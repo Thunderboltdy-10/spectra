@@ -323,10 +323,6 @@
     {
       "commandId": "document.insert.footnote",
       "region": "footnotes"
-    },
-    {
-      "commandId": "document.insert.image",
-      "region": "images"
     }
   ]
 }

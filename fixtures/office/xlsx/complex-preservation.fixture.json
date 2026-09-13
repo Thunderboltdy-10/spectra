@@ -26,7 +26,8 @@
         "xl/diagrams/data1.xml",
         "xl/comments1.xml",
         "xl/media/image1.png"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     },
     {
       "commandId": "sheets.fill.down",
@@ -37,7 +38,8 @@
         "xl/diagrams/data1.xml",
         "xl/comments1.xml",
         "xl/media/image1.png"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     },
     {
       "commandId": "sheets.formula.autosum",
@@ -47,7 +49,8 @@
         "xl/tables/table1.xml",
         "xl/diagrams/data1.xml",
         "xl/comments1.xml"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     },
     {
       "commandId": "sheets.formula.insert",
@@ -57,7 +60,8 @@
         "xl/tables/table1.xml",
         "xl/diagrams/data1.xml",
         "xl/comments1.xml"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     }
   ]
 }

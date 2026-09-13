@@ -479,6 +479,27 @@ export function isPlaceholderBuildingSummary(summary: unknown) {
   return /^Spectra is building\b/i.test(clean);
 }
 
+/** Summaries produced from artifact cardinality may be refreshed after edits. */
+export function isGeneratedArtifactSummary(
+  summary: unknown,
+  blueprintKey: BlueprintKey,
+) {
+  const clean = typeof summary === "string" ? summary.trim() : "";
+  if (!clean) return false;
+  const patterns: Partial<Record<BlueprintKey, RegExp>> = {
+    document: /^\d+-block document about .+\.$/i,
+    flashcard_deck: /^\d+-card deck about .+\.$/i,
+    quiz: /^\d+-question quiz about .+\.$/i,
+    planner_task: /^(?:Study task|Task) about .+\.$/i,
+    presentation: /^\d+-slide presentation about .+\.$/i,
+    timetable: /^\d+-event timetable about .+\.$/i,
+    code: /^\d+-file code artifact about .+\.$/i,
+    whiteboard: /^\d+-node whiteboard about .+\.$/i,
+    sheets: /^Workbook with \d+ filled cells? about .+\.$/i,
+  };
+  return patterns[blueprintKey]?.test(clean) ?? false;
+}
+
 /**
  * Default/empty AI create shells that must never be finalized as workspace
  * artifacts. Kept local to Convex (no src/ import) and aligned with

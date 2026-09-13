@@ -40,6 +40,7 @@ import {
 } from "@/features/spectra/presentation/bibliography";
 import type { PresentationContent } from "@/features/spectra/presentation/model";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import { refreshGeneratedArtifactSummary } from "@/features/spectra/operations/hollow-content";
 import {
   aiInteractionFrame,
   aiSettleFrame,
@@ -90,6 +91,7 @@ type CollaborationSession = {
   actor: ActorIdentity;
   artifact: ArtifactRecord;
   clientId: string;
+  actorKind: "ai" | "human";
   documentName: string;
   token: string;
   url: string;
@@ -265,7 +267,7 @@ async function createAiRealtimeProvider(params: {
       schemaVersion: session.artifact.schemaVersion ?? 1,
       document,
       clientId: session.clientId,
-      actorKind: "ai",
+      actorKind: session.actorKind,
       fetch: async () =>
         Response.json({
           token: session.token,
@@ -522,6 +524,7 @@ async function createCollaborationSession(
   artifactId: string,
   clientId: string,
   level: "read" | "modify" = "modify",
+  actorKind: "ai" | "human" = "ai",
 ): Promise<CollaborationSession> {
   const [actor, artifact] = await Promise.all([
     convexQuery<Record<string, never>, ActorIdentity | null>("identity:me", {}),
@@ -584,7 +587,7 @@ async function createCollaborationSession(
     schemaVersion: room.schemaVersion ?? artifact.schemaVersion ?? 1,
     protocolVersion: collaborationProtocolVersion(),
     permissionEpoch: room.policyVersion,
-    actorKind: "ai",
+    actorKind,
     access: level === "modify" ? "edit" : "read_only",
     internalCapabilities:
       level === "modify"
@@ -596,6 +599,7 @@ async function createCollaborationSession(
     actor,
     artifact,
     clientId,
+    actorKind,
     documentName,
     token,
     providerKind,
@@ -1654,7 +1658,12 @@ export async function applyAiArtifactMutation(params: {
       ? `restore:${params.runId}:${randomUUID()}`
       : `ai:${params.runId}:${params.operationId}${ownerClientHint}:${randomUUID()}`
   ).slice(0, 180);
-  const session = await createCollaborationSession(params.artifactId, clientId);
+  const session = await createCollaborationSession(
+    params.artifactId,
+    clientId,
+    "modify",
+    claimActorKind,
+  );
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   if (!params.replacePendingCreate) {
     const native = await nativeGateContext(session.artifact);
@@ -1839,15 +1848,22 @@ export async function applyAiArtifactMutation(params: {
         const issue = validated.error.issues[0];
         const path = issue?.path?.length ? issue.path.join(".") : "";
         const detail = issue?.message ?? "The edited artifact is invalid.";
-        throw new Error(
+          throw new Error(
           path
             ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
             : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
-        );
+          );
       }
+      const nextSummary = refreshGeneratedArtifactSummary({
+        blueprintKey: typeKey,
+        title: desired.title.trim() || "Untitled work",
+        content: validated.data,
+        currentSummary: base.summary,
+        nextSummary: desired.summary,
+      });
       return {
         title: desired.title.trim() || "Untitled work",
-        ...(desired.summary?.trim() ? { summary: desired.summary.trim() } : {}),
+        ...(nextSummary ? { summary: nextSummary } : {}),
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
         ].slice(0, 80),
@@ -1876,12 +1892,13 @@ export async function applyAiArtifactMutation(params: {
         executionId: params.executionId,
       });
     }
-    await convexMutation("spectraArtifacts:markAiState", {
-      artifactId: params.artifactId,
-      runId: params.runId,
-      executionId: params.executionId,
-      state: "updating",
-    }).catch(() => undefined);
+    if (claimActorKind === "ai")
+      await convexMutation("spectraArtifacts:markAiState", {
+        artifactId: params.artifactId,
+        runId: params.runId,
+        executionId: params.executionId,
+        state: "updating",
+      }).catch(() => undefined);
 
     // Claims are acquired inside synchronizeMutation. Re-resolve once against
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is

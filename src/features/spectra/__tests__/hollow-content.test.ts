@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   assertCreateContentNotHollow,
   deriveCreateArtifactSummary,
+  isGeneratedArtifactSummary,
   isHollowCreateContent,
   isPlaceholderArtifactSummary,
+  refreshGeneratedArtifactSummary,
   resolveFocusCandidatesByTitle,
   artifactPopulationScore,
 } from "../operations/hollow-content";
@@ -190,6 +192,42 @@ describe("hollow create content detection", () => {
         prompt: "Create a sheet about enzyme kinetics",
       }),
     ).toMatch(/Workbook with 2 filled cells/i);
+  });
+
+  it("refreshes generated summaries after content cardinality changes", () => {
+    expect(
+      isGeneratedArtifactSummary(
+        "8-block document about Water Cycle Revision Guide.",
+        "document",
+      ),
+    ).toBe(true);
+    expect(
+      refreshGeneratedArtifactSummary({
+        blueprintKey: "document",
+        title: "Water Cycle Revision Guide",
+        currentSummary: "8-block document about Water Cycle Revision Guide.",
+        nextSummary: "8-block document about Water Cycle Revision Guide.",
+        content: {
+          blocks: Array.from({ length: 11 }, (_, index) => ({
+            id: `block-${index}`,
+            type: "paragraph",
+            text: `Block ${index}`,
+          })),
+        },
+      }),
+    ).toBe("11-block document about Water Cycle Revision Guide.");
+  });
+
+  it("preserves an explicit summary when a generated summary was replaced", () => {
+    expect(
+      refreshGeneratedArtifactSummary({
+        blueprintKey: "document",
+        title: "Water Cycle Revision Guide",
+        currentSummary: "8-block document about Water Cycle Revision Guide.",
+        nextSummary: "A concise guide for exam-week review.",
+        content: { blocks: [{ id: "p1", type: "paragraph", text: "Water" }] },
+      }),
+    ).toBe("A concise guide for exam-week review.");
   });
 
   it("prefers populated same-title sheets when resolving focus", () => {

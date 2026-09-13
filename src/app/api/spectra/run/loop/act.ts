@@ -31,6 +31,105 @@ import { assertCreateContentNotHollow } from "@/features/spectra/operations/holl
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
+import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
+
+function finiteApplicationNumber(args: Record<string, unknown>, key: string) {
+  const value = Number(args[key]);
+  if (!Number.isFinite(value)) throw new Error(`CALENDAR_${key.toUpperCase()}_INVALID`);
+  return value;
+}
+
+async function executeLegacyCalendarCommand(
+  actorClerkId: string,
+  runId: string,
+  command: string,
+  args: Record<string, unknown>,
+  onUiEvent?: (event: {
+    key: string;
+    payload?: Record<string, unknown>;
+  }) => void,
+) {
+  const schedule =
+    command === "calendar.schedule" ||
+    command === "calendar.schedule_task" ||
+    command === "calendar.scheduleTask";
+  const move =
+    command === "calendar.move" ||
+    command === "calendar.move_work_block" ||
+    command === "calendar.moveWorkBlock";
+  const resize =
+    command === "calendar.resize" ||
+    command === "calendar.resize_work_block" ||
+    command === "calendar.resizeWorkBlock";
+  if (!schedule && !move && !resize)
+    throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
+
+  if (schedule) {
+    const taskItemId =
+      typeof args.taskItemId === "string" ? args.taskItemId : undefined;
+    const planArtifactId =
+      typeof args.planArtifactId === "string" ? args.planArtifactId : undefined;
+    const planTaskId =
+      typeof args.planTaskId === "string" ? args.planTaskId : undefined;
+    if (!taskItemId && !(planArtifactId && planTaskId))
+      throw new Error("CALENDAR_TASK_REQUIRED");
+    const startAt = finiteApplicationNumber(args, "startAt");
+    const endAt = finiteApplicationNumber(args, "endAt");
+    const requestedKey =
+      typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
+        ? args.idempotencyKey.trim().slice(0, 180)
+        : `${command}:${planArtifactId ?? taskItemId ?? "task"}:${planTaskId ?? "root"}:${startAt}:${endAt}`;
+    const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
+      "calendar:scheduleTask",
+      {
+        taskItemId,
+        planArtifactId,
+        planTaskId,
+        startAt,
+        endAt,
+        timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
+        actorKind: "ai",
+        idempotencyKey: `ai:${runId}:${requestedKey}`.slice(0, 240),
+      },
+    );
+    if (item.kind !== "scheduled_work_block" || item.startAt !== startAt || item.endAt !== endAt)
+      throw new Error("CALENDAR_POSTCONDITION_FAILED");
+    onUiEvent?.({
+      key: "calendar_changed",
+      payload: {
+        targetId: String(item.id ?? "calendar"),
+        note: "Scheduled a Calendar work block",
+      },
+    });
+    return { ok: true, item };
+  }
+
+  const itemId = typeof args.itemId === "string" ? args.itemId.trim() : "";
+  if (!itemId) throw new Error("CALENDAR_ITEM_REQUIRED");
+  const expectedRevision = finiteApplicationNumber(args, "expectedRevision");
+  const startAt = move ? finiteApplicationNumber(args, "startAt") : undefined;
+  const endAt = finiteApplicationNumber(args, "endAt");
+  const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
+    move ? "calendar:moveWorkBlock" : "calendar:resizeWorkBlock",
+    move
+      ? { itemId, startAt, endAt, expectedRevision }
+      : { itemId, endAt, expectedRevision },
+  );
+  if (
+    item.kind !== "scheduled_work_block" ||
+    (move && item.startAt !== startAt) ||
+    item.endAt !== endAt
+  )
+    throw new Error("CALENDAR_POSTCONDITION_FAILED");
+  onUiEvent?.({
+    key: "calendar_changed",
+    payload: {
+      targetId: itemId,
+      note: move ? "Moved a Calendar work block" : "Resized a Calendar work block",
+    },
+  });
+  return { ok: true, item };
+}
 
 export async function executeApplicationCommand(
   actorClerkId: string,
@@ -44,13 +143,38 @@ export async function executeApplicationCommand(
     payload?: Record<string, unknown>;
   }) => void,
 ) {
+  if (
+    command === "school.sync" ||
+    command === "school_data.sync" ||
+    command === "managebac.sync"
+  )
+    command = "trigger_managebac_sync";
+  if (command.startsWith("calendar."))
+    return executeLegacyCalendarCommand(
+      actorClerkId,
+      runId,
+      command,
+      args,
+      onUiEvent,
+    );
   const definition = spectraToolRegistry.get(command);
   if (!definition || definition.capability !== "operate_application")
     throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
   const registeredCommandId = applicationCommandIdForTool(command);
   if (!registeredCommandId || !appCommandById(registeredCommandId))
     throw new Error(`APP_COMMAND_REGISTRY_DRIFT:${command}`);
-  const parsed = definition.inputSchema.parse(args) as Record<string, unknown>;
+  // Normalize model-friendly aliases before Zod strips unknown fields. The
+  // settings schema intentionally accepts only persisted preference sections,
+  // so doing this after parse would silently turn a valid natural-language
+  // request into an empty settings write.
+  const inputArgs =
+    command === "change_spectra_settings"
+      ? {
+          ...args,
+          patch: normalizeAiPreferencePatch(args.patch),
+        }
+      : args;
+  const parsed = definition.inputSchema.parse(inputArgs) as Record<string, unknown>;
   if (definition.aiAvailability === "prohibited")
     throw new Error(
       `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
@@ -92,12 +216,7 @@ export async function executeApplicationCommand(
   // and the human-facing Convex actions. Keep this dispatch small and typed;
   // adding a command requires adding its schema and one handler here.
   if (command === "change_spectra_settings") {
-    const patch =
-      parsed.patch &&
-      typeof parsed.patch === "object" &&
-      !Array.isArray(parsed.patch)
-        ? parsed.patch
-        : {};
+    const patch = normalizeAiPreferencePatch(parsed.patch);
     const settings = await mutate("accountPreferences:writeLayer", {
       actorClerkId,
       scope: "account",
@@ -407,14 +526,75 @@ export async function executeApplicationCommand(
   if (command === "trigger_managebac_sync") {
     const purpose = String(parsed.purpose ?? "upcoming_deadlines");
     const result = await mutate("managebac:requestAiRefresh", {
-      actorClerkId,
       reason: `ai_${purpose}`,
+      force: parsed.force !== false,
     });
     onUiEvent?.({
       key: "managebac_sync_requested",
       payload: { targetId: "managebac", note: "Requested a ManageBac refresh" },
     });
     return result;
+  }
+  if (command === "select_managebac_classes") {
+    const recordIds = Array.isArray(parsed.recordIds)
+      ? parsed.recordIds.filter((id): id is string => typeof id === "string")
+      : [];
+    const result = await mutate("managebac:setSelectedClasses", {
+      recordIds,
+      ...(typeof parsed.expectedRevision === "number"
+        ? { expectedRevision: parsed.expectedRevision }
+        : {}),
+      ...(parsed.retention === "keep_in_spectra" ||
+      parsed.retention === "archive_projection"
+        ? { retention: parsed.retention }
+        : {}),
+    });
+    onUiEvent?.({
+      key: "managebac_classes_selected",
+      payload: {
+        targetId: "managebac",
+        note: `Updated the ManageBac class selection (${recordIds.length} selected)`,
+        selectedCount: recordIds.length,
+      },
+    });
+    return result;
+  }
+  if (command === "insert_reference") {
+    const hostWorkId = String(parsed.hostWorkId ?? "").trim();
+    const targetWorkId = String(parsed.targetWorkId ?? "").trim();
+    if (!hostWorkId || !targetWorkId)
+      throw new Error("REFERENCE_WORKS_REQUIRED");
+    const target = await query<
+      { actorClerkId: string; artifactId: string },
+      Record<string, unknown>
+    >("spectraArtifacts:get", { actorClerkId, artifactId: targetWorkId });
+    const workType = String(target.blueprintKey ?? "").trim();
+    if (!workType) throw new Error("REFERENCE_TARGET_UNAVAILABLE");
+    const targetLabel =
+      typeof parsed.label === "string" && parsed.label.trim()
+        ? parsed.label.trim().slice(0, 160)
+        : String(target.title ?? "Referenced work").slice(0, 160);
+    onUiEvent?.({
+      key: "reference_insert",
+      payload: {
+        hostWorkId,
+        targetWorkId,
+        targetWorkType: workType,
+        schemaVersion:
+          typeof target.schemaVersion === "number" ? target.schemaVersion : 1,
+        label: targetLabel,
+        fallbackExcerpt: targetLabel,
+        note: `Insert a live reference to ${targetLabel}`,
+      },
+    });
+    return {
+      ok: true,
+      status: "needs-ui",
+      message:
+        "The reference is ready for insertion in the focused work surface.",
+      hostWorkId,
+      targetWorkId,
+    };
   }
   throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
 }
@@ -667,6 +847,11 @@ export async function executeOperation(
     onArtifactRegions?: (info: {
       artifactId: string;
       regionIds: string[];
+    }) => void;
+    onApplicationResult?: (result: {
+      command: string;
+      args: Record<string, unknown>;
+      result: Record<string, unknown>;
     }) => void;
     collaborationClientId?: string;
     onUiEvent?: (event: {
@@ -1074,6 +1259,11 @@ export async function executeOperation(
       context.scopeNodeId,
       context.onUiEvent,
     )) as Record<string, unknown>;
+    context.onApplicationResult?.({
+      command: operation.input.command,
+      args: operation.input.args,
+      result: output,
+    });
     affected = [];
   }
   await mutate("spectraOperations:markExecuted", {
@@ -1090,7 +1280,6 @@ export function resolveCreatedArtifactDependencies(
   operation: ModelOperation,
   createdArtifactIds: ReadonlyMap<number, string>,
 ): ModelOperation {
-  if (operation.type !== "artifact.link") return operation;
   const resolve = (value: string) => {
     const match = /^@created:(\d+)$/.exec(value);
     if (!match) return value;
@@ -1101,6 +1290,39 @@ export function resolveCreatedArtifactDependencies(
       );
     return artifactId;
   };
+  if (operation.type === "app.command") {
+    const args = { ...operation.input.args };
+    for (const key of [
+      "artifactId",
+      "planArtifactId",
+      "sourceArtifactId",
+      "targetArtifactId",
+    ]) {
+      if (typeof args[key] === "string") args[key] = resolve(args[key]);
+    }
+    const isCalendarSchedule = [
+      "calendar.schedule",
+      "calendar.schedule_task",
+      "calendar.scheduleTask",
+    ].includes(operation.input.command);
+    // A planner artifact is not a calendarItems row. When a model carries the
+    // same @created reference into taskItemId, prefer the canonical planner
+    // identity and use the stable root task id exposed by Calendar.
+    if (
+      isCalendarSchedule &&
+      typeof args.planArtifactId === "string" &&
+      args.planArtifactId.trim()
+    ) {
+      delete args.taskItemId;
+      if (typeof args.planTaskId !== "string" || !args.planTaskId.trim())
+        args.planTaskId = "task-1";
+    }
+    return {
+      ...operation,
+      input: { ...operation.input, args },
+    };
+  }
+  if (operation.type !== "artifact.link") return operation;
   return {
     ...operation,
     input: {

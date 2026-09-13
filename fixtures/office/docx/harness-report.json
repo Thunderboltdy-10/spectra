@@ -1,6 +1,6 @@
 {
   "harness": "Spectra DOCX fidelity harness v1",
-  "generatedAt": "2026-09-05T20:29:38.354Z",
+  "generatedAt": "2026-09-13T22:36:22.139Z",
   "source": "Microsoft Open XML SDK public test assets (MIT)",
   "vocabulary": [
     "render fidelity",
@@ -13,7 +13,7 @@
   ],
   "summary": {
     "fixtures": 16,
-    "assertions": 177,
+    "assertions": 171,
     "failed": 0
   },
   "rows": [
@@ -22,7 +22,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "7ad5cb76c67df7921228e8878eeb5bdec4ddb20e3843de6a0874cd3a4f921597",
+      "semanticDigest": "c1522260117bf0141362de1869ac1efe26bda69563656bdda5dda097f30193d9",
       "detail": "package bytes identical"
     },
     {
@@ -33,7 +33,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "321743b3665c2824e36a979bc4892758a058ce0af5e91b6ce3046b43a5d5411a",
+      "semanticDigest": "028679d8a21d97d2e95e6f42cc30c9ecf8c26317ba2f91c2736cfc1b3c92574a",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -64,7 +64,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "be8c18976238f4d00546e72164c284f85fcda44ed39de085485f52370977e119",
+      "semanticDigest": "1b340ff5fc67de5532278333c56bca85bb6c83c5ef4cf5162d89f8e40676d20e",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -102,7 +102,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "b1f216e107be43c318ea84915060a8e25e2382e7c0bd23e2e179a3e16617f964",
+      "semanticDigest": "49928281dd46111279bb072fdb00bbced9bee9448b53d65243b3a1b8a0b0fa87",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -140,7 +140,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "9faf36f456287f0cc00f50969b7557b1f65dfb61adc417628d7bf0bce18a1afd",
+      "semanticDigest": "704fcd3ee1fe390f0ccb2f3f3c80225cf23cbc5cf75e618b8e4e015e80349792",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -178,7 +178,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "405b949fcaae5784e7204cb3841b73cf7978fb5be9acd2560751348011b39e8c",
+      "semanticDigest": "39bc2af41f3b161140d5efbe12e2473d65d20cac3ad3a09a601cc652afc59fa5",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -189,7 +189,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "57c22b76915d7c2d64e37f823f27fbb4a23425387c490aa57a0c595a4a23a8f6",
+      "semanticDigest": "e3e49c7d57001df3a9c9a071ff1d9e3e130b76a7061eae5199ae0cdbed961dbb",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -197,7 +197,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "88774617a546504825874eb1621fc851a46cd7793d7321d7c53e426435c4f686",
+      "semanticDigest": "8925b71db5d0697b2ed1a39e78babb951519a8a42596fc7722287e6f4881c948",
       "detail": "package bytes identical"
     },
     {
@@ -208,7 +208,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "9376ee4b94dcedcaa0cfd295996eb9ebfbf75401edb54b9a0d87ceb35ec470ce",
+      "semanticDigest": "97f596ae6fa5c1f83f2c16b936bfbd3f7500ceb2da93390f60afd96ae7c1032d",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -217,7 +217,7 @@
       "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [],
-      "semanticDigest": "88774617a546504825874eb1621fc851a46cd7793d7321d7c53e426435c4f686",
+      "semanticDigest": "8925b71db5d0697b2ed1a39e78babb951519a8a42596fc7722287e6f4881c948",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -240,7 +240,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "fa908d24ae3d561c60b744d6e566aa46a4c5fde3bfd396ce1a1c8cf2565a8c5a",
+      "semanticDigest": "026ee14cde62c49bf07c4774ac1f9aec556ea0c1ca82a1848c07a9bb39f8c15d",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -278,7 +278,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "38dc00cb9b38499ab475861da5345a72647f3b8008541f793910ead062f5df21",
+      "semanticDigest": "7194a22079fd28f2186cbe91513efefc02f71fb4852a41c06b93fd92d9e3a3db",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -316,7 +316,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "0eb35cbd428524d254acfdd935dfaadcd2d31516f22c5dd78f982c5f2c829648",
+      "semanticDigest": "c12f4c1911806877752beba1adab3d74a920734ceb7dfcce84577cb8b82c67d2",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -354,7 +354,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "68b61187289d27ff2a154bed8379a4094d0760e7f325ef37fcd3c86f8bac222c",
+      "semanticDigest": "d28ed8c6e0c5fbaff6e695b2baadf8e9a81968f0400165d82a14c1e1afd518ec",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -365,7 +365,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "961553331f688619dad66b2b486446c8e084637f39dfa63ddb97d79a0c353021",
+      "semanticDigest": "f37616e1cc8e7cd8f33ba769699ad270c590eee0d6d8fb91d92d46473c853b3e",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -373,7 +373,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "75e944b0cb810db26bdadaf886cf076099ea3c3cc7d4f986c6ad370bb9cedd3d",
+      "semanticDigest": "532285800f3c1046261952532e4b28f7bc1f25f1dcef2add0fa0c83cc4d1353e",
       "detail": "package bytes identical"
     },
     {
@@ -384,7 +384,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "a9978d0944d332352ac506bb784112d102bc31fabf5915c7882f020fc28545e8",
+      "semanticDigest": "4c4d10d90dc3ae7ab80f9051ac02b96bd676ab91543aef676c6369e276696539",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -393,7 +393,7 @@
       "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [],
-      "semanticDigest": "75e944b0cb810db26bdadaf886cf076099ea3c3cc7d4f986c6ad370bb9cedd3d",
+      "semanticDigest": "532285800f3c1046261952532e4b28f7bc1f25f1dcef2add0fa0c83cc4d1353e",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -416,7 +416,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "8ef3317c4ceee28417fd50cfba416a4db2bbc17949ef1b2478175e50b36bedf0",
+      "semanticDigest": "1085d5884e8c0b4a77ab53a27279cfcea57119d3d52f8e7efbadd1c5725d5c09",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -454,7 +454,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7193628db105333328eda4c91a8854db33eae6b2e25f18af8d2c76f9d667cc99",
+      "semanticDigest": "610961b1d61196815458bd9451689ee9a34f610a0df8b4262aeb1ddeb2e182de",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -492,7 +492,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "bf0c6279adada79083701e4ad95ef4a4817c361ebc2dbf21ff2ff864d53a2808",
+      "semanticDigest": "e979b00eaae00f233b65dc48df738764716906f48fa4f93dbf4a565c63804cdf",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -530,7 +530,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "49bc3922781f8c34dd74c776ba36d7bcb9277ed3c651535fc2f9e6b3d0090ceb",
+      "semanticDigest": "801e1c5116d4fafbc7e4ffe196741a58ff4ee7098d0d2a1ca7078d7b95d7f7de",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -541,7 +541,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "385ad666d656bdbe95788eb183b71f6796ce56d2fe9a344757ed726a83d7c456",
+      "semanticDigest": "b19df666cb2b3b464cf44171c9ec914cce935ae73c6674fa8171bd798ae8efce",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -549,14 +549,14 @@
       "mutation": "open",
       "status": "genuinely unsupported file",
       "changedParts": [],
-      "detail": "This Word package is incomplete or corrupt. Spectra kept it unchanged and did not attempt a conversion. (zip: no end of central directory record)"
+      "detail": "This Word package is incomplete or corrupt. Spectra kept it unchanged and did not attempt a conversion. (ARCHIVE_INVALID: zip: no end of central directory record)"
     },
     {
       "fixture": "embedded-ole.docx",
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "492c7953beb97506f513d15ca074508113626bab7871a812a9085f292cc89d80",
+      "semanticDigest": "1945b8b0622a33c7f160ba60b52ed840b557aa1d73f92f493d8b23b77ab12f4a",
       "detail": "package bytes identical"
     },
     {
@@ -567,7 +567,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "c709c60faae83c6ede682a7acaf6b8d6c36915f4d2da60e86b1b2db822c9bdb9",
+      "semanticDigest": "6a2fa8bbb3394c7b4febda5795b6509987bcd82dca86ccdd277daf05fb1d8cbd",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -598,7 +598,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "9948108d8bc2c384631d2c6a530cd2ccdc530e3486e8a319c6f0c3c81a51e8ec",
+      "semanticDigest": "fb8d458853e68be89467671a6548b6e0729ade70755847d1ce36d4435a21a12c",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -636,7 +636,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "a60ddd8cc45ec8ec2d8ba1296d433009309030657d2591bd7663e505dbd3a079",
+      "semanticDigest": "3376254bb3c6990541da85d66fc9034f3f86aa6952de7926304598f7d286debc",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -674,7 +674,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "24ba1cedf1896864d7d5414faca322d088908af215360c5bab97f695271fb2fb",
+      "semanticDigest": "d46ec539daa41049f738e876b0b210985838b0c386e47bff69b62d3868bcc125",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -712,7 +712,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "d16e08726dec493e7318473c5c369e58f8e0ef798a5df096c2fb51a6db3c07d9",
+      "semanticDigest": "33f4a898fcde7e9979a416afb1cd7cc5f49643b79bbb30ee1a17d3016df2d640",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -723,7 +723,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "5e1e4407576b7adb629e90088dd8f8a43b938c4140d24a2539075e22c1a2f454",
+      "semanticDigest": "ec69131dc5252b3e26c7a3e853a4205778f199037514f3ea2b5cde9613be947f",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -731,16 +731,19 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "a72e65dc11e07e1c12aa6ced0113e7f641945075aee609b67090342d809cbf37",
+      "semanticDigest": "98e52aa6153a1e1c1d7a029f3f2ea3003a9a89eb63bdd9ca27de746909c4353b",
       "detail": "package bytes identical"
     },
     {
       "fixture": "equation-omml.docx",
       "mutation": "edit one paragraph",
       "operation": "rewrite_blocks",
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "fe2b637f9d0082bf84611db88cfff66167bfb577b780534ba885ff9823954de6",
+      "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "equation-omml.docx",
@@ -748,7 +751,7 @@
       "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "detail": "no safely editable table region"
     },
     {
       "fixture": "equation-omml.docx",
@@ -766,9 +769,12 @@
         "document.references.bibliography",
         "document.references.crossRef"
       ],
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "2deb4b504462b91f15fb6450b1c4b559b0d90dec7a7d07c64f56aa8285d26fd7",
+      "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "equation-omml.docx",
@@ -801,9 +807,12 @@
         "document.format.style",
         "document.format.underline"
       ],
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "7ce81df6fdfc9a12c1f8c77eb10e759f20e8b73b92f08b92daa5fc324bdf84aa",
+      "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "equation-omml.docx",
@@ -836,9 +845,12 @@
         "document.format.style",
         "document.format.underline"
       ],
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "0edee0d609b22495201df2e98103d930dc28848cd562fdc64a1850e1c954dd6e",
+      "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "equation-omml.docx",
@@ -871,24 +883,30 @@
         "document.format.style",
         "document.format.underline"
       ],
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "a86a82ce56cd2232a539203584207ba705e1e5208bef66040d2cc76f042c946f",
+      "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "equation-omml.docx",
       "mutation": "AI edit via operations",
       "operation": "rewrite_blocks",
-      "status": "unsupported-read-only",
-      "changedParts": [],
-      "detail": "no safely editable paragraph"
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "4a8f176d850dffeeac6eed1b2859fbcc387b5bfa9205f571bbc91baa02de696a",
+      "detail": "AI received only lens-valid operations"
     },
     {
       "fixture": "fields-toc.docx",
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "d024d52badd28b59f80d8024992a7c52a35bc377b1a5e95fbc3be1b8541d8d54",
+      "semanticDigest": "93c40c075032e02906a8ccd2ee9cb8e98b9b1dd351d7b552cb33bc0662384926",
       "detail": "package bytes identical"
     },
     {
@@ -899,7 +917,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7e78f356722d92d150e37134f8a655dcf54083c4f6a0a5ff971bf3c3cc2d183e",
+      "semanticDigest": "71d1fce6b60d1d7da82fd1cd70a14250a163938aa25ed2bbf28ee2b421f02f34",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -930,7 +948,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "ffd07b813565beaff700cf9b5b1da4031f6cdfa761d92c373a3452ae348b1c3d",
+      "semanticDigest": "4dc677e96e7c6f9e2161affdd3d18e900a30ea9cabc02447b4ea73eaa32f641f",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -968,7 +986,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "5b32fb3e8be9b95f6e545d5196a3c9f9e92d3b2cb3dd0038dcc6b65bcd77ceeb",
+      "semanticDigest": "a2a4cb559317a76ec093f5c6609f519d535ec72e96e5f2979b4f38f32332bcbb",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1006,7 +1024,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "24663473003cf13f7f256273a4061d9b94b3ac18b9a2a671f5819c664d8e2675",
+      "semanticDigest": "f49bfcc980d84bf85fab8f531a78e509d86e87baf56109296c3e49f32b05ff68",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1044,7 +1062,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "22ace9e89e348ddb22a22f073c7605dba108cb7d0f9533371b5fbf53a4080a9c",
+      "semanticDigest": "e2e1acbef0152de8740c333bc636a051d2e38c061798bb400beb47deafd51a1c",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1055,7 +1073,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "eab4fd90ad4baf7e4e5e024f1fad1b8f50ea4ae9c51537a3f5166d0e41fac46e",
+      "semanticDigest": "74e256b1ee0e1d29518128ae5c807a9f0c3d4bd43b704fc3d8efaa1d1a5814ad",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1063,7 +1081,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "889bbc0e0f9c999c97c9e509a4fc87827eff1421ae4f967e8f80ec9e63277d00",
+      "semanticDigest": "acb72133cd53828f99f8acd8bb42abf6b01104a6a345c154b789e8f574c86c01",
       "detail": "package bytes identical"
     },
     {
@@ -1074,7 +1092,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "a1829bf9de023f7c52d8c1760cb2316551297af2e3deb7c2de6f511f7d46db71",
+      "semanticDigest": "84e477c43d6a0c7e10e727a1a3078e9fe688a5019495bb181bc2521ccd425695",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1105,7 +1123,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7085a6e421e206844382a86f59f081f9722dae6902184b6f690503143f292d3f",
+      "semanticDigest": "2002a1da21268f05159e8ed7ccf0d2047456ae442f3d051d10eb839e2700943d",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1143,7 +1161,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "ad24587f6c816c922b4f5b1f251ba31d905bc84d667d79f5000173657cde7474",
+      "semanticDigest": "f89652cafca0ee6d7b28ee0ded16dfc77561dfcf1f9a42d5dc78607d47d76b05",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1181,7 +1199,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "889bbc0e0f9c999c97c9e509a4fc87827eff1421ae4f967e8f80ec9e63277d00",
+      "semanticDigest": "acb72133cd53828f99f8acd8bb42abf6b01104a6a345c154b789e8f574c86c01",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1219,7 +1237,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "11a4dc01dd2c40255b4f58993a500be537268759206f839e8626b62cfbdc6bf8",
+      "semanticDigest": "e33372c3a5f90e6aa811d6fbe922886fc66997110a82b2f9881b2c052e3b5d79",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1230,7 +1248,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6f29dc629c1c09b0112e924ff25cfe50496924d114b835ec109a3531ae43a2b9",
+      "semanticDigest": "6507c585ca6627f09ab551c302f927c806e0a1eedc4875a8ffa99f968023e64c",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1238,7 +1256,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "32f6ff90c59e9c634928213e6b6ae08800a5c9b745af0a04947dfb47a5a073d1",
+      "semanticDigest": "d53085b3d1637fc0289f4cb4ff1c0089e6c3cb54399d4b99bc3c42cd87a02831",
       "detail": "package bytes identical"
     },
     {
@@ -1249,7 +1267,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "b54b9c796a683248c576255532d68d179ddadf7e2dbc8ec87aa53ed388981325",
+      "semanticDigest": "68409a301e7471129b679835f6e6fe89e28dadf90ac2cd6c9b4df158d648fa43",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1280,7 +1298,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7cde18598256d87e451a1fe93f439efe8f0ea7c4c8780c1c47a7ee0644ad2f27",
+      "semanticDigest": "6ebad0bd0114cf1f5627a2e4ba1d2f84f09a7531a9e6174f2e250e2bfd109789",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1318,7 +1336,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "0c1afca9c3c8c30cb23eaaf91f6ff4007b859948d9008bcad6325706ade9af0d",
+      "semanticDigest": "7b240012413080a2f0f4a286977f50ed36cefc4d575353d5325465175c65b7e5",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1356,7 +1374,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "2f8b277163692f28926072c9a82e52c950064926f5eb49169f7998112d07e862",
+      "semanticDigest": "55d7a06a00bd6e5adf09b1b32f5cca93cd6f79948eae0916f62d51d09d303ef5",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1394,7 +1412,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "2c1ee2350bab2c880c321a78b0e924d78eb71de95adc8f338297b753c38c9d44",
+      "semanticDigest": "b421fe804561e8b8aa7cc9a6c1b492f21f40f6dc22271088bf8041446343b817",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1405,7 +1423,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "5e1d2fe2f6607a1dec50706b82ceb3460b6f58a0a7bd5d8f6acdb78116e24b39",
+      "semanticDigest": "aa7912f0e1a96e7bb7e2d2e3a38ad20e97c6cb7fb3c80a54a25407ff77f49630",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1413,7 +1431,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "65e4b929e8fc3321795615df619a0ac985a6557eb4735166d504403dfab9b237",
+      "semanticDigest": "c51f6a64857bb8f45930765c4cab6c1b48536c9fad8a98bc4c5777af1d555537",
       "detail": "package bytes identical"
     },
     {
@@ -1424,7 +1442,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7a8679c0a1fd05e31c3752d7364862212bec459daf45265a02eb6eb47934d82a",
+      "semanticDigest": "7f7ff498ccc5fe30c15ce7b07b5f04b92ef7e073b5b6f904de661ef4f76dbc4e",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1455,7 +1473,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "27ea6a5654efbf07126b41457346bc967195c7acf45b1ddeac4bf22c3d7ebed9",
+      "semanticDigest": "fc3912395445a647fbb9e3b94981cc0db089ee1c8b160971c345589bae874540",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1493,7 +1511,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "856afe0efc7b88fdcc809af38b262d5336949ce409451f12d840d0a44b6f97b6",
+      "semanticDigest": "4db4ee7192dee39b6ebc62d58a04c0e8b7318a1877adb91db33f82e8f784f405",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1531,7 +1549,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "47ded31a7f7a2e9efb7278e8c989c85115fe8bbd6fed51638fc6f7929b1c9d1a",
+      "semanticDigest": "43013950b2b8d5d97121c0f2de97a51682726ba3c9560650dc1bd59eb8b638e5",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1569,7 +1587,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "58e0276f42521cb7f8dbe265da374b15b1e0a47f6df398814ff6c6961a7f7858",
+      "semanticDigest": "af55ee683828e9bb1d136c4f128b86486f646c5affaefda6d76afa3d0e6fc77f",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1580,7 +1598,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "b78ddd53cc664b888cd9ede2e204e73bf14f8ca192f79b4c96e4b658ab247701",
+      "semanticDigest": "5d64d85b28725fad986ff7fde21d77d28bc9a3ebc459cd0c3253f5c9cca8da41",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1588,7 +1606,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "8544882bc7c05ee53434a9089418881d67d1b49f22369e1590eb80ad3e6653d4",
+      "semanticDigest": "8dc682af820b928cb2dc1c3abd201b4ad08af919bb6d30ce7dea1ad385bfb37b",
       "detail": "package bytes identical"
     },
     {
@@ -1599,7 +1617,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "b8fb87c65cdfedf5610d15c407d798fbd2b47a80f96ebcba5207b951c79750a5",
+      "semanticDigest": "c077081ab5afcd8fdd55a29fef15da1014cf5daa0ad3c0108ca3d70cab6a509f",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1630,7 +1648,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "c1042f628407b84b18c1856a8edc7e7f9801b602d6824e6ff3d20605e3a91863",
+      "semanticDigest": "75d10d76edc75b3d73a6d2ea4491063921265d90008e22878835afe18e7d6a66",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1668,7 +1686,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "dcd40b03565dab7c46bef1f351785da611a08715bd33d66dc9f5540b420da763",
+      "semanticDigest": "e9324ceab076472cb4b70fc351e02993be0e8f3ed2a6e77a8da6b2c78fa42284",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1706,7 +1724,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "89f6f2206abc3175eb07988723e90f543b99107dfe5f131667b5ecc25b18e56d",
+      "semanticDigest": "303b38d9bdde437b4c208e9ee16d60455dad1c9555036052cd19d3d5f1386fe8",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1744,7 +1762,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "06f065c2538477e9256e0132da26af6874a4923672a223302cd4d293fbbd1c4e",
+      "semanticDigest": "f003ef360aeda47bd080c993e3277974ffe0f518de78d99fcf834be37944280c",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1755,7 +1773,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "f7e22c8caa4bcb1e62bd24b7db6e895e1e2c4ff1b96a32029157e49a2093e81f",
+      "semanticDigest": "d87ec48db2b7e630afa1464b5c99902f294e9a1b853cd182586b00b24360e393",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1770,7 +1788,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "889bbc0e0f9c999c97c9e509a4fc87827eff1421ae4f967e8f80ec9e63277d00",
+      "semanticDigest": "acb72133cd53828f99f8acd8bb42abf6b01104a6a345c154b789e8f574c86c01",
       "detail": "package bytes identical"
     },
     {
@@ -1781,7 +1799,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "a1829bf9de023f7c52d8c1760cb2316551297af2e3deb7c2de6f511f7d46db71",
+      "semanticDigest": "84e477c43d6a0c7e10e727a1a3078e9fe688a5019495bb181bc2521ccd425695",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1812,7 +1830,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "7085a6e421e206844382a86f59f081f9722dae6902184b6f690503143f292d3f",
+      "semanticDigest": "2002a1da21268f05159e8ed7ccf0d2047456ae442f3d051d10eb839e2700943d",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1850,7 +1868,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "ad24587f6c816c922b4f5b1f251ba31d905bc84d667d79f5000173657cde7474",
+      "semanticDigest": "f89652cafca0ee6d7b28ee0ded16dfc77561dfcf1f9a42d5dc78607d47d76b05",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1888,7 +1906,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "889bbc0e0f9c999c97c9e509a4fc87827eff1421ae4f967e8f80ec9e63277d00",
+      "semanticDigest": "acb72133cd53828f99f8acd8bb42abf6b01104a6a345c154b789e8f574c86c01",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1926,7 +1944,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "11a4dc01dd2c40255b4f58993a500be537268759206f839e8626b62cfbdc6bf8",
+      "semanticDigest": "e33372c3a5f90e6aa811d6fbe922886fc66997110a82b2f9881b2c052e3b5d79",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1937,7 +1955,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "cb737b5165c61709c8d6adad50748db224465988cc04fa14eb9b9d3b697359e3",
+      "semanticDigest": "8a2f2f6f9d8c286180abef5e7ec2c48e0924b7a4282887da7b48a0c563889f31",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1945,7 +1963,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "6f948745d829b264535ec0f95ef313276bdf3233b7a294697d85275503cea22d",
+      "semanticDigest": "cc166c28212a8ec3cb54aa9d7cb8482aad086ef9d33a3abe47f307eb9a290fc7",
       "detail": "package bytes identical"
     },
     {
@@ -1956,7 +1974,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6dd52e0fa5aa36aca2cf1d356de29172c002e0908ad4ae2170efcda925fe298c",
+      "semanticDigest": "f437d14f9d25967390dc44621aecbdaed728784e4d6970af91b36dbd992e81c8",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -1987,7 +2005,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "8a3a0f67c4cf407dc16e4368063eb01d667870226777a33a3ec83e3bb638e920",
+      "semanticDigest": "b3e6f6effdaebb9e0fcff7dbfbc18bfe5fd7c134a650c76f08f0acef94a389a3",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2025,7 +2043,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "b9532b6c561d7d7b4edabab65fd41fa8795d27b4b599b3da87192a3b1e4b8f80",
+      "semanticDigest": "ccaf1b226a569b6641d4c6e51398fa5c676a58ea53b01fbd6056333aa7ed9429",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2063,7 +2081,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6efe5aba533bc15f3c684f6468bede96bec314f5b6b3b2742858b54a47387707",
+      "semanticDigest": "dce280fb1967121f0f3585f4a1f7623e97171b65c195620b6d74e7bd26888006",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2101,7 +2119,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "82dbf102c1fcfd9e0ef9c1b78a64321befb905abf37db45cac472cfd0c636a7a",
+      "semanticDigest": "e44212a3ee10c242a74d66492077b1f6836f651fa6bebdd81b2aacb77f122652",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2112,7 +2130,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6b43a1abf7e1d16f3a4f2c3ce7cb8b57f81958432521afb49cbb9b0a4fbb8a13",
+      "semanticDigest": "bb977033f4e3f4cd5c55de818de8b622d701335bb0b7515c3f667540eb95de6f",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -2120,7 +2138,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "32ac1a58ddc9f1b83f107448605d241cfbcb766bd6a2bccbf1bf40ef55c8c6e5",
+      "semanticDigest": "0aa48f69da6e7440655f5919c6713fc40c15daf5d041cc4740228213594cfc0f",
       "detail": "package bytes identical"
     },
     {
@@ -2131,7 +2149,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "823cddc15c63c61e7a78af32808c43b6570f466c3a6de6898c04e6e345522211",
+      "semanticDigest": "ad986e44e4a7739f4789caf6850ed93da76f5c7a07632780ca0c92ec0e45b6c9",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2140,7 +2158,7 @@
       "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [],
-      "semanticDigest": "32ac1a58ddc9f1b83f107448605d241cfbcb766bd6a2bccbf1bf40ef55c8c6e5",
+      "semanticDigest": "0aa48f69da6e7440655f5919c6713fc40c15daf5d041cc4740228213594cfc0f",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2163,7 +2181,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "46d99879b89cbe61159daa869c085e004b65ecaae428a3001a76e871deee4160",
+      "semanticDigest": "28d249c93eca90329818dae816b105de891a738681e8a80520256483aa06e1f2",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2201,7 +2219,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "60562422dbaee7bb10bdf31808b51b87788f0d09de96ada3212d0e5b7a5edb52",
+      "semanticDigest": "b258b347581bf72ef80f70ffe54961c6e0616add33c9edc7864d8d54f5e47286",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2239,7 +2257,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "9da5e8c5d70ff5d444b13871628b22c49a19b188cd9caf64834699b5ec7fc90d",
+      "semanticDigest": "228492b8802fa667385553974ee0629b1bcb90c795cf1460fc002d3087ebd6e8",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2277,7 +2295,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "3aa896c69aeaedaa184758b60caf0da05c12cebb239e66ab551a33e0220f7576",
+      "semanticDigest": "91cfdda864293b1103b2bcbaaa9cfa59cd63fa051c54f44d635b61e729057d70",
       "detail": "targeted semantic mutation materialized"
     },
     {
@@ -2288,7 +2306,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "3b07c2bc912e2aa4583746eec252e41345181ba0a205eadeca10276b12b6fc75",
+      "semanticDigest": "68c29308aca7f9a346e14da2db2c9e7969ad970c2e606049bd67e0a817309c58",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -2296,7 +2314,7 @@
       "mutation": "no-op open+save",
       "status": "round-trip preservation",
       "changedParts": [],
-      "semanticDigest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "semanticDigest": "fd818ee36ee3a797c71d1f853b23fe606b73094d3384102cad5374c8dcd6d61b",
       "detail": "package bytes identical"
     },
     {
@@ -2791,28 +2809,6 @@
       "reason": "Spectra preserves Word footnotes and endnotes but cannot add or edit them in the linked file. Make this change in Word."
     },
     {
-      "fixture": "complex-structure",
-      "commandId": "document.insert.image",
-      "region": "images",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [],
-      "reason": "Spectra preserves pictures in a linked Word file but cannot add or restyle them there. Make this change in Word."
-    },
-    {
-      "fixture": "equation-omml",
-      "commandId": "document.insert.equation",
-      "region": "equations",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [
-        "insert_equation"
-      ],
-      "reason": "Spectra preserves Word equations but cannot add or edit them in the linked file. Add or edit the equation in Word."
-    },
-    {
       "fixture": "footnotes-endnotes",
       "commandId": "document.insert.footnote",
       "region": "footnotes",
@@ -2835,46 +2831,6 @@
         "insert_blocks"
       ],
       "reason": "Spectra preserves Word footnotes and endnotes but cannot add or edit them in the linked file. Make this change in Word."
-    },
-    {
-      "fixture": "section-headers-footers",
-      "commandId": "document.layout.pageSize",
-      "region": "sections",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [],
-      "reason": "Spectra preserves section properties exactly as Word saved them. Change sections, margins, columns, or page setup in Word."
-    },
-    {
-      "fixture": "section-headers-footers",
-      "commandId": "document.layout.margins",
-      "region": "sections",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [],
-      "reason": "Spectra preserves section properties exactly as Word saved them. Change sections, margins, columns, or page setup in Word."
-    },
-    {
-      "fixture": "section-headers-footers",
-      "commandId": "document.layout.header",
-      "region": "headersFooters",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [],
-      "reason": "Spectra preserves linked Word headers and footers but cannot rewrite those parts. Edit them in Word."
-    },
-    {
-      "fixture": "section-headers-footers",
-      "commandId": "document.layout.footer",
-      "region": "headersFooters",
-      "regionPreserved": true,
-      "humanRefused": true,
-      "assistantRefused": true,
-      "operations": [],
-      "reason": "Spectra preserves linked Word headers and footers but cannot rewrite those parts. Edit them in Word."
     },
     {
       "fixture": "tracked-changes",

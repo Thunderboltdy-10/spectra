@@ -4,7 +4,10 @@ import {
   documentJsonFromContent,
 } from "../components/artifact-studio";
 import { withDocumentFormatting } from "../components/document-studio";
-import { docxProjectionFromContent } from "../lenses/document-projection";
+import {
+  compactDocxProjectionForStorage,
+  docxProjectionFromContent,
+} from "../lenses/document-projection";
 import type { DocxProjection } from "../lenses/projection-contracts";
 import {
   documentContentToProseMirrorJson,
@@ -483,6 +486,78 @@ describe("native document projection", () => {
     expect(docxProjectionFromContent(null, base)).toEqual({
       projection: base,
       operations: [],
+    });
+  });
+
+  it("compacts safe equation metadata without discarding unsafe native OMML", () => {
+    const projection: DocxProjection = {
+      blocks: [
+        {
+          id: "docx:paragraph:equations",
+          type: "paragraph",
+          text: "x+1 and x\\ne",
+          inlineContent: [
+            {
+              kind: "equation",
+              latex: "x+1",
+              display: "inline",
+              ommlXml: "<m:oMath><m:r><m:t>x+1</m:t></m:r></m:oMath>",
+              ommlSourceLatex: "x+1",
+            },
+            { kind: "text", text: " and " },
+            {
+              kind: "equation",
+              latex: "x\\ne y",
+              display: "inline",
+              ommlXml: "<m:oMath><m:r><m:t>x≠y</m:t></m:r></m:oMath>",
+              ommlSourceLatex: "x\\ne y",
+            },
+          ],
+        },
+        {
+          id: "docx:equation:block",
+          type: "equation",
+          text: "x+1",
+          latex: "x+1",
+          inlineContent: [
+            {
+              kind: "equation",
+              latex: "x+1",
+              display: "block",
+              ommlXml: "<m:oMath><m:r><m:t>x+1</m:t></m:r></m:oMath>",
+              ommlSourceLatex: "x+1",
+            },
+          ],
+        },
+      ],
+      outline: [],
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+      },
+    };
+
+    const compact = compactDocxProjectionForStorage(projection);
+    const inlines = compact.blocks[0]?.inlineContent ?? [];
+    expect(inlines[0]).toEqual({
+      kind: "equation",
+      latex: "x+1",
+      display: "inline",
+    });
+    expect(inlines[2]).toMatchObject({
+      kind: "equation",
+      latex: "x\\ne y",
+      ommlXml: "<m:oMath><m:r><m:t>x≠y</m:t></m:r></m:oMath>",
+    });
+    expect(compact.blocks[1]).not.toHaveProperty("latex");
+    expect(compact.blocks[1]?.inlineContent?.[0]).toEqual({
+      kind: "equation",
+      latex: "x+1",
+      display: "block",
     });
   });
 });

@@ -14,6 +14,11 @@ import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 import { filenameFromRelativePath } from "../shared/native-filename";
+import {
+  finalizeArtifactSummary,
+  isGeneratedArtifactSummary,
+  type BlueprintKey,
+} from "./spectraShared";
 
 const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
 const MAX_GATEWAY_UPDATE_BYTES = 760 * 1024;
@@ -107,6 +112,7 @@ function parseGatewayProjection(
   projectionHash: string | undefined,
   artifact: {
     blueprintKey: string;
+    summary?: string;
   },
 ): GatewayProjection | null {
   if (!projectionJson) return null;
@@ -121,13 +127,13 @@ function parseGatewayProjection(
     throw new Error("COLLABORATION_PROJECTION_INVALID");
   const value = parsed as Record<string, unknown>;
   const title = typeof value.title === "string" ? value.title.trim() : "";
-  const summary =
+  const rawSummary =
     typeof value.summary === "string" ? value.summary.trim() : undefined;
   const tags = Array.isArray(value.tags) ? value.tags : [];
   if (
     !title ||
     title.length > 300 ||
-    (summary?.length ?? 0) > 2_000 ||
+    (rawSummary?.length ?? 0) > 2_000 ||
     tags.length > 80 ||
     !tags.every((tag) => typeof tag === "string" && tag.length <= 100) ||
     value.typeKey !== artifact.blueprintKey ||
@@ -141,6 +147,17 @@ function parseGatewayProjection(
     timetableContentContainsPersonalState(value.content)
   )
     throw new Error("COLLABORATION_TIMETABLE_PERSONAL_STATE_FORBIDDEN");
+  const summary = isGeneratedArtifactSummary(
+    artifact.summary,
+    artifact.blueprintKey as BlueprintKey,
+  )
+    ? finalizeArtifactSummary({
+        blueprintKey: artifact.blueprintKey as BlueprintKey,
+        title,
+        summary: undefined,
+        content: value.content,
+      })
+    : rawSummary;
   return {
     title,
     ...(summary ? { summary } : {}),

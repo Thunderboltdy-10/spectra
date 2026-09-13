@@ -89,4 +89,18 @@ describe("AI UI events", () => {
     );
     __resetAppChoreographyHost();
   });
+
+  it("does not choreograph an internal authority notice", async () => {
+    const { getAppChoreographyCoordinator, __resetAppChoreographyHost } =
+      await import("../collaboration/app-choreography-host");
+    __resetAppChoreographyHost();
+    setFollowingAi(true);
+    handleSpectraAiUiEvent({
+      key: "authority_notice",
+      runId: "run-authority",
+      payload: { note: "Approval is required." },
+    });
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+    __resetAppChoreographyHost();
+  });
 });

@@ -849,7 +849,11 @@ export function CalendarApplication() {
               : [...current, artifact!],
           );
         }
-        studio.openSplit(artifact);
+        // Calendar is a launch surface for the work itself. Opening a plan in
+        // the split inspector made a task feel like a modified calendar
+        // detail, hid the canonical artifact chrome, and left too little room
+        // for its editor. Use the same full artifact tab the Library uses.
+        studio.openTab(artifact);
       } catch (nextError) {
         toast.error(
           nextError instanceof Error ? nextError.message : "Could not open this work.",
@@ -1726,7 +1730,7 @@ function CalendarItemPanel({
               <button
                 key={workId}
                 type="button"
-                onClick={() => void spectraBus.command("work.open", { workId, surface: "panel" })}
+                onClick={() => void spectraBus.command("work.open", { workId, surface: "full" })}
                 className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-micro font-semibold hover:bg-[var(--bg-hover)]"
               >
                 <Link2 className="size-3.5" />

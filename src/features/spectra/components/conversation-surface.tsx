@@ -149,10 +149,15 @@ function mergeTracePage(
   };
 }
 
-function savedRunStatusCopy(run: Pick<SpectraRun, "status"> | undefined) {
+function savedRunStatusCopy(
+  run: Pick<SpectraRun, "status" | "phase"> | undefined,
+) {
   if (!run) return "Saved progress and results";
   if (run.status === "awaiting_confirmation") return "Waiting for your approval";
-  if (run.status === "awaiting_resolution") return "Waiting for a conflict to be resolved";
+  if (run.status === "awaiting_resolution")
+    return run.phase === "conflict"
+      ? "Waiting for a conflict to be resolved"
+      : "Waiting for your choice";
   if (run.status === "queued") return "Queued";
   if (run.status === "running") return "Still running";
   if (run.status === "completed") return "Completed result";
@@ -165,7 +170,7 @@ function SavedRunDisclosure({
   state,
   onLoad,
 }: {
-  run?: Pick<SpectraRun, "status">;
+  run?: Pick<SpectraRun, "status" | "phase">;
   state?: TraceLoadState;
   onLoad: () => void;
 }) {
@@ -1005,10 +1010,16 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
           {trace.operations.length === 0 ? (
             <p className="text-micro text-[var(--text-tertiary)]">
-              {publicSpectraFailureText(
-                trace.run.error,
-                trace.run.retryable !== false,
-              )}
+              {trace.run.status === "awaiting_confirmation"
+                ? "Review the proposed changes before applying them."
+                : trace.run.status === "awaiting_resolution"
+                  ? trace.run.phase === "conflict"
+                    ? "Review the preserved conflict proposal before choosing how to continue."
+                    : "Choose an option above to continue."
+                  : publicSpectraFailureText(
+                      trace.run.error,
+                      trace.run.retryable !== false,
+                    )}
             </p>
           ) : (
             <div className="space-y-2">
@@ -1076,11 +1087,13 @@ function RunOutcomeNote({
   savedCount,
   failedCount,
   retrying = false,
+  retryAvailable = true,
   onRetry,
 }: {
   savedCount: number;
   failedCount: number;
   retrying?: boolean;
+  retryAvailable?: boolean;
   onRetry?: () => void;
 }) {
   return (
@@ -1097,7 +1110,9 @@ function RunOutcomeNote({
             : `${failedCount} parts could not be finished`}
         </p>
         <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
-          Completed work stays saved. Retry continues only the unfinished part.
+          {retryAvailable
+            ? "Completed work stays saved. Retry continues only the unfinished part."
+            : "Completed work stays saved. Continue in this thread to finish the remaining part."}
         </p>
       </div>
       {onRetry ? (
@@ -1170,8 +1185,9 @@ function PersistedRunOutcomeNote({
       savedCount={savedCount}
       failedCount={failedCount}
       retrying={retrying}
+      retryAvailable={trace.run.retryable !== false}
       onRetry={
-        onRetryRun
+        onRetryRun && trace.run.retryable !== false
           ? () => {
               setRetrying(true);
               void Promise.resolve(onRetryRun(trace.run._id)).finally(() =>
@@ -2484,8 +2500,10 @@ export function ConversationSurface({
                     <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                       {trace.run.status === "running"
                         ? "This response is still in progress. Saved text and progress will catch up here automatically."
-                        : trace.run.status === "awaiting_resolution"
-                          ? "The same semantic region changed concurrently. Review the preserved proposal below."
+                          : trace.run.status === "awaiting_resolution"
+                            ? trace.run.phase === "conflict"
+                              ? "The same semantic region changed concurrently. Review the preserved proposal below."
+                              : "Choose an option above to continue."
                           : publicSpectraFailureText(
                               trace.run.error,
                               trace.run.retryable !== false,

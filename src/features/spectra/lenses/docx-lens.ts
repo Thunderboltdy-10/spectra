@@ -3061,6 +3061,11 @@ function semanticProjectionValue(value: unknown, parentKey?: string): unknown {
           (key === "fontFamily" && child === "Calibri") ||
           (key === "fontSizePoints" && child === 11))
       ) return [];
+      // OMML is exact native preservation metadata. It is not authored
+      // semantics, and including it in the digest makes a large equation-
+      // heavy paper hash differently when its safe storage projection omits
+      // the redundant native subtree.
+      if (key === "ommlXml" || key === "ommlSourceLatex") return [];
       const normalizedChild = semanticProjectionValue(child, key);
       if (
         key === "format" &&

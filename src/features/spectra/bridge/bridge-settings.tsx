@@ -265,7 +265,11 @@ export function BridgeSettings() {
       setTrustNote(
         preset === "both"
           ? "Native write & sync is enabled for the account default. Existing folders stay where they are; review each existing item before changing its storage strategy."
-        : "Managed-copy protection is now the account default. Existing folders stay where they are.",
+          : preset === "linked"
+            ? "Protected-original mode is now the account default. Spectra can read approved local files but will not write them back."
+            : preset === "device"
+              ? "Keep-on-this-computer is now the account default. Existing folders stay where they are."
+              : "Managed-copy protection is now the account default. Existing folders stay where they are.",
       );
       return { status: "completed", message: "Bridge trust preset applied." };
     } catch (reason) {
@@ -648,9 +652,21 @@ export function BridgeSettings() {
             </div>
           ) : null}
           {error ? (
-            <p className="text-micro text-[var(--danger)]" role="alert">
-              {error}
-            </p>
+            <div
+              className="flex items-center justify-between gap-3 text-micro text-[var(--danger)]"
+              role="alert"
+            >
+              <span>{error}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-label="Dismiss Bridge error"
+                onClick={() => setError(undefined)}
+              >
+                Dismiss
+              </Button>
+            </div>
           ) : null}
         </div>
       </section>

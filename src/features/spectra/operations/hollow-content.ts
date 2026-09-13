@@ -334,6 +334,66 @@ export function isPlaceholderArtifactSummary(summary: unknown) {
   return false;
 }
 
+/**
+ * These summaries are a projection of artifact content, not user-authored
+ * copy. They must follow the content when an AI or human edit changes the
+ * artifact cardinality, otherwise the editor and Library describe different
+ * saved work.
+ */
+export function isGeneratedArtifactSummary(
+  summary: unknown,
+  blueprintKey: ArtifactTypeKey,
+) {
+  const clean = typeof summary === "string" ? summary.trim() : "";
+  if (!clean) return false;
+  const patterns: Partial<Record<ArtifactTypeKey, RegExp>> = {
+    document: /^\d+-block document about .+\.$/i,
+    flashcard_deck: /^\d+-card deck about .+\.$/i,
+    quiz: /^\d+-question quiz about .+\.$/i,
+    planner_task: /^(?:Study task|Task) about .+\.$/i,
+    presentation: /^\d+-slide (?:presentation|deck) about .+\.$/i,
+    timetable: /^\d+-event timetable about .+\.$/i,
+    code: /^\d+-file code artifact about .+\.$/i,
+    whiteboard: /^\d+-node whiteboard about .+\.$/i,
+    sheets: /^Workbook with \d+ filled cells? about .+\.$/i,
+  };
+  return patterns[blueprintKey]?.test(clean) ?? false;
+}
+
+/**
+ * Keep a generated summary truthful while allowing an explicit natural
+ * language summary edit to win. `currentSummary` is the authority signal: a
+ * newly generated-looking string alone must not unexpectedly rewrite a
+ * hand-authored summary.
+ */
+export function refreshGeneratedArtifactSummary(params: {
+  blueprintKey: ArtifactTypeKey;
+  title: string;
+  content: unknown;
+  currentSummary?: unknown;
+  nextSummary?: unknown;
+}) {
+  const currentSummary =
+    typeof params.currentSummary === "string"
+      ? params.currentSummary.trim()
+      : "";
+  const nextSummary =
+    typeof params.nextSummary === "string" ? params.nextSummary.trim() : "";
+  if (!isGeneratedArtifactSummary(currentSummary, params.blueprintKey))
+    return nextSummary || undefined;
+  if (
+    nextSummary &&
+    nextSummary !== currentSummary &&
+    !isGeneratedArtifactSummary(nextSummary, params.blueprintKey)
+  )
+    return nextSummary.slice(0, 320);
+  return deriveCreateArtifactSummary({
+    blueprintKey: params.blueprintKey,
+    title: params.title,
+    content: params.content,
+  });
+}
+
 export function deriveCreateArtifactSummary(params: {
   blueprintKey: ArtifactTypeKey;
   title: string;

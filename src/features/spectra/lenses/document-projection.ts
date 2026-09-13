@@ -17,6 +17,7 @@ import {
   type DocxProjection,
   type DocxRichInline,
 } from "./projection-contracts";
+import { isEquationLatexSupported } from "./equation-interchange";
 
 export type DocumentJsonNode = {
   type?: string;
@@ -112,6 +113,112 @@ export function documentBlocksFromJson(
   json: DocumentJsonNode,
 ): DocumentSemanticBlock[] {
   return sharedDocumentBlocksFromJson(json) as DocumentSemanticBlock[];
+}
+
+/**
+ * Convex documents have a roughly 1 MiB value ceiling. Native OMML is an
+ * exact-package preservation aid, not authored document semantics: the
+ * equation's LaTeX is the editable source and the original DOCX remains the
+ * carry package. Keep exact OMML only when regenerating it from LaTeX would
+ * be unsafe; this keeps large equation-heavy papers openable without making
+ * an unsupported equation look editable.
+ */
+function compactDocxInlineForStorage(item: DocxRichInline): DocxRichInline {
+  if (item.kind !== "equation" || !isEquationLatexSupported(item.latex))
+    return item;
+  const {
+    ommlXml: _ommlXml,
+    ommlSourceLatex: _ommlSourceLatex,
+    ...semanticEquation
+  } = item;
+  return semanticEquation;
+}
+
+function compactDocxBlockForStorage(
+  block: DocxProjection["blocks"][number],
+) {
+  const compact = {
+    ...block,
+    ...(block.inlineContent
+      ? { inlineContent: block.inlineContent.map(compactDocxInlineForStorage) }
+      : {}),
+    ...(block.richRows
+      ? {
+          richRows: block.richRows.map((row) =>
+            row.map((cell) => cell.map(compactDocxInlineForStorage)),
+          ),
+        }
+      : {}),
+  };
+  if (compact.type !== "equation") return compact;
+  // Equation blocks already carry the same LaTeX in inlineContent. Removing
+  // this duplicate is what gives formal, equation-dense papers headroom for
+  // the fidelity map and the Convex mutation envelope.
+  const { latex: _latex, ...withoutDuplicateLatex } = compact;
+  return withoutDuplicateLatex;
+}
+
+/** Return a Convex-safe DOCX projection without dropping unsafe native data. */
+export function compactDocxProjectionForStorage(
+  projection: DocxProjection,
+): DocxProjection {
+  return docxProjectionSchema.parse({
+    ...projection,
+    blocks: projection.blocks.map(compactDocxBlockForStorage),
+  });
+}
+
+/**
+ * Imported documents may also carry an editor JSON mirror. That mirror repeats
+ * every equation and can exceed the persistence ceiling even when the native
+ * projection is compact. Native content reconstructs this mirror on open, so
+ * it is deliberately omitted at the native import boundary.
+ */
+export function compactDocxEditorJsonForStorage(value: unknown): unknown {
+  const visit = (current: unknown): unknown => {
+    if (Array.isArray(current)) return current.map(visit);
+    if (!current || typeof current !== "object") return current;
+    const source = current as Record<string, unknown>;
+    const next = Object.fromEntries(
+      Object.entries(source).map(([key, child]) => [key, visit(child)]),
+    ) as Record<string, unknown>;
+    const attrs = next.attrs;
+    const latex =
+      attrs && typeof attrs === "object" && !Array.isArray(attrs)
+        ? (attrs as Record<string, unknown>).latex
+        : undefined;
+    if (
+      (next.type === "inlineEquation" || next.type === "equation") &&
+      typeof latex === "string" &&
+      isEquationLatexSupported(latex) &&
+      attrs &&
+      typeof attrs === "object" &&
+      !Array.isArray(attrs)
+    ) {
+      const {
+        ommlXml: _ommlXml,
+        ommlSourceLatex: _ommlSourceLatex,
+        ...semanticAttrs
+      } = attrs as Record<string, unknown>;
+      next.attrs = semanticAttrs;
+    }
+    return next;
+  };
+  return visit(value);
+}
+
+/** Compact native content while retaining the fields used by editor chrome. */
+export function compactDocxContentForStorage(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  const next = { ...source };
+  delete next.tiptap;
+  if (Array.isArray(next.blocks))
+    next.blocks = next.blocks.map((block) => {
+      const parsed = docxProjectionBlockSchema.safeParse(block);
+      return parsed.success ? compactDocxBlockForStorage(parsed.data) : block;
+    });
+  return next;
 }
 
 export function documentContentToProseMirrorJson(

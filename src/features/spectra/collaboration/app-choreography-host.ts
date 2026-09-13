@@ -34,7 +34,10 @@ const UI_EVENT_CAPABILITY: Record<string, string> = {
   memory_written: "app.memory.write",
   sharing_changed: "app.sharing.change",
   managebac_sync_requested: "app.managebac.sync",
+  managebac_classes_selected: "app.managebac.sync",
+  calendar_changed: "app.page.calendar",
   bridge_setup: "app.bridge.setup",
+  reference_insert: "app.reference.insert",
   navigate: "app.navigate",
   navigate_spectra: "app.navigate",
 };
@@ -138,8 +141,12 @@ export function performAppUiEvent(event: {
 }): void {
   const actorId = event.runId?.trim();
   if (!actorId) return;
-  artifactPerformerFor(actorId);
   const capabilityId = UI_EVENT_CAPABILITY[event.key];
+  // Progress and authority messages are semantic run metadata, not user
+  // actions. Do not turn an unregistered event into the generic workspace
+  // target: that could steal the viewport when Follow AI is enabled.
+  if (!capabilityId && event.key !== "navigate" && event.key !== "navigate_spectra") return;
+  artifactPerformerFor(actorId);
   const primitive = capabilityId
     ? capabilityById(capabilityId)?.choreography
     : undefined;

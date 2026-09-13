@@ -8,10 +8,5 @@
     "equation XML": "unsupported-but-preserved"
   },
   "mutations": [],
-  "refusedRegions": [
-    {
-      "commandId": "document.insert.equation",
-      "region": "equations"
-    }
-  ]
+  "refusedRegions": []
 }

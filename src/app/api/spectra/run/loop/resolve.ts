@@ -125,6 +125,36 @@ export function resolveNamedReference(
   return contained.length === 1 ? contained[0]!.id : value;
 }
 
+/**
+ * Resolve a workspace named in the user's request even when the model omitted
+ * or malformed the destination field. This is title-based only for owned
+ * workspace candidates; it never turns an arbitrary string into a database id.
+ * The longest matching title wins so "Chemistry Lab" is not shadowed by a
+ * broader "Lab" workspace.
+ */
+export function resolveWorkspaceMention(
+  prompt: string,
+  candidates: Array<{ id: unknown; title: unknown }>,
+) {
+  const promptKey = normalizedReference(prompt);
+  if (!promptKey) return undefined;
+  const matches = candidates.flatMap((candidate) => {
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.title !== "string"
+    )
+      return [];
+    const titleKey = normalizedReference(candidate.title);
+    if (titleKey.length < 3 || !containsNormalizedPhrase(promptKey, titleKey))
+      return [];
+    return [{ id: candidate.id, length: titleKey.length }];
+  });
+  if (!matches.length) return undefined;
+  const longest = Math.max(...matches.map((match) => match.length));
+  const strongest = matches.filter((match) => match.length === longest);
+  return strongest.length === 1 ? strongest[0]!.id : undefined;
+}
+
 export type ArtifactTargetCandidate = {
   id: string;
   title: string;
@@ -431,6 +461,28 @@ export function resolveArtifactTarget(input: {
         candidate.id !== top.id &&
         normalizedReference(candidate.title) === normalizedReference(top.title),
     );
+  const exactOwnedReference = input.reference
+    ? scored.find((candidate) => candidate.id === input.reference)
+    : undefined;
+  // An exact id that came from the owned candidate packet is already
+  // permission-checked evidence. Do not run it through the fuzzy title
+  // ambiguity threshold: opaque ids have no title tokens and otherwise score
+  // below the generic 0.76 cutoff even though they are the safest target.
+  const namedDifferentArtifact = promptNamed.some(
+    (candidate) => candidate.id !== input.reference,
+  );
+  if (exactOwnedReference && !namedDifferentArtifact) {
+    return {
+      role: input.role,
+      requestedReference: input.reference ?? null,
+      blueprintKey: input.blueprintKey,
+      status: "resolved",
+      confidence: 1,
+      resolvedArtifactId: exactOwnedReference.id,
+      resolvedTitle: exactOwnedReference.title,
+      candidates: scored.slice(0, 6),
+    };
+  }
   const strongCompositeEvidence =
     top.reasons.includes("title named in request") &&
     top.reasons.includes("planned owned id");
@@ -466,10 +518,20 @@ export function resolvePlanReferences(
     id: artifact.id,
     title: artifact.title,
   }));
-  const workspaceCandidates = context.workspaces.map((workspace) => ({
-    id: workspace.id,
-    title: workspace.title,
-  }));
+  const workspaceCandidates = [
+    ...context.workspaces.map((workspace) => ({
+      id: workspace.id,
+      title: workspace.title,
+    })),
+    ...(context.currentWorkspace
+      ? [
+          {
+            id: context.currentWorkspace.id,
+            title: context.currentWorkspace.title,
+          },
+        ]
+      : []),
+  ];
   const threadCandidates = context.threads.map((thread) => ({
     id: thread.id,
     title: thread.title,
@@ -1203,6 +1265,91 @@ export function assertRequestedArtifactMutation(
     );
 }
 
+export function promptRequestsCalendarAction(prompt: string) {
+  const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
+  if (
+    /\b(?:calendar|time[- ]?block|work block|calendar block|scheduled work)\b/.test(
+      normalized,
+    )
+  )
+    return true;
+  const schedulingVerb =
+    /\b(?:schedule|put|place|book|block|reserve|move|resize)\b/.test(
+      normalized,
+    );
+  const timeSignal =
+    /\b(?:today|tomorrow|tonight|this\s+(?:morning|afternoon|evening|week)|next\s+(?:week|month)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|from\s+\d{1,2}(?::\d{2})?)/.test(
+      normalized,
+    );
+  return schedulingVerb && timeSignal;
+}
+
+/**
+ * Distinguish “schedule the saved task” from the dependency graph requested by
+ * “create a planner task and schedule it”. Calendar language alone must never
+ * turn a named existing artifact into a duplicate planner task.
+ */
+export function promptRequestsNewPlannerTask(prompt: string) {
+  const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
+  return (
+    /\b(?:create|make|build|generate|draft|write)\b[\s\S]{0,80}\b(?:planner\s+)?(?:task|todo|to-do)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:new|another|separate)\s+(?:planner\s+)?(?:task|todo|to-do)\b/.test(
+      normalized,
+    )
+  );
+}
+
+export function assertCalendarActionContract(
+  operations: ModelOperation[],
+  prompt: string,
+) {
+  if (!promptRequestsCalendarAction(prompt)) return;
+  const calendarCommands = new Set([
+    "calendar.schedule",
+    "calendar.schedule_task",
+    "calendar.scheduleTask",
+    "calendar.move",
+    "calendar.move_work_block",
+    "calendar.moveWorkBlock",
+    "calendar.resize",
+    "calendar.resize_work_block",
+    "calendar.resizeWorkBlock",
+  ]);
+  const hasCalendarMutation = operations.some(
+    (operation) =>
+      operation.type === "app.command" &&
+      calendarCommands.has(operation.input.command),
+  );
+  const plannerUpdates = operations.filter(
+    (
+      operation,
+    ): operation is Extract<ModelOperation, { type: "artifact.update" }> =>
+      operation.type === "artifact.update" &&
+      operation.input.blueprintKey === "planner_task",
+  );
+  if (plannerUpdates.length > 0)
+    throw new Error(
+      "This is a Calendar request. Use the Calendar schedule, move, or resize tool; do not rewrite a planner task as a substitute for creating a Calendar block.",
+    );
+  const plannerCreates = operations.filter(
+    (
+      operation,
+    ): operation is Extract<ModelOperation, { type: "artifact.create" }> =>
+      operation.type === "artifact.create" &&
+      operation.input.blueprintKey === "planner_task",
+  );
+  if (plannerCreates.length > 0 && !promptRequestsNewPlannerTask(prompt))
+    throw new Error(
+      "This Calendar request refers to existing work. Do not create or rewrite a planner task; locate the named artifact and schedule that exact task with Calendar.",
+    );
+  if (plannerCreates.length > 0 && !hasCalendarMutation)
+    throw new Error(
+      "This Calendar request created a planner task without a Calendar block. Emit the planner create first, then a calendar.schedule operation using its exact @created:<operation index> artifact id and planTaskId; never promise to schedule it later.",
+    );
+}
+
 export function requestedPresentationLayout(prompt: string) {
   const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
   return PRESENTATION_LAYOUT_IDS.find((layoutId) =>
@@ -1366,6 +1513,42 @@ export function resolveAndValidatePlan(
       : plan;
   const reconciled = reconcileExplicitRequestContract(promoted, prompt);
   let resolved = resolvePlanReferences(reconciled, context);
+  const promptWorkspaceId = resolveWorkspaceMention(prompt, [
+    ...context.workspaces,
+    ...(context.currentWorkspace
+      ? [
+          {
+            id: context.currentWorkspace.id,
+            title: context.currentWorkspace.title,
+          },
+        ]
+      : []),
+  ]);
+  if (promptWorkspaceId) {
+    const operations = resolved.operations.map((operation) => {
+      if (operation.type === "workspaceItem.add") {
+        return parseModelOperation({
+          ...operation,
+          input: { ...operation.input, workspaceId: promptWorkspaceId },
+        });
+      }
+      if (operation.type === "artifact.create") {
+        return parseModelOperation({
+          ...operation,
+          input: { ...operation.input, workspaceId: promptWorkspaceId },
+        });
+      }
+      return operation;
+    });
+    resolved = parseSpectraPlan({
+      ...resolved,
+      intent: {
+        ...resolved.intent,
+        targetWorkspaceId: promptWorkspaceId,
+      },
+      operations,
+    });
+  }
   const targetOutcome = resolvePlanArtifactTargets(resolved, context, prompt);
   const targetResolutions = targetOutcome.targetResolutions;
   resolved = targetOutcome.plan;
@@ -1392,6 +1575,7 @@ export function resolveAndValidatePlan(
   }
   resolved = narrateResolvedTargets(resolved, targetResolutions);
   assertRequestedArtifactMutation(resolved.operations, prompt);
+  assertCalendarActionContract(resolved.operations, prompt);
   assertPresentationLayoutContract(resolved.operations, prompt);
   console.info(
     `[spectra.plan.summary] ${JSON.stringify({

@@ -86,7 +86,7 @@ describe("Planner Reminder affordance", () => {
       "utf8",
     );
     expect(studio).toContain("Reminders");
-    expect(studio).toContain('aria-label="Add reminder"');
+    expect(studio).toContain('ariaLabel="Add reminder"');
     expect(studio).toContain("minutesBefore");
     expect(studio).toContain("REMINDER_MINUTE_OPTIONS");
     expect(studio).not.toContain("reminderDraft");

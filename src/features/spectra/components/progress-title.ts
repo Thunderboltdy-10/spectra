@@ -1,7 +1,11 @@
 const IRREGULAR_PROGRESS_VERBS: Record<string, string> = {
+  being: "was",
   beginning: "began",
   building: "built",
+  choosing: "chose",
   doing: "did",
+  finding: "found",
+  keeping: "kept",
   making: "made",
   reading: "read",
   rewriting: "rewrote",

@@ -3208,6 +3208,9 @@ export function SpectraShell({
     const { historyMode } = pendingHydratedOpen;
     setPendingHydratedOpen(null);
     openArtifactPanel(artifact, historyMode);
+  // openArtifactPanel intentionally remains render-local; this effect only
+  // runs while the pending hydration record exists and clears it before use.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allArtifacts, pendingHydratedOpen]);
 
   function openArtifactTab(artifact: SpectraArtifact) {

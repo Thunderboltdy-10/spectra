@@ -1,14 +1,29 @@
 import { describe, expect, it } from "vitest";
+import {
+  explicitlyNamedExistingArtifactId,
+} from "@/app/api/spectra/run/loop/gather";
+import { resolveCreatedArtifactDependencies } from "@/app/api/spectra/run/loop/act";
 import type { buildContext } from "@/app/api/spectra/run/loop/gather";
 import {
+  assertCalendarActionContract,
   narrateResolvedTargets,
   promptExplicitlyTargetsFocusedArtifact,
+  promptRequestsCalendarAction,
+  promptRequestsNewPlannerTask,
   reconcileExplicitDocumentRegions,
   resolveArtifactTarget,
   resolvePlanArtifactTargets,
+  resolveWorkspaceMention,
 } from "@/app/api/spectra/run/loop/resolve";
-import { safeOperationPreview } from "@/app/api/spectra/run/loop/plan";
-import { parseSpectraPlan } from "@/features/spectra/operations/schema";
+import {
+  compactCalendarForAgent,
+  parseStreamedPlanText,
+  safeOperationPreview,
+} from "@/app/api/spectra/run/loop/plan";
+import {
+  parseModelOperation,
+  parseSpectraPlan,
+} from "@/features/spectra/operations/schema";
 
 type Context = Awaited<ReturnType<typeof buildContext>>;
 
@@ -114,6 +129,220 @@ function updatePlan(
 }
 
 describe("P4.I2 artifact target resolution", () => {
+  it("keeps Calendar work-block identity ahead of noisy imported task rows", () => {
+    const compact = compactCalendarForAgent({
+      timezone: "UTC",
+      range: { from: 1, to: 2 },
+      items: Array.from({ length: 246 }, (_, index) => ({
+        id: `task-${index}`,
+        kind: "task",
+        title: `Imported task ${index}`,
+        notes: "x".repeat(800),
+      })),
+      scheduledWorkBlocks: [
+        {
+          id: "block-2",
+          kind: "scheduled_work_block",
+          title: "Named saved task",
+          planArtifactId: "artifact-2",
+          planTaskId: "task-1",
+          revision: 4,
+          startAt: 3,
+          endAt: 4,
+        },
+      ],
+      unscheduledTasks: [],
+      partialTimeItems: [],
+    }) as {
+      scheduledWorkBlocks: Array<Record<string, unknown>>;
+      items: Array<Record<string, unknown>>;
+    };
+    expect(compact.scheduledWorkBlocks).toMatchObject([
+      {
+        id: "block-2",
+        planArtifactId: "artifact-2",
+        planTaskId: "task-1",
+        revision: 4,
+      },
+    ]);
+    expect(compact.items).toHaveLength(80);
+    expect(JSON.stringify(compact).length).toBeLessThan(80_000);
+  });
+
+  it("lets a unique named existing artifact override stale open focus", () => {
+    expect(
+      explicitlyNamedExistingArtifactId(
+        "Move the V8-03 second calendar graph work block to tomorrow.",
+        [
+          { _id: "open", title: "V8-03 calendar graph test" },
+          { _id: "target", title: "V8-03 second calendar graph" },
+        ],
+      ),
+    ).toBe("target");
+  });
+
+  it("does not steal focus from an explicitly new artifact request", () => {
+    expect(
+      explicitlyNamedExistingArtifactId(
+        "Create a planner task called V8-03 second calendar graph and put it on my calendar.",
+        [{ _id: "target", title: "V8-03 second calendar graph" }],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not guess when two owned artifacts share the named title", () => {
+    expect(
+      explicitlyNamedExistingArtifactId(
+        "Move the Revision block tomorrow.",
+        [
+          { _id: "one", title: "Revision" },
+          { _id: "two", title: "Revision" },
+        ],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps Calendar scheduling separate from planner-task edits", () => {
+    const calendarPrompt =
+      "Put Evaluation of DP1 work on tomorrow morning from 09:00 to 10:00.";
+    expect(promptRequestsCalendarAction(calendarPrompt)).toBe(true);
+    const plannerUpdate = parseSpectraPlan({
+      ...updatePlan("planner-task"),
+      intent: {
+        ...updatePlan("planner-task").intent,
+        requestedArtifactTypes: ["planner_task"],
+      },
+      operations: [
+        {
+          type: "artifact.update",
+          input: {
+            artifactId: "planner-task",
+            blueprintKey: "planner_task",
+            title: null,
+            summary: null,
+            content: null,
+            contentPatch: {
+              changes: [{ path: "/dueAt", value: Date.now() }],
+            },
+            tags: null,
+          },
+        },
+      ],
+    });
+    expect(() =>
+      assertCalendarActionContract(plannerUpdate.operations, calendarPrompt),
+    ).toThrow(/Calendar request/i);
+    expect(() =>
+      assertCalendarActionContract(
+        plannerUpdate.operations,
+        "Set the due date for tomorrow.",
+      ),
+    ).not.toThrow();
+  });
+
+  it("requires a real Calendar mutation when a request creates a planner task", () => {
+    const create = parseModelOperation({
+      type: "artifact.create",
+      input: {
+        blueprintKey: "planner_task",
+        title: "First task",
+        summary: null,
+        content: {
+          taskTitle: "First task",
+          status: "todo",
+          timezone: "UTC",
+          recurrence: {
+            frequency: "none",
+            interval: 1,
+            weekdays: [],
+            exceptions: [],
+          },
+          subtasks: [],
+        },
+        tags: [],
+        workspaceId: null,
+        placement: "inbox",
+        pinned: false,
+        exclusivePin: false,
+      },
+    });
+    const schedule = parseModelOperation({
+      type: "app.command",
+      input: {
+        command: "calendar.schedule",
+        args: {
+          planArtifactId: "@created:0",
+          planTaskId: null,
+          taskItemId: "@created:0",
+          startAt: 1_000,
+          endAt: 2_000,
+          timezone: "UTC",
+        },
+      },
+    });
+    const prompt = "Create First task and put it on my calendar tomorrow from 09:00 to 10:00.";
+    expect(() => assertCalendarActionContract([create], prompt)).toThrow(
+      /without a Calendar block/i,
+    );
+    expect(() => assertCalendarActionContract([create, schedule], prompt)).not.toThrow();
+    const resolved = resolveCreatedArtifactDependencies(
+      schedule,
+      new Map([[0, "artifact-first-task"]]),
+    );
+    expect(resolved).toMatchObject({
+      input: {
+        args: {
+          planArtifactId: "artifact-first-task",
+          planTaskId: "task-1",
+        },
+      },
+    });
+    expect(resolved).not.toMatchObject({ input: { args: { taskItemId: expect.anything() } } });
+  });
+
+  it("does not turn an existing Calendar task into a duplicate planner create", () => {
+    const existingPrompt =
+      "Put V8-03 calendar graph test on my calendar tomorrow from 09:00 to 10:00.";
+    expect(promptRequestsNewPlannerTask(existingPrompt)).toBe(false);
+    const create = parseModelOperation({
+      type: "artifact.create",
+      input: {
+        blueprintKey: "planner_task",
+        title: "V8-03 calendar graph test",
+        summary: null,
+        content: {
+          taskTitle: "V8-03 calendar graph test",
+          status: "todo",
+          timezone: "UTC",
+          recurrence: {
+            frequency: "none",
+            interval: 1,
+            weekdays: [],
+            exceptions: [],
+          },
+          subtasks: [],
+        },
+        tags: [],
+        workspaceId: null,
+        placement: "inbox",
+        pinned: false,
+        exclusivePin: false,
+      },
+    });
+    expect(() => assertCalendarActionContract([create], existingPrompt)).toThrow(
+      /existing work/i,
+    );
+  });
+
+  it("resolves the longest owned workspace title from natural placement language", () => {
+    expect(
+      resolveWorkspaceMention("Put the guide in Chemistry Lab.", [
+        { id: "lab", title: "Lab" },
+        { id: "chemistry", title: "Chemistry Lab" },
+      ]),
+    ).toBe("chemistry");
+  });
+
   it("redirects a wrong focused plan to the explicitly named similar artifact", () => {
     const artifacts = Array.from({ length: 12 }, (_, index) =>
       candidate(
@@ -439,5 +668,52 @@ describe("P4.I2 artifact target resolution", () => {
     expect(
       safeOperationPreview(plan.operations[0]!, "Target Notes"),
     ).toMatchObject({ title: "Updating Target Notes", targetId: "target" });
+  });
+
+  it("normalizes a flattened streamed calendar command into executable args", () => {
+    const plan = parseStreamedPlanText(
+      JSON.stringify({
+        decision: "operate",
+        intent: {
+          mode: "mixed",
+          requestedArtifactTypes: [],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: null,
+          targetWorkspaceId: null,
+        },
+        conversationTitle: "Calendar scheduling",
+        conversationSummary: "Schedule a saved planner task.",
+        choices: null,
+        operations: [
+          {
+            type: "app.command",
+            input: {
+              command: "calendar.schedule",
+              planArtifactId: "@created:0",
+              planTaskId: null,
+              taskItemId: "@created:0",
+              startAt: 1000,
+              endAt: 2000,
+              timezone: "UTC",
+            },
+          },
+        ],
+        finalResponse: "Scheduled the task.",
+      }),
+    );
+    expect(plan.operations[0]).toMatchObject({
+      type: "app.command",
+      input: {
+        command: "calendar.schedule",
+        args: {
+          planArtifactId: "@created:0",
+          planTaskId: null,
+          taskItemId: "@created:0",
+          startAt: 1000,
+          endAt: 2000,
+          timezone: "UTC",
+        },
+      },
+    });
   });
 });

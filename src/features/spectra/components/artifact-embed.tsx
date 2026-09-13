@@ -166,6 +166,8 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         ))}
         {image ? (
           <figure className="overflow-hidden rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
+            {/* The authenticated asset endpoint has no stable intrinsic dimensions; keep the existing bounded preview. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`/api/spectra/assets/content?assetId=${encodeURIComponent(String(image.assetId))}`}
               alt={textFrom(image.altText) || "Document image"}

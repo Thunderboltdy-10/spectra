@@ -64,6 +64,13 @@ function nodeBlockId(node: ProseMirrorJson | undefined) {
   return typeof blockId === "string" && blockId ? blockId : null;
 }
 
+function isDefaultPlaceholderDocument(document: ProseMirrorJson) {
+  const blocks = documentBlocksFromJson(document);
+  if (blocks.length !== 1 || blocks[0]?.id !== "intro") return false;
+  const text = typeof blocks[0]?.text === "string" ? blocks[0].text.trim() : "";
+  return text === "" || text === "Start writing here.";
+}
+
 function appendJsonNode(
   parent: Y.XmlFragment | Y.XmlElement,
   node: ProseMirrorJson,
@@ -126,6 +133,13 @@ function adoptProjectionFragment(
   const nextNodes = nextDocument.content ?? [];
   const currentIds = currentNodes.map(nodeBlockId);
   const nextIds = nextNodes.map(nodeBlockId);
+  // A newly-created document is seeded with one editable placeholder so the
+  // editor is never visually empty. Once AI has authored real blocks, that
+  // shell must be replaced rather than treated as a user-authored paragraph.
+  if (isDefaultPlaceholderDocument(currentDocument)) {
+    populateFragment(fragment, nextDocument);
+    return;
+  }
   const currentIdSet = new Set(
     currentIds.filter((id): id is string => Boolean(id)),
   );

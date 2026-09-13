@@ -97,6 +97,10 @@ import { loadCodeRuntimeAssets } from "../code/runtime-assets-client";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import {
+  isGeneratedArtifactSummary,
+  refreshGeneratedArtifactSummary,
+} from "../operations/hollow-content";
+import {
   disengageFollow,
   noteFollowLocation,
   useFollow,
@@ -3161,6 +3165,7 @@ function ArtifactStudioEditor({
   const reconcilingRemoteRef = useRef(false);
   const activeArtifactIdRef = useRef(artifact._id);
   const lastReconciledIncomingKeyRef = useRef<string | null>(null);
+  const generatedSummaryRepairRef = useRef<string | null>(null);
   const currentSnapshotRef = useRef(artifactEditorSnapshot(artifact));
   const aiMergeRef = useRef<{
     paths: string[];
@@ -3279,10 +3284,23 @@ function ArtifactStudioEditor({
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingReactBody = nativeBodyBinding ? null : content;
+  const incomingLiveSummary = humanSummary(live.liveValue.summary);
+  const incomingSummary =
+    workType &&
+    isGeneratedArtifactSummary(incomingLiveSummary, workType) &&
+    isGeneratedArtifactSummary(humanSummary(artifact.summary), workType)
+      ? refreshGeneratedArtifactSummary({
+          blueprintKey: workType,
+          title: live.liveValue.title,
+          content: live.liveValue.content,
+          currentSummary: incomingLiveSummary,
+          nextSummary: artifact.summary,
+        }) ?? incomingLiveSummary
+      : incomingLiveSummary;
   const incomingSnapshot = useMemo(
     () => ({
       title: live.liveValue.title,
-      summary: humanSummary(live.liveValue.summary),
+      summary: incomingSummary,
       tagDraft: incomingLiveTagDraft,
       // Native document/code editors already consume their Yjs types directly.
       // Feeding every live-origin body projection back through React creates a
@@ -3296,9 +3314,8 @@ function ArtifactStudioEditor({
       incomingLiveContent,
       incomingLiveTagDraft,
       incomingReactBody,
-      live.liveValue.summary,
+      incomingSummary,
       live.liveValue.title,
-      humanSummary,
       nativeBodyBinding,
       nativeProjectionOverrideRef,
       nativeProjectionReady,
@@ -3521,6 +3538,7 @@ function ArtifactStudioEditor({
       artifact.blueprintKey,
       isCollaborativeArtifact,
       live,
+      nativeBodyBinding,
       permissionReadOnly,
       queueNativeMaterialization,
     ],
@@ -4614,6 +4632,51 @@ function ArtifactStudioEditor({
     },
     [],
   );
+
+  useEffect(() => {
+    if (
+      !workType ||
+      readOnly ||
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid" ||
+      live.state !== "synchronized" ||
+      live.unsynchronizedChanges > 0 ||
+      dirtyRef.current ||
+      userHasEditedRef.current
+    )
+      return;
+    const expected = humanSummary(artifact.summary);
+    const actual = humanSummary(live.liveValue.summary);
+    if (
+      !isGeneratedArtifactSummary(expected, workType) ||
+      expected === actual ||
+      (actual && !isGeneratedArtifactSummary(actual, workType))
+    )
+      return;
+    const repairKey = `${artifact._id}:${artifact.updatedAt}:${actual}:${expected}`;
+    if (generatedSummaryRepairRef.current === repairKey) return;
+    generatedSummaryRepairRef.current = repairKey;
+    void live
+      .synchronizeMetadata({
+        ...live.liveValue,
+        summary: expected,
+      })
+      .then((result) => {
+        if (result && "applied" in result && result.applied === false)
+          generatedSummaryRepairRef.current = null;
+      })
+      .catch(() => {
+        generatedSummaryRepairRef.current = null;
+      });
+  }, [
+    artifact._id,
+    artifact.summary,
+    artifact.updatedAt,
+    humanSummary,
+    live,
+    readOnly,
+    workType,
+  ]);
 
   useEffect(() => {
     const snapshotsDiffer =

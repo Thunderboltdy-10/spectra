@@ -15,6 +15,7 @@ import {
 } from "../artifacts/schemas";
 import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
 import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
+import { normalizeAiPreferencePatch } from "../settings/schema/preferences";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 export const SPECTRA_CREATABLE_BLUEPRINT_KEYS = WORK_TYPE_KEYS;
@@ -472,6 +473,63 @@ function preprocessModelOperationContent(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const row = value as Record<string, unknown>;
   if (
+    row.type === "app.command" &&
+    row.input &&
+    typeof row.input === "object" &&
+    !Array.isArray(row.input)
+  ) {
+    const input = { ...(row.input as Record<string, unknown>) };
+    const applicationArgs =
+      input.args &&
+      typeof input.args === "object" &&
+      !Array.isArray(input.args)
+        ? (input.args as Record<string, unknown>)
+        : {};
+    if (
+      input.command === "schoolData.refresh" ||
+      input.command === "school_data.refresh" ||
+      input.command === "managebac.refresh" ||
+      input.command === "school.sync" ||
+      input.command === "school_data.sync" ||
+      input.command === "managebac.sync"
+    ) {
+      const purpose = [
+        "upcoming_deadlines",
+        "class_resources",
+        "timetable",
+        "classes",
+        "cas",
+      ].includes(String(applicationArgs.purpose))
+        ? String(applicationArgs.purpose)
+        : "upcoming_deadlines";
+      return {
+        ...row,
+        input: {
+          ...input,
+          command: "trigger_managebac_sync",
+          args: {
+            purpose,
+            force:
+              typeof applicationArgs.force === "boolean"
+                ? applicationArgs.force
+                : true,
+          },
+        },
+      };
+    }
+    if (
+      input.command === "change_spectra_settings" &&
+      input.args &&
+      typeof input.args === "object" &&
+      !Array.isArray(input.args)
+    ) {
+      const args = { ...(input.args as Record<string, unknown>) };
+      args.patch = normalizeAiPreferencePatch(args.patch);
+      return { ...row, input: { ...input, args } };
+    }
+    return value;
+  }
+  if (
     (row.type !== "artifact.create" && row.type !== "artifact.update") ||
     !row.input ||
     typeof row.input !== "object" ||
@@ -692,7 +750,19 @@ export function parseSpectraPlan(value: unknown) {
       preprocessPlanOperations(coerceCommonPlanSchemaSlips(value)),
     ),
   );
-  return { ...plan, operations: plan.operations.map(parseModelOperation) };
+  const operations = plan.operations.map(parseModelOperation);
+  let manageBacRefreshSeen = false;
+  const dedupedOperations = operations.filter((operation) => {
+    if (
+      operation.type === "app.command" &&
+      operation.input.command === "trigger_managebac_sync"
+    ) {
+      if (manageBacRefreshSeen) return false;
+      manageBacRefreshSeen = true;
+    }
+    return true;
+  });
+  return { ...plan, operations: dedupedOperations };
 }
 
 const nullableString = {

@@ -21,7 +21,8 @@
         "xl/drawings/vmlDrawing1.vml",
         "xl/charts/chart1.xml",
         "xl/media/image1.emf"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     },
     {
       "commandId": "sheets.fill.down",
@@ -31,7 +32,8 @@
         "xl/drawings/vmlDrawing1.vml",
         "xl/charts/chart1.xml",
         "xl/media/image1.emf"
-      ]
+      ],
+      "allowChartCacheRefresh": true
     }
   ]
 }

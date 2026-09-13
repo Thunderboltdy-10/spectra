@@ -165,6 +165,75 @@ export const preferenceLayerValuesSchema = z
 
 export type PreferenceLayerValues = z.infer<typeof preferenceLayerValuesSchema>;
 
+/**
+ * The model sometimes paraphrases a preference label instead of using the
+ * persisted schema. Normalize the small set of stable aliases before the
+ * typed settings path runs; unsupported controls remain unsupported and are
+ * removed by the schema rather than being reported as saved work.
+ */
+export function normalizeAiPreferencePatch(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const raw = input as Record<string, unknown>;
+  const patch: Record<string, unknown> = { ...raw };
+  const appearance =
+    raw.appearance && typeof raw.appearance === "object" && !Array.isArray(raw.appearance)
+      ? { ...(raw.appearance as Record<string, unknown>) }
+      : {};
+  const general =
+    raw.general && typeof raw.general === "object" && !Array.isArray(raw.general)
+      ? { ...(raw.general as Record<string, unknown>) }
+      : {};
+  if (
+    (appearance.density === undefined || appearance.density === null) &&
+    (raw.interfaceDensity === "compact" || raw.interfaceDensity === "comfortable")
+  )
+    appearance.density = raw.interfaceDensity;
+  if (appearance.density === undefined &&
+    (raw.density === "compact" || raw.density === "comfortable"))
+    appearance.density = raw.density;
+  const commandOrder =
+    raw.globalBarOrder ??
+    raw.commandBarOrder ??
+    (raw.commandsFirst === true ? "commands_first" : undefined) ??
+    (raw.commandActionsPosition === "before_search"
+      ? "commands_first"
+      : raw.commandActionsPosition === "after_search"
+        ? "search_first"
+        : raw.toolbarLayout &&
+            typeof raw.toolbarLayout === "object" &&
+            !Array.isArray(raw.toolbarLayout) &&
+            (raw.toolbarLayout as Record<string, unknown>)
+              .commandActionsBeforeSearch === true
+          ? "commands_first"
+          : raw.toolbarLayout &&
+              typeof raw.toolbarLayout === "object" &&
+              !Array.isArray(raw.toolbarLayout) &&
+              (raw.toolbarLayout as Record<string, unknown>)
+                .commandActionsBeforeSearch === false
+            ? "search_first"
+            : undefined);
+  if (
+    general.globalCommandBehaviour === undefined &&
+    (commandOrder === "commands_first" ||
+      commandOrder === "search_first" ||
+      commandOrder === "search_and_commands")
+  )
+    general.globalCommandBehaviour = commandOrder;
+  if (Object.keys(appearance).length) patch.appearance = appearance;
+  if (Object.keys(general).length) patch.general = general;
+  delete patch.interfaceDensity;
+  delete patch.density;
+  delete patch.globalBarOrder;
+  delete patch.commandBarOrder;
+  delete patch.commandActionsPosition;
+  delete patch.commandsFirst;
+  delete patch.toolbarLayout;
+  // There is no persisted top/bottom command-bar setting. Keep this out of
+  // the saved patch so a model cannot claim to have moved an unsupported UI.
+  delete patch.commandBar;
+  return patch;
+}
+
 export const spectraPreferencesSchema = z.object({
   version: z.literal(PREFERENCE_SCHEMA_VERSION),
   general: generalSchema.default(generalSchema.parse({})),

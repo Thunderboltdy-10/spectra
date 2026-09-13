@@ -1089,6 +1089,16 @@ export const updateStatus = mutation({
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
+    // A confirmation event can reach the browser just before the durable
+    // approval transition finishes. A stale heartbeat/status retry must not
+    // put that run back into `running` (or `queued`) after approval has been
+    // recorded, otherwise a valid Apply click is rejected and the worker can
+    // sit until lease recovery marks the run partial.
+    if (
+      run.approval?.status === "pending" &&
+      (args.status === "running" || args.status === "queued")
+    )
+      return { ignored: true, status: run.status };
     if (!canTransitionRunStatus(run.status, args.status))
       throw new Error("This run has already moved to a newer state.");
     if (
@@ -1428,6 +1438,12 @@ export const claimExecution = mutation({
       .slice(0, 160);
     if (!workerId) throw new Error("Execution worker identity is required.");
     await ctx.db.patch(args.runId, {
+      // Confirmation continuations are deliberately re-queued so they can
+      // acquire a fresh worker lease. Claiming that lease is also the durable
+      // hand-off back into the mutation path; leaving the run in `queued`
+      // makes every staged-artifact mutation reject the continuation as not
+      // currently running.
+      status: "running",
       workerId,
       leaseExpiresAt: now + 2 * 60_000,
       heartbeatAt: now,
@@ -2149,7 +2165,11 @@ export const claimConfirmation = mutation({
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
-    if (run.status !== "awaiting_confirmation")
+    const approvalPending =
+      run.approval?.executionId === args.executionId &&
+      run.approval.status === "pending";
+    if (run.status !== "awaiting_confirmation" &&
+      !(run.status === "running" && approvalPending))
       throw new Error("This approval was already handled in another view.");
     if (
       !run.approval ||
@@ -2224,7 +2244,13 @@ export const rejectConfirmation = mutation({
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status === "cancelled" && run.approval?.status === "rejected")
       return { alreadyRejected: true };
-    if (run.status !== "awaiting_confirmation")
+    const approvalPending =
+      run.approval?.executionId === args.executionId &&
+      run.approval.status === "pending";
+    if (
+      run.status !== "awaiting_confirmation" &&
+      !(run.status === "running" && approvalPending)
+    )
       throw new Error("This approval was already handled in another view.");
     if (
       !run.approval ||
@@ -2306,7 +2332,10 @@ export const reviseConfirmation = mutation({
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (
-      run.status !== "awaiting_confirmation" ||
+      (run.status !== "awaiting_confirmation" &&
+        !(run.status === "running" &&
+          run.approval?.executionId === args.executionId &&
+          run.approval.status === "pending")) ||
       !run.approval ||
       run.approval.status !== "pending" ||
       run.approval.executionId !== args.executionId
@@ -3272,25 +3301,26 @@ export const listRunAttachments = query({
         q.eq("runId", args.runId).eq("executionId", args.executionId),
       )
       .collect();
-    return rows
-      .filter(
-        (row) =>
-          row.ownerAccountId === actor._id &&
-          row.status !== "quarantined" &&
-          row.status !== "uploading" &&
-          row.storageId,
-      )
-      .map((row) => ({
-        runAttachmentId: row._id,
-        originalFileId: row.originalFileId,
-        name: row.name,
-        mimeType: row.mimeType,
-        size: row.size,
-        handling: row.handling,
-        sourceMap: row.sourceMap,
-        provenance: row.provenance,
-        url: row.storageId ? ctx.storage.getUrl(row.storageId) : null,
-      }));
+    return await Promise.all(
+      rows
+        .filter(
+          (row) =>
+            row.ownerAccountId === actor._id &&
+            row.status !== "quarantined" &&
+            row.status !== "uploading" &&
+            row.storageId,
+        )
+        .map(async (row) => ({
+          runAttachmentId: row._id,
+          originalFileId: row.originalFileId,
+          name: row.name,
+          mimeType: row.mimeType,
+          size: row.size,
+          handling: row.handling,
+          sourceMap: row.sourceMap,
+          url: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
+        })),
+    );
   },
 });
 

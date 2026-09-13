@@ -50,6 +50,55 @@ describe("Spectra operation policy", () => {
     expect(plan.intent.mode).toBe("answer");
   });
 
+  it("normalizes and deduplicates legacy ManageBac refresh commands while retaining Calendar aliases", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "mixed",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      operations: [
+        {
+          type: "app.command",
+          input: {
+            command: "trigger_managebac_sync",
+            args: { purpose: "upcoming_deadlines", force: true },
+          },
+        },
+        { type: "app.command", input: { command: "school.sync", args: {} } },
+        {
+          type: "app.command",
+          input: {
+            command: "calendar.schedule",
+            args: {
+              planArtifactId: "plan-1",
+              planTaskId: "task-1",
+              startAt: 1_000,
+              endAt: 2_000,
+              timezone: "UTC",
+            },
+          },
+        },
+      ],
+      finalResponse: "The refresh is ready for approval.",
+    });
+    expect(plan.operations).toHaveLength(2);
+    expect(plan.operations[0]).toMatchObject({
+      type: "app.command",
+      input: {
+        command: "trigger_managebac_sync",
+        args: { purpose: "upcoming_deadlines", force: true },
+      },
+    });
+    expect(plan.operations[1]).toMatchObject({
+      type: "app.command",
+      input: { command: "calendar.schedule" },
+    });
+  });
+
   it("accepts bounded content patches for narrow canonical edits", () => {
     const plan = parseSpectraPlan({
       decision: "operate",

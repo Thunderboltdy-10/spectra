@@ -103,9 +103,9 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
       };
     case "managebac_sync":
       return {
-        decision: "notify",
+        decision: "confirm",
         reason:
-          "ManageBac sync proceeds with visible status and mapping evidence.",
+          "Refreshing ManageBac data can change the school records available to Spectra, so it requires explicit approval.",
       };
     case "managebac_selection":
       return {

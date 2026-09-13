@@ -313,7 +313,13 @@ async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {
     signal: bridgeRequestSignal(init.signal ?? undefined),
     cache: "no-store",
   });
-  if (response.status === 401) return null;
+  if (response.status === 401) {
+    // A stale browser token otherwise causes every 15-second health refresh to
+    // emit another unauthorized network error while Bridge is unavailable.
+    clearBridgeSession();
+    clearBridgeStatusCache();
+    return null;
+  }
   if (!response.ok) {
     throw new Error(
       (await response.text()) ||
@@ -340,6 +346,11 @@ export async function bridgeStatus(
         },
         cache: "no-store",
       });
+      if (resume.status === 401) {
+        clearBridgeSession();
+        clearBridgeStatusCache();
+        return null;
+      }
       if (resume.ok) {
         const result = z
           .object({ paired: z.boolean(), sessionToken: z.string().optional() })

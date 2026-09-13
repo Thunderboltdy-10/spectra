@@ -112,6 +112,13 @@ async function assertNativeReplicaHonest(artifactId: string) {
     );
 }
 
+function artifactHasNativeBacking(artifact: Record<string, unknown>) {
+  const nativeFormat = artifact.nativeFormat;
+  if (typeof nativeFormat === "string" && nativeFormat.trim()) return true;
+  return artifact.compatibilityProfile === "strict-native" ||
+    artifact.compatibilityProfile === "enhanced";
+}
+
 export async function committedCreatesAreUsable(
   actorClerkId: string,
   outcomes: Array<{
@@ -308,7 +315,13 @@ export async function verifyCommittedOutcomes(
           blueprintKey,
           content: artifact.content,
         });
-        await assertNativeReplicaHonest(artifactId);
+        // Spectra-native artifacts can have stale local replica rows left by
+        // an earlier Bridge session, but their canonical save is complete and
+        // must not be failed by an unrelated native-file observer. Native
+        // verification belongs to artifacts that are explicitly backed by a
+        // native format.
+        if (artifactHasNativeBacking(artifact))
+          await assertNativeReplicaHonest(artifactId);
       }
       if (options.requireResearchEvidence)
         assertResearchEvidenceReadback(artifact);
@@ -368,7 +381,8 @@ export async function verifyCommittedOutcomes(
         return matched === changes.length;
       };
       if (matchesPatch(artifact.content)) {
-        await assertNativeReplicaHonest(artifactId);
+        if (artifactHasNativeBacking(artifact))
+          await assertNativeReplicaHonest(artifactId);
         continue;
       }
       // Convex projection can lag the acknowledged Yjs commit. Prefer the live
@@ -385,7 +399,8 @@ export async function verifyCommittedOutcomes(
         return null;
       });
       if (live && matchesPatch(live.content)) {
-        await assertNativeReplicaHonest(artifactId);
+        if (artifactHasNativeBacking(artifact))
+          await assertNativeReplicaHonest(artifactId);
         continue;
       }
       if (live) {
@@ -414,7 +429,8 @@ export async function verifyCommittedOutcomes(
         }
       }
       if (matched) {
-        await assertNativeReplicaHonest(artifactId);
+        if (artifactHasNativeBacking(artifact))
+          await assertNativeReplicaHonest(artifactId);
         continue;
       }
       throw new Error(

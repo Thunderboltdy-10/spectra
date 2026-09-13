@@ -36,6 +36,61 @@ export function summarizeArtifact(
   };
 }
 
+function normalizedPromptReference(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function promptContainsReference(prompt: string, reference: string) {
+  const promptKey = normalizedPromptReference(prompt);
+  const referenceKey = normalizedPromptReference(reference);
+  return Boolean(
+    referenceKey && ` ${promptKey} `.includes(` ${referenceKey} `),
+  );
+}
+
+function promptRequestsNewArtifact(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  return (
+    /\b(?:create|make|build|generate|draft|write)\b[\s\S]{0,90}\b(?:new|another|separate)?\s*(?:planner\s+)?(?:task|todo|document|note|deck|presentation|quiz|flashcard|sheet|workbook|artifact)\b/.test(
+      normalized,
+    ) ||
+    /\b(?:new|another|separate)\s+(?:planner\s+)?(?:task|todo|document|note|deck|presentation|quiz|flashcard|sheet|workbook|artifact)\b/.test(
+      normalized,
+    )
+  );
+}
+
+/**
+ * A stale open artifact is useful context, but it must not outrank a unique
+ * owned title explicitly named in an existing-work request. This is kept at
+ * the context boundary so the native agent, typed-plan resolver, and
+ * clarification continuations all receive the same target.
+ */
+export function explicitlyNamedExistingArtifactId(
+  prompt: string,
+  candidates: Array<Record<string, unknown>>,
+) {
+  if (promptRequestsNewArtifact(prompt)) return undefined;
+  const matches = candidates.flatMap((candidate) => {
+    const id =
+      typeof candidate._id === "string"
+        ? candidate._id
+        : typeof candidate.id === "string"
+          ? candidate.id
+          : undefined;
+    const title = typeof candidate.title === "string" ? candidate.title : "";
+    return id && title.length >= 3 && promptContainsReference(prompt, title)
+      ? [{ id, title }]
+      : [];
+  });
+  return matches.length === 1 ? matches[0]!.id : undefined;
+}
+
 export async function hydrateArtifactWithLiveContent(
   artifact: Record<string, unknown> | null,
 ): Promise<Record<string, unknown> | null> {
@@ -287,6 +342,18 @@ export async function buildContext(
     continuationChoice && typeof continuationChoice === "object"
       ? (continuationChoice as Record<string, unknown>)
       : null;
+  const continuationOriginalPrompt =
+    continuationRecord?.askingRun &&
+    typeof continuationRecord.askingRun === "object" &&
+    typeof (continuationRecord.askingRun as Record<string, unknown>).userPrompt ===
+      "string"
+      ? String(
+          (continuationRecord.askingRun as Record<string, unknown>).userPrompt,
+        )
+      : "";
+  const targetingPrompt = [prompt, continuationOriginalPrompt]
+    .filter((value) => value.trim())
+    .join("\n");
   const continuationClarification =
     continuationRecord?.clarification && typeof continuationRecord.clarification === "object"
       ? (continuationRecord.clarification as Record<string, unknown>)
@@ -352,7 +419,7 @@ export async function buildContext(
   ]);
   const hydratedFocusedArtifact =
     liveFocusedArtifact ?? effectiveFocusedArtifact;
-  const artifacts = [
+  const baseArtifacts = [
     ...rows(artifactRows),
     ...retrievedRows.flatMap((result) => rows(result)),
     ...(hydratedFocusedArtifact && typeof hydratedFocusedArtifact === "object"
@@ -368,27 +435,59 @@ export async function buildContext(
     (artifact, index, all) =>
       all.findIndex((candidate) => candidate._id === artifact._id) === index,
   );
+  const namedExistingArtifactId = explicitlyNamedExistingArtifactId(
+    targetingPrompt,
+    baseArtifacts,
+  );
+  const namedExistingArtifact =
+    namedExistingArtifactId && namedExistingArtifactId !== effectiveArtifactId
+      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
+          actorClerkId,
+          artifactId: namedExistingArtifactId,
+        }).catch(() => null)
+      : null;
+  const resolvedFocusedArtifact =
+    namedExistingArtifact && typeof namedExistingArtifact === "object"
+      ? await hydrateArtifactWithLiveContent(
+          namedExistingArtifact as Record<string, unknown>,
+        )
+      : hydratedFocusedArtifact;
+  const resolvedEffectiveArtifactId =
+    namedExistingArtifactId ?? effectiveArtifactId;
+  const artifacts = [
+    ...baseArtifacts,
+    ...(resolvedFocusedArtifact && typeof resolvedFocusedArtifact === "object"
+      ? [resolvedFocusedArtifact as Record<string, unknown>]
+      : []),
+  ].filter(
+    (artifact, index, all) =>
+      all.findIndex((candidate) => candidate._id === artifact._id) === index,
+  );
   // Agent artifacts are routing candidates, not ordinary knowledge. Keep
   // their instructions out of catalog/workspace context unless the user is
   // explicitly inspecting or editing that exact Agent artifact.
   const ordinaryContextArtifacts = artifacts.filter(
     (artifact) =>
       artifact.blueprintKey !== "agent" ||
-      artifact._id === effectiveArtifactId ||
-      selectedArtifactIds.includes(String(artifact._id)),
+      artifact._id === resolvedEffectiveArtifactId ||
+      selectedArtifactIds.includes(String(artifact._id)) ||
+      artifact._id === namedExistingArtifactId,
   );
   const ownedArtifactIdSet = new Set(
     artifacts.flatMap((artifact) =>
       typeof artifact._id === "string" ? [artifact._id] : [],
     ),
   );
-  const ownedSelectedArtifactIds = durableSelectedArtifactIds.filter((id) =>
-    ownedArtifactIdSet.has(id),
-  );
+  const ownedSelectedArtifactIds = [
+    ...new Set([
+      ...durableSelectedArtifactIds,
+      ...(namedExistingArtifactId ? [namedExistingArtifactId] : []),
+    ]),
+  ].filter((id) => ownedArtifactIdSet.has(id));
   const linkedContextIds = [
     ...new Set([
       ...ownedSelectedArtifactIds,
-      ...(effectiveArtifactId ? [effectiveArtifactId] : []),
+      ...(resolvedEffectiveArtifactId ? [resolvedEffectiveArtifactId] : []),
       ...(continuedArtifactId ? [continuedArtifactId] : []),
     ]),
   ].slice(0, 12);
@@ -499,7 +598,7 @@ export async function buildContext(
       id,
       explicitArtifactIds.has(id)
         ? "explicit"
-        : id === effectiveArtifactId
+        : id === resolvedEffectiveArtifactId
           ? "open"
           : "visible",
     ]),
@@ -596,8 +695,8 @@ export async function buildContext(
       ? (workspace as Record<string, unknown>)
       : null;
   const focusedRecord =
-    hydratedFocusedArtifact && typeof hydratedFocusedArtifact === "object"
-      ? (hydratedFocusedArtifact as Record<string, unknown>)
+    resolvedFocusedArtifact && typeof resolvedFocusedArtifact === "object"
+      ? (resolvedFocusedArtifact as Record<string, unknown>)
       : null;
   const conversation =
     threadDetail && typeof threadDetail === "object"

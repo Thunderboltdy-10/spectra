@@ -11,7 +11,7 @@ describe("AI authority policy", () => {
     ["tree_delete", "confirm"],
     ["sharing", "confirm"],
     ["local_file", "confirm"],
-    ["managebac_sync", "notify"],
+    ["managebac_sync", "confirm"],
     ["managebac_mapping", "confirm"],
     ["memory", "notify"],
     ["credential", "prohibited"],

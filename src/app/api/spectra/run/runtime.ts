@@ -249,6 +249,7 @@ async function runAttempt(
       })
       .catch(() => null);
   }, 1_000);
+  const stopHeartbeat = () => clearInterval(heartbeat);
   const persistQueuedEvents = () => {
     if (eventFlushTimer) {
       clearTimeout(eventFlushTimer);
@@ -433,7 +434,26 @@ async function runAttempt(
       number,
       NativeProgressUpdate
     >();
-    const artifactEffectWrites = new Map<string, Promise<unknown>>();
+    // Preview content and choreography effects both update the same artifact
+    // projection. Model callbacks can arrive concurrently, so serialize all
+    // preview writes per artifact; otherwise Convex retries the two mutations
+    // against one summary row until the live run fails after useful work has
+    // already been saved.
+    const artifactPreviewWrites = new Map<string, Promise<unknown>>();
+    const queueArtifactPreviewWrite = (
+      artifactId: string,
+      writeOperation: () => Promise<unknown>,
+    ) => {
+      const previous =
+        artifactPreviewWrites.get(artifactId) ?? Promise.resolve();
+      const write = previous
+        .catch(() => null)
+        .then(writeOperation)
+        .catch(() => null);
+      artifactPreviewWrites.set(artifactId, write);
+      progressiveWrites.push(write);
+      return write;
+    };
     const queueArtifactEffect = (
       artifactId: string,
       progress: NativeProgressUpdate,
@@ -459,11 +479,8 @@ async function runAttempt(
           effectOperationIndex: progress.operationIndex,
         },
       });
-      const previous =
-        artifactEffectWrites.get(artifactId) ?? Promise.resolve();
-      const write = previous
-        .then(() =>
-          mutate("spectraArtifacts:updateAiEffect", {
+      queueArtifactPreviewWrite(artifactId, () =>
+        mutate("spectraArtifacts:updateAiEffect", {
             actorClerkId: params.actorClerkId,
             artifactId,
             runId: params.runId,
@@ -474,10 +491,7 @@ async function runAttempt(
             regionHint: progress.regionHint,
             operationIndex: progress.operationIndex,
           }),
-        )
-        .catch(() => null);
-      artifactEffectWrites.set(artifactId, write);
-      progressiveWrites.push(write);
+      );
     };
     const bindArtifactEffect = (operationIndex: number, artifactId: string) => {
       artifactEffectTargetByIndex.set(operationIndex, artifactId);
@@ -503,7 +517,10 @@ async function runAttempt(
     // separate object. This prevents invisible orphan shells on every edit.
     // An open artifact is often the source or update target for a larger task;
     // it must not disable explicit creation work in that same request.
-    const parallelCreations = parallelCreationContract(params.prompt);
+    const parallelCreations = parallelCreationContract(
+      params.prompt,
+      Boolean(params.artifactId),
+    );
     const provisionalCreation =
       params.artifactId &&
       promptLooksLikeFocusedStructuralEdit(params.prompt) &&
@@ -1039,32 +1056,34 @@ async function runAttempt(
                   frameIndex += 1
                 ) {
                   const frame = frames[frameIndex]!;
-                  await mutate("spectraArtifacts:patchPendingContent", {
-                    actorClerkId: params.actorClerkId,
-                    artifactId: pendingArtifactId,
-                    runId: params.runId,
-                    executionId: params.executionId,
-                    content: encodeArtifactContentForStorage(
-                      operation.input.blueprintKey,
-                      frame.content,
-                    ),
-                    progress: frame.progress,
-                    title: operation.input.title,
-                    // Progress belongs to aiProgress/the live trace. Never
-                    // overwrite durable artifact metadata with an ephemeral
-                    // implementation status, especially when an approval can
-                    // leave the pending shell visible for several minutes.
-                    // Still replace createPending placeholders with a derived
-                    // content summary so hollow leftovers never keep
-                    // "Spectra is building New sheets".
-                    summary: normalizeCreationSummary(
-                      operation.input.summary,
-                      operation.input.blueprintKey,
-                      operation.input.title,
-                      frame.content,
-                      params.prompt,
-                    ),
-                  });
+                  await queueArtifactPreviewWrite(pendingArtifactId, () =>
+                    mutate("spectraArtifacts:patchPendingContent", {
+                      actorClerkId: params.actorClerkId,
+                      artifactId: pendingArtifactId,
+                      runId: params.runId,
+                      executionId: params.executionId,
+                      content: encodeArtifactContentForStorage(
+                        operation.input.blueprintKey,
+                        frame.content,
+                      ),
+                      progress: frame.progress,
+                      title: operation.input.title,
+                      // Progress belongs to aiProgress/the live trace. Never
+                      // overwrite durable artifact metadata with an ephemeral
+                      // implementation status, especially when an approval can
+                      // leave the pending shell visible for several minutes.
+                      // Still replace createPending placeholders with a derived
+                      // content summary so hollow leftovers never keep
+                      // "Spectra is building New sheets".
+                      summary: normalizeCreationSummary(
+                        operation.input.summary,
+                        operation.input.blueprintKey,
+                        operation.input.title,
+                        frame.content,
+                        params.prompt,
+                      ),
+                    }),
+                  );
                   publish({
                     type: "artifact_patch",
                     runId: params.runId,
@@ -1191,22 +1210,24 @@ async function runAttempt(
               )
                 return;
               const progress = Math.min(0.82, 0.14 + itemCount * 0.11);
-              await mutate("spectraArtifacts:patchPendingContent", {
-                actorClerkId: params.actorClerkId,
-                artifactId: pendingArtifactId,
-                runId: params.runId,
-                executionId: params.executionId,
-                content: encodeArtifactContentForStorage(blueprintKey, content),
-                progress,
-                title,
-                summary: normalizeCreationSummary(
-                  undefined,
-                  blueprintKey,
-                  title || `New ${itemLabel}`,
-                  content,
-                  params.prompt,
-                ),
-              });
+              await queueArtifactPreviewWrite(pendingArtifactId, () =>
+                mutate("spectraArtifacts:patchPendingContent", {
+                  actorClerkId: params.actorClerkId,
+                  artifactId: pendingArtifactId,
+                  runId: params.runId,
+                  executionId: params.executionId,
+                  content: encodeArtifactContentForStorage(blueprintKey, content),
+                  progress,
+                  title,
+                  summary: normalizeCreationSummary(
+                    undefined,
+                    blueprintKey,
+                    title || `New ${itemLabel}`,
+                    content,
+                    params.prompt,
+                  ),
+                }),
+              );
               publish({
                 type: "artifact_patch",
                 runId: params.runId,
@@ -1591,6 +1612,7 @@ async function runAttempt(
 
     if (plan.decision !== "operate") {
       loop.enter("report", "answer, clarification, and refusal do not mutate");
+      stopHeartbeat();
       await Promise.all([
         mutate("spectraArtifacts:discardPendingForRun", {
           actorClerkId: params.actorClerkId,
@@ -1719,6 +1741,7 @@ async function runAttempt(
         usage: modelResult.usage,
       });
       await Promise.all([
+        stopHeartbeat(),
         mutate("spectraArtifacts:pausePendingForApproval", {
           actorClerkId: params.actorClerkId,
           runId: params.runId,
@@ -2179,6 +2202,7 @@ async function runAttempt(
             usage: modelResult.usage,
           });
           await Promise.all([
+            stopHeartbeat(),
             mutate("spectraArtifacts:settleStagedForRun", {
               actorClerkId: params.actorClerkId,
               runId: params.runId,
@@ -2294,6 +2318,7 @@ async function runAttempt(
         }
       }
     }
+    stopHeartbeat();
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -2421,6 +2446,7 @@ async function runAttempt(
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "run failed before later stages completed");
+    stopHeartbeat();
     console.error(
       "[spectra.run.failure]",
       JSON.stringify({
@@ -2762,6 +2788,55 @@ async function loadPersistedRunAttachments(runId: string, executionId: string) {
   }));
 }
 
+function confirmedApplicationSummary(
+  command: string,
+  result: Record<string, unknown>,
+): string {
+  if (command === "trigger_managebac_sync") {
+    if (result.started === true)
+      return "ManageBac refresh started. Spectra will use the new school data once the provider sync completes.";
+    const reason = typeof result.reason === "string" ? result.reason : "";
+    if (reason === "not_connected")
+      return "ManageBac refresh was not started because ManageBac is not connected. No school data changed.";
+    if (reason === "identity_required")
+      return "ManageBac refresh was not started because the provider identity still needs verification.";
+    if (reason === "fresh")
+      return "ManageBac is already fresh enough for this request, so no duplicate refresh was started.";
+    if (reason === "already_running")
+      return "A ManageBac refresh is already running, so Spectra did not start a duplicate.";
+    return "ManageBac accepted the refresh request. Spectra will report new data only after the provider confirms it.";
+  }
+  if (command === "select_managebac_classes") {
+    const selected = Array.isArray(result.selectedClassIds)
+      ? result.selectedClassIds.length
+      : undefined;
+    return selected === undefined
+      ? "ManageBac class selection was updated."
+      : `ManageBac class selection was updated: ${selected} class${selected === 1 ? "" : "es"} selected.`;
+  }
+  if (command === "delete_library_items") {
+    const count = Array.isArray(result.affected)
+      ? result.affected.length
+      : undefined;
+    return count === undefined
+      ? "The selected Library items were moved to Trash."
+      : `${count} Library item${count === 1 ? "" : "s"} were moved to Trash.`;
+  }
+  if (command === "change_spectra_settings")
+    return "Spectra settings were updated and are now active.";
+  if (command === "change_sync_policy")
+    return "The requested sync policy was updated.";
+  if (command === "change_sharing")
+    return "The requested sharing change was applied.";
+  if (command === "write_memory")
+    return "That memory was saved with its source attribution.";
+  if (command === "organize_library")
+    return "The requested Library organization change was applied.";
+  if (command === "insert_reference")
+    return "The live reference is ready in the focused work surface.";
+  return "The approved Spectra action was applied successfully.";
+}
+
 async function resumeOperationsAttempt(params: {
   actorClerkId: string;
   runId: string;
@@ -2852,6 +2927,7 @@ async function resumeOperationsAttempt(params: {
       return [];
     }
   });
+  const applicationSummaries: string[] = [];
   const allAffected = operations.flatMap(
     (operation) => operation.affected ?? [],
   );
@@ -2863,6 +2939,7 @@ async function resumeOperationsAttempt(params: {
       workerId: params.workerId,
     }).catch(() => null);
   }, 1_000);
+  const stopHeartbeat = () => clearInterval(heartbeat);
   try {
     for (let index = 0; index < operations.length; index += 1) {
       const row = operations[index]!;
@@ -2994,6 +3071,17 @@ async function resumeOperationsAttempt(params: {
                 }).then(() => undefined);
               return undefined;
             }),
+          onApplicationResult: ({
+            command,
+            result,
+          }: {
+            command: string;
+            args: Record<string, unknown>;
+            result: Record<string, unknown>;
+          }) => {
+            const summary = confirmedApplicationSummary(command, result);
+            if (summary) applicationSummaries.push(summary);
+          },
         };
         let affected: Array<{ type: string; id: string }> = [];
         try {
@@ -3044,13 +3132,10 @@ async function resumeOperationsAttempt(params: {
             { ...resumeExecuteContext, preclaimed: true },
           );
         }
-        await mutate("spectraOperations:markExecuted", {
-          actorClerkId: params.actorClerkId,
-          operationId: row._id,
-          executionId: params.executionId,
-          output: { resumed: true },
-          affected,
-        });
+        // executeOperation owns the claim -> apply -> executed transition for
+        // every operation, including confirmation continuations. A second
+        // markExecuted here races the already-executed row and turns a durable
+        // workspace/artifact save into a false failed run.
         allAffected.push(...affected);
         outcomes.push({ operation, affected });
         if (operation.type === "artifact.create") {
@@ -3178,6 +3263,7 @@ async function resumeOperationsAttempt(params: {
         }
       }
     }
+    stopHeartbeat();
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -3194,7 +3280,9 @@ async function resumeOperationsAttempt(params: {
     ]);
     const artifact = allAffected.find((item) => item.type === "artifact");
     const finalSummary =
-      state.run.finalSummary || "The resolved operations are complete.";
+      applicationSummaries.join(" ").trim() ||
+      state.run.finalSummary ||
+      "The resolved operations are complete.";
     loop.enter("report");
     // Same ordering as the primary operate path: terminal run status first so
     // chat/Live Dock agree on "finished" before open-artifact cards appear.
@@ -3252,8 +3340,24 @@ async function resumeOperationsAttempt(params: {
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "resumed run failed before later stages completed");
+    stopHeartbeat();
     const message = publicError(error);
+    // A resumed approval can fail after one operation has committed and before
+    // later proposed rows are consumed. Clear the unconsumed operation/shell
+    // state before settling staged work, otherwise a failed continuation can
+    // leave an orphaned draft that appears editable but is not owned by any
+    // active run anymore.
     await Promise.all([
+      mutate("spectraOperations:cancelPending", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null),
+      mutate("spectraArtifacts:failPendingForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null),
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
@@ -3346,6 +3450,44 @@ async function executeScheduledResume(body: Body) {
   );
 }
 
+async function persistScheduledRunPreflightFailure(params: {
+  actorClerkId: string;
+  runId: string;
+  executionId: string;
+  error: unknown;
+}) {
+  const message = publicError(params.error);
+  await mutate("spectraRuns:updateStatus", {
+    actorClerkId: params.actorClerkId,
+    runId: params.runId,
+    executionId: params.executionId,
+    status: "failed",
+    error: message,
+    finalSummary: message,
+    resultTitle: "Paused",
+    resultSummary: `${message} You can retry when ready.`,
+    resultVariant: "status",
+    resultActions: [
+      {
+        key: "retry",
+        label: "Retry",
+        targetType: "run",
+        targetId: params.runId,
+      },
+    ],
+    recoveryState: "interrupted",
+    retryable: true,
+    preservedPartial: false,
+  });
+  await mutate("spectraRuns:appendEvent", {
+    actorClerkId: params.actorClerkId,
+    runId: params.runId,
+    executionId: params.executionId,
+    type: "error",
+    payload: { type: "error", runId: params.runId, message },
+  }).catch(() => null);
+}
+
 async function executeScheduledRun(body: Body) {
   const required = (value: string | undefined, name: string) => {
     const normalized = value?.trim();
@@ -3380,74 +3522,93 @@ async function executeScheduledRun(body: Body) {
   await withWorkerConvexToken(token.jwt, async () => {
     const runId = required(body.runId, "runId");
     const executionId = required(body.executionId, "executionId");
-    const attachments = await loadPersistedRunAttachments(runId, executionId);
-    await runAttempt(
-      {
+    try {
+      const attachments = await loadPersistedRunAttachments(runId, executionId);
+      await runAttempt(
+        {
+          actorClerkId,
+          runId,
+          resultCardId: required(body.resultCardId, "resultCardId"),
+          executionId,
+          workerId: `event-run:${body.executionId}`,
+          prompt: typeof payload.prompt === "string" ? payload.prompt : "",
+          surface,
+          threadId:
+            typeof payload.threadId === "string" ? payload.threadId : undefined,
+          continuedThread: payload.continuedThread === true,
+          workspaceId:
+            typeof payload.workspaceId === "string"
+              ? payload.workspaceId
+              : undefined,
+          artifactId:
+            typeof payload.artifactId === "string"
+              ? payload.artifactId
+              : undefined,
+          focusMode:
+            typeof payload.focusMode === "string"
+              ? (payload.focusMode as EffectiveFocusMode)
+              : undefined,
+          selectedArtifactIds: Array.isArray(payload.selectedArtifactIds)
+            ? payload.selectedArtifactIds.filter(
+                (value): value is string => typeof value === "string",
+              )
+            : undefined,
+          explicitContextObjects: Array.isArray(payload.explicitContextObjects)
+            ? (payload.explicitContextObjects as Body["explicitContextObjects"])
+            : undefined,
+          currentView:
+            typeof payload.currentView === "string"
+              ? payload.currentView
+              : undefined,
+          agentId:
+            typeof payload.agentId === "string" ? payload.agentId : undefined,
+          disableAgentRouting: payload.disableAgentRouting === true,
+          clarificationId:
+            typeof payload.clarificationId === "string"
+              ? payload.clarificationId
+              : undefined,
+          choiceMessageId:
+            typeof payload.choiceMessageId === "string"
+              ? payload.choiceMessageId
+              : undefined,
+          choiceKey:
+            typeof payload.choiceKey === "string" ? payload.choiceKey : undefined,
+          clarificationExecutionId:
+            typeof payload.clarificationExecutionId === "string"
+              ? payload.clarificationExecutionId
+              : undefined,
+          batchSelections: Array.isArray(payload.batchSelections)
+            ? payload.batchSelections.filter(
+                (value): value is NonNullable<Body["batchSelections"]>[number] =>
+                  Boolean(value) &&
+                  typeof value === "object" &&
+                  typeof (value as Record<string, unknown>).questionId === "string" &&
+                  typeof (value as Record<string, unknown>).choiceKey === "string" &&
+                  typeof (value as Record<string, unknown>).choiceTitle === "string",
+              )
+            : undefined,
+          attachments,
+        },
+        () => undefined,
+      );
+    } catch (error) {
+      // Attachment hydration, execution claiming, and the first card read all
+      // happen before runAttempt's main failure boundary. If one of those
+      // preflight steps fails, leave a durable retryable result instead of
+      // returning a 500 while the UI still shows the run as queued.
+      const current = await query<
+        { actorClerkId: string; runId: string },
+        RunDetail
+      >("spectraRuns:get", { actorClerkId, runId });
+      if (current.run.status !== "queued" && current.run.status !== "running")
+        return;
+      await persistScheduledRunPreflightFailure({
         actorClerkId,
         runId,
-        resultCardId: required(body.resultCardId, "resultCardId"),
         executionId,
-        workerId: `event-run:${body.executionId}`,
-        prompt: typeof payload.prompt === "string" ? payload.prompt : "",
-        surface,
-        threadId:
-          typeof payload.threadId === "string" ? payload.threadId : undefined,
-        continuedThread: payload.continuedThread === true,
-        workspaceId:
-          typeof payload.workspaceId === "string"
-            ? payload.workspaceId
-            : undefined,
-        artifactId:
-          typeof payload.artifactId === "string"
-            ? payload.artifactId
-            : undefined,
-        focusMode:
-          typeof payload.focusMode === "string"
-            ? (payload.focusMode as EffectiveFocusMode)
-            : undefined,
-        selectedArtifactIds: Array.isArray(payload.selectedArtifactIds)
-          ? payload.selectedArtifactIds.filter(
-              (value): value is string => typeof value === "string",
-            )
-          : undefined,
-        explicitContextObjects: Array.isArray(payload.explicitContextObjects)
-          ? (payload.explicitContextObjects as Body["explicitContextObjects"])
-          : undefined,
-        currentView:
-          typeof payload.currentView === "string"
-            ? payload.currentView
-            : undefined,
-        agentId:
-          typeof payload.agentId === "string" ? payload.agentId : undefined,
-        disableAgentRouting: payload.disableAgentRouting === true,
-        clarificationId:
-          typeof payload.clarificationId === "string"
-            ? payload.clarificationId
-            : undefined,
-        choiceMessageId:
-          typeof payload.choiceMessageId === "string"
-            ? payload.choiceMessageId
-            : undefined,
-        choiceKey:
-          typeof payload.choiceKey === "string" ? payload.choiceKey : undefined,
-        clarificationExecutionId:
-          typeof payload.clarificationExecutionId === "string"
-            ? payload.clarificationExecutionId
-            : undefined,
-        batchSelections: Array.isArray(payload.batchSelections)
-          ? payload.batchSelections.filter(
-              (value): value is NonNullable<Body["batchSelections"]>[number] =>
-                Boolean(value) &&
-                typeof value === "object" &&
-                typeof (value as Record<string, unknown>).questionId === "string" &&
-                typeof (value as Record<string, unknown>).choiceKey === "string" &&
-                typeof (value as Record<string, unknown>).choiceTitle === "string",
-            )
-          : undefined,
-        attachments,
-      },
-      () => undefined,
-    );
+        error,
+      });
+    }
   });
 }
 
@@ -4025,6 +4186,11 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           "Spectra could not undo this run.",
         { status: 409 },
       );
+    await mutate("spectraArtifacts:settleStagedForRun", {
+      runId,
+      executionId: expectedExecutionId,
+      outcome: "failed",
+    }).catch(() => null);
     const executionId =
       expectedExecutionId ?? state.run.executionId ?? `revert:${runId}`;
     await Promise.all(
@@ -4061,9 +4227,15 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         "This older approval cannot be resumed safely. Start a new thread instead.",
         { status: 409 },
       );
+    const approval = state.run.approval;
+    const approvalPending =
+      approval !== undefined &&
+      approval.executionId === state.run.executionId &&
+      approval.status === "pending";
     if (
       state.run.status !== "awaiting_confirmation" &&
-      state.run.status !== "cancelled"
+      state.run.status !== "cancelled" &&
+      !(state.run.status === "running" && approvalPending)
     )
       return new Response(
         "This approval was already handled in another view.",
@@ -4202,7 +4374,15 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         "This older approval cannot be resumed safely. Start a new thread instead.",
         { status: 409 },
       );
-    if (state.run.status !== "awaiting_confirmation")
+    const approval = state.run.approval;
+    const approvalPending =
+      approval !== undefined &&
+      approval.executionId === state.run.executionId &&
+      approval.status === "pending";
+    if (
+      state.run.status !== "awaiting_confirmation" &&
+      !(state.run.status === "running" && approvalPending)
+    )
       return new Response("Run is not awaiting confirmation", { status: 409 });
     const intent = requestIntentSchema.parse(state.run.planIntent);
     const proposed = state.operations.filter(

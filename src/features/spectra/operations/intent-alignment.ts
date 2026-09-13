@@ -190,7 +190,7 @@ export function promoteMatchingUpdateToCreate(
 }
 
 const FOCUSED_STRUCTURAL_REGION =
-  /\b(?:column|cell|row|sheet|workbook|range|section|paragraph|heading|block|question|answer|card|hint|subtask|slide|event|validation|formula|table|speaker\s+notes?)\b/i;
+  /\b(?:guide|study\s+guide|document|notes?|deck|presentation|flashcards?|column|cell|row|sheet|workbook|range|section|paragraph|heading|block|question|answer|card|hint|subtask|slide|event|validation|formula|table|speaker\s+notes?)\b/i;
 
 /**
  * Structural edits of an already-open artifact ("add a validation column",

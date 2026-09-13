@@ -45,6 +45,13 @@ export type XlsxFixtureMutationRow = {
    * on rows that assert a refusal.
    */
   blocked?: string;
+  /**
+   * A native cell/formula edit may refresh an existing chart's cached points.
+   * Permit that specific chart-part delta only when its non-cache structure and
+   * source formula remain unchanged; chart formatting/relationships must still
+   * stay byte-equivalent at the semantic level.
+   */
+  allowChartCacheRefresh?: boolean;
 };
 
 export type XlsxFixtureSidecar = {
@@ -257,6 +264,30 @@ function formulaTexts(payload: Uint8Array) {
   return found;
 }
 
+/**
+ * Chart caches are derived values, not chart structure. Excel changes the
+ * cache kind when a source value changes from numeric to text and may normalize
+ * an equivalent sheet quote at the same time. Ignore only those two details;
+ * a changed range, series, axis, style, relationship or layout is still a
+ * collateral mutation.
+ */
+function chartStructureFingerprint(payload: Uint8Array, name: string) {
+  const xml = strFromU8(unzipSync(payload)[name] ?? new Uint8Array());
+  return xml
+    .replace(/^<\?xml[^>]*\?>\s*/i, "")
+    .replace(/<c:(?:numCache|strCache)>[\s\S]*?<\/c:(?:numCache|strCache)>/gi, "<c:cache />")
+    .replace(/<c:f>([^<]*)<\/c:f>/gi, (_match, formula: string) => {
+      const canonical = formula.trim().replace(/^'((?:[^']|'')+)'!/, (_sheetMatch, sheet: string) => `${sheet.replaceAll("''", "'")}!`);
+      return `<c:f>${canonical}</c:f>`;
+    });
+}
+
+function chartCacheOnly(source: Uint8Array, saved: Uint8Array, name: string) {
+  return /^xl\/charts\/[^/]+\.xml$/i.test(name) &&
+    chartStructureFingerprint(source, name) === chartStructureFingerprint(saved, name) &&
+    strFromU8(unzipSync(source)[name] ?? new Uint8Array()) !== strFromU8(unzipSync(saved)[name] ?? new Uint8Array());
+}
+
 export async function runXlsxCommandFixtures(fixtureDir: string) {
   const assertions: XlsxCommandAssertion[] = [];
   const files = (await readdir(fixtureDir)).filter((name) =>
@@ -361,6 +392,12 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
         carry: opened.preservedCarry,
       });
       const comparison = await comparePackages(source, saved);
+      const chartCacheRefreshes = new Set(
+        comparison.parts
+          .filter((part) => part.verdict !== "identical")
+          .map((part) => part.name.replace(/^\//, ""))
+          .filter((part) => row.allowChartCacheRefresh && chartCacheOnly(source, saved, part)),
+      );
       const changed = comparison.parts
         .filter((part) => part.verdict !== "identical")
         .map((part) => part.name.replace(/^\//, ""));
@@ -378,7 +415,8 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
       const noCollateralChange = changed.every(
         (part) =>
           infrastructure(part) ||
-          row.touch.some((claim) => part.startsWith(claim)),
+          row.touch.some((claim) => part.startsWith(claim)) ||
+          chartCacheRefreshes.has(part),
       );
       const preserved = row.preserve.every((claim) => {
         const name = partNames.find((candidate) => candidate.startsWith(claim));
@@ -387,7 +425,7 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
           comparison.parts.find(
             (part) =>
               part.name.replace(/^\//, "") === name &&
-              part.verdict === "identical",
+              (part.verdict === "identical" || chartCacheRefreshes.has(name)),
           ),
         );
       });
@@ -418,6 +456,7 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
         preserved,
         readBack,
         formulasIntact,
+        ...(chartCacheRefreshes.size ? { notes: `chart cache refreshed safely: ${[...chartCacheRefreshes].join(", ")}` } : {}),
       });
     }
   }

@@ -151,6 +151,10 @@ export type RunState = {
   decision?: SpectraPlan["decision"];
   planIntent?: unknown;
   executionId?: string;
+  approval?: {
+    executionId: string;
+    status: "pending" | "accepted" | "rejected" | "revised";
+  };
   selectedAgentId?: string;
   selectedAgentVersionId?: string;
   agentRouting?: {

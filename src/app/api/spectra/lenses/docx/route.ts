@@ -15,6 +15,7 @@ import {
 import { resolveArtifactAssetBytes } from "@/features/spectra/lenses/asset-resolver-server";
 import {
   bindDocxProjectionSource,
+  compactDocxProjectionForStorage,
   docxProjectionFromContent,
 } from "@/features/spectra/lenses/document-projection";
 import {
@@ -140,7 +141,7 @@ async function materializeDocxArtifactAttempt(
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: ours,
+        content: compactDocxProjectionForStorage(ours),
         fidelityMap: externalOpened.fidelityMap,
         regionIds: rebased.externalChanged,
         partNames: [],
@@ -261,13 +262,13 @@ async function materializeDocxArtifactAttempt(
         .map((part) => `/${part.name}`),
       nativeReceipt,
       localReplicaId: local._id as Id<"workReplicas">,
-      baseContent: opened.projection,
+      baseContent: compactDocxProjectionForStorage(opened.projection),
       baseContentHash: opened.projection.nativeBinding.semanticDigest,
       baseTextIndex: opened.projection.blocks
         .map((block) => block.text)
         .join("\n")
         .slice(0, 200_000),
-      projectionContent: nextProjection,
+      projectionContent: compactDocxProjectionForStorage(nextProjection),
       projectionContentHash: nextProjection.nativeBinding.semanticDigest,
       projectionTextIndex: nextProjection.blocks
         .map((block) => block.text)
@@ -426,7 +427,9 @@ export async function POST(request: Request) {
               localReplicaId: local.truth.replicaId as Id<"workReplicas">,
               localPayloadRef: local.truth.payloadRef,
               localRevision: local.truth.revision,
-              content: contentProjection(artifact.content, baseOpened.projection),
+              content: compactDocxProjectionForStorage(
+                contentProjection(artifact.content, baseOpened.projection),
+              ),
               fidelityMap: externalOpened.fidelityMap,
               regionIds: merged.externalChanged,
               partNames: [],
@@ -443,10 +446,12 @@ export async function POST(request: Request) {
             localReplicaId: local.truth.replicaId as Id<"workReplicas">,
             localPayloadRef: local.truth.payloadRef,
             localRevision: local.truth.revision,
-            content: bindDocxProjectionSource(
-              merged.projection,
-              String(workId),
-              local.truth.hash,
+            content: compactDocxProjectionForStorage(
+              bindDocxProjectionSource(
+                merged.projection,
+                String(workId),
+                local.truth.hash,
+              ),
             ),
             fidelityMap: externalOpened.fidelityMap,
             regionIds: merged.externalChanged,
@@ -480,7 +485,7 @@ export async function POST(request: Request) {
       >("replicas:activateLens", {
         workId,
         payloadHash: truth.hash,
-        content: activatedProjection,
+        content: compactDocxProjectionForStorage(activatedProjection),
         fidelityMap: opened.fidelityMap,
         semanticDigest: activatedProjection.nativeBinding.semanticDigest,
         nativeFormat: activatedProjection.nativeBinding.format,
@@ -536,7 +541,7 @@ export async function POST(request: Request) {
         >("replicas:activateLens", {
           workId,
           payloadHash: local.truth.hash,
-          content: projection,
+          content: compactDocxProjectionForStorage(projection),
           fidelityMap: opened.fidelityMap,
           semanticDigest: projection.nativeBinding.semanticDigest,
           nativeFormat: projection.nativeBinding.format,
@@ -617,7 +622,7 @@ export async function POST(request: Request) {
           .filter((part) => part.verdict !== "identical")
           .map((part) => `/${part.name}`),
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
-        projectionContent: nextProjection,
+        projectionContent: compactDocxProjectionForStorage(nextProjection),
         projectionContentHash: nextProjection.nativeBinding.semanticDigest,
         projectionTextIndex: nextProjection.blocks
           .map((block) => block.text)
@@ -657,7 +662,7 @@ export async function POST(request: Request) {
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: current,
+        content: compactDocxProjectionForStorage(current),
         fidelityMap: externalOpened.fidelityMap,
         regionIds: mergedResult.externalChanged,
         partNames: diff.preservedPartChanges,
@@ -698,7 +703,7 @@ export async function POST(request: Request) {
       localReplicaId: local.truth.replicaId as Id<"workReplicas">,
       localPayloadRef: local.truth.payloadRef,
       localRevision: local.truth.revision,
-      content: merged,
+      content: compactDocxProjectionForStorage(merged),
       fidelityMap: externalOpened.fidelityMap,
       regionIds: [...externalChanged],
       partNames: diff.preservedPartChanges,

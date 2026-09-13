@@ -175,7 +175,8 @@ describe("Live Dock V2", () => {
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("displayedRunVersions");
     expect(runHook).not.toContain("force: true");
-    expect(runHook).toContain("threadId: target.threadId");
+    expect(runHook).toContain("let targetThreadId = target?.threadId");
+    expect(runHook).toContain("threadId: targetThreadId");
     const surface = read(
       "src/features/spectra/components/conversation-surface.tsx",
     );

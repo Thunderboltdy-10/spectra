@@ -211,6 +211,14 @@ export const overview = query({
         item.startAt === undefined ||
         (item.startAt <= args.to && (item.endAt ?? item.startAt) >= args.from),
     );
+    // The visible range is the right projection for the Calendar surface, but
+    // an AI move/resize request may arrive with a guessed range while it is
+    // resolving a named task. Keep a compact owner-scoped index of saved work
+    // blocks so the agent can recover the exact item id/revision without
+    // guessing, duplicating, or asking the user for implementation details.
+    const scheduledWorkBlocks = items
+      .filter((item) => item.kind === "scheduled_work_block")
+      .map(itemWire);
     const unscheduledStored = items.filter(
       (item) =>
         item.kind === "task" &&
@@ -238,6 +246,7 @@ export const overview = query({
       timezone,
       range: { from: args.from, to: args.to },
       items: visible.map(itemWire),
+      scheduledWorkBlocks,
       unscheduledTasks: [
         ...unscheduledStored.map(itemWire),
         ...unscheduledPlans,
@@ -325,6 +334,25 @@ export const scheduleTask = mutation({
     const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
     if (args.idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length < 8))
       throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+    let plannerArtifact: Doc<"spectraArtifacts"> | null = null;
+    let plannerTask: { id: string; title: string } | undefined;
+    if (args.planArtifactId && !args.taskItemId) {
+      plannerArtifact = await ctx.db.get(args.planArtifactId);
+      if (
+        !plannerArtifact ||
+        plannerArtifact.ownerAccountId !== actor.accountId ||
+        plannerArtifact.blueprintKey !== "planner_task"
+      )
+        throw new Error("CALENDAR_PLAN_NOT_FOUND");
+      const availableTasks = planTasks(plannerArtifact);
+      plannerTask =
+        availableTasks.find((candidate) => candidate.id === args.planTaskId) ??
+        // A single-root planner has one canonical Calendar task even if the
+        // editor/model surfaced a visual subtask id.
+        (availableTasks.length === 1 ? availableTasks[0] : undefined);
+      if (!plannerTask) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
+    }
+    const resolvedPlanTaskId = plannerTask?.id ?? args.planTaskId;
     const existingByKey = idempotencyKey
       ? await ctx.db
           .query("calendarItems")
@@ -337,7 +365,7 @@ export const scheduleTask = mutation({
       const sameTask =
         String(existingByKey.taskItemId ?? "") === String(args.taskItemId ?? "") &&
         String(existingByKey.planArtifactId ?? "") === String(args.planArtifactId ?? "") &&
-        String(existingByKey.planTaskId ?? "") === String(args.planTaskId ?? "") &&
+        String(existingByKey.planTaskId ?? "") === String(resolvedPlanTaskId ?? "") &&
         existingByKey.startAt === args.startAt &&
         existingByKey.endAt === args.endAt &&
         existingByKey.timezone === args.timezone;
@@ -356,10 +384,7 @@ export const scheduleTask = mutation({
       title = task.title;
       officialDeadlineItemId = task.officialDeadlineItemId;
     } else if (args.planArtifactId) {
-      const plan = await ctx.db.get(args.planArtifactId);
-      if (!plan || plan.ownerAccountId !== actor.accountId || plan.blueprintKey !== "planner_task")
-        throw new Error("CALENDAR_PLAN_NOT_FOUND");
-      const task = planTasks(plan).find((candidate) => candidate.id === args.planTaskId);
+      const task = plannerTask;
       if (!task) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
       title = task.title;
     }
@@ -378,7 +403,7 @@ export const scheduleTask = mutation({
       sourceLocked: false,
       taskItemId: args.taskItemId,
       planArtifactId: args.planArtifactId,
-      planTaskId: args.planTaskId,
+      planTaskId: resolvedPlanTaskId,
       officialDeadlineItemId,
       linkedArtifactIds: args.planArtifactId ? [args.planArtifactId] : [],
       idempotencyKey,

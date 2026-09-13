@@ -24,6 +24,12 @@ describe("pastTenseProgressTitle", () => {
     expect(pastTenseProgressTitle("Reading source material", true)).toBe(
       "Read source material",
     );
+    expect(pastTenseProgressTitle("Finding Library items", true)).toBe(
+      "Found Library items",
+    );
+    expect(pastTenseProgressTitle("Keeping your request in focus", true)).toBe(
+      "Kept your request in focus",
+    );
     expect(pastTenseProgressTitle("Rewriting the overview", true)).toBe(
       "Rewrote the overview",
     );

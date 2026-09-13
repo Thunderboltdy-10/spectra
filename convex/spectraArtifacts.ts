@@ -10,6 +10,7 @@ import {
   fallbackArtifactSummary,
   finalizeArtifactSummary,
   hollowFinalizeFailureMessage,
+  isGeneratedArtifactSummary,
   isHollowDefaultContent,
   isPlaceholderBuildingSummary,
   normalizeArtifactId,
@@ -2629,8 +2630,26 @@ export const stageAiPatch = mutation({
       return { ...effect, changedPaths: nextPaths, updatedAt: now };
     });
     const nextTitle = args.title?.trim() || artifact.title;
-    const nextSummary =
-      args.summary !== undefined ? args.summary : artifact.summary;
+    const previousGeneratedSummary = finalizeArtifactSummary({
+      blueprintKey: artifact.blueprintKey as BlueprintKey,
+      title: artifact.title,
+      summary: undefined,
+      content: artifact.content,
+    });
+    const shouldRefreshGeneratedSummary =
+      content !== undefined &&
+      (artifact.summary === previousGeneratedSummary ||
+        isGeneratedArtifactSummary(artifact.summary, artifact.blueprintKey as BlueprintKey));
+    const nextSummary = shouldRefreshGeneratedSummary
+      ? finalizeArtifactSummary({
+          blueprintKey: artifact.blueprintKey as BlueprintKey,
+          title: nextTitle,
+          summary: undefined,
+          content,
+        })
+      : args.summary !== undefined
+        ? args.summary
+        : artifact.summary;
     const nextTags = args.tags ?? artifact.tags;
     const previewPaths = preferLineScopedPaths(
       changedPaths.length > 0
@@ -2651,7 +2670,12 @@ export const stageAiPatch = mutation({
             summary: nextSummary,
             tags: nextTags,
             content,
-            textIndex: `${nextTitle} ${nextSummary ?? ""} ${nextTags.join(" ")}`,
+            textIndex: buildArtifactTextIndex({
+              title: nextTitle,
+              summary: nextSummary,
+              content,
+              tags: nextTags,
+            }),
             syncState: "synchronized",
             lastSynchronizedAt: now,
           }
@@ -3071,6 +3095,26 @@ export const settleStagedForRun = mutation({
             aiState: undefined,
             aiRunId: undefined,
             aiExecutionId: undefined,
+            aiStateExpiresAt: undefined,
+            aiProgress: undefined,
+            aiPreview: undefined,
+            aiEffects: undefined,
+            updatedAt: now,
+          });
+        }
+        // pausePendingForApproval intentionally removes the visible creating
+        // state while retaining the run identity on an unfinalized shell.
+        // Do not turn that shell into an "edited" artifact or clear its run
+        // identity here: the confirmation continuation needs to reclaim it
+        // and write the real content into the same artifact.
+        const awaitingApprovalCreate =
+          artifact.createdFrom?.runId === args.runId &&
+          !artifact.currentVersionId &&
+          artifact.aiRunId === args.runId &&
+          artifact.aiExecutionId === args.executionId;
+        if (awaitingApprovalCreate) {
+          return ctx.db.patch(artifact._id, {
+            aiState: undefined,
             aiStateExpiresAt: undefined,
             aiProgress: undefined,
             aiPreview: undefined,

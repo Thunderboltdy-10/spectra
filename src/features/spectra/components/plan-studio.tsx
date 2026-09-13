@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { SelectField } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ArtifactWorkbar } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
@@ -134,6 +136,7 @@ export function PlanStudio({
   const importRef = useRef<HTMLInputElement>(null);
   const quickAddRef = useRef<HTMLInputElement>(null);
   const boardAddRef = useRef<HTMLInputElement>(null);
+  const autoOpenedTaskKeyRef = useRef<string | undefined>(undefined);
   const [columnDraft, setColumnDraft] = useState<
     Partial<Record<PlanStatus, string>>
   >({});
@@ -169,6 +172,20 @@ export function PlanStudio({
       setPendingQuickAdd(false);
     }
   }, [pendingQuickAdd, view]);
+
+  // A one-task plan is usually the artifact's actual work, so open its
+  // existing detail surface once on first read. The key guard preserves the
+  // user's collapse choice while content is being saved or rehydrated.
+  useEffect(() => {
+    const key = plan.tasks.map((task) => task.id).join("|");
+    if (autoOpenedTaskKeyRef.current === key) return;
+    autoOpenedTaskKeyRef.current = key;
+    if (plan.tasks.length === 1) {
+      setOpenTaskId(plan.tasks[0]?.id);
+    } else if (openTaskId && !plan.tasks.some((task) => task.id === openTaskId)) {
+      setOpenTaskId(undefined);
+    }
+  }, [openTaskId, plan.tasks]);
 
   const filter: PlanFilter = useMemo(
     () => ({
@@ -1169,7 +1186,7 @@ export function PlanStudio({
               <X className="h-4 w-4" />
             </button>
           </header>
-          <input
+          <Input
             className="spectra-plan-detail-title"
             value={openTask.title}
             disabled={readOnly}
@@ -1178,7 +1195,7 @@ export function PlanStudio({
             }
             aria-label="Task title"
           />
-          <textarea
+          <Textarea
             value={openTask.description}
             disabled={readOnly}
             placeholder="What does done look like?"
@@ -1190,25 +1207,23 @@ export function PlanStudio({
           <div className="spectra-plan-detail-grid">
             <label>
               <span>Status</span>
-              <select
-                disabled={readOnly}
+              <SelectField
+                ariaLabel="Status"
+                size="sm"
                 value={openTask.status}
-                onChange={(event) =>
-                  patchTask(openTask.id, {
-                    status: event.target.value as PlanStatus,
-                  })
+                disabled={readOnly}
+                onChange={(value) =>
+                  patchTask(openTask.id, { status: value as PlanStatus })
                 }
-              >
-                {PLAN_STATUS_ORDER.map((status) => (
-                  <option key={status} value={status}>
-                    {PLAN_STATUS_LABELS[status]}
-                  </option>
-                ))}
-              </select>
+                options={PLAN_STATUS_ORDER.map((status) => ({
+                  value: status,
+                  label: PLAN_STATUS_LABELS[status],
+                }))}
+              />
             </label>
             <label>
               <span>Due</span>
-              <input
+              <Input
                 type="date"
                 disabled={readOnly || Boolean(openTask.officialDeadlineRef)}
                 value={dateInput(openTask.dueAt)}
@@ -1217,7 +1232,7 @@ export function PlanStudio({
             </label>
             <label>
               <span>Estimate</span>
-              <input
+              <Input
                 type="number"
                 min={0}
                 step={15}
@@ -1235,71 +1250,70 @@ export function PlanStudio({
             </label>
             <label>
               <span>Section</span>
-              <select
-                disabled={readOnly}
+              <SelectField
+                ariaLabel="Section"
+                size="sm"
                 value={openTask.sectionId ?? ""}
-                onChange={(event) =>
+                disabled={readOnly}
+                onChange={(value) =>
                   patchTask(openTask.id, {
-                    sectionId: event.target.value || undefined,
+                    sectionId: value || undefined,
                   })
                 }
-              >
-                <option value="">No section</option>
-                {plan.sections.map((section) => (
-                  <option key={section.id} value={section.id}>
-                    {section.title}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "No section" },
+                  ...plan.sections.map((section) => ({
+                    value: section.id,
+                    label: section.title,
+                  })),
+                ]}
+              />
             </label>
             <label>
               <span>Milestone</span>
-              <select
-                disabled={readOnly}
+              <SelectField
+                ariaLabel="Milestone"
+                size="sm"
                 value={openTask.milestoneId ?? ""}
-                onChange={(event) =>
+                disabled={readOnly}
+                onChange={(value) =>
                   patchTask(openTask.id, {
-                    milestoneId: event.target.value || undefined,
+                    milestoneId: value || undefined,
                   })
                 }
-              >
-                <option value="">None</option>
-                {plan.milestones.map((milestone) => (
-                  <option key={milestone.id} value={milestone.id}>
-                    {milestone.title}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "None" },
+                  ...plan.milestones.map((milestone) => ({
+                    value: milestone.id,
+                    label: milestone.title,
+                  })),
+                ]}
+              />
             </label>
             <label>
               <span>Waiting on</span>
-              <select
-                disabled={readOnly}
+              <SelectField
+                ariaLabel="Waiting on"
+                size="sm"
                 value=""
-                onChange={(event) => {
-                  const value = event.target.value;
+                disabled={readOnly}
+                placeholder="Add a dependency…"
+                onChange={(value) => {
                   if (!value) return;
                   patchTask(openTask.id, {
                     dependencyIds: [
                       ...new Set([...openTask.dependencyIds, value]),
                     ],
                   });
-                  event.target.value = "";
                 }}
-              >
-                <option value="">Add a dependency…</option>
-                {plan.tasks
+                options={plan.tasks
                   .filter(
                     (task) =>
                       task.id !== openTask.id &&
                       !openTask.dependencyIds.includes(task.id),
                   )
-                  .map((task) => (
-                    <option key={task.id} value={task.id}>
-                      {task.title}
-                    </option>
-                  ))}
-              </select>
+                  .map((task) => ({ value: task.id, label: task.title }))}
+              />
             </label>
           </div>
           {openTask.officialDeadlineRef ? (
@@ -1361,13 +1375,13 @@ export function PlanStudio({
                 </button>
               ))}
               {!readOnly ? (
-                <select
-                  className="h-8 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-secondary)]"
+                <SelectField
+                  ariaLabel="Add reminder"
+                  size="sm"
                   value=""
-                  aria-label="Add reminder"
-                  onChange={(event) => {
-                    const minutes = Number(event.target.value);
-                    event.target.value = "";
+                  placeholder="Add reminder…"
+                  onChange={(value) => {
+                    const minutes = Number(value);
                     if (!Number.isFinite(minutes) || minutes < 0) return;
                     if (
                       openTask.reminders.some(
@@ -1385,20 +1399,14 @@ export function PlanStudio({
                       ],
                     });
                   }}
-                >
-                  <option value="">Add reminder…</option>
-                  {REMINDER_MINUTE_OPTIONS.map((option) => (
-                    <option
-                      key={option.minutesBefore}
-                      value={option.minutesBefore}
-                      disabled={openTask.reminders.some(
-                        (item) => item.minutesBefore === option.minutesBefore,
-                      )}
-                    >
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  options={REMINDER_MINUTE_OPTIONS.map((option) => ({
+                    value: String(option.minutesBefore),
+                    label: option.label,
+                    disabled: openTask.reminders.some(
+                      (item) => item.minutesBefore === option.minutesBefore,
+                    ),
+                  }))}
+                />
               ) : null}
             </div>
           </div>

@@ -7,6 +7,9 @@ import {
   xlsxArtifactContent,
   pptxArtifactContent,
 } from "@/features/spectra/lenses/office-content";
+import {
+  compactDocxProjectionForStorage,
+} from "@/features/spectra/lenses/document-projection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +40,7 @@ export async function POST(request: Request) {
         ok: true,
         blueprintKey: "document",
         nativeFormat: format,
-        content: opened.projection,
+        content: compactDocxProjectionForStorage(opened.projection),
         fidelityReport: opened.fidelityMap.entries.map((entry) => ({
           scope: entry.feature,
           level: entry.class === "NATIVE" ? "exact" : entry.class === "PRESERVED" ? "exact" : "adapted",

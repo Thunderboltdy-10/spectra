@@ -5,6 +5,11 @@ import { uploadArtifactAsset } from "../data/api";
 import { artifactBlobSha256 } from "../components/artifact-studio-file-utils";
 import { documentContentFromJson } from "../components/artifact-studio";
 import { importDocxPayload } from "../lenses/docx-adapter";
+import {
+  compactDocxContentForStorage,
+  compactDocxEditorJsonForStorage,
+  compactDocxProjectionForStorage,
+} from "../lenses/document-projection";
 
 function imagePixelDimensions(
   bytes: Uint8Array,
@@ -103,7 +108,13 @@ export async function projectDocxImportWithDurableImages(file: File, artifactId:
   );
   const imported = await importDocxPayload(checked.bytes);
   const durableJson = await materializeJsonImages(imported.json as JSONContent, artifactId);
-  return documentContentFromJson(durableJson, imported.projection);
+  const compactJson = compactDocxEditorJsonForStorage(durableJson) as JSONContent;
+  return compactDocxContentForStorage(
+    documentContentFromJson(
+      compactJson,
+      compactDocxProjectionForStorage(imported.projection),
+    ),
+  );
 }
 
 export const LIBRARY_IMPORT_ACCEPT = [

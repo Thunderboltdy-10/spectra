@@ -1331,6 +1331,88 @@ export type ProvisionalCreation = {
   clause: string;
 };
 
+type CreationCandidate = {
+  match: RegExpExecArray | null;
+  blueprintKey: WorkTypeKey;
+  label: string;
+};
+
+function creationCandidates(clause: string): CreationCandidate[] {
+  const searchableClause = clause.replace(/["“'][^"”']*["”']/g, " ");
+  const candidates: CreationCandidate[] = [
+    {
+      match: /\b(?:flashcards?|flashcard\s+deck|deck|flashcard\s+set)\b/i.exec(
+        searchableClause,
+      ),
+      blueprintKey: "flashcard_deck",
+      label: "Flashcard deck",
+    },
+    {
+      match: /\bquiz(?:zes)?\b/i.exec(searchableClause),
+      blueprintKey: "quiz",
+      label: "Quiz",
+    },
+    {
+      match: /\b(?:planner\s+task|study\s+task|task)\b/i.exec(searchableClause),
+      blueprintKey: "planner_task",
+      label: "Planner task",
+    },
+    {
+      match: /\b(?:document|notes?|guide|outline|summary|handout|study\s+sheet|revision\s+sheet)\b/i.exec(
+        searchableClause,
+      ),
+      blueprintKey: "document",
+      label: "Document",
+    },
+    {
+      match: /\b(?:agent|assistant)\b/i.exec(searchableClause),
+      blueprintKey: "agent",
+      label: "Agent",
+    },
+    {
+      match: /\b(?:presentation|slide\s*deck|slides?)\b/i.exec(searchableClause),
+      blueprintKey: "presentation",
+      label: "Presentation",
+    },
+    {
+      match: /\b(?:spreadsheet|workbook|sheets?)\b/i.exec(searchableClause),
+      blueprintKey: "sheets",
+      label: "Sheets",
+    },
+    {
+      match: /\b(?:code|visuali[sz]ation|web\s*app)\b/i.exec(searchableClause),
+      blueprintKey: "code",
+      label: "Code",
+    },
+    {
+      match: /\b(?:whiteboard|canvas|mind\s*map)\b/i.exec(searchableClause),
+      blueprintKey: "whiteboard",
+      label: "Whiteboard",
+    },
+  ];
+  return candidates
+    .filter((candidate) => candidate.match)
+    .sort((left, right) => left.match!.index - right.match!.index);
+}
+
+function creationTargetsForClause(clause: string): CreationCandidate[] {
+  const candidates = creationCandidates(clause);
+  const uniqueBlueprints = new Set(candidates.map((candidate) => candidate.blueprintKey));
+  const asksForSeparateOutputs =
+    (uniqueBlueprints.size > 1 &&
+      /\b(?:separate|individual|distinct|two|three|four|five|both|things?|outputs?|materials?|items?|pack|bundle|set)\b/i.test(
+        clause,
+      )) ||
+    (uniqueBlueprints.size > 1 && /\b(?:and|plus|alongside)\b/i.test(clause));
+  if (!asksForSeparateOutputs) return candidates.slice(0, 1);
+  const seen = new Set<WorkTypeKey>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.blueprintKey)) return false;
+    seen.add(candidate.blueprintKey);
+    return true;
+  });
+}
+
 export function provisionalCreations(prompt: string): ProvisionalCreation[] {
   const requestShape = prompt
     .trim()
@@ -1352,68 +1434,23 @@ export function provisionalCreations(prompt: string): ProvisionalCreation[] {
     const start = (verb.index ?? 0) + verb[0].length;
     const directObject =
       requestShape
-        .slice(start, start + 64)
+        .slice(start, start + 160)
         .split(/\b(?:from|using|based\s+on|with\s+the\s+included)\b/i, 1)[0]
         ?.split(/[.?!;]/, 1)[0]
-        ?.slice(0, 48) ?? "";
-    const candidates = [
-      {
-        match: /\b(?:flashcards?|flashcard\s+deck|deck)\b/i.exec(directObject),
-        blueprintKey: "flashcard_deck" as const,
-        label: "Flashcard deck",
-      },
-      {
-        match: /\bquiz(?:zes)?\b/i.exec(directObject),
-        blueprintKey: "quiz" as const,
-        label: "Quiz",
-      },
-      {
-        match: /\b(?:planner\s+task|study\s+task|task)\b/i.exec(directObject),
-        blueprintKey: "planner_task" as const,
-        label: "Planner task",
-      },
-      {
-        match: /\b(?:document|notes?|guide|outline|summary)\b/i.exec(
-          directObject,
-        ),
-        blueprintKey: "document" as const,
-        label: "Document",
-      },
-      {
-        match: /\b(?:agent|assistant)\b/i.exec(directObject),
-        blueprintKey: "agent" as const,
-        label: "Agent",
-      },
-      {
-        match: /\b(?:presentation|slide\s*deck|slides?)\b/i.exec(directObject),
-        blueprintKey: "presentation" as const,
-        label: "Presentation",
-      },
-      {
-        match: /\b(?:spreadsheet|workbook|sheets?)\b/i.exec(directObject),
-        blueprintKey: "sheets" as const,
-        label: "Sheets",
-      },
-      {
-        match: /\b(?:code|visuali[sz]ation|web\s*app)\b/i.exec(directObject),
-        blueprintKey: "code" as const,
-        label: "Code",
-      },
-      {
-        match: /\b(?:whiteboard|canvas|mind\s*map)\b/i.exec(directObject),
-        blueprintKey: "whiteboard" as const,
-        label: "Whiteboard",
-      },
-    ]
-      .filter((candidate) => candidate.match)
-      .sort((left, right) => left.match!.index - right.match!.index);
-    const target = candidates[0];
-    if (!target) return [];
-    return [{ verb, target }];
+        ?.split(/\b(?:create|make|build|generate|write|draft)\b/i, 1)[0]
+        ?.split(
+          /\b(?:add|update|edit|revise|rewrite|rename|change|fix|replace|delete|remove|archive|move|pin|unpin|link|connect|relate|tag)\b/i,
+          1,
+        )[0]
+        ?.slice(0, 140) ?? "";
+    return creationTargetsForClause(directObject).map((target) => ({ verb, target }));
   });
-  return targetedVerbs.map(({ verb, target }, index) => {
+  const creations = targetedVerbs.map(({ verb, target }) => {
     const start = (verb.index ?? 0) + verb[0].length;
-    const end = targetedVerbs[index + 1]?.verb.index ?? requestShape.length;
+    const end =
+      targetedVerbs.find(
+        (candidate) => (candidate.verb.index ?? 0) > (verb.index ?? 0),
+      )?.verb.index ?? requestShape.length;
     let rawClause = requestShape.slice(start, Math.min(end, start + 1_200));
     const followingMutation =
       /[.?!;]\s+(?=(?:add|update|edit|revise|rewrite|rename|change|set|link|connect|relate|tag|move|pin|unpin|delete|remove|archive)\b)/i.exec(
@@ -1430,6 +1467,17 @@ export function provisionalCreations(prompt: string): ProvisionalCreation[] {
       requestedTitle: requestedTitle || undefined,
       clause: `${verb[0]}${rawClause}`.trim(),
     };
+  });
+  return creations.filter((creation, index, all) => {
+    const titleKey = creation.requestedTitle?.trim().toLocaleLowerCase();
+    if (!titleKey) return true;
+    return (
+      all.findIndex(
+        (candidate) =>
+          candidate.blueprintKey === creation.blueprintKey &&
+          candidate.requestedTitle?.trim().toLocaleLowerCase() === titleKey,
+      ) === index
+    );
   });
 }
 
@@ -1479,58 +1527,7 @@ export function provisionalSingleCreation(prompt: string): {
         /\b(?:from|using|based\s+on|with\s+the\s+included)\b/i,
         1,
       )[0] ?? "";
-    const candidates = [
-      {
-        match: /\b(?:flashcards?|flashcard\s+deck|deck)\b/i.exec(targetClause),
-        blueprintKey: "flashcard_deck" as const,
-        label: "Flashcard deck",
-      },
-      {
-        match: /\bquiz(?:zes)?\b/i.exec(targetClause),
-        blueprintKey: "quiz" as const,
-        label: "Quiz",
-      },
-      {
-        match: /\b(?:planner\s+task|study\s+task|task)\b/i.exec(targetClause),
-        blueprintKey: "planner_task" as const,
-        label: "Planner task",
-      },
-      {
-        match: /\b(?:document|notes?|guide|outline|summary)\b/i.exec(
-          targetClause,
-        ),
-        blueprintKey: "document" as const,
-        label: "Document",
-      },
-      {
-        match: /\b(?:agent|assistant)\b/i.exec(targetClause),
-        blueprintKey: "agent" as const,
-        label: "Agent",
-      },
-      {
-        match: /\b(?:presentation|slide\s*deck|slides?)\b/i.exec(targetClause),
-        blueprintKey: "presentation" as const,
-        label: "Presentation",
-      },
-      {
-        match: /\b(?:spreadsheet|workbook|sheets?)\b/i.exec(targetClause),
-        blueprintKey: "sheets" as const,
-        label: "Sheets",
-      },
-      {
-        match: /\b(?:code|visuali[sz]ation|web\s*app)\b/i.exec(targetClause),
-        blueprintKey: "code" as const,
-        label: "Code",
-      },
-      {
-        match: /\b(?:whiteboard|canvas|mind\s*map)\b/i.exec(targetClause),
-        blueprintKey: "whiteboard" as const,
-        label: "Whiteboard",
-      },
-    ]
-      .filter((candidate) => candidate.match)
-      .sort((left, right) => left.match!.index - right.match!.index);
-    return candidates[0] ? [candidates[0]] : [];
+    return creationTargetsForClause(targetClause);
   });
   // A specialized terminal action is safe only for exactly one explicit
   // output. Multi-output packs stay in the general typed operation harness.
@@ -1549,7 +1546,16 @@ export function provisionalSingleCreation(prompt: string): {
   return null;
 }
 
-export function parallelCreationContract(prompt: string) {
+export function parallelCreationContract(
+  prompt: string,
+  focusedArtifactOpen = false,
+) {
+  if (
+    focusedArtifactOpen &&
+    promptLooksLikeFocusedStructuralEdit(prompt) &&
+    !/\b(?:create|build|generate)\b|\b(?:new|another|separate)\b/i.test(prompt)
+  )
+    return [];
   const creations = provisionalCreations(prompt);
   if (creations.length > 6) return [];
   if (creations.length < 2 && !hasNonCreationMutationIntent(prompt)) return [];

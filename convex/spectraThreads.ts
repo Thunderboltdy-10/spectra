@@ -44,12 +44,31 @@ const TRACE_CURSOR_VERSION = 1;
 const BACKFILL_CURSOR_VERSION = 1;
 
 function encodeCursor(value: unknown) {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const json = JSON.stringify(value);
+  // Convex functions run on a web-standard runtime where Node's Buffer is not
+  // guaranteed to exist. The list endpoint only encodes bounded ASCII cursor
+  // metadata, so use the platform encoder when available and retain the Node
+  // fallback for local tooling/tests.
+  const base64 =
+    typeof btoa === "function"
+      ? btoa(json)
+      : Buffer.from(json, "utf8").toString("base64");
+  return base64.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 function decodeCursor<T>(value: string | undefined): T | undefined {
   if (!value) return undefined;
-  try { return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T; } catch { return undefined; }
+  try {
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const json =
+      typeof atob === "function"
+        ? atob(padded)
+        : Buffer.from(padded, "base64").toString("utf8");
+    return JSON.parse(json) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 function requireCursor<T>(value: string, kind: string): T {

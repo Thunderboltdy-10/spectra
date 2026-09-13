@@ -9,6 +9,7 @@ import {
 } from "./stream-events";
 import {
   getSpectraRunEvents,
+  getSpectraRunDetail,
   getSpectraRunTabs,
   postSpectra,
   type SpectraResultCard,
@@ -388,6 +389,26 @@ export function useSpectraRun({
   const displayedRunVersions = useRef(
     new Map<string, { executionId?: string; attemptId?: string }>(),
   );
+  const resolveDisplayedRunVersion = useCallback(async (runId: string, fresh = false) => {
+    const displayed = displayedRunVersions.current.get(runId);
+    if (!fresh && displayed?.executionId)
+      return {
+        executionId: displayed.executionId,
+        attemptId: displayed.attemptId ?? displayed.executionId,
+      };
+    const detail = await getSpectraRunDetail(runId);
+    const executionId = detail.run.executionId?.trim();
+    if (!executionId)
+      throw new Error(
+        "This run control is missing the displayed attempt. Refresh it and try again.",
+      );
+    const version = {
+      executionId,
+      attemptId: detail.run.attemptId ?? executionId,
+    };
+    displayedRunVersions.current.set(runId, version);
+    return version;
+  }, []);
   // A streamed patch can arrive while the user is inside another artifact or
   // a thread panel, before the newly-created shell exists in this view's
   // overview snapshot. Bootstrap that canonical shell once, then serialize
@@ -463,9 +484,16 @@ export function useSpectraRun({
     if (!observeDurableRuns) return;
     let disposed = false;
     let timer: number | undefined;
+    let polling = false;
+    let pollAgain = false;
     let tabSnapshot: SpectraRunTab[] = [];
     let tabsFetchedAt = 0;
     const poll = async () => {
+      if (polling) {
+        pollAgain = true;
+        return;
+      }
+      polling = true;
       let observedActive = false;
       try {
         // The cursor endpoint is the live transport. Refresh the tab index only
@@ -529,7 +557,16 @@ export function useSpectraRun({
             eventCursors.current.has(tab.runId),
         );
         for (const tab of observed) {
-          if (activeRunIds.current.has(tab.runId)) continue;
+          // The initial POST is only an acknowledgement; the worker may finish
+          // after that response closes. Let durable polling take over as soon
+          // as a run reaches a user-input state even if the initiating request
+          // is still unwinding, otherwise a clarification can look like an
+          // endless "Thinking" strip with no choice card.
+          if (
+            activeRunIds.current.has(tab.runId) &&
+            (tab.run.status === "queued" || tab.run.status === "running")
+          )
+            continue;
           const after = eventCursors.current.get(tab.runId) ?? 0;
           const { events } = await getSpectraRunEvents(tab.runId, after);
           if (disposed) return;
@@ -664,7 +701,11 @@ export function useSpectraRun({
       } catch {
         // A transient observer failure must not interrupt the authoritative run.
       } finally {
-        if (!disposed)
+        polling = false;
+        if (!disposed && pollAgain) {
+          pollAgain = false;
+          timer = window.setTimeout(() => void poll(), 0);
+        } else if (!disposed)
           // Active runs use the cursor stream aggressively; the tab index above
           // is deliberately slower. Hidden tabs keep a slow heartbeat.
           timer = window.setTimeout(
@@ -677,10 +718,24 @@ export function useSpectraRun({
           );
       }
     };
+    const requestDurablePoll = () => {
+      if (disposed) return;
+      tabsFetchedAt = 0;
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+      void poll();
+    };
+    const removeThreadsChanged = spectraBus.on(
+      "threads.changed",
+      requestDurablePoll,
+    );
     void poll();
     return () => {
       disposed = true;
       if (timer) window.clearTimeout(timer);
+      removeThreadsChanged();
     };
   }, [
     artifactId,
@@ -1189,18 +1244,15 @@ export function useSpectraRun({
       try {
         const target = displayedRunTabs.current.get(runId);
         if (mode === "cancel_current_action") {
+          const version = await resolveDisplayedRunVersion(runId, true);
           const response = await fetch("/api/spectra/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "stop",
               runId,
-              ...(displayedRunVersions.current.get(runId)?.executionId
-                ? {
-                    executionId: displayedRunVersions.current.get(runId)!.executionId,
-                    attemptId: displayedRunVersions.current.get(runId)!.attemptId,
-                  }
-                : {}),
+              executionId: version.executionId,
+              attemptId: version.attemptId,
             }),
           });
           if (!response.ok && response.status !== 409)
@@ -1212,21 +1264,76 @@ export function useSpectraRun({
           queuedSteering.current.delete(runId);
           return true;
         }
-        if (!target) throw new Error("That run is no longer available.");
-        const stopResponse = await fetch("/api/spectra/run", {
+        let targetThreadId = target?.threadId;
+        if (!targetThreadId) {
+          const detail = await getSpectraRunDetail(runId);
+          targetThreadId = detail.run.threadId;
+        }
+        // Steering is a stop-then-continue transaction. The tab projection can
+        // lag the run detail by a heartbeat, and the old worker can still be
+        // unwinding while the stop response reaches the browser. Resolve a
+        // fresh execution identity, stop it, and wait for the terminal state
+        // before starting the continuation. Starting immediately made the
+        // continuation race `beginRun` and surface a misleading 409.
+        let version = await resolveDisplayedRunVersion(runId, true);
+        let stopResponse = await fetch("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "stop",
-              runId,
-              executionId: displayedRunVersions.current.get(runId)?.executionId,
-              attemptId: displayedRunVersions.current.get(runId)?.attemptId,
-            }),
+          body: JSON.stringify({
+            action: "stop",
+            runId,
+            executionId: version.executionId,
+            attemptId: version.attemptId,
+          }),
         });
+        if (!stopResponse.ok && stopResponse.status === 409) {
+          // A 409 is safe only when the run is already terminal. Otherwise
+          // refresh once and retry against the current attempt; this covers a
+          // retry/heartbeat rollover without ever cancelling a newer run.
+          const current = await getSpectraRunDetail(runId);
+          const currentStatus = current.run.status;
+          const active =
+            currentStatus === "queued" ||
+            currentStatus === "running" ||
+            currentStatus === "awaiting_confirmation" ||
+            currentStatus === "awaiting_resolution";
+          if (active) {
+            version = await resolveDisplayedRunVersion(runId, true);
+            stopResponse = await fetch("/api/spectra/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "stop",
+                runId,
+                executionId: version.executionId,
+                attemptId: version.attemptId,
+              }),
+            });
+          }
+        }
         if (!stopResponse.ok && stopResponse.status !== 409)
           throw new Error(
             (await stopResponse.text().catch(() => "")) ||
               "This run could not be redirected safely.",
+          );
+        let settled = false;
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const current = await getSpectraRunDetail(runId);
+          const currentStatus = current.run.status;
+          const active =
+            currentStatus === "queued" ||
+            currentStatus === "running" ||
+            currentStatus === "awaiting_confirmation" ||
+            currentStatus === "awaiting_resolution";
+          if (!active) {
+            settled = true;
+            break;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 200));
+        }
+        if (!settled)
+          throw new Error(
+            "Spectra is still closing the previous step. Try steering again in a moment.",
           );
         spectraBus.emit("threads.changed", {});
         const steerPrompt =
@@ -1236,7 +1343,7 @@ export function useSpectraRun({
               ? `Change the next step: ${clean}`
               : `Refine the current goal: ${clean}`;
         const accepted = await run(steerPrompt, [], {
-          threadId: target.threadId,
+          threadId: targetThreadId,
         });
         queuedSteering.current.delete(runId);
         if (accepted)
@@ -1250,7 +1357,7 @@ export function useSpectraRun({
         return false;
       }
     },
-    [run],
+    [resolveDisplayedRunVersion, run],
   );
 
   const keepAsThread = useCallback(
@@ -1297,7 +1404,13 @@ export function useSpectraRun({
       if (actionKey === "confirm" || actionKey === "cancel") {
         setActiveRequestCount((count) => count + 1);
         try {
-          await consume({ action: actionKey, runId: card.runId });
+          const version = await resolveDisplayedRunVersion(card.runId);
+          await consume({
+            action: actionKey,
+            runId: card.runId,
+            executionId: version.executionId,
+            attemptId: version.attemptId,
+          });
         } catch (error) {
           toast.error(
             error instanceof Error
@@ -1313,10 +1426,13 @@ export function useSpectraRun({
         const clean = targetId.trim();
         setActiveRequestCount((count) => count + 1);
         try {
+          const version = await resolveDisplayedRunVersion(card.runId);
           await consume({
             action: "revise",
             runId: card.runId,
             revision: clean,
+            executionId: version.executionId,
+            attemptId: version.attemptId,
           });
           await run(`Revise the pending proposal with this feedback: ${clean}`);
         } catch (error) {
@@ -1331,11 +1447,18 @@ export function useSpectraRun({
         return;
       }
       if (actionKey === "revert") {
+        setActiveRequestCount((count) => count + 1);
         try {
+          const version = await resolveDisplayedRunVersion(card.runId, true);
           const response = await fetch("/api/spectra/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "revert", runId: card.runId }),
+            body: JSON.stringify({
+              action: "revert",
+              runId: card.runId,
+              executionId: version.executionId,
+              attemptId: version.attemptId,
+            }),
           });
           if (!response.ok)
             throw new Error(
@@ -1349,6 +1472,8 @@ export function useSpectraRun({
           toast.error(
             error instanceof Error ? error.message : "Could not undo this run.",
           );
+        } finally {
+          setActiveRequestCount((count) => Math.max(0, count - 1));
         }
         return;
       }
@@ -1356,10 +1481,13 @@ export function useSpectraRun({
         toast.dismiss();
         setActiveRequestCount((count) => count + 1);
         try {
+          const version = await resolveDisplayedRunVersion(card.runId);
           await consume({
             action: "retry",
             runId: card.runId,
             submissionKey: crypto.randomUUID(),
+            executionId: version.executionId,
+            attemptId: version.attemptId,
           });
         } catch (error) {
           toast.error(
@@ -1380,7 +1508,7 @@ export function useSpectraRun({
           );
       }
     },
-    [consume, onDataChanged, onOpenArtifact, run],
+    [consume, onDataChanged, onOpenArtifact, resolveDisplayedRunVersion, run],
   );
 
   const revise = useCallback(
@@ -1476,9 +1604,9 @@ export function useSpectraRun({
             ? submissionKey
             : undefined;
         if (targetRunId) {
-          const displayed = displayedRunVersions.current.get(targetRunId);
-          executionId = displayed?.executionId;
-          attemptId = displayed?.attemptId ?? executionId;
+          const displayed = await resolveDisplayedRunVersion(targetRunId);
+          executionId = displayed.executionId;
+          attemptId = displayed.attemptId;
         }
         const response = await fetch("/api/spectra/run", {
           method: "POST",
@@ -1525,6 +1653,7 @@ export function useSpectraRun({
       observedContinuationRunId,
       onDataChanged,
       publishActiveRuns,
+      resolveDisplayedRunVersion,
     ],
   );
 
@@ -1553,8 +1682,15 @@ export function useSpectraRun({
         startedAt: Date.now(),
       });
       try {
+        const version = await resolveDisplayedRunVersion(runId);
         await consume(
-          { action: "retry", runId, submissionKey: crypto.randomUUID() },
+          {
+            action: "retry",
+            runId,
+            submissionKey: crypto.randomUUID(),
+            executionId: version.executionId,
+            attemptId: version.attemptId,
+          },
           undefined,
           exchangeId,
         );
@@ -1566,7 +1702,7 @@ export function useSpectraRun({
         setActiveRequestCount((count) => Math.max(0, count - 1));
       }
     },
-    [consume],
+    [consume, resolveDisplayedRunVersion],
   );
 
   const submitting =

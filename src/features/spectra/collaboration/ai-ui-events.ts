@@ -1,11 +1,29 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
 import { performAppUiEvent } from "./app-choreography-host";
+import { spectraBus } from "../events";
 
 export type SpectraAiUiEvent = {
   key: string;
   runId?: string;
   payload?: Record<string, unknown>;
 };
+
+const ARTIFACT_TYPE_KEYS = [
+  "document",
+  "code",
+  "flashcard_deck",
+  "quiz",
+  "planner_task",
+  "agent",
+  "presentation",
+  "sheets",
+  "whiteboard",
+  "timetable",
+] as const;
+
+function isArtifactTypeKey(value: unknown): value is (typeof ARTIFACT_TYPE_KEYS)[number] {
+  return typeof value === "string" && (ARTIFACT_TYPE_KEYS as readonly string[]).includes(value);
+}
 
 function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key === "organize_library") {
@@ -92,6 +110,73 @@ function rememberEvent(event: SpectraAiUiEvent): void {
           ? event.payload.note
           : "Open Bridge settings to finish setup",
     });
+    return;
+  }
+  if (event.key === "managebac_classes_selected") {
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "settings",
+      target: "managebac",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updated ManageBac class selection",
+    });
+    return;
+  }
+  if (event.key === "calendar_changed") {
+    const targetId = event.payload?.targetId;
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "calendar",
+      ...(typeof targetId === "string" && targetId ? { target: targetId } : {}),
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updating Calendar",
+    });
+    return;
+  }
+  if (event.key === "reference_insert") {
+    const hostWorkId = event.payload?.hostWorkId;
+    const targetWorkId = event.payload?.targetWorkId;
+    if (
+      typeof hostWorkId === "string" &&
+      hostWorkId.trim() &&
+      typeof targetWorkId === "string" &&
+      targetWorkId.trim()
+    ) {
+      void spectraBus
+        .commandAsync("reference.insert", {
+          hostWorkId,
+          target: {
+            workId: targetWorkId,
+            workType: isArtifactTypeKey(event.payload?.targetWorkType)
+              ? event.payload.targetWorkType
+              : "document",
+            kind: "work:root",
+            path: ["work", "root"],
+            stableIds: { workId: targetWorkId },
+            ...(typeof event.payload?.fallbackExcerpt === "string"
+              ? { fallbackExcerpt: event.payload.fallbackExcerpt }
+              : {}),
+            schemaVersion:
+              typeof event.payload?.schemaVersion === "number"
+                ? event.payload.schemaVersion
+                : 1,
+          },
+        })
+        .catch(() => undefined);
+    }
+    if (typeof hostWorkId === "string" && hostWorkId.trim())
+      noteAiLocation({
+        ...(event.runId ? { actorId: event.runId } : {}),
+        artifactId: hostWorkId,
+        note:
+          typeof event.payload?.note === "string"
+            ? event.payload.note
+            : "Inserting a live reference",
+      });
     return;
   }
   if (event.key !== "navigate" && event.key !== "navigate_spectra") return;

@@ -980,13 +980,26 @@ export const listForContainer = query({
   handler: async (ctx, args) => {
     const actorValue = await getOptionalAuthenticatedActor(ctx);
     if (!actorValue) return { canConfigure: false, embeds: [] };
-    const container = await requireContainer(
-      ctx,
-      actorValue,
-      args.containerType,
-      args.containerId,
-      "read",
-    );
+    let container: Awaited<ReturnType<typeof requireContainer>>;
+    try {
+      container = await requireContainer(
+        ctx,
+        actorValue,
+        args.containerType,
+        args.containerId,
+        "read",
+      );
+    } catch (error) {
+      // A deleted host can outlive its old reference rows. Reading that stale
+      // container is an empty state, not a page-level failure.
+      if (
+        error instanceof Error &&
+        (error.message === "EMBED_CONTAINER_NOT_FOUND" ||
+          error.message === "AUTH_RESOURCE_FORBIDDEN")
+      )
+        return { canConfigure: false, embeds: [] };
+      throw error;
+    }
     const rows = await ctx.db
       .query("artifactEmbeds")
       .withIndex("by_container", (q) =>
@@ -1016,14 +1029,28 @@ export const getProjection = query({
     // A reference node can outlive a legacy embed row (for example after an
     // older cleanup job).  Missing reference metadata is a normal unavailable
     // state for the reader, not a reason to take down the whole document.
-    if (!embed) return null;
-    const container = await requireContainer(
-      ctx,
-      actorValue,
-      embed.containerType,
-      embed.containerId,
-      "read",
-    );
+    if (!embed || embed.removedAt) return null;
+    let container: Awaited<ReturnType<typeof requireContainer>>;
+    try {
+      container = await requireContainer(
+        ctx,
+        actorValue,
+        embed.containerType,
+        embed.containerId,
+        "read",
+      );
+    } catch (error) {
+      // Tiptap reference nodes are durable UI history. If their host was
+      // deleted or access was revoked, render the component's unavailable
+      // state instead of throwing through the global error boundary.
+      if (
+        error instanceof Error &&
+        (error.message === "EMBED_CONTAINER_NOT_FOUND" ||
+          error.message === "AUTH_RESOURCE_FORBIDDEN")
+      )
+        return null;
+      throw error;
+    }
     return projection(ctx, actorValue, embed, container.canConfigure);
   },
 });

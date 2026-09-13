@@ -48,22 +48,5 @@
       ]
     }
   ],
-  "refusedRegions": [
-    {
-      "commandId": "document.layout.pageSize",
-      "region": "sections"
-    },
-    {
-      "commandId": "document.layout.margins",
-      "region": "sections"
-    },
-    {
-      "commandId": "document.layout.header",
-      "region": "headersFooters"
-    },
-    {
-      "commandId": "document.layout.footer",
-      "region": "headersFooters"
-    }
-  ]
+  "refusedRegions": []
 }

@@ -4,7 +4,7 @@ mod polling;
 
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use polling::{PollResult, PollScheduler, PollWake, WaitResult};
 use spectra_bridge_core::fs::{FsError, Grant, GrantRegistry, SafeWriter, WriteRequest};
@@ -38,7 +38,10 @@ struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
     wake: PollWake,
+    active_mount_syncs: ActiveMountSyncs,
 }
+
+type ActiveMountSyncs = Arc<Mutex<HashSet<String>>>;
 
 fn resolve_bridge_data_dir(
     isolated_runtime: Option<std::ffi::OsString>,
@@ -62,6 +65,7 @@ struct SpectraLocalControl {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
     wake: PollWake,
+    active_mount_syncs: ActiveMountSyncs,
 }
 
 impl SpectraLocalControl {
@@ -108,13 +112,26 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn select_mount(&self) -> Result<(), String> {
-        select_mount_impl(&self.app, &self.grants, &self.journal, &self.wake)
+        select_mount_impl(
+            &self.app,
+            &self.grants,
+            &self.journal,
+            &self.wake,
+            &self.active_mount_syncs,
+        )
             .await
             .map(|_| ())
     }
 
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
-        retry_mount_impl(grant_id, &self.grants, &self.journal, &self.wake).await
+        retry_mount_impl(
+            grant_id,
+            &self.grants,
+            &self.journal,
+            &self.wake,
+            &self.active_mount_syncs,
+        )
+        .await
     }
 
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
@@ -1780,6 +1797,7 @@ fn spawn_grant_watcher(
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
     wake: PollWake,
+    active_mount_syncs: ActiveMountSyncs,
 ) {
     tauri::async_runtime::spawn(async move {
         let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
@@ -1852,7 +1870,7 @@ fn spawn_grant_watcher(
                     );
                     continue;
                 }
-                let _ = sync_grant(&grant, &journal).await;
+                let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
                 let marker_key = format!("mount_availability:{}", grant.id);
                 let was_unavailable =
                     journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
@@ -2054,7 +2072,7 @@ fn spawn_grant_watcher(
                 }
             }
             if last_reconciliation.elapsed() >= config.reconciliation_interval {
-                let _ = sync_grant(&grant, &journal).await;
+                let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
                 last_reconciliation = std::time::Instant::now();
             }
             if local_work_queued {
@@ -2067,8 +2085,19 @@ fn spawn_grant_watcher(
     });
 }
 
-async fn sync_grant(grant: &Grant, journal: &Journal) -> Result<(), String> {
-    if !grant.is_available() {
+async fn sync_grant(
+    grant: &Grant,
+    journal: &Journal,
+    active_mount_syncs: &ActiveMountSyncs,
+) -> Result<(), String> {
+    let acquired = active_mount_syncs
+        .lock()
+        .expect("mount sync gate is not poisoned")
+        .insert(grant.id.clone());
+    if !acquired {
+        return Ok(());
+    }
+    let result = if !grant.is_available() {
         set_mount_status(
             journal,
             &grant.id,
@@ -2076,16 +2105,21 @@ async fn sync_grant(grant: &Grant, journal: &Journal) -> Result<(), String> {
             "Folder is unavailable on this device; reconnect the drive to resume.",
             0,
             0,
-        )?;
-        return Ok(());
-    }
-    match run_sync(grant, journal).await {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            let _ = set_mount_status(journal, &grant.id, "error", &error, 0, 0);
-            Err(error)
+        )
+    } else {
+        match run_sync(grant, journal).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = set_mount_status(journal, &grant.id, "error", &error, 0, 0);
+                Err(error)
+            }
         }
-    }
+    };
+    active_mount_syncs
+        .lock()
+        .expect("mount sync gate is not poisoned")
+        .remove(&grant.id);
+    result
 }
 
 #[tauri::command]
@@ -2233,6 +2267,7 @@ async fn select_mount_impl(
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
     wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<Option<(String, String)>, String> {
     let Some(selection) = app.dialog().file().blocking_pick_folder() else {
         return Ok(None);
@@ -2263,7 +2298,13 @@ async fn select_mount_impl(
         0,
         0,
     )?;
-    spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone(), wake.clone());
+    spawn_grant_watcher(
+        grant.clone(),
+        grants.clone(),
+        journal.clone(),
+        wake.clone(),
+        active_mount_syncs.clone(),
+    );
     wake.wake();
     Ok(Some((grant.id, label)))
 }
@@ -2273,7 +2314,14 @@ async fn select_mount(
     app: tauri::AppHandle,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<Option<(String, String)>, String> {
-    select_mount_impl(&app, &runtime.grants, &runtime.journal, &runtime.wake).await
+    select_mount_impl(
+        &app,
+        &runtime.grants,
+        &runtime.journal,
+        &runtime.wake,
+        &runtime.active_mount_syncs,
+    )
+    .await
 }
 
 async fn retry_mount_impl(
@@ -2281,17 +2329,46 @@ async fn retry_mount_impl(
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
     wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<(), String> {
     let grant = grants
         .device_grants()
         .into_iter()
         .find(|grant| grant.id == grant_id)
         .ok_or_else(|| "Folder grant not found".to_string())?;
-    let result = sync_grant(&grant, journal).await;
-    if result.is_ok() {
-        wake.wake();
+    let already_running = active_mount_syncs
+        .lock()
+        .expect("mount sync gate is not poisoned")
+        .contains(&grant.id);
+    if already_running {
+        return Ok(());
     }
-    result
+    set_mount_status(
+        journal,
+        &grant.id,
+        "scanning",
+        "Repair scan queued; existing changes remain safe.",
+        0,
+        0,
+    )?;
+    let grant_for_scan = grant.clone();
+    let journal_for_scan = journal.clone();
+    let active_mount_syncs_for_scan = active_mount_syncs.clone();
+    let wake_for_scan = wake.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) =
+            sync_grant(&grant_for_scan, &journal_for_scan, &active_mount_syncs_for_scan).await
+        {
+            record_runtime_error(
+                &journal_for_scan,
+                "Repair scan failed",
+                &error,
+            );
+        }
+        wake_for_scan.wake();
+    });
+    wake.wake();
+    Ok(())
 }
 
 #[tauri::command]
@@ -2299,7 +2376,14 @@ async fn retry_mount(
     grant_id: String,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<(), String> {
-    retry_mount_impl(&grant_id, &runtime.grants, &runtime.journal, &runtime.wake).await
+    retry_mount_impl(
+        &grant_id,
+        &runtime.grants,
+        &runtime.journal,
+        &runtime.wake,
+        &runtime.active_mount_syncs,
+    )
+    .await
 }
 
 async fn remove_mount_impl(
@@ -2400,6 +2484,7 @@ async fn run_sync_iteration(
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
     state: &Arc<ServerState>,
+    active_mount_syncs: &ActiveMountSyncs,
     restored_grants_reconciled: &mut bool,
     last_compaction: &mut std::time::Instant,
     deployment: &mut Option<String>,
@@ -2447,7 +2532,10 @@ async fn run_sync_iteration(
     if !*restored_grants_reconciled {
         let mut reconciliation_succeeded = true;
         for grant in grants.device_grants() {
-            if sync_grant(&grant, journal).await.is_err() {
+            if sync_grant(&grant, journal, active_mount_syncs)
+                .await
+                .is_err()
+            {
                 reconciliation_succeeded = false;
             }
         }
@@ -2516,7 +2604,7 @@ async fn run_sync_iteration(
                 // LibreOffice/Office disk edits can upload again.
                 *restored_grants_reconciled = false;
                 for grant in grants.device_grants() {
-                    let _ = sync_grant(&grant, journal).await;
+                    let _ = sync_grant(&grant, journal, active_mount_syncs).await;
                 }
             }
         }
@@ -2597,6 +2685,7 @@ async fn run_sync_worker(
     journal: Arc<Journal>,
     state: Arc<ServerState>,
     wake: PollWake,
+    active_mount_syncs: ActiveMountSyncs,
 ) {
     // UUID v4 supplies an independent per-process component. The scheduler
     // folds the persisted device ID into it once pairing is available.
@@ -2622,6 +2711,7 @@ async fn run_sync_worker(
             &grants,
             &journal,
             &state,
+            &active_mount_syncs,
             &mut restored_grants_reconciled,
             &mut last_compaction,
             &mut deployment,
@@ -2753,16 +2843,25 @@ fn main() {
                 grants: grants.clone(),
                 journal: journal.clone(),
                 wake: sync_wake.clone(),
+                active_mount_syncs: Arc::new(Mutex::new(HashSet::new())),
             });
+            let active_mount_syncs = app.state::<BridgeRuntime>().active_mount_syncs.clone();
             state.install_local_control(Arc::new(SpectraLocalControl {
                 app: app.handle().clone(),
                 state: state.clone(),
                 grants: grants.clone(),
                 journal: journal.clone(),
                 wake: sync_wake.clone(),
+                active_mount_syncs: active_mount_syncs.clone(),
             }));
             for grant in restored_grants {
-                spawn_grant_watcher(grant, grants.clone(), journal.clone(), sync_wake.clone());
+                spawn_grant_watcher(
+                    grant,
+                    grants.clone(),
+                    journal.clone(),
+                    sync_wake.clone(),
+                    active_mount_syncs.clone(),
+                );
             }
             let sync_journal = app.state::<BridgeRuntime>().journal.clone();
             let sync_grants = app.state::<BridgeRuntime>().grants.clone();
@@ -2772,6 +2871,7 @@ fn main() {
                 sync_journal,
                 sync_state,
                 sync_wake.clone(),
+                active_mount_syncs,
             ));
             let server_journal = journal.clone();
             tauri::async_runtime::spawn(async move {

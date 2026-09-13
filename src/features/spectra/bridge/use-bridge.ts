@@ -43,10 +43,15 @@ export function useBridgeHealth() {
     const cached = loadBridgeStatusCache();
     if (cached) setStatus({ ...cached, paired: false, cloudConnected: false });
     const refresh = () =>
-      Promise.all([
-        discoverBridge(controller.signal),
-        bridgeStatus(controller.signal),
-      ]).then(([nextDiscovery, nextStatus]) => {
+      discoverBridge(controller.signal).then(async (nextDiscovery) => {
+        // Do not probe the authenticated status endpoint when the local
+        // process is absent (the common local --no-bridge mode). Besides
+        // avoiding needless work, this prevents stale sessions from turning a
+        // healthy Spectra page into a stream of 401 console errors.
+        const nextStatus =
+          nextDiscovery.kind === "running"
+            ? await bridgeStatus(controller.signal)
+            : null;
         setDiscovery(nextDiscovery);
         setHealth(
           nextDiscovery.kind === "running" ? nextDiscovery.health : null,
@@ -128,10 +133,9 @@ export function useBridgeHealth() {
       );
     },
     refresh: async () => {
-      const [nextDiscovery, nextStatus] = await Promise.all([
-        discoverBridge(),
-        bridgeStatus(),
-      ]);
+      const nextDiscovery = await discoverBridge();
+      const nextStatus =
+        nextDiscovery.kind === "running" ? await bridgeStatus() : null;
       setDiscovery(nextDiscovery);
       setHealth(
         nextDiscovery.kind === "running" ? nextDiscovery.health : null,

@@ -45,7 +45,7 @@ function taskPayload(classId, revision) {
         id: 3001,
         title: changed ? "Functions problem set — updated" : "Functions problem set",
         description: "Fixture task for selected-class polling.",
-        due_at: "2026-09-18T16:00:00Z",
+        due_at: changed ? "2026-09-19T16:30:00Z" : "2026-09-18T16:00:00Z",
         updated_at: revision,
       },
     ],

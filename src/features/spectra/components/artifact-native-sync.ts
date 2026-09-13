@@ -346,7 +346,7 @@ export function useArtifactNativeSync({
         if (!response.ok)
           throw new Error(
             result?.message ??
-              "This edit could not be written safely to the Word file.",
+              `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
           );
         if (result?.state === "unchanged") {
           lastPromotedLiveKeyRef.current = nativeLiveContentKey(
@@ -373,7 +373,7 @@ export function useArtifactNativeSync({
         }
         if (!result?.hash)
           throw new Error(
-            "The Word write was queued without a verifiable hash.",
+            `The ${nativeOfficeApplication} write was queued without a verifiable hash.`,
           );
         lastPromotedLiveKeyRef.current = nativeLiveContentKey(snapshot.content);
         lastFailedPromotionKeyRef.current = undefined;
@@ -386,7 +386,7 @@ export function useArtifactNativeSync({
         setNativeWriteError(
           error instanceof Error
             ? error.message
-            : "This edit could not be written safely to the Word file.",
+            : `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
         );
       }
     },

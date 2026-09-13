@@ -782,6 +782,29 @@ export async function buildPresentationPptx(
   const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
   const byId = assetMap(assets);
   const slideNumbers = new Map(content.slides.map((slide, index) => [slide.id, index + 1] as const));
+  // Image fetches used to happen inside the slide/object loop, so a deck with
+  // several media objects paid the network and FileReader cost one at a time.
+  // Resolve each referenced asset once before PptxGenJS starts building pages;
+  // this keeps export ordering deterministic while allowing the browser to
+  // overlap independent downloads.
+  const imageAssetIds = new Set<string>();
+  for (const slide of content.slides) {
+    for (const object of slide.objects) {
+      if (object.type !== "image") continue;
+      const source = (object.content && typeof object.content === "object"
+        ? object.content
+        : {}) as { assetId?: unknown };
+      if (typeof source.assetId === "string" && byId.get(source.assetId)?.downloadUrl)
+        imageAssetIds.add(source.assetId);
+    }
+  }
+  const assetDataUrls = new Map<string, string>();
+  await Promise.all(
+    [...imageAssetIds].map(async (assetId) => {
+      const url = byId.get(assetId)?.downloadUrl;
+      if (url) assetDataUrls.set(assetId, await dataUrl(url));
+    }),
+  );
   for (const slide of content.slides) {
     const page = pptx.addSlide();
     page.background = {
@@ -846,9 +869,12 @@ export async function buildPresentationPptx(
           ? object.content
           : {}) as { assetId?: string; crop?: { left?: number; top?: number; right?: number; bottom?: number } };
         const asset = source.assetId ? byId.get(source.assetId) : undefined;
-        if (asset?.downloadUrl)
+        const imageData = source.assetId
+          ? assetDataUrls.get(source.assetId)
+          : undefined;
+        if (asset?.downloadUrl && imageData)
           page.addImage({
-            data: await dataUrl(asset.downloadUrl),
+            data: imageData,
             altText: object.altText,
             ...(object.hyperlink ? { hyperlink: pptxHyperlink(object.hyperlink, slideNumbers) } : {}),
             ...(object.style?.fit === "cover"

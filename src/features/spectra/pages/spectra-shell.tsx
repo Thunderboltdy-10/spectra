@@ -1113,6 +1113,12 @@ export function SpectraShell({
   const requestedThreadId = searchParams.get("threadId") ?? undefined;
   const requestedHome = searchParams.get("home") === "1";
   const [overview, setOverview] = useState<SpectraOverview | null>(null);
+  // Library/overview rows are intentionally summary-only. Keep detail
+  // payloads in the shell so opening one cannot mount a default document and
+  // let collaboration persist that shell over a rich committed snapshot.
+  const [hydratedArtifacts, setHydratedArtifacts] = useState<
+    Record<string, SpectraArtifact>
+  >({});
   const [overviewLoadState, setOverviewLoadState] = useState<OverviewLoadState>(
     { status: "loading" },
   );
@@ -1684,8 +1690,10 @@ export function SpectraShell({
   const allArtifacts = useMemo(
     () =>
       snapshotArtifacts.map((artifact) => {
+        const hydrated = hydratedArtifacts[artifact._id];
+        const base = hydrated ?? artifact;
         const live = liveIdentityByKey.get(`work:${artifact._id}`);
-        if (!live) return artifact;
+        if (!live) return base;
         const placements = live.workspaceContextId
           ? [
               {
@@ -1700,17 +1708,17 @@ export function SpectraShell({
             ]
           : [];
         return {
-          ...artifact,
+          ...base,
           title: live.name,
-          summary: live.summary ?? artifact.summary,
+          summary: live.summary ?? base.summary,
           updatedAt: live.activityAt,
           placements,
           placementStatus: placements.length
             ? ("workspace" as const)
-            : artifact.placementStatus,
+            : base.placementStatus,
         };
       }),
-    [liveIdentityByKey, snapshotArtifacts],
+    [hydratedArtifacts, liveIdentityByKey, snapshotArtifacts],
   );
   useEffect(() => {
     const known = new Set(allArtifacts.map((artifact) => artifact._id));
@@ -3130,6 +3138,18 @@ export function SpectraShell({
     artifact: SpectraArtifact,
     historyMode: "push" | "replace" | "none" = "push",
   ) {
+    if (artifact.content === undefined) {
+      void getSpectraArtifact(artifact._id)
+        .then(({ artifact: hydrated }) => {
+          setHydratedArtifacts((current) => ({
+            ...current,
+            [hydrated._id]: hydrated,
+          }));
+          openArtifactPanel(hydrated, historyMode);
+        })
+        .catch(() => toast.error("That work could not be opened."));
+      return;
+    }
     // A user-chosen open ends spectating; a follow-dispatched open does not.
     if (!isProgrammaticOpen() && !isProgrammaticFollowOpen()) {
       disengageFollowAi();
@@ -3685,7 +3705,13 @@ export function SpectraShell({
             (work) => work._id === created.artifactId,
           ),
         );
-      if (imported) openArtifactPanel(imported);
+      if (imported) {
+        setHydratedArtifacts((current) => ({
+          ...current,
+          [imported._id]: imported,
+        }));
+        openArtifactPanel(imported);
+      }
       toast.success(
         selectedWorkspaceId
           ? `${title} imported into this workspace.`

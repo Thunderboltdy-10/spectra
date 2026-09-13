@@ -609,8 +609,12 @@ export const configure = mutation({
         "INTEGRATION_URL_INVALID: Enter the tenant API base URL.",
       );
     }
+    const localStack = process.env.SPECTRA_APP_URL?.startsWith(
+      "http://localhost:",
+    );
     const localFixture =
-      process.env.SPECTRA_ALLOW_LOCAL_MANAGEBAC_FIXTURE === "true" &&
+      (process.env.SPECTRA_ALLOW_LOCAL_MANAGEBAC_FIXTURE === "true" ||
+        localStack) &&
       parsed.protocol === "http:" &&
       ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
     if (parsed.protocol !== "https:" && !localFixture)

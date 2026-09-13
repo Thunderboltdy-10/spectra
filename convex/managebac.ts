@@ -609,7 +609,11 @@ export const configure = mutation({
         "INTEGRATION_URL_INVALID: Enter the tenant API base URL.",
       );
     }
-    if (parsed.protocol !== "https:")
+    const localFixture =
+      process.env.SPECTRA_ALLOW_LOCAL_MANAGEBAC_FIXTURE === "true" &&
+      parsed.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
+    if (parsed.protocol !== "https:" && !localFixture)
       throw new Error("INTEGRATION_URL_INVALID: ManageBac must use HTTPS.");
     if (
       parsed.username ||

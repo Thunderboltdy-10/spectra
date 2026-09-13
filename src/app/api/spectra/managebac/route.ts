@@ -473,8 +473,11 @@ function isPrivateIpv6(ip: string) {
 
 async function assertPublicApiHost(baseUrl: string) {
   const url = new URL(baseUrl);
+  const localStack = process.env.SPECTRA_APP_URL?.startsWith(
+    "http://localhost:",
+  );
   const testFixtureOrigin =
-    process.env.NODE_ENV === "test"
+    process.env.NODE_ENV === "test" || localStack
       ? process.env.SPECTRA_MANAGEBAC_TEST_FIXTURE_ORIGIN?.trim()
       : undefined;
   if (testFixtureOrigin && url.origin === testFixtureOrigin) {

@@ -165,6 +165,7 @@ import { openSpectraPackage } from "../lenses/spectra-package";
 import {
   classifyLibraryImport,
   importLibraryResourceFile,
+  projectDocxImportWithDurableImages,
   projectOfficeImportWithLens,
   projectLibraryImportContent,
 } from "../organization/library-import";
@@ -3628,6 +3629,12 @@ export function SpectraShell({
         source: "manual",
         workspaceId: selectedWorkspaceId,
       });
+      const canonicalImportedContent =
+        !portable &&
+        blueprintKey === "document" &&
+        file.name.toLowerCase().endsWith(".docx")
+          ? await projectDocxImportWithDurableImages(file, created.artifactId)
+          : importedContent;
       const digest = await crypto.subtle.digest("SHA-256", originalBuffer);
       const sha256 = [...new Uint8Array(digest)]
         .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -3659,7 +3666,7 @@ export function SpectraShell({
               },
             ],
         unsupportedFeatures: officeProjection?.unsupportedFeatures ?? [],
-        importedContent,
+        importedContent: canonicalImportedContent,
       });
       await postSpectra({
         action: "createArtifactImportVersion",

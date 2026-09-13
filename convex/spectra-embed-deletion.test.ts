@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
@@ -32,6 +32,69 @@ async function drainDeletion(t: ReturnType<typeof convexTest>, jobId: Id<"artifa
 }
 
 describe("Spectra embed deletion lifecycle", () => {
+  it("runs the dispatcher handoff through the scheduled page worker", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setupTest();
+      const artifactId = await t.run(async (ctx) => {
+        const now = Date.now();
+        const schoolId = await ctx.db.insert("schools", {
+          name: "Scheduled deletion school",
+          slug: `scheduled-deletion-${crypto.randomUUID()}`,
+          verifiedDomains: [],
+          status: "active",
+          timezone: "Europe/Madrid",
+          policyVersion: 1,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const accountId = await ctx.db.insert("accounts", {
+          clerkId: identity.subject,
+          email: identity.email,
+          emailVerified: true,
+          name: "Scheduled deletion owner",
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.insert("schoolMemberships", {
+          accountId,
+          schoolId,
+          role: "school_admin",
+          status: "active",
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return ctx.db.insert("spectraArtifacts", {
+          ownerAccountId: accountId,
+          schoolId,
+          blueprintKey: "document",
+          schemaVersion: 2,
+          title: "Scheduled deletion artifact",
+          content: { blocks: [] },
+          textIndex: "scheduled deletion artifact",
+          tags: [],
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
+
+      const deletion = await t.withIdentity(identity).mutation(api.spectraArtifacts.permanentlyDelete, { artifactId });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+      const result = await t.run(async (ctx) => ({
+        artifact: await ctx.db.get(artifactId),
+        job: await ctx.db.get(deletion.jobId),
+      }));
+      expect(result.artifact).toBeNull();
+      expect(result.job?.phase).toBe("complete");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tombstones embeds in both directions and cancels their pending requests", async () => {
     const t = setupTest();
     const fixture = await t.run(async (ctx) => {

@@ -14,6 +14,7 @@ import {
   DELETION_CURSOR_VERSION,
   DELETION_PAGE_TIMEOUT_MS,
   queueDeletionDispatch,
+  queueDeletionProcess,
   queueDeletionRecovery,
 } from "./artifactDeletionScheduling";
 import {
@@ -381,7 +382,7 @@ export const dispatch = internalMutation({
     const attemptId = crypto.randomUUID();
     const attemptCount = (job.attemptCount ?? 0) + 1;
     await ctx.db.patch(job._id, { activeAttemptId: attemptId, activeAttemptAt: now, attemptCount, nextAttemptAt: now + DELETION_PAGE_TIMEOUT_MS, updatedAt: now });
-    await schedule(ctx, job._id, job.generation, 0, { phase: job.phase, cursor: job.cursor });
+    await queueDeletionProcess(ctx, job._id, job.generation, attemptId, { phase: job.phase, cursor: job.cursor });
     await queueDeletionRecovery(ctx, job._id, job.generation, attemptId, { phase: job.phase, cursor: job.cursor });
     return { started: true, attemptId };
   },

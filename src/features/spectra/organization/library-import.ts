@@ -1,5 +1,108 @@
+import type { JSONContent } from "@tiptap/core";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
+import { uploadArtifactAsset } from "../data/api";
+import { artifactBlobSha256 } from "../components/artifact-studio-file-utils";
+import { importDocxPayload } from "../lenses/docx-adapter";
+
+function imagePixelDimensions(
+  bytes: Uint8Array,
+  mediaType: "image/png" | "image/jpeg",
+) {
+  if (mediaType === "image/png" && bytes.length >= 24) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16);
+    const height = view.getUint32(20);
+    return width > 0 && height > 0 ? { width, height } : undefined;
+  }
+  if (mediaType !== "image/jpeg" || bytes.length < 4) return undefined;
+  let offset = 2;
+  while (offset + 3 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = bytes[offset + 1]!;
+    offset += 2;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 1 >= bytes.length) return undefined;
+    const segmentLength = (bytes[offset]! << 8) | bytes[offset + 1]!;
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) return undefined;
+    const isSizeMarker =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+    if (isSizeMarker && offset + 7 < bytes.length) {
+      const height = (bytes[offset + 3]! << 8) | bytes[offset + 4]!;
+      const width = (bytes[offset + 5]! << 8) | bytes[offset + 6]!;
+      return width > 0 && height > 0 ? { width, height } : undefined;
+    }
+    offset += segmentLength;
+  }
+  return undefined;
+}
+
+export function imageEmuAttributes(
+  bytes: Uint8Array,
+  mediaType: "image/png" | "image/jpeg",
+) {
+  const dimensions = imagePixelDimensions(bytes, mediaType);
+  if (!dimensions || dimensions.width > 100_000 || dimensions.height > 100_000)
+    return {};
+  return {
+    widthEmu: dimensions.width * 9_525,
+    heightEmu: dimensions.height * 9_525,
+  };
+}
+
+/** Replace transient data URLs from the DOCX lens with durable artifact assets. */
+export async function materializeJsonImages(node: JSONContent, artifactId: string): Promise<JSONContent> {
+  const attrs = node.attrs ?? {};
+  if (node.type === "image" && typeof attrs.assetId !== "string" && typeof attrs.src === "string") {
+    const match = attrs.src.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/iu);
+    if (match) {
+      const binary = atob(match[2]!);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const blob = new Blob([bytes], { type: match[1]!.toLowerCase() });
+      const sha256 = await artifactBlobSha256(blob);
+      const extension = match[1]!.toLowerCase() === "image/jpeg" ? "jpg" : "png";
+      const uploaded = await uploadArtifactAsset({
+        artifactId,
+        path: `document/images/${sha256}.${extension}`,
+        name: `image-${sha256.slice(0, 12)}.${extension}`,
+        mediaType: match[1]!.toLowerCase(),
+        sha256,
+        blob,
+      });
+      return {
+        ...node,
+        attrs: {
+          ...attrs,
+          src: `/api/spectra/assets/content?assetId=${encodeURIComponent(uploaded.assetId)}`,
+          assetId: uploaded.assetId,
+          mediaType: match[1]!.toLowerCase(),
+          ...imageEmuAttributes(bytes, match[1]!.toLowerCase() as "image/png" | "image/jpeg"),
+        },
+      };
+    }
+  }
+  if (!node.content?.length) return node;
+  return {
+    ...node,
+    content: await Promise.all(node.content.map((child) => materializeJsonImages(child, artifactId))),
+  };
+}
+
+/** Parse a Library DOCX and bind every supported image before canonical commit. */
+export async function projectDocxImportWithDurableImages(file: File, artifactId: string) {
+  const checked = await readBoundedArchive(
+    new Uint8Array(await file.arrayBuffer()),
+    OFFICE_ARCHIVE_LIMITS,
+  );
+  const imported = await importDocxPayload(checked.bytes);
+  return materializeJsonImages(imported.json as JSONContent, artifactId);
+}
 
 export const LIBRARY_IMPORT_ACCEPT = [
   ".spectra-pkg",

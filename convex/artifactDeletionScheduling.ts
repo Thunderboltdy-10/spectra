@@ -30,6 +30,31 @@ export function initialDeletionCursor(
   ).toString("base64url");
 }
 
+export async function queueDeletionProcess(
+  ctx: MutationCtx,
+  jobId: Id<"artifactDeletionJobs">,
+  generation: number,
+  attemptId: string,
+  expected: ExpectedCursor,
+  delay = 0,
+) {
+  await (ctx.scheduler.runAfter as unknown as (
+    delay: number,
+    fn: unknown,
+    args: unknown,
+  ) => Promise<unknown>)(
+    delay,
+    internalDeletionFunction("process"),
+    {
+      jobId,
+      generation,
+      attemptId,
+      expectedPhase: expected.phase,
+      expectedCursor: expected.cursor,
+    },
+  );
+}
+
 export async function queueDeletionDispatch(
   ctx: MutationCtx,
   jobId: Id<"artifactDeletionJobs">,

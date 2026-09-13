@@ -119,7 +119,7 @@ async function readBoundedJson(request: Request, limit = MAX_IMPORT_BODY_BYTES) 
   return JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), length).toString("utf8")) as Record<string, unknown>;
 }
 
-async function streamStorageUpload(uploadUrl: string, request: Request, mimeType: string, bytes: number) {
+export async function streamStorageUpload(uploadUrl: string, request: Request, mimeType: string, bytes: number) {
   if (!request.body) throw new Error("IMPORT_BODY_REQUIRED");
   const reader = request.body.getReader();
   let seen = 0;
@@ -147,7 +147,12 @@ async function streamStorageUpload(uploadUrl: string, request: Request, mimeType
   if (!uploaded.ok) throw new Error("IMPORT_STORAGE_UPLOAD_FAILED");
   const payload = (await uploaded.json()) as { storageId?: string };
   if (!payload.storageId) throw new Error("IMPORT_STORAGE_ID_MISSING");
-  return { storageId: payload.storageId, bytes: seen, sha256: hash.copy().digest("hex") };
+  return {
+    storageId: payload.storageId,
+    bytes: seen,
+    sha256: hash.copy().digest("hex"),
+    complete: seen === bytes,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -293,6 +298,16 @@ export async function PUT(request: NextRequest) {
       sha256: uploaded.sha256,
       mediaType: normalizeMediaType(intent.mimeType),
     });
+    if (!uploaded.complete) {
+      // The storage service has already received the streamed candidate. Send
+      // its truthful receipt through the normal trusted verifier so the job is
+      // quarantined and the candidate cannot become an unowned object.
+      await convexAction<
+        { jobId: string; storageId: string; uploadReceipt: string; attestation: typeof attestation },
+        { jobId: string; status: string; errorCode?: string }
+      >("artifactIntakeActions:verifyUploadedOriginal", { jobId, storageId: uploaded.storageId, uploadReceipt: intent.uploadReceipt ?? "", attestation }).catch(() => undefined);
+      throw new Error("IMPORT_UPLOAD_INVALID: streamed byte count did not match the upload intent.");
+    }
     const finalized = await convexAction<
       { jobId: string; storageId: string; uploadReceipt: string; attestation: typeof attestation },
       { jobId: string; status: string; errorCode?: string }

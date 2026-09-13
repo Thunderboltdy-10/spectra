@@ -22,7 +22,9 @@ async function manageBacPost(body: Record<string, unknown>) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(
-      payload?.error?.message ?? "Those class shelves could not be saved.",
+      [payload?.error?.code, payload?.error?.message]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join(": ") || "Those class shelves could not be saved.",
     );
   return payload.data ?? payload;
 }

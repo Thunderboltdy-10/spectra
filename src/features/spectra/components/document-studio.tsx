@@ -923,7 +923,12 @@ export function DocumentStudio({
         TableHeader,
         TaskList,
         TaskItem.configure({ nested: true }),
-        DocumentImage.configure({ allowBase64: true, inline: false }),
+        // DOCX pictures are authored image nodes inside their source
+        // paragraph. They must remain inline in ProseMirror or schema parsing
+        // drops the entire paragraph when the live Yjs editor reopens it.
+        // `setImage` still inserts at the current paragraph selection, while
+        // Word export continues to place the drawing in that paragraph.
+        DocumentImage.configure({ allowBase64: true, inline: true }),
         NativeDocxImage,
         TextAlign.configure({ types: ["heading", "paragraph"] }),
         Highlight.configure({ multicolor: true }),

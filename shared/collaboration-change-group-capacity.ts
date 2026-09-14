@@ -11,7 +11,8 @@ export type ChangeGroupSnapshotLike = {
   summary?: string;
   content?: unknown;
   tags: string[];
-  $spectraSnapshotOmitted?: boolean;
+  /** Omit marker — must NOT start with '$' (Convex reserved field names). */
+  spectraSnapshotOmitted?: boolean;
   contentHash?: string;
   [key: string]: unknown;
 };
@@ -40,7 +41,8 @@ export function slimChangeGroupSnapshot(
     title: snapshot.title,
     summary: snapshot.summary,
     tags: Array.isArray(snapshot.tags) ? snapshot.tags : [],
-    $spectraSnapshotOmitted: true,
+    // Legal Convex field (no leading '$') — content lives on artifact / Yjs head.
+    spectraSnapshotOmitted: true,
     ...(hash ? { contentHash: hash } : {}),
   };
 }
@@ -87,7 +89,7 @@ export function isOmittedChangeGroupSnapshot(snapshot: unknown): boolean {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot))
     return false;
   return Boolean(
-    (snapshot as ChangeGroupSnapshotLike).$spectraSnapshotOmitted === true,
+    (snapshot as ChangeGroupSnapshotLike).spectraSnapshotOmitted === true,
   );
 }
 

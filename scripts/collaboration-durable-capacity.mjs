@@ -392,7 +392,8 @@ export function slimChangeGroupSnapshot(snapshot, contentHash) {
     title: snapshot.title,
     summary: snapshot.summary,
     tags: Array.isArray(snapshot.tags) ? snapshot.tags : [],
-    $spectraSnapshotOmitted: true,
+    // Legal Convex field (no leading '$') — content lives on artifact / Yjs head.
+    spectraSnapshotOmitted: true,
     ...(hash ? { contentHash: hash } : {}),
   };
 }

@@ -377,6 +377,13 @@ describe("P5.I2 gateway production helpers", () => {
       ),
     ).toBe(true);
     expect(
+      permanentPersistenceFailure(
+        new Error(
+          "Field name $spectraSnapshotOmitted starts with a '$', which is reserved.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
       appendBaseStateVectorHash({
         lastPersistedHash: "b".repeat(43),
         capturedBaseHash: "a".repeat(43),

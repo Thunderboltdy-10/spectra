@@ -222,7 +222,13 @@ describe("change group snapshot capacity", () => {
       contentHash: "a".repeat(43),
     });
     expect(fitted.omitted).toBe(true);
-    expect(fitted.baseSnapshot.$spectraSnapshotOmitted).toBe(true);
+    expect(fitted.baseSnapshot.spectraSnapshotOmitted).toBe(true);
+    // Convex object fields may not start with '$' (reserved) — omit marker must be legal.
+    expect(
+      Object.keys(fitted.baseSnapshot).every((key) => !key.startsWith("$")),
+    ).toBe(true);
+    expect("spectraSnapshotOmitted" in fitted.baseSnapshot).toBe(true);
+    expect("$spectraSnapshotOmitted" in fitted.baseSnapshot).toBe(false);
     expect(fitted.finalSnapshot.content).toBeUndefined();
     expect(fitted.baseSnapshot.contentHash).toBe("a".repeat(43));
     const storedChars = JSON.stringify({

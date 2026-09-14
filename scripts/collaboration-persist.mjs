@@ -22,6 +22,9 @@ export function permanentPersistenceFailure(error) {
   // Convex document ceiling — retrying cannot shrink the row. Fail closed so
   // Saving does not hang in an endless durable-append loop (1.48 MiB > 1 MiB).
   if (/Value is too large|maximum size\s+1\s*MiB/i.test(message)) return true;
+  // Convex reserved-field / document validation — retrying cannot legalize the row.
+  if (/Field name .+ starts with a '\$'|which is reserved|ArgumentValidationError|Validator error/i.test(message))
+    return true;
   const code = persistenceFailureCode(error);
   if (!code || code === "COLLABORATION_BASE_STATE_STALE") return false;
   // PROJECTION_SIZE / PROJECTION_INVALID / CHANGE_GROUP_SIZE are fail-closed:

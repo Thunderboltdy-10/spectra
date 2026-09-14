@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "IMPORT_FILE_REQUIRED" }, { status: 400 });
     const format = file.name.split(".").pop()?.toLowerCase() ?? "";
     const payload = new Uint8Array(await file.arrayBuffer());
-    if (format === "docx" || format === "doc") {
+    if (format === "docx") {
       const opened = await docxLens.open(payload, "strict-native");
       return NextResponse.json({
         ok: true,

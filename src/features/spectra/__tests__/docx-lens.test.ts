@@ -655,8 +655,10 @@ describe("DOCX preservation lens", () => {
     ));
     const opened = await docxLens.open(zipSync(files));
     const linked = opened.projection.blocks.find((block) => block.attrs?.nativeReadOnly === true)!;
-    expect(opened.fidelityMap.entries.find((entry) => entry.feature === "hyperlinks"))
-      .toMatchObject({ class: "PRESERVED", readOnly: true });
+    const hyperlinks = opened.fidelityMap.entries.find((entry) => entry.feature === "hyperlinks");
+    expect(hyperlinks).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(hyperlinks?.reason ?? "").toMatch(/preserves hyperlinks/i);
+    expect(hyperlinks?.reason ?? "").not.toMatch(/editable when/i);
     await expect(docxLens.mutate(opened.preservedCarry, {
       kind: "replace-paragraph",
       regionId: linked.id,

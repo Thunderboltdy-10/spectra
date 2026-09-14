@@ -369,7 +369,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "insert.citation",
-    "Cite a source this document carries.",
+    "Insert a Spectra research citation into the body. This does not create a Word citation field or Sources XML entry.",
     { delta: "insert-paragraph", touches: ["body"], manifest: "add_citation" },
   ],
   [
@@ -650,17 +650,17 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "references.bibliography",
-    "Insert a bibliography from the citations in this document.",
+    "Insert a Spectra research bibliography from citations in this document. This does not write Word Sources/bibliography XML.",
     { delta: "insert-paragraph", touches: ["body"] },
   ],
   [
     "references.citationStyle",
-    "Set the citation style for this document.",
+    "Set Spectra research citation style for this document. Word citation styles are unchanged.",
     { params: text, delta: "insert-paragraph", touches: ["body"], field: true },
   ],
   [
     "references.source.add",
-    "Add a source to this document.",
+    "Add a Spectra research source to this document. This does not add a Word Sources XML entry.",
     { delta: "insert-paragraph", touches: ["body"] },
   ],
   [

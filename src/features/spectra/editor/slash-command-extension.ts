@@ -56,7 +56,7 @@ export const DOCUMENT_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { id: "image", commandId: "document.insert.image", label: "Image", description: "Insert an image from your device", icon: "image", section: "Media", aliases: ["picture", "photo"] },
   { id: "reference", commandId: "document.insert.reference", label: "Reference", description: "Insert visible work without copying it", icon: "link", section: "Media", aliases: ["embed", "work"] },
   { id: "link", commandId: "document.insert.link", label: "Link", description: "Link the selection to a web address", icon: "link", section: "Media", aliases: ["url", "href"] },
-  { id: "citation", commandId: "document.insert.citation", label: "Citation", description: "Cite a source this document carries", icon: "book", section: "References", aliases: ["cite", "source"] },
+  { id: "citation", commandId: "document.insert.citation", label: "Citation", description: "Insert a Spectra research citation (not a Word citation field)", icon: "book", section: "References", aliases: ["cite", "source"] },
   { id: "footnote", commandId: "document.insert.footnote", label: "Footnote", description: "A numbered note at the foot of the page", icon: "book", section: "References", aliases: ["note"] },
   { id: "endnote", commandId: "document.insert.endnote", label: "Endnote", description: "A note collected at the end", icon: "book", section: "References", aliases: [] },
   { id: "toc", commandId: "document.insert.toc", label: "Table of contents", description: "List the headings as they are now", icon: "list-ordered", section: "References", aliases: ["contents", "outline"] },

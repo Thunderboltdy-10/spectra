@@ -405,6 +405,25 @@ async function runHasAttachmentInput(
   return serializedInput && !hasRetainedBytes;
 }
 
+
+function durableArtifactWritesArmRunUndo(
+  operations: ReadonlyArray<{
+    type: string;
+    status: string;
+    affected: Array<{ type: string; id: string }>;
+  }>,
+) {
+  return operations.some(
+    (operation) =>
+      operation.status === "executed" &&
+      (operation.type === "artifact.create" ||
+        operation.type === "artifact.update") &&
+      operation.affected.some(
+        (item) => item.type === "artifact" && Boolean(item.id),
+      ),
+  );
+}
+
 function recoveryForRun(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
@@ -1874,25 +1893,37 @@ export const reconcileStaleRuns = internalMutation({
                 ? "Partial work preserved"
                 : "Run interrupted",
             summary: error,
-            actions: recovery.retryable
-              ? [
-                  {
-                    key: "retry",
-                    label: "Retry",
-                    targetType: "run",
-                    targetId: run._id,
-                  },
-                ]
-              : run.threadId
+            actions: [
+              ...(recovery.retryable
                 ? [
                     {
-                      key: "continue",
-                      label: "Continue in thread",
-                      targetType: "thread",
-                      targetId: run.threadId,
+                      key: "retry" as const,
+                      label: "Retry",
+                      targetType: "run" as const,
+                      targetId: run._id,
                     },
                   ]
-                : [],
+                : run.threadId
+                  ? [
+                      {
+                        key: "continue" as const,
+                        label: "Continue in thread",
+                        targetType: "thread" as const,
+                        targetId: run.threadId,
+                      },
+                    ]
+                  : []),
+              ...(durableArtifactWritesArmRunUndo(currentOperations)
+                ? [
+                    {
+                      key: "revert" as const,
+                      label: "Undo this run",
+                      targetType: "run" as const,
+                      targetId: run._id,
+                    },
+                  ]
+                : []),
+            ],
             updatedAt: now,
           }),
         ),
@@ -2524,6 +2555,39 @@ export const stopRun = mutation({
       .query("spectraResultCards")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .collect();
+    const durableArtifactWrite =
+      durableArtifactWritesArmRunUndo(currentOperations);
+    const stopActions = [
+      ...(recovery.retryable
+        ? [
+            {
+              key: "retry" as const,
+              label: "Retry",
+              targetType: "run" as const,
+              targetId: args.runId,
+            },
+          ]
+        : run.threadId
+          ? [
+              {
+                key: "continue" as const,
+                label: "Continue in thread",
+                targetType: "thread" as const,
+                targetId: run.threadId,
+              },
+            ]
+          : []),
+      ...(durableArtifactWrite
+        ? [
+            {
+              key: "revert" as const,
+              label: "Undo this run",
+              targetType: "run" as const,
+              targetId: args.runId,
+            },
+          ]
+        : []),
+    ];
     await Promise.all(
       cards.map((card) =>
         ctx.db.patch(card._id, {
@@ -2534,25 +2598,7 @@ export const stopRun = mutation({
             : recovery.retryable
               ? "Stopped by you. Any partial response remains available in the thread."
               : "Stopped by you. Some work may already be visible — review it before continuing.",
-          actions: recovery.retryable
-            ? [
-                {
-                  key: "retry",
-                  label: "Retry",
-                  targetType: "run",
-                  targetId: args.runId,
-                },
-              ]
-            : run.threadId
-              ? [
-                  {
-                    key: "continue",
-                    label: "Continue in thread",
-                    targetType: "thread",
-                    targetId: run.threadId,
-                  },
-                ]
-              : [],
+          actions: stopActions,
           updatedAt: now,
         }),
       ),

@@ -2544,6 +2544,10 @@ async function runAttempt(
       const durableArtifactWrite = durableArtifactWritesFromOutcomes(
         operationOutcomes,
       );
+      // Stop API's spectraRuns:stopRun may already have armed retry/continue and
+      // revert from durable executed ops. Only replace resultActions when this
+      // worker still holds outcome evidence; otherwise preserve stopRun's card
+      // actions so a late empty-outcomes cancel cannot strip Undo.
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
@@ -2555,30 +2559,32 @@ async function runAttempt(
               ? "Stopped by you. The partial response remains available, and you can retry when ready."
               : "Stopped before the response began. You can retry when ready."
             : "Stopped by you. Some work may already be visible — review it before continuing.",
-        resultActions: [
-          ...(recovery.retryable
-            ? [
-                {
-                  key: "retry" as const,
-                  label: "Retry",
-                  targetType: "run" as const,
-                  targetId: params.runId,
-                },
-              ]
-            : params.threadId
-              ? [
-                  {
-                    key: "continue" as const,
-                    label: "Continue in thread",
-                    targetType: "thread" as const,
-                    targetId: params.threadId,
-                  },
-                ]
-              : []),
-          ...(durableArtifactWrite
-            ? [revertRunResultAction(params.runId)]
-            : []),
-        ],
+        ...(durableArtifactWrite
+          ? {
+              resultActions: [
+                ...(recovery.retryable
+                  ? [
+                      {
+                        key: "retry" as const,
+                        label: "Retry",
+                        targetType: "run" as const,
+                        targetId: params.runId,
+                      },
+                    ]
+                  : params.threadId
+                    ? [
+                        {
+                          key: "continue" as const,
+                          label: "Continue in thread",
+                          targetType: "thread" as const,
+                          targetId: params.threadId,
+                        },
+                      ]
+                    : []),
+                revertRunResultAction(params.runId),
+              ],
+            }
+          : {}),
         recoveryState: recovery.recoveryState,
         retryable: recovery.retryable,
         preservedPartial: recovery.preservedPartial,
@@ -2646,25 +2652,30 @@ async function runAttempt(
           : "Needs review",
       resultSummary,
       resultVariant: "status",
-      resultActions: recovery.retryable
-        ? [
-            {
-              key: "retry",
-              label: "Retry",
-              targetType: "run",
-              targetId: params.runId,
-            },
-          ]
-        : params.threadId
+      resultActions: [
+        ...(recovery.retryable
           ? [
               {
-                key: "continue",
-                label: "Continue in thread",
-                targetType: "thread",
-                targetId: params.threadId,
+                key: "retry" as const,
+                label: "Retry",
+                targetType: "run" as const,
+                targetId: params.runId,
               },
             ]
-          : [],
+          : params.threadId
+            ? [
+                {
+                  key: "continue" as const,
+                  label: "Continue in thread",
+                  targetType: "thread" as const,
+                  targetId: params.threadId,
+                },
+              ]
+            : []),
+        ...(durableArtifactWritesFromOutcomes(operationOutcomes)
+          ? [revertRunResultAction(params.runId)]
+          : []),
+      ],
       recoveryState: recovery.recoveryState,
       retryable: recovery.retryable,
       preservedPartial: recovery.preservedPartial,

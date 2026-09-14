@@ -541,3 +541,31 @@ describe("P5.I2 gateway production helpers", () => {
     ).toBe(false);
   });
 });
+
+describe("collaboration bridge verify precision", () => {
+  it("emits distinct verify failure codes instead of a single INVALID", async () => {
+    const { readFileSync } = await import("node:fs");
+    const bridge = readFileSync("convex/collaborationGatewayBridge.ts", "utf8");
+    expect(bridge).toContain("COLLABORATION_BRIDGE_EXPIRED");
+    expect(bridge).toContain("COLLABORATION_BRIDGE_NONCE_INVALID");
+    expect(bridge).toContain("COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE");
+    expect(bridge).toContain("COLLABORATION_BRIDGE_FORBIDDEN");
+    // Legacy umbrella must not be the only verify throw.
+    const verifyBlock = bridge.slice(
+      bridge.indexOf("function verify("),
+      bridge.indexOf("function objectPayload("),
+    );
+    expect(verifyBlock).not.toMatch(
+      /throw new Error\("COLLABORATION_BRIDGE_INVALID"\)/,
+    );
+  });
+
+  it("soft-fails onLoadDocument recover/repair so oversized envelopes cannot block open", async () => {
+    const { readFileSync } = await import("node:fs");
+    const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+    expect(gateway).toContain("onLoadDocument:repair");
+    expect(gateway).toContain("opening stored room without repair");
+    expect(gateway).toContain("skipping inline recover/checkpoint");
+    expect(gateway).toContain("MAX_BRIDGE_ENVELOPE_CHARS");
+  });
+});

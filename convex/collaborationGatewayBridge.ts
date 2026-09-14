@@ -38,14 +38,19 @@ function verify(
   nonce: string,
   signature: string,
 ) {
-  if (Math.abs(Date.now() - timestamp) > 30_000)
-    throw new Error("COLLABORATION_BRIDGE_EXPIRED");
-  if (
-    payloadJson.length > MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS ||
-    nonce.length < 20 ||
-    nonce.length > 100
-  )
-    throw new Error("COLLABORATION_BRIDGE_INVALID");
+  const skewMs = Math.abs(Date.now() - timestamp);
+  if (skewMs > 30_000)
+    throw new Error(
+      `COLLABORATION_BRIDGE_EXPIRED: skewMs=${skewMs} op=${operationName}`,
+    );
+  if (typeof nonce !== "string" || nonce.length < 20 || nonce.length > 100)
+    throw new Error(
+      `COLLABORATION_BRIDGE_NONCE_INVALID: len=${typeof nonce === "string" ? nonce.length : -1} op=${operationName}`,
+    );
+  if (payloadJson.length > MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS)
+    throw new Error(
+      `COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE: chars=${payloadJson.length} max=${MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS} op=${operationName}`,
+    );
   const digest = createHash("sha256").update(payloadJson).digest("base64url");
   const canonical = [operationName, timestamp, nonce, digest].join("|");
   const expected = createHmac("sha256", bridgeKey()).update(canonical).digest();
@@ -54,7 +59,9 @@ function verify(
     received.length !== expected.length ||
     !timingSafeEqual(received, expected)
   )
-    throw new Error("COLLABORATION_BRIDGE_FORBIDDEN");
+    throw new Error(
+      `COLLABORATION_BRIDGE_FORBIDDEN: hmac mismatch op=${operationName}`,
+    );
 }
 
 function objectPayload(value: string) {

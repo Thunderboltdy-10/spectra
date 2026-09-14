@@ -422,9 +422,26 @@ export async function projectOfficeImportWithLens(file: File) {
     unsupportedFeatures?: string[];
     parserVersion?: string;
     message?: string;
+    error?: string;
+    durableFailed?: boolean;
+    activationStub?: boolean;
   } | null;
-  if (!response.ok || !payload?.ok || !payload.blueprintKey || payload.content === undefined) {
-    throw new Error(payload?.message || "Could not parse this Office file with the Spectra lens.");
+  if (
+    !response.ok ||
+    !payload?.ok ||
+    !payload.blueprintKey ||
+    payload.content === undefined
+  ) {
+    const err = new Error(
+      payload?.message ||
+        "Could not parse this Office file with the Spectra lens.",
+    );
+    (err as Error & { code?: string; durableFailed?: boolean }).code =
+      payload?.error || `HTTP_${response.status}`;
+    (err as Error & { durableFailed?: boolean }).durableFailed =
+      payload?.durableFailed === true ||
+      payload?.error === "IMPORT_SNAPSHOT_TOO_LARGE";
+    throw err;
   }
   return payload;
 }

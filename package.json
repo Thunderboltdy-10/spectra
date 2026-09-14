@@ -39,7 +39,8 @@
     "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
     "convex:dev": "convex dev",
     "lint:design": "node scripts/report-design-census.mjs",
-    "start:collab:raw": "node scripts/collaboration-gateway.mjs"
+    "start:collab:raw": "SPECTRA_COLLAB_ALLOW_RAW=1 node scripts/collaboration-gateway.mjs",
+    "verify:collab-secrets": "node scripts/verify-collab-secrets.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.79",

@@ -74,3 +74,21 @@ describe("Office activation Convex budget", () => {
     expect(stored).toMatchObject({ truncated: true });
   });
 });
+
+describe("Library office import activation path", () => {
+  it("uses convexSafeOfficeActivationContent instead of full xlsxArtifactContent in the import route", async () => {
+    const { readFileSync } = await import("node:fs");
+    const route = readFileSync("src/app/api/spectra/imports/office/route.ts", "utf8");
+    expect(route).toContain("convexSafeOfficeActivationContent");
+    expect(route).toContain("IMPORT_SNAPSHOT_TOO_LARGE");
+    expect(route).toContain("durableFailed");
+    // Full cell maps must not be returned to the browser on Library import.
+    expect(route).toContain('convexSafeOfficeActivationContent(');
+    expect(route).toContain('xlsxArtifactContent(opened.projection)');
+    expect(route.indexOf('convexSafeOfficeActivationContent')).toBeLessThan(
+      route.indexOf('xlsxArtifactContent(opened.projection)'),
+    );
+    // Must not assign raw full workbook content to the JSON body.
+    expect(route).not.toMatch(/content:\s*xlsxArtifactContent\(/);
+  });
+});

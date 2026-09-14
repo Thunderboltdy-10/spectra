@@ -59,6 +59,21 @@ if (!tokenSecret || tokenSecret.length < 32)
   throw new Error("COLLABORATION_TOKEN_CONFIG_MISSING");
 if (!bridgeKey || bridgeKey.length < 32)
   throw new Error("COLLABORATION_BRIDGE_CONFIG_MISSING");
+if (
+  process.env.SPECTRA_COLLAB_SERVED_BY !== "serve-collaboration-gateway.mjs" &&
+  process.env.SPECTRA_COLLAB_ALLOW_RAW !== "1"
+) {
+  throw new Error(
+    "COLLABORATION_GATEWAY_USE_SERVE: Start via `SPECTRA_COLLAB_PORT=1234 node scripts/serve-collaboration-gateway.mjs` (matched .env.local secrets + port). Set SPECTRA_COLLAB_ALLOW_RAW=1 only for deliberate raw debugging.",
+  );
+}
+const tokenFingerprint = createHash("sha256")
+  .update(tokenSecret, "utf8")
+  .digest("hex")
+  .slice(0, 12);
+process.stdout.write(
+  `Spectra collaboration gateway secrets tokenFp=${tokenFingerprint} bind=${process.env.SPECTRA_COLLAB_PORT || 1234}\n`,
+);
 
 const rawBridge = createCollaborationGatewayBridgeClient({
   convexUrl,
@@ -79,6 +94,10 @@ const REGION_MAP = "spectra:artifact-regions";
 const REGION_MARKER = "$spectraRegion";
 const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
+// Must match shared/collaboration-bridge.ts — recover/repair projections that
+// exceed this cannot ride the signed exchange envelope.
+const MAX_BRIDGE_ENVELOPE_CHARS = 2_000_000;
+const BRIDGE_ENVELOPE_METADATA_HEADROOM = 64_000;
 const PERSISTENCE_DEBOUNCE_MS = 180;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
@@ -1392,60 +1411,119 @@ const server = new Server({
         typeof stored?.roomId === "string" &&
         typeof stored?.liveStateVectorHash === "string";
       if (shouldRecover || shouldRepair) {
-        const observedProjectionJson = artifactProjection(
-          storedDocument,
-          context.schemaVersion,
-        );
-        if (!observedProjectionJson)
-          throw new Error("COLLABORATION_NATIVE_RECOVERY_PROJECTION_MISSING");
-        storedDocument.destroy();
-        if (shouldRecover) {
-          await bridge("recover", {
-            artifactId: context.artifactId,
-            partitionKey: context.partitionKey,
-            accountId: context.accountId,
-            clientId: context.clientId,
-            policyVersion: context.policyVersion,
-            expectedNextSequence: stored.nextSequence,
-            expectedStateVectorHash: stored.liveStateVectorHash,
-            observedStateVectorHash,
-            observedProjectionJson,
-            observedProjectionHash: createHash("sha256")
+        // Repair/recover must NEVER block room open. Oversized observed
+        // projections previously blew the signed bridge envelope
+        // (COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE / legacy INVALID) and left
+        // DOCX/XLSX stuck on Reconnecting. Spill when possible, else skip.
+        try {
+          const observedProjectionJson = artifactProjection(
+            storedDocument,
+            context.schemaVersion,
+          );
+          if (!observedProjectionJson) {
+            process.stderr.write(
+              `[onLoadDocument:repair] missing projection — skipping repair artifact=${context.artifactId}\n`,
+            );
+          } else {
+            const observedProjectionHash = createHash("sha256")
               .update(observedProjectionJson)
-              .digest("base64url"),
-          });
-        } else {
-          // Append-before-checkpoint recovery uses the same authority, room
-          // generation and state-vector CAS as an ordinary checkpoint. It
-          // repairs only the durable head observed above; a newer append or
-          // rotated room makes the mutation stale and leaves the artifact
-          // projection untouched.
-          await bridge("checkpoint", {
-            artifactId: context.artifactId,
-            partitionKey: context.partitionKey,
-            accountId: context.accountId,
-            clientId: context.clientId,
-            policyVersion: context.policyVersion,
-            roomId: stored.roomId,
-            expectedNextSequence: stored.nextSequence,
-            expectedLastProjectionSequence:
-              stored.lastProjectionSequence ?? 0,
-            stateVectorHash: stored.liveStateVectorHash,
-            projectionJson: observedProjectionJson,
-            projectionHash: createHash("sha256")
-              .update(observedProjectionJson)
-              .digest("base64url"),
-            throughSequence: durableHeadSequence,
-          });
+              .digest("base64url");
+            const envelopeBudget =
+              MAX_BRIDGE_ENVELOPE_CHARS - BRIDGE_ENVELOPE_METADATA_HEADROOM;
+            let projectionForBridge = observedProjectionJson;
+            let spilledRef = null;
+            const projectionPlan = planProjectionStorage(observedProjectionJson);
+            const tooLargeForEnvelope =
+              observedProjectionJson.length > envelopeBudget;
+            // Spill at durable projection bound OR bridge envelope limit.
+            if (projectionPlan.mode === "spill" || tooLargeForEnvelope) {
+              if (projectionPlan.mode === "spill") {
+                try {
+                  const storedPayload = await bridge("storeDurablePayload", {
+                    artifactId: context.artifactId,
+                    partitionKey: context.partitionKey,
+                    accountId: context.accountId,
+                    kind: "projection",
+                    digest: projectionPlan.manifest.digest,
+                    mediaType: projectionPlan.manifest.mediaType,
+                    bytesBase64: Buffer.from(projectionPlan.bytes).toString(
+                      "base64",
+                    ),
+                  });
+                  spilledRef = storedPayload.payloadRef;
+                  process.stderr.write(
+                    `[onLoadDocument:repair] spilled oversized projection chars=${observedProjectionJson.length} ref=${spilledRef} — skipping inline recover/checkpoint\n`,
+                  );
+                  projectionForBridge = null;
+                } catch (spillError) {
+                  const spillReason =
+                    spillError instanceof Error
+                      ? spillError.message
+                      : String(spillError);
+                  process.stderr.write(
+                    `[onLoadDocument:repair] spill failed (${spillReason}) — skipping repair\n`,
+                  );
+                  projectionForBridge = null;
+                }
+              } else {
+                process.stderr.write(
+                  `[onLoadDocument:repair] projection chars=${observedProjectionJson.length} exceeds bridge envelope — skipping repair\n`,
+                );
+                projectionForBridge = null;
+              }
+            }
+            if (projectionForBridge) {
+              if (shouldRecover) {
+                await bridge("recover", {
+                  artifactId: context.artifactId,
+                  partitionKey: context.partitionKey,
+                  accountId: context.accountId,
+                  clientId: context.clientId,
+                  policyVersion: context.policyVersion,
+                  expectedNextSequence: stored.nextSequence,
+                  expectedStateVectorHash: stored.liveStateVectorHash,
+                  observedStateVectorHash,
+                  observedProjectionJson: projectionForBridge,
+                  observedProjectionHash,
+                });
+              } else {
+                await bridge("checkpoint", {
+                  artifactId: context.artifactId,
+                  partitionKey: context.partitionKey,
+                  accountId: context.accountId,
+                  clientId: context.clientId,
+                  policyVersion: context.policyVersion,
+                  roomId: stored.roomId,
+                  expectedNextSequence: stored.nextSequence,
+                  expectedLastProjectionSequence:
+                    stored.lastProjectionSequence ?? 0,
+                  stateVectorHash: stored.liveStateVectorHash,
+                  projectionJson: projectionForBridge,
+                  projectionHash: observedProjectionHash,
+                  throughSequence: durableHeadSequence,
+                });
+              }
+              stored = await bridge("load", {
+                artifactId: context.artifactId,
+                partitionKey: context.partitionKey,
+              });
+              storedDocument.destroy();
+              storedDocument = applyStoredRoomUpdates(Y, stored);
+              rememberDurableHead(context, stored?.liveStateVectorHash);
+            }
+          }
+        } catch (repairError) {
+          const repairReason =
+            repairError instanceof Error
+              ? repairError.message
+              : String(repairError);
+          process.stderr.write(
+            `[onLoadDocument:repair] ${repairReason} — opening stored room without repair\n`,
+          );
         }
-        stored = await bridge("load", {
-          artifactId: context.artifactId,
-          partitionKey: context.partitionKey,
-        });
-        storedDocument = applyStoredRoomUpdates(Y, stored);
-        rememberDurableHead(context, stored?.liveStateVectorHash);
       }
     }
+
     if (isNativeArtifactDocument(storedDocument)) {
       const encoded = Y.encodeStateAsUpdate(storedDocument);
       storedDocument.destroy();

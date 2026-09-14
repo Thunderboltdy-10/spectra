@@ -126,3 +126,38 @@ node scripts/serve-collaboration-gateway.mjs
 ```
 
 Do not start `scripts/collaboration-gateway.mjs` bare unless the shell already exports identical secrets to the Next process.
+
+
+## Live E2E follow-up (`serve` port + import Aw Snap)
+
+Evidence: `/workspace/live-verify-fixtures/s9-durable-e2e/fail-863b5e4/` (docx-crash.webp, xlsx-crash.webp).
+
+| Symptom | Root cause | Fix |
+| --- | --- | --- |
+| Gateway on wrong port / signature noise | `.env.local` instance `SPECTRA_COLLAB_PORT=3001` applied by serve while Live web used `:1234` | `loadCollaborationEnv` ignores file ports by default; prefer exported `SPECTRA_COLLAB_PORT`; serve defaults to **1234**, prints `tokenFp` + bind port, clears stale Spectra listeners |
+| 200k / formal-paper Aw Snap 9 on Library import | `/api/spectra/imports/office` returned full `xlsxArtifactContent` (and client re-parsed DOCX) into the tab | Import route returns `convexSafeOfficeActivationContent` stub for sheets/pptx; soft `IMPORT_SNAPSHOT_TOO_LARGE` / `durableFailed` instead of OOM; shell skips client mammoth re-parse when lens content exists |
+
+### Live start recipe (matched secrets + fingerprint)
+
+```bash
+# Prove secrets would match (fingerprints only)
+npm run verify:collab-secrets
+
+# terminal A — web (example Live ports)
+SPECTRA_WEB_PORT=3040 SPECTRA_COLLAB_PORT=1234 npm run dev:web
+
+# terminal B — gateway ONLY via serve (matched .env.local secrets)
+SPECTRA_COLLAB_PORT=1234 node scripts/serve-collaboration-gateway.mjs
+# expect: tokenFp=… bind=1234  and NO "signature verification failed"
+```
+
+Do not start `scripts/collaboration-gateway.mjs` bare (`SPECTRA_COLLAB_ALLOW_RAW=1` only for deliberate debugging).
+
+## Bridge verify precision + load soft-fail
+
+Live auth-clean FAIL (`/tmp/collab-gateway-serve-1234.log`): every `onLoadDocument` threw `COLLABORATION_BRIDGE_INVALID` at verify(). Source maps aliased the payload/nonce branch; oversized recover/repair `observedProjectionJson` blew the 2M signed envelope and blocked room open (DOCX Reconnecting).
+
+| Fix | Detail |
+| --- | --- |
+| Precise verify reasons | `EXPIRED` / `NONCE_INVALID` / `PAYLOAD_TOO_LARGE` / `FORBIDDEN` (no umbrella INVALID) |
+| Load soft-fail | `onLoadDocument` recover/repair try/catch — spill oversized projection via `storeDurablePayload`, skip inline recover/checkpoint, still return stored Yjs |

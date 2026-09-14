@@ -3691,10 +3691,14 @@ export function SpectraShell({
         workspaceId: selectedWorkspaceId,
         ...(placementParentId ? { parentNodeId: placementParentId } : {}),
       });
+      // Prefer the server lens projection. Re-parsing a formal paper in the
+      // tab (mammoth + TipTap) after a successful office import previously
+      // spiked memory into Chrome Aw Snap 9.
       const canonicalImportedContent =
         !portable &&
         blueprintKey === "document" &&
-        file.name.toLowerCase().endsWith(".docx")
+        file.name.toLowerCase().endsWith(".docx") &&
+        !officeProjection
           ? await projectDocxImportWithDurableImages(file, created.artifactId)
           : importedContent;
       const digest = await crypto.subtle.digest("SHA-256", originalBuffer);
@@ -3768,9 +3772,22 @@ export function SpectraShell({
           importJobId,
           "Library import failed",
         ).catch(() => undefined);
+      const durableFailed =
+        Boolean(
+          error &&
+            typeof error === "object" &&
+            "durableFailed" in error &&
+            (error as { durableFailed?: boolean }).durableFailed,
+        ) ||
+        (error instanceof Error &&
+          /IMPORT_SNAPSHOT_TOO_LARGE|too large to open/i.test(error.message));
       toast.error(
-        describeFailure(error, { fallback: "Could not import this file." })
-          .message,
+        durableFailed
+          ? error instanceof Error
+            ? error.message
+            : "This Office file is too large to import into the editor without crashing the tab."
+          : describeFailure(error, { fallback: "Could not import this file." })
+              .message,
       );
     } finally {
       setBusyKey(null);

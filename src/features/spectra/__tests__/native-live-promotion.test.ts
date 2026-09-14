@@ -172,6 +172,8 @@ describe("native live promotion", () => {
     expect(studio).toContain("live.flushSnapshot?.()");
     expect(sync).toContain("nativeLiveNeedsPromotion");
     expect(sync).toContain("queueNativeMaterialization(liveValue)");
+    expect(sync).toContain('result?.state === "deferred_native"');
+    expect(sync).toContain('result?.state === "cloud_saved"');
     expect(sync).toContain("bridgeAvailable");
     expect(sync).toContain("lastFailedPromotionKeyRef");
     expect(sync).toContain("protectedOriginal: nativeLocalReplica.protectedOriginal === true");

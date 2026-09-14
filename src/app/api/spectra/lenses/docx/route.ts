@@ -117,13 +117,28 @@ async function materializeDocxArtifactAttempt(
   attempt: number,
   options?: { promotionMode?: "verified-first" },
 ) {
-  const [cloud, workTruth] = await Promise.all([
-    fetchVerifiedNativePayload(workId, "cloud"),
-    convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
-      "replicas:forWork",
-      { workId },
-    ),
-  ]);
+  let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
+  let workTruth: WorkTruth;
+  try {
+    [cloud, workTruth] = await Promise.all([
+      fetchVerifiedNativePayload(workId, "cloud"),
+      convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+        "replicas:forWork",
+        { workId },
+      ),
+    ]);
+  } catch (error) {
+    // Library import commits projection without a cloud replica payload URL.
+    // Spectra already saved the edit — do not toast a false Word writeback failure.
+    if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+      return {
+        state: "deferred_native" as const,
+        status:
+          "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
+      };
+    }
+    throw error;
+  }
   let { truth, payload } = cloud;
   let opened = await docxLens.open(payload, "strict-native");
   let update = docxProjectionFromContent(content, opened.projection);
@@ -391,7 +406,18 @@ export async function POST(request: Request) {
     const workId = artifactId(input.artifactId);
 
     if (input.action === "open") {
-      let { truth, payload } = await fetchVerifiedNativePayload(workId, "cloud");
+      let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
+      try {
+        cloud = await fetchVerifiedNativePayload(workId, "cloud");
+      } catch (error) {
+        // No retained native bytes on the replica wire (typical Library DOCX
+        // import without Bridge). Projection content is already on the artifact.
+        if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+          return NextResponse.json({ state: "opened", deferredNative: true });
+        }
+        throw error;
+      }
+      let { truth, payload } = cloud;
       let opened = await docxLens.open(payload, "strict-native");
 
       // A Bridge external revision may arrive after the cloud projection was

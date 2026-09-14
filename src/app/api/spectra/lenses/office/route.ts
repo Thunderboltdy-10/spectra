@@ -205,14 +205,29 @@ async function materializeOfficeArtifactAttempt(
   attempt: number,
   options?: { promotionMode?: "verified-first" },
 ) {
-  const [{ truth: cloudTruth, payload: cloudPayload }, workTruth] =
-    await Promise.all([
-      fetchVerifiedNativePayload(workId, "cloud"),
-      convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
-        "replicas:forWork",
-        { workId },
-      ),
-  ]);
+  let cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"];
+  let cloudPayload: Uint8Array;
+  let workTruth: WorkTruth;
+  try {
+    [{ truth: cloudTruth, payload: cloudPayload }, workTruth] =
+      await Promise.all([
+        fetchVerifiedNativePayload(workId, "cloud"),
+        convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+          "replicas:forWork",
+          { workId },
+        ),
+      ]);
+  } catch (error) {
+    // Library import commits projection/stub without a cloud replica payload URL.
+    if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+      return {
+        state: "deferred_native" as const,
+        status:
+          "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
+      };
+    }
+    throw error;
+  }
   const isSheet = spreadsheetFormats.has(cloudTruth.nativeFormat);
   const materializationContent = isSheet
     ? content
@@ -495,7 +510,24 @@ export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
     const workId = id(input.artifactId);
-    let cloud = await fetchVerifiedNativePayload(workId, "cloud");
+    let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
+    try {
+      cloud = await fetchVerifiedNativePayload(workId, "cloud");
+    } catch (error) {
+      if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+        if (input.action === "open") {
+          return NextResponse.json({ state: "opened", deferredNative: true });
+        }
+        if (input.action === "materialize") {
+          return NextResponse.json({
+            state: "deferred_native",
+            status:
+              "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
+          });
+        }
+      }
+      throw error;
+    }
     const isSheet = spreadsheetFormats.has(cloud.truth.nativeFormat);
     application = isSheet ? "Excel" : "PowerPoint";
     let baseOpened = isSheet

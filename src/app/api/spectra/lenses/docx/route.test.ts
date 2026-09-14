@@ -228,4 +228,30 @@ describe("DOCX materialization route", () => {
       footer: "Route footer",
     });
   });
+
+  it("soft-opens without a retained native payload (Library import, no Bridge)", async () => {
+    fetchVerifiedNativePayload.mockRejectedValue(new Error("NATIVE_PAYLOAD_UNAVAILABLE"));
+    const { POST } = await import("./route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/spectra/lenses/docx", {
+        method: "POST",
+        body: JSON.stringify({ action: "open", artifactId }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      state: "opened",
+      deferredNative: true,
+    });
+  });
+
+  it("defers materialize without toasting when native payload is unavailable", async () => {
+    fetchVerifiedNativePayload.mockRejectedValue(new Error("NATIVE_PAYLOAD_UNAVAILABLE"));
+    const response = await routePost({ blocks: [] });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.state).toBe("deferred_native");
+    expect(result.status).toMatch(/Spectra saved your edit/i);
+    expect(uploadNativePayload).not.toHaveBeenCalled();
+  });
 });

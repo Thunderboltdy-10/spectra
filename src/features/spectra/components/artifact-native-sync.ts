@@ -348,7 +348,14 @@ export function useArtifactNativeSync({
             result?.message ??
               `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
           );
-        if (result?.state === "unchanged") {
+        // cloud_saved / deferred_native: Spectra kept the edit; there is no
+        // local Bridge replica (or no retained native payload URL yet). Do not
+        // toast NATIVE_PAYLOAD_UNAVAILABLE as a false Word/Office writeback.
+        if (
+          result?.state === "unchanged" ||
+          result?.state === "cloud_saved" ||
+          result?.state === "deferred_native"
+        ) {
           lastPromotedLiveKeyRef.current = nativeLiveContentKey(
             snapshot.content,
           );

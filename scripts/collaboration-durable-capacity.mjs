@@ -295,3 +295,74 @@ export function compactionDeferredHealthRecord({
     at,
   };
 }
+
+/**
+ * Whether raw bytes can ride storeDurablePayload inside the signed bridge
+ * envelope (base64 + modest metadata headroom under MAX_BRIDGE_ENVELOPE_CHARS).
+ * Oversized projections must omit the inline JSON and either spill or rely on
+ * the artifact row already holding import content (bootstrap).
+ */
+export function durablePayloadFitsBridgeEnvelope(
+  byteLength,
+  {
+    maxEnvelopeChars = 2_000_000,
+    metadataHeadroom = 64_000,
+  } = {},
+) {
+  if (!Number.isSafeInteger(byteLength) || byteLength <= 0) return false;
+  const base64Chars = Math.ceil(byteLength / 3) * 4;
+  return base64Chars + metadataHeadroom <= maxEnvelopeChars;
+}
+
+/**
+ * Plan how bootstrap ships projection through the bridge without blowing the
+ * 2M signed envelope. Artifact content is already authoritative on first open.
+ */
+export function planBootstrapProjectionTransport(projectionJson, {
+  maxChars = MAX_PROJECTION_JSON_CHARS,
+  maxUtf8Bytes = MAX_PROJECTION_JSON_UTF8_BYTES,
+  maxEnvelopeChars = 2_000_000,
+  metadataHeadroom = 64_000,
+} = {}) {
+  const plan = planProjectionStorage(projectionJson, { maxChars, maxUtf8Bytes });
+  if (plan.mode === "absent") return plan;
+  if (plan.mode === "inline") {
+    // Leave room for update + metadata alongside projectionJson.
+    if (plan.charLength + metadataHeadroom <= maxEnvelopeChars) {
+      return { ...plan, transport: "inline" };
+    }
+    // Inline projection alone nearly fills the envelope — try spill.
+  }
+  const bytes = plan.bytes ?? Buffer.from(projectionJson, "utf8");
+  if (
+    durablePayloadFitsBridgeEnvelope(bytes.byteLength, {
+      maxEnvelopeChars,
+      metadataHeadroom,
+    })
+  ) {
+    return {
+      mode: "spill",
+      transport: "spill",
+      reason: plan.reason ?? "envelope",
+      charLength: plan.charLength ?? projectionJson.length,
+      utf8ByteLength: plan.utf8ByteLength ?? bytes.byteLength,
+      bytes,
+      manifest:
+        plan.manifest ??
+        createDurablePayloadManifest({
+          kind: "projection",
+          bytes,
+          encoding: "payload-ref",
+          payloadRef: "pending",
+        }),
+      hotStub: plan.hotStub,
+    };
+  }
+  return {
+    mode: "omit",
+    transport: "omit",
+    reason: "projection_exceeds_bridge_spill",
+    charLength: plan.charLength ?? projectionJson.length,
+    utf8ByteLength: plan.utf8ByteLength ?? bytes.byteLength,
+  };
+}

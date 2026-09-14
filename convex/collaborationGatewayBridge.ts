@@ -312,7 +312,7 @@ export const exchange = action({
             "observed_state_vector_hash",
             180,
           ),
-          observedProjectionJson: projectionText(
+          observedProjectionJson: optionalProjectionText(
             payload.observedProjectionJson,
             "observed_projection",
           ),
@@ -321,15 +321,24 @@ export const exchange = action({
             "observed_projection_hash",
             180,
           ),
+          observedProjectionPayloadRef: optionalPayloadRef(
+            payload.observedProjectionPayloadRef,
+          ),
         },
       );
     }
 
     if (args.operation === "bootstrap") {
-      const update = Buffer.from(
-        text(payload.update, "update", 1_400_000),
-        "base64",
-      );
+      const payloadRef = optionalPayloadRef(payload.payloadRef);
+      const updateB64 =
+        payload.update === undefined || payload.update === null
+          ? ""
+          : String(payload.update);
+      if (!payloadRef && (!updateB64 || !updateB64.trim()))
+        throw new Error("COLLABORATION_BRIDGE_UPDATE_INVALID");
+      if (updateB64.length > 1_400_000)
+        throw new Error("COLLABORATION_BRIDGE_UPDATE_INVALID");
+      const update = Buffer.from(updateB64, "base64");
       return ctx.runMutation(
         internal.collaborationGatewayStore.bootstrapNative,
         {
@@ -355,8 +364,34 @@ export const exchange = action({
             "state_vector_hash",
             180,
           ),
-          projectionJson: projectionText(payload.projectionJson, "projection"),
-          projectionHash: text(payload.projectionHash, "projection_hash", 180),
+          projectionJson: optionalProjectionText(
+            payload.projectionJson,
+            "projection",
+          ),
+          projectionHash: optionalText(
+            payload.projectionHash,
+            "projection_hash",
+            180,
+          ),
+          payloadRef,
+          payloadDigest: optionalText(payload.payloadDigest, "payload_digest", 80),
+          payloadManifest:
+            payload.payloadManifest === undefined ||
+            payload.payloadManifest === null
+              ? undefined
+              : payload.payloadManifest,
+          byteLength:
+            payload.byteLength === undefined || payload.byteLength === null
+              ? undefined
+              : integer(payload.byteLength, "byte_length"),
+          projectionPayloadRef: optionalPayloadRef(
+            payload.projectionPayloadRef,
+          ),
+          projectionPayloadDigest: optionalText(
+            payload.projectionPayloadDigest,
+            "projection_payload_digest",
+            80,
+          ),
         },
       );
     }

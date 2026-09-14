@@ -560,12 +560,16 @@ describe("collaboration bridge verify precision", () => {
     );
   });
 
-  it("soft-fails onLoadDocument recover/repair so oversized envelopes cannot block open", async () => {
+  it("bootstraps oversized projections via spill/omit so envelopes cannot block open", async () => {
     const { readFileSync } = await import("node:fs");
     const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
-    expect(gateway).toContain("onLoadDocument:repair");
-    expect(gateway).toContain("opening stored room without repair");
-    expect(gateway).toContain("skipping inline recover/checkpoint");
+    expect(gateway).toContain("planBootstrapProjectionTransport");
+    expect(gateway).toContain("onLoadDocument:bootstrap");
+    expect(gateway).toContain("omitting oversized projection");
+    expect(gateway).toContain("durable Yjs head only");
     expect(gateway).toContain("MAX_BRIDGE_ENVELOPE_CHARS");
+    const bridge = readFileSync("convex/collaborationGatewayBridge.ts", "utf8");
+    expect(bridge).toContain("optionalProjectionText");
+    expect(bridge).toContain("projectionPayloadRef");
   });
 });

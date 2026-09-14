@@ -161,3 +161,21 @@ Live auth-clean FAIL (`/tmp/collab-gateway-serve-1234.log`): every `onLoadDocume
 | --- | --- |
 | Precise verify reasons | `EXPIRED` / `NONCE_INVALID` / `PAYLOAD_TOO_LARGE` / `FORBIDDEN` (no umbrella INVALID) |
 | Load soft-fail | `onLoadDocument` recover/repair try/catch — spill oversized projection via `storeDurablePayload`, skip inline recover/checkpoint, still return stored Yjs |
+
+## Bootstrap spill/omit durable head (post-1da880c)
+
+Live FAIL on `1da880c` (`/tmp/collab-gateway-serve-1234-1da880c.log`): every
+`onLoadDocument` threw `COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE … op=bootstrap`
+(chars≈2.15M). Soft-fail only wrapped recover/repair; first-open **bootstrap**
+still stuffed `projectionJson` into the signed envelope → Hocuspocus load
+failed → UI Reconnecting loop. Soft-open without a repaired Yjs head is NOT PASS.
+
+| Fix | Detail |
+| --- | --- |
+| `planBootstrapProjectionTransport` | inline / spill / **omit** — never put oversized JSON in verify envelope |
+| `bootstrapNative` | optional `projectionJson` + `projectionPayloadRef` + spilled `payloadRef` for Yjs update; omit keeps import content, still writes durable update + `liveStateVectorHash` |
+| recover hash-only | optional `observedProjectionJson`; when omitted, attest via `artifact.contentHash === observedProjectionHash` |
+| Gateway bootstrap | spill update/projection when they fit; otherwise omit projection and still persist Yjs head |
+
+Restart: `SPECTRA_COLLAB_PORT=1234 SPECTRA_COLLAB_HOST=127.0.0.1 node scripts/serve-collaboration-gateway.mjs` after Convex redeploy (`--typecheck=disable`).
+

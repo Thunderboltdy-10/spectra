@@ -405,8 +405,11 @@ export const recoverNativeSnapshot = internalMutation({
     expectedNextSequence: v.number(),
     expectedStateVectorHash: v.string(),
     observedStateVectorHash: v.string(),
-    observedProjectionJson: v.string(),
+    // Optional when oversized: gateway attests via observedProjectionHash only
+    // (must equal artifact.contentHash) so recover never ships 2M+ JSON.
+    observedProjectionJson: v.optional(v.string()),
     observedProjectionHash: v.string(),
+    observedProjectionPayloadRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const [actor, artifact, room] = await Promise.all([
@@ -464,37 +467,46 @@ export const recoverNativeSnapshot = internalMutation({
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const clientId = args.clientId.trim().slice(0, 180);
-    const observedProjection = parseGatewayProjection(
-      args.observedProjectionJson,
-      args.observedProjectionHash,
-      artifact,
-    );
-    const observedProjectionDigest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(args.observedProjectionJson),
-    );
-    const observedProjectionHash = btoa(
-      String.fromCharCode(...new Uint8Array(observedProjectionDigest)),
-    )
-      .replaceAll("+", "-")
-      .replaceAll("/", "_")
-      .replace(/=+$/, "");
-    // The gateway derives this projection from the stored Y.Doc. Exact equality
-    // with the current artifact proves a reset can be rebuilt without losing
-    // semantic edits, even when compaction removed bootstrap idempotency data.
-    const projectionMatchesArtifact =
-      observedProjection !== null &&
-      observedProjectionHash === args.observedProjectionHash &&
-      observedProjection.title === artifact.title &&
-      (observedProjection.summary ?? "") === (artifact.summary ?? "") &&
-      observedProjection.schemaVersion === room.schemaVersion &&
-      canonicalJson(observedProjection.tags) === canonicalJson(artifact.tags) &&
-      canonicalJson(
-        encodeArtifactContentForStorage(
-          observedProjection.typeKey,
-          observedProjection.content,
-        ),
-      ) === canonicalJson(artifact.content);
+    let projectionMatchesArtifact = false;
+    if (args.observedProjectionJson) {
+      const observedProjection = parseGatewayProjection(
+        args.observedProjectionJson,
+        args.observedProjectionHash,
+        artifact,
+      );
+      const observedProjectionDigest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(args.observedProjectionJson),
+      );
+      const observedProjectionHash = btoa(
+        String.fromCharCode(...new Uint8Array(observedProjectionDigest)),
+      )
+        .replaceAll("+", "-")
+        .replaceAll("/", "_")
+        .replace(/=+$/, "");
+      // The gateway derives this projection from the stored Y.Doc. Exact equality
+      // with the current artifact proves a reset can be rebuilt without losing
+      // semantic edits, even when compaction removed bootstrap idempotency data.
+      projectionMatchesArtifact =
+        observedProjection !== null &&
+        observedProjectionHash === args.observedProjectionHash &&
+        observedProjection.title === artifact.title &&
+        (observedProjection.summary ?? "") === (artifact.summary ?? "") &&
+        observedProjection.schemaVersion === room.schemaVersion &&
+        canonicalJson(observedProjection.tags) === canonicalJson(artifact.tags) &&
+        canonicalJson(
+          encodeArtifactContentForStorage(
+            observedProjection.typeKey,
+            observedProjection.content,
+          ),
+        ) === canonicalJson(artifact.content);
+    } else {
+      // Hash-only / spilled-ref path: do not require inline JSON in the bridge.
+      projectionMatchesArtifact =
+        typeof artifact.contentHash === "string" &&
+        artifact.contentHash.length >= 16 &&
+        artifact.contentHash === args.observedProjectionHash;
+    }
     if (
       !clientId ||
       !Number.isSafeInteger(args.expectedNextSequence) ||
@@ -615,8 +627,17 @@ export const bootstrapNative = internalMutation({
     expectedNextSequence: v.number(),
     update: v.bytes(),
     stateVectorHash: v.string(),
-    projectionJson: v.string(),
-    projectionHash: v.string(),
+    // Optional: oversized formal-paper / 200k projections must not ride the
+    // signed bridge envelope. Artifact content is already authoritative from
+    // import; spill ref or omit keeps Yjs head durable without PAYLOAD_TOO_LARGE.
+    projectionJson: v.optional(v.string()),
+    projectionHash: v.optional(v.string()),
+    payloadRef: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    payloadManifest: v.optional(v.any()),
+    byteLength: v.optional(v.number()),
+    projectionPayloadRef: v.optional(v.string()),
+    projectionPayloadDigest: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const [actor, artifact, room] = await Promise.all([
@@ -663,21 +684,49 @@ export const bootstrapNative = internalMutation({
       room.policyVersion !== currentPolicyVersion
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    const spilled = Boolean(args.payloadRef);
+    const effectiveByteLength = spilled
+      ? (args.byteLength ?? 0)
+      : args.update.byteLength;
     if (
       !Number.isSafeInteger(args.expectedNextSequence) ||
       args.expectedNextSequence < 1 ||
       artifact.updatedAt !== args.artifactUpdatedAt ||
-      args.update.byteLength <= 0 ||
-      args.update.byteLength > MAX_GATEWAY_UPDATE_BYTES ||
       args.stateVectorHash.length < 16
     )
       throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
-    const projection = parseGatewayProjection(
-      args.projectionJson,
-      args.projectionHash,
-      artifact,
-    );
-    if (!projection) throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    if (spilled) {
+      if (
+        !args.payloadDigest ||
+        args.update.byteLength !== 0 ||
+        !Number.isSafeInteger(effectiveByteLength) ||
+        effectiveByteLength <= 0
+      )
+        throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    } else if (
+      args.update.byteLength <= 0 ||
+      args.update.byteLength > MAX_GATEWAY_UPDATE_BYTES
+    ) {
+      throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
+    }
+    const projection = args.projectionJson
+      ? parseGatewayProjection(
+          args.projectionJson,
+          args.projectionHash,
+          artifact,
+        )
+      : null;
+    if (args.projectionJson && !projection)
+      throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    if (
+      !projection &&
+      !args.projectionPayloadRef &&
+      args.projectionJson === undefined
+    ) {
+      // Omit path: require a projection hash so the gateway attested the head.
+      if (!args.projectionHash || args.projectionHash.length < 16)
+        throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    }
     if (existingUpdate) {
       if (existingUpdate.stateVectorHash !== args.stateVectorHash)
         throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
@@ -693,24 +742,43 @@ export const bootstrapNative = internalMutation({
       schoolId: room.schoolId,
       sequence: args.expectedNextSequence,
       update: args.update,
-      byteLength: args.update.byteLength,
+      byteLength: effectiveByteLength,
       stateVectorHash: args.stateVectorHash,
       actorAccountId: actor.accountId,
       clientId,
       idempotencyKey: `bootstrap:${artifact.updatedAt}:${args.stateVectorHash}`,
       regionIds: ["artifact:structure"],
       createdAt: now,
+      payloadRef: args.payloadRef,
+      payloadDigest: args.payloadDigest,
+      payloadManifest: args.payloadManifest,
     });
+    let projectionPatch: Record<string, unknown> = projection
+      ? artifactProjectionPatch(projection, args.projectionHash!)
+      : {};
+    if (args.projectionPayloadRef) {
+      projectionPatch = {
+        ...projectionPatch,
+        projectionPayloadRef: args.projectionPayloadRef,
+        projectionPayloadDigest: args.projectionPayloadDigest,
+      };
+      if (!projection && args.projectionHash) {
+        projectionPatch.contentHash = args.projectionHash;
+      }
+    } else if (!projection && args.projectionHash) {
+      // Omit: keep import content; only advance sync head + contentHash attest.
+      projectionPatch = { contentHash: args.projectionHash };
+    }
     await Promise.all([
       ctx.db.patch(room._id, {
         nextSequence: args.expectedNextSequence + 1,
-        uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+        uncompactedBytes: room.uncompactedBytes + effectiveByteLength,
         lastProjectionSequence: args.expectedNextSequence,
         lastProjectionAt: now,
         updatedAt: now,
       }),
       ctx.db.patch(artifact._id, {
-        ...artifactProjectionPatch(projection, args.projectionHash),
+        ...projectionPatch,
         syncState: "synchronized",
         liveStateVectorHash: args.stateVectorHash,
         lastSynchronizedAt: now,
@@ -719,7 +787,9 @@ export const bootstrapNative = internalMutation({
     /* Every commit is activity, whether or not the title moved: the tree caches
        both the name and the moment, so a recency-ordered column can be an
        indexed window instead of a scan (D42, D40). */
-    await syncListingAfterProjection(ctx, artifact, projection.title);
+    if (projection)
+      await syncListingAfterProjection(ctx, artifact, projection.title);
+    else await syncSourceNodes(ctx, "work", artifact._id, artifact.title);
     return { sequence: args.expectedNextSequence, duplicate: false };
   },
 });

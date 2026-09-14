@@ -14,6 +14,8 @@ import {
   resolveDurableUpdateBytes,
   planMergedUpdatePersist,
   planProjectionStorage,
+  planBootstrapProjectionTransport,
+  durablePayloadFitsBridgeEnvelope,
   compactionSnapshotDecision,
   compactionDeferredHealthRecord,
   sha256Hex,
@@ -167,5 +169,26 @@ describe("collaboration durable capacity", () => {
     });
     expect(record.code).toBe("COLLABORATION_COMPACTION_DEFERRED");
     expect(record.at).toBe(42);
+  });
+});
+
+describe("bootstrap projection transport", () => {
+  it("inlines small projections and omits bridge-oversized ones", () => {
+    const inline = planBootstrapProjectionTransport("ok");
+    expect(inline.transport).toBe("inline");
+    expect(durablePayloadFitsBridgeEnvelope(1000)).toBe(true);
+    const huge = "x".repeat(2_100_000);
+    const omitted = planBootstrapProjectionTransport(huge);
+    expect(omitted.transport).toBe("omit");
+    expect(omitted.reason).toBe("projection_exceeds_bridge_spill");
+    expect(durablePayloadFitsBridgeEnvelope(2_100_000)).toBe(false);
+  });
+
+  it("spills mid-size projections that exceed the durable inline bound", () => {
+    const mid = "y".repeat(950_000);
+    const plan = planBootstrapProjectionTransport(mid);
+    expect(plan.transport).toBe("spill");
+    expect(plan.mode).toBe("spill");
+    expect(plan.bytes.byteLength).toBeGreaterThan(900_000);
   });
 });

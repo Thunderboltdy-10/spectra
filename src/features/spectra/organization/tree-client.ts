@@ -5,6 +5,7 @@ import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useAuthedArgs } from "../data/use-authed-args";
+import { identityFailureMessage } from "@/components/ui/truthful-state";
 
 /**
  * The tree's client. Every read here is a live Convex subscription, so a rename
@@ -406,13 +407,38 @@ export function useTreeActions() {
   );
 }
 
+/**
+ * LIBRARY_* codes are organizer/command preconditions, never connectivity.
+ * Map them the same way describeFailure maps AUTH_* — raw codes must not reach
+ * toasts or agent outcomes as the only user-visible text.
+ */
+function libraryFailureMessage(raw: string): string | null {
+  if (/LIBRARY_FOLDER_NAME_REQUIRED/i.test(raw))
+    return "Enter a folder name first.";
+  if (/LIBRARY_TARGETS_REQUIRED/i.test(raw)) return "Select something first.";
+  if (/LIBRARY_RENAME_PARAMS_REQUIRED/i.test(raw))
+    return "Choose one item and enter a new name.";
+  if (/LIBRARY_DESTINATION_REQUIRED/i.test(raw))
+    return "Choose where to put it.";
+  if (/\bLIBRARY_[A-Z0-9_]+\b/.test(raw))
+    return "Could not update the Library. Try again.";
+  return null;
+}
+
 /** A stable failure message: the server's reason, or a plain fallback. */
 export function treeFailureMessage(error: unknown, fallback: string) {
-      const raw = error instanceof Error ? error.message : "";
-      /* Convex prefixes thrown messages; the sentence we wrote is what a reader
-         needs, not the frame around it. */
-      const match = raw.match(/Uncaught Error:\s*([^\n]+)/);
-  return (match?.[1] ?? raw ?? "").trim() || fallback;
+  const raw = error instanceof Error ? error.message : "";
+  /* Convex prefixes thrown messages; the sentence we wrote is what a reader
+     needs, not the frame around it. */
+  const match = raw.match(/Uncaught Error:\s*([^\n]+)/);
+  const message = (match?.[1] ?? raw ?? "").trim();
+  /* AUTH_* identity codes must win over LIBRARY_* if a frame ever carries both
+     (LIBRARY catch-all must not mask sign-in / school membership failures). */
+  return (
+    identityFailureMessage(message) ??
+    libraryFailureMessage(message) ??
+    (message || fallback)
+  );
 }
 
 export function useTreeErrorReporter(report: (message: string) => void) {

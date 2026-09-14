@@ -226,7 +226,7 @@ export type DescribedFailure = {
  * pass "Check your connection…" as a load fallback; map those codes to plain
  * verify/account copy so shells do not mislabel an unverified email as offline.
  */
-function identityFailureMessage(raw: string): string | null {
+export function identityFailureMessage(raw: string): string | null {
   if (/AUTH_EMAIL_UNVERIFIED/i.test(raw))
     return "Verify your school email before using Spectra.";
   if (/AUTH_NOT_SIGNED_IN/i.test(raw)) return "Sign in to continue.";

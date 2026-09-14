@@ -429,7 +429,13 @@ function ShellNavigation() {
       timetableNotifications,
     ],
   );
-  const unreadCount = notifications.filter((item) => !item.readAt).length;
+  // Pending share invitations are outstanding actions, not clearable
+  // "unread" notifications. Counting them as unread made Mark-read a no-op
+  // while the badge stayed hot (AUDIT-A F3 / AUDIT-D). Keep them listed with
+  // Accept deep-link; exclude from unread math and unread dots.
+  const unreadCount = notifications.filter(
+    (item) => !item.readAt && item.kind !== "share",
+  ).length;
 
   const markAllNotificationsRead = useCallback(async () => {
     const comments = commentNotifications
@@ -879,7 +885,7 @@ function ShellNavigation() {
                         {item.detail}
                       </span>
                     </span>
-                    {!item.readAt ? (
+                    {!item.readAt && item.kind !== "share" ? (
                       <i className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
                     ) : null}
                   </Link>
@@ -1028,7 +1034,7 @@ function ShellNavigation() {
                         <strong className="min-w-0 flex-1 truncate text-caption text-[var(--text-primary)]">
                           {item.title}
                         </strong>
-                        {!item.readAt ? (
+                        {!item.readAt && item.kind !== "share" ? (
                           <i className="size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
                         ) : null}
                       </span>

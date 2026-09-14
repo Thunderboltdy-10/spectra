@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  LIBRARY_IMPORT_ACCEPT,
   classifyLibraryImport,
   documentContentFromImportedPlainText,
+  isOfficeNativeImportFile,
   projectLibraryImportContent,
 } from "../organization/library-import";
 
@@ -29,6 +31,89 @@ describe("Library Import resource citizens (D29)", () => {
       type: "application/octet-stream",
     });
     expect(classifyLibraryImport(unknown).kind).toBe("resource");
+  });
+
+  it("treats legacy .doc as a Library resource, not a Word projection", () => {
+    const legacy = new File([new Uint8Array([0xd0, 0xcf])], "essay.doc", {
+      type: "application/msword",
+    });
+    expect(classifyLibraryImport(legacy)).toEqual({
+      kind: "resource",
+      nativeFormat: "doc",
+    });
+  });
+
+  it("keeps .doc in the Import accept list without claiming Word work", () => {
+    expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".doc");
+    expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".docx");
+    const src = readFileSync(
+      resolve(__dirname, "../organization/library-import.ts"),
+      "utf8",
+    );
+    // Legacy OLE .doc must not be mapped as editable document work.
+    expect(src).not.toMatch(/\n\s*doc:\s*"document",/);
+    expect(src).toMatch(/docx:\s*"document"/);
+  });
+
+  it("gates the office lens to OOXML natives only", () => {
+    expect(
+      isOfficeNativeImportFile(
+        new File([""], "essay.DOCX", {
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isOfficeNativeImportFile(
+        new File([""], "book.xlsx", {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isOfficeNativeImportFile(
+        new File([""], "deck.PPTX", {
+          type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }),
+      ),
+    ).toBe(true);
+    // Legacy OLE and text/md share work blueprints but must not hit the lens.
+    expect(
+      isOfficeNativeImportFile(
+        new File([new Uint8Array([0xd0, 0xcf])], "essay.doc", {
+          type: "application/msword",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isOfficeNativeImportFile(new File(["hi"], "note.txt", { type: "text/plain" })),
+    ).toBe(false);
+    expect(
+      isOfficeNativeImportFile(new File(["# hi"], "note.md", { type: "text/markdown" })),
+    ).toBe(false);
+  });
+
+  it("does not Word-route .doc and does not swallow office lens failures", () => {
+    const shell = readFileSync(
+      resolve(__dirname, "../pages/spectra-shell.tsx"),
+      "utf8",
+    );
+    // Resource classify short-circuits before work/office projection.
+    expect(shell).toContain('classification.kind === "resource"');
+    expect(shell).toContain("importLibraryResourceFile");
+    // Office lens gated by OOXML helper — not by document/sheets/presentation alone.
+    expect(shell).toContain("isOfficeNativeImportFile(file)");
+    expect(shell).not.toMatch(
+      /projectOfficeImportWithLens\(file\)\.catch\(\(\) => null\)/,
+    );
+    const importFnAt = shell.indexOf("async function importLibraryFile");
+    expect(importFnAt).toBeGreaterThan(-1);
+    const importFnSlice = shell.slice(importFnAt, importFnAt + 5500);
+    expect(importFnSlice).toContain("await projectOfficeImportWithLens(file)");
+    // Blueprint-only gate must not remain (would POST .txt/.md to office).
+    expect(importFnSlice).not.toMatch(
+      /blueprintKey === "document"[\s\S]{0,120}projectOfficeImportWithLens/,
+    );
   });
 
   it("keeps Office and text as editable work imports", () => {
@@ -91,5 +176,41 @@ describe("Library Import resource citizens (D29)", () => {
     expect(createAt).toBeGreaterThan(-1);
     expect(failAt).toBeGreaterThan(createAt);
     expect(deleteAt).toBeGreaterThan(-1);
+  });
+
+  it("forwards parentNodeId from the open folder on both Import paths", () => {
+    const organizer = readFileSync(
+      resolve(__dirname, "../organization/library-organizer.tsx"),
+      "utf8",
+    );
+    const shell = readFileSync(
+      resolve(__dirname, "../pages/spectra-shell.tsx"),
+      "utf8",
+    );
+    // Organizer threads the same parent New uses into onImportFile.
+    expect(organizer).toContain("onImportFile?.(file, currentParentId)");
+    expect(organizer).toMatch(
+      /onImportFile\?:\s*\(file:\s*File,\s*parentNodeId\?:\s*string\s*\|\s*null\)\s*=>\s*void/,
+    );
+    // Shell accepts parent and passes it to resource + work createArtifact paths.
+    expect(shell).toContain("importLibraryFile(");
+    expect(shell).toContain("parentNodeId?: string | null");
+    expect(shell).toContain("parentNodeId: placementParentId");
+    expect(shell).toContain(
+      "...(placementParentId ? { parentNodeId: placementParentId } : {})",
+    );
+    const resourceCallAt = shell.indexOf("importLibraryResourceFile(file,");
+    // Both import branches must mention placementParentId after the resource call site.
+    expect(resourceCallAt).toBeGreaterThan(-1);
+    expect(shell.indexOf("placementParentId", resourceCallAt)).toBeGreaterThan(
+      resourceCallAt,
+    );
+    const importFnAt = shell.indexOf("async function importLibraryFile");
+    expect(importFnAt).toBeGreaterThan(-1);
+    const importFnSlice = shell.slice(importFnAt, importFnAt + 4500);
+    expect(importFnSlice).toContain("parentNodeId: placementParentId");
+    expect(importFnSlice).toContain(
+      "...(placementParentId ? { parentNodeId: placementParentId } : {})",
+    );
   });
 });

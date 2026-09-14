@@ -128,7 +128,13 @@ impl GrantRegistry {
     }
 
     pub fn resolve(&self, grant_id: &str, relative: &Path) -> Result<PathBuf, FsError> {
+        // Refuse host-absolute paths and any Windows drive/UNC form even when
+        // this process is running on Unix. Relative grant paths arrive as
+        // strings from Bridge clients; on Linux `C:\secret` is one Normal
+        // component (backslash is not a separator), so is_absolute()/Prefix
+        // alone would silently accept a Windows absolute escape.
         if relative.is_absolute()
+            || looks_like_windows_absolute(relative)
             || relative.components().any(|part| {
                 matches!(
                     part,
@@ -155,6 +161,16 @@ impl GrantRegistry {
         }
         Ok(canonical)
     }
+}
+
+
+fn looks_like_windows_absolute(path: &Path) -> bool {
+    let raw = path.as_os_str().to_string_lossy();
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return true;
+    }
+    raw.starts_with(r"\\") || raw.starts_with("//")
 }
 
 pub fn sha256_file(path: &Path) -> std::io::Result<String> {

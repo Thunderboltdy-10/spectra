@@ -8,13 +8,17 @@ import {
   assertCalendarActionContract,
   narrateResolvedTargets,
   promptExplicitlyTargetsFocusedArtifact,
+  promptPlacesIntoWorkspace,
   promptRequestsCalendarAction,
   promptRequestsNewPlannerTask,
   reconcileExplicitDocumentRegions,
   resolveArtifactTarget,
   resolvePlanArtifactTargets,
   resolveWorkspaceMention,
+  toolFulfillsEntireRequest,
+  applicationToolMayCompleteRequest,
 } from "@/app/api/spectra/run/loop/resolve";
+import { compactOperationsRemappingCreated } from "@/features/spectra/operations/schema";
 import {
   compactCalendarForAgent,
   parseStreamedPlanText,
@@ -166,7 +170,52 @@ describe("P4.I2 artifact target resolution", () => {
       },
     ]);
     expect(compact.items).toHaveLength(80);
+    expect(compact.coverage).toMatchObject({
+      complete: false,
+      truncatedVisibleItems: true,
+      rangeBounded: true,
+    });
+    expect(compact.counts).toMatchObject({
+      visibleItems: 246,
+      returnedVisibleItems: 80,
+      scheduledWorkBlocks: 1,
+    });
     expect(JSON.stringify(compact).length).toBeLessThan(80_000);
+  });
+
+  it("does not treat an empty range-bounded overview as complete calendar truth", () => {
+    const compact = compactCalendarForAgent({
+      timezone: "UTC",
+      range: { from: 1_000, to: 2_000 },
+      items: [],
+      scheduledWorkBlocks: [],
+      unscheduledTasks: [],
+      partialTimeItems: [
+        {
+          id: "deadline-1",
+          kind: "official_deadline",
+          title: "Unknown-time deadline",
+          timePrecision: "unknown",
+        },
+      ],
+      sourceState: { kind: "not_connected" },
+      migration: { complete: false, partial: true, migratedArtifacts: 0, migratedEvents: 0, skippedEvents: 1 },
+    }) as {
+      coverage: Record<string, unknown>;
+      counts: Record<string, unknown>;
+      partialTimeItems: unknown[];
+      migration: Record<string, unknown>;
+    };
+    expect(compact.coverage.complete).toBe(false);
+    expect(compact.coverage.rangeBounded).toBe(true);
+    expect(compact.coverage.emptyIsNotComplete).toMatch(/empty items array/i);
+    expect(compact.counts).toMatchObject({
+      visibleItems: 0,
+      returnedVisibleItems: 0,
+      partialTimeItems: 1,
+    });
+    expect(compact.partialTimeItems).toHaveLength(1);
+    expect(compact.migration.partial).toBe(true);
   });
 
   it("lets a unique named existing artifact override stale open focus", () => {
@@ -670,6 +719,227 @@ describe("P4.I2 artifact target resolution", () => {
     ).toMatchObject({ title: "Updating Target Notes", targetId: "target" });
   });
 
+
+  it("does not treat a slide move as a Calendar request", () => {
+    expect(
+      promptRequestsCalendarAction("Move the slide 2 heading above the diagram."),
+    ).toBe(false);
+    expect(
+      promptRequestsCalendarAction(
+        "Put Evaluation of DP1 work on tomorrow morning from 09:00 to 10:00.",
+      ),
+    ).toBe(true);
+  });
+
+  it("allows a planner note update when paired with a Calendar schedule", () => {
+    const update = parseModelOperation({
+      type: "artifact.update",
+      input: {
+        artifactId: "planner-task",
+        blueprintKey: "planner_task",
+        title: null,
+        summary: null,
+        content: null,
+        contentPatch: {
+          changes: [{ path: "/notes", value: "Bring the IA rubric" }],
+        },
+        tags: null,
+      },
+    });
+    const schedule = parseModelOperation({
+      type: "app.command",
+      input: {
+        command: "calendar.schedule",
+        args: {
+          planArtifactId: "planner-task",
+          planTaskId: "task-1",
+          taskItemId: null,
+          startAt: 1_000,
+          endAt: 2_000,
+          timezone: "UTC",
+        },
+      },
+    });
+    const prompt =
+      "Update the note on Evaluation of DP1 work and schedule it tomorrow from 09:00 to 10:00.";
+    expect(promptRequestsCalendarAction(prompt)).toBe(true);
+    expect(() => assertCalendarActionContract([update], prompt)).toThrow(
+      /Calendar request/i,
+    );
+    expect(() =>
+      assertCalendarActionContract([update, schedule], prompt),
+    ).not.toThrow();
+  });
+
+  it("does not rewrite create destinations from a source-only workspace mention", () => {
+    expect(
+      promptPlacesIntoWorkspace(
+        "Create a guide from Chemistry Lab notes for tomorrow.",
+        "Chemistry Lab",
+      ),
+    ).toBe(false);
+    expect(
+      resolveWorkspaceMention(
+        "Create a guide from Chemistry Lab notes for tomorrow.",
+        [
+          { id: "lab", title: "Chemistry Lab" },
+          { id: "bio", title: "Biology" },
+        ],
+        { requireDestinationLanguage: true },
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveWorkspaceMention(
+        "Put the guide in Chemistry Lab.",
+        [
+          { id: "lab", title: "Chemistry Lab" },
+          { id: "bio", title: "Biology" },
+        ],
+        { requireDestinationLanguage: true },
+      ),
+    ).toBe("lab");
+  });
+
+  it("keeps the agent loop open after the first tool on multi-obligation prompts", () => {
+    expect(
+      toolFulfillsEntireRequest(
+        "Schedule the essay block tomorrow at 09:00 and then open the study guide.",
+        "schedule_calendar_task",
+      ),
+    ).toBe(false);
+    expect(
+      toolFulfillsEntireRequest(
+        "Schedule two distinct blocks for the IA and the quiz tomorrow.",
+        "schedule_calendar_task",
+      ),
+    ).toBe(false);
+    expect(
+      toolFulfillsEntireRequest(
+        "Put Evaluation of DP1 work on tomorrow morning from 09:00 to 10:00.",
+        "schedule_calendar_task",
+      ),
+    ).toBe(true);
+    expect(
+      toolFulfillsEntireRequest(
+        "Insert a reference to the reading and then summarize it.",
+        "insert_reference",
+      ),
+    ).toBe(false);
+  });
+
+  it("remaps @created dependencies after dropped operations", () => {
+    const createA = parseModelOperation({
+      type: "artifact.create",
+      input: {
+        blueprintKey: "document",
+        title: "Guide A",
+        summary: "A",
+        content: { blocks: [{ id: "b1", type: "paragraph", text: "A" }], outline: [] },
+        tags: [],
+        workspaceId: "workspace-1",
+        placement: "context",
+        pinned: false,
+        exclusivePin: false,
+      },
+    });
+    const refresh = parseModelOperation({
+      type: "app.command",
+      input: {
+        command: "trigger_managebac_sync",
+        args: {},
+      },
+    });
+    const createB = parseModelOperation({
+      type: "artifact.create",
+      input: {
+        blueprintKey: "document",
+        title: "Guide B",
+        summary: "B",
+        content: { blocks: [{ id: "b2", type: "paragraph", text: "B" }], outline: [] },
+        tags: [],
+        workspaceId: "workspace-1",
+        placement: "context",
+        pinned: false,
+        exclusivePin: false,
+      },
+    });
+    const link = parseModelOperation({
+      type: "artifact.link",
+      input: {
+        sourceArtifactId: "@created:2",
+        targetArtifactId: "@created:0",
+        relationType: "supports",
+        label: null,
+        explanation: null,
+        workspaceId: "workspace-1",
+      },
+    });
+    const compacted = compactOperationsRemappingCreated(
+      [createA, refresh, createB, link],
+      (operation) =>
+        !(
+          operation.type === "app.command" &&
+          operation.input.command === "trigger_managebac_sync"
+        ),
+    );
+    expect(compacted).toHaveLength(3);
+    expect(compacted[2]).toMatchObject({
+      input: {
+        sourceArtifactId: "@created:1",
+        targetArtifactId: "@created:0",
+      },
+    });
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "mixed",
+        requestedArtifactTypes: ["document"],
+        requestedVisibleArtifactCount: 2,
+        targetArtifactId: null,
+        targetWorkspaceId: "workspace-1",
+      },
+      choices: null,
+      operations: [
+        {
+          type: "app.command",
+          input: { command: "trigger_managebac_sync", args: {} },
+        },
+        {
+          type: "app.command",
+          input: { command: "trigger_managebac_sync", args: {} },
+        },
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "document",
+            title: "After refresh",
+            summary: "x",
+            content: { blocks: [{ id: "b", type: "paragraph", text: "x" }], outline: [] },
+            tags: [],
+            workspaceId: "workspace-1",
+            placement: "context",
+          },
+        },
+        {
+          type: "artifact.link",
+          input: {
+            sourceArtifactId: "@created:2",
+            targetArtifactId: "deck",
+            relationType: "supports",
+            label: null,
+            explanation: null,
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
+      finalResponse: "Refreshed once and linked.",
+    });
+    expect(plan.operations).toHaveLength(3);
+    expect(plan.operations[2]).toMatchObject({
+      input: { sourceArtifactId: "@created:1" },
+    });
+  });
+
   it("normalizes a flattened streamed calendar command into executable args", () => {
     const plan = parseStreamedPlanText(
       JSON.stringify({
@@ -716,4 +986,60 @@ describe("P4.I2 artifact target resolution", () => {
       },
     });
   });
+
+  it("rejects slide ordinal negatives that must not become Calendar", () => {
+    expect(
+      promptRequestsCalendarAction("Move slide 12 of the deck above the figure."),
+    ).toBe(false);
+    expect(
+      promptRequestsCalendarAction("Resize presentation slide 3 heading."),
+    ).toBe(false);
+    expect(
+      promptRequestsCalendarAction("Put the block on Friday at 3 pm."),
+    ).toBe(true);
+  });
+
+  it("keeps Unicode source mentions from becoming destinations and refuses duplicate titles", () => {
+    expect(
+      promptPlacesIntoWorkspace(
+        "Create a guide from Química Lab notes for tomorrow.",
+        "Química Lab",
+      ),
+    ).toBe(false);
+    expect(
+      resolveWorkspaceMention(
+        "Put the guide in Química Lab.",
+        [
+          { id: "lab-a", title: "Química Lab" },
+          { id: "lab-b", title: "Quimica Lab" },
+        ],
+        { requireDestinationLanguage: true },
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveWorkspaceMention(
+        "Put the guide in Química Lab.",
+        [{ id: "lab-a", title: "Química Lab" }],
+        { requireDestinationLanguage: true },
+      ),
+    ).toBe("lab-a");
+  });
+
+  it("does not treat a queued reference insert as request completion", () => {
+    expect(
+      applicationToolMayCompleteRequest(
+        "Insert a reference to the reading.",
+        "insert_reference",
+        { status: 0, ok: true, data: { status: "queued_refresh" } },
+      ),
+    ).toBe(false);
+    expect(
+      applicationToolMayCompleteRequest(
+        "Insert a reference to the reading.",
+        "insert_reference",
+        { status: 0, ok: true, data: { status: "verified_native_write" } },
+      ),
+    ).toBe(true);
+  });
 });
+

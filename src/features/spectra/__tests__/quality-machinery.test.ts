@@ -221,6 +221,87 @@ function structuredDocument() {
 }
 
 describe("P4.I4 quality machinery", () => {
+  it("rejects a shape labelled chart when numeric presentation data is required", () => {
+    const placeholderDeck = {
+      ...presentationDraft(),
+      slides: presentationDraft().slides.map((slide, index) =>
+        index === 3
+          ? {
+              ...slide,
+              objects: [
+                textObject("s4-title", "Neighborhood heat"),
+                shapeObject("s4-fake-chart", "Chart"),
+                textObject("s4-body", "Greenery tracks cooler surfaces."),
+              ],
+            }
+          : slide,
+      ),
+    };
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content: placeholderDeck,
+      prompt:
+        "Turn this CSV into a study deck and present the numeric comparison with a chart.",
+    });
+    expect(report.passed).toBe(false);
+    expect(
+      report.findings.some((finding) =>
+        /editable chart or table with numeric series/i.test(finding.message),
+      ),
+    ).toBe(true);
+  });
+
+
+  it("rejects an empty chart object without numeric series", () => {
+    const emptyChartDeck = {
+      ...presentationDraft(),
+      slides: presentationDraft().slides.map((slide, index) =>
+        index === 3
+          ? {
+              ...slide,
+              objects: [
+                textObject("s4-title", "Neighborhood heat"),
+                {
+                  id: "s4-empty-chart",
+                  type: "chart",
+                  content: { chartType: "bar", labels: [], values: [] },
+                  altText: "Empty chart placeholder",
+                },
+                textObject("s4-body", "Greenery tracks cooler surfaces."),
+              ],
+            }
+          : slide,
+      ),
+    };
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content: emptyChartDeck,
+      prompt:
+        "Turn this CSV into a study deck and present the numeric comparison with a chart.",
+    });
+    expect(report.passed).toBe(false);
+    expect(
+      report.findings.some((finding) =>
+        /editable chart or table with numeric series/i.test(finding.message),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a real editable numeric chart series for data presentations", () => {
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content: presentationDraft(),
+      prompt:
+        "Turn this CSV into a study deck and present the numeric comparison with a chart.",
+    });
+    expect(
+      report.findings.some((finding) =>
+        /editable chart or table with numeric series/i.test(finding.message),
+      ),
+    ).toBe(false);
+  });
+
+
   it("keeps one presentation layout vocabulary for Studio, commands, and AI", () => {
     expect(PRESENTATION_LAYOUTS).toBe(PRESENTATION_LAYOUT_OPTIONS);
 

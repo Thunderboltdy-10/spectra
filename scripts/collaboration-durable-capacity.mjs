@@ -1,0 +1,297 @@
+/**
+ * S9-DURABLE capacity helpers: digest-verified manifests, merge pre-check /
+ * spill planning, projection off-row planning, compaction honesty.
+ * Does not replace Yjs ledger authority — only how oversized bytes are stored.
+ */
+import { createHash } from "node:crypto";
+import {
+  MAX_DURABLE_UPDATE_BYTES,
+  MAX_PROJECTION_JSON_CHARS,
+  MAX_PROJECTION_JSON_UTF8_BYTES,
+  MAX_COMPACTION_STATE_VECTOR_BYTES,
+} from "./collaboration-update-envelope.mjs";
+
+export const DURABLE_PAYLOAD_MANIFEST_VERSION = 1;
+export const DURABLE_PAYLOAD_MEDIA_YJS = "application/vnd.spectra.yjs-update";
+export const DURABLE_PAYLOAD_MEDIA_SNAPSHOT =
+  "application/vnd.spectra.yjs-snapshot";
+export const DURABLE_PAYLOAD_MEDIA_PROJECTION =
+  "application/vnd.spectra.projection+json";
+
+export { MAX_COMPACTION_STATE_VECTOR_BYTES };
+
+export function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function sha256Base64Url(bytes) {
+  return createHash("sha256").update(bytes).digest("base64url");
+}
+
+export function utf8ByteLength(value) {
+  if (typeof value !== "string") return 0;
+  if (typeof Buffer !== "undefined") return Buffer.byteLength(value, "utf8");
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/**
+ * Versioned immutable payload manifest. Digests are hex SHA-256 of raw bytes.
+ * Legacy rows without a manifest are treated as inline bytes by resolve helpers.
+ */
+export function createDurablePayloadManifest({
+  kind,
+  bytes,
+  payloadRef = null,
+  encoding = payloadRef ? "payload-ref" : "inline-base64",
+  mediaType,
+}) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength <= 0)
+    throw new Error("DURABLE_PAYLOAD_BYTES_INVALID");
+  if (kind !== "yjs-update" && kind !== "yjs-snapshot" && kind !== "projection")
+    throw new Error("DURABLE_PAYLOAD_KIND_INVALID");
+  const digest = sha256Hex(bytes);
+  const manifest = {
+    version: DURABLE_PAYLOAD_MANIFEST_VERSION,
+    kind,
+    digest,
+    byteLength: bytes.byteLength,
+    encoding,
+    mediaType:
+      mediaType ??
+      (kind === "projection"
+        ? DURABLE_PAYLOAD_MEDIA_PROJECTION
+        : kind === "yjs-snapshot"
+          ? DURABLE_PAYLOAD_MEDIA_SNAPSHOT
+          : DURABLE_PAYLOAD_MEDIA_YJS),
+  };
+  if (encoding === "inline-base64") {
+    manifest.inlineBase64 = Buffer.from(bytes).toString("base64");
+  } else if (encoding === "payload-ref") {
+    if (typeof payloadRef !== "string" || !payloadRef.trim())
+      throw new Error("DURABLE_PAYLOAD_REF_INVALID");
+    manifest.payloadRef = payloadRef.trim();
+  } else {
+    throw new Error("DURABLE_PAYLOAD_ENCODING_INVALID");
+  }
+  return manifest;
+}
+
+export function verifyDurablePayloadManifest(manifest, bytes) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest))
+    return { ok: false, reason: "manifest_missing" };
+  if (manifest.version !== DURABLE_PAYLOAD_MANIFEST_VERSION)
+    return { ok: false, reason: "manifest_version" };
+  if (typeof manifest.digest !== "string" || manifest.digest.length !== 64)
+    return { ok: false, reason: "manifest_digest" };
+  if (
+    typeof manifest.byteLength !== "number" ||
+    !Number.isSafeInteger(manifest.byteLength) ||
+    manifest.byteLength <= 0
+  )
+    return { ok: false, reason: "manifest_byte_length" };
+  if (!(bytes instanceof Uint8Array))
+    return { ok: false, reason: "bytes_missing" };
+  if (bytes.byteLength !== manifest.byteLength)
+    return { ok: false, reason: "byte_length_mismatch" };
+  if (sha256Hex(bytes) !== manifest.digest)
+    return { ok: false, reason: "digest_mismatch" };
+  return { ok: true };
+}
+
+/**
+ * Resolve update bytes from a stored row. Legacy rows only have inline `update`
+ * bytes; capacity rows may carry a verified manifest + payload ref.
+ */
+export function resolveDurableUpdateBytes(record, loadPayloadBytes) {
+  if (!record || typeof record !== "object") return null;
+  const inline =
+    record.update instanceof Uint8Array
+      ? record.update
+      : record.update instanceof ArrayBuffer
+        ? new Uint8Array(record.update)
+        : null;
+  if (!record.payloadManifest) {
+    return inline && inline.byteLength > 0 ? inline : null;
+  }
+  const manifest = record.payloadManifest;
+  if (manifest.encoding === "inline-base64" && manifest.inlineBase64) {
+    const bytes = Buffer.from(String(manifest.inlineBase64), "base64");
+    const verified = verifyDurablePayloadManifest(manifest, bytes);
+    if (!verified.ok) throw new Error(`DURABLE_PAYLOAD_${verified.reason.toUpperCase()}`);
+    return new Uint8Array(bytes);
+  }
+  if (manifest.encoding === "payload-ref") {
+    if (typeof loadPayloadBytes !== "function")
+      throw new Error("DURABLE_PAYLOAD_LOADER_REQUIRED");
+    const bytes = loadPayloadBytes(manifest.payloadRef, manifest.digest);
+    if (!(bytes instanceof Uint8Array))
+      throw new Error("DURABLE_PAYLOAD_REF_MISSING");
+    const verified = verifyDurablePayloadManifest(manifest, bytes);
+    if (!verified.ok) throw new Error(`DURABLE_PAYLOAD_${verified.reason.toUpperCase()}`);
+    return bytes;
+  }
+  // Unknown manifest encoding: fall back to legacy inline when present.
+  if (inline && inline.byteLength > 0) return inline;
+  throw new Error("DURABLE_PAYLOAD_ENCODING_UNSUPPORTED");
+}
+
+/**
+ * Split a same-batch group so each Y.mergeUpdates result stays ≤ maxBytes.
+ * Single updates that already exceed the envelope require spill (not split).
+ */
+export function planMergedUpdatePersist(Y, updates, maxBytes = MAX_DURABLE_UPDATE_BYTES) {
+  if (!Array.isArray(updates) || updates.length === 0)
+    return { mode: "empty", batches: [] };
+  const bodies = updates.map((entry) =>
+    entry instanceof Uint8Array ? entry : entry?.documentUpdate,
+  );
+  if (bodies.some((body) => !(body instanceof Uint8Array) || body.byteLength <= 0))
+    throw new Error("DURABLE_MERGE_UPDATE_INVALID");
+
+  for (const body of bodies) {
+    if (body.byteLength > maxBytes) {
+      return {
+        mode: "spill",
+        reason: "single_update_exceeds_envelope",
+        update: body,
+        manifest: createDurablePayloadManifest({
+          kind: "yjs-update",
+          bytes: body,
+          encoding: "payload-ref",
+          payloadRef: "pending",
+        }),
+        batches: [],
+      };
+    }
+  }
+
+  if (bodies.length === 1) {
+    return { mode: "inline", batches: [{ updates: [bodies[0]], merged: bodies[0] }] };
+  }
+
+  const mergedAll = Y.mergeUpdates(bodies);
+  if (mergedAll.byteLength <= maxBytes) {
+    return {
+      mode: "inline",
+      batches: [{ updates: bodies, merged: mergedAll }],
+    };
+  }
+
+  // Greedy pack: grow a sub-batch while the merged size stays in envelope.
+  const batches = [];
+  let current = [];
+  for (const body of bodies) {
+    const trial = current.length === 0 ? [body] : [...current, body];
+    const merged = trial.length === 1 ? trial[0] : Y.mergeUpdates(trial);
+    if (merged.byteLength <= maxBytes) {
+      current = trial;
+      continue;
+    }
+    if (current.length === 0) {
+      // Defensive: should be unreachable because singles were gated above.
+      return {
+        mode: "spill",
+        reason: "single_update_exceeds_envelope",
+        update: body,
+        batches: [],
+      };
+    }
+    batches.push({
+      updates: current,
+      merged: current.length === 1 ? current[0] : Y.mergeUpdates(current),
+    });
+    current = [body];
+  }
+  if (current.length)
+    batches.push({
+      updates: current,
+      merged: current.length === 1 ? current[0] : Y.mergeUpdates(current),
+    });
+  return { mode: "split", reason: "merged_batch_exceeds_envelope", batches };
+}
+
+export function planProjectionStorage(projectionJson, {
+  maxChars = MAX_PROJECTION_JSON_CHARS,
+  maxUtf8Bytes = MAX_PROJECTION_JSON_UTF8_BYTES,
+} = {}) {
+  if (typeof projectionJson !== "string" || !projectionJson)
+    return { mode: "absent" };
+  const chars = projectionJson.length;
+  const utf8 = utf8ByteLength(projectionJson);
+  if (chars <= maxChars && utf8 <= maxUtf8Bytes) {
+    return { mode: "inline", projectionJson, charLength: chars, utf8ByteLength: utf8 };
+  }
+  const bytes = Buffer.from(projectionJson, "utf8");
+  return {
+    mode: "spill",
+    reason: chars > maxChars ? "chars" : "utf8",
+    charLength: chars,
+    utf8ByteLength: utf8,
+    bytes,
+    manifest: createDurablePayloadManifest({
+      kind: "projection",
+      bytes,
+      encoding: "payload-ref",
+      payloadRef: "pending",
+    }),
+    // Hot-row stub: readers resolve via digest/ref; never treat as full content.
+    hotStub: {
+      $spectraProjectionPayload: true,
+      digest: sha256Hex(bytes),
+      byteLength: bytes.byteLength,
+      schema: DURABLE_PAYLOAD_MANIFEST_VERSION,
+    },
+  };
+}
+
+export function compactionSnapshotDecision(
+  updateBytes,
+  stateVectorBytes,
+  {
+    maxUpdateBytes = MAX_DURABLE_UPDATE_BYTES,
+    maxStateVectorBytes = MAX_COMPACTION_STATE_VECTOR_BYTES,
+  } = {},
+) {
+  const updateLen =
+    typeof updateBytes === "number" ? updateBytes : updateBytes?.byteLength ?? 0;
+  const svLen =
+    typeof stateVectorBytes === "number"
+      ? stateVectorBytes
+      : stateVectorBytes?.byteLength ?? 0;
+  if (updateLen <= maxUpdateBytes && svLen <= maxStateVectorBytes) {
+    return { action: "inline", updateBytes: updateLen, stateVectorBytes: svLen };
+  }
+  if (updateLen > maxUpdateBytes) {
+    return {
+      action: "spill",
+      reason: "snapshot_update_exceeds_envelope",
+      updateBytes: updateLen,
+      stateVectorBytes: svLen,
+    };
+  }
+  return {
+    action: "degraded",
+    reason: "state_vector_exceeds_envelope",
+    updateBytes: updateLen,
+    stateVectorBytes: svLen,
+  };
+}
+
+export function compactionDeferredHealthRecord({
+  artifactId,
+  partitionKey,
+  reason,
+  updateBytes,
+  stateVectorBytes,
+  at = Date.now(),
+}) {
+  return {
+    code: "COLLABORATION_COMPACTION_DEFERRED",
+    reason,
+    artifactId: artifactId ?? null,
+    partitionKey: partitionKey ?? null,
+    updateBytes: updateBytes ?? null,
+    stateVectorBytes: stateVectorBytes ?? null,
+    at,
+  };
+}

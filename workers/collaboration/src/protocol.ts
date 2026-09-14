@@ -1,5 +1,10 @@
 export const COLLABORATION_PROTOCOL_VERSION = 1;
-export const MAX_UPDATE_BYTES = 1_048_576;
+// Durable apply gate — must match self-hosted MAX_DURABLE_UPDATE_BYTES (760 KiB).
+// Realtime frames may still use MAX_REALTIME_MESSAGE_BYTES; do not conflate them.
+export const MAX_DURABLE_UPDATE_BYTES = 760 * 1024;
+export const MAX_REALTIME_MESSAGE_BYTES = 1_048_576;
+/** @deprecated Prefer MAX_DURABLE_UPDATE_BYTES; kept as the room apply ceiling. */
+export const MAX_UPDATE_BYTES = MAX_DURABLE_UPDATE_BYTES;
 export const MAX_AWARENESS_BYTES = 16_384;
 
 export type ActorIdentity = {

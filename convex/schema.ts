@@ -1387,6 +1387,8 @@ export default defineSchema({
     content: v.any(),
     schemaVersion: v.optional(v.number()),
     contentHash: v.optional(v.string()),
+    projectionPayloadRef: v.optional(v.string()),
+    projectionPayloadDigest: v.optional(v.string()),
     pendingPayloadRef: v.optional(v.string()),
     pendingContentHash: v.optional(v.string()),
     pendingBaseRevision: v.optional(v.string()),
@@ -2643,6 +2645,27 @@ export default defineSchema({
     .index("by_school_hash", ["schoolId", "hash"])
     .index("by_state_reference", ["state", "lastReferencedAt"]),
 
+  collaborationDurablePayloads: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    accountId: v.id("accounts"),
+    kind: v.union(
+      v.literal("yjs-update"),
+      v.literal("yjs-snapshot"),
+      v.literal("projection"),
+    ),
+    digest: v.string(),
+    storageId: v.id("_storage"),
+    byteLength: v.number(),
+    mediaType: v.string(),
+    manifestVersion: v.number(),
+    status: v.union(v.literal("active"), v.literal("released")),
+    createdAt: v.number(),
+    releasedAt: v.optional(v.number()),
+  })
+    .index("by_digest", ["digest"])
+    .index("by_artifact_kind", ["artifactId", "kind"])
+    .index("by_status_created", ["status", "createdAt"]),
+
   collaborationRooms: defineTable({
     artifactId: v.id("spectraArtifacts"),
     schoolId: v.optional(v.id("schools")),
@@ -2682,6 +2705,9 @@ export default defineSchema({
     changeGroupId: v.optional(v.id("changeGroups")),
     regionIds: v.array(v.string()),
     createdAt: v.number(),
+    payloadRef: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    payloadManifest: v.optional(v.any()),
   })
     .index("by_room_sequence", ["roomId", "sequence"])
     .index("by_room_idempotency", ["roomId", "idempotencyKey"])
@@ -2696,6 +2722,10 @@ export default defineSchema({
     stateVector: v.bytes(),
     contentHash: v.string(),
     schemaVersion: v.number(),
+    payloadRef: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    payloadManifest: v.optional(v.any()),
+    byteLength: v.optional(v.number()),
     status: v.union(
       v.literal("pending"),
       v.literal("verified"),

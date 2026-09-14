@@ -85,3 +85,18 @@ Evidence anchors: `collaboration-gateway.mjs:250`, `:415–446`, `:725–759`, `
 ## Suggested Audit scale-room status (Atlas/Spectra)
 
 S9-DURABLE remains OPEN on capacity: 760 KiB durable append, 900k projection (now UTF-8-honest), and in-value sheet chunking still cannot host dense Sheets/Word state end-to-end — Collab needs payload/manifest partitioning, not threshold bumps. This branch closed concrete honesty gaps (pre-apply `durable_failed`, permanent projection failures, exhausted-retry reconnect, client `4409` unsynchronized messaging) under ≤2 commits without a gateway rewrite; live 200k/formal-paper acceptance and dual-gate are still outstanding.
+
+
+## Collab capacity landing (`C-Collab+Share`)
+
+Branch: `grokbot/launch-review/collab-share-capacity` (from main tip including Native honesty `2e126fb`).
+
+Implemented without rewriting Native honesty (`rejectPeerUpdate`, `forceCanonicalReconnect`, `projectionExceedsDurableBound`, permanent projection regex, client `4409`):
+
+1. **Payload/blob + versioned manifest** — `scripts/collaboration-durable-capacity.mjs` + `convex/collaborationDurablePayloads` / `collaborationDurablePayload.ts`; digest-verified manifests; legacy inline read fallback on load.
+2. **Pre-check/spill for merged batches** — `persistAcceptedMessages` uses `planMergedUpdatePersist` (split under 760 KiB; spill single oversized updates via `storeDurablePayload`).
+3. **Projection off hot row** — spill plan + `projectionPayloadRef` / hot stub on `spectraArtifacts`; bridge projection gates use **true UTF-8** (`projectionText`).
+4. **Compaction silent-skip** — `compactionSnapshotDecision` + `lastCompactionDeferred` health (`degraded`); spill path for oversized snapshot updates.
+5. **Worker parity** — Cloudflare `MAX_UPDATE_BYTES` aligned to **760 KiB** durable; `MAX_REALTIME_MESSAGE_BYTES` remains 1 MiB.
+
+Still OPEN for product/live dual-gate: end-to-end 200k workbook + formal-paper round-trip on live Convex, pin/retention GC against spilled payloads, and whether launch serves self-hosted only (worker path is parity-locked for defense in depth).

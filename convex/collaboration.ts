@@ -289,6 +289,10 @@ export const storeSnapshot = internalMutation({
       v.literal("recovery"),
       v.literal("migration"),
     ),
+    payloadRef: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    payloadManifest: v.optional(v.any()),
+    byteLength: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.roomId);
@@ -321,6 +325,14 @@ export const storeSnapshot = internalMutation({
         "COLLABORATION_SNAPSHOT_HEAD_MISMATCH: Snapshot state is not the durable sequence head.",
       );
     const now = Date.now();
+    if (args.payloadRef) {
+      if (!args.payloadDigest || !args.byteLength)
+        throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_INVALID");
+      if (args.update.byteLength !== 0)
+        throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_INLINE_CONFLICT");
+    } else if (args.update.byteLength <= 0) {
+      throw new Error("COLLABORATION_SNAPSHOT_UPDATE_INVALID");
+    }
     const snapshotId = await ctx.db.insert("collaborationSnapshots", {
       roomId: room._id,
       artifactId: room.artifactId,
@@ -333,6 +345,10 @@ export const storeSnapshot = internalMutation({
       status: "pending",
       createdBy: args.createdBy,
       createdAt: now,
+      payloadRef: args.payloadRef,
+      payloadDigest: args.payloadDigest,
+      payloadManifest: args.payloadManifest,
+      byteLength: args.byteLength ?? args.update.byteLength,
     });
     await ctx.db.patch(room._id, { status: "compacting", updatedAt: now });
     return snapshotId;
@@ -349,13 +365,30 @@ export const verifySnapshot = internalMutation({
     const now = Date.now();
     let valid = false;
     try {
-      const digest = await crypto.subtle.digest("SHA-256", snapshot.update);
+      let updateBytes = new Uint8Array(snapshot.update);
+      if (snapshot.payloadRef) {
+        const payloadId = ctx.db.normalizeId(
+          "collaborationDurablePayloads",
+          snapshot.payloadRef,
+        );
+        const payload = payloadId ? await ctx.db.get(payloadId) : null;
+        if (
+          !payload ||
+          payload.status !== "active" ||
+          payload.digest !== snapshot.payloadDigest
+        )
+          throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_MISSING");
+        const blob = await ctx.storage.get(payload.storageId);
+        if (!blob) throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_MISSING");
+        updateBytes = new Uint8Array(await blob.arrayBuffer());
+      }
+      const digest = await crypto.subtle.digest("SHA-256", updateBytes);
       const hash = btoa(String.fromCharCode(...new Uint8Array(digest)))
         .replaceAll("+", "-")
         .replaceAll("/", "_")
         .replace(/=+$/, "");
       const document = new Y.Doc();
-      Y.applyUpdate(document, new Uint8Array(snapshot.update));
+      Y.applyUpdate(document, updateBytes);
       const expectedStateVector = Y.encodeStateVector(document);
       const storedStateVector = new Uint8Array(snapshot.stateVector);
       valid =

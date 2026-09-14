@@ -23,11 +23,18 @@ import {
 import {
   MAX_DURABLE_UPDATE_BYTES,
   MAX_REALTIME_MESSAGE_BYTES,
+  MAX_COMPACTION_STATE_VECTOR_BYTES,
   DURABLE_FAILURE_USER_MESSAGE,
   DURABLE_REJECT_CLOSE_CODE,
   canonicalDurableUpdate,
-  projectionExceedsDurableBound,
 } from "./collaboration-update-envelope.mjs";
+import {
+  planMergedUpdatePersist,
+  planProjectionStorage,
+  compactionSnapshotDecision,
+  compactionDeferredHealthRecord,
+  createDurablePayloadManifest,
+} from "./collaboration-durable-capacity.mjs";
 import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "./collaboration-gateway-bridge-client.mjs";
 import {
   appendBaseStateVectorHash,
@@ -82,6 +89,7 @@ const durableHeads = new Map();
 const checkpointSchedulers = new Set();
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
+let lastCompactionDeferred = null;
 let convexReadiness = { at: 0, status: "not_ready", detail: "Convex has not been probed yet." };
 
 async function probeConvexReadiness() {
@@ -98,7 +106,7 @@ async function probeConvexReadiness() {
     convexReadiness = response.ok && text
       ? { at: now, status: "ready", detail: text }
       : { at: now, status: "not_ready", detail: `HTTP ${response.status}` };
-  } catch (error) {
+  } catch {
     convexReadiness = {
       at: now,
       status: "not_ready",
@@ -250,8 +258,56 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
       return;
     }
     const { update, stateVector } = encodeStoredRoomSnapshot(Y, stored);
-    if (update.byteLength > 760 * 1024 || stateVector.byteLength > 128 * 1024)
-      return;
+    const decision = compactionSnapshotDecision(update, stateVector, {
+      maxUpdateBytes: MAX_DURABLE_UPDATE_BYTES,
+      maxStateVectorBytes: MAX_COMPACTION_STATE_VECTOR_BYTES,
+    });
+    if (decision.action !== "inline") {
+      // Never silently skip: spill snapshot bytes when the update envelope is
+      // the problem; otherwise surface degraded health for state-vector bloat.
+      lastCompactionDeferred = compactionDeferredHealthRecord({
+        artifactId: context.artifactId,
+        partitionKey: context.partitionKey,
+        reason: decision.reason,
+        updateBytes: decision.updateBytes,
+        stateVectorBytes: decision.stateVectorBytes,
+      });
+      if (decision.action === "spill") {
+        const manifest = createDurablePayloadManifest({
+          kind: "yjs-snapshot",
+          bytes: update,
+          encoding: "payload-ref",
+          payloadRef: "pending",
+        });
+        const storedPayload = await bridge("storeDurablePayload", {
+          artifactId: context.artifactId,
+          partitionKey: context.partitionKey,
+          accountId: context.accountId,
+          kind: "yjs-snapshot",
+          digest: manifest.digest,
+          mediaType: manifest.mediaType,
+          bytesBase64: Buffer.from(update).toString("base64"),
+        });
+        manifest.payloadRef = storedPayload.payloadRef;
+        await bridge("snapshot", {
+          artifactId: context.artifactId,
+          partitionKey: context.partitionKey,
+          roomId: stored.roomId,
+          throughSequence,
+          update: "",
+          stateVector: Buffer.from(stateVector).toString("base64"),
+          contentHash: createHash("sha256").update(update).digest("base64url"),
+          schemaVersion: stored.schemaVersion,
+          payloadManifest: manifest,
+          payloadRef: storedPayload.payloadRef,
+          payloadDigest: manifest.digest,
+          byteLength: update.byteLength,
+        });
+        lastCompactionDeferred = null;
+      } else {
+        return;
+      }
+    } else {
     await bridge("snapshot", {
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
@@ -262,6 +318,7 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
       contentHash: createHash("sha256").update(update).digest("base64url"),
       schemaVersion: stored.schemaVersion,
     });
+    }
     local.appends = 0;
     local.lastSnapshotAt = Date.now();
     compactionState.set(key, local);
@@ -428,41 +485,156 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
       const immediateProjection =
         first.context.actorKind === "ai" ||
         group.some((entry) => entry.nativeInitialization);
-      const projectionJson = immediateProjection
-        ? artifactProjection(scratch, first.context.schemaVersion)
-        : null;
-      const mergedUpdate = Y.mergeUpdates(
+      let projectionJson = null;
+      let projectionPayloadRef = null;
+      let projectionPayloadDigest = null;
+      let projectionHotStub = null;
+      if (immediateProjection) {
+        // Return the string even when oversize so planProjectionStorage can
+        // spill. Never swallow PROJECTION_SIZE → null and continue append.
+        projectionJson = artifactProjection(
+          scratch,
+          first.context.schemaVersion,
+        );
+        if (projectionJson) {
+          const projectionPlan = planProjectionStorage(projectionJson);
+          if (projectionPlan.mode === "spill") {
+            try {
+              const storedPayload = await bridge("storeDurablePayload", {
+                artifactId: first.context.artifactId,
+                partitionKey: first.context.partitionKey,
+                accountId: first.context.accountId,
+                kind: "projection",
+                digest: projectionPlan.manifest.digest,
+                mediaType: projectionPlan.manifest.mediaType,
+                bytesBase64: Buffer.from(projectionPlan.bytes).toString(
+                  "base64",
+                ),
+              });
+              projectionPayloadRef = storedPayload.payloadRef;
+              projectionPayloadDigest = projectionPlan.manifest.digest;
+              // Keep $spectraProjectionPayload stubs off hot artifact.content
+              // until a reader exists; spill refs live in dedicated fields only.
+              projectionHotStub = null;
+              projectionJson = null;
+            } catch (error) {
+              const sizeError = new Error("COLLABORATION_PROJECTION_SIZE");
+              lastPersistenceFailure = {
+                code: "COLLABORATION_PROJECTION_SIZE",
+                at: Date.now(),
+                attempt: 1,
+              };
+              forceCanonicalReconnect(
+                first.context,
+                collaborationFailureMessage(sizeError),
+              );
+              throw sizeError;
+            }
+          }
+        }
+      }
+      const mergePlan = planMergedUpdatePersist(
+        Y,
         group.map((entry) => entry.documentUpdate),
+        MAX_DURABLE_UPDATE_BYTES,
       );
-      const updateHash = createHash("sha256")
-        .update(mergedUpdate)
-        .digest("base64url");
-      const appendResult = await appendWithRetry(
-        {
+      let appendResult = null;
+      let baseHash = appendBaseStateVectorHash({
+        lastPersistedHash: durableHeads.get(durableHeadKey(first.context)),
+        capturedBaseHash: first.baseStateVectorHash,
+      });
+      const nativeInitialization = group.some(
+        (entry) => entry.nativeInitialization,
+      );
+      if (mergePlan.mode === "spill") {
+        const storedPayload = await bridge("storeDurablePayload", {
           artifactId: first.context.artifactId,
           partitionKey: first.context.partitionKey,
           accountId: first.context.accountId,
-          actorKind: first.context.actorKind,
-          clientId: first.context.clientId,
-          policyVersion: first.context.policyVersion,
-          idempotencyKey: `${first.context.clientId}:${updateHash}`,
-          update: Buffer.from(mergedUpdate).toString("base64"),
-          baseStateVectorHash: appendBaseStateVectorHash({
-            lastPersistedHash: durableHeads.get(durableHeadKey(first.context)),
-            capturedBaseHash: first.baseStateVectorHash,
-          }),
-          stateVectorHash: last.stateVectorHash,
-          regionIds,
-          nativeInitialization: group.some(
-            (entry) => entry.nativeInitialization,
-          ),
-          projectionJson,
-          projectionHash: projectionJson
-            ? createHash("sha256").update(projectionJson).digest("base64url")
-            : null,
-        },
-        group,
-      );
+          kind: "yjs-update",
+          digest: mergePlan.manifest.digest,
+          mediaType: mergePlan.manifest.mediaType,
+          bytesBase64: Buffer.from(mergePlan.update).toString("base64"),
+        });
+        const manifest = {
+          ...mergePlan.manifest,
+          payloadRef: storedPayload.payloadRef,
+        };
+        const updateHash = createHash("sha256")
+          .update(mergePlan.update)
+          .digest("base64url");
+        appendResult = await appendWithRetry(
+          {
+            artifactId: first.context.artifactId,
+            partitionKey: first.context.partitionKey,
+            accountId: first.context.accountId,
+            actorKind: first.context.actorKind,
+            clientId: first.context.clientId,
+            policyVersion: first.context.policyVersion,
+            idempotencyKey: `${first.context.clientId}:${updateHash}`,
+            update: "",
+            baseStateVectorHash: baseHash,
+            stateVectorHash: last.stateVectorHash,
+            regionIds,
+            nativeInitialization,
+            projectionJson,
+            projectionHash: projectionJson
+              ? createHash("sha256").update(projectionJson).digest("base64url")
+              : projectionPayloadDigest,
+            payloadManifest: manifest,
+            payloadRef: storedPayload.payloadRef,
+            payloadDigest: manifest.digest,
+            byteLength: mergePlan.update.byteLength,
+            projectionPayloadRef,
+            projectionPayloadDigest,
+            projectionHotStub,
+          },
+          group,
+        );
+      } else {
+        const batches = mergePlan.batches;
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+          const batch = batches[batchIndex];
+          const updateHash = createHash("sha256")
+            .update(batch.merged)
+            .digest("base64url");
+          const isLast = batchIndex === batches.length - 1;
+          appendResult = await appendWithRetry(
+            {
+              artifactId: first.context.artifactId,
+              partitionKey: first.context.partitionKey,
+              accountId: first.context.accountId,
+              actorKind: first.context.actorKind,
+              clientId: first.context.clientId,
+              policyVersion: first.context.policyVersion,
+              idempotencyKey: `${first.context.clientId}:${updateHash}`,
+              update: Buffer.from(batch.merged).toString("base64"),
+              baseStateVectorHash: baseHash,
+              stateVectorHash: last.stateVectorHash,
+              regionIds,
+              nativeInitialization: nativeInitialization && batchIndex === 0,
+              // Projection rides the final sub-batch so split merges do not
+              // rewrite the hot artifact row multiple times.
+              projectionJson: isLast ? projectionJson : null,
+              projectionHash:
+                isLast && projectionJson
+                  ? createHash("sha256")
+                      .update(projectionJson)
+                      .digest("base64url")
+                  : isLast
+                    ? projectionPayloadDigest
+                    : null,
+              projectionPayloadRef: isLast ? projectionPayloadRef : null,
+              projectionPayloadDigest: isLast
+                ? projectionPayloadDigest
+                : null,
+              projectionHotStub: isLast ? projectionHotStub : null,
+            },
+            group,
+          );
+          baseHash = last.stateVectorHash;
+        }
+      }
       lastCheckpoint = {
         artifactId: first.context.artifactId,
         partitionKey: first.context.partitionKey,
@@ -480,7 +652,10 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
         scratch,
         lastCheckpoint.schemaVersion,
       );
-      if (projectionJson) {
+      if (
+        projectionJson &&
+        planProjectionStorage(projectionJson).mode === "inline"
+      ) {
         checkpointScheduler(document).note({
           artifactId: lastCheckpoint.artifactId,
           partitionKey: lastCheckpoint.partitionKey,
@@ -740,10 +915,9 @@ function artifactProjection(document, fallbackSchemaVersion) {
   if (nativeProjection) {
     if (nativeProjection.typeKey === "timetable")
       assertSharedTimetableProjection(nativeProjection.content);
-    const projection = JSON.stringify(nativeProjection);
-    if (projectionExceedsDurableBound(projection))
-      throw new Error("COLLABORATION_PROJECTION_SIZE");
-    return projection;
+    // Size gates live in planProjectionStorage (spill) or Convex parse
+    // (fail-closed). Returning the string here keeps spill reachable.
+    return JSON.stringify(nativeProjection);
   }
   const metadata = document.getMap(META_MAP);
   if (metadata.get("initialized") !== true) return null;
@@ -775,7 +949,9 @@ function artifactProjection(document, fallbackSchemaVersion) {
     schemaVersion,
     content,
   });
-  return projectionExceedsDurableBound(projection) ? null : projection;
+  // Do not null oversize here — callers spill via planProjectionStorage or
+  // Convex rejects inline writes fail-closed.
+  return projection;
 }
 
 function artifactModelState(document) {
@@ -911,6 +1087,7 @@ const server = new Server({
           protocolVersion: GATEWAY_PROTOCOL_VERSION,
           connections: activeConnections.size,
           lastPersistenceFailure,
+          lastCompactionDeferred,
           startedAt: GATEWAY_STARTED_AT,
           convex: { status: convex.status, detail: convex.detail },
         }),

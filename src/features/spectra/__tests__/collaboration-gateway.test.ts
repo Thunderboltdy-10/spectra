@@ -157,6 +157,20 @@ describe("P5.I2 gateway production helpers", () => {
     });
     expect(notReady.status).toBe("not_ready");
     expect(isGatewayHealthBody(notReady)).toBe(true);
+    const compactionDegraded = gatewayHealthPayload({
+      protocolVersion: 1,
+      lastCompactionDeferred: {
+        code: "COLLABORATION_COMPACTION_DEFERRED",
+        reason: "snapshot_update_exceeds_envelope",
+        at: 9,
+      },
+      startedAt: 10,
+      now: 25,
+    });
+    expect(compactionDegraded.status).toBe("degraded");
+    expect(compactionDegraded.compaction?.code).toBe(
+      "COLLABORATION_COMPACTION_DEFERRED",
+    );
   });
 
 

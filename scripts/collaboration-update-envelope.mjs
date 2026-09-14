@@ -8,6 +8,7 @@ export const MAX_REALTIME_MESSAGE_BYTES = 1024 * 1024;
 // Convex document ceiling; fail closed on either bound.
 export const MAX_PROJECTION_JSON_CHARS = 900_000;
 export const MAX_PROJECTION_JSON_UTF8_BYTES = 900_000;
+export const MAX_COMPACTION_STATE_VECTOR_BYTES = 128 * 1024;
 export const DURABLE_FAILURE_USER_MESSAGE =
   "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.";
 export const DURABLE_REJECT_CLOSE_CODE = 4409;

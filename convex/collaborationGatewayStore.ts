@@ -343,11 +343,19 @@ export const load = internalQuery({
             update: snapshot.update,
             stateVector: snapshot.stateVector,
             contentHash: snapshot.contentHash,
+            byteLength: snapshot.byteLength ?? snapshot.update.byteLength,
+            payloadRef: snapshot.payloadRef ?? null,
+            payloadDigest: snapshot.payloadDigest ?? null,
+            payloadManifest: snapshot.payloadManifest ?? null,
           }
         : null,
       updates: updates.map((update) => ({
         sequence: update.sequence,
         update: update.update,
+        byteLength: update.byteLength,
+        payloadRef: update.payloadRef ?? null,
+        payloadDigest: update.payloadDigest ?? null,
+        payloadManifest: update.payloadManifest ?? null,
       })),
       hasMore:
         updates.length === limit &&
@@ -722,6 +730,13 @@ export const append = internalMutation({
     nativeInitialization: v.optional(v.boolean()),
     projectionJson: v.optional(v.string()),
     projectionHash: v.optional(v.string()),
+    payloadRef: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    payloadManifest: v.optional(v.any()),
+    byteLength: v.optional(v.number()),
+    projectionPayloadRef: v.optional(v.string()),
+    projectionPayloadDigest: v.optional(v.string()),
+    projectionHotStub: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const [actor, artifact, room] = await Promise.all([
@@ -772,11 +787,24 @@ export const append = internalMutation({
       room.policyVersion !== currentPolicyVersion
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
-    if (
+    const spilled = Boolean(args.payloadRef);
+    const effectiveByteLength = spilled
+      ? (args.byteLength ?? 0)
+      : args.update.byteLength;
+    if (spilled) {
+      if (
+        !args.payloadDigest ||
+        args.update.byteLength !== 0 ||
+        !Number.isSafeInteger(effectiveByteLength) ||
+        effectiveByteLength <= 0
+      )
+        throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    } else if (
       args.update.byteLength <= 0 ||
       args.update.byteLength > MAX_GATEWAY_UPDATE_BYTES
-    )
+    ) {
       throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
+    }
     const clientId = args.clientId.trim().slice(0, 180);
     const idempotencyKey = args.idempotencyKey.trim().slice(0, 180);
     if (
@@ -797,7 +825,7 @@ export const append = internalMutation({
         duplicate.actorAccountId !== actor.accountId ||
         duplicate.clientId !== clientId ||
         duplicate.stateVectorHash !== args.stateVectorHash ||
-        duplicate.byteLength !== args.update.byteLength
+        duplicate.byteLength !== effectiveByteLength
       )
         throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
       return {
@@ -1063,7 +1091,7 @@ export const append = internalMutation({
       schoolId: room.schoolId,
       sequence,
       update: args.update,
-      byteLength: args.update.byteLength,
+      byteLength: effectiveByteLength,
       stateVectorHash: args.stateVectorHash,
       actorAccountId: actor.accountId,
       clientId,
@@ -1071,15 +1099,33 @@ export const append = internalMutation({
       changeGroupId: changeGroup?._id,
       regionIds,
       createdAt: now,
+      payloadRef: args.payloadRef,
+      payloadDigest: args.payloadDigest,
+      payloadManifest: args.payloadManifest,
     });
     await ctx.db.patch(room._id, {
       nextSequence: sequence + 1,
-      uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+      uncompactedBytes: room.uncompactedBytes + effectiveByteLength,
       updatedAt: now,
     });
-    const projectionPatch = projection
+    let projectionPatch: Record<string, unknown> = projection
       ? artifactProjectionPatch(projection, args.projectionHash!)
       : {};
+    if (projection && args.projectionPayloadRef) {
+      projectionPatch = {
+        ...projectionPatch,
+        projectionPayloadRef: args.projectionPayloadRef,
+        projectionPayloadDigest: args.projectionPayloadDigest,
+      };
+    } else if (!projection && args.projectionPayloadRef) {
+      // Spill refs only — do not write $spectraProjectionPayload stubs into
+      // hot artifact.content until a payload reader exists. Leave legacy
+      // content untouched; Yjs remains the authority for full state.
+      projectionPatch = {
+        projectionPayloadRef: args.projectionPayloadRef,
+        projectionPayloadDigest: args.projectionPayloadDigest,
+      };
+    }
     await ctx.db.patch(artifact._id, {
       ...projectionPatch,
       syncState: "synchronized",

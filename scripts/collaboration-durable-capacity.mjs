@@ -371,15 +371,25 @@ export function planBootstrapProjectionTransport(projectionJson, {
 /** Convex changeGroups document ceiling budget (chars of base+final JSON). */
 export const MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS = 900_000;
 /** Per-side budget — see shared/collaboration-change-group-capacity.ts. */
-export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 700_000;
+export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 500_000;
 
 export function estimateJsonChars(value) {
   try {
     const encoded = JSON.stringify(value);
-    return typeof encoded === "string" ? encoded.length : Number.POSITIVE_INFINITY;
+    if (typeof encoded !== "string") return Number.POSITIVE_INFINITY;
+    // Convex document ceiling is UTF-8 bytes — see shared helper.
+    return new TextEncoder().encode(encoded).byteLength;
   } catch {
     return Number.POSITIVE_INFINITY;
   }
+}
+
+function snapshotCarriesInlineContent(snapshot) {
+  return snapshot?.content !== undefined && snapshot?.spectraSnapshotOmitted !== true;
+}
+
+function isOmittedChangeGroupSnapshot(snapshot) {
+  return Boolean(snapshot && typeof snapshot === "object" && snapshot.spectraSnapshotOmitted === true);
 }
 
 export function slimChangeGroupSnapshot(snapshot, contentHash) {
@@ -412,7 +422,13 @@ export function fitChangeGroupSnapshots(
   const baseChars = estimateJsonChars(baseSnapshot);
   const finalChars = estimateJsonChars(finalSnapshot);
   const inlineChars = estimateJsonChars({ baseSnapshot, finalSnapshot });
+  const omittedSiblingWouldMix =
+    (isOmittedChangeGroupSnapshot(baseSnapshot) &&
+      snapshotCarriesInlineContent(finalSnapshot)) ||
+    (isOmittedChangeGroupSnapshot(finalSnapshot) &&
+      snapshotCarriesInlineContent(baseSnapshot));
   const needsOmit =
+    omittedSiblingWouldMix ||
     inlineChars > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS ||
     baseChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS ||
     finalChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS;

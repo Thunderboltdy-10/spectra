@@ -6,12 +6,12 @@
  */
 export const MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS = 900_000;
 /**
- * One side of an open changeGroup must leave room for the sibling snapshot plus
- * envelope fields under Convex's ~1 MiB document ceiling. Checkpoint/repair
- * often passes an already-slim baseSnapshot with a full finalSnapshot; the pair
- * can sit under the dual budget while the whole row still Value-too-large.
+ * Per-side UTF-8 byte budget. Leaves headroom for the sibling snapshot plus
+ * changeGroup envelope fields under Convex's ~1 MiB document ceiling.
+ * Checkpoint/repair often passes an already-slim (omitted) base with a full
+ * final; mixing those without omitting both is the formal-paper import toast.
  */
-export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 700_000;
+export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 500_000;
 
 export type ChangeGroupSnapshotLike = {
   title: string;
@@ -27,10 +27,27 @@ export type ChangeGroupSnapshotLike = {
 export function estimateJsonChars(value: unknown): number {
   try {
     const encoded = JSON.stringify(value);
-    return typeof encoded === "string" ? encoded.length : Number.POSITIVE_INFINITY;
+    if (typeof encoded !== "string") return Number.POSITIVE_INFINITY;
+    // Convex's ~1 MiB document ceiling is UTF-8 bytes, not JS string length.
+    // Formal-paper JSON is Unicode-heavy (equations); char-length budgets can
+    // keep a fat finalSnapshot inline beside an omitted base and still blow
+    // the row — Live "Could not import this file." on checkpoint/repair.
+    return new TextEncoder().encode(encoded).byteLength;
   } catch {
     return Number.POSITIVE_INFINITY;
   }
+}
+
+function snapshotCarriesInlineContent(snapshot: ChangeGroupSnapshotLike): boolean {
+  return snapshot.content !== undefined && snapshot.spectraSnapshotOmitted !== true;
+}
+
+export function isOmittedChangeGroupSnapshot(snapshot: unknown): boolean {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot))
+    return false;
+  return Boolean(
+    (snapshot as ChangeGroupSnapshotLike).spectraSnapshotOmitted === true,
+  );
 }
 
 export function slimChangeGroupSnapshot(
@@ -74,7 +91,16 @@ export function fitChangeGroupSnapshots(
     baseSnapshot,
     finalSnapshot,
   });
+  // Checkpoint/repair often reuses an already-omitted slim base with a fresh
+  // fat final. Never leave inline content beside an omitted sibling — that is
+  // the Live false-import-toast failure mode on formal-paper.
+  const omittedSiblingWouldMix =
+    (isOmittedChangeGroupSnapshot(baseSnapshot) &&
+      snapshotCarriesInlineContent(finalSnapshot)) ||
+    (isOmittedChangeGroupSnapshot(finalSnapshot) &&
+      snapshotCarriesInlineContent(baseSnapshot));
   const needsOmit =
+    omittedSiblingWouldMix ||
     inlineChars > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS ||
     baseChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS ||
     finalChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS;
@@ -96,14 +122,6 @@ export function fitChangeGroupSnapshots(
     finalSnapshot: slimFinal,
     omitted: true,
   };
-}
-
-export function isOmittedChangeGroupSnapshot(snapshot: unknown): boolean {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot))
-    return false;
-  return Boolean(
-    (snapshot as ChangeGroupSnapshotLike).spectraSnapshotOmitted === true,
-  );
 }
 
 export const CONTENT_ADDRESSED_BLUEPRINT_KEYS = [

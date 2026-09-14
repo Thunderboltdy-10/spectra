@@ -272,6 +272,63 @@ describe("change group snapshot capacity", () => {
     expect(fitted.finalSnapshot.content).toBeUndefined();
     expect(fitted.baseSnapshot.spectraSnapshotOmitted).toBe(true);
   });
+
+  it("omits medium final beside already-omitted base (mixed sibling invariant)", () => {
+    const slimBase = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      spectraSnapshotOmitted: true,
+      contentHash: "b".repeat(43),
+    };
+    // Under the per-side byte budget — old fit kept this inline and Convex
+    // still rejected the changeGroup row (false import toast).
+    const mediumFinal = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      content: { body: "y".repeat(200_000) },
+    };
+    expect(JSON.stringify(mediumFinal).length).toBeLessThan(
+      MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
+    );
+    const fitted = fitChangeGroupSnapshots(slimBase, mediumFinal, {
+      contentHash: "d".repeat(43),
+    });
+    expect(fitted.omitted).toBe(true);
+    expect(fitted.finalSnapshot.content).toBeUndefined();
+    expect(fitted.finalSnapshot.spectraSnapshotOmitted).toBe(true);
+  });
+
+  it("omits Unicode-heavy final when UTF-8 bytes exceed the per-side budget", () => {
+    // "≈" is multi-byte UTF-8; JS string length can sit under the old char
+    // budget while Convex document bytes do not.
+    const body = "≈".repeat(200_000);
+    const fatFinal = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      content: { body },
+    };
+    expect(fatFinal.content.body.length).toBeLessThan(
+      MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
+    );
+    expect(new TextEncoder().encode(JSON.stringify(fatFinal)).byteLength).toBeGreaterThan(
+      MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
+    );
+    const slimBase = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      spectraSnapshotOmitted: true,
+      contentHash: "e".repeat(43),
+    };
+    const fitted = fitChangeGroupSnapshots(slimBase, fatFinal, {
+      contentHash: "f".repeat(43),
+    });
+    expect(fitted.omitted).toBe(true);
+    expect(fitted.finalSnapshot.content).toBeUndefined();
+  });
 });
 
 describe("version commit snapshot strategy", () => {

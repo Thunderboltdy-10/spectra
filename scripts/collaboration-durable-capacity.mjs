@@ -426,3 +426,39 @@ export function fitChangeGroupSnapshots(
     omitted: true,
   };
 }
+
+export const CONTENT_ADDRESSED_BLUEPRINT_KEYS = [
+  "presentation",
+  "sheets",
+  "code",
+  "whiteboard",
+];
+
+export function baseSnapshotStrategyForType(typeKey) {
+  return CONTENT_ADDRESSED_BLUEPRINT_KEYS.includes(typeKey)
+    ? "content_addressed"
+    : "normalized";
+}
+
+/**
+ * Dual-inline before+after on spectraArtifactVersions hits the same 1 MiB
+ * ceiling. Promote oversized formal-paper commits to content_addressed so
+ * payloads live only in artifactSnapshotObjects (off-row via snapshot refs).
+ */
+export function resolveCommitSnapshotStrategy(typeKey, before, after) {
+  const base = baseSnapshotStrategyForType(typeKey);
+  if (base === "content_addressed") {
+    return { strategy: base, inline: false, promotedOffRow: false };
+  }
+  if (
+    estimateJsonChars({ before, after }) <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS
+  ) {
+    return { strategy: "normalized", inline: true, promotedOffRow: false };
+  }
+  return {
+    strategy: "content_addressed",
+    inline: false,
+    promotedOffRow: true,
+  };
+}
+

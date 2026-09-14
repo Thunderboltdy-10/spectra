@@ -13,7 +13,10 @@ import {
   retainSnapshotObject,
   type SnapshotStrategy,
 } from "./artifactSnapshots";
-import { isOmittedChangeGroupSnapshot } from "../shared/collaboration-change-group-capacity";
+import {
+  isOmittedChangeGroupSnapshot,
+  resolveCommitSnapshotStrategy,
+} from "../shared/collaboration-change-group-capacity";
 import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
@@ -47,14 +50,15 @@ async function retainLiveStateAfterRecoveredImport(
     tags: artifact.tags,
   };
   if (JSON.stringify(before) === JSON.stringify(after)) return null;
-  const strategy = snapshotStrategy(
+  const { strategy, inline } = commitSnapshotPlan(
     artifact.blueprintKey,
-  ) satisfies SnapshotStrategy;
+    before,
+    after,
+  );
   const [beforeObject, afterObject] = await Promise.all([
     retainSnapshotObject(ctx, artifact.schoolId, before, strategy),
     retainSnapshotObject(ctx, artifact.schoolId, after, strategy),
   ]);
-  const inline = strategy === "normalized";
   const now = Date.now();
   const versionId = await ctx.db.insert("spectraArtifactVersions", {
     artifactId: artifact._id,
@@ -203,14 +207,15 @@ async function commitImportJob(
     ? await ctx.db.get(refreshed.currentVersionId)
     : null;
   const before = parent ? await loadVersionAfter(ctx, parent) : after;
-  const strategy = snapshotStrategy(
+  const { strategy, inline } = commitSnapshotPlan(
     refreshed.blueprintKey,
-  ) satisfies SnapshotStrategy;
+    before,
+    after,
+  );
   const [beforeObject, afterObject] = await Promise.all([
     retainSnapshotObject(ctx, refreshed.schoolId, before, strategy),
     retainSnapshotObject(ctx, refreshed.schoolId, after, strategy),
   ]);
-  const inline = strategy === "normalized";
   const now = Date.now();
   const versionId = await ctx.db.insert("spectraArtifactVersions", {
     artifactId: refreshed._id,
@@ -270,10 +275,13 @@ async function commitImportJob(
 type VersionSource =
   "manual" | "ai" | "import" | "restore" | "migration" | "checkpoint";
 
-function snapshotStrategy(typeKey: string) {
-  return ["presentation", "sheets", "code", "whiteboard"].includes(typeKey)
-    ? ("content_addressed" as const)
-    : ("normalized" as const);
+/** Prefer off-row refs when dual-inline before+after would exceed 1 MiB. */
+function commitSnapshotPlan(typeKey: string, before: unknown, after: unknown) {
+  const plan = resolveCommitSnapshotStrategy(typeKey, before, after);
+  return {
+    strategy: plan.strategy satisfies SnapshotStrategy,
+    inline: plan.inline,
+  };
 }
 
 export async function commitChangeGroup(
@@ -299,7 +307,8 @@ export async function commitChangeGroup(
   const now = Date.now();
   // Open groups for oversized formal-paper / sheets omit inline content so the
   // changeGroups row stays under Convex's 1 MiB ceiling. Rebuild from the live
-  // artifact (+ parent version) at commit time for version history.
+  // artifact (+ parent version) at commit time; commitSnapshotPlan then keeps
+  // oversized before+after off-row (content_addressed) on spectraArtifactVersions.
   if (
     isOmittedChangeGroupSnapshot(before) ||
     isOmittedChangeGroupSnapshot(after)
@@ -337,14 +346,15 @@ export async function commitChangeGroup(
     (source === "ai"
       ? "Spectra edited this artifact"
       : `Edited ${group.regionIds.length} ${group.regionIds.length === 1 ? "region" : "regions"}`);
-  const strategy = snapshotStrategy(
+  const { strategy, inline } = commitSnapshotPlan(
     artifact.blueprintKey,
-  ) satisfies SnapshotStrategy;
+    before,
+    after,
+  );
   const [beforeObject, afterObject] = await Promise.all([
     retainSnapshotObject(ctx, artifact.schoolId, before, strategy),
     retainSnapshotObject(ctx, artifact.schoolId, after, strategy),
   ]);
-  const inline = strategy === "normalized";
   const versionId = await ctx.db.insert("spectraArtifactVersions", {
     artifactId: artifact._id,
     ownerAccountId: artifact.ownerAccountId,
@@ -420,14 +430,15 @@ export async function commitHumanCheckpoint(
     );
     return [];
   }
-  const strategy = snapshotStrategy(
+  const { strategy, inline } = commitSnapshotPlan(
     artifact.blueprintKey,
-  ) satisfies SnapshotStrategy;
+    before,
+    after,
+  );
   const [beforeObject, afterObject] = await Promise.all([
     retainSnapshotObject(ctx, artifact.schoolId, before, strategy),
     retainSnapshotObject(ctx, artifact.schoolId, after, strategy),
   ]);
-  const inline = strategy === "normalized";
   const regionIds = [
     ...new Set(humanGroups.flatMap((group) => group.regionIds)),
   ];
@@ -637,14 +648,15 @@ export const createNamedCheckpoint = mutation({
       ? await ctx.db.get(refreshed.currentVersionId)
       : null;
     const before = parent ? await loadVersionAfter(ctx, parent) : after;
-    const strategy = snapshotStrategy(
+    const { strategy, inline } = commitSnapshotPlan(
       refreshed.blueprintKey,
-    ) satisfies SnapshotStrategy;
+      before,
+      after,
+    );
     const [beforeObject, afterObject] = await Promise.all([
       retainSnapshotObject(ctx, refreshed.schoolId, before, strategy),
       retainSnapshotObject(ctx, refreshed.schoolId, after, strategy),
     ]);
-    const inline = strategy === "normalized";
     const now = Date.now();
     const versionId = await ctx.db.insert("spectraArtifactVersions", {
       artifactId: refreshed._id,

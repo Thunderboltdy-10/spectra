@@ -20,6 +20,7 @@ import {
   compactionDeferredHealthRecord,
   sha256Hex,
   fitChangeGroupSnapshots,
+  resolveCommitSnapshotStrategy,
   MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS,
 } from "./collaboration-durable-capacity.mjs";
 import {
@@ -233,3 +234,45 @@ describe("change group snapshot capacity", () => {
     expect(storedChars).toBeLessThan(500_000);
   });
 });
+
+describe("version commit snapshot strategy", () => {
+  it("keeps small formal-paper versions normalized+inline", () => {
+    const snap = { title: "t", tags: [], content: { ok: true } };
+    const plan = resolveCommitSnapshotStrategy("formal-paper", snap, snap);
+    expect(plan.strategy).toBe("normalized");
+    expect(plan.inline).toBe(true);
+    expect(plan.promotedOffRow).toBe(false);
+  });
+
+  it("promotes oversized formal-paper dual-inline to content_addressed", () => {
+    const content = { body: "x".repeat(780_000) };
+    const before = {
+      title: "Formal paper",
+      summary: "large",
+      tags: ["doc"],
+      content,
+    };
+    const after = { ...before, summary: "edited" };
+    const dualChars = JSON.stringify({ before, after }).length;
+    expect(dualChars).toBeGreaterThan(MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS);
+    const plan = resolveCommitSnapshotStrategy("formal-paper", before, after);
+    expect(plan.strategy).toBe("content_addressed");
+    expect(plan.inline).toBe(false);
+    expect(plan.promotedOffRow).toBe(true);
+    // Version row stores refs only — dual payload must not ride the document.
+    const versionInlineChars = JSON.stringify({
+      before: plan.inline ? before : undefined,
+      after: plan.inline ? after : undefined,
+    }).length;
+    expect(versionInlineChars).toBeLessThan(100);
+  });
+
+  it("leaves sheets/presentation on content_addressed without promotion flag", () => {
+    const snap = { title: "t", tags: [], content: { cells: [] } };
+    const plan = resolveCommitSnapshotStrategy("sheets", snap, snap);
+    expect(plan.strategy).toBe("content_addressed");
+    expect(plan.inline).toBe(false);
+    expect(plan.promotedOffRow).toBe(false);
+  });
+});
+

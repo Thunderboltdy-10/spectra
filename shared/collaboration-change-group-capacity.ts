@@ -90,3 +90,49 @@ export function isOmittedChangeGroupSnapshot(snapshot: unknown): boolean {
     (snapshot as ChangeGroupSnapshotLike).$spectraSnapshotOmitted === true,
   );
 }
+
+export const CONTENT_ADDRESSED_BLUEPRINT_KEYS = [
+  "presentation",
+  "sheets",
+  "code",
+  "whiteboard",
+] as const;
+
+export function baseSnapshotStrategyForType(
+  typeKey: string,
+): "normalized" | "content_addressed" {
+  return (CONTENT_ADDRESSED_BLUEPRINT_KEYS as readonly string[]).includes(typeKey)
+    ? "content_addressed"
+    : "normalized";
+}
+
+/**
+ * spectraArtifactVersions dual-inlines before+after for normalized docs.
+ * Large formal-paper (~2× hot row) still Value-too-large at commit/idle even
+ * after open changeGroups omit. Promote to content_addressed so payloads live
+ * only in artifactSnapshotObjects (snapshotRef / beforeSnapshotRef).
+ */
+export function resolveCommitSnapshotStrategy(
+  typeKey: string,
+  before: unknown,
+  after: unknown,
+): {
+  strategy: "normalized" | "content_addressed";
+  inline: boolean;
+  promotedOffRow: boolean;
+} {
+  const base = baseSnapshotStrategyForType(typeKey);
+  if (base === "content_addressed") {
+    return { strategy: base, inline: false, promotedOffRow: false };
+  }
+  if (
+    estimateJsonChars({ before, after }) <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS
+  ) {
+    return { strategy: "normalized", inline: true, promotedOffRow: false };
+  }
+  return {
+    strategy: "content_addressed",
+    inline: false,
+    promotedOffRow: true,
+  };
+}

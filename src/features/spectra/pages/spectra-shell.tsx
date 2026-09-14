@@ -3680,6 +3680,10 @@ export function SpectraShell({
         (await projectLibraryImportContent(file, blueprintKey)) ??
         fallback.content;
       const title = titleHint || fallback.title;
+      const importedNativeFormat =
+        officeProjection?.nativeFormat ||
+        classification.nativeFormat ||
+        undefined;
       const created = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
         blueprintKey,
@@ -3690,6 +3694,9 @@ export function SpectraShell({
         source: "manual",
         workspaceId: selectedWorkspaceId,
         ...(placementParentId ? { parentNodeId: placementParentId } : {}),
+        ...(importedNativeFormat
+          ? { nativeFormat: importedNativeFormat }
+          : {}),
       });
       // Prefer the server lens projection. Re-parsing a formal paper in the
       // tab (mammoth + TipTap) after a successful office import previously

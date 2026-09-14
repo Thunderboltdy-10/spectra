@@ -240,8 +240,16 @@ async function commitImportJob(
     },
     createdAt: now,
   });
+  const importNativeFormat = String(job.format ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "")
+    .slice(0, 32);
   await ctx.db.patch(refreshed._id, {
     currentVersionId: versionId,
+    ...(importNativeFormat && !refreshed.nativeFormat
+      ? { nativeFormat: importNativeFormat }
+      : {}),
     ...(job.importedContent !== undefined &&
     !isHollowDefaultContent(refreshed.blueprintKey, importContent)
       ? {

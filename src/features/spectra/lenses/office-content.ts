@@ -612,7 +612,7 @@ function jsonBytes(value: unknown) {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
-function stripSheetCellsForActivation(content: unknown) {
+function sheetActivationShell(content: unknown) {
   const source = record(content);
   const workbook = record(source.workbook);
   const sheets = Array.isArray(source.sheets) ? source.sheets : [];
@@ -622,7 +622,7 @@ function stripSheetCellsForActivation(content: unknown) {
     ),
   );
   return {
-    ...source,
+    source,
     workbook: {
       calculationMode:
         workbook.calculationMode === "manual" ? "manual" : "automatic",
@@ -634,7 +634,22 @@ function stripSheetCellsForActivation(content: unknown) {
           : 1,
       ...(workbook.date1904 === true ? { date1904: true } : {}),
     },
-    sheets: sheets.map((sheet, index) => {
+    sheets,
+    activeSheetId:
+      typeof source.activeSheetId === "string"
+        ? source.activeSheetId
+        : typeof record(sheets[0]).id === "string"
+          ? String(record(sheets[0]).id)
+          : "",
+  };
+}
+
+function stripSheetCellsForActivation(content: unknown) {
+  const shell = sheetActivationShell(content);
+  return {
+    ...shell.source,
+    workbook: shell.workbook,
+    sheets: shell.sheets.map((sheet, index) => {
       const row = record(sheet);
       return {
         id: typeof row.id === "string" ? row.id : `sheet-${index + 1}`,
@@ -653,14 +668,65 @@ function stripSheetCellsForActivation(content: unknown) {
           typeof row.frozenColumns === "number" ? row.frozenColumns : undefined,
       };
     }),
-    activeSheetId:
-      typeof source.activeSheetId === "string"
-        ? source.activeSheetId
-        : typeof record(sheets[0]).id === "string"
-          ? String(record(sheets[0]).id)
-          : "",
-    nativeBinding: source.nativeBinding,
+    activeSheetId: shell.activeSheetId,
+    nativeBinding: shell.source.nativeBinding,
   };
+}
+
+/**
+ * Keep as many occupied cells as fit under the Convex hot-row budget.
+ * Wiping every cell made Library 200k imports look like an Empty sheet and
+ * failed hollow-content guards on complete — the native package remains the
+ * lossless source; the hot row only needs a durable nonempty head.
+ */
+function boundSheetCellsForActivation(content: unknown, budgetBytes: number) {
+  const shell = sheetActivationShell(content);
+  const sheetEntries = shell.sheets.map((sheet, index) => {
+    const row = record(sheet);
+    const cells = record(row.cells);
+    return {
+      id: typeof row.id === "string" ? row.id : `sheet-${index + 1}`,
+      name: typeof row.name === "string" ? row.name : `Sheet ${index + 1}`,
+      entries: Object.entries(cells),
+      tables: Array.isArray(row.tables) ? row.tables : [],
+      charts: Array.isArray(row.charts) ? row.charts : [],
+      mergedRanges: Array.isArray(row.mergedRanges)
+        ? row.mergedRanges.filter(
+            (range): range is string => typeof range === "string",
+          )
+        : [],
+      frozenRows: typeof row.frozenRows === "number" ? row.frozenRows : undefined,
+      frozenColumns:
+        typeof row.frozenColumns === "number" ? row.frozenColumns : undefined,
+    };
+  });
+  let keep = sheetEntries.map((sheet) => sheet.entries.length);
+  const build = (counts: number[]) => {
+    const next = {
+      ...shell.source,
+      workbook: shell.workbook,
+      sheets: sheetEntries.map((sheet, index) => ({
+        id: sheet.id,
+        name: sheet.name,
+        cells: Object.fromEntries(sheet.entries.slice(0, counts[index] ?? 0)),
+        tables: sheet.tables,
+        charts: sheet.charts,
+        mergedRanges: sheet.mergedRanges,
+        frozenRows: sheet.frozenRows,
+        frozenColumns: sheet.frozenColumns,
+      })),
+      activeSheetId: shell.activeSheetId,
+      nativeBinding: shell.source.nativeBinding,
+    };
+    return encodeArtifactContentForStorage("sheets", next);
+  };
+  let candidate = build(keep);
+  if (jsonBytes(candidate) <= budgetBytes) return candidate;
+  while (jsonBytes(candidate) > budgetBytes && keep.some((count) => count > 0)) {
+    keep = keep.map((count) => Math.floor(count / 2));
+    candidate = build(keep);
+  }
+  return candidate;
 }
 
 function stripPresentationObjectsForActivation(content: unknown) {
@@ -718,6 +784,14 @@ export function convexSafeOfficeActivationContent(
   const encoded = encodeArtifactContentForStorage(typeKey, content);
   if (jsonBytes(encoded) <= CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES)
     return encoded;
+  if (typeKey === "sheets") {
+    const bounded = boundSheetCellsForActivation(
+      content,
+      CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES,
+    );
+    if (jsonBytes(bounded) <= CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES)
+      return bounded;
+  }
   const compact =
     typeKey === "sheets"
       ? stripSheetCellsForActivation(content)

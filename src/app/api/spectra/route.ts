@@ -1327,6 +1327,8 @@ export async function POST(request: NextRequest) {
           : optionalString(body.workspaceId)
             ? "workspace"
             : "manual";
+      const parentNodeId = optionalString(body.parentNodeId);
+      const nativeFormat = optionalString(body.nativeFormat);
       const result = await spectraMutation("spectraArtifacts:create", {
         blueprintKey,
         title: requireString(body.title, "title"),
@@ -1336,6 +1338,12 @@ export async function POST(request: NextRequest) {
           ? body.tags.filter((tag): tag is string => typeof tag === "string")
           : undefined,
         workspaceId: optionalString(body.workspaceId),
+        ...(parentNodeId === "root"
+          ? { parentNodeId: "root" as const }
+          : parentNodeId
+            ? { parentNodeId }
+            : {}),
+        ...(nativeFormat ? { nativeFormat } : {}),
         source,
       });
       return ok(result);

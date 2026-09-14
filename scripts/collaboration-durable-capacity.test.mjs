@@ -22,6 +22,7 @@ import {
   fitChangeGroupSnapshots,
   resolveCommitSnapshotStrategy,
   MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS,
+  MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
 } from "./collaboration-durable-capacity.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES as WORKER_MAX_DURABLE,
@@ -238,6 +239,38 @@ describe("change group snapshot capacity", () => {
     expect(storedChars).toBeLessThan(MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS);
     // ~1.48 MiB dual-copy failure mode must not recur
     expect(storedChars).toBeLessThan(500_000);
+  });
+
+  it("omits full final even when base is already slim (checkpoint/repair path)", () => {
+    const slimBase = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      spectraSnapshotOmitted: true,
+      contentHash: "b".repeat(43),
+    };
+    const fatFinal = {
+      title: "Formal paper",
+      summary: "Imported from formal-paper.docx",
+      tags: ["imported"],
+      content: { body: "x".repeat(780_000) },
+    };
+    const pairChars = JSON.stringify({
+      baseSnapshot: slimBase,
+      finalSnapshot: fatFinal,
+    }).length;
+    // Pair can sit under the dual budget — the live failure mode.
+    expect(pairChars).toBeLessThanOrEqual(MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS);
+    expect(JSON.stringify(fatFinal).length).toBeGreaterThan(
+      MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
+    );
+    const fitted = fitChangeGroupSnapshots(slimBase, fatFinal, {
+      contentHash: "c".repeat(43),
+    });
+    expect(fitted.omitted).toBe(true);
+    expect(fitted.finalSnapshot.spectraSnapshotOmitted).toBe(true);
+    expect(fitted.finalSnapshot.content).toBeUndefined();
+    expect(fitted.baseSnapshot.spectraSnapshotOmitted).toBe(true);
   });
 });
 

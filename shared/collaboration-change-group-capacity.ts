@@ -5,6 +5,13 @@
  * and blocks durable append with endless Saving retries.
  */
 export const MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS = 900_000;
+/**
+ * One side of an open changeGroup must leave room for the sibling snapshot plus
+ * envelope fields under Convex's ~1 MiB document ceiling. Checkpoint/repair
+ * often passes an already-slim baseSnapshot with a full finalSnapshot; the pair
+ * can sit under the dual budget while the whole row still Value-too-large.
+ */
+export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 700_000;
 
 export type ChangeGroupSnapshotLike = {
   title: string;
@@ -61,11 +68,17 @@ export function fitChangeGroupSnapshots(
   finalSnapshot: ChangeGroupSnapshotLike;
   omitted: boolean;
 } {
+  const baseChars = estimateJsonChars(baseSnapshot);
+  const finalChars = estimateJsonChars(finalSnapshot);
   const inlineChars = estimateJsonChars({
     baseSnapshot,
     finalSnapshot,
   });
-  if (inlineChars <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS) {
+  const needsOmit =
+    inlineChars > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS ||
+    baseChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS ||
+    finalChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS;
+  if (!needsOmit) {
     return { baseSnapshot, finalSnapshot, omitted: false };
   }
   const slimBase = slimChangeGroupSnapshot(baseSnapshot, options.contentHash);

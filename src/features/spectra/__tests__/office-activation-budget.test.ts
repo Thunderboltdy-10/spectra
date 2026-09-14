@@ -53,7 +53,10 @@ describe("Office activation Convex budget", () => {
     );
     expect(storedText).toContain("Density");
     expect(storedText).toContain("xlsx:sheet:1");
-    expect(storedText).not.toContain("density-4000");
+    // Budgeted head must stay nonempty (Empty sheet / hollow import guard).
+    expect(storedText).toContain("density-0");
+    // Must still drop the oversized tail so the hot row fits Convex.
+    expect(storedText).not.toContain("density-7999");
   });
 
   it("does not show Convex body-limit JSON to a person", () => {

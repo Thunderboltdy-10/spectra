@@ -1866,6 +1866,8 @@ export const create = mutation({
      * the top of their Library would silently land in General instead.
      */
     parentNodeId: v.optional(v.union(v.id("orgNodes"), v.literal("root"))),
+    /** Office import format (xlsx/docx/…) so lens open can hydrate without a title extension. */
+    nativeFormat: v.optional(v.string()),
     runId: v.optional(v.id("spectraAiRuns")),
     executionId: v.optional(v.string()),
     threadId: v.optional(v.id("spectraThreads")),
@@ -1903,6 +1905,11 @@ export const create = mutation({
     const summary =
       args.summary?.trim() ||
       fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
+    const nativeFormat = args.nativeFormat
+      ?.trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "")
+      .slice(0, 32);
     const content = contentForArtifactStorage(
       args.blueprintKey,
       args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
@@ -1917,6 +1924,7 @@ export const create = mutation({
       title,
       summary,
       content,
+      ...(nativeFormat ? { nativeFormat } : {}),
       textIndex: buildArtifactTextIndex({
         title,
         summary,

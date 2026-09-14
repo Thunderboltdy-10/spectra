@@ -370,6 +370,8 @@ export function planBootstrapProjectionTransport(projectionJson, {
 
 /** Convex changeGroups document ceiling budget (chars of base+final JSON). */
 export const MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS = 900_000;
+/** Per-side budget — see shared/collaboration-change-group-capacity.ts. */
+export const MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS = 700_000;
 
 export function estimateJsonChars(value) {
   try {
@@ -407,8 +409,14 @@ export function fitChangeGroupSnapshots(
   finalSnapshot,
   { contentHash } = {},
 ) {
+  const baseChars = estimateJsonChars(baseSnapshot);
+  const finalChars = estimateJsonChars(finalSnapshot);
   const inlineChars = estimateJsonChars({ baseSnapshot, finalSnapshot });
-  if (inlineChars <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS) {
+  const needsOmit =
+    inlineChars > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS ||
+    baseChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS ||
+    finalChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS;
+  if (!needsOmit) {
     return { baseSnapshot, finalSnapshot, omitted: false };
   }
   const slimBase = slimChangeGroupSnapshot(baseSnapshot, contentHash);

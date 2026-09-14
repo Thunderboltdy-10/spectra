@@ -103,15 +103,69 @@ function planTasks(artifact: Doc<"spectraArtifacts">) {
   ];
 }
 
+
+/** Timed items that start before the visible window but still overlap it.
+ *  Events spanning longer than this lookback may be omitted from `items`
+ *  (residual — see AUDIT-D). AI work-block discovery does not rely on this. */
+const RANGE_OVERLAP_LOOKBACK_MS = 90 * 24 * 60 * 60_000;
+
 export const overview = query({
   args: { from: v.number(), to: v.number() },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
-    const [items, plans, migrations, legacyArtifacts, integration, projections] = await Promise.all([
+    // Bound ordinary week/AI range reads: timed items via by_account_start,
+    // plus kind-scoped task/work-block/official rows needed for unscheduled,
+    // MB projection joins, partial-time, and cross-range AI work-block identity.
+    // Planner/timetable canonical bodies and externalProjections remain residual
+    // collects (AUDIT-D) — do not silently drop unscheduled plan discovery.
+    const lookbackFrom = args.from - RANGE_OVERLAP_LOOKBACK_MS;
+    const [
+      rangedTimed,
+      taskItems,
+      workBlockItems,
+      officialEventItems,
+      officialDeadlineItems,
+      plans,
+      migrations,
+      legacyArtifacts,
+      integration,
+      projections,
+    ] = await Promise.all([
       ctx.db
         .query("calendarItems")
-        .withIndex("by_account_status", (q) =>
-          q.eq("ownerAccountId", actor.accountId).eq("status", "active"),
+        .withIndex("by_account_start", (q) =>
+          q
+            .eq("ownerAccountId", actor.accountId)
+            .gte("startAt", lookbackFrom)
+            .lte("startAt", args.to),
+        )
+        .collect(),
+      ctx.db
+        .query("calendarItems")
+        .withIndex("by_account_kind", (q) =>
+          q.eq("ownerAccountId", actor.accountId).eq("kind", "task"),
+        )
+        .collect(),
+      ctx.db
+        .query("calendarItems")
+        .withIndex("by_account_kind", (q) =>
+          q
+            .eq("ownerAccountId", actor.accountId)
+            .eq("kind", "scheduled_work_block"),
+        )
+        .collect(),
+      ctx.db
+        .query("calendarItems")
+        .withIndex("by_account_kind", (q) =>
+          q.eq("ownerAccountId", actor.accountId).eq("kind", "official_event"),
+        )
+        .collect(),
+      ctx.db
+        .query("calendarItems")
+        .withIndex("by_account_kind", (q) =>
+          q
+            .eq("ownerAccountId", actor.accountId)
+            .eq("kind", "official_deadline"),
         )
         .collect(),
       ctx.db
@@ -151,6 +205,18 @@ export const overview = query({
         .withIndex("by_account_updated", (q) => q.eq("accountId", actor.accountId))
         .collect(),
     ]);
+    const itemsById = new Map<string, Doc<"calendarItems">>();
+    for (const item of [
+      ...rangedTimed,
+      ...taskItems,
+      ...workBlockItems,
+      ...officialEventItems,
+      ...officialDeadlineItems,
+    ]) {
+      if (item.status !== "active") continue;
+      itemsById.set(String(item._id), item);
+    }
+    const items = [...itemsById.values()];
     const calendarSourceRecordIds = new Set(
       items.flatMap((item) =>
         item.kind === "task" && item.sourceRecordId

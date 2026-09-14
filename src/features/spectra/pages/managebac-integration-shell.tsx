@@ -329,6 +329,10 @@ function syncStageLabel(
       return "School data is current";
     case "failed":
       return "Sync stopped";
+    case "selection_changed":
+      return "Class choices changed";
+    case "lease_expired":
+      return "Sync timed out";
     default:
       if (run.stage.startsWith("syncing:")) return "Reading school data";
       if (run.stage.startsWith("quarantined:")) return "Data needs review";
@@ -354,6 +358,12 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
     case "INTEGRATION_ROUTE_FAILED":
     case "INTEGRATION_CAPABILITY_FAILED":
       return "ManageBac could not provide this data. Try again or ask a school administrator to review the connection.";
+    case "INTEGRATION_SELECTION_CHANGED":
+      return "Class choices changed; this sync was stopped.";
+    case "INTEGRATION_SYNC_FENCED":
+      return "A newer sync already replaced this one.";
+    case "INTEGRATION_WORKER_LEASE_EXPIRED":
+      return "This sync timed out and was stopped. Retry if you still need school updates.";
     default:
       return run.status === "partial"
         ? "Some school data was saved. Retry to fill the gaps."
@@ -775,8 +785,8 @@ export function ManageBacIntegrationShell() {
                   </strong>
                   <p className="mt-1 max-w-xl text-micro leading-5 text-[var(--text-secondary)]">
                     Disconnecting ManageBac clears identity mappings. Spectra
-                    searches only for your authenticated school email and never
-                    reveals a selectable student ID.
+                    matches the email already on your Spectra account to the
+                    school connection and never reveals a selectable student ID.
                   </p>
                 </div>
                 <button
@@ -860,9 +870,10 @@ export function ManageBacIntegrationShell() {
                     Match your verified school account
                   </h2>
                   <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
-                    Spectra searches only for your authenticated school email,
-                    accepts exactly one match, and never sends or reveals a
-                    selectable student ID.
+                    Spectra matches the email already on your Spectra account to
+                    the school’s ManageBac connection. You do not need to sign
+                    in again. Exactly one match is accepted, and Spectra never
+                    sends or reveals a student ID.
                   </p>
                   <button
                     type="button"
@@ -1558,7 +1569,7 @@ function ProvenancePanel({
               [
                 UserCheck,
                 "Identity is exact",
-                "Only the authenticated verified school email may resolve an account.",
+                "Only the email on your Spectra account may match a school identity. This is not a separate login.",
               ],
               [
                 RotateCcw,
@@ -1808,7 +1819,8 @@ function SettingsDialog({
             </span>
             <input
               type="password"
-              autoComplete="new-password"
+              autoComplete="off"
+              name="managebac-school-api-token"
               value={config.token}
               onChange={(event) =>
                 setConfig((current) => ({
@@ -1827,8 +1839,9 @@ function SettingsDialog({
             />
           </label>
           <div className="rounded-control border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3 text-micro leading-4 text-[var(--accent-mint)]">
-            Sync cadence, auth header format, and conflict policy are fixed by
-            Spectra. Individual users cannot supply their own ManageBac keys.
+            Sync cadence, how the school API token is sent, and conflict policy
+            are fixed by Spectra. Individual users cannot supply their own
+            ManageBac keys.
           </div>
           <section className="rounded-lg border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3">
             <div className="flex gap-2">

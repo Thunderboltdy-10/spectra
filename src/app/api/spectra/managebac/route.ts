@@ -1320,7 +1320,9 @@ async function runSync(
           skipped:
             fanOutSource === "year_group"
               ? "No verified year group targets this route yet."
-              : "No verified class membership targets this route.",
+              : selectedClassIds.size === 0
+                ? "No classes selected yet. Choose classes to follow before class-scoped school updates can run."
+                : "No verified class membership targets this route.",
         });
         continue;
       }

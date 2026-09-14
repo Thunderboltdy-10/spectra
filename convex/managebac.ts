@@ -3563,19 +3563,40 @@ export const setOverlay = mutation({
       )
       .unique();
     const now = Date.now();
+    /* Omit-means-preserve for personal fields so a completion-only write
+       cannot wipe notes (and vice versa). Pass "" / [] / false explicitly
+       to clear. Tags and linkedArtifactIds already merged with existing. */
     const patch = {
-      notes: args.notes?.slice(0, 100_000),
-      completion: args.completion,
-      reminders: args.reminders
-        ?.filter((item) => Number.isFinite(item))
-        .slice(0, 20),
+      notes:
+        args.notes !== undefined
+          ? args.notes.slice(0, 100_000)
+          : existing?.notes,
+      completion:
+        args.completion !== undefined
+          ? args.completion
+          : existing?.completion,
+      reminders:
+        args.reminders !== undefined
+          ? args.reminders
+              .filter((item) => Number.isFinite(item))
+              .slice(0, 20)
+          : existing?.reminders,
       tags: (args.tags ?? existing?.tags ?? [])
         .map((item) => item.trim().slice(0, 48))
         .filter(Boolean)
         .slice(0, 32),
-      alternativeStartAt: args.alternativeStartAt,
-      alternativeEndAt: args.alternativeEndAt,
-      placementWorkspaceId: args.placementWorkspaceId,
+      alternativeStartAt:
+        args.alternativeStartAt !== undefined
+          ? args.alternativeStartAt
+          : existing?.alternativeStartAt,
+      alternativeEndAt:
+        args.alternativeEndAt !== undefined
+          ? args.alternativeEndAt
+          : existing?.alternativeEndAt,
+      placementWorkspaceId:
+        args.placementWorkspaceId !== undefined
+          ? args.placementWorkspaceId
+          : existing?.placementWorkspaceId,
       linkedArtifactIds: (
         args.linkedArtifactIds ??
         existing?.linkedArtifactIds ??
@@ -4095,16 +4116,33 @@ export const setSelectedClasses = mutation({
       .map((source) => source._id);
     const revision = currentRevision + 1;
     const now = Date.now();
+    /* Retention is the deselect policy for rows leaving the selection.
+       Do not stamp archive_projection onto classes that remain selected —
+       that polluted the onboarding radio (any selected row with archive)
+       without changing release behavior for kept shelves. */
     const nextRetention = args.retention ?? "keep_in_spectra";
     for (const row of currentRows) {
       const key = `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`;
       const shouldSelect = selectedKeys.has(key);
-      if (row.selected === shouldSelect && !args.retention) continue;
+      if (row.selected === shouldSelect) {
+        if (row.selectionRevision === revision) continue;
+        if (shouldSelect) {
+          await ctx.db.patch(row._id, {
+            selectionRevision: revision,
+            updatedAt: now,
+          });
+        }
+        continue;
+      }
       await ctx.db.patch(row._id, {
         selected: shouldSelect,
-        retention: args.retention ?? row.retention,
+        retention: shouldSelect
+          ? row.retention ?? "keep_in_spectra"
+          : nextRetention,
         selectionRevision: revision,
-        ...(shouldSelect ? { selectedAt: now, deselectedAt: undefined } : { deselectedAt: now }),
+        ...(shouldSelect
+          ? { selectedAt: now, deselectedAt: undefined }
+          : { deselectedAt: now }),
         updatedAt: now,
       });
     }
@@ -4116,13 +4154,20 @@ export const setSelectedClasses = mutation({
           (row.academicPeriodKey ?? undefined) === periodKey,
       );
       if (existing) {
-        if (!existing.selected || args.retention)
+        if (!existing.selected)
           await ctx.db.patch(existing._id, {
             selected: true,
-            retention: args.retention ?? existing.retention,
+            /* Re-select restores follow without inheriting a prior archive
+               stamp as the live radio source of truth. */
+            retention: "keep_in_spectra",
             selectionRevision: revision,
             selectedAt: now,
             deselectedAt: undefined,
+            updatedAt: now,
+          });
+        else if (existing.selectionRevision !== revision)
+          await ctx.db.patch(existing._id, {
+            selectionRevision: revision,
             updatedAt: now,
           });
         continue;
@@ -4135,7 +4180,7 @@ export const setSelectedClasses = mutation({
         providerRecordKey: source.providerRecordKey,
         ...(periodKey ? { academicPeriodKey: periodKey } : {}),
         selected: true,
-        retention: nextRetention,
+        retention: "keep_in_spectra",
         selectionRevision: revision,
         selectedAt: now,
         createdAt: now,
@@ -4754,6 +4799,7 @@ export const releaseClassWorkspaces = mutation({
     const now = Date.now();
     let removed = 0;
     let skipped = 0;
+    let kept = 0;
     for (const recordId of selected) {
       const source = await ctx.db.get(recordId);
       if (
@@ -4864,35 +4910,12 @@ export const releaseClassWorkspaces = mutation({
         removed += 1;
         continue;
       }
-      const dissolved = await dissolveWorkspaceNode(ctx, workspace, {
-        limit: DISSOLVE_CHILD_BATCH,
-      });
-      if (dissolved.remaining > 0) {
-        return {
-          removed,
-          skipped,
-          requested: selected.length,
-          remaining: dissolved.remaining,
-          done: false,
-        };
-      }
-      await ctx.db.delete(workspace._id);
-      if (projection) {
-        await ctx.db.patch(projection._id, {
-          state: "detached",
-          updatedAt: now,
-        });
-      }
-      removed += 1;
-      if (removed + skipped < selected.length) {
-        return {
-          removed,
-          skipped,
-          requested: selected.length,
-          remaining: 0,
-          done: false,
-        };
-      }
+      /* keep_in_spectra (default): stop school updates only. Leave the class
+         workspace, its children, and projections in place. Do not dissolve
+         work into General or delete the shelf. ManageBac source records are
+         not tombstoned. Selection already dropped this class, so later syncs
+         will not fan out to it. Conflict "Keep" (detach) is a different path. */
+      kept += 1;
     }
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
@@ -4900,12 +4923,13 @@ export const releaseClassWorkspaces = mutation({
       action: "integration.managebac.class_workspaces_released",
       targetType: "school_integration",
       targetId: integration?._id ?? actor.schoolId,
-      metadata: { removed, skipped, requested: selected.length },
+      metadata: { removed, skipped, kept, requested: selected.length },
       retentionClass: "security",
     });
     return {
       removed,
       skipped,
+      kept,
       requested: selected.length,
       remaining: 0,
       done: true,

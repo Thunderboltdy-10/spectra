@@ -217,10 +217,10 @@ export function ClassShelfPicker({
                   : "Match your ManageBac account",
             detail:
               identityStatus === "no_match"
-                ? "Spectra searched only for your signed-in school email. Check that your invitation and ManageBac email match, then try again or continue in General."
+                ? "Spectra searched only for the email on your Spectra account. Check that your invitation and ManageBac email match, then try again or continue in General."
                 : identityStatus === "ambiguous"
                   ? "ManageBac returned more than one exact email match. Ask a school administrator to review the school connection."
-                  : "Spectra uses your signed-in school email to find one matching ManageBac account. No provider account is exposed or guessed.",
+                  : "Spectra uses the email on your Spectra account to find one matching ManageBac account via the school connection. No provider account is exposed or guessed.",
           }
         : state.kind === "empty"
           ? {

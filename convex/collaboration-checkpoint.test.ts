@@ -181,6 +181,64 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     });
   });
 
+  it("keeps chunked sheet cells on load initialProjection (≤1024 fields)", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const denseCells = Object.fromEntries(
+      Array.from({ length: 1_322 }, (_, index) => [
+        `A${index + 1}`,
+        { value: index + 1 },
+      ]),
+    );
+    // Expanded address maps exceed Convex's 1024-field return cap and stuck
+    // Live on Reconnecting (Object has too many fields). Load must stay chunked.
+    expect(Object.keys(denseCells).length).toBeGreaterThan(1_024);
+    const storedContent = encodeArtifactContentForStorage("sheets", {
+      workbook: { calculationMode: "automatic", locale: "en-US" },
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Data",
+          cells: denseCells,
+          tables: [],
+          charts: [],
+        },
+      ],
+      activeSheetId: "sheet-1",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.artifactId, {
+        blueprintKey: "sheets",
+        schemaVersion: 4,
+        title: "Dense workbook",
+        content: storedContent,
+      });
+      await ctx.db.patch(seed.roomId, { typeKey: "sheets", schemaVersion: 4 });
+    });
+
+    const loaded = await t.query(internal.collaborationGatewayStore.load, {
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      afterSequence: 0,
+      limit: 500,
+      includeInitialProjection: true,
+    });
+    const projectedSheet = (
+      loaded?.initialProjection?.content as {
+        sheets?: Array<{ cells?: Record<string, unknown> }>;
+      }
+    )?.sheets?.[0];
+    const cells = projectedSheet?.cells;
+    expect(cells).toMatchObject({ encoding: "spectra-sheet-cells-v1" });
+    expect(Array.isArray((cells as { chunks?: unknown }).chunks)).toBe(true);
+    expect(Object.keys(cells ?? {})).toEqual(
+      expect.arrayContaining(["encoding", "chunks"]),
+    );
+    expect(Object.keys(cells ?? {}).length).toBeLessThanOrEqual(1_024);
+    expect(Object.prototype.hasOwnProperty.call(cells, "A1")).toBe(false);
+    expect(sheetCellEntries(cells)).toHaveLength(1_322);
+  });
+
   it("appends a durable Yjs update without rewriting artifact.content", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);

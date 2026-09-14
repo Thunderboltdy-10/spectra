@@ -19,6 +19,8 @@ import {
   compactionSnapshotDecision,
   compactionDeferredHealthRecord,
   sha256Hex,
+  fitChangeGroupSnapshots,
+  MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS,
 } from "./collaboration-durable-capacity.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES as WORKER_MAX_DURABLE,
@@ -190,5 +192,44 @@ describe("bootstrap projection transport", () => {
     expect(plan.transport).toBe("spill");
     expect(plan.mode).toBe("spill");
     expect(plan.bytes.byteLength).toBeGreaterThan(900_000);
+  });
+});
+
+
+describe("change group snapshot capacity", () => {
+  it("keeps small snapshots inline", () => {
+    const snap = { title: "t", tags: [], content: { ok: true } };
+    const fitted = fitChangeGroupSnapshots(snap, snap);
+    expect(fitted.omitted).toBe(false);
+    expect(fitted.baseSnapshot.content).toEqual({ ok: true });
+  });
+
+  it("omits dual oversized formal-paper snapshots under the 1 MiB ceiling", () => {
+    const content = { body: "x".repeat(780_000) };
+    const snap = {
+      title: "Formal paper",
+      summary: "large",
+      tags: ["doc"],
+      content,
+    };
+    const inlineChars = JSON.stringify({
+      baseSnapshot: snap,
+      finalSnapshot: snap,
+    }).length;
+    expect(inlineChars).toBeGreaterThan(MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS);
+    const fitted = fitChangeGroupSnapshots(snap, { ...snap }, {
+      contentHash: "a".repeat(43),
+    });
+    expect(fitted.omitted).toBe(true);
+    expect(fitted.baseSnapshot.$spectraSnapshotOmitted).toBe(true);
+    expect(fitted.finalSnapshot.content).toBeUndefined();
+    expect(fitted.baseSnapshot.contentHash).toBe("a".repeat(43));
+    const storedChars = JSON.stringify({
+      baseSnapshot: fitted.baseSnapshot,
+      finalSnapshot: fitted.finalSnapshot,
+    }).length;
+    expect(storedChars).toBeLessThan(MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS);
+    // ~1.48 MiB dual-copy failure mode must not recur
+    expect(storedChars).toBeLessThan(500_000);
   });
 });

@@ -365,6 +365,18 @@ describe("P5.I2 gateway production helpers", () => {
       ),
     ).toBe(true);
     expect(
+      permanentPersistenceFailure(
+        new Error(
+          "[Request ID: abc] Server Error\nUncaught Error: Uncaught Error: Value is too large (1.48 MiB > maximum size 1 MiB)",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      permanentPersistenceFailure(
+        new Error("COLLABORATION_CHANGE_GROUP_SIZE"),
+      ),
+    ).toBe(true);
+    expect(
       appendBaseStateVectorHash({
         lastPersistedHash: "b".repeat(43),
         capturedBaseHash: "a".repeat(43),

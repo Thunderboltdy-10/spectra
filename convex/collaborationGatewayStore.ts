@@ -17,6 +17,7 @@ import { syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
+import { fitChangeGroupSnapshots } from "../shared/collaboration-change-group-capacity";
 import { filenameFromRelativePath } from "../shared/native-filename";
 import {
   finalizeArtifactSummary,
@@ -1127,6 +1128,13 @@ export const append = internalMutation({
       await commitChangeGroup(ctx, changeGroup._id);
       changeGroup = undefined;
     }
+    const snapshotIntegrityHash =
+      args.projectionHash ?? args.stateVectorHash;
+    const fittedSnapshots = fitChangeGroupSnapshots(
+      beforeSnapshot,
+      finalSnapshot,
+      { contentHash: snapshotIntegrityHash },
+    );
     if (!changeGroup) {
       const changeGroupId = await ctx.db.insert("changeGroups", {
         artifactId: artifact._id,
@@ -1140,26 +1148,35 @@ export const append = internalMutation({
         baseStateVectorHash:
           artifact.liveStateVectorHash ?? `initial:${artifact._id}`,
         baseVersionId: artifact.currentVersionId,
-        baseSnapshot: beforeSnapshot,
+        baseSnapshot: fittedSnapshots.baseSnapshot,
         finalStateVectorHash: args.stateVectorHash,
-        finalSnapshot,
-        finalIntegrityHash: args.projectionHash ?? args.stateVectorHash,
+        finalSnapshot: fittedSnapshots.finalSnapshot,
+        finalIntegrityHash: snapshotIntegrityHash,
         status: "open",
         openedAt: now,
         lastActivityAt: now,
       });
       changeGroup = (await ctx.db.get(changeGroupId)) ?? undefined;
     } else {
+      const patchSnapshots = projection
+        ? fitChangeGroupSnapshots(
+            (changeGroup.baseSnapshot as typeof beforeSnapshot) ??
+              beforeSnapshot,
+            finalSnapshot,
+            { contentHash: snapshotIntegrityHash },
+          )
+        : null;
       await ctx.db.patch(changeGroup._id, {
         regionIds: [...new Set([...changeGroup.regionIds, ...regionIds])],
         operationIds: [
           ...new Set([...changeGroup.operationIds, ...aiOperationIds]),
         ],
         finalStateVectorHash: args.stateVectorHash,
-        ...(projection
+        ...(patchSnapshots
           ? {
-              finalSnapshot,
-              finalIntegrityHash: args.projectionHash ?? args.stateVectorHash,
+              baseSnapshot: patchSnapshots.baseSnapshot,
+              finalSnapshot: patchSnapshots.finalSnapshot,
+              finalIntegrityHash: snapshotIntegrityHash,
             }
           : {}),
         lastActivityAt: now,
@@ -1231,13 +1248,22 @@ export const append = internalMutation({
             (group) =>
               group.source === "human" && group._id !== changeGroup?._id,
           )
-          .map((group) =>
-            ctx.db.patch(group._id, {
-              finalStateVectorHash: args.stateVectorHash,
+          .map((group) => {
+            const fitted = fitChangeGroupSnapshots(
+              (group.baseSnapshot as typeof beforeSnapshot) ?? beforeSnapshot,
               finalSnapshot,
+              {
+                contentHash:
+                  args.projectionHash ?? args.stateVectorHash,
+              },
+            );
+            return ctx.db.patch(group._id, {
+              finalStateVectorHash: args.stateVectorHash,
+              baseSnapshot: fitted.baseSnapshot,
+              finalSnapshot: fitted.finalSnapshot,
               finalIntegrityHash: args.projectionHash ?? args.stateVectorHash,
-            }),
-          ),
+            });
+          }),
       );
     }
     if (changeGroup) {
@@ -1419,13 +1445,19 @@ export const checkpoint = internalMutation({
     await Promise.all(
       openGroups
         .filter((group) => group.source === "human")
-        .map((group) =>
-          ctx.db.patch(group._id, {
-            finalStateVectorHash: args.stateVectorHash,
+        .map((group) => {
+          const fitted = fitChangeGroupSnapshots(
+            (group.baseSnapshot as typeof finalSnapshot) ?? finalSnapshot,
             finalSnapshot,
+            { contentHash: args.projectionHash },
+          );
+          return ctx.db.patch(group._id, {
+            finalStateVectorHash: args.stateVectorHash,
+            baseSnapshot: fitted.baseSnapshot,
+            finalSnapshot: fitted.finalSnapshot,
             finalIntegrityHash: args.projectionHash,
-          }),
-        ),
+          });
+        }),
     );
     return { sequence: throughSequence, duplicate: false };
   },

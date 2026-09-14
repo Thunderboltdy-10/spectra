@@ -13,6 +13,7 @@ import {
   retainSnapshotObject,
   type SnapshotStrategy,
 } from "./artifactSnapshots";
+import { isOmittedChangeGroupSnapshot } from "../shared/collaboration-change-group-capacity";
 import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
@@ -293,9 +294,28 @@ export async function commitChangeGroup(
     });
     return { status: "abandoned" as const };
   }
-  const before = group.baseSnapshot;
-  const after = group.finalSnapshot;
+  let before = group.baseSnapshot;
+  let after = group.finalSnapshot;
   const now = Date.now();
+  // Open groups for oversized formal-paper / sheets omit inline content so the
+  // changeGroups row stays under Convex's 1 MiB ceiling. Rebuild from the live
+  // artifact (+ parent version) at commit time for version history.
+  if (
+    isOmittedChangeGroupSnapshot(before) ||
+    isOmittedChangeGroupSnapshot(after)
+  ) {
+    const liveAfter = {
+      title: artifact.title,
+      summary: artifact.summary,
+      content: artifact.content,
+      tags: artifact.tags,
+    };
+    const parent = artifact.currentVersionId
+      ? await ctx.db.get(artifact.currentVersionId)
+      : null;
+    before = parent ? await loadVersionAfter(ctx, parent) : liveAfter;
+    after = liveAfter;
+  }
   if (
     before === undefined ||
     after === undefined ||

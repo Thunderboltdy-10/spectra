@@ -366,3 +366,63 @@ export function planBootstrapProjectionTransport(projectionJson, {
     utf8ByteLength: plan.utf8ByteLength ?? bytes.byteLength,
   };
 }
+
+
+/** Convex changeGroups document ceiling budget (chars of base+final JSON). */
+export const MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS = 900_000;
+
+export function estimateJsonChars(value) {
+  try {
+    const encoded = JSON.stringify(value);
+    return typeof encoded === "string" ? encoded.length : Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+export function slimChangeGroupSnapshot(snapshot, contentHash) {
+  const hash =
+    typeof contentHash === "string" && contentHash.length >= 16
+      ? contentHash
+      : typeof snapshot?.contentHash === "string" &&
+          snapshot.contentHash.length >= 16
+        ? snapshot.contentHash
+        : undefined;
+  return {
+    title: snapshot.title,
+    summary: snapshot.summary,
+    tags: Array.isArray(snapshot.tags) ? snapshot.tags : [],
+    $spectraSnapshotOmitted: true,
+    ...(hash ? { contentHash: hash } : {}),
+  };
+}
+
+/**
+ * Dual-copy open changeGroups blow Convex's 1 MiB ceiling on formal-paper /
+ * large-sheet rows (~2× hot artifact). Omit content; Yjs ledger stays durable.
+ */
+export function fitChangeGroupSnapshots(
+  baseSnapshot,
+  finalSnapshot,
+  { contentHash } = {},
+) {
+  const inlineChars = estimateJsonChars({ baseSnapshot, finalSnapshot });
+  if (inlineChars <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS) {
+    return { baseSnapshot, finalSnapshot, omitted: false };
+  }
+  const slimBase = slimChangeGroupSnapshot(baseSnapshot, contentHash);
+  const slimFinal = slimChangeGroupSnapshot(finalSnapshot, contentHash);
+  if (
+    estimateJsonChars({
+      baseSnapshot: slimBase,
+      finalSnapshot: slimFinal,
+    }) > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS
+  ) {
+    throw new Error("COLLABORATION_CHANGE_GROUP_SIZE");
+  }
+  return {
+    baseSnapshot: slimBase,
+    finalSnapshot: slimFinal,
+    omitted: true,
+  };
+}

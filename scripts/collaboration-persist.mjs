@@ -18,11 +18,16 @@ export function isRebaseablePersistenceFailure(error) {
 }
 
 export function permanentPersistenceFailure(error) {
+  const message = collaborationFailureMessage(error);
+  // Convex document ceiling — retrying cannot shrink the row. Fail closed so
+  // Saving does not hang in an endless durable-append loop (1.48 MiB > 1 MiB).
+  if (/Value is too large|maximum size\s+1\s*MiB/i.test(message)) return true;
   const code = persistenceFailureCode(error);
   if (!code || code === "COLLABORATION_BASE_STATE_STALE") return false;
-  // PROJECTION_SIZE / PROJECTION_INVALID are fail-closed: retrying cannot shrink
-  // an oversize native projection, and must not leave peers without durable_failed.
-  return /COLLABORATION_(?:ACCESS_REVOKED|TOKEN_EXPIRED|READ_ONLY|REGION_|AI_ATTRIBUTION|NATIVE_PROJECTION|PROJECTION_(?:SIZE|INVALID)|MODEL_CHANGE|GATEWAY_(?:FORBIDDEN|UPDATE_(?:SIZE|INVALID)))/.test(
+  // PROJECTION_SIZE / PROJECTION_INVALID / CHANGE_GROUP_SIZE are fail-closed:
+  // retrying cannot shrink an oversize native projection or change-group row,
+  // and must not leave peers without durable_failed.
+  return /COLLABORATION_(?:ACCESS_REVOKED|TOKEN_EXPIRED|READ_ONLY|REGION_|AI_ATTRIBUTION|NATIVE_PROJECTION|PROJECTION_(?:SIZE|INVALID)|CHANGE_GROUP_SIZE|MODEL_CHANGE|GATEWAY_(?:FORBIDDEN|UPDATE_(?:SIZE|INVALID)))/.test(
     code,
   );
 }

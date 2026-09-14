@@ -341,6 +341,7 @@ export type BlueprintChoiceKey = Parameters<
  */
 export function SurfaceNewMenu({
   disabled,
+  disabledTitle,
   importing,
   onNewFolder,
   onNewWorkspace,
@@ -354,6 +355,8 @@ export function SurfaceNewMenu({
   placeChoices,
 }: {
   disabled?: boolean;
+  /** Why the control is inactive — shown as title / accessible description. */
+  disabledTitle?: string;
   importing?: boolean;
   onNewFolder?: () => void;
   onNewWorkspace?: () => void;
@@ -393,6 +396,8 @@ export function SurfaceNewMenu({
       <button
         type="button"
         disabled={disabled}
+        title={disabled ? disabledTitle : undefined}
+        aria-description={disabled ? disabledTitle : undefined}
         onClick={() => onNewWork(only.key)}
         className={cn(controlClass, "w-full justify-center")}
       >
@@ -402,16 +407,29 @@ export function SurfaceNewMenu({
     );
   }
 
+  /* Disabled controls often skip native title; wrap so hover/focus still
+     explain why New is inactive (e.g. quick views / Trash). */
+  const triggerNode = trigger ?? (
+    <span
+      className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90"
+      title={disabled ? disabledTitle : undefined}
+      aria-description={disabled ? disabledTitle : undefined}
+    >
+      <Plus className="size-3.5" />
+      {label}
+    </span>
+  );
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger disabled={disabled} asChild={Boolean(trigger)}>
-        {trigger ?? (
-          <span className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90">
-            <Plus className="size-3.5" />
-            {label}
-          </span>
-        )}
-      </DropdownMenuTrigger>
+      <span
+        className="inline-flex"
+        title={disabled ? disabledTitle : undefined}
+      >
+        <DropdownMenuTrigger disabled={disabled} asChild={Boolean(trigger)}>
+          {triggerNode}
+        </DropdownMenuTrigger>
+      </span>
       <DropdownMenuContent
         align={align}
         className="w-[240px]"

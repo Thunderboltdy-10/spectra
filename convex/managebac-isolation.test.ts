@@ -749,6 +749,134 @@ describe("ManageBac account isolation", () => {
     expect(materialized.skipped).toBe(0);
   });
 
+  it("keeps the class workspace on deselect with keep_in_spectra", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const now = Date.now();
+    const seeded = await t.run(async (ctx) => {
+      const insert = (input: {
+        providerRecordId: string;
+        recordType: string;
+        providerClassId?: string;
+        audienceScope: "mapped_user" | "class_members";
+        mappedAccountId?: typeof fixture.aliceId;
+        tombstone: boolean;
+        title: string;
+      }) =>
+        ctx.db.insert("externalRecords", {
+          integrationId: fixture.integrationId,
+          schoolId: fixture.schoolId,
+          providerRecordId: input.providerRecordId,
+          providerRecordKey: `${input.recordType}:${input.providerRecordId}`,
+          recordType: input.recordType,
+          classification:
+            input.audienceScope === "mapped_user" ? "personal" : "class",
+          audienceScope: input.audienceScope,
+          mappedAccountId: input.mappedAccountId,
+          providerClassId: input.providerClassId,
+          normalized: { title: input.title },
+          payloadVersion: "v2p2",
+          sourceHash: `${input.providerRecordId}-hash`,
+          tombstone: input.tombstone,
+          tombstonedAt: input.tombstone ? now : undefined,
+          fetchedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      await insert({
+        providerRecordId: "membership-keep",
+        recordType: "membership",
+        providerClassId: "class-keep",
+        audienceScope: "mapped_user",
+        mappedAccountId: fixture.aliceId,
+        tombstone: false,
+        title: "Keep membership",
+      });
+      const classId = await insert({
+        providerRecordId: "class-keep",
+        recordType: "class",
+        providerClassId: "class-keep",
+        audienceScope: "class_members",
+        mappedAccountId: fixture.aliceId,
+        tombstone: false,
+        title: "Keep class",
+      });
+      return { classId };
+    });
+
+    const asAlice = t.withIdentity(alice);
+    const selected = await asAlice.mutation(api.managebac.setSelectedClasses, {
+      recordIds: [seeded.classId],
+      expectedRevision: 0,
+    });
+    const materialized = await asAlice.mutation(
+      api.managebac.materializeClassWorkspaces,
+      { recordIds: [seeded.classId] },
+    );
+    expect(materialized.created).toBe(1);
+
+    const deselected = await asAlice.mutation(api.managebac.setSelectedClasses, {
+      recordIds: [],
+      expectedRevision: selected.selectionRevision,
+      retention: "keep_in_spectra",
+    });
+    expect(deselected.selectedClassIds).toEqual([]);
+    expect(deselected.deselectedRecordIds).toEqual([seeded.classId]);
+
+    const released = await asAlice.mutation(
+      api.managebac.releaseClassWorkspaces,
+      {
+        recordIds: deselected.deselectedRecordIds ?? [seeded.classId],
+        retention: "keep_in_spectra",
+      },
+    );
+    expect(released).toMatchObject({
+      kept: 1,
+      removed: 0,
+      skipped: 0,
+      done: true,
+    });
+
+    const state = await t.run(async (ctx) => {
+      const source = await ctx.db.get(seeded.classId);
+      const workspaces = await ctx.db
+        .query("spectraWorkspaces")
+        .withIndex("by_account_starter", (q) =>
+          q
+            .eq("ownerAccountId", fixture.aliceId)
+            .eq("starterKey", "managebac-class"),
+        )
+        .collect();
+      const projections = await ctx.db
+        .query("externalProjections")
+        .withIndex("by_account_updated", (q) =>
+          q.eq("accountId", fixture.aliceId),
+        )
+        .collect();
+      const selections = await ctx.db
+        .query("managebacClassSelections")
+        .withIndex("by_account_integration", (q) =>
+          q
+            .eq("accountId", fixture.aliceId)
+            .eq("integrationId", fixture.integrationId),
+        )
+        .collect();
+      return { source, workspaces, projections, selections };
+    });
+
+    expect(state.source?.tombstone).toBe(false);
+    expect(state.workspaces).toHaveLength(1);
+    expect(state.workspaces[0]?.status).toBe("active");
+    expect(state.projections).toHaveLength(1);
+    expect(state.projections[0]?.projectionType).toBe("workspace");
+    expect(state.projections[0]?.state).not.toBe("tombstoned");
+    expect(state.projections[0]?.projectionId).toBe(
+      String(state.workspaces[0]?._id),
+    );
+    expect(state.selections.map((row) => row.selected)).toEqual([false]);
+    expect(state.selections[0]?.retention).toBe("keep_in_spectra");
+  });
+
   it("refreshes a calendarItems timetable projection and removes it without duplicates", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
@@ -1381,4 +1509,262 @@ describe("ManageBac account isolation", () => {
     expect(state.run?.counts.fetched).toBe(2);
     expect(state.run?.counts.unchanged).toBe(1);
   });
+
+  it("does not stamp archive retention on still-selected classes", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const now = Date.now();
+    const seeded = await t.run(async (ctx) => {
+      const insertClass = async (providerClassId: string) => {
+        await ctx.db.insert("externalRecords", {
+          integrationId: fixture.integrationId,
+          schoolId: fixture.schoolId,
+          providerRecordId: `membership-${providerClassId}`,
+          providerRecordKey: `membership:membership-${providerClassId}`,
+          recordType: "membership",
+          classification: "personal",
+          audienceScope: "mapped_user",
+          mappedAccountId: fixture.aliceId,
+          providerClassId,
+          normalized: { title: `${providerClassId} membership` },
+          payloadVersion: "v2p2",
+          sourceHash: `membership-${providerClassId}-hash`,
+          tombstone: false,
+          fetchedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return ctx.db.insert("externalRecords", {
+          integrationId: fixture.integrationId,
+          schoolId: fixture.schoolId,
+          providerRecordId: providerClassId,
+          providerRecordKey: `class:${providerClassId}`,
+          recordType: "class",
+          classification: "class",
+          audienceScope: "class_members",
+          mappedAccountId: fixture.aliceId,
+          providerClassId,
+          normalized: { title: providerClassId },
+          payloadVersion: "v2p2",
+          sourceHash: `${providerClassId}-hash`,
+          tombstone: false,
+          fetchedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      };
+      const keepId = await insertClass("class-keep-ret");
+      const dropId = await insertClass("class-drop-ret");
+      return { keepId, dropId };
+    });
+
+    const asAlice = t.withIdentity(alice);
+    const first = await asAlice.mutation(api.managebac.setSelectedClasses, {
+      recordIds: [seeded.keepId, seeded.dropId],
+      expectedRevision: 0,
+      retention: "keep_in_spectra",
+    });
+    const second = await asAlice.mutation(api.managebac.setSelectedClasses, {
+      recordIds: [seeded.keepId],
+      expectedRevision: first.selectionRevision,
+      retention: "archive_projection",
+    });
+    expect(second.retention).toBe("archive_projection");
+    expect(second.deselectedRecordIds).toEqual([seeded.dropId]);
+
+    const rows = await t.run(async (ctx) =>
+      ctx.db
+        .query("managebacClassSelections")
+        .withIndex("by_account_integration", (q) =>
+          q
+            .eq("accountId", fixture.aliceId)
+            .eq("integrationId", fixture.integrationId),
+        )
+        .collect(),
+    );
+    const byClass = Object.fromEntries(
+      rows.map((row) => [row.providerClassId, row]),
+    );
+    expect(byClass["class-keep-ret"]?.selected).toBe(true);
+    expect(byClass["class-keep-ret"]?.retention).toBe("keep_in_spectra");
+    expect(byClass["class-drop-ret"]?.selected).toBe(false);
+    expect(byClass["class-drop-ret"]?.retention).toBe("archive_projection");
+  });
+
+  it("keeps personal overlay notes when a deadline source hash refreshes", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const now = Date.now();
+    const seeded = await t.run(async (ctx) => {
+      const recordId = await ctx.db.insert("externalRecords", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        providerRecordId: "deadline-notes-1",
+        providerRecordKey: "deadline:deadline-notes-1",
+        recordType: "deadline",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        mappedAccountId: fixture.aliceId,
+        providerClassId: "class-notes",
+        normalized: {
+          title: "Essay draft",
+          description: "Original brief",
+          dueAt: now + 86_400_000,
+        },
+        payloadVersion: "v2p2",
+        sourceHash: "deadline-hash-v1",
+        tombstone: false,
+        fetchedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const artifactId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: fixture.aliceId,
+        schoolId: fixture.schoolId,
+        blueprintKey: "planner_task",
+        schemaVersion: 1,
+        title: "Essay draft",
+        summary: "Original brief",
+        content: {
+          taskTitle: "Essay draft",
+          description: "Original brief",
+          dueAt: now + 86_400_000,
+          source: {
+            provider: "managebac",
+            externalId: "deadline-notes-1",
+            version: "v2p2",
+            hash: "deadline-hash-v1",
+            status: "active",
+            lockedFields: ["taskTitle", "description", "dueAt", "source"],
+          },
+          personalOverlay: {},
+        },
+        textIndex: "Essay draft",
+        tags: ["managebac"],
+        status: "active",
+        createdFrom: { source: "manual", contextSummary: "test" },
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("externalProjections", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        recordId,
+        accountId: fixture.aliceId,
+        projectionType: "planner_task",
+        projectionId: artifactId,
+        providerKey: `planner:${recordId}`,
+        sourceHash: "deadline-hash-v1",
+        state: "active",
+        bootstrapVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const syncRunId = await ctx.db.insert("externalSyncRuns", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        accountId: fixture.aliceId,
+        kind: "manual",
+        status: "running",
+        trigger: "user",
+        stage: "syncing:deadlines",
+        capabilityIds: [fixture.capabilityId],
+        selectionRevision: 0,
+        leaseOwner: "overlay-notes-worker",
+        leaseToken: "overlay-notes-lease",
+        leaseExpiresAt: now + 120_000,
+        counts: { ...emptyCounts },
+        attemptCount: 1,
+        nextAttemptAt: now,
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { recordId, artifactId, syncRunId };
+    });
+
+    const asAlice = t.withIdentity(alice);
+    await asAlice.mutation(api.managebac.setOverlay, {
+      recordId: seeded.recordId,
+      notes: "Personal study plan — keep me",
+      completion: false,
+    });
+
+    const records = [
+      {
+        providerRecordId: "deadline-notes-1",
+        providerRecordKey: "deadline:deadline-notes-1",
+        classification: "personal" as const,
+        audienceScope: "mapped_user" as const,
+        providerClassId: "class-notes",
+        normalized: {
+          title: "Essay draft",
+          description: "Updated school brief",
+          dueAt: now + 2 * 86_400_000,
+        },
+        payloadVersion: "v2p2",
+        sourceHash: "deadline-hash-v2",
+      },
+    ];
+    const timestamp = Date.now();
+    const payloadDigest = digest({
+      capabilityId: fixture.capabilityId,
+      records,
+      pageNumber: 1,
+      leaseToken: "overlay-notes-lease",
+    });
+    await asAlice.mutation(api.managebac.commitNormalizedPage, {
+      integrationId: fixture.integrationId,
+      syncRunId: seeded.syncRunId,
+      capabilityId: fixture.capabilityId,
+      records,
+      pageNumber: 1,
+      payloadDigest,
+      timestamp,
+      nonce: "overlay-notes-nonce",
+      leaseToken: "overlay-notes-lease",
+      signature: signature(
+        "sync-page",
+        alice,
+        fixture.integrationId,
+        seeded.syncRunId,
+        timestamp,
+        "overlay-notes-nonce",
+        payloadDigest,
+      ),
+    });
+
+    const state = await t.run(async (ctx) => {
+      const overlay = await ctx.db
+        .query("externalRecordOverlays")
+        .withIndex("by_record_account", (q) =>
+          q.eq("recordId", seeded.recordId).eq("accountId", fixture.aliceId),
+        )
+        .unique();
+      const conflicts = (
+        await ctx.db.query("externalSyncConflicts").collect()
+      ).filter((item) => item.syncRunId === seeded.syncRunId);
+      return { overlay, conflicts };
+    });
+    expect(state.overlay?.notes).toBe("Personal study plan — keep me");
+    expect(state.conflicts.length).toBeGreaterThanOrEqual(1);
+    expect(state.conflicts.some((item) => item.status === "open")).toBe(true);
+
+    // Partial update must not wipe notes.
+    await asAlice.mutation(api.managebac.setOverlay, {
+      recordId: seeded.recordId,
+      completion: true,
+    });
+    const afterPartial = await t.run(async (ctx) =>
+      ctx.db
+        .query("externalRecordOverlays")
+        .withIndex("by_record_account", (q) =>
+          q.eq("recordId", seeded.recordId).eq("accountId", fixture.aliceId),
+        )
+        .unique(),
+    );
+    expect(afterPartial?.notes).toBe("Personal study plan — keep me");
+    expect(afterPartial?.completion).toBe(true);
+  });
+
 });

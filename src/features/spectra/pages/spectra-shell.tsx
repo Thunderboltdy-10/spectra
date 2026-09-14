@@ -165,6 +165,7 @@ import { openSpectraPackage } from "../lenses/spectra-package";
 import {
   classifyLibraryImport,
   importLibraryResourceFile,
+  isOfficeNativeImportFile,
   projectDocxImportWithDurableImages,
   projectOfficeImportWithLens,
   projectLibraryImportContent,
@@ -3622,16 +3623,27 @@ export function SpectraShell({
    * types still project into editable studios, and the import always preserves
    * the uploaded bytes before anything is parsed out of them.
    */
-  async function importLibraryFile(file: File) {
+  async function importLibraryFile(
+    file: File,
+    parentNodeId?: string | null,
+  ) {
     const classification = classifyLibraryImport(file);
     let importJobId: string | null = null;
     setBusyKey("library:import");
     try {
       const titleHint = file.name.replace(/\.[^.]+$/, "") || "Untitled file";
+      /* Same parent New uses: only place under a folder when the organizer
+         (or another caller) names one. Explicit null means Library/workspace
+         root — do not revive a stale currentLibraryNodeId. */
+      const placementParentId =
+        typeof parentNodeId === "string" && parentNodeId.trim()
+          ? parentNodeId.trim()
+          : undefined;
       // CANON D29: ordinary files land as Library resource citizens with bytes.
       if (classification.kind === "resource") {
         const imported = await importLibraryResourceFile(file, {
           workspaceId: selectedWorkspaceId || undefined,
+          parentNodeId: placementParentId,
           title: titleHint,
         });
         const refreshed = await loadOverview(selectedWorkspaceId, true);
@@ -3655,12 +3667,12 @@ export function SpectraShell({
         ? portable.manifest.artifactType
         : classification.blueprintKey ?? "document";
       const fallback = createDefaultArtifactPayload(blueprintKey);
+      // Office lens only for OOXML natives. Text/md share the document
+      // blueprint but must keep projectLibraryImportContent. Lens failures
+      // must toast and abort — never hollow createArtifact fallback.
       const officeProjection =
-        !portable &&
-        (blueprintKey === "document" ||
-          blueprintKey === "sheets" ||
-          blueprintKey === "presentation")
-          ? await projectOfficeImportWithLens(file).catch(() => null)
+        !portable && isOfficeNativeImportFile(file)
+          ? await projectOfficeImportWithLens(file)
           : null;
       const importedContent =
         portable?.content ??
@@ -3677,6 +3689,7 @@ export function SpectraShell({
         tags: ["imported"],
         source: "manual",
         workspaceId: selectedWorkspaceId,
+        ...(placementParentId ? { parentNodeId: placementParentId } : {}),
       });
       const canonicalImportedContent =
         !portable &&
@@ -4451,8 +4464,8 @@ export function SpectraShell({
                             activeWorkId={studio.activeArtifact?._id}
                             busy={Boolean(busyKey?.startsWith("artifact:"))}
                             importing={busyKey === "library:import"}
-                            onImportFile={(file) =>
-                              void importLibraryFile(file)
+                            onImportFile={(file, parentNodeId) =>
+                              void importLibraryFile(file, parentNodeId)
                             }
                             onNewWorkspace={(parentNodeId) => {
                               setWorkspaceCreateParentNodeId(parentNodeId);

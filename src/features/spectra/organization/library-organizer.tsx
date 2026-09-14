@@ -128,7 +128,7 @@ export type LibraryOrganizerProps = {
   /** Replaces the composer's selected work with this set (list range-select). */
   onSelectWork?: (artifactIds: string[]) => void;
   contextIds?: ReadonlySet<string>;
-  onImportFile?: (file: File) => void;
+  onImportFile?: (file: File, parentNodeId?: string | null) => void;
   /** Create a workspace exactly where this surface is currently standing. */
   onNewWorkspace?: (parentNodeId: string | null) => void;
   importing?: boolean;
@@ -1002,7 +1002,8 @@ export function LibraryOrganizer({
         accept={LIBRARY_IMPORT_ACCEPT}
         onChange={(event) => {
           const file = event.target.files?.[0];
-          if (file) onImportFile?.(file);
+          /* Same parent New uses: import lands in the open folder, not at root. */
+          if (file) onImportFile?.(file, currentParentId);
           event.target.value = "";
         }}
       />
@@ -1129,6 +1130,9 @@ export function LibraryOrganizer({
           )}
           <SurfaceNewMenu
             disabled={!inFolder || busy}
+            disabledTitle={
+              !inFolder ? "Open a folder to create here" : undefined
+            }
             importing={importing}
             onNewFolder={createFolderHere}
             onNewWorkspace={

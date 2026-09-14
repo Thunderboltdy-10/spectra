@@ -360,3 +360,32 @@ export function compactStoredResultCardSummary(
     provenance: summary.provenance,
   };
 }
+
+/**
+ * Observable facts that feed tab + result-card-summary projections.
+ * Lease/heartbeat fields (heartbeatAt, leaseExpiresAt, workerId, …) are
+ * intentionally omitted — a change that only touches those must not load
+ * dependent tab/card rows.
+ */
+export function projectRunObservableFacts(run: Doc<"spectraAiRuns">) {
+  return {
+    ownerAccountId: run.ownerAccountId,
+    schoolId: run.schoolId,
+    runSummary: projectRunTabSummary(run),
+  };
+}
+
+/**
+ * True when old→new leaves every fact that feeds tab/card summaries
+ * unchanged. Inserts (no oldDoc) always need projection side effects.
+ */
+export function runProjectionFactsUnchanged(
+  oldDoc: Doc<"spectraAiRuns"> | null | undefined,
+  newDoc: Doc<"spectraAiRuns">,
+): boolean {
+  if (!oldDoc) return false;
+  return (
+    stableJson(projectRunObservableFacts(oldDoc)) ===
+    stableJson(projectRunObservableFacts(newDoc))
+  );
+}

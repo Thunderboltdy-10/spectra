@@ -161,3 +161,93 @@ describe("Calendar scheduled work blocks", () => {
     expect(retry.linkedWorkIds).toEqual([planArtifactId]);
   });
 });
+
+describe("Calendar overview range-bounded reads", () => {
+  it("returns in-range timed items, keeps off-range work blocks for AI, and preserves MB task joins", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendarTask(t);
+    const planArtifactId = await seedPlanner(t, seeded.accountId, seeded.schoolId);
+    const user = t.withIdentity(identity);
+    const weekFrom = 1_700_000_000_000;
+    const weekTo = weekFrom + 7 * 24 * 60 * 60_000;
+    const farPast = weekFrom - 200 * 24 * 60 * 60_000;
+    const farFutureBlockStart = weekTo + 30 * 24 * 60 * 60_000;
+
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      // Off-range personal history must not appear in visible items.
+      await ctx.db.insert("calendarItems", {
+        ownerAccountId: seeded.accountId,
+        schoolId: seeded.schoolId,
+        kind: "personal_event",
+        title: "Ancient personal event",
+        startAt: farPast,
+        endAt: farPast + 3_600_000,
+        allDay: false,
+        timezone: "Europe/Madrid",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: false,
+        linkedArtifactIds: [],
+        revision: 1,
+        createdBy: "human",
+        createdAt: now,
+        updatedAt: now,
+      });
+      // In-range event must appear.
+      await ctx.db.insert("calendarItems", {
+        ownerAccountId: seeded.accountId,
+        schoolId: seeded.schoolId,
+        kind: "personal_event",
+        title: "This week meetup",
+        startAt: weekFrom + 86_400_000,
+        endAt: weekFrom + 86_400_000 + 3_600_000,
+        allDay: false,
+        timezone: "Europe/Madrid",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: false,
+        linkedArtifactIds: [],
+        revision: 1,
+        createdBy: "human",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const scheduled = await user.mutation(api.calendar.scheduleTask, {
+      planArtifactId,
+      planTaskId: "essay",
+      startAt: farFutureBlockStart,
+      endAt: farFutureBlockStart + 3_600_000,
+      timezone: "Europe/Madrid",
+      actorKind: "ai" as const,
+      idempotencyKey: "ai:overview-offrange-block",
+    });
+
+    const overview = await user.query(api.calendar.overview, {
+      from: weekFrom,
+      to: weekTo,
+    });
+
+    const visibleTitles = overview.items.map((item: { title: string }) => item.title);
+    expect(visibleTitles).toContain("This week meetup");
+    expect(visibleTitles).not.toContain("Ancient personal event");
+
+    // Cross-range AI identity index remains complete.
+    expect(
+      overview.scheduledWorkBlocks.some(
+        (item: { id: string }) => item.id === scheduled.id,
+      ),
+    ).toBe(true);
+
+    // Unscheduled plan discovery still sees the linked plan task as scheduled.
+    expect(
+      overview.unscheduledTasks.some(
+        (item: { planArtifactId?: string; planTaskId?: string }) =>
+          item.planArtifactId === planArtifactId && item.planTaskId === "essay",
+      ),
+    ).toBe(false);
+  });
+});
+

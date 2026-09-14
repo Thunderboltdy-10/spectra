@@ -157,7 +157,10 @@ const WORK_EXTENSIONS: Record<string, ArtifactTypeKey> = {
   xlsx: "sheets",
   csv: "sheets",
   tsv: "sheets",
-  doc: "document",
+  /* Legacy OLE .doc is not OOXML. Classifying it as document work would
+     route through the Word lens / hollow default payload and claim a Word
+     projection. Keep .doc in LIBRARY_IMPORT_ACCEPT as a resource citizen
+     (bytes preserved) instead — same honesty as PDF. */
   docx: "document",
   txt: "document",
   md: "document",
@@ -199,6 +202,19 @@ export function classifyLibraryImport(file: File): {
     return { kind: "work", blueprintKey, nativeFormat };
   }
   return { kind: "resource", nativeFormat };
+}
+
+/** OOXML natives that Import routes through the Spectra office lens. */
+const OFFICE_NATIVE_EXTENSIONS = new Set(["docx", "xlsx", "pptx"]);
+
+/**
+ * True only for .docx / .xlsx / .pptx (case-insensitive). Legacy OLE (.doc /
+ * .xls / .ppt), plain text, and markdown share document/sheets/presentation
+ * blueprints but must not POST to the office import lens.
+ */
+export function isOfficeNativeImportFile(file: File): boolean {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return OFFICE_NATIVE_EXTENSIONS.has(extension);
 }
 
 export function documentContentFromImportedHtml(html: string) {

@@ -17,6 +17,7 @@ import {
   projectRunTabSummary,
   RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
   RUN_TAB_PROJECTION_VERSION,
+  runProjectionFactsUnchanged,
   upsertResultCardSummary,
 } from "./spectraRunProjection";
 import {
@@ -47,8 +48,24 @@ orgNodeAggregates.forEach((aggregate, index) =>
   ),
 );
 
+/** Test-only I/O counters for heartbeat short-circuit proofs (W9-02 / F3). */
+export const runProjectionTriggerIo = {
+  tabCollects: 0,
+  cardSummaryCollects: 0,
+  reset() {
+    this.tabCollects = 0;
+    this.cardSummaryCollects = 0;
+  },
+};
+
 triggers.register("spectraAiRuns", async (ctx, change) => {
   if (!change.newDoc) return;
+  // Lease/heartbeat-only patches must not collect tabs or card summaries.
+  // Compare the same observable facts that feed projectRunTabSummary /
+  // projectResultCardRunSummary (+ owner/school for card rows) before any
+  // dependent reads. Heartbeat does not bump updatedAt, so equality holds.
+  if (runProjectionFactsUnchanged(change.oldDoc, change.newDoc)) return;
+  runProjectionTriggerIo.tabCollects += 1;
   const tabs = await ctx.innerDb
     .query("spectraRunTabs")
     .withIndex("by_run", (q) => q.eq("runId", change.id))
@@ -72,10 +89,9 @@ triggers.register("spectraAiRuns", async (ctx, change) => {
         }),
       ),
   );
-  // Run lifecycle writes are frequent and may only touch heartbeat/lease
-  // fields. Update the already-compact card rows directly; reading canonical
-  // cards here reopened evidence/provenance payloads on every run change and
-  // also bypassed the result-card trigger.
+  // Update already-compact card rows directly; reading canonical cards here
+  // reopened evidence/provenance payloads and bypassed the result-card trigger.
+  runProjectionTriggerIo.cardSummaryCollects += 1;
   const cardSummaries = await ctx.innerDb
     .query("spectraResultCardSummaries")
     .withIndex("by_run", (q) => q.eq("runId", change.id))

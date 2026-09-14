@@ -539,18 +539,52 @@ export const create = mutation({
         })
       : undefined;
     if (operationId) {
-      const existing = await ctx.db
+      // Prefer live matches, then revive a soft-removed row for the same
+      // placementOperationId. `.first()` alone can return a removed provisional
+      // and fall through to a duplicate insert.
+      const matches = await ctx.db
         .query("artifactEmbeds")
         .withIndex("by_placement_operation", (q) =>
           q.eq("containerType", args.containerType)
             .eq("containerId", args.containerId.trim())
             .eq("placementOperationId", operationId),
         )
-        .first();
-      if (existing && !existing.removedAt) {
-        if (existing.placementFingerprint && existing.placementFingerprint !== placementFingerprint)
+        .collect();
+      const live = matches.find((embed) => !embed.removedAt);
+      if (live) {
+        if (live.placementFingerprint && live.placementFingerprint !== placementFingerprint)
           throw new Error("EMBED_PLACEMENT_OPERATION_CONFLICT");
-        return { embedId: existing._id, idempotent: true };
+        return { embedId: live._id, idempotent: true };
+      }
+      const removed = matches.find((embed) => embed.removedAt !== undefined);
+      if (removed) {
+        if (
+          removed.placementFingerprint &&
+          removed.placementFingerprint !== placementFingerprint
+        )
+          throw new Error("EMBED_PLACEMENT_OPERATION_CONFLICT");
+        await ctx.db.patch(removed._id, {
+          containerRegionId: args.containerRegionId.trim().slice(0, 240),
+          sourceArtifactId: args.sourceArtifactId,
+          mode: args.mode,
+          interaction: args.interaction,
+          versionPolicy: args.versionPolicy,
+          pinnedVersionId:
+            args.versionPolicy === "pinned" ? args.pinnedVersionId : undefined,
+          displayPreferences: args.displayPreferences,
+          contextPolicy: args.contextPolicy,
+          removedAt: undefined,
+          placementState: "provisional",
+          placementFingerprint,
+          placementExpiresAt: now + 10 * 60_000,
+          updatedAt: now,
+        });
+        await (ctx.scheduler.runAfter as unknown as (delay: number, fn: unknown, args: unknown) => Promise<unknown>)(
+          10 * 60_000,
+          (internal as unknown as { artifactEmbeds: { expireProvisional: unknown } }).artifactEmbeds.expireProvisional,
+          { embedId: removed._id, placementOperationId: operationId },
+        );
+        return { embedId: removed._id, idempotent: true };
       }
     }
     const embedId = await ctx.db.insert("artifactEmbeds", {

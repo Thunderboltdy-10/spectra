@@ -59,6 +59,52 @@ describe("Office activation Convex budget", () => {
     expect(storedText).not.toContain("density-7999");
   });
 
+
+  it("keeps a nonempty head when activation content is already chunk-encoded", async () => {
+    const { encodeArtifactContentForStorage, decodeSheetsContentFromStorage } =
+      await import("../../../../shared/sheet-cells");
+    const cells = Object.fromEntries(
+      Array.from({ length: 12_000 }, (_, index) => [
+        `A${index + 1}`,
+        { value: `row-${index}-${"x".repeat(100)}` },
+      ]),
+    );
+    const content = {
+      workbook: {
+        calculationMode: "automatic" as const,
+        locale: "en-US",
+        namedRanges: {},
+        calculationVersion: 1,
+      },
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          name: "Density",
+          cells,
+          tables: [],
+          charts: [],
+          mergedRanges: [],
+        },
+      ],
+      activeSheetId: "xlsx:sheet:1",
+    };
+    const encoded = encodeArtifactContentForStorage("sheets", content);
+    expect(JSON.stringify(encoded)).toContain("spectra-sheet-cells-v1");
+    expect(JSON.stringify(encoded).length).toBeGreaterThan(
+      CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES,
+    );
+    // Pass already-encoded content the way a Convex reload would.
+    const stored = convexSafeOfficeActivationContent("sheets", encoded);
+    const storedText = JSON.stringify(stored);
+    expect(storedText.length).toBeLessThanOrEqual(
+      CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES,
+    );
+    const decoded = decodeSheetsContentFromStorage(stored) as {
+      sheets: Array<{ cells: Record<string, { value?: string }> }>;
+    };
+    expect(decoded.sheets[0]?.cells.A1?.value).toContain("row-0");
+  });
+
   it("does not show Convex body-limit JSON to a person", () => {
     const leaked = `{"code": "BadJsonBody", "message": "Failed to buffer the request body: length limit exceeded"}`;
     expect(humanizePublicFailure(leaked, "Excel")).toContain("too large");

@@ -268,6 +268,53 @@ function isSheetCellsPath(path) {
   return path[0] === "sheets" && path.at(-1) === "cells" && path.length >= 3;
 }
 
+const SHEET_CELLS_ENCODING = "spectra-sheet-cells-v1";
+
+/**
+ * Convex stores dense sheets as bounded chunks. Gateway bootstrap must expand
+ * them into address-keyed cells before Yjs sync — otherwise encoding/chunks
+ * land as fake addresses and normalizeSheetsContent drops every cell (Empty
+ * sheet on Library 200k open).
+ */
+function expandSheetCellsRecord(cells) {
+  if (!cells || typeof cells !== "object" || Array.isArray(cells)) return {};
+  if (
+    cells.encoding === SHEET_CELLS_ENCODING &&
+    Array.isArray(cells.chunks)
+  ) {
+    const entries = [];
+    for (const chunk of cells.chunks) {
+      if (!Array.isArray(chunk)) continue;
+      for (const candidate of chunk) {
+        if (
+          Array.isArray(candidate) &&
+          candidate.length === 2 &&
+          typeof candidate[0] === "string"
+        )
+          entries.push(candidate);
+      }
+    }
+    return Object.fromEntries(entries);
+  }
+  return cells;
+}
+
+function decodeSheetsContentForYjs(content) {
+  const source =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? content
+      : null;
+  if (!source || !Array.isArray(source.sheets)) return content;
+  return {
+    ...source,
+    sheets: source.sheets.map((sheet) => {
+      if (!sheet || typeof sheet !== "object" || Array.isArray(sheet))
+        return sheet;
+      return { ...sheet, cells: expandSheetCellsRecord(sheet.cells) };
+    }),
+  };
+}
+
 function encodeSheetCellValue(cell) {
   return JSON.stringify(cell);
 }
@@ -286,11 +333,12 @@ function decodeSheetCellValue(value) {
 }
 
 function syncSheetCells(map, cells) {
+  const expanded = expandSheetCellsRecord(cells);
   map.set(SHEET_CELLS_MARKER, true);
-  const keep = new Set(Object.keys(cells));
+  const keep = new Set(Object.keys(expanded));
   keep.add(SHEET_CELLS_MARKER);
   for (const key of [...map.keys()]) if (!keep.has(key)) map.delete(key);
-  for (const [address, cell] of Object.entries(cells)) {
+  for (const [address, cell] of Object.entries(expanded)) {
     const encoded =
       cell && typeof cell === "object" && !Array.isArray(cell)
         ? encodeSheetCellValue(cell)
@@ -452,13 +500,17 @@ export function initializeNativeArtifactDocument(document, projection) {
     Array.isArray(projection.content)
   )
     throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_INVALID");
+  const bootstrapContent =
+    projection.typeKey === "sheets"
+      ? decodeSheetsContentForYjs(projection.content)
+      : projection.content;
   document.transact(() => {
     if (projection.typeKey === "document")
-      initializeDocument(document, projection.content);
+      initializeDocument(document, bootstrapContent);
     else if (projection.typeKey === "code")
-      initializeCode(document, projection.content);
+      initializeCode(document, bootstrapContent);
     else
-      syncRecord(document.getMap(WORK_ROOT_MAP), projection.content, [
+      syncRecord(document.getMap(WORK_ROOT_MAP), bootstrapContent, [
         projection.typeKey,
       ]);
     setNativeEnvelope(document, projection);

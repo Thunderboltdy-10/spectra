@@ -22,6 +22,7 @@ import { NativeArtifactYjsModel } from "../work/models/yjs/native-artifact-model
 import { useArtifactCollaboration } from "./use-artifact-collaboration";
 import { realtimeProviderForWorkType } from "../realtime/providers/provider-factory";
 import { nativeRoomBaselineExpected } from "./native-bootstrap";
+import { studioContentLooksHollow } from "../components/artifact-studio-value-utils";
 
 const EMPTY_MODEL_SNAPSHOT: ArtifactLiveModelSnapshot = {
   initialized: false,
@@ -138,6 +139,49 @@ export function useArtifactLiveModel(
     initialValue,
     modelSnapshot.validity,
     modelSnapshot.value,
+  ]);
+
+  // Sheets: a pre-decode gateway bootstrap can leave a valid hollow Yjs room
+  // while Convex still holds a budgeted nonempty activation head. Push that
+  // head once so Library 200k open is not stuck on Empty sheet.
+  const sheetsHeadHealRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeKey !== "sheets") return;
+    if (
+      collaboration.state !== "synchronized" ||
+      collaboration.unsynchronizedChanges > 0 ||
+      modelSnapshot.validity !== "valid" ||
+      !modelSnapshot.value ||
+      !model ||
+      !controller
+    )
+      return;
+    const liveContent = modelSnapshot.value.content;
+    const seedContent = initialValue.content;
+    if (
+      !studioContentLooksHollow(liveContent) ||
+      studioContentLooksHollow(seedContent)
+    )
+      return;
+    const healKey = `${artifactId}:${authoritativeRevision ?? "seed"}`;
+    if (sheetsHeadHealRef.current === healKey) return;
+    sheetsHeadHealRef.current = healKey;
+    void model
+      .replaceSnapshot(initialValue, controller)
+      .catch(() => {
+        if (sheetsHeadHealRef.current === healKey) sheetsHeadHealRef.current = null;
+      });
+  }, [
+    artifactId,
+    authoritativeRevision,
+    collaboration.state,
+    collaboration.unsynchronizedChanges,
+    controller,
+    initialValue,
+    model,
+    modelSnapshot.validity,
+    modelSnapshot.value,
+    typeKey,
   ]);
 
   const synchronize = useCallback(

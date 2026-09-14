@@ -4,6 +4,7 @@ import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import { normalizeArtifactContent } from "../../../ai/content-normalization";
 import { normalizeFoundryContent } from "../../../agents/foundry/foundry-document";
 import { normalizePresentationContent } from "../../../presentation/model";
+import { sheetCellEntries } from "../../../../../../shared/sheet-cells";
 import {
   normalizeSheetsContent,
   type SheetCell,
@@ -272,12 +273,19 @@ function decodeSheetCellValue(value: unknown): unknown {
   }
 }
 
+function expandSheetCellsRecord(cells: unknown): JsonRecord {
+  // Convex chunked cells must expand before Yjs address sync — otherwise
+  // encoding/chunks become fake keys and the studio paints Empty sheet.
+  return Object.fromEntries(sheetCellEntries(cells));
+}
+
 function syncSheetCells(map: Y.Map<unknown>, cells: JsonRecord) {
+  const expanded = expandSheetCellsRecord(cells);
   map.set(SHEET_CELLS_MARKER, true);
-  const keep = new Set(Object.keys(cells));
+  const keep = new Set(Object.keys(expanded));
   keep.add(SHEET_CELLS_MARKER);
   for (const key of [...map.keys()]) if (!keep.has(key)) map.delete(key);
-  for (const [address, cell] of Object.entries(cells)) {
+  for (const [address, cell] of Object.entries(expanded)) {
     const encoded = isRecord(cell) ? encodeSheetCellValue(cell) : JSON.stringify({ value: cell });
     if (map.get(address) !== encoded) map.set(address, encoded);
   }

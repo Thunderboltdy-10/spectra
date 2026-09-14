@@ -10,6 +10,7 @@ import {
 import {
   decodeSheetsContentFromStorage,
   encodeArtifactContentForStorage,
+  sheetCellEntries,
 } from "../../../../shared/sheet-cells";
 import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
@@ -683,11 +684,12 @@ function boundSheetCellsForActivation(content: unknown, budgetBytes: number) {
   const shell = sheetActivationShell(content);
   const sheetEntries = shell.sheets.map((sheet, index) => {
     const row = record(sheet);
-    const cells = record(row.cells);
     return {
       id: typeof row.id === "string" ? row.id : `sheet-${index + 1}`,
       name: typeof row.name === "string" ? row.name : `Sheet ${index + 1}`,
-      entries: Object.entries(cells),
+      // Prefer sheetCellEntries so Convex chunked storage still yields a
+      // nonempty activation head (Object.entries on {encoding,chunks} is hollow).
+      entries: sheetCellEntries(row.cells),
       tables: Array.isArray(row.tables) ? row.tables : [],
       charts: Array.isArray(row.charts) ? row.charts : [],
       mergedRanges: Array.isArray(row.mergedRanges)

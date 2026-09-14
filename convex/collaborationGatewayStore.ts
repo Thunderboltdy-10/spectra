@@ -16,7 +16,10 @@ import { changedArtifactRegionIds } from "../src/features/spectra/collaboration/
 import { syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
-import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
+import {
+  decodeSheetsContentFromStorage,
+  encodeArtifactContentForStorage,
+} from "../shared/sheet-cells";
 import { fitChangeGroupSnapshots } from "../shared/collaboration-change-group-capacity";
 import { filenameFromRelativePath } from "../shared/native-filename";
 import {
@@ -388,7 +391,12 @@ export const load = internalQuery({
               tags: artifact.tags,
               typeKey: artifact.blueprintKey,
               schemaVersion: room.schemaVersion,
-              content: artifact.content,
+              // Expand chunked sheet cells so gateway Yjs bootstrap lands real
+              // A1 addresses (encoded {encoding,chunks} → Empty sheet).
+              content:
+                artifact.blueprintKey === "sheets"
+                  ? decodeSheetsContentFromStorage(artifact.content)
+                  : artifact.content,
               artifactUpdatedAt: artifact.updatedAt,
             }
           : null,

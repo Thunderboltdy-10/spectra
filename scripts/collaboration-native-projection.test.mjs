@@ -16,6 +16,8 @@ import {
   nativeChangedRegionIds,
 } from "./collaboration-native-projection.mjs";
 import { shouldRepairNativeProjection } from "./collaboration-room-state.mjs";
+import { encodeArtifactContentForStorage } from "../shared/sheet-cells.ts";
+import { normalizeSheetsContent } from "../src/features/spectra/sheets/model.ts";
 
 function defaultContent(typeKey) {
   const blueprint = getBlueprint(typeKey);
@@ -239,6 +241,55 @@ describe("native collaboration gateway projection", () => {
     expect(nativeChangedRegionIds(after, after)).toEqual([
       "$spectra:native-projection",
     ]);
+  });
+
+
+  it("expands Convex chunked sheet cells on gateway bootstrap (no Empty sheet)", () => {
+    const canonical = {
+      workbook: {
+        calculationMode: "automatic",
+        locale: "en-US",
+        namedRanges: {},
+        calculationVersion: 1,
+      },
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          name: "1 - Density",
+          cells: {
+            A1: { value: "density-0" },
+            B1: { value: 42 },
+            A2: { value: "kept-head" },
+          },
+          tables: [],
+          charts: [],
+          mergedRanges: [],
+        },
+      ],
+      activeSheetId: "xlsx:sheet:1",
+    };
+    const stored = encodeArtifactContentForStorage("sheets", canonical);
+    // Prove the fixture is chunk-encoded (the Live Empty-sheet failure mode).
+    expect(stored.sheets[0].cells.encoding).toBe("spectra-sheet-cells-v1");
+
+    const gatewayDocument = new Y.Doc();
+    expect(
+      initializeNativeArtifactDocument(gatewayDocument, {
+        title: "P8V1-F2-200k-cell",
+        summary: "Imported",
+        tags: [],
+        typeKey: "sheets",
+        schemaVersion: 2,
+        content: stored,
+      }),
+    ).toBe(true);
+
+    const projected = nativeArtifactProjection(gatewayDocument, 2);
+    const normalized = normalizeSheetsContent(projected.content);
+    expect(normalized.sheets[0].cells.A1?.value).toBe("density-0");
+    expect(normalized.sheets[0].cells.B1?.value).toBe(42);
+    expect(normalized.sheets[0].cells.encoding).toBeUndefined();
+    gatewayDocument.destroy();
   });
 
   it("requests projection repair when a replayed durable head is ahead of its checkpoint", () => {

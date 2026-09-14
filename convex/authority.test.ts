@@ -269,6 +269,20 @@ describe("ordinary student and peer authority boundaries", () => {
     });
   });
 
+
+  it("rejects inviting yourself even when you can share", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    await expect(
+      t.withIdentity(fixture.owner).mutation(api.authority.invite, {
+        resourceType: "artifact",
+        resourceId: fixture.artifactId,
+        inviteeAccountId: fixture.ownerAccountId,
+        level: "modify",
+      }),
+    ).rejects.toThrow(/SHARING_OWNER_INVARIANT|SHARING_SELF_INVARIANT/);
+  });
+
   it("derives restricted-link eligibility from a verified identity and preserves expiry, revocation, and native privacy", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);

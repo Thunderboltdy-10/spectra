@@ -365,3 +365,369 @@ describe("presentation default reconcile stability", () => {
     ).toBe("accept-bootstrap");
   });
 });
+
+describe("hydrate hollow protection across studios", () => {
+  const base = {
+    incomingKey: "incoming",
+    baselineKey: "baseline",
+    dismissedRemoteKey: null as string | null,
+    isLocalSyncKey: false,
+    isCollaborative: true,
+    nativeOfficeDocument: false,
+  };
+
+  it("rejects hollow quiz bootstrap that would wipe populated questions", () => {
+    const populated = {
+      questions: [{ id: "q1", prompt: "What is photosynthesis?", type: "short" }],
+    };
+    const hollow = {
+      questions: [{ id: "q1", prompt: "", type: "short" }],
+    };
+    expect(studioContentLooksHollow(populated)).toBe(false);
+    expect(studioContentLooksHollow(hollow)).toBe(true);
+    expect(
+      decideRemoteStudioIncoming({
+        ...base,
+        dirty: false,
+        userHasEdited: false,
+        currentContent: populated,
+        incomingContent: hollow,
+      }),
+    ).toBe("ignore");
+  });
+
+  it("rejects empty-cell sheet shells that would wipe filled workbooks", () => {
+    const populated = {
+      sheets: [
+        {
+          id: "sheet-a",
+          name: "Data",
+          cells: { A1: { value: "Filled" } },
+        },
+      ],
+    };
+    const hollow = {
+      sheets: [{ id: "sheet-a", name: "Data", cells: {} }],
+    };
+    expect(studioContentLooksHollow(populated)).toBe(false);
+    expect(studioContentLooksHollow(hollow)).toBe(true);
+    expect(
+      shouldRejectHollowStudioIncoming({
+        currentContent: populated,
+        incomingContent: hollow,
+      }),
+    ).toBe(true);
+  });
+
+  it("treats placeholder-only presentation shells as hollow", () => {
+    const hollow = {
+      slides: [
+        {
+          id: "slide-1",
+          objects: [{ id: "obj-1", content: { text: "Title" } }],
+        },
+      ],
+    };
+    const populated = {
+      slides: [
+        {
+          id: "slide-1",
+          objects: [{ id: "obj-1", content: { text: "Mitosis overview" } }],
+        },
+      ],
+    };
+    expect(studioContentLooksHollow(hollow)).toBe(true);
+    expect(studioContentLooksHollow(populated)).toBe(false);
+  });
+
+  it("treats empty-object bootstraps as hollow so they cannot wipe populated studios", () => {
+    const populated = {
+      blocks: [{ id: "b1", type: "paragraph", text: "Imported body text" }],
+    };
+    expect(studioContentLooksHollow({})).toBe(true);
+    expect(studioContentLooksHollow(populated)).toBe(false);
+    expect(
+      shouldRejectHollowStudioIncoming({
+        currentContent: populated,
+        incomingContent: {},
+      }),
+    ).toBe(true);
+    expect(
+      decideRemoteStudioIncoming({
+        ...base,
+        dirty: false,
+        userHasEdited: false,
+        currentContent: populated,
+        incomingContent: {},
+      }),
+    ).toBe("ignore");
+  });
+
+  it("rejects hollow deck / whiteboard / timetable / code / agent / planner shells", () => {
+    const cases: Array<{ populated: unknown; hollow: unknown }> = [
+      {
+        populated: { cards: [{ id: "c1", front: "Q", back: "A" }] },
+        hollow: { cards: [{ id: "c1", front: "", back: "" }] },
+      },
+      {
+        populated: { nodes: [{ id: "n1", type: "note", text: "Idea" }] },
+        hollow: { nodes: [] },
+      },
+      {
+        populated: { events: [{ id: "e1", title: "Bio", start: "09:00" }] },
+        hollow: { events: [] },
+      },
+      {
+        populated: {
+          files: [{ id: "f1", path: "index.html", source: "<main>Hello class</main>" }],
+        },
+        hollow: {
+          files: [{ id: "f1", path: "index.html", source: "<main></main>" }],
+        },
+      },
+      {
+        populated: {
+          instructions: {
+            regionId: "agent-instructions",
+            text: "You help students revise biology with concrete examples.",
+          },
+        },
+        hollow: { instructions: { regionId: "agent-instructions", text: "" } },
+      },
+      {
+        populated: { description: "Finish lab report", subtasks: [] },
+        hollow: { description: "", subtasks: [] },
+      },
+    ];
+    for (const row of cases) {
+      expect(studioContentLooksHollow(row.populated)).toBe(false);
+      expect(studioContentLooksHollow(row.hollow)).toBe(true);
+      expect(
+        shouldRejectHollowStudioIncoming({
+          currentContent: row.populated,
+          incomingContent: row.hollow,
+        }),
+      ).toBe(true);
+    }
+  });
+});
+
+describe("two-user keyed collaborative rebase", () => {
+  it("keeps a local question edit while accepting a peer insert", () => {
+    const baseline = {
+      title: "Quiz",
+      summary: "",
+      tagDraft: "",
+      content: {
+        questions: [
+          { id: "q1", prompt: "Original", type: "short" },
+          { id: "q2", prompt: "Keep me", type: "short" },
+        ],
+      },
+    };
+    const local = {
+      ...baseline,
+      content: {
+        questions: [
+          { id: "q1", prompt: "Local edit", type: "short" },
+          { id: "q2", prompt: "Keep me", type: "short" },
+        ],
+      },
+    };
+    const incoming = {
+      ...baseline,
+      content: {
+        questions: [
+          { id: "q1", prompt: "Original", type: "short" },
+          { id: "q2", prompt: "Keep me", type: "short" },
+          { id: "q3", prompt: "Peer insert", type: "short" },
+        ],
+      },
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(rebased.snapshot.content).toEqual({
+      questions: [
+        { id: "q1", prompt: "Local edit", type: "short" },
+        { id: "q2", prompt: "Keep me", type: "short" },
+        { id: "q3", prompt: "Peer insert", type: "short" },
+      ],
+    });
+  });
+
+  it("merges disjoint field edits on the same keyed block", () => {
+    const baseline = {
+      title: "Doc",
+      summary: "",
+      tagDraft: "",
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Base", note: "" }],
+      },
+    };
+    const local = {
+      ...baseline,
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Local text", note: "" }],
+      },
+    };
+    const incoming = {
+      ...baseline,
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Base", note: "Peer note" }],
+      },
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(rebased.snapshot.content).toEqual({
+      blocks: [
+        { id: "b1", type: "paragraph", text: "Local text", note: "Peer note" },
+      ],
+    });
+  });
+
+  it("reports same-leaf collisions instead of dropping either side silently", () => {
+    const baseline = {
+      title: "Doc",
+      summary: "",
+      tagDraft: "",
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Base" }],
+      },
+    };
+    const local = {
+      ...baseline,
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Local" }],
+      },
+    };
+    const incoming = {
+      ...baseline,
+      content: {
+        blocks: [{ id: "b1", type: "paragraph", text: "Remote" }],
+      },
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual(["/content/blocks/b1/text"]);
+    expect(rebased.snapshot.content).toEqual({
+      blocks: [{ id: "b1", type: "paragraph", text: "Local" }],
+    });
+  });
+
+  it("merges disjoint sheet cell edits without false conflict", () => {
+    const baseline = {
+      title: "Sheet",
+      summary: "",
+      tagDraft: "",
+      content: {
+        sheets: [
+          {
+            id: "sheet-a",
+            name: "Data",
+            cells: { A1: { value: "Base" }, B1: { value: "Keep" } },
+          },
+        ],
+      },
+    };
+    const local = {
+      ...baseline,
+      content: {
+        sheets: [
+          {
+            id: "sheet-a",
+            name: "Data",
+            cells: { A1: { value: "Local" }, B1: { value: "Keep" } },
+          },
+        ],
+      },
+    };
+    const incoming = {
+      ...baseline,
+      content: {
+        sheets: [
+          {
+            id: "sheet-a",
+            name: "Data",
+            cells: {
+              A1: { value: "Base" },
+              B1: { value: "Keep" },
+              C1: { value: "Peer" },
+            },
+          },
+        ],
+      },
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(rebased.snapshot.content).toEqual({
+      sheets: [
+        {
+          id: "sheet-a",
+          name: "Data",
+          cells: {
+            A1: { value: "Local" },
+            B1: { value: "Keep" },
+            C1: { value: "Peer" },
+          },
+        },
+      ],
+    });
+  });
+
+  it("keeps a local slide-object edit while accepting a peer object insert", () => {
+    const baseline = {
+      title: "Deck",
+      summary: "",
+      tagDraft: "",
+      content: {
+        slides: [
+          {
+            id: "slide-1",
+            objects: [
+              { id: "obj-1", content: { text: "Original title text" } },
+            ],
+          },
+        ],
+      },
+    };
+    const local = {
+      ...baseline,
+      content: {
+        slides: [
+          {
+            id: "slide-1",
+            objects: [
+              { id: "obj-1", content: { text: "Local title rewrite" } },
+            ],
+          },
+        ],
+      },
+    };
+    const incoming = {
+      ...baseline,
+      content: {
+        slides: [
+          {
+            id: "slide-1",
+            objects: [
+              { id: "obj-1", content: { text: "Original title text" } },
+              { id: "obj-2", content: { text: "Peer bullet point" } },
+            ],
+          },
+        ],
+      },
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(rebased.snapshot.content).toEqual({
+      slides: [
+        {
+          id: "slide-1",
+          objects: [
+            { id: "obj-1", content: { text: "Local title rewrite" } },
+            { id: "obj-2", content: { text: "Peer bullet point" } },
+          ],
+        },
+      ],
+    });
+  });
+});

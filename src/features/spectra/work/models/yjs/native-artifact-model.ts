@@ -610,10 +610,18 @@ export class NativeArtifactYjsModel {
           throw new Error(
             `NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`,
           );
+        const historicalValue = valueAtPath(
+          value.content,
+          historicalRegion.path,
+        );
+        if (historicalValue === undefined)
+          throw new Error(
+            `NATIVE_PARTIAL_RESTORE_VALUE_MISSING: ${regionId}`,
+          );
         replaceAtPath(
           mergedContent,
           liveRegion.path,
-          structuredClone(valueAtPath(value.content, historicalRegion.path)),
+          structuredClone(historicalValue),
         );
       }
       if (contentRegionIds.length)

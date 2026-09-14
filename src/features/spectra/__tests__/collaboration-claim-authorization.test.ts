@@ -36,3 +36,42 @@ describe("gateway claim acknowledgement race", () => {
     expect(claimAuthorizesGatewayUpdate(candidate, update)).toBe(false);
   });
 });
+
+
+describe("AI×human gateway claim identity", () => {
+  it("rejects a human append that tries to ride an AI claim", () => {
+    expect(
+      claimAuthorizesGatewayUpdate(
+        { ...claim, actorKind: "ai" },
+        { ...update, actorKind: "human" },
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects an AI append that tries to ride a human claim", () => {
+    expect(
+      claimAuthorizesGatewayUpdate(
+        { ...claim, actorKind: "human" },
+        { ...update, actorKind: "ai" },
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a matching AI claim for the exact AI actor, client, and base", () => {
+    expect(
+      claimAuthorizesGatewayUpdate(
+        { ...claim, actorKind: "ai" },
+        { ...update, actorKind: "ai" },
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a different account even when actorKind matches", () => {
+    expect(
+      claimAuthorizesGatewayUpdate(
+        { ...claim, actorKind: "ai", actorAccountId: "account-ai-owner" },
+        { ...update, actorKind: "ai", actorAccountId: "account-other" },
+      ),
+    ).toBe(false);
+  });
+});

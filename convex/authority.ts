@@ -173,6 +173,10 @@ export const invite = mutation({
       throw new Error(
         "SHARING_OWNER_INVARIANT: The owner already has full access.",
       );
+    if (invitee._id === decision.actor.accountId)
+      throw new Error(
+        "SHARING_SELF_INVARIANT: You already have access to this work.",
+      );
     const now = Date.now();
     if (args.expiresAt && args.expiresAt <= now)
       throw new Error("SHARING_EXPIRY_INVALID: Expiry must be in the future.");

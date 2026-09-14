@@ -6,6 +6,7 @@ import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
 import { MAX_IMPORT_REQUEST_BYTES, MAX_PERSISTED_CONTENT_BYTES } from "../../../../../shared/intake-limits";
+import { encodeArtifactContentForStorage } from "../../../../../shared/sheet-cells";
 import { normalizeMediaType } from "../../../../../shared/intake-integrity";
 
 export const runtime = "nodejs";
@@ -209,7 +210,13 @@ export async function POST(request: NextRequest) {
         const parsed = validateArtifactContent(typeKey, body.importedContent);
         if (!parsed.success) throw new Error("IMPORT_CONTENT_INVALID");
         const job = await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") });
-        sanitizedContent = await materializeImportedMedia(parsed.data, job.artifactId, actor);
+        // Match createArtifact: chunk sheets before Convex mutation args.
+        // validate/materialize can expand address-keyed cells past the 1024-field
+        // ceiling → Live false "Could not import this file." after create ok.
+        sanitizedContent = encodeArtifactContentForStorage(
+          typeKey,
+          await materializeImportedMedia(parsed.data, job.artifactId, actor),
+        );
         const encoded = Buffer.from(JSON.stringify(sanitizedContent), "utf8");
         if (encoded.byteLength > MAX_PERSISTED_CONTENT_BYTES) throw new Error("IMPORT_SNAPSHOT_TOO_LARGE");
       }
@@ -252,11 +259,24 @@ export async function POST(request: NextRequest) {
         ...(sanitizedContent !== undefined ? { importedContent: sanitizedContent } : {}),
       });
       if (status === "imported") {
-        const committed = await convexMutation<{ artifactId: string; importJobId: string }, { versionId: string; reused?: boolean }>("changeGroups:commitImport", {
-          artifactId: await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") }).then((job) => job.artifactId),
-          importJobId: text(body.jobId, "job_id"),
-        });
-        return NextResponse.json({ ok: true, ...result, status: "imported", ...committed });
+        try {
+          const committed = await convexMutation<{ artifactId: string; importJobId: string }, { versionId: string; reused?: boolean }>("changeGroups:commitImport", {
+            artifactId: await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") }).then((job) => job.artifactId),
+            importJobId: text(body.jobId, "job_id"),
+          });
+          return NextResponse.json({ ok: true, ...result, status: "imported", ...committed });
+        } catch {
+          // Job is awaiting_commit with importedContent; artifact already holds
+          // the projection from createArtifact. Failing here previously toasted
+          // false "Could not import this file." despite usable Library content
+          // (formal-paper commitImport trigger byte-cap under dig load).
+          return NextResponse.json({
+            ok: true,
+            ...result,
+            status: "imported",
+            commitDeferred: true,
+          });
+        }
       }
       return NextResponse.json({ ok: true, ...result });
     }

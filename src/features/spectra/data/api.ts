@@ -2614,6 +2614,7 @@ export async function completeArtifactImport(input: {
     artifactId?: string;
     commitReceipt?: string | null;
     receipt?: SpectraArtifactCommitReceipt | null;
+    commitDeferred?: boolean;
   }>(
     await fetch("/api/spectra/imports", {
       method: "POST",

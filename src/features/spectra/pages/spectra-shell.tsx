@@ -3723,7 +3723,7 @@ export function SpectraShell({
       });
       importJobId = beginning.jobId;
       await uploadArtifactImportOriginal(beginning.jobId, file);
-      await completeArtifactImport({
+      const completedImport = await completeArtifactImport({
         jobId: beginning.jobId,
         typeKey: blueprintKey,
         status: "imported",
@@ -3741,11 +3741,16 @@ export function SpectraShell({
         unsupportedFeatures: officeProjection?.unsupportedFeatures ?? [],
         importedContent: canonicalImportedContent,
       });
-      await postSpectra({
-        action: "createArtifactImportVersion",
-        artifactId: created.artifactId,
-        importJobId: beginning.jobId,
-      });
+      // complete already attempts commitImport. Skip/soft-fail the redundant
+      // version commit so a deferred commit cannot toast false import failure
+      // after createArtifact already persisted usable content.
+      if (!completedImport.versionId && !completedImport.commitDeferred) {
+        await postSpectra({
+          action: "createArtifactImportVersion",
+          artifactId: created.artifactId,
+          importJobId: beginning.jobId,
+        }).catch(() => undefined);
+      }
       const refreshed = await loadOverview(selectedWorkspaceId, true);
       // The overview is intentionally summary-only and does not carry the
       // document body. Hydrate the committed artifact before mounting the

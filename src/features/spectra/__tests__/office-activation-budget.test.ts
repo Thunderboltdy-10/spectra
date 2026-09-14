@@ -141,3 +141,34 @@ describe("Library office import activation path", () => {
     expect(route).not.toMatch(/content:\s*xlsxArtifactContent\(/);
   });
 });
+
+describe("Library import complete Convex field ceiling", () => {
+  it("encodes sheets before artifactImports:complete mutation args", async () => {
+    const { readFileSync } = await import("node:fs");
+    const route = readFileSync("src/app/api/spectra/imports/route.ts", "utf8");
+    expect(route).toContain("encodeArtifactContentForStorage");
+    expect(route).toContain("artifactImports:complete");
+    // Encode must wrap materialize output before the complete mutation.
+    const encodeAt = route.indexOf(
+      "encodeArtifactContentForStorage(\n          typeKey,\n          await materializeImportedMedia",
+    );
+    const altEncodeAt = route.indexOf(
+      "sanitizedContent = encodeArtifactContentForStorage(",
+    );
+    const completeAt = route.indexOf('"artifactImports:complete"');
+    expect(altEncodeAt).toBeGreaterThan(-1);
+    expect(completeAt).toBeGreaterThan(altEncodeAt);
+  });
+
+  it("does not fail Library import toast when commitImport is deferred", async () => {
+    const { readFileSync } = await import("node:fs");
+    const route = readFileSync("src/app/api/spectra/imports/route.ts", "utf8");
+    const shell = readFileSync(
+      "src/features/spectra/pages/spectra-shell.tsx",
+      "utf8",
+    );
+    expect(route).toContain("commitDeferred");
+    expect(shell).toContain("commitDeferred");
+    expect(shell).toContain("completedImport.versionId");
+  });
+});

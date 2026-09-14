@@ -5262,6 +5262,29 @@ function ArtifactStudioEditor({
       ...semantic,
     ];
   }, [live.modelSnapshot.regionIds, liveDescriptor]);
+  const wordComments = useMemo(() => {
+    const binding =
+      editorContent && typeof editorContent === "object" && !Array.isArray(editorContent)
+        ? ((editorContent as Record<string, unknown>).nativeBinding as
+            | Record<string, unknown>
+            | undefined)
+        : undefined;
+    const raw = binding && Array.isArray(binding.wordComments) ? binding.wordComments : [];
+    return raw.flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const comment = value as Record<string, unknown>;
+      return typeof comment.id === "string" && typeof comment.text === "string"
+        ? [
+            {
+              id: comment.id,
+              author: typeof comment.author === "string" ? comment.author : undefined,
+              date: typeof comment.date === "string" ? comment.date : undefined,
+              text: comment.text,
+            },
+          ]
+        : [];
+    });
+  }, [editorContent]);
   const handleActiveRegionChange = useCallback(
     (regionId: string) => {
       setActiveCommentRegionId((current) =>
@@ -6228,6 +6251,7 @@ function ArtifactStudioEditor({
         preferredRegionId={activeCommentRegionId}
         currentAccountId={currentAccountId}
         relativePosition={commentRelativePosition}
+        wordComments={wordComments}
         requestedComment={requestedComment}
         onRequestedCommentResult={(error) => {
           const pending = requestedComment;

@@ -232,6 +232,17 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           },
         },
       ];
+    if (item.kind === "noteRef")
+      return [
+        {
+          type: item.noteType === "endnote" ? "endnote" : "footnote",
+          attrs: {
+            text: typeof item.text === "string" ? item.text : "",
+            nativeNoteId: item.noteId,
+            nativeReadOnly: true,
+          },
+        },
+      ];
     const authored = typeof item.assetId === "string" && item.assetId;
     return [
       {
@@ -489,6 +500,7 @@ export function documentNodeText(node) {
   if (typeof node.text === "string") return node.text;
   if (node.type === "inlineEquation" || node.type === "equation")
     return String(node.attrs?.latex ?? "");
+  if (node.type === "footnote" || node.type === "endnote") return "";
   if (node.type === "nativeDocxImage") return String(node.attrs?.alt ?? "");
   const separator = node.type === "listItem" ? "" : "\n";
   return (node.content ?? []).map(documentNodeText).join(separator);
@@ -618,6 +630,19 @@ export function documentRichInlineFromJson(node) {
         ...(typeof current.attrs?.ommlSourceLatex === "string"
           ? { ommlSourceLatex: current.attrs.ommlSourceLatex }
           : {}),
+      });
+      return;
+    }
+    if (current?.type === "footnote" || current?.type === "endnote") {
+      const noteId =
+        typeof current.attrs?.nativeNoteId === "string" && current.attrs.nativeNoteId
+          ? current.attrs.nativeNoteId
+          : "spectra";
+      appendRichInline(output, {
+        kind: "noteRef",
+        noteType: current.type === "endnote" ? "endnote" : "footnote",
+        noteId,
+        text: typeof current.attrs?.text === "string" ? current.attrs.text : "",
       });
       return;
     }

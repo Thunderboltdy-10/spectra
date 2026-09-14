@@ -785,10 +785,10 @@ export function DocumentStudio({
     },
     [artifactId, createReference],
   );
+  const nativeBinding = useMemo(() => record(record(content).nativeBinding), [content]);
   const nativePlaceholders = useMemo(() => {
-    const binding = record(record(content).nativeBinding);
-    return Array.isArray(binding.nativePlaceholders)
-      ? binding.nativePlaceholders.flatMap((value) => {
+    return Array.isArray(nativeBinding.nativePlaceholders)
+      ? nativeBinding.nativePlaceholders.flatMap((value) => {
           const placeholder = record(value);
           return typeof placeholder.label === "string" &&
             typeof placeholder.detail === "string"
@@ -805,7 +805,57 @@ export function DocumentStudio({
             : [];
         })
       : [];
-  }, [content]);
+  }, [nativeBinding]);
+  const wordRevisions = useMemo(() => {
+    return Array.isArray(nativeBinding.wordRevisions)
+      ? nativeBinding.wordRevisions.flatMap((value) => {
+          const mark = record(value);
+          return typeof mark.id === "string" &&
+            typeof mark.kind === "string" &&
+            typeof mark.text === "string"
+            ? [
+                {
+                  id: mark.id,
+                  kind: mark.kind,
+                  author: typeof mark.author === "string" ? mark.author : undefined,
+                  date: typeof mark.date === "string" ? mark.date : undefined,
+                  text: mark.text,
+                },
+              ]
+            : [];
+        })
+      : [];
+  }, [nativeBinding]);
+  const wordComments = useMemo(() => {
+    return Array.isArray(nativeBinding.wordComments)
+      ? nativeBinding.wordComments.flatMap((value) => {
+          const comment = record(value);
+          return typeof comment.id === "string" && typeof comment.text === "string"
+            ? [
+                {
+                  id: comment.id,
+                  author:
+                    typeof comment.author === "string" ? comment.author : undefined,
+                  date: typeof comment.date === "string" ? comment.date : undefined,
+                  text: comment.text,
+                },
+              ]
+            : [];
+        })
+      : [];
+  }, [nativeBinding]);
+  const wordNotes = useMemo(() => {
+    return Array.isArray(nativeBinding.wordNotes)
+      ? nativeBinding.wordNotes.flatMap((value) => {
+          const note = record(value);
+          return typeof note.id === "string" &&
+            (note.type === "footnote" || note.type === "endnote") &&
+            typeof note.text === "string"
+            ? [{ id: note.id, type: note.type as "footnote" | "endnote", text: note.text }]
+            : [];
+        })
+      : [];
+  }, [nativeBinding]);
   const [pendingTemplate, setPendingTemplate] = useState<
     "notes" | "essay" | "lab" | null
   >(null);
@@ -2150,11 +2200,29 @@ export function DocumentStudio({
             : editor.isActive("codeBlock")
               ? "code"
               : "paragraph";
-  const trackedPlaceholders = nativePlaceholders.filter((placeholder) =>
-    /revision|tracked change/i.test(
-      `${placeholder.label} ${placeholder.detail}`,
-    ),
-  );
+  const trackedPlaceholders = wordRevisions.length
+    ? wordRevisions.map((mark) => {
+        const kindLabel =
+          mark.kind === "ins"
+            ? "Insertion"
+            : mark.kind === "del"
+              ? "Deletion"
+              : mark.kind === "moveFrom"
+                ? "Moved from"
+                : mark.kind === "moveTo"
+                  ? "Moved to"
+                  : "Revision";
+        return {
+          id: mark.id,
+          label: `Tracked change · ${kindLabel}`,
+          detail: `${mark.author?.trim() || "Word"}: ${(mark.text.trim() || "(empty mark)").slice(0, 180)}`,
+        };
+      })
+    : nativePlaceholders.filter((placeholder) =>
+        /revision|tracked change/i.test(
+          `${placeholder.label} ${placeholder.detail}`,
+        ),
+      );
 
   function applyStyle(style: string) {
     withEdit(() => {
@@ -3503,6 +3571,36 @@ export function DocumentStudio({
                   file has them, they are listed here read-only.
                 </p>
               )}
+              {wordComments.length ? (
+                <div className="spectra-document-word-comments">
+                  <strong>Word comments</strong>
+                  {wordComments.map((comment) => (
+                    <div key={`word-comment-${comment.id}`}>
+                      <strong>{comment.author?.trim() || "Word"}</strong>
+                      <small>{comment.text}</small>
+                    </div>
+                  ))}
+                  <p>
+                    These are native Word comments from the file. Spectra
+                    threads stay separate and are never written into the
+                    package by this panel.
+                  </p>
+                </div>
+              ) : null}
+              {wordNotes.length ? (
+                <div className="spectra-document-word-notes">
+                  <strong>Word notes</strong>
+                  {wordNotes.map((note) => (
+                    <div key={`word-note-${note.type}-${note.id}`}>
+                      <strong>
+                        {note.type === "endnote" ? "Endnote" : "Footnote"}{" "}
+                        {note.id}
+                      </strong>
+                      <small>{note.text || "(empty note)"}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </aside>
           ) : null}
           <main>

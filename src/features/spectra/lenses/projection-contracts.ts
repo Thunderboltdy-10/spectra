@@ -6,6 +6,35 @@ const compatibilityProfileSchema = z.enum([
   "spectra-native",
 ]);
 const semanticDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+const wordRevisionMarkSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    kind: z.enum(["ins", "del", "moveFrom", "moveTo"]),
+    author: z.string().max(400).optional(),
+    date: z.string().max(80).optional(),
+    text: z.string().max(20_000),
+  })
+  .strict();
+
+const wordNoteSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    type: z.enum(["footnote", "endnote"]),
+    text: z.string().max(100_000),
+  })
+  .strict();
+
+const wordCommentSchema = z
+  .object({
+    id: z.string().min(1).max(64),
+    author: z.string().max(400).optional(),
+    date: z.string().max(80).optional(),
+    initials: z.string().max(40).optional(),
+    text: z.string().max(100_000),
+  })
+  .strict();
+
 const nativeBindingBase = {
   version: z.literal(1),
   profile: compatibilityProfileSchema,
@@ -98,6 +127,15 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("noteRef"),
+      noteType: z.enum(["footnote", "endnote"]),
+      noteId: z.string().min(1).max(64),
+      /** Note body text from footnotes.xml / endnotes.xml for display. */
+      text: z.string().max(100_000),
+    })
+    .strict(),
 ]);
 
 export const docxProjectionBlockSchema = z
@@ -167,6 +205,12 @@ export const docxProjectionSchema = z
             })
             .strict(),
         ),
+        /** Individual Word revision marks inventory (read path). */
+        wordRevisions: z.array(wordRevisionMarkSchema).max(10_000).optional(),
+        /** Footnote/endnote bodies from Word parts (read path). */
+        wordNotes: z.array(wordNoteSchema).max(10_000).optional(),
+        /** Native Word comments from comments.xml (distinct from Spectra threads). */
+        wordComments: z.array(wordCommentSchema).max(10_000).optional(),
       })
       .passthrough(),
   })

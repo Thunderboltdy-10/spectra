@@ -86,7 +86,12 @@ function noteNode(name: "footnote" | "endnote") {
     atom: true,
     selectable: true,
     addAttributes() {
-      return { text: { default: "" } };
+      return {
+        text: { default: "" },
+        /** Present when this marker was projected from a Word note part. */
+        nativeNoteId: { default: null },
+        nativeReadOnly: { default: false },
+      };
     },
     parseHTML() {
       return [{ tag: `span[data-note="${name}"]` }];

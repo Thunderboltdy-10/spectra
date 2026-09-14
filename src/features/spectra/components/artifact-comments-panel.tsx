@@ -36,6 +36,14 @@ export type ArtifactCommentRegion = {
   kind?: string;
 };
 
+/** Native Word comments projected from comments.xml — distinct from Spectra threads. */
+export type WordImportedComment = {
+  id: string;
+  author?: string;
+  date?: string;
+  text: string;
+};
+
 type NotificationMode = "all" | "mentions_replies" | "off";
 
 const NOTIFICATION_MODE_ITEMS: ReadonlyArray<{
@@ -66,6 +74,7 @@ export function ArtifactCommentsPanel({
   requestedComment,
   onRequestedCommentResult,
   onClose,
+  wordComments = [],
 }: {
   open: boolean;
   artifactId: string;
@@ -77,6 +86,7 @@ export function ArtifactCommentsPanel({
   requestedComment?: { id: string; body: string; regionId?: string; submit?: boolean } | null;
   onRequestedCommentResult?: (error?: unknown) => void;
   onClose: () => void;
+  wordComments?: readonly WordImportedComment[];
 }) {
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
   const [includeResolved, setIncludeResolved] = useState(false);
@@ -356,7 +366,34 @@ export function ArtifactCommentsPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2"><span className="text-micro text-[var(--text-tertiary)]">{comments.filter((comment) => comment.status !== "resolved").length} open</span><label className="flex cursor-pointer items-center gap-2 text-micro text-[var(--text-secondary)]"><input type="checkbox" checked={includeResolved} onChange={(event) => setIncludeResolved(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent-cyan)]" />Show resolved</label></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            {loading ? <div className="flex h-32 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" /></div> : orderedRootComments.length === 0 ? <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]"><MessageSquare className="h-4 w-4" /></span><h3 className="mt-3 text-caption font-semibold text-[var(--text-primary)]">No comments here yet</h3><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Anchor a thought to a block, field, card, cell, object, or other semantic region.</p></div> : <div className="space-y-3">{orderedRootComments.map((comment) => renderThread(comment))}</div>}
+            {loading ? <div className="flex h-32 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" /></div> : (
+              <div className="space-y-3">
+                {wordComments.length ? (
+                  <div className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5">
+                    <h3 className="text-caption font-semibold text-[var(--text-primary)]">From Word</h3>
+                    <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
+                      Native comments from the imported file. Spectra threads stay separate and are never written into the Word package from here.
+                    </p>
+                    <div className="mt-3 space-y-2">
+                      {wordComments.map((comment) => (
+                        <article key={`word-${comment.id}`} className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-caption font-semibold text-[var(--text-primary)]">{comment.author?.trim() || "Word"}</span>
+                            {comment.date ? <span className="text-micro text-[var(--text-tertiary)]">{comment.date}</span> : null}
+                          </div>
+                          <p className="mt-1.5 text-caption leading-5 text-[var(--text-secondary)]">{comment.text || "(empty comment)"}</p>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {orderedRootComments.length === 0 ? (
+                  wordComments.length ? null : (
+                    <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]"><MessageSquare className="h-4 w-4" /></span><h3 className="mt-3 text-caption font-semibold text-[var(--text-primary)]">No comments here yet</h3><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Anchor a thought to a block, field, card, cell, object, or other semantic region.</p></div>
+                  )
+                ) : orderedRootComments.map((comment) => renderThread(comment))}
+              </div>
+            )}
           </div>
 
           <div className="shrink-0 border-t border-[var(--border-default)] bg-[var(--bg-primary)] p-3">

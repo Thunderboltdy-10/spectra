@@ -29,6 +29,14 @@ import {
   type DocxRunFormat,
   type DocxSemanticDelta,
 } from "./projection-contracts";
+import {
+  collectWordComments,
+  collectWordNotes,
+  collectWordRevisions,
+  revisionPlaceholderDetail,
+  revisionPlaceholderLabel,
+  type WordNote,
+} from "./docx-word-review";
 
 const W14_NAMESPACE =
   "http://schemas.microsoft.com/office/word/2010/wordml";
@@ -746,6 +754,7 @@ function projectedRichContent(
   document: Document,
   root: XmlElement,
   paragraph?: Paragraph,
+  noteBodies?: ReadonlyMap<string, WordNote>,
 ) {
   const content: DocxRichInline[] = [];
   const formats = new Map(
@@ -813,6 +822,24 @@ function projectedRichContent(
         content.push({ kind: "text", text: "­" });
         return;
       }
+      if (
+        element.localName === "footnoteReference" ||
+        element.localName === "endnoteReference"
+      ) {
+        const noteType =
+          element.localName === "endnoteReference" ? "endnote" : "footnote";
+        const noteId = element.getAttributeNs(WML_NAMESPACE, "id") ?? "";
+        if (noteId) {
+          const body = noteBodies?.get(`${noteType}:${noteId}`);
+          content.push({
+            kind: "noteRef",
+            noteType,
+            noteId,
+            text: body?.text ?? "",
+          });
+        }
+        return;
+      }
       if (element.localName === "drawing") {
         content.push(...nativeImageContent(document, element));
         return;
@@ -850,6 +877,7 @@ function semanticRichText(content: readonly DocxRichInline[]) {
     .map((item) => {
       if (item.kind === "text") return item.text;
       if (item.kind === "equation") return item.latex;
+      if (item.kind === "noteRef") return "";
       return item.altText;
     })
     .join("");
@@ -864,18 +892,24 @@ function hasRichSemantics(content: readonly DocxRichInline[]) {
   );
 }
 
+function noteBodyMap(notes: readonly WordNote[]) {
+  return new Map(notes.map((note) => [`${note.type}:${note.id}`, note] as const));
+}
+
 function projectedCellRichContent(
   document: Document,
   cell: NativeTableCell,
+  noteBodies?: ReadonlyMap<string, WordNote>,
 ) {
   const paragraphs = cell.paragraphElements();
-  if (!paragraphs.length) return projectedRichContent(document, cell.element);
+  if (!paragraphs.length)
+    return projectedRichContent(document, cell.element, undefined, noteBodies);
   return mergeRichText(
     paragraphs.flatMap((paragraph, index) => {
       const wrapped = Paragraph._wrap(document, paragraph);
       return [
         ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
-        ...projectedRichContent(document, paragraph, wrapped),
+        ...projectedRichContent(document, paragraph, wrapped, noteBodies),
       ];
     }),
   );
@@ -3046,6 +3080,12 @@ async function projectDocument(
 ) {
   const fidelityEntries: LensFidelityEntry[] = [];
   const blocks: DocxProjectionBlock[] = [];
+  const [wordNotes, wordComments] = await Promise.all([
+    collectWordNotes(document),
+    collectWordComments(document),
+  ]);
+  const wordRevisions = collectWordRevisions(document.body());
+  const noteBodies = noteBodyMap(wordNotes);
   const bodyChildren = topLevelFlow(document.body());
   const topLevelTables = new Map(
     document
@@ -3063,7 +3103,12 @@ async function projectDocument(
       const regionId = paragraphRegionId(paragraph, path);
       const styleId = paragraph.styleId();
       const list = paragraph.list();
-      const richContent = projectedRichContent(document, element, paragraph);
+      const richContent = projectedRichContent(
+        document,
+        element,
+        paragraph,
+        noteBodies,
+      );
       const unsafeHyperlink = descendants(element).some(
         (candidate) =>
           candidate.namespaceUri() === WML_NAMESPACE &&
@@ -3178,7 +3223,9 @@ async function projectDocument(
             candidate.localName === "tbl",
         );
         const richRows = table.rows().map((row) =>
-          row.cells().map((cell) => projectedCellRichContent(document, cell)),
+          row.cells().map((cell) =>
+            projectedCellRichContent(document, cell, noteBodies),
+          ),
         );
         const unsafeInterior = table.rows().some((_row, _rowIndex) =>
           _row.cells().some(
@@ -3345,9 +3392,28 @@ async function projectDocument(
     profile,
     entries: fidelityEntries,
   };
-  const placeholders = fidelityEntries
+  const featurePlaceholders = fidelityEntries
     .map(placeholderFor)
     .filter((value): value is DocxNativePlaceholder => Boolean(value));
+  // One placeholder per revision mark so the Tracked Changes panel can list
+  // what Word actually wrote — not a single opaque "tracked changes" chip.
+  const revisionPlaceholders: DocxNativePlaceholder[] = wordRevisions.map(
+    (mark) => ({
+      id: mark.id,
+      feature: "trackedChanges",
+      label: revisionPlaceholderLabel(mark),
+      detail: revisionPlaceholderDetail(mark),
+    }),
+  );
+  const placeholders = [
+    ...revisionPlaceholders,
+    ...featurePlaceholders.filter((entry) => entry.feature !== "trackedChanges"),
+    // Keep the feature-level chip only when marks exist but somehow produced
+    // no inventory (should not happen); otherwise prefer the per-mark rows.
+    ...(revisionPlaceholders.length
+      ? []
+      : featurePlaceholders.filter((entry) => entry.feature === "trackedChanges")),
+  ];
   const semanticDigest = await docxProjectionSemanticDigest({
     blocks,
     pageSetup: pageSetupFromDocument(document),
@@ -3374,6 +3440,9 @@ async function projectDocument(
       semanticDigest,
       identityStable,
       nativePlaceholders: placeholders,
+      ...(wordRevisions.length ? { wordRevisions } : {}),
+      ...(wordNotes.length ? { wordNotes } : {}),
+      ...(wordComments.length ? { wordComments } : {}),
     },
   });
   return { projection, fidelityMap };

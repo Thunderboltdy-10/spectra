@@ -744,6 +744,49 @@ function preprocessPlanOperations(value: unknown) {
   return plan;
 }
 
+
+/**
+ * Keep operations that pass `keep`, remapping every `@created:N` dependency
+ * from the original operation indexes onto the compacted list. A kept consumer
+ * that still points at a dropped create fails loudly instead of silently
+ * shifting onto a different artifact.
+ */
+export function compactOperationsRemappingCreated(
+  operations: ModelOperation[],
+  keep: (operation: ModelOperation, index: number) => boolean,
+): ModelOperation[] {
+  const indexMap = new Map<number, number>();
+  const kept: ModelOperation[] = [];
+  operations.forEach((operation, index) => {
+    if (!keep(operation, index)) return;
+    indexMap.set(index, kept.length);
+    kept.push(operation);
+  });
+  const rewrite = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      const match = /^@created:(\d+)$/.exec(value);
+      if (!match) return value;
+      const old = Number(match[1]);
+      const next = indexMap.get(old);
+      if (next === undefined)
+        throw new Error(
+          `Operation dependency @created:${old} pointed at a dropped operation.`,
+        );
+      return `@created:${next}`;
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+          key,
+          rewrite(child),
+        ]),
+      );
+    return value;
+  };
+  return kept.map((operation) => parseModelOperation(rewrite(operation)));
+}
+
 export function parseSpectraPlan(value: unknown) {
   const plan = spectraPlanSchema.parse(
     normalizePlanIntentMode(
@@ -752,16 +795,19 @@ export function parseSpectraPlan(value: unknown) {
   );
   const operations = plan.operations.map(parseModelOperation);
   let manageBacRefreshSeen = false;
-  const dedupedOperations = operations.filter((operation) => {
-    if (
-      operation.type === "app.command" &&
-      operation.input.command === "trigger_managebac_sync"
-    ) {
-      if (manageBacRefreshSeen) return false;
-      manageBacRefreshSeen = true;
-    }
-    return true;
-  });
+  const dedupedOperations = compactOperationsRemappingCreated(
+    operations,
+    (operation) => {
+      if (
+        operation.type === "app.command" &&
+        operation.input.command === "trigger_managebac_sync"
+      ) {
+        if (manageBacRefreshSeen) return false;
+        manageBacRefreshSeen = true;
+      }
+      return true;
+    },
+  );
   return { ...plan, operations: dedupedOperations };
 }
 

@@ -19,6 +19,7 @@ import type {
 } from "@/features/spectra/operations/schema";
 import { validatePlanAgainstIntent } from "@/features/spectra/operations/validate-plan";
 import type { OwnedOperationReferences } from "@/features/spectra/operations/validate-plan";
+import { isCalendarMutationCommand } from "@/features/spectra/calendar/domain/command";
 
 export function ownedReferences(
   context: Awaited<ReturnType<typeof buildContext>>,
@@ -132,12 +133,42 @@ export function resolveNamedReference(
  * The longest matching title wins so "Chemistry Lab" is not shadowed by a
  * broader "Lab" workspace.
  */
+/**
+ * True when the prompt places new work into the named workspace, not when the
+ * workspace is only a source/context mention ("from Chemistry Lab", "using
+ * Biology notes"). Mentions alone must not rewrite create destinations.
+ */
+export function promptPlacesIntoWorkspace(prompt: string, workspaceTitle: string) {
+  const promptKey = normalizedReference(prompt);
+  const titleKey = normalizedReference(workspaceTitle);
+  if (!promptKey || titleKey.length < 3 || !containsNormalizedPhrase(promptKey, titleKey))
+    return false;
+  const escaped = titleKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const destinationNearTitle = new RegExp(
+    `\\b(?:in|into|inside|under|within|onto|to)\\s+${escaped}\\b`,
+  );
+  const placeVerbNearTitle = new RegExp(
+    `\\b(?:put|place|save|add|move|create|make|build|draft|write)\\b[\\s\\S]{0,96}\\b(?:in|into|inside|under|within|onto|to)\\s+${escaped}\\b`,
+  );
+  if (!destinationNearTitle.test(promptKey) && !placeVerbNearTitle.test(promptKey))
+    return false;
+  const sourceOnly = new RegExp(
+    `\\b(?:from|using|based on|with material from|copied from)\\s+${escaped}\\b`,
+  );
+  // "from X into Y" still has a destination; only reject pure source mentions.
+  if (sourceOnly.test(promptKey) && !destinationNearTitle.test(promptKey))
+    return false;
+  return true;
+}
+
 export function resolveWorkspaceMention(
   prompt: string,
   candidates: Array<{ id: unknown; title: unknown }>,
+  options?: { requireDestinationLanguage?: boolean },
 ) {
   const promptKey = normalizedReference(prompt);
   if (!promptKey) return undefined;
+  const requireDestination = options?.requireDestinationLanguage === true;
   const matches = candidates.flatMap((candidate) => {
     if (
       typeof candidate.id !== "string" ||
@@ -146,6 +177,8 @@ export function resolveWorkspaceMention(
       return [];
     const titleKey = normalizedReference(candidate.title);
     if (titleKey.length < 3 || !containsNormalizedPhrase(promptKey, titleKey))
+      return [];
+    if (requireDestination && !promptPlacesIntoWorkspace(prompt, candidate.title))
       return [];
     return [{ id: candidate.id, length: titleKey.length }];
   });
@@ -1273,12 +1306,23 @@ export function promptRequestsCalendarAction(prompt: string) {
     )
   )
     return true;
+  // Slide/deck edits often use "move" plus an ordinal ("slide 2"). A bare
+  // integer is not a wall-clock signal; require an explicit time or weekday.
+  if (
+    /\b(?:slide|slides|deck|presentation|heading|paragraph|pptx)\b/.test(
+      normalized,
+    ) &&
+    !/\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}:\d{2}|\d{1,2}\s*(?:a\.?\s*m\.?|p\.?\s*m\.?))\b/.test(
+      normalized,
+    )
+  )
+    return false;
   const schedulingVerb =
     /\b(?:schedule|put|place|book|block|reserve|move|resize)\b/.test(
       normalized,
     );
   const timeSignal =
-    /\b(?:today|tomorrow|tonight|this\s+(?:morning|afternoon|evening|week)|next\s+(?:week|month)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}(?::\d{2})?\s*(?:am|pm)?|from\s+\d{1,2}(?::\d{2})?)/.test(
+    /\b(?:today|tomorrow|tonight|this\s+(?:morning|afternoon|evening|week)|next\s+(?:week|month)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d{1,2}:\d{2}(?:\s*(?:a\.?\s*m\.?|p\.?\s*m\.?))?|\d{1,2}\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)|from\s+\d{1,2}(?::\d{2})?(?:\s*(?:a\.?\s*m\.?|p\.?\s*m\.?))?)\b/.test(
       normalized,
     );
   return schedulingVerb && timeSignal;
@@ -1289,6 +1333,122 @@ export function promptRequestsCalendarAction(prompt: string) {
  * “create a planner task and schedule it”. Calendar language alone must never
  * turn a named existing artifact into a duplicate planner task.
  */
+
+/**
+ * True when the successful tool may end the agent loop because the prompt's
+ * visible obligations are limited to that one action family. Multi-step
+ * requests (schedule two blocks, navigate then edit, insert then summarize,
+ * update-then-schedule) must keep planning.
+ */
+export function toolFulfillsEntireRequest(prompt: string, toolName: string) {
+  const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
+  const calendarTools = new Set([
+    "schedule_calendar_task",
+    "move_calendar_block",
+    "resize_calendar_block",
+  ]);
+  const soleSurfaceTools = new Set([
+    ...calendarTools,
+    "navigate_spectra",
+    "setup_bridge",
+    "insert_reference",
+  ]);
+  if (!soleSurfaceTools.has(toolName)) return false;
+
+  const hasContinuation =
+    /\b(?:and then|then|after that|afterwards|also|plus|as well)\b/.test(
+      normalized,
+    );
+  const hasSecondArtifactObligation =
+    /\b(?:create|make|build|generate|draft|write|summarize|summarise|explain|rewrite|replace|edit|update|change|add(?:\s+a)?\s+note|insert|open|navigate|go to)\b/.test(
+      normalized,
+    );
+  const multipleScheduleTargets =
+    calendarTools.has(toolName) &&
+    (/\b(?:two|2|both|several|multiple|a pair of)\b[\s\S]{0,48}\b(?:block|blocks|task|tasks|item|items|event|events)\b/.test(
+      normalized,
+    ) ||
+      /\b(?:schedule|put|place|book)\b[\s\S]{0,120}\band\b[\s\S]{0,80}\b(?:schedule|put|place|book|block|tomorrow|today|at\s+\d)/.test(
+        normalized,
+      ));
+
+  if (calendarTools.has(toolName)) {
+    if (multipleScheduleTargets) return false;
+    if (hasContinuation && hasSecondArtifactObligation) return false;
+    // "Update the task note and schedule it" / create-then-schedule.
+    if (
+      /\b(?:create|make|build|update|edit|change|rewrite|add)\b/.test(normalized) &&
+      /\b(?:schedule|put|place|book|calendar|time[- ]?block|work block)\b/.test(
+        normalized,
+      )
+    )
+      return false;
+    if (/\b(?:open|navigate|go to|show)\b/.test(normalized)) return false;
+    return true;
+  }
+
+  if (toolName === "navigate_spectra" || toolName === "setup_bridge") {
+    if (hasContinuation && hasSecondArtifactObligation) return false;
+    if (
+      /\b(?:edit|update|create|schedule|insert|write|summarize|summarise|open)\b/.test(
+        normalized,
+      ) &&
+      /\b(?:and|then|after)\b/.test(normalized)
+    )
+      return false;
+    return true;
+  }
+
+  if (toolName === "insert_reference") {
+    if (
+      /\b(?:and|then|also|summarize|summarise|explain|write|edit|rewrite)\b/.test(
+        normalized,
+      )
+    )
+      return false;
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Gate used by isCompleteAfterTool. Reference inserts that only queued a UI
+ * refresh must not end the agent loop as if the write already happened.
+ */
+export function applicationToolMayCompleteRequest(
+  prompt: string,
+  toolName: string,
+  toolResult: unknown,
+) {
+  const result =
+    toolResult && typeof toolResult === "object" && !Array.isArray(toolResult)
+      ? (toolResult as Record<string, unknown>)
+      : null;
+  const data =
+    result?.data &&
+    typeof result.data === "object" &&
+    !Array.isArray(result.data)
+      ? (result.data as Record<string, unknown>)
+      : null;
+  const phase =
+    (typeof data?.status === "string" ? data.status : undefined) ??
+    (typeof result?.status === "string" ? result.status : undefined);
+  const calendarTools = new Set([
+    "schedule_calendar_task",
+    "move_calendar_block",
+    "resize_calendar_block",
+  ]);
+  const numericOk = result?.status === 0 || result?.ok === true;
+  const toolSucceeded =
+    ((toolName === "navigate_spectra" || toolName === "setup_bridge") &&
+      numericOk) ||
+    (toolName === "insert_reference" &&
+      (phase === "verified_native_write" || phase === "canonical_write")) ||
+    (calendarTools.has(toolName) && (numericOk || Boolean(result?.item)));
+  return toolSucceeded && toolFulfillsEntireRequest(prompt, toolName);
+}
+
 export function promptRequestsNewPlannerTask(prompt: string) {
   const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
   return (
@@ -1306,21 +1466,10 @@ export function assertCalendarActionContract(
   prompt: string,
 ) {
   if (!promptRequestsCalendarAction(prompt)) return;
-  const calendarCommands = new Set([
-    "calendar.schedule",
-    "calendar.schedule_task",
-    "calendar.scheduleTask",
-    "calendar.move",
-    "calendar.move_work_block",
-    "calendar.moveWorkBlock",
-    "calendar.resize",
-    "calendar.resize_work_block",
-    "calendar.resizeWorkBlock",
-  ]);
   const hasCalendarMutation = operations.some(
     (operation) =>
       operation.type === "app.command" &&
-      calendarCommands.has(operation.input.command),
+      isCalendarMutationCommand(operation.input.command),
   );
   const plannerUpdates = operations.filter(
     (
@@ -1329,7 +1478,10 @@ export function assertCalendarActionContract(
       operation.type === "artifact.update" &&
       operation.input.blueprintKey === "planner_task",
   );
-  if (plannerUpdates.length > 0)
+  // A legitimate "update the note, then schedule it" request includes both a
+  // planner update and a Calendar mutation. Only reject planner updates that
+  // stand in for a missing Calendar block.
+  if (plannerUpdates.length > 0 && !hasCalendarMutation)
     throw new Error(
       "This is a Calendar request. Use the Calendar schedule, move, or resize tool; do not rewrite a planner task as a substitute for creating a Calendar block.",
     );
@@ -1513,17 +1665,21 @@ export function resolveAndValidatePlan(
       : plan;
   const reconciled = reconcileExplicitRequestContract(promoted, prompt);
   let resolved = resolvePlanReferences(reconciled, context);
-  const promptWorkspaceId = resolveWorkspaceMention(prompt, [
-    ...context.workspaces,
-    ...(context.currentWorkspace
-      ? [
-          {
-            id: context.currentWorkspace.id,
-            title: context.currentWorkspace.title,
-          },
-        ]
-      : []),
-  ]);
+  const promptWorkspaceId = resolveWorkspaceMention(
+    prompt,
+    [
+      ...context.workspaces,
+      ...(context.currentWorkspace
+        ? [
+            {
+              id: context.currentWorkspace.id,
+              title: context.currentWorkspace.title,
+            },
+          ]
+        : []),
+    ],
+    { requireDestinationLanguage: true },
+  );
   if (promptWorkspaceId) {
     const operations = resolved.operations.map((operation) => {
       if (operation.type === "workspaceItem.add") {

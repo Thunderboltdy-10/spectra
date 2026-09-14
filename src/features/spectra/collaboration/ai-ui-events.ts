@@ -140,14 +140,52 @@ function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key === "reference_insert") {
     const hostWorkId = event.payload?.hostWorkId;
     const targetWorkId = event.payload?.targetWorkId;
+    const emitReceipt = (input: {
+      phase:
+        | "queued_refresh"
+        | "consent"
+        | "viewport_ready"
+        | "canonical_write"
+        | "verified_native_write"
+        | "failed"
+        | "host_unmounted";
+      message: string;
+      ok: boolean;
+    }) => {
+      if (typeof hostWorkId !== "string" || !hostWorkId.trim()) return;
+      if (typeof targetWorkId !== "string" || !targetWorkId.trim()) return;
+      spectraBus.emit("ai.ui.referenceReceipt", {
+        ...(event.runId ? { runId: event.runId } : {}),
+        hostWorkId,
+        targetWorkId,
+        phase: input.phase,
+        message: input.message,
+        ok: input.ok,
+      });
+      noteAiLocation({
+        ...(event.runId ? { actorId: event.runId } : {}),
+        artifactId: hostWorkId,
+        note: input.message,
+      });
+    };
     if (
       typeof hostWorkId === "string" &&
       hostWorkId.trim() &&
       typeof targetWorkId === "string" &&
       targetWorkId.trim()
     ) {
+      emitReceipt({
+        phase: "queued_refresh",
+        message:
+          typeof event.payload?.note === "string"
+            ? event.payload.note
+            : "Reference insert queued for the host surface",
+        ok: false,
+      });
+      // Await the shared command path. Offscreen / unmounted hosts must emit a
+      // durable failure receipt instead of looking like a successful needs-ui handoff.
       void spectraBus
-        .commandAsync("reference.insert", {
+        .commandAsyncResults("reference.insert", {
           hostWorkId,
           target: {
             workId: targetWorkId,
@@ -166,17 +204,52 @@ function rememberEvent(event: SpectraAiUiEvent): void {
                 : 1,
           },
         })
-        .catch(() => undefined);
+        .then((dispatched) => {
+          const failed = dispatched.results.some(
+            (result) =>
+              Boolean(result) &&
+              typeof result === "object" &&
+              ((result as { ok?: unknown }).ok === false ||
+                (result as { status?: unknown }).status === "failed"),
+          );
+          const verified = dispatched.results.some(
+            (result) =>
+              Boolean(result) &&
+              typeof result === "object" &&
+              ((result as { status?: unknown }).status === "completed" ||
+                (result as { ok?: unknown }).ok === true),
+          );
+          if (dispatched.listeners === 0) {
+            emitReceipt({
+              phase: "host_unmounted",
+              message:
+                "Reference insert failed: no mounted host surface is listening.",
+              ok: false,
+            });
+            return;
+          }
+          if (failed || !verified) {
+            emitReceipt({
+              phase: "failed",
+              message: "Reference insert did not complete in the host surface",
+              ok: false,
+            });
+            return;
+          }
+          emitReceipt({
+            phase: "verified_native_write",
+            message: "Reference insert verified in the host surface",
+            ok: true,
+          });
+        })
+        .catch(() => {
+          emitReceipt({
+            phase: "failed",
+            message: "Reference insert failed before the host acknowledged it",
+            ok: false,
+          });
+        });
     }
-    if (typeof hostWorkId === "string" && hostWorkId.trim())
-      noteAiLocation({
-        ...(event.runId ? { actorId: event.runId } : {}),
-        artifactId: hostWorkId,
-        note:
-          typeof event.payload?.note === "string"
-            ? event.payload.note
-            : "Inserting a live reference",
-      });
     return;
   }
   if (event.key !== "navigate" && event.key !== "navigate_spectra") return;

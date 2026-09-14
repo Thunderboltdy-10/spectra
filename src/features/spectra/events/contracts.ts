@@ -104,6 +104,21 @@ export type SpectraEvents = {
   "shell.openCommandBar": Record<string, never>;
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.changed": { runId: string };
+  "ai.ui.referenceReceipt": {
+    runId?: string;
+    hostWorkId: string;
+    targetWorkId: string;
+    phase:
+      | "queued_refresh"
+      | "consent"
+      | "viewport_ready"
+      | "canonical_write"
+      | "verified_native_write"
+      | "failed"
+      | "host_unmounted";
+    message: string;
+    ok: boolean;
+  };
   "run.requiredInput": {
     runId: string;
     requestId: string;

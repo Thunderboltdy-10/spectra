@@ -15,26 +15,33 @@ export async function localFileCountForApplicationCommand(
   _actorClerkId: string,
   command: string,
   args: Record<string, unknown>,
-) {
+): Promise<number | null> {
   const targetIds = stringIds(args.targetIds);
   if (targetIds.length === 0) return 0;
   if (command === "change_sync_policy") {
-    const localEffect = await query<
-      { workIds: string[] },
-      { count: number }
-    >("replicas:localEffectCount", {
-      workIds: targetIds,
-    }).catch(() => ({ count: 0 }));
-    return localEffect.count;
+    try {
+      const localEffect = await query<{ workIds: string[] }, { count: number }>(
+        "replicas:localEffectCount",
+        { workIds: targetIds },
+      );
+      return localEffect.count;
+    } catch {
+      // Unknown local effects must not be reported as zero affected files.
+      return null;
+    }
   }
   if (command === "organize_library" || command === "delete_library_items") {
-    const localEffect = await query<
-      { nodeIds: string[] },
-      { count: number }
-    >("replicas:localEffectCountForNodes", {
-      nodeIds: targetIds,
-    }).catch(() => ({ count: 0 }));
-    return localEffect.count;
+    try {
+      const localEffect = await query<
+        { nodeIds: string[] },
+        { count: number }
+      >("replicas:localEffectCountForNodes", {
+        nodeIds: targetIds,
+      });
+      return localEffect.count;
+    } catch {
+      return null;
+    }
   }
   return 0;
 }
@@ -55,12 +62,15 @@ export async function evaluateCommandAuthority(input: {
       input.command === "delete_library_items" ||
       input.command === "change_sync_policy") &&
     stringIds(input.args.targetIds).length > 0
-  )
-    input.args.localFileCount = localFileCount;
+  ) {
+    if (localFileCount === null) input.args.localFileCountUnknown = true;
+    else input.args.localFileCount = localFileCount;
+  }
   return evaluateApplicationAuthority({
     command: input.command,
     args: input.args,
-    localFileCount,
+    localFileCount: localFileCount ?? 0,
+    localFileCountUnknown: localFileCount === null,
     authorityTarget: input.authorityTarget,
   });
 }
@@ -94,11 +104,18 @@ export async function hydrateApplicationLocalFileCounts(
       !Array.isArray(input.args)
         ? (input.args as Record<string, unknown>)
         : {};
-    args.localFileCount = await localFileCountForApplicationCommand(
+    const count = await localFileCountForApplicationCommand(
       actorClerkId,
       command,
       args,
     );
+    if (count === null) {
+      args.localFileCountUnknown = true;
+      delete args.localFileCount;
+    } else {
+      args.localFileCount = count;
+      delete args.localFileCountUnknown;
+    }
     input.args = args;
   }
 }

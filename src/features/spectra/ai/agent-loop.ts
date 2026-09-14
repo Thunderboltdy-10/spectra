@@ -181,6 +181,8 @@ export async function runSpectraAgentLoop(input: {
     });
 
     const executeOne = async (call: OpenRouterAgentToolCall) => {
+      if (input.signal?.aborted)
+        throw new DOMException("Aborted", "AbortError");
       toolCalls += 1;
       if (toolCalls > maxToolCalls)
         throw new Error(

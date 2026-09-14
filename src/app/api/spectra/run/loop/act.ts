@@ -1,4 +1,7 @@
 import type { NativeProgressUpdate, Surface } from "./contract";
+import { throwIfAborted } from "./abort";
+import { executeRegisteredCalendarMutation } from "./calendar-command";
+import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
 import { rows } from "./gather";
 import { mutate, query } from "./io";
 import { normalizeCreationSummary, operationLabel } from "./plan";
@@ -33,102 +36,28 @@ import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
 
-function finiteApplicationNumber(args: Record<string, unknown>, key: string) {
-  const value = Number(args[key]);
-  if (!Number.isFinite(value)) throw new Error(`CALENDAR_${key.toUpperCase()}_INVALID`);
-  return value;
-}
-
 async function executeLegacyCalendarCommand(
   actorClerkId: string,
   runId: string,
+  executionId: string,
   command: string,
   args: Record<string, unknown>,
   onUiEvent?: (event: {
     key: string;
     payload?: Record<string, unknown>;
   }) => void,
+  signal?: AbortSignal,
 ) {
-  const schedule =
-    command === "calendar.schedule" ||
-    command === "calendar.schedule_task" ||
-    command === "calendar.scheduleTask";
-  const move =
-    command === "calendar.move" ||
-    command === "calendar.move_work_block" ||
-    command === "calendar.moveWorkBlock";
-  const resize =
-    command === "calendar.resize" ||
-    command === "calendar.resize_work_block" ||
-    command === "calendar.resizeWorkBlock";
-  if (!schedule && !move && !resize)
-    throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
-
-  if (schedule) {
-    const taskItemId =
-      typeof args.taskItemId === "string" ? args.taskItemId : undefined;
-    const planArtifactId =
-      typeof args.planArtifactId === "string" ? args.planArtifactId : undefined;
-    const planTaskId =
-      typeof args.planTaskId === "string" ? args.planTaskId : undefined;
-    if (!taskItemId && !(planArtifactId && planTaskId))
-      throw new Error("CALENDAR_TASK_REQUIRED");
-    const startAt = finiteApplicationNumber(args, "startAt");
-    const endAt = finiteApplicationNumber(args, "endAt");
-    const requestedKey =
-      typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
-        ? args.idempotencyKey.trim().slice(0, 180)
-        : `${command}:${planArtifactId ?? taskItemId ?? "task"}:${planTaskId ?? "root"}:${startAt}:${endAt}`;
-    const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
-      "calendar:scheduleTask",
-      {
-        taskItemId,
-        planArtifactId,
-        planTaskId,
-        startAt,
-        endAt,
-        timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
-        actorKind: "ai",
-        idempotencyKey: `ai:${runId}:${requestedKey}`.slice(0, 240),
-      },
-    );
-    if (item.kind !== "scheduled_work_block" || item.startAt !== startAt || item.endAt !== endAt)
-      throw new Error("CALENDAR_POSTCONDITION_FAILED");
-    onUiEvent?.({
-      key: "calendar_changed",
-      payload: {
-        targetId: String(item.id ?? "calendar"),
-        note: "Scheduled a Calendar work block",
-      },
-    });
-    return { ok: true, item };
-  }
-
-  const itemId = typeof args.itemId === "string" ? args.itemId.trim() : "";
-  if (!itemId) throw new Error("CALENDAR_ITEM_REQUIRED");
-  const expectedRevision = finiteApplicationNumber(args, "expectedRevision");
-  const startAt = move ? finiteApplicationNumber(args, "startAt") : undefined;
-  const endAt = finiteApplicationNumber(args, "endAt");
-  const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
-    move ? "calendar:moveWorkBlock" : "calendar:resizeWorkBlock",
-    move
-      ? { itemId, startAt, endAt, expectedRevision }
-      : { itemId, endAt, expectedRevision },
-  );
-  if (
-    item.kind !== "scheduled_work_block" ||
-    (move && item.startAt !== startAt) ||
-    item.endAt !== endAt
-  )
-    throw new Error("CALENDAR_POSTCONDITION_FAILED");
-  onUiEvent?.({
-    key: "calendar_changed",
-    payload: {
-      targetId: itemId,
-      note: move ? "Moved a Calendar work block" : "Resized a Calendar work block",
-    },
+  return executeRegisteredCalendarMutation({
+    actorClerkId,
+    runId,
+    executionId,
+    command,
+    args,
+    mutationScopeId: runId,
+    signal,
+    onUiEvent,
   });
-  return { ok: true, item };
 }
 
 export async function executeApplicationCommand(
@@ -142,7 +71,9 @@ export async function executeApplicationCommand(
     key: string;
     payload?: Record<string, unknown>;
   }) => void,
+  signal?: AbortSignal,
 ) {
+  throwIfAborted(signal);
   if (
     command === "school.sync" ||
     command === "school_data.sync" ||
@@ -153,9 +84,11 @@ export async function executeApplicationCommand(
     return executeLegacyCalendarCommand(
       actorClerkId,
       runId,
+      executionId,
       command,
       args,
       onUiEvent,
+      signal,
     );
   const definition = spectraToolRegistry.get(command);
   if (!definition || definition.capability !== "operate_application")
@@ -589,9 +522,14 @@ export async function executeApplicationCommand(
     });
     return {
       ok: true,
-      status: "needs-ui",
+      status: "queued_refresh",
+      receipt: {
+        phase: "queued_refresh",
+        hostWorkId,
+        targetWorkId,
+      },
       message:
-        "The reference is ready for insertion in the focused work surface.",
+        "The reference is queued for the host work surface. Insertion is not complete until a canonical or verified native write acknowledges it.",
       hostWorkId,
       targetWorkId,
     };
@@ -860,6 +798,7 @@ export async function executeOperation(
     }) => void;
   },
 ) {
+  throwIfAborted(context.signal);
   await mutate(
     context.preclaimed
       ? "spectraOperations:assertClaimed"
@@ -1250,6 +1189,7 @@ export async function executeOperation(
       { type: "artifact", id: operation.input.targetArtifactId },
     ];
   } else if (operation.type === "app.command") {
+    throwIfAborted(context.signal);
     output = (await executeApplicationCommand(
       actorClerkId,
       runId,
@@ -1258,6 +1198,7 @@ export async function executeOperation(
       operation.input.args,
       context.scopeNodeId,
       context.onUiEvent,
+      context.signal,
     )) as Record<string, unknown>;
     context.onApplicationResult?.({
       command: operation.input.command,
@@ -1300,11 +1241,9 @@ export function resolveCreatedArtifactDependencies(
     ]) {
       if (typeof args[key] === "string") args[key] = resolve(args[key]);
     }
-    const isCalendarSchedule = [
-      "calendar.schedule",
-      "calendar.schedule_task",
-      "calendar.scheduleTask",
-    ].includes(operation.input.command);
+    const isCalendarSchedule =
+      normalizeCalendarCommand(operation.input.command) ===
+      "schedule_calendar_task";
     // A planner artifact is not a calendarItems row. When a model carries the
     // same @created reference into taskItemId, prefer the canonical planner
     // identity and use the stable root task id exposed by Calendar.

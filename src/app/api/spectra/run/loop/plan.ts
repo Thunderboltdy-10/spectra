@@ -5389,7 +5389,7 @@ export async function callModel(
             : agentResult.completedTool.name === "resize_calendar_block"
               ? "Resized the Calendar work block."
               : agentResult.completedTool.name === "setup_bridge"
- 
+
           ? (() => {
               const action =
                 typeof completedArgs.action === "string"
@@ -5417,7 +5417,7 @@ export async function callModel(
                 .replace(/\b\w/g, (character) => character.toUpperCase());
               return `Opened ${label}.`;
             })();
-                /* W9-02 contributes only formatting changes in this shared response branch. */
+                /* W9-02 contributes only formatting changes in this shared response branch.
                 ? (() => {
                     const action =
                       typeof completedArgs.action === "string"

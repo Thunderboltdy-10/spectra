@@ -327,7 +327,7 @@ export function registerApplicationTools() {
     capability: "operate_application",
     concurrencyDomain: "application_command",
   };
- 
+
   define({ ...appActionDefaults, id: "navigate_spectra", title: "Navigate Spectra", description: "Open a registered Spectra route or work target through the same navigation command used by the human interface.", inputSchema: z.object({ destination: z.enum(["library", "calendar", "settings", "workspace", "artifact"]), targetId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
   define({ ...appActionDefaults, id: "setup_bridge", title: "Prepare Bridge setup", description: "Open the exact Bridge settings handoff for pairing, folder selection, or a retry. The user still completes pairing, folder grants, and any write-enabling consent.", inputSchema: z.object({ action: z.enum(["pair", "select-location", "retry-connection", "retry-folder"]), grantId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
   define({ ...appActionDefaults, id: "organize_library", title: "Organize Library", description: "Create, rename, move, or link Library nodes through the canonical organization operation path.", inputSchema: z.object({ action: z.enum(["create_folder", "rename", "move", "link"]), targetIds: z.array(z.string()).max(100).default([]), destinationId: z.string().optional(), name: z.string().trim().min(1).max(200).optional() }).superRefine((value, ctx) => {
@@ -350,7 +350,7 @@ export function registerApplicationTools() {
   define({ ...appActionDefaults, id: "change_managebac_mapping", title: "Change ManageBac mapping", description: "ManageBac mapping changes use the dedicated human admin flow; AI mapping mutation is deferred until that typed path is exposed.", inputSchema: z.object({ mappingId: z.string(), patch: jsonObject }), risk: "high", approval: "always", authorityTarget: "managebac_mapping", aiAvailability: "prohibited", prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow." });
   define({ ...appActionDefaults, id: "insert_reference", title: "Insert reference", description: "Insert a reference through the shared work/reference command path.", inputSchema: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional() }), risk: "medium", approval: "policy", authorityTarget: "content" });
   define({ ...readDefaults, id: "read_embeds", title: "Read embeds", description: "Read live or pinned embeds and their source identities without mutating the source.", inputSchema: z.object({ hostWorkId: z.string() }) });
-  /* W9-02's copy is formatting-only here; retain W9-01's shared registry, including resource import. */
+  /* W9-02's copy is formatting-only here; retain W9-01's shared registry, including resource import.
   define({
     ...appActionDefaults,
     id: "navigate_spectra",
@@ -709,9 +709,9 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
- 
+
   "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "setup_bridge", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
-  /* W9-02's copy is formatting-only here; retain the integrated tool id list. */
+  /* W9-02's copy is formatting-only here; retain the integrated tool id list.
   "search_objects",
   "search_library",
   "read_artifact",

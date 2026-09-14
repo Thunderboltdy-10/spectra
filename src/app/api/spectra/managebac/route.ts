@@ -1160,7 +1160,7 @@ async function uploadResourcePayload(
   const uploaded = await fetch(uploadUrl, {
     method: "POST",
     headers: { "Content-Type": mimeType },
-    body: bytes,
+    body: new Uint8Array(bytes) as unknown as BodyInit,
   });
   const stored = (await uploaded.json().catch(() => null)) as { storageId?: string } | null;
   if (!uploaded.ok || !stored?.storageId) throw new Error("RESOURCE_PAYLOAD_UPLOAD_FAILED");

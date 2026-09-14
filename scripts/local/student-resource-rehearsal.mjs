@@ -54,7 +54,7 @@ async function main() {
   const { command, values } = parse(process.argv.slice(2));
   const instanceId = normalizeInstanceId(values.instance ?? "1");
   const runtimeRoot = resolve(repositoryRoot, String(process.env.SPECTRA_LOCAL_ROOT ?? ".spectra-local"));
-  const instanceRoot = resolve(runtimeRoot, "instances", instanceId);
+  const instanceRoot = resolve(runtimeRoot, "instances", String(instanceId));
   const appEnvPath = resolve(instanceRoot, "env.local");
   const manifestPath = resolve(instanceRoot, "instance.json");
   const projectRoot = resolve(instanceRoot, "project");
@@ -70,13 +70,18 @@ async function main() {
   const manifest = JSON.parse(manifestText);
   assertLocalSeedTarget({ appEnv, projectEnv, ports: manifest.ports });
   const runtimeEnv = { ...appEnv, ...projectEnv, SPECTRA_LOCAL_REHEARSAL: "1" };
-  const lookup = await run(process.execPath, [convexCli, "run", "--inline-query", `const account = await ctx.db.query("accounts").withIndex("by_email", q => q.eq("email", ${JSON.stringify(String(values["operator-email"] ?? appEnv.SUPER_ADMIN_EMAILS?.split(",")[0] ?? "").trim().toLowerCase())})).unique(); return account ? { clerkId: account.clerkId, email: account.email, name: account.name } : null;`, "--deployment", "local", "--codegen", "disable", "--typecheck", "disable"], { cwd: projectRoot, env: { ...process.env, ...runtimeEnv }, label: "Local operator lookup" });
+  const selfHosted = Boolean(process.env.CONVEX_SELF_HOSTED_URL);
+  const commandEnv = { ...process.env, ...runtimeEnv };
+  if (selfHosted) delete commandEnv.CONVEX_DEPLOYMENT;
+  const deploymentArgs = selfHosted ? [] : ["--deployment", "local"];
+  const cliArgs = (args) => [...args, ...deploymentArgs, "--codegen", "disable", "--typecheck", "disable"];
+  const lookup = await run(process.execPath, cliArgs([convexCli, "run", "--inline-query", `const account = await ctx.db.query("accounts").withIndex("by_email", q => q.eq("email", ${JSON.stringify(String(values["operator-email"] ?? appEnv.SUPER_ADMIN_EMAILS?.split(",")[0] ?? "").trim().toLowerCase())})).unique(); return account ? { clerkId: account.clerkId, email: account.email, name: account.name } : null;`]), { cwd: projectRoot, env: commandEnv, label: "Local operator lookup" });
   const operator = JSON.parse(lookup);
   if (!operator) throw new Error("Configured local operator account was not found.");
   const identity = JSON.stringify(identityForAccount(operator));
   const target = { accountEmail: String(values["student-email"]).trim().toLowerCase(), ...(values["school-id"] ? { schoolId: values["school-id"] } : {}) };
   if (command === "snapshot") {
-    const snapshot = JSON.parse(await run(process.execPath, [convexCli, "run", "localStudentRehearsal:snapshot", JSON.stringify(target), "--identity", identity, "--deployment", "local", "--codegen", "disable", "--typecheck", "disable"], { cwd: projectRoot, env: { ...process.env, ...runtimeEnv }, label: "Rehearsal snapshot" }));
+    const snapshot = JSON.parse(await run(process.execPath, cliArgs([convexCli, "run", "localStudentRehearsal:snapshot", JSON.stringify(target), "--identity", identity]), { cwd: projectRoot, env: commandEnv, label: "Rehearsal snapshot" }));
     await mkdir(dirname(snapshotPath), { recursive: true });
     await writeFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     process.stdout.write(`Saved reversible student rehearsal snapshot: ${snapshotPath}\n`);
@@ -84,12 +89,12 @@ async function main() {
   }
   if (command === "apply") {
     if (!values["school-id"]) throw new Error("--school-id is required for apply.");
-    const result = await run(process.execPath, [convexCli, "run", "localStudentRehearsal:apply", JSON.stringify({ ...target, role: values.role ?? "student" }), "--identity", identity, "--deployment", "local", "--codegen", "disable", "--typecheck", "disable"], { cwd: projectRoot, env: { ...process.env, ...runtimeEnv }, label: "Rehearsal apply" });
+    const result = await run(process.execPath, cliArgs([convexCli, "run", "localStudentRehearsal:apply", JSON.stringify({ ...target, role: values.role ?? "student" }), "--identity", identity]), { cwd: projectRoot, env: commandEnv, label: "Rehearsal apply" });
     process.stdout.write(`Applied local student rehearsal context: ${result}\nRestore with the same snapshot file when finished.\n`);
     return;
   }
   const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"));
-  const result = await run(process.execPath, [convexCli, "run", "localStudentRehearsal:restore", JSON.stringify({ snapshot }), "--identity", identity, "--deployment", "local", "--codegen", "disable", "--typecheck", "disable"], { cwd: projectRoot, env: { ...process.env, ...runtimeEnv }, label: "Rehearsal restore" });
+  const result = await run(process.execPath, cliArgs([convexCli, "run", "localStudentRehearsal:restore", JSON.stringify({ snapshot }), "--identity", identity]), { cwd: projectRoot, env: commandEnv, label: "Rehearsal restore" });
   process.stdout.write(`Restored local student rehearsal context idempotently: ${result}\n`);
 }
 

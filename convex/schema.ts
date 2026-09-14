@@ -1040,6 +1040,9 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     /** Snapshot of the account's class selection at claim time. */
     selectionRevision: v.optional(v.number()),
+    /** Optional class scope carried by class-specific sync runs. */
+    providerClassId: v.optional(v.string()),
+    academicPeriodKey: v.optional(v.string()),
     attemptCount: v.number(),
     nextAttemptAt: v.number(),
     errorCode: v.optional(v.string()),

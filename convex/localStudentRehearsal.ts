@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { resolveActorContext } from "./identityShared";
 
@@ -9,7 +10,8 @@ import { resolveActorContext } from "./identityShared";
  */
 function assertLocalRehearsal() {
   const deployment = process.env.CONVEX_DEPLOYMENT ?? "";
-  if (process.env.NODE_ENV === "production" || !deployment.startsWith("local:"))
+  const localSelfHosted = process.env.SPECTRA_LOCAL_SELF_HOSTED === "1";
+  if ((!/^local[-:]/.test(deployment) && !localSelfHosted) || (process.env.NODE_ENV === "production" && !localSelfHosted))
     throw new Error("LOCAL_REHEARSAL_FORBIDDEN: This helper only runs on a local Convex deployment.");
 }
 
@@ -104,24 +106,24 @@ export const restore = mutation({
   handler: async (ctx, args) => {
     await requireLocalOperator(ctx);
     const snapshot = args.snapshot as {
-      account?: { _id?: string };
-      memberships?: Array<{ _id: string; role: "student" | "teacher" | "school_admin"; status: "active" | "invited" | "suspended" | "ended"; joinedAt?: number; endedAt?: number; createdAt: number; updatedAt: number; accountId: string; schoolId: string }>;
+      account?: { _id?: Id<"accounts"> };
+      memberships?: Array<{ _id: Id<"schoolMemberships">; role: "student" | "teacher" | "school_admin"; status: "active" | "invited" | "suspended" | "ended"; joinedAt?: number; endedAt?: number; createdAt: number; updatedAt: number; accountId: Id<"accounts">; schoolId: Id<"schools"> }>;
     };
     const accountId = snapshot.account?._id;
     if (!accountId || !Array.isArray(snapshot.memberships)) throw new Error("LOCAL_REHEARSAL_SNAPSHOT_INVALID");
     const priorIds = new Set(snapshot.memberships.map((row) => row._id));
-    const current = await ctx.db.query("schoolMemberships").withIndex("by_account", (q) => q.eq("accountId", accountId as never)).collect();
+    const current = await ctx.db.query("schoolMemberships").withIndex("by_account", (q) => q.eq("accountId", accountId)).collect();
     for (const row of current) {
       if (!priorIds.has(row._id)) await ctx.db.delete(row._id);
     }
     for (const row of snapshot.memberships) {
-      const existing = await ctx.db.get(row._id as never);
+      const existing = await ctx.db.get(row._id);
       if (existing) {
         await ctx.db.patch(existing._id, { role: row.role, status: row.status, joinedAt: row.joinedAt, endedAt: row.endedAt, updatedAt: row.updatedAt });
       } else {
         await ctx.db.insert("schoolMemberships", {
-          accountId: row.accountId,
-          schoolId: row.schoolId,
+          accountId: row.accountId as Id<"accounts">,
+          schoolId: row.schoolId as Id<"schools">,
           role: row.role,
           status: row.status,
           joinedAt: row.joinedAt,

@@ -2981,7 +2981,7 @@ const REGION_FIDELITY: ReadonlyArray<{
     region: "hyperlinks",
     class: "PRESERVED",
     reason:
-      "Supported hyperlink runs are editable when the paragraph contains only native text; linked drawings, fields, and other anchored ranges remain preserved.",
+      "Spectra preserves hyperlinks in a linked Word file but cannot add, change, or remove them. Make hyperlink edits in Word.",
   },
   {
     region: "lists",
@@ -3289,7 +3289,11 @@ async function projectDocument(
         ...(reason ? { reason } : {}),
       });
   };
-  partRule("bibliography", (name) => /^\/customXml\/item\d*\.xml$/i.test(name));
+  partRule(
+    "bibliography",
+    (name) => /^\/customXml\/item\d*\.xml$/i.test(name),
+    "Word bibliography and Sources customXml parts are preserved. Spectra research citations live in the document body, not in Word Sources XML.",
+  );
   partRule("customXml", (name) => name.toLowerCase().startsWith("/customxml/"));
   for (const partName of await boundCustomXmlPartNames(document)) {
     fidelityEntries.push({

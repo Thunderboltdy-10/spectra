@@ -147,6 +147,40 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   return createNdjsonResponse(task, publicError);
 }
 
+
+function operationTypesArmRunUndo(
+  operations: ReadonlyArray<{ type: string }>,
+): boolean {
+  return operations.some(
+    (operation) =>
+      operation.type === "artifact.create" ||
+      operation.type === "artifact.update",
+  );
+}
+
+function revertRunResultAction(runId: string): ResultAction {
+  return {
+    key: "revert",
+    label: "Undo this run",
+    targetType: "run",
+    targetId: runId,
+  };
+}
+
+function durableArtifactWritesFromOutcomes(
+  outcomes: ReadonlyArray<{
+    operation: { type: string };
+    affected: Array<{ type: string; id: string }>;
+  }>,
+): boolean {
+  return outcomes.some(
+    ({ operation, affected }) =>
+      (operation.type === "artifact.create" ||
+        operation.type === "artifact.update") &&
+      affected.some((item) => item.type === "artifact" && Boolean(item.id)),
+  );
+}
+
 function recoveryForAttempt(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
@@ -2367,17 +2401,8 @@ async function runAttempt(
         targetType: "artifact" as const,
         targetId,
       })),
-      ...(plan.operations.some(
-        (operation) => operation.type === "artifact.update",
-      )
-        ? [
-            {
-              key: "revert" as const,
-              label: "Undo this run",
-              targetType: "run" as const,
-              targetId: params.runId,
-            },
-          ]
+      ...(operationTypesArmRunUndo(plan.operations)
+        ? [revertRunResultAction(params.runId)]
         : []),
     ];
     const mergedProvenance = {
@@ -2516,6 +2541,9 @@ async function runAttempt(
         Boolean(publicText.trim()),
         false,
       );
+      const durableArtifactWrite = durableArtifactWritesFromOutcomes(
+        operationOutcomes,
+      );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
@@ -2527,25 +2555,30 @@ async function runAttempt(
               ? "Stopped by you. The partial response remains available, and you can retry when ready."
               : "Stopped before the response began. You can retry when ready."
             : "Stopped by you. Some work may already be visible — review it before continuing.",
-        resultActions: recovery.retryable
-          ? [
-              {
-                key: "retry",
-                label: "Retry",
-                targetType: "run",
-                targetId: params.runId,
-              },
-            ]
-          : params.threadId
+        resultActions: [
+          ...(recovery.retryable
             ? [
                 {
-                  key: "continue",
-                  label: "Continue in thread",
-                  targetType: "thread",
-                  targetId: params.threadId,
+                  key: "retry" as const,
+                  label: "Retry",
+                  targetType: "run" as const,
+                  targetId: params.runId,
                 },
               ]
-            : [],
+            : params.threadId
+              ? [
+                  {
+                    key: "continue" as const,
+                    label: "Continue in thread",
+                    targetType: "thread" as const,
+                    targetId: params.threadId,
+                  },
+                ]
+              : []),
+          ...(durableArtifactWrite
+            ? [revertRunResultAction(params.runId)]
+            : []),
+        ],
         recoveryState: recovery.recoveryState,
         retryable: recovery.retryable,
         preservedPartial: recovery.preservedPartial,
@@ -3308,15 +3341,8 @@ async function resumeOperationsAttempt(params: {
               },
             ]
           : []),
-        ...(operations.some((row) => row.type === "artifact.update")
-          ? [
-              {
-                key: "revert" as const,
-                label: "Undo this run",
-                targetType: "run" as const,
-                targetId: params.runId,
-              },
-            ]
+        ...(operationTypesArmRunUndo(operations)
+          ? [revertRunResultAction(params.runId)]
           : []),
       ],
       outcome: "canonical_saved",

@@ -12,6 +12,16 @@ export type CalendarSemanticAction =
       idempotencyKey?: string;
     }
   | {
+      type: "calendar.create_personal_event";
+      title: string;
+      startAt: number;
+      endAt: number;
+      timezone: string;
+      notes?: string;
+      allDay?: boolean;
+      linkedArtifactIds?: string[];
+    }
+  | {
       type: "calendar.move_work_block";
       itemId: string;
       startAt: number;
@@ -27,13 +37,21 @@ export type CalendarSemanticAction =
 
 export type CalendarActionPostcondition = {
   itemId: string;
-  kind: "scheduled_work_block";
+  kind: "scheduled_work_block" | "personal_event";
   startAt: number;
   endAt: number;
   linkedTask: boolean;
 };
 
 export function calendarActionTarget(action: CalendarSemanticAction) {
+  if (action.type === "calendar.create_personal_event")
+    return {
+      workId: "calendar",
+      workType: "planner_task" as const,
+      kind: "personal_event" as const,
+      path: [action.title.slice(0, 80) || "event"],
+      schemaVersion: 1,
+    };
   return {
     workId: "calendar",
     workType: "planner_task" as const,
@@ -62,6 +80,21 @@ export function verifyCalendarActionPostcondition(
   action: CalendarSemanticAction,
   item: CalendarItem,
 ): CalendarActionPostcondition {
+  if (action.type === "calendar.create_personal_event") {
+    if (item.kind !== "personal_event")
+      throw new Error("CALENDAR_POSTCONDITION_KIND_MISMATCH");
+    if (item.startAt === undefined || item.endAt === undefined)
+      throw new Error("CALENDAR_POSTCONDITION_TIME_MISSING");
+    if (item.startAt !== action.startAt || item.endAt !== action.endAt)
+      throw new Error("CALENDAR_POSTCONDITION_TIME_MISMATCH");
+    return {
+      itemId: item.id,
+      kind: item.kind,
+      startAt: item.startAt,
+      endAt: item.endAt,
+      linkedTask: false,
+    };
+  }
   if (item.kind !== "scheduled_work_block")
     throw new Error("CALENDAR_POSTCONDITION_KIND_MISMATCH");
   if (item.startAt === undefined || item.endAt === undefined)

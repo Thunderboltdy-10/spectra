@@ -7,6 +7,7 @@ import { calendarItemFromWire, type CalendarItem } from "./model";
 
 export const CALENDAR_MUTATION_TOOL_IDS = [
   "schedule_calendar_task",
+  "create_calendar_personal_event",
   "move_calendar_block",
   "resize_calendar_block",
 ] as const;
@@ -19,6 +20,10 @@ export const CALENDAR_COMMAND_ALIASES: Record<string, CanonicalCalendarTool> = {
   "calendar.schedule_task": "schedule_calendar_task",
   "calendar.scheduleTask": "schedule_calendar_task",
   schedule_calendar_task: "schedule_calendar_task",
+  "calendar.create_personal_event": "create_calendar_personal_event",
+  "calendar.createPersonalItem": "create_calendar_personal_event",
+  "calendar.add_event": "create_calendar_personal_event",
+  create_calendar_personal_event: "create_calendar_personal_event",
   "calendar.move": "move_calendar_block",
   "calendar.move_work_block": "move_calendar_block",
   "calendar.moveWorkBlock": "move_calendar_block",
@@ -31,12 +36,14 @@ export const CALENDAR_COMMAND_ALIASES: Record<string, CanonicalCalendarTool> = {
 
 const CONVEX_MUTATION: Record<CanonicalCalendarTool, string> = {
   schedule_calendar_task: "calendar:scheduleTask",
+  create_calendar_personal_event: "calendar:createPersonalItem",
   move_calendar_block: "calendar:moveWorkBlock",
   resize_calendar_block: "calendar:resizeWorkBlock",
 };
 
 const UI_NOTE: Record<CanonicalCalendarTool, string> = {
   schedule_calendar_task: "Scheduled a Calendar work block",
+  create_calendar_personal_event: "Added a Calendar personal event",
   move_calendar_block: "Moved a Calendar work block",
   resize_calendar_block: "Resized a Calendar work block",
 };
@@ -44,6 +51,12 @@ const UI_NOTE: Record<CanonicalCalendarTool, string> = {
 export type CalendarUndoInverse =
   | {
       kind: "remove_work_block";
+      itemId: string;
+      expectedRevision: number;
+      convexMutation: "calendar:removePersonalItem";
+    }
+  | {
+      kind: "remove_personal_event";
       itemId: string;
       expectedRevision: number;
       convexMutation: "calendar:removePersonalItem";
@@ -112,6 +125,29 @@ export function calendarSemanticAction(
         : {}),
     };
   }
+  if (toolId === "create_calendar_personal_event") {
+    const title =
+      typeof args.title === "string" ? args.title.trim().slice(0, 500) : "";
+    if (!title) throw new Error("CALENDAR_TITLE_REQUIRED");
+    const linkedArtifactIds = Array.isArray(args.linkedArtifactIds)
+      ? args.linkedArtifactIds
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .map((value) => value.trim())
+          .slice(0, 24)
+      : undefined;
+    return {
+      type: "calendar.create_personal_event",
+      title,
+      startAt: finiteNumber(args, "startAt"),
+      endAt: finiteNumber(args, "endAt"),
+      timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
+      ...(typeof args.notes === "string" && args.notes.trim()
+        ? { notes: args.notes.trim().slice(0, 20_000) }
+        : {}),
+      ...(args.allDay === true ? { allDay: true } : {}),
+      ...(linkedArtifactIds?.length ? { linkedArtifactIds } : {}),
+    };
+  }
   const itemId = typeof args.itemId === "string" ? args.itemId.trim() : "";
   if (!itemId) throw new Error("CALENDAR_ITEM_REQUIRED");
   if (toolId === "move_calendar_block")
@@ -144,6 +180,20 @@ export function calendarMutationPayload(
       timezone: action.timezone,
       actorKind: "ai" as const,
       ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+  if (action.type === "calendar.create_personal_event")
+    return {
+      kind: "personal_event" as const,
+      title: action.title,
+      notes: action.notes,
+      startAt: action.startAt,
+      endAt: action.endAt,
+      allDay: action.allDay === true,
+      timezone: action.timezone,
+      actorKind: "ai" as const,
+      ...(action.linkedArtifactIds?.length
+        ? { linkedArtifactIds: action.linkedArtifactIds }
+        : {}),
     };
   if (action.type === "calendar.move_work_block")
     return {
@@ -197,6 +247,13 @@ export function calendarUndoInverse(
   if (toolId === "schedule_calendar_task")
     return {
       kind: "remove_work_block",
+      itemId: item.id,
+      expectedRevision: item.revision,
+      convexMutation: "calendar:removePersonalItem",
+    };
+  if (toolId === "create_calendar_personal_event")
+    return {
+      kind: "remove_personal_event",
       itemId: item.id,
       expectedRevision: item.revision,
       convexMutation: "calendar:removePersonalItem",

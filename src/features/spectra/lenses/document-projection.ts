@@ -7,7 +7,10 @@ import {
   docxNativeMediaUrl as sharedDocxNativeMediaUrl,
   docxRichBlockToJson as sharedDocxRichBlockToJson,
   docxRichInlineToJson as sharedDocxRichInlineToJson,
+  authoredSemanticsEqual,
+  restoreDocxEquationCarryMetadata,
 } from "../../../../shared/document-projection.mjs";
+import { equationNodeToLatex, latexToEquation } from "./equation-interchange";
 import {
   docxProjectionBlockSchema,
   docxProjectionSchema,
@@ -39,6 +42,36 @@ export type DocumentSemanticBlock = {
   reference?: Record<string, unknown>;
   citation?: Record<string, unknown>;
 };
+
+function canonicalEquationLatex(
+  latex: string,
+  display: "inline" | "block",
+  retainedSource?: string,
+  retainedOmml?: string,
+) {
+  // Retained OMML/source pairs are authoritative for advanced native content.
+  // Only canonicalize newly authored or source-changing equations so the route
+  // digest matches Word's deterministic OMML readback without flattening a
+  // native subtree.
+  if (retainedOmml && retainedSource === latex) return latex;
+  const interchange = latexToEquation(latex, display);
+  return interchange.supported ? equationNodeToLatex(interchange.ast) : latex;
+}
+
+function canonicalRichContent(content: readonly DocxRichInline[] | undefined) {
+  return content?.map((item) => {
+    if (item.kind !== "equation") return item;
+    return {
+      ...item,
+      latex: canonicalEquationLatex(
+        item.latex,
+        item.display,
+        item.ommlSourceLatex,
+        item.ommlXml,
+      ),
+    };
+  });
+}
 
 export function bindDocxProjectionSource(
   projection: DocxProjection,
@@ -221,6 +254,36 @@ export function compactDocxContentForStorage(value: unknown): unknown {
   return next;
 }
 
+/**
+ * Recover native equation carry metadata from the exact projection used as
+ * the materialization base. The editor projection may omit OMML to stay under
+ * the Convex value ceiling, but it must not invent a subtree from another
+ * revision or regenerate one that was untouched.
+ */
+export function restoreDocxBlockCarryMetadata(
+  previous: DocxProjection["blocks"][number],
+  incoming: DocxProjection["blocks"][number],
+) {
+  const inlineContent = incoming.inlineContent
+    ? restoreDocxEquationCarryMetadata(previous.inlineContent, incoming.inlineContent)
+    : undefined;
+  const richRows = incoming.richRows
+    ? incoming.richRows.map((row, rowIndex) =>
+        row.map((cell, columnIndex) =>
+          restoreDocxEquationCarryMetadata(
+            previous.richRows?.[rowIndex]?.[columnIndex],
+            cell,
+          ),
+        ),
+      )
+    : undefined;
+  return {
+    ...incoming,
+    ...(inlineContent ? { inlineContent } : {}),
+    ...(richRows ? { richRows } : {}),
+  };
+}
+
 export function documentContentToProseMirrorJson(
   content: Record<string, unknown>,
 ): DocumentJsonNode {
@@ -268,6 +331,40 @@ function richContentWithoutImages(content: readonly DocxRichInline[]) {
   return content.filter((item) => item.kind !== "image");
 }
 
+function richContentWithoutImagesOrLayout(content: readonly DocxRichInline[]) {
+  return richContentWithoutImages(content).map((item) =>
+    item.kind === "equation" ? { ...item, display: "block" as const } : item,
+  );
+}
+
+function imageOccurrenceSequence(content: readonly DocxRichInline[]) {
+  return content
+    .filter((item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image")
+    .map((item) => item.occurrenceId ?? item.partName ?? item.assetId ?? "");
+}
+
+function imageOccurrenceOrderChanged(
+  before: readonly DocxRichInline[],
+  after: readonly DocxRichInline[],
+) {
+  const previous = imageOccurrenceSequence(before);
+  const next = imageOccurrenceSequence(after);
+  // Add/remove/replace operations are handled by imageOperationsBetween. A
+  // same-cardinality reorder is the image change that needs a rich rewrite.
+  return previous.length === next.length &&
+    previous.some((value, index) => value !== next[index]);
+}
+
+function authoredRichContentChanged(
+  before: readonly DocxRichInline[],
+  after: readonly DocxRichInline[],
+) {
+  return !authoredSemanticsEqual(
+    richContentWithoutImagesOrLayout(before),
+    richContentWithoutImagesOrLayout(after),
+  ) || imageOccurrenceOrderChanged(before, after);
+}
+
 function replacePlainRichText(
   content: readonly DocxRichInline[],
   text: string,
@@ -288,11 +385,29 @@ function imageOperationsBetween(
   const beforeImages = beforeContent.filter(
     (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
   );
-  return afterContent.flatMap<DocxOperation>((item): DocxOperation[] => {
+  const afterImages = afterContent.filter(
+    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
+  );
+  const sameOccurrence = (
+    left: Extract<DocxRichInline, { kind: "image" }>,
+    right: Extract<DocxRichInline, { kind: "image" }>,
+  ) =>
+    left.occurrenceId && right.occurrenceId
+      ? left.occurrenceId === right.occurrenceId
+      : left.partName === right.partName;
+  const removed = beforeImages.flatMap<DocxOperation>((item) => {
+    if (afterImages.some((candidate) => sameOccurrence(item, candidate)) || !item.partName)
+      return [];
+    return [{
+      kind: "delete-image" as const,
+      regionId,
+      partName: item.partName,
+      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
+    }];
+  });
+  const changed = afterImages.flatMap<DocxOperation>((item): DocxOperation[] => {
     if (item.kind !== "image") return [];
-    const previous = item.partName
-      ? beforeImages.find((candidate) => candidate.partName === item.partName)
-      : undefined;
+    const previous = beforeImages.find((candidate) => sameOccurrence(candidate, item));
     if (!previous && item.assetId)
       return [{
         kind: "insert-image",
@@ -305,12 +420,26 @@ function imageOperationsBetween(
         ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
         ...(item.crop !== undefined ? { crop: item.crop } : {}),
       }];
+    if (!previous && item.partName)
+      return [{
+        kind: "insert-image",
+        regionId,
+        ...(location ?? {}),
+        partName: item.partName,
+        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
     if (!previous || !item.partName) return [];
     if (item.assetId && item.assetId !== previous.assetId)
       return [{
         kind: "replace-image",
         regionId,
         partName: item.partName,
+        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
         assetId: item.assetId,
         mediaType: item.mediaType,
         ...(item.altText !== undefined ? { altText: item.altText } : {}),
@@ -322,6 +451,7 @@ function imageOperationsBetween(
       kind: "update-image",
       regionId,
       partName: item.partName,
+      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
       ...(item.altText !== previous.altText ? { altText: item.altText } : {}),
       ...(item.widthEmu !== previous.widthEmu ? { widthEmu: item.widthEmu } : {}),
       ...(item.heightEmu !== previous.heightEmu ? { heightEmu: item.heightEmu } : {}),
@@ -336,6 +466,7 @@ function imageOperationsBetween(
       ? [operation]
       : [];
   });
+  return [...removed, ...changed];
 }
 
 function inlineContentForTextOperation(
@@ -350,6 +481,31 @@ function inlineContentForTextOperation(
   return afterContent.filter(
     (item) => item.kind !== "image" || (item.partName && retainedParts.has(item.partName)),
   );
+}
+
+function equationLayoutBetween(
+  regionId: string,
+  before: DocxProjection["blocks"][number],
+  after: DocxProjection["blocks"][number],
+): DocxOperation[] {
+  const beforeEquation = (before.inlineContent ?? []).find((item) => item.kind === "equation");
+  const afterEquation = (after.inlineContent ?? []).find((item) => item.kind === "equation");
+  if (!beforeEquation || !afterEquation) return [];
+  const beforeDisplay = before.attrs?.display === "inline" || beforeEquation.display === "inline" ? "inline" : "block";
+  const afterDisplay = after.attrs?.display === "inline" || afterEquation.display === "inline" ? "inline" : "block";
+  const beforeAlignment = before.attrs?.alignment === "left" || before.attrs?.alignment === "right" || before.attrs?.alignment === "center"
+    ? before.attrs.alignment
+    : "center";
+  const afterAlignment = after.attrs?.alignment === "left" || after.attrs?.alignment === "right" || after.attrs?.alignment === "center"
+    ? after.attrs.alignment
+    : "center";
+  if (beforeDisplay === afterDisplay && beforeAlignment === afterAlignment) return [];
+  return [{
+    kind: "set-equation-layout",
+    regionId,
+    ...(beforeDisplay !== afterDisplay ? { display: afterDisplay } : {}),
+    ...(beforeAlignment !== afterAlignment ? { alignment: afterAlignment } : {}),
+  }];
 }
 
 export function docxOperationsBetween(
@@ -427,21 +583,19 @@ export function docxOperationsBetween(
             inlineContent,
             { row: rowIndex, column: columnIndex },
           );
+          const deletedImages = imageOperations.filter((operation) => operation.kind === "delete-image");
+          const otherImageOperations = imageOperations.filter((operation) => operation.kind !== "delete-image");
           const visibleText = inlineContent
             ? richTextWithoutImages(inlineContent)
             : text;
           const previousVisibleText = previousInline
             ? richTextWithoutImages(previousInline)
             : oldRows[rowIndex]?.[columnIndex] ?? "";
-          const nonImageRichChanged =
-            JSON.stringify(
-              inlineContent ? richContentWithoutImages(inlineContent) : inlineContent,
-            ) !==
-            JSON.stringify(
-              previousInline
-                ? richContentWithoutImages(previousInline)
-                : previousInline,
-            );
+          const nonImageRichChanged = authoredRichContentChanged(
+            previousInline,
+            inlineContent ?? [],
+          );
+          operations.push(...deletedImages);
           if (visibleText !== previousVisibleText || nonImageRichChanged) {
             const textInlineContent = inlineContent
               ? inlineContentForTextOperation(previousInline, inlineContent)
@@ -457,42 +611,47 @@ export function docxOperationsBetween(
           }
           // Apply text before adding/replacing drawings so the text rewrite
           // never clears a drawing operation that is about to run.
-          operations.push(...imageOperations);
+          operations.push(...otherImageOperations);
         }),
       );
     } else if (
       block.type !== "table" &&
       (block.text !== old.text ||
-        JSON.stringify(block.inlineContent) !== JSON.stringify(old.inlineContent))
+        authoredRichContentChanged(old.inlineContent ?? [], block.inlineContent ?? []) ||
+        imageOperationsBetween(block.id, old.inlineContent ?? [], block.inlineContent ?? []).length > 0 ||
+        block.attrs?.display !== old.attrs?.display ||
+        block.attrs?.alignment !== old.attrs?.alignment)
     ) {
       const previousInline = old.inlineContent ?? [];
       const nextInline = block.inlineContent ?? [];
       const imageOperations = imageOperationsBetween(block.id, previousInline, nextInline);
+      const deletedImages = imageOperations.filter((operation) => operation.kind === "delete-image");
+      const otherImageOperations = imageOperations.filter((operation) => operation.kind !== "delete-image");
+      const layoutOperations = equationLayoutBetween(block.id, old, block);
       const hasImages = previousInline.some((item) => item.kind === "image") ||
         nextInline.some((item) => item.kind === "image");
       const visibleText = hasImages ? richTextWithoutImages(nextInline) : block.text;
       const previousVisibleText = hasImages ? richTextWithoutImages(previousInline) : old.text;
-      const nonImageRichChanged = hasImages
-        ? JSON.stringify(richContentWithoutImages(nextInline)) !==
-          JSON.stringify(richContentWithoutImages(previousInline))
-        : JSON.stringify(block.inlineContent) !== JSON.stringify(old.inlineContent);
+      const nonImageRichChanged = authoredRichContentChanged(
+        previousInline,
+        nextInline,
+      );
       const richChanged = nonImageRichChanged;
       if (visibleText === previousVisibleText && !richChanged) {
-        operations.push(...imageOperations);
+        operations.push(...deletedImages, ...otherImageOperations, ...layoutOperations);
         return;
       }
       const textInlineContent = block.inlineContent
         ? inlineContentForTextOperation(previousInline, nextInline)
         : undefined;
-      operations.push({
+      operations.push(...deletedImages, {
         kind: "replace-paragraph",
         regionId: block.id,
         text: block.text,
         ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
-      });
-      // Apply text before adding/replacing drawings so the text rewrite never
-      // clears a drawing operation that is about to run.
-      operations.push(...imageOperations);
+      }, ...otherImageOperations, ...layoutOperations);
+      // Apply retained text before adding/replacing drawings so the text rewrite
+      // never clears a surviving picture operation that follows it.
     }
   });
   operations.push(
@@ -554,6 +713,11 @@ export function docxProjectionFromContent(
   const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(incoming.id);
+    const recovered = previous
+      ? restoreDocxBlockCarryMetadata(previous, incoming)
+      : incoming;
+    const inlineContent = canonicalRichContent(recovered.inlineContent);
+    const blockEquation = inlineContent?.find((item) => item.kind === "equation");
     // ProseMirror does not retain Word's invisible trailing run whitespace in
     // its DOM/Yjs projection. Treating that normalization as authored content
     // made an otherwise safe edit also emit replacements for protected native
@@ -561,32 +725,47 @@ export function docxProjectionFromContent(
     // differs; a material edit (including one in a read-only region) still
     // flows through to the lens and is rejected by its native safety gate.
     const text =
+      recovered.type === "equation" && blockEquation
+        ? blockEquation.latex
+        :
       previous &&
       nativeTrailingWhitespaceEquivalent(previous.text, incoming.text)
         ? previous.text
         : incoming.text;
     const normalizedInlineContent =
       previous &&
-      incoming.inlineContent &&
+      recovered.inlineContent &&
       previous.inlineContent &&
-      incoming.text !== previous.text &&
-      richTextWithoutImages(incoming.inlineContent) === previous.text
-        ? replacePlainRichText(incoming.inlineContent, incoming.text)
+      recovered.text !== previous.text &&
+      richTextWithoutImages(recovered.inlineContent) === previous.text
+        ? replacePlainRichText(recovered.inlineContent, recovered.text)
         : undefined;
     const normalizedRichRows =
-      incoming.type === "table" &&
-      incoming.rows &&
-      !incoming.richRows
-        ? incoming.rows.map((row) =>
+      recovered.type === "table" &&
+      recovered.rows &&
+      !recovered.richRows
+        ? recovered.rows.map((row) =>
             row.map((cell) => [{ kind: "text" as const, text: cell }]),
           )
         : undefined;
     return docxProjectionBlockSchema.parse({
       ...(previous ?? {}),
-      ...incoming,
+      ...recovered,
       text,
+      ...(recovered.type === "equation" && blockEquation
+        ? { latex: blockEquation.latex }
+        : {}),
+      ...(inlineContent ? { inlineContent } : {}),
       ...(normalizedInlineContent ? { inlineContent: normalizedInlineContent } : {}),
-      ...(normalizedRichRows ? { richRows: normalizedRichRows } : {}),
+      ...(recovered.richRows
+        ? {
+            richRows: recovered.richRows.map((row) =>
+              row.map((cell) => canonicalRichContent(cell) ?? []),
+            ),
+          }
+        : normalizedRichRows
+          ? { richRows: normalizedRichRows }
+          : {}),
       ...(previous?.attrs || incoming.attrs
         ? {
             attrs: {

@@ -97,6 +97,12 @@ describe("vague sheets create intent", () => {
         "make slide 3 more concise and keep the speaker notes",
       ),
     ).toBe(false);
+    expect(
+      promptLooksLikeFocusedStructuralEdit("make the study guide clearer"),
+    ).toBe(true);
+    expect(promptLooksLikeFreshCreate("make the study guide clearer")).toBe(
+      false,
+    );
   });
 
   it("keeps an open sheets artifact focused even when focusMode is workspace", () => {

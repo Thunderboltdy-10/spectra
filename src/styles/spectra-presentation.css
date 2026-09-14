@@ -219,6 +219,14 @@
   opacity: 0.45;
 }
 
+/* Keep large decks responsive while preserving the full native preview when
+   a thumbnail enters the rail viewport. */
+.spectra-item-rail-preview {
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 36px 24px;
+}
+
 .spectra-item-rail-preview[data-slide-hidden]::after {
   position: absolute;
   z-index: 3;

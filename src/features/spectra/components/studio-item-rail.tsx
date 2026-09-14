@@ -112,10 +112,16 @@ export function StudioItemRail({
               event.preventDefault();
               const movedId =
                 event.dataTransfer.getData("text/plain") || draggingId;
-              onDragEnd?.();
-              if (!movedId || !onMove) return;
+              if (!movedId || !onMove) {
+                onDragEnd?.();
+                return;
+              }
               const from = items.findIndex((entry) => entry.id === movedId);
               if (from >= 0) onMove(from, index);
+              // Run this after the move callback. Some consumers use the
+              // active drag id to identify the source, and clearing it first
+              // turns a valid browser drop into a no-op.
+              onDragEnd?.();
             }}
             data-dragging={draggingId === item.id || undefined}
           >

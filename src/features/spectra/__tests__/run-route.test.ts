@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { createHash, createHmac } from "node:crypto";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -7,6 +8,8 @@ afterEach(() => {
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.SPECTRA_TEST_INLINE_RUNS;
   delete process.env.SPECTRA_APP_URL;
+  delete process.env.CLERK_SECRET_KEY;
+  delete process.env.SPECTRA_COLLAB_BRIDGE_KEY;
 });
 
 function deckPlan() {
@@ -1345,6 +1348,77 @@ describe("Spectra run route", () => {
       }),
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("settles a scheduled preflight failure as a retryable run", async () => {
+    const { convexQuery, convexMutation } = setup({});
+    convexQuery.mockImplementationOnce(async (name: string) => {
+      if (name.includes("spectraRuns:listRunAttachments"))
+        throw new Error("attachment hydration exploded");
+      throw new Error(`Unexpected query: ${name}`);
+    });
+    vi.doMock("@clerk/backend", () => ({
+      createClerkClient: () => ({
+        sessions: {
+          getSessionList: vi.fn().mockResolvedValue({
+            data: [{ id: "session-real", lastActiveAt: 2 }],
+          }),
+          getToken: vi.fn().mockResolvedValue({ jwt: "worker-token" }),
+        },
+      }),
+    }));
+    vi.doMock("@/lib/convex-worker-context", () => ({
+      withWorkerConvexToken: async (_token: string, work: () => Promise<unknown>) =>
+        work(),
+    }));
+    process.env.CLERK_SECRET_KEY = "clerk-secret";
+    process.env.SPECTRA_COLLAB_BRIDGE_KEY = "bridge-key-that-is-long-enough-for-tests";
+    const rawBody = JSON.stringify({
+      action: "scheduled_run",
+      actorClerkId: "actor",
+      runId: "run-real",
+      resultCardId: "card-real",
+      executionId: "execution-1",
+      payload: { prompt: "Prepare the study guide.", surface: "chat" },
+    });
+    const timestamp = Date.now();
+    const callbackKey = createHmac("sha256", process.env.SPECTRA_COLLAB_BRIDGE_KEY)
+      .update("spectra-event-callback:v1")
+      .digest("base64url");
+    const digest = createHash("sha256").update(rawBody).digest("base64url");
+    const signature = createHmac("sha256", callbackKey)
+      .update(`${timestamp}.${digest}`)
+      .digest("base64url");
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        headers: {
+          "x-spectra-scheduler-timestamp": String(timestamp),
+          "x-spectra-scheduler-signature": signature,
+        },
+        body: rawBody,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ completed: true });
+    const failure = convexMutation.mock.calls.find(
+      ([name, args]) =>
+        String(name).includes("spectraRuns:updateStatus") &&
+        (args as { status?: string }).status === "failed",
+    );
+    expect(failure?.[1]).toMatchObject({
+      resultTitle: "Paused",
+      retryable: true,
+      preservedPartial: false,
+      resultActions: [
+        {
+          key: "retry",
+          targetType: "run",
+          targetId: "run-real",
+        },
+      ],
+    });
   });
 
   it("sanitizes invalid operation errors before streaming them to the client", async () => {

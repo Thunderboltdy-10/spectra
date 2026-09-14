@@ -859,10 +859,13 @@ function replaceShapeText(shape: XmlElement, value: string) {
       const textNodesInParagraph = textNodes(paragraph);
       if (textNodesInParagraph.length) {
         replaceNodeText(textNodesInParagraph[0]!, lines[index] ?? "");
+        const redundantRuns = new Set<XmlElement>();
         textNodesInParagraph.slice(1).forEach((node) => {
           const parent = node.parent;
-          if (parent) parent.removeChild(node);
+          if (parent?.localName === "r" && parent.parent === paragraph) redundantRuns.add(parent);
+          else if (parent) parent.removeChild(node);
         });
+        redundantRuns.forEach((run) => run.parent?.removeChild(run));
       } else {
         const run = new XmlElement("r", "a");
         run.appendChild(new XmlElement("rPr", "a"));
@@ -1374,6 +1377,15 @@ function setTableCellText(shape: XmlElement, rowIndex: number, columnIndex: numb
 function updateCache(cache: XmlElement, values: Array<string | number>, numeric: boolean) {
   const points = cache.elements().filter((node) => node.localName === "pt");
   points.forEach((point) => cache.removeChild(point));
+  if (numeric) {
+    const format = child(cache, "http://schemas.openxmlformats.org/drawingml/2006/chart", "formatCode") ?? (() => {
+      const created = new XmlElement("formatCode", "c");
+      const before = cache.elements().find((node) => node.localName === "ptCount");
+      cache.insertBefore(created, before ?? null);
+      return created;
+    })();
+    setTextElement(format, "General");
+  }
   const count = child(cache, "http://schemas.openxmlformats.org/drawingml/2006/chart", "ptCount") ?? (() => {
     const value = new XmlElement("ptCount", "c");
     cache.insertBefore(value, cache.elements()[0] ?? null);
@@ -1388,7 +1400,6 @@ function updateCache(cache: XmlElement, values: Array<string | number>, numeric:
     point.appendChild(text);
     cache.appendChild(point);
   });
-  if (numeric) cache.setAttribute("formatCode", "General");
 }
 
 function formulaCells(formula: string) {
@@ -1490,6 +1501,23 @@ function chartTextElement(root: XmlElement, value: string) {
     : root;
   const tx = ensureChild(owner, chartNamespace, "c", "tx");
   const rich = ensureChild(tx, "http://schemas.openxmlformats.org/drawingml/2006/chart", "c", "rich");
+  const bodyPr = child(rich, DRAWINGML_NAMESPACE, "bodyPr") ?? (() => {
+    const created = new XmlElement("bodyPr", "a");
+    rich.insertBefore(created, rich.elements()[0] ?? null);
+    return created;
+  })();
+  const firstParagraph = rich.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p");
+  const lstStyle = child(rich, DRAWINGML_NAMESPACE, "lstStyle") ?? (() => {
+    const created = new XmlElement("lstStyle", "a");
+    rich.insertBefore(created, firstParagraph ?? null);
+    return created;
+  })();
+  if (bodyPr.parent === rich && rich.elements()[0] !== bodyPr) {
+    rich.removeChild(bodyPr); rich.insertBefore(bodyPr, rich.elements()[0] ?? null);
+  }
+  if (lstStyle.parent === rich && rich.elements().indexOf(lstStyle) > rich.elements().indexOf(firstParagraph ?? lstStyle)) {
+    rich.removeChild(lstStyle); rich.insertBefore(lstStyle, firstParagraph ?? null);
+  }
   const paragraph = ensureChild(rich, DRAWINGML_NAMESPACE, "a", "p");
   const run = ensureChild(paragraph, DRAWINGML_NAMESPACE, "a", "r");
   const text = ensureChild(run, DRAWINGML_NAMESPACE, "a", "t");
@@ -1552,7 +1580,15 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   if (input.title !== undefined) {
     if (input.title === null) {
       if (chartTitle) chartRoot.removeChild(chartTitle);
-    } else chartTextElement(chartTitle ?? ensureChild(chartRoot, chartNamespace, "c", "title"), input.title);
+    } else {
+      const title = chartTitle ?? (() => {
+        const created = new XmlElement("title", "c");
+        const before = chartRoot.elements().find((node) => ["plotArea", "legend", "plotVisOnly", "dispBlanksAs", "showDLbls", "extLst"].includes(node.localName));
+        chartRoot.insertBefore(created, before ?? null);
+        return created;
+      })();
+      chartTextElement(title, input.title);
+    }
   }
   if (!input.series.length) throw new PptxLensError("PPTX_CHART_EMPTY", "A native PowerPoint chart needs at least one series.");
   const initialSeriesNodes = descendants(root).filter((node) => node.localName === "ser");
@@ -1602,7 +1638,11 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   seriesNodes.slice(input.series.length).forEach((node) => node.parent?.removeChild(node));
   const legend = child(firstDescendant(root, chartNamespace, "chart") ?? root, chartNamespace, "legend");
   if (input.showLegend === false && legend) chartRoot.removeChild(legend);
-  if (input.showLegend === true && !legend) chartRoot.appendChild(new XmlElement("legend", "c"));
+  if (input.showLegend === true && !legend) {
+    const created = new XmlElement("legend", "c");
+    const before = chartRoot.elements().find((node) => ["plotVisOnly", "dispBlanksAs", "showDLbls", "extLst"].includes(node.localName));
+    chartRoot.insertBefore(created, before ?? null);
+  }
   const axes = descendants(root).filter((node) => node.localName === "catAx" || node.localName === "valAx");
   if (input.axisTitle !== undefined) {
     const axis = axes.find((node) => node.localName === "catAx");

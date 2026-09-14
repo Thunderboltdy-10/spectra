@@ -38,6 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -922,7 +923,11 @@ function SlideCanvas({
 }) {
   const canvasHeight = deck.settings?.aspectRatio === "4:3" ? 750 : 562.5;
   const tokens = deck.theme.tokens ?? {};
-  const assetById = new Map(assets.map((asset) => [asset.assetId, asset]));
+  const assetById = useMemo(
+    () => new Map(assets.map((asset) => [asset.assetId, asset])),
+    [assets],
+  );
+  const slideIndex = deck.slides.indexOf(slide);
   return (
     <div
       className="presentation-canvas"
@@ -1037,7 +1042,6 @@ function SlideCanvas({
           !Array.isArray(object.content)
             ? (object.content as Record<string, unknown>)
             : {};
-        const slideIndex = deck.slides.indexOf(slide);
         const aiActive = pathTouches(
           aiChangedPaths,
           `/slides/${slideIndex}/objects/${objectIndex}`,
@@ -1090,6 +1094,53 @@ function SlideCanvas({
     </div>
   );
 }
+
+const SlideRailPreview = memo(
+  function SlideRailPreview({
+    slide,
+    deck,
+    assets,
+    artifacts,
+  }: {
+    slide: PresentationSlide;
+    deck: PresentationContent;
+    assets: SpectraArtifactAsset[];
+    artifacts: SpectraArtifact[];
+  }) {
+    return (
+      <div
+        className="spectra-item-rail-preview"
+        data-spectra-hidden-target="true"
+        data-slide-hidden={slide.hidden || undefined}
+      >
+        <SlideCanvas
+          slide={slide}
+          deck={deck}
+          assets={assets}
+          artifacts={artifacts}
+          readOnly
+          compact
+          aiChangedPaths={[]}
+          onSelectObject={() => undefined}
+          onPointerDown={() => undefined}
+          onResizePointerDown={() => undefined}
+          onPointerMove={() => undefined}
+          onPointerUp={() => undefined}
+          onTextChange={() => undefined}
+          onTextFocus={() => undefined}
+          onTextBlur={() => undefined}
+        />
+      </div>
+    );
+  },
+  (previous, next) =>
+    previous.slide === next.slide &&
+    previous.assets === next.assets &&
+    previous.artifacts === next.artifacts &&
+    previous.deck.theme === next.deck.theme &&
+    previous.deck.settings === next.deck.settings &&
+    previous.deck.nativeBinding === next.deck.nativeBinding,
+);
 
 function PresentationObjectInspector({
   object,
@@ -3757,29 +3808,12 @@ export function PresentationStudio({
                     .join(" · ") || undefined,
                   active: slide.id === activeSlide.id,
                   preview: (
-                    <div
-                      className="spectra-item-rail-preview"
-                      data-spectra-hidden-target="true"
-                      data-slide-hidden={slide.hidden || undefined}
-                    >
-                      <SlideCanvas
-                        slide={slide}
-                        deck={deck}
-                        assets={assets}
-                        artifacts={artifacts}
-                        readOnly
-                        compact
-                        aiChangedPaths={[]}
-                        onSelectObject={() => undefined}
-                        onPointerDown={() => undefined}
-                        onResizePointerDown={() => undefined}
-                        onPointerMove={() => undefined}
-                        onPointerUp={() => undefined}
-                        onTextChange={() => undefined}
-                        onTextFocus={() => undefined}
-                        onTextBlur={() => undefined}
-                      />
-                    </div>
+                    <SlideRailPreview
+                      slide={slide}
+                      deck={deck}
+                      assets={assets}
+                      artifacts={artifacts}
+                    />
                   ),
                 }))}
                 onSelect={selectSlide}

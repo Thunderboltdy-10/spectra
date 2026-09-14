@@ -143,6 +143,31 @@ function sharedTexts(
 }
 
 describe("native fine-grained Yjs models", () => {
+  it("replaces the seeded document placeholder when AI authors a new document", () => {
+    const adapter = documentYjsAdapter;
+    const document = adapter.createDocument({
+      blocks: [{ id: "intro", type: "paragraph", text: "Start writing here." }],
+      outline: [],
+    });
+    adapter.applyProjection(
+      document,
+      {
+        blocks: [
+          { id: "title", type: "heading", text: "Cell biology" },
+          { id: "body", type: "paragraph", text: "A useful revision note." },
+        ],
+        outline: [{ id: "title", title: "Cell biology", level: 1 }],
+      },
+      workTransactionOrigin(ai, "ai_semantic_edit"),
+    );
+    const projected = adapter.project(document) as {
+      blocks: Array<{ id: string; text?: string }>;
+    };
+    expect(projected.blocks.map((block) => block.id)).toEqual(["title", "body"]);
+    expect(projected.blocks.some((block) => block.text === "Start writing here.")).toBe(false);
+    document.destroy();
+  });
+
   it("registers a complete create/bind/project/regions/validate/migrate/undo adapter for every work type", () => {
     const adapters = listWorkYjsAdapters();
     expect(adapters.map((adapter) => adapter.workType)).toEqual(

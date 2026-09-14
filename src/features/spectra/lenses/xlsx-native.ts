@@ -25,6 +25,10 @@ import {
   rewriteSheetNameInFormula,
   rewriteStructuralReferences,
 } from "../sheets/formula-refs";
+import {
+  DEFAULT_CHART_COLOR_XML,
+  DEFAULT_CHART_STYLE_XML,
+} from "./xlsx-chart-assets";
 
 export const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 export const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -33,9 +37,18 @@ export const CHART_REL = "http://schemas.openxmlformats.org/officeDocument/2006/
 export const TABLE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 export const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
 export const CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+/** Modern Excel statistical charts (including histograms) are ChartEx parts. */
+export const CHART_EX_NS = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+export const CHART_EX_REL = "http://schemas.microsoft.com/office/2014/relationships/chartEx";
+const CHART_STYLE_REL = "http://schemas.microsoft.com/office/2011/relationships/chartStyle";
+const CHART_COLOR_REL = "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle";
+const CHART_EX_REQUIRES_NS = "http://schemas.microsoft.com/office/drawing/2015/9/8/chartex";
 export const A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
 export const CT_DRAWING = "application/vnd.openxmlformats-officedocument.drawing+xml";
 export const CT_CHART = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+export const CT_CHART_EX = "application/vnd.ms-office.chartex+xml";
+const CT_CHART_STYLE = "application/vnd.ms-office.chartstyle+xml";
+const CT_CHART_COLOR = "application/vnd.ms-office.chartcolorstyle+xml";
 
 type NativeRule = Record<string, unknown>;
 
@@ -132,8 +145,25 @@ function refSheetName(ref: string, fallback: string) {
   return ref.slice(0, bang).replace(/^'|'$/g, "").replaceAll("''", "'");
 }
 
+function seriesHeaderReference(formula: string | undefined, defaultSheet: string) {
+  if (!formula) return undefined;
+  const bang = formula.lastIndexOf("!");
+  const local = bang >= 0 ? formula.slice(bang + 1) : formula;
+  const range = rangePart(local);
+  if (!range) return undefined;
+  const sheet = refSheetName(formula, defaultSheet);
+  const prefix = quoteSheetPrefix(sheet);
+  const headerRow = Math.max(1, range.start.row - 1);
+  const headerColumn = columnName(range.start.col - 1);
+  return `${prefix}$${headerColumn}$${headerRow}`;
+}
+
 function formulaElement(node: XmlElement) {
-  return node.localName === "f" && (node.namespaceUri() === SML || node.namespaceUri() === CHART_NS);
+  return node.localName === "f" && (
+    node.namespaceUri() === SML ||
+    node.namespaceUri() === CHART_NS ||
+    node.namespaceUri() === CHART_EX_NS
+  );
 }
 
 function mapFormulaElements(root: XmlElement, mapper: (formula: string) => string) {
@@ -269,8 +299,39 @@ async function projectTables(workbook: Workbook, sheet: Worksheet): Promise<Xlsx
 }
 
 function chartText(chartRoot: XmlElement) {
+  const modernTitle = firstDescendant(chartRoot, CHART_EX_NS, "title");
+  if (modernTitle) return textOf(firstDescendant(modernTitle, CHART_EX_NS, "v"));
   const title = firstDescendant(child(chartRoot, CHART_NS, "title") ?? chartRoot, A_NS, "t");
   return textOf(title);
+}
+
+function definedNameReference(workbook: Workbook, value: string | undefined) {
+  if (!value) return undefined;
+  const name = value.trim().replace(/^=/, "");
+  return workbook.definedNames().find((candidate) => candidate.name.toLowerCase() === name.toLowerCase())?.ref;
+}
+
+function chartExDataFormula(root: XmlElement, dataId: string) {
+  const data = allDescendants(root, CHART_EX_NS, "data").find((candidate) => candidate.getAttribute("id") === dataId);
+  return data ? firstDescendant(data, CHART_EX_NS, "f")?.text() : undefined;
+}
+
+function chartExSeries(workbook: Workbook, chartRoot: XmlElement) {
+  const region = firstDescendant(chartRoot, CHART_EX_NS, "plotAreaRegion");
+  const seriesNodes = region?.elements().filter((node) => node.namespaceUri() === CHART_EX_NS && node.localName === "series") ?? [];
+  return seriesNodes.map((series) => {
+    const dataId = child(series, CHART_EX_NS, "dataId")?.getAttribute("val");
+    const formula = dataId === undefined ? undefined : chartExDataFormula(chartRoot, dataId);
+    const values = definedNameReference(workbook, formula) ?? formula;
+    const binning = firstDescendant(series, CHART_EX_NS, "binning");
+    return {
+      name: textOf(firstDescendant(series.find(CHART_EX_NS, "tx") ?? series, CHART_EX_NS, "v")) || undefined,
+      categories: undefined,
+      ...(values ? { values } : {}),
+      chartType: "column" as const,
+      ...(binning ? { axis: "primary" as const } : {}),
+    };
+  });
 }
 
 function chartReference(parent: XmlElement | undefined, localName: "cat" | "val") {
@@ -279,7 +340,7 @@ function chartReference(parent: XmlElement | undefined, localName: "cat" | "val"
   return ref ? textOf(ref.find(CHART_NS, "f")) : undefined;
 }
 
-function chartSeries(chartType: XmlElement) {
+function chartSeries(chartType: XmlElement, secondaryAxisIds = new Set<string>()) {
   const chartTypeName = chartType.localName === "barChart"
     ? (chartType.find(CHART_NS, "barDir")?.getAttribute("val") === "bar" ? "bar" : "column")
     : chartType.localName === "lineChart"
@@ -299,7 +360,7 @@ function chartSeries(chartType: XmlElement) {
     values: chartReference(series, "val"),
     ...(chartTypeName ? { chartType: chartTypeName as "column" | "bar" | "line" | "area" | "scatter" } : {}),
     ...(chartType.localName === "histogramChart" ? { chartType: "column" as const } : {}),
-    ...(chartType.findAll(CHART_NS, "axId").some((axis) => axis.getAttribute("val") === "-1000000002") ? { axis: "secondary" as const } : {}),
+    ...(chartType.findAll(CHART_NS, "axId").some((axis) => secondaryAxisIds.has(axis.getAttribute("val") ?? "")) ? { axis: "secondary" as const } : {}),
   }));
 }
 
@@ -317,6 +378,15 @@ function chartSourceRange(series: Array<{ categories?: string; values?: string }
 }
 
 function chartTypeAndElement(chartRoot: XmlElement) {
+  if (chartRoot.namespaceUri() === CHART_EX_NS || firstDescendant(chartRoot, CHART_EX_NS, "plotArea")) {
+    const region = firstDescendant(chartRoot, CHART_EX_NS, "plotAreaRegion");
+    const modernSeries = region?.elements().filter((node) => node.namespaceUri() === CHART_EX_NS && node.localName === "series") ?? [];
+    return {
+      type: modernSeries.some((series) => firstDescendant(series, CHART_EX_NS, "binning")) ? "histogram" as const : "column" as const,
+      element: region,
+      chartEx: true as const,
+    };
+  }
   const plot = child(chartRoot, CHART_NS, "chart")?.find(CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
   const typeElements = plot?.elements().filter((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName) && node.localName !== "plotArea") ?? [];
   const typeElement = typeElements[0];
@@ -366,24 +436,36 @@ async function projectCharts(workbook: Workbook, sheet: Worksheet): Promise<Xlsx
   const result: XlsxChartProjection[] = [];
   for (const anchor of drawingRoot.elements().filter((node) => node.namespaceUri() === DRAWING_NS && (node.localName === "twoCellAnchor" || node.localName === "oneCellAnchor"))) {
     const frame = firstDescendant(anchor, DRAWING_NS, "graphicFrame");
-    const chartRef = firstDescendant(frame ?? anchor, CHART_NS, "chart")?.getAttribute("r:id");
+    const chartNode = firstDescendant(frame ?? anchor, CHART_NS, "chart") ?? firstDescendant(frame ?? anchor, CHART_EX_NS, "chart");
+    const chartRef = chartNode?.getAttribute("r:id");
     if (!chartRef) continue;
     const chartPart = workbook.office.package.relatedPart(drawingPart, chartRef);
     if (!chartPart) continue;
     const chartRoot = (await workbook.office.xml(chartPart.name)).root;
     const chart = chartTypeAndElement(chartRoot);
-    const series = chart.elements
-      ? chart.elements.flatMap((element) => chartSeries(element))
-      : chart.element
-        ? chartSeries(chart.element)
-        : [];
+    const modern = "chartEx" in chart && chart.chartEx;
+    const secondaryAxisIds = new Set(
+      allDescendants(chartRoot, CHART_NS, "valAx")
+        .slice(1)
+        .map((axis) => child(axis, CHART_NS, "axId")?.getAttribute("val") ?? ""),
+    );
+    const series = modern
+      ? chartExSeries(workbook, chartRoot)
+      : chart.elements
+        ? chart.elements.flatMap((element) => chartSeries(element, secondaryAxisIds))
+        : chart.element
+          ? chartSeries(chart.element, secondaryAxisIds)
+          : [];
     const sourceRange = chartSourceRange(series, sheet.name) ?? series[0]?.values ?? series[0]?.categories ?? `${sheet.name}!A1`;
+    const modernChart = modern ? chartRoot : undefined;
     result.push({
       id: `xlsx:chart:${sheet.sheetId}:${chartPart.name}`,
       type: chart.type,
       sourceRange,
       title: chartText(chartRoot),
-      ...(child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "legend") ? {} : { showLegend: false }),
+      ...(modern
+        ? (firstDescendant(modernChart!, CHART_EX_NS, "legend") ? {} : { showLegend: false })
+        : (child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "legend") ? {} : { showLegend: false })),
       position: anchorPosition(anchor),
       ...(series.length ? { series } : {}),
       partName: chartPart.name,
@@ -430,6 +512,22 @@ export function nativeSheetById(workbook: Workbook, sheetId: string, aliases = n
 
 function workbookRoot(workbook: Workbook) {
   return workbook._internal().workbook.doc.root;
+}
+
+const WORKBOOK_CHILD_ORDER = [
+  "fileVersion", "fileSharing", "workbookPr", "workbookProtection", "bookViews", "sheets",
+  "functionGroups", "externalReferences", "definedNames", "calcPr", "oleSize",
+  "customWorkbookViews", "pivotCaches", "smartTagPr", "smartTags", "webPublishing",
+  "fileRecoveryPr", "extLst",
+];
+
+function insertWorkbookChild(root: XmlElement, node: XmlElement) {
+  const wanted = WORKBOOK_CHILD_ORDER.indexOf(node.localName);
+  const reference = root.elements().find((candidate) => {
+    const index = WORKBOOK_CHILD_ORDER.indexOf(candidate.localName);
+    return index >= 0 && wanted >= 0 && index > wanted;
+  });
+  root.insertBefore(node, reference ?? null);
 }
 
 function workbookSheetsElement(workbook: Workbook) {
@@ -776,24 +874,117 @@ function setChartRef(workbook: Workbook, container: XmlElement, formula: string 
   if (cache) ref.appendChild(chartCacheXml(cache.kind, cache.values));
 }
 
-function makeChartPlot(type: XlsxChartProjection["type"], seriesXml: XmlElement[]) {
+const PRIMARY_CATEGORY_AXIS_ID = "100000001";
+const PRIMARY_VALUE_AXIS_ID = "100000002";
+const SECONDARY_VALUE_AXIS_ID = "100000004";
+
+function chartAxisId(value: string) {
+  const node = new XmlElement("axId", "c");
+  node.setAttribute("val", value);
+  return node;
+}
+
+function standardCategoryAxis(axisId: string, crossAxisId: string) {
+  const axis = new XmlElement("catAx", "c");
+  axis.appendChild(chartAxisId(axisId));
+  const scaling = new XmlElement("scaling", "c");
+  const orientation = new XmlElement("orientation", "c");
+  orientation.setAttribute("val", "minMax");
+  scaling.appendChild(orientation);
+  axis.appendChild(scaling);
+  const deleted = new XmlElement("delete", "c");
+  deleted.setAttribute("val", "0");
+  axis.appendChild(deleted);
+  const position = new XmlElement("axPos", "c");
+  position.setAttribute("val", "b");
+  axis.appendChild(position);
+  const tickLabels = new XmlElement("tickLblPos", "c");
+  tickLabels.setAttribute("val", "nextTo");
+  axis.appendChild(tickLabels);
+  const cross = new XmlElement("crossAx", "c");
+  cross.setAttribute("val", crossAxisId);
+  axis.appendChild(cross);
+  const crosses = new XmlElement("crosses", "c");
+  crosses.setAttribute("val", "autoZero");
+  axis.appendChild(crosses);
+  return axis;
+}
+
+function standardValueAxis(axisId: string, crossAxisId: string, position = "l") {
+  const axis = new XmlElement("valAx", "c");
+  axis.appendChild(chartAxisId(axisId));
+  const scaling = new XmlElement("scaling", "c");
+  const orientation = new XmlElement("orientation", "c");
+  orientation.setAttribute("val", "minMax");
+  scaling.appendChild(orientation);
+  axis.appendChild(scaling);
+  const deleted = new XmlElement("delete", "c");
+  deleted.setAttribute("val", "0");
+  axis.appendChild(deleted);
+  const positionNode = new XmlElement("axPos", "c");
+  positionNode.setAttribute("val", position);
+  axis.appendChild(positionNode);
+  const tickLabels = new XmlElement("tickLblPos", "c");
+  tickLabels.setAttribute("val", "nextTo");
+  axis.appendChild(tickLabels);
+  const cross = new XmlElement("crossAx", "c");
+  cross.setAttribute("val", crossAxisId);
+  axis.appendChild(cross);
+  const crosses = new XmlElement("crosses", "c");
+  crosses.setAttribute("val", "autoZero");
+  axis.appendChild(crosses);
+  const crossBetween = new XmlElement("crossBetween", "c");
+  crossBetween.setAttribute("val", "midCat");
+  axis.appendChild(crossBetween);
+  return axis;
+}
+
+type StandardChartPlotOptions = {
+  categoryAxisId?: string;
+  valueAxisId?: string;
+  includeAxes?: boolean;
+  includeCategoryAxis?: boolean;
+  includeValueAxis?: boolean;
+};
+
+function makeChartPlot(
+  type: Exclude<XlsxChartProjection["type"], "histogram">,
+  seriesXml: XmlElement[],
+  options: StandardChartPlotOptions = {},
+) {
   const document = parseXml(`<c:plot xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
   const plot = document.root;
-  const elementName = type === "column" || type === "bar" ? "barChart" : type === "area" ? "areaChart" : type === "pie" ? "pieChart" : type === "scatter" ? "scatterChart" : type === "histogram" ? "histogramChart" : "lineChart";
+  const elementName = type === "column" || type === "bar" ? "barChart" : type === "area" ? "areaChart" : type === "pie" ? "pieChart" : type === "scatter" ? "scatterChart" : "lineChart";
   const chart = new XmlElement(elementName, "c");
-  if (elementName === "barChart") { const barDir = new XmlElement("barDir", "c"); barDir.setAttribute("val", type === "bar" ? "bar" : "col"); chart.appendChild(barDir); const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "clustered"); chart.appendChild(grouping); }
-  if (elementName === "lineChart") { const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "standard"); chart.appendChild(grouping); }
-  if (elementName === "histogramChart") {
-    const binCount = new XmlElement("binCount", "c"); binCount.setAttribute("val", String(Math.max(3, Math.min(30, seriesXml.length || 10)))); chart.appendChild(binCount);
-    const gapWidth = new XmlElement("gapWidth", "c"); gapWidth.setAttribute("val", "20"); chart.appendChild(gapWidth);
+  const categoryAxisId = options.categoryAxisId ?? PRIMARY_CATEGORY_AXIS_ID;
+  const valueAxisId = options.valueAxisId ?? PRIMARY_VALUE_AXIS_ID;
+  if (elementName === "barChart") {
+    const barDir = new XmlElement("barDir", "c");
+    barDir.setAttribute("val", type === "bar" ? "bar" : "col");
+    chart.appendChild(barDir);
+    const grouping = new XmlElement("grouping", "c");
+    grouping.setAttribute("val", "clustered");
+    chart.appendChild(grouping);
+  }
+  if (elementName === "areaChart" || elementName === "lineChart") {
+    const grouping = new XmlElement("grouping", "c");
+    grouping.setAttribute("val", "standard");
+    chart.appendChild(grouping);
   }
   for (const series of seriesXml) chart.appendChild(series);
-  const axId = (value: string) => { const node = new XmlElement("axId", "c"); node.setAttribute("val", value); return node; };
-  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart" || elementName === "histogramChart") { chart.appendChild(axId("-1000000001")); chart.appendChild(axId("1000000001")); }
+  if (elementName === "barChart") {
+    const gapWidth = new XmlElement("gapWidth", "c");
+    gapWidth.setAttribute("val", "150");
+    chart.appendChild(gapWidth);
+  }
+  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") {
+    chart.appendChild(chartAxisId(categoryAxisId));
+    chart.appendChild(chartAxisId(valueAxisId));
+  }
   plot.appendChild(chart);
-  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart" || elementName === "histogramChart") {
-    for (const axisName of ["catAx", "valAx"]) {
-      const axis = new XmlElement(axisName, "c"); axis.appendChild(axId(axisName === "catAx" ? "-1000000001" : "1000000001")); const scaling = new XmlElement("scaling", "c"); const orientation = new XmlElement("orientation", "c"); orientation.setAttribute("val", "minMax"); scaling.appendChild(orientation); axis.appendChild(scaling); const deleteNode = new XmlElement("delete", "c"); deleteNode.setAttribute("val", "0"); axis.appendChild(deleteNode); const pos = new XmlElement("axPos", "c"); pos.setAttribute("val", axisName === "catAx" ? "b" : "l"); axis.appendChild(pos); plot.appendChild(axis); }
+  if ((elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") && options.includeAxes !== false) {
+    if (options.includeCategoryAxis !== false) plot.appendChild(standardCategoryAxis(categoryAxisId, valueAxisId));
+    if (options.includeValueAxis !== false) plot.appendChild(standardValueAxis(valueAxisId, categoryAxisId));
   }
   return plot;
 }
@@ -821,78 +1012,296 @@ function chartSeriesForSource(workbook: Workbook, chart: XlsxChartProjection, de
   });
 }
 
-function newChartSeries(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
-  const source = chartSeriesForSource(workbook, chart, defaultSheet);
+type IndexedChartSeries = NonNullable<XlsxChartProjection["series"]>[number] & { nativeIndex?: number };
+
+function newChartSeries(
+  workbook: Workbook,
+  chart: XlsxChartProjection,
+  defaultSheet: string,
+  sourceOverride?: IndexedChartSeries[],
+) {
+  const source = sourceOverride ?? chartSeriesForSource(workbook, chart, defaultSheet);
   return source.map((series, index) => {
     const document = parseXml(`<c:ser xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
     const ser = document.root;
-    const idx = new XmlElement("idx", "c"); idx.setAttribute("val", String(index)); ser.appendChild(idx);
-    const order = new XmlElement("order", "c"); order.setAttribute("val", String(index)); ser.appendChild(order);
-    const tx = new XmlElement("tx", "c"); const v = new XmlElement("v", "c"); v.appendChild(new XmlText(series.name ?? `Series ${index + 1}`)); tx.appendChild(v); ser.appendChild(tx);
+    const nativeIndex = (series as IndexedChartSeries).nativeIndex ?? index;
+    const idx = new XmlElement("idx", "c"); idx.setAttribute("val", String(nativeIndex)); ser.appendChild(idx);
+    const order = new XmlElement("order", "c"); order.setAttribute("val", String(nativeIndex)); ser.appendChild(order);
+    const tx = new XmlElement("tx", "c");
+    const headerReference = seriesHeaderReference(series.values ?? chart.sourceRange, defaultSheet);
+    const headerCache = headerReference ? cacheValues(workbook, headerReference, defaultSheet) : null;
+    const canUseHeaderReference = Boolean(
+      headerReference &&
+      headerCache?.values.length &&
+      (!series.name || String(headerCache.values[0]) === series.name),
+    );
+    if (canUseHeaderReference) setChartRef(workbook, tx, headerReference, defaultSheet, true);
+    else {
+      const v = new XmlElement("v", "c");
+      v.appendChild(new XmlText(series.name ?? `Series ${nativeIndex + 1}`));
+      tx.appendChild(v);
+    }
+    ser.appendChild(tx);
     if (series.categories) { const cat = new XmlElement("cat", "c"); setChartRef(workbook, cat, series.categories, defaultSheet, true); ser.appendChild(cat); }
     if (series.values || chart.sourceRange) { const val = new XmlElement("val", "c"); setChartRef(workbook, val, series.values ?? chart.sourceRange, defaultSheet); ser.appendChild(val); }
     return ser;
   });
 }
 
-function histogramBinCount(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
-  const source = chartSeriesForSource(workbook, chart, defaultSheet)[0]?.values ?? chart.sourceRange;
-  const cached = cacheValues(workbook, source, defaultSheet);
-  const count = cached?.values.filter((value) => typeof value === "number" && Number.isFinite(value)).length ?? 1;
-  return Math.max(3, Math.min(30, Math.ceil(Math.sqrt(Math.max(1, count)))));
+function nextChartExNamePair(workbook: Workbook) {
+  const used = new Set(workbook.definedNames().map((candidate) => candidate.name.toLowerCase()));
+  for (let index = 0; ; index += 2) {
+    const header = `_xlchart.v1.${index}`;
+    const values = `_xlchart.v1.${index + 1}`;
+    if (!used.has(header.toLowerCase()) && !used.has(values.toLowerCase())) return { header, values };
+  }
 }
 
-function newHistogramSeries(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
-  const source = chartSeriesForSource(workbook, chart, defaultSheet);
-  const series = source[0] ?? { values: chart.sourceRange };
-  const document = parseXml(`<c:histogramSeries xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
-  const node = document.root;
-  const idx = new XmlElement("idx", "c"); idx.setAttribute("val", "0"); node.appendChild(idx);
-  const order = new XmlElement("order", "c"); order.setAttribute("val", "0"); node.appendChild(order);
-  const tx = new XmlElement("tx", "c"); const v = new XmlElement("v", "c"); v.appendChild(new XmlText(series.name ?? "Frequency")); tx.appendChild(v); node.appendChild(tx);
-  const values = new XmlElement("val", "c"); setChartRef(workbook, values, series.values ?? chart.sourceRange, defaultSheet); node.appendChild(values);
-  return node;
+function ensureHiddenDefinedName(workbook: Workbook, name: string, reference: string) {
+  const root = workbookRoot(workbook);
+  let names = root.find(SML, "definedNames");
+  if (!names) {
+    names = new XmlElement("definedNames", root.lookupPrefix(SML) ?? null);
+    insertWorkbookChild(root, names);
+  }
+  let node = names.elements().find((candidate) => candidate.localName === "definedName" && candidate.getAttribute("name")?.toLowerCase() === name.toLowerCase());
+  if (!node) {
+    node = new XmlElement("definedName", names.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+    node.setAttribute("name", name);
+    names.appendChild(node);
+  }
+  node.setAttribute("hidden", "1");
+  setText(node, reference.replace(/^=/, ""));
+  workbook._internal().markDirty(workbook._internal().workbook);
+}
+
+function firstCellReference(formula: string, defaultSheet: string) {
+  const sourceSheet = refSheetName(formula, defaultSheet);
+  const local = formula.slice(formula.lastIndexOf("!") + 1);
+  const range = rangePart(local);
+  if (!range) return formula;
+  return `${quoteSheetPrefix(sourceSheet)}$${columnName(range.start.col - 1)}$${range.start.row}`;
+}
+
+function chartExTitleXml(title: string) {
+  const document = parseXml(`<cx:title xmlns:cx="${CHART_EX_NS}" pos="t" align="ctr" overlay="0"><cx:tx><cx:txData><cx:v/></cx:txData></cx:tx></cx:title>`);
+  const text = firstDescendant(document.root, CHART_EX_NS, "v");
+  if (text) setText(text, title);
+  return document.root;
+}
+
+function xmlText(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+function chartExUniqueId(chart: XlsxChartProjection, index: number) {
+  let hash = 2166136261;
+  for (const character of `${chart.id}:${chart.sourceRange}`) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  const seed = ((hash >>> 0) || 1).toString(16).padStart(8, "0").toUpperCase().repeat(3);
+  return `{${index.toString(16).padStart(8, "0")}-${seed.slice(0, 4)}-4${seed.slice(4, 7)}-8${seed.slice(7, 10)}-${seed.slice(10, 22)}}`;
+}
+
+function chartExLegendXml() {
+  return parseXml(`<cx:legend xmlns:cx="${CHART_EX_NS}" pos="r" align="ctr" overlay="0"/>`).root;
+}
+
+function chartExHistogramDocument(
+  workbook: Workbook,
+  chart: XlsxChartProjection,
+  defaultSheet: string,
+) {
+  const source = chartSeriesForSource(workbook, chart, defaultSheet)[0] ?? { values: chart.sourceRange };
+  const valuesReference = source.values ?? chart.sourceRange;
+  const names = nextChartExNamePair(workbook);
+  const headerReference = seriesHeaderReference(valuesReference, defaultSheet) ?? firstCellReference(valuesReference, defaultSheet);
+  ensureHiddenDefinedName(workbook, names.header, headerReference);
+  ensureHiddenDefinedName(workbook, names.values, absoluteRange(valuesReference, defaultSheet));
+  const seriesName = source.name ?? "Values";
+  const document = parseXml(`<cx:chartSpace xmlns:cx="${CHART_EX_NS}" xmlns:a="${A_NS}" xmlns:r="${REL}"><cx:chartData><cx:data id="0"><cx:numDim type="val"><cx:f>${xmlText(names.values)}</cx:f></cx:numDim></cx:data><cx:data id="1"><cx:numDim type="val"><cx:f>${xmlText(names.values)}</cx:f></cx:numDim></cx:data></cx:chartData><cx:chart><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="clusteredColumn" uniqueId="${chartExUniqueId(chart, 0)}" formatIdx="0"><cx:tx><cx:txData><cx:f>${xmlText(names.header)}</cx:f><cx:v>${xmlText(seriesName)}</cx:v></cx:txData></cx:tx><cx:dataId val="0"/><cx:layoutPr><cx:binning intervalClosed="r"/></cx:layoutPr></cx:series><cx:series layoutId="clusteredColumn" hidden="1" uniqueId="${chartExUniqueId(chart, 1)}" formatIdx="1"><cx:tx><cx:txData><cx:v>${xmlText(seriesName)}</cx:v></cx:txData></cx:tx><cx:dataId val="1"/><cx:layoutPr><cx:binning intervalClosed="r"/></cx:layoutPr></cx:series></cx:plotAreaRegion><cx:axis id="0"><cx:catScaling gapWidth="0"/><cx:tickLabels/></cx:axis><cx:axis id="1"><cx:valScaling/><cx:majorGridlines/><cx:tickLabels/></cx:axis></cx:plotArea></cx:chart></cx:chartSpace>`);
+  if (chart.title) {
+    const chartNode = child(document.root, CHART_EX_NS, "chart");
+    if (chartNode) chartNode.insertBefore(chartExTitleXml(chart.title), chartNode.elements()[0] ?? null);
+  }
+  return document;
+}
+
+function ensureChartExDataFormula(chartRoot: XmlElement, dataId: string, formula: string) {
+  const dataContainer = child(chartRoot, CHART_EX_NS, "chartData");
+  if (!dataContainer) return;
+  let data = dataContainer.elements().find((candidate) => candidate.namespaceUri() === CHART_EX_NS && candidate.localName === "data" && candidate.getAttribute("id") === dataId);
+  if (!data) {
+    data = parseXml(`<cx:data xmlns:cx="${CHART_EX_NS}" id="${xmlText(dataId)}"><cx:numDim type="val"><cx:f>${xmlText(formula)}</cx:f></cx:numDim></cx:data>`).root;
+    dataContainer.appendChild(data);
+    return;
+  }
+  let dimension = child(data, CHART_EX_NS, "numDim");
+  if (!dimension) {
+    dimension = new XmlElement("numDim", "cx");
+    dimension.setAttribute("type", "val");
+    data.appendChild(dimension);
+  }
+  const formulaNode = child(dimension, CHART_EX_NS, "f") ?? (() => {
+    const created = new XmlElement("f", "cx");
+    dimension!.appendChild(created);
+    return created;
+  })();
+  setText(formulaNode, formula);
+}
+
+function chartExSeriesText(series: XmlElement, formula: string | undefined, label: string) {
+  let tx = child(series, CHART_EX_NS, "tx");
+  if (!tx) {
+    tx = new XmlElement("tx", "cx");
+    series.appendChild(tx);
+  }
+  let txData = child(tx, CHART_EX_NS, "txData");
+  if (!txData) {
+    txData = new XmlElement("txData", "cx");
+    tx.appendChild(txData);
+  }
+  const existingFormula = child(txData, CHART_EX_NS, "f");
+  if (formula) {
+    const formulaNode = existingFormula ?? (() => {
+      const created = new XmlElement("f", "cx");
+      txData!.insertBefore(created, txData!.elements()[0] ?? null);
+      return created;
+    })();
+    setText(formulaNode, formula);
+  } else if (existingFormula) txData.removeChild(existingFormula);
+  const value = child(txData, CHART_EX_NS, "v") ?? (() => {
+    const created = new XmlElement("v", "cx");
+    txData!.appendChild(created);
+    return created;
+  })();
+  setText(value, label);
+}
+
+function ensureChartExBinning(series: XmlElement) {
+  let layout = child(series, CHART_EX_NS, "layoutPr");
+  if (!layout) {
+    layout = new XmlElement("layoutPr", "cx");
+    series.appendChild(layout);
+  }
+  let binning = child(layout, CHART_EX_NS, "binning");
+  if (!binning) {
+    binning = new XmlElement("binning", "cx");
+    binning.setAttribute("intervalClosed", "r");
+    layout.appendChild(binning);
+  }
+  if (!binning.getAttribute("intervalClosed")) binning.setAttribute("intervalClosed", "r");
+  for (const node of [...binning.elements()].filter((candidate) => candidate.localName === "binSize" || candidate.localName === "binCount")) binning.removeChild(node);
+}
+
+function newChartExSeries(chart: XlsxChartProjection, index: number, hidden: boolean) {
+  const hiddenAttribute = hidden ? ' hidden="1"' : "";
+  return parseXml(`<cx:series xmlns:cx="${CHART_EX_NS}" layoutId="clusteredColumn"${hiddenAttribute} uniqueId="${chartExUniqueId(chart, index)}" formatIdx="${index}"><cx:tx><cx:txData><cx:v/></cx:txData></cx:tx><cx:dataId val="${index}"/><cx:layoutPr><cx:binning intervalClosed="r"/></cx:layoutPr></cx:series>`).root;
+}
+
+function updateChartExHistogram(workbook: Workbook, chartRoot: XmlElement, chart: XlsxChartProjection, defaultSheet: string) {
+  const modernChart = child(chartRoot, CHART_EX_NS, "chart") ?? firstDescendant(chartRoot, CHART_EX_NS, "chart");
+  const region = firstDescendant(chartRoot, CHART_EX_NS, "plotAreaRegion");
+  const seriesNodes = region?.elements().filter((node) => node.namespaceUri() === CHART_EX_NS && node.localName === "series") ?? [];
+  const series = seriesNodes.find((candidate) => !boolAttribute(candidate.getAttribute("hidden"))) ?? seriesNodes[0];
+  if (!modernChart || !region || !series) return;
+  let companion = seriesNodes.find((candidate) => candidate !== series && boolAttribute(candidate.getAttribute("hidden")));
+  if (!companion) {
+    companion = newChartExSeries(chart, 1, true);
+    region.appendChild(companion);
+  }
+  const source = chartSeriesForSource(workbook, chart, defaultSheet)[0] ?? { values: chart.sourceRange };
+  const valueReference = source.values ?? chart.sourceRange;
+  const existingValueDataId = child(series, CHART_EX_NS, "dataId")?.getAttribute("val") ?? "0";
+  const existingValueName = chartExDataFormula(chartRoot, existingValueDataId) ?? chartExDataFormula(chartRoot, "0") ?? chartExDataFormula(chartRoot, "1");
+  const existingHeaderName = firstDescendant(child(series, CHART_EX_NS, "tx") ?? series, CHART_EX_NS, "f")?.text();
+  const names = !existingValueName || !/^_xlchart\.v1\./i.test(existingValueName) || !existingHeaderName || !/^_xlchart\.v1\./i.test(existingHeaderName) ? nextChartExNamePair(workbook) : undefined;
+  const valueName = existingValueName && /^_xlchart\.v1\./i.test(existingValueName) ? existingValueName : names!.values;
+  const headerName = existingHeaderName && /^_xlchart\.v1\./i.test(existingHeaderName) ? existingHeaderName : names!.header;
+  ensureChartExDataFormula(chartRoot, "0", valueName);
+  ensureChartExDataFormula(chartRoot, "1", valueName);
+  child(series, CHART_EX_NS, "dataId")?.setAttribute("val", "0");
+  child(companion, CHART_EX_NS, "dataId")?.setAttribute("val", "1");
+  const headerReference = seriesHeaderReference(valueReference, defaultSheet) ?? firstCellReference(valueReference, defaultSheet);
+  ensureHiddenDefinedName(workbook, headerName, headerReference);
+  ensureHiddenDefinedName(workbook, valueName, absoluteRange(valueReference, defaultSheet));
+  const label = source.name ?? "Values";
+  series.removeAttribute("hidden");
+  companion.setAttribute("hidden", "1");
+  if (!series.getAttribute("uniqueId") || /^\{0{8}-0{4}-0{4}-0{4}-0{12}\}$/.test(series.getAttribute("uniqueId") ?? "")) series.setAttribute("uniqueId", chartExUniqueId(chart, 0));
+  if (!companion.getAttribute("uniqueId") || /^\{0{8}-0{4}-0{4}-0{4}-0{12}\}$/.test(companion.getAttribute("uniqueId") ?? "")) companion.setAttribute("uniqueId", chartExUniqueId(chart, 1));
+  series.setAttribute("formatIdx", series.getAttribute("formatIdx") ?? "0");
+  companion.setAttribute("formatIdx", companion.getAttribute("formatIdx") ?? "1");
+  chartExSeriesText(series, headerName, label);
+  chartExSeriesText(companion, undefined, label);
+  const existingTitle = child(modernChart, CHART_EX_NS, "title");
+  if (existingTitle) modernChart.removeChild(existingTitle);
+  if (chart.title) modernChart.insertBefore(chartExTitleXml(chart.title), modernChart.elements()[0] ?? null);
+  ensureChartExBinning(series);
+  ensureChartExBinning(companion);
 }
 
 function comboChartPlots(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
   const source = chartSeriesForSource(workbook, chart, defaultSheet);
-  const primary = source.map((series, index) => ({ ...series, chartType: series.chartType ?? (index === 0 ? "column" : "line") }));
-  const barSeries = newChartSeries(workbook, { ...chart, type: "column", series: primary.filter((series) => series.chartType === "column" || series.chartType === "bar") }, defaultSheet);
-  const lineSeries = newChartSeries(workbook, { ...chart, type: "line", series: primary.filter((series) => series.chartType === "line") }, defaultSheet);
+  const primary: IndexedChartSeries[] = source.map((series, index) => ({ ...series, nativeIndex: index, chartType: series.chartType ?? (index === 0 ? "column" : "line") }));
+  const barSource = primary.filter((series) => series.chartType === "column" || series.chartType === "bar");
+  const lineSource = primary.filter((series) => series.chartType === "line");
+  const secondaryLines = lineSource.some((series) => series.axis === "secondary");
+  const barSeries = newChartSeries(workbook, { ...chart, type: "column" }, defaultSheet, barSource);
+  const lineSeries = newChartSeries(workbook, { ...chart, type: "line" }, defaultSheet, lineSource);
+  const valueAxisId = secondaryLines && !barSeries.length ? SECONDARY_VALUE_AXIS_ID : PRIMARY_VALUE_AXIS_ID;
   const plots: XmlElement[] = [];
-  if (barSeries.length) plots.push(makeChartPlot("column", barSeries).elements()[0]!);
-  if (lineSeries.length) plots.push(makeChartPlot("line", lineSeries).elements()[0]!);
+  if (barSeries.length) plots.push(...makeChartPlot("column", barSeries, { includeAxes: false }).elements());
+  if (lineSeries.length) {
+    plots.push(...makeChartPlot("line", lineSeries, {
+      includeAxes: false,
+      valueAxisId: secondaryLines ? SECONDARY_VALUE_AXIS_ID : PRIMARY_VALUE_AXIS_ID,
+    }).elements());
+  }
+  if (barSeries.length || lineSeries.length) {
+    plots.push(standardCategoryAxis(PRIMARY_CATEGORY_AXIS_ID, valueAxisId));
+    plots.push(standardValueAxis(valueAxisId, PRIMARY_CATEGORY_AXIS_ID, valueAxisId === SECONDARY_VALUE_AXIS_ID ? "r" : "l"));
+    if (secondaryLines && barSeries.length) plots.push(standardValueAxis(SECONDARY_VALUE_AXIS_ID, PRIMARY_CATEGORY_AXIS_ID, "r"));
+  }
   return plots;
 }
 
 function updateChartSeries(workbook: Workbook, chartRoot: XmlElement, chart: XlsxChartProjection, defaultSheet: string) {
+  if (chartRoot.namespaceUri() === CHART_EX_NS || firstDescendant(chartRoot, CHART_EX_NS, "plotArea")) {
+    if (chart.type === "histogram") updateChartExHistogram(workbook, chartRoot, chart, defaultSheet);
+    return;
+  }
   const plot = child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
   const plotTypes = plot?.elements().filter((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName)) ?? [];
-  if (chart.type === "histogram" || plotTypes.some((candidate) => candidate.localName === "histogramChart")) {
+  if (plotTypes.some((candidate) => candidate.localName === "histogramChart")) {
     const histogram = plotTypes.find((candidate) => candidate.localName === "histogramChart");
     if (histogram) {
       const existing = histogram.elements().find((node) => node.namespaceUri() === CHART_NS && node.localName === "histogramSeries");
-      const desired = newHistogramSeries(workbook, chart, defaultSheet);
       if (existing) histogram.removeChild(existing);
-      histogram.insertBefore(desired, histogram.elements()[0] ?? null);
-      const binCount = child(histogram, CHART_NS, "binCount");
-      if (binCount) binCount.setAttribute("val", String(histogramBinCount(workbook, chart, defaultSheet)));
+      for (const series of newChartSeries(workbook, { ...chart, type: "column" }, defaultSheet)) histogram.insertBefore(series, histogram.elements()[0] ?? null);
     }
     return;
   }
   if (chart.type === "combo" || plotTypes.length > 1) {
-    const requested = chartSeriesForSource(workbook, chart, defaultSheet);
+    const requested: IndexedChartSeries[] = chartSeriesForSource(workbook, chart, defaultSheet).map((series, index) => ({ ...series, nativeIndex: index, chartType: series.chartType ?? (index === 0 ? "column" : "line") }));
     const plots = plotTypes.filter((candidate) => candidate.localName === "barChart" || candidate.localName === "lineChart");
     if (!plots.length) return;
     plots.forEach((plotType) => {
       const desiredType = plotType.localName === "barChart" ? "column" : "line";
-      const desired = requested.filter((series, index) => (series.chartType ?? (index === 0 ? "column" : "line")) === desiredType || (desiredType === "column" && series.chartType === "bar"));
+      const desired = requested.filter((series) => series.chartType === desiredType || (desiredType === "column" && series.chartType === "bar"));
       const current = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
       for (let index = current.length - 1; index >= desired.length; index -= 1) plotType.removeChild(current[index]!);
       const next = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
-      for (let index = next.length; index < desired.length; index += 1) plotType.appendChild(newChartSeries(workbook, { ...chart, type: desiredType, series: [desired[index]!] }, defaultSheet)[0]!);
+      for (let index = next.length; index < desired.length; index += 1) plotType.appendChild(newChartSeries(workbook, { ...chart, type: desiredType }, defaultSheet, [desired[index]!])[0]!);
+      const lineUsesSecondary = desiredType === "line" && desired.some((series) => series.axis === "secondary");
+      const valueAxisId = lineUsesSecondary ? SECONDARY_VALUE_AXIS_ID : PRIMARY_VALUE_AXIS_ID;
+      for (const axisId of plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "axId")) {
+        const value = axisId.getAttribute("val");
+        if (value === PRIMARY_VALUE_AXIS_ID || value === SECONDARY_VALUE_AXIS_ID) axisId.setAttribute("val", value === PRIMARY_VALUE_AXIS_ID || value === SECONDARY_VALUE_AXIS_ID ? valueAxisId : value);
+      }
       plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser").forEach((ser, index) => {
         const requestedSeries = desired[index]!;
+        const nativeIndex = requestedSeries.nativeIndex ?? index;
+        child(ser, CHART_NS, "idx")?.setAttribute("val", String(nativeIndex));
+        child(ser, CHART_NS, "order")?.setAttribute("val", String(nativeIndex));
         const tx = child(ser, CHART_NS, "tx");
         if (tx && requestedSeries.name) { const value = firstDescendant(tx, CHART_NS, "v"); if (value) setText(value, requestedSeries.name); }
         const categories = child(ser, CHART_NS, "cat") ?? (() => { const created = new XmlElement("cat", "c"); ser.appendChild(created); return created; })();
@@ -923,13 +1332,28 @@ function updateChartSeries(workbook: Workbook, chartRoot: XmlElement, chart: Xls
 }
 
 function setChartLegend(chartRoot: XmlElement, visible: boolean) {
+  if (chartRoot.namespaceUri() === CHART_EX_NS || firstDescendant(chartRoot, CHART_EX_NS, "plotArea")) {
+    const chart = child(chartRoot, CHART_EX_NS, "chart");
+    if (!chart) return;
+    const existing = child(chart, CHART_EX_NS, "legend");
+    if (!visible) {
+      if (existing) chart.removeChild(existing);
+      return;
+    }
+    if (!existing) chart.appendChild(chartExLegendXml());
+    return;
+  }
   const chart = child(chartRoot, CHART_NS, "chart");
   if (!chart) return;
   const existing = child(chart, CHART_NS, "legend");
   if (!visible) { if (existing) chart.removeChild(existing); return; }
   if (existing) return;
   const document = parseXml(`<c:legend xmlns:c="${CHART_NS}"><c:legendPos val="r"/><c:layout/><c:overlay val="0"/></c:legend>`);
-  chart.appendChild(document.root);
+  // CT_Chart places the legend after plotArea and before the display
+  // switches. Appending it after c:dispBlanksAs is accepted by some readers
+  // but is a schema defect that Excel repairs on open.
+  const before = chart.elements().find((node) => ["plotVisOnly", "dispBlanksAs", "showDLbls", "showDataLabelsOverMaximum", "extLst"].includes(node.localName));
+  chart.insertBefore(document.root, before ?? null);
 }
 
 function setChartType(chartRoot: XmlElement, type: XlsxChartProjection["type"]) {
@@ -948,12 +1372,12 @@ function setChartType(chartRoot: XmlElement, type: XlsxChartProjection["type"]) 
     return;
   }
   if (type === "histogram") {
-    const histogramSeries = series[0] ? histogramSeriesFromStandard(series[0]) : new XmlElement("histogramSeries", parent.lookupPrefix(CHART_NS) ?? "c");
-    parent.appendChild(makeChartPlot("histogram", [histogramSeries]).elements()[0]!);
+    // Histogram is a ChartEx feature. Callers migrate a legacy chart to a
+    // ChartEx part instead of emitting the non-standard c:histogramChart.
+    for (const plot of makeChartPlot("column", series).elements()) parent.appendChild(plot);
     return;
   }
-  const replacement = makeChartPlot(type, series).elements()[0]!;
-  parent.appendChild(replacement);
+  for (const replacement of makeChartPlot(type, series).elements()) parent.appendChild(replacement);
 }
 
 function standardSeriesFromHistogram(node: XmlElement) {
@@ -966,22 +1390,16 @@ function standardSeriesFromHistogram(node: XmlElement) {
   return result;
 }
 
-function histogramSeriesFromStandard(node: XmlElement) {
-  const document = parseXml(`<c:histogramSeries xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
-  const result = document.root;
-  for (const childName of ["idx", "order", "tx", "val"]) {
-    const childNode = child(node, CHART_NS, childName);
-    if (childNode) result.appendChild(childNode.clone());
-  }
-  return result;
-}
-
 function comboChartPlotsFromExisting(series: XmlElement[]) {
   const first = series.slice(0, 1);
   const rest = series.slice(1);
   const plots: XmlElement[] = [];
-  if (first.length) plots.push(makeChartPlot("column", first).elements()[0]!);
-  if (rest.length) plots.push(makeChartPlot("line", rest).elements()[0]!);
+  if (first.length) plots.push(...makeChartPlot("column", first, { includeAxes: false }).elements());
+  if (rest.length) plots.push(...makeChartPlot("line", rest, { includeAxes: false }).elements());
+  if (first.length || rest.length) {
+    plots.push(standardCategoryAxis(PRIMARY_CATEGORY_AXIS_ID, PRIMARY_VALUE_AXIS_ID));
+    plots.push(standardValueAxis(PRIMARY_VALUE_AXIS_ID, PRIMARY_CATEGORY_AXIS_ID));
+  }
   return plots;
 }
 
@@ -989,6 +1407,28 @@ async function writeExistingChart(workbook: Workbook, sheet: Worksheet, chart: X
   if (!chart.partName) return false;
   const document = await workbook.office.xml(chart.partName);
   const root = document.root;
+  const modern = workbook.office.package.contentTypeOf(chart.partName) === CT_CHART_EX || root.namespaceUri() === CHART_EX_NS || Boolean(firstDescendant(root, CHART_EX_NS, "plotArea"));
+  if (modern) {
+    ensureChartExAssets(workbook, chart.partName);
+    if (chart.type !== "histogram") {
+      await removeNativeChart(workbook, sheet, chart.id);
+      await createNativeChart(workbook, sheet, { ...chart, partName: undefined, drawingPartName: undefined, anchorId: undefined });
+      return true;
+    }
+    if (chart.showLegend !== undefined) setChartLegend(root, chart.showLegend);
+    updateChartExHistogram(workbook, root, chart, sheet.name);
+    await updateChartAnchor(workbook, chart);
+    workbook.office.markDirty(chart.partName);
+    return true;
+  }
+  if (chart.type === "histogram" || Boolean(firstDescendant(root, CHART_NS, "histogramChart"))) {
+    // Legacy c:histogramChart/c:histogramSeries is not part of the standard
+    // chart plot model. Replace it with a real ChartEx part and keep the
+    // worksheet anchor/relationship managed by the same writer path.
+    await removeNativeChart(workbook, sheet, chart.id);
+    await createNativeChart(workbook, sheet, { ...chart, partName: undefined, drawingPartName: undefined, anchorId: undefined });
+    return true;
+  }
   const title = firstDescendant(root, CHART_NS, "title");
   if (title?.parent) title.parent.removeChild(title);
   if (chart.title) {
@@ -1003,14 +1443,17 @@ async function writeExistingChart(workbook: Workbook, sheet: Worksheet, chart: X
   return true;
 }
 
-function drawingAnchorXml(chartRelId: string, chart: XlsxChartProjection) {
+function drawingAnchorXml(chartRelId: string, chart: XlsxChartProjection, modern = false, shapeId = 2) {
   const right = chart.position.x + chart.position.width;
   const bottom = chart.position.y + chart.position.height;
   const x = Math.max(0, Math.floor(chart.position.x / 64));
   const y = Math.max(0, Math.floor(chart.position.y / 20));
   const toX = Math.max(x + 1, Math.floor(right / 64));
   const toY = Math.max(y + 1, Math.floor(bottom / 20));
-  const document = parseXml(`<xdr:twoCellAnchor xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:r="${REL}"><xdr:from><xdr:col>${x}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${y}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${toX}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${toY}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri="${CHART_NS}"><c:chart r:id="${chartRelId}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`);
+  const graphic = modern
+    ? `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:cx1="${CHART_EX_REQUIRES_NS}" Requires="cx1"><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${shapeId}" name="Chart"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri="${CHART_EX_NS}"><cx:chart xmlns:cx="${CHART_EX_NS}" xmlns:r="${REL}" r:id="${chartRelId}"/></a:graphicData></a:graphic></xdr:graphicFrame></mc:Choice><mc:Fallback><xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="0" name=""/><xdr:cNvSpPr><a:spLocks noTextEdit="1"/></xdr:cNvSpPr></xdr:nvSpPr><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="1"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:prstClr val="white"/></a:solidFill><a:ln w="1"><a:solidFill><a:prstClr val="green"/></a:solidFill></a:ln></xdr:spPr><xdr:txBody><a:bodyPr vertOverflow="clip" horzOverflow="clip"/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="900"/><a:t>This chart is not available in this Office version.</a:t></a:r></a:p></xdr:txBody></xdr:sp></mc:Fallback></mc:AlternateContent>`
+    : `<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${shapeId}" name="Chart"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri="${CHART_NS}"><c:chart r:id="${chartRelId}"/></a:graphicData></a:graphic></xdr:graphicFrame>`;
+  const document = parseXml(`<xdr:twoCellAnchor xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:cx="${CHART_EX_NS}" xmlns:r="${REL}"><xdr:from><xdr:col>${x}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${y}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${toX}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${toY}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>${graphic.replace("<xdr:xfrm/>", "<xdr:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/></xdr:xfrm>")}<xdr:clientData/></xdr:twoCellAnchor>`);
   const anchor = document.root;
   const from = child(anchor, DRAWING_NS, "from");
   const to = child(anchor, DRAWING_NS, "to");
@@ -1033,7 +1476,7 @@ async function updateChartAnchor(workbook: Workbook, chart: XlsxChartProjection)
   const document = await workbook.office.xml(chart.drawingPartName);
   const anchor = document.root.elements().find((candidate) =>
     (candidate.localName === "twoCellAnchor" || candidate.localName === "oneCellAnchor")
-      && firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === chart.anchorId,
+      && (firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === chart.anchorId || firstDescendant(candidate, CHART_EX_NS, "chart")?.getAttribute("r:id") === chart.anchorId),
   );
   if (!anchor) return;
   const right = chart.position.x + chart.position.width;
@@ -1065,31 +1508,56 @@ async function updateChartAnchor(workbook: Workbook, chart: XlsxChartProjection)
   if (changed) workbook.office.markDirty(chart.drawingPartName);
 }
 
+function nextChartAssetPartName(workbook: Workbook, prefix: string) {
+  let index = 1;
+  while (workbook.office.package.getPart(`/xl/charts/${prefix}${index}.xml`)) index += 1;
+  return `/xl/charts/${prefix}${index}.xml`;
+}
+
+function ensureChartExAssets(workbook: Workbook, chartPartName: string) {
+  const packageModel = workbook.office.package;
+  const chartPart = packageModel.getPart(chartPartName);
+  if (!chartPart) return;
+  const ensure = (relationshipType: string, contentType: string, prefix: string, xml: string) => {
+    const relationships = chartPart.relationships();
+    const existing = relationships.byType(relationshipType).find((candidate) => packageModel.relatedPart(chartPart, candidate.id));
+    if (existing) return;
+    for (const broken of relationships.byType(relationshipType)) relationships.remove(broken.id);
+    const partName = nextChartAssetPartName(workbook, prefix);
+    packageModel.addPart(partName, contentType, new TextEncoder().encode(xml));
+    relationships.add({ type: relationshipType, target: relativeTarget(chartPartName, partName) });
+  };
+  ensure(CHART_STYLE_REL, CT_CHART_STYLE, "style", DEFAULT_CHART_STYLE_XML);
+  ensure(CHART_COLOR_REL, CT_CHART_COLOR, "colors", DEFAULT_CHART_COLOR_XML);
+}
+
 async function createNativeChart(workbook: Workbook, sheet: Worksheet, chart: XlsxChartProjection) {
   const packageModel = workbook.office.package;
   const nextPart = (prefix: string, suffix: string) => {
     let index = 1; while (packageModel.getPart(`/xl/${prefix}/${suffix}${index}.xml`)) index += 1; return `/xl/${prefix}/${suffix}${index}.xml`;
   };
-  const chartPartName = nextPart("charts", "chart");
-  const chartDocument = parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${A_NS}" xmlns:r="${REL}"><c:chart><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`);
-  const chartRoot = chartDocument.root;
-  const chartNode = child(chartRoot, CHART_NS, "chart")!;
-  const plotArea = child(chartNode, CHART_NS, "plotArea")!;
-  for (const node of [...plotArea.children]) plotArea.removeChild(node);
-  plotArea.appendChild(new XmlElement("layout", "c"));
-  if (chart.title) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
-  if (chart.type === "combo") {
-    for (const plot of comboChartPlots(workbook, chart, sheet.name)) plotArea.appendChild(plot);
-  } else if (chart.type === "histogram") {
-    const plot = makeChartPlot("histogram", [newHistogramSeries(workbook, chart, sheet.name)]).elements()[0]!;
-    const binCount = child(plot, CHART_NS, "binCount");
-    if (binCount) binCount.setAttribute("val", String(histogramBinCount(workbook, chart, sheet.name)));
-    plotArea.appendChild(plot);
+  const modern = chart.type === "histogram";
+  const chartPartName = nextPart("charts", modern ? "chartEx" : "chart");
+  if (modern) {
+    packageModel.addPart(chartPartName, CT_CHART_EX, serializeXml(chartExHistogramDocument(workbook, chart, sheet.name)));
+    ensureChartExAssets(workbook, chartPartName);
   } else {
-    plotArea.appendChild(makeChartPlot(chart.type, newChartSeries(workbook, chart, sheet.name).map((node) => node.clone())).elements()[0]!);
+    const chartDocument = parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${A_NS}" xmlns:r="${REL}"><c:chart><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`);
+    const chartRoot = chartDocument.root;
+    const chartNode = child(chartRoot, CHART_NS, "chart")!;
+    const plotArea = child(chartNode, CHART_NS, "plotArea")!;
+    for (const node of [...plotArea.children]) plotArea.removeChild(node);
+    plotArea.appendChild(new XmlElement("layout", "c"));
+    if (chart.title) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
+    if (chart.type === "combo") {
+      for (const plot of comboChartPlots(workbook, chart, sheet.name)) plotArea.appendChild(plot);
+    } else {
+      const standardType = chart.type === "histogram" ? "line" : chart.type;
+      for (const plot of makeChartPlot(standardType, newChartSeries(workbook, chart, sheet.name).map((node) => node.clone())).elements()) plotArea.appendChild(plot);
+    }
+    if (chart.showLegend !== false) setChartLegend(chartRoot, true);
+    packageModel.addPart(chartPartName, CT_CHART, serializeXml(chartDocument));
   }
-  if (chart.showLegend !== false) setChartLegend(chartRoot, true);
-  packageModel.addPart(chartPartName, CT_CHART, serializeXml(chartDocument));
 
   let drawingPartName: string;
   let drawingPart: ReturnType<typeof packageModel.getPart>;
@@ -1103,14 +1571,18 @@ async function createNativeChart(workbook: Workbook, sheet: Worksheet, chart: Xl
     drawingPart = existing; drawingPartName = existing.name; drawingRoot = (await workbook.office.xml(existing.name)).root;
   } else {
     drawingPartName = nextPart("drawings", "drawing");
-    const drawingDocument = parseXml(`<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:r="${REL}"/>`);
+    const drawingDocument = parseXml(`<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:cx="${CHART_EX_NS}" xmlns:r="${REL}"/>`);
     drawingPart = packageModel.addPart(drawingPartName, CT_DRAWING, serializeXml(drawingDocument));
     drawingRoot = (await workbook.office.xml(drawingPartName)).root;
     const rel = sheetPart(workbook, sheet)!.relationships().add({ type: DRAWING_REL, target: relativeTarget(sheet.partName, drawingPartName) });
     const element = new XmlElement("drawing", worksheetRoot.lookupPrefix(SML) ?? null); element.setAttribute("r:id", rel.id); worksheetRoot.appendChild(element); workbook.office.markDirty(sheet.partName);
   }
-  const relation = drawingPart!.relationships().add({ type: CHART_REL, target: relativeTarget(drawingPartName, chartPartName) });
-  drawingRoot.appendChild(drawingAnchorXml(relation.id, chart));
+  const relation = drawingPart!.relationships().add({ type: modern ? CHART_EX_REL : CHART_REL, target: relativeTarget(drawingPartName, chartPartName) });
+  const shapeIds = allDescendants(drawingRoot, DRAWING_NS, "cNvPr")
+    .map((node) => Number(node.getAttribute("id")))
+    .filter((value) => Number.isSafeInteger(value) && value > 0);
+  const nextShapeId = Math.max(1, ...shapeIds) + 1;
+  drawingRoot.appendChild(drawingAnchorXml(relation.id, chart, modern, nextShapeId));
   workbook.office.markDirty(drawingPartName);
   return { chartPartName, drawingPartName };
 }
@@ -1129,8 +1601,11 @@ async function removeNativeChart(workbook: Workbook, sheet: Worksheet, chartId: 
   const drawingDocument = await workbook.office.xml(chart.drawingPartName);
   const drawingRoot = drawingDocument.root;
   const drawingPart = workbook.office.package.getPart(chart.drawingPartName);
-  const relation = drawingPart?.relationships().all().find((candidate) => candidate.type === CHART_REL && workbook.office.package.relatedPart(drawingPart, candidate.id)?.name === chart.partName);
-  const anchor = drawingRoot.elements().find((candidate) => firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === relation?.id);
+  const relation = drawingPart?.relationships().all().find((candidate) => (candidate.type === CHART_REL || candidate.type === CHART_EX_REL) && workbook.office.package.relatedPart(drawingPart, candidate.id)?.name === chart.partName);
+  const anchor = drawingRoot.elements().find((candidate) =>
+    firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === relation?.id ||
+    firstDescendant(candidate, CHART_EX_NS, "chart")?.getAttribute("r:id") === relation?.id,
+  );
   if (anchor) drawingRoot.removeChild(anchor);
   if (relation) drawingPart?.relationships().remove(relation.id);
   if (drawingPart) workbook.office.markDirty(drawingPart.name);

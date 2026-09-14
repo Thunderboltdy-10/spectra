@@ -35,11 +35,21 @@ function normalizeLineBreaks(value) {
 
 function authoredPlainInline(content, text) {
   if (
-    content.length === 1 &&
-    content[0]?.kind === "text" &&
-    normalizeLineBreaks(content[0].text) !== normalizeLineBreaks(text)
-  )
-    return [{ ...content[0], text }];
+    content.every((item) => item.kind === "text") &&
+    normalizeLineBreaks(richInlineText(content)) !== normalizeLineBreaks(text)
+  ) {
+    const first = content[0];
+    const sameFormat = content.every(
+      (item) => JSON.stringify(item.format ?? null) === JSON.stringify(first?.format ?? null),
+    );
+    const sameHref = content.every((item) => item.href === first?.href);
+    return [{
+      kind: "text",
+      text,
+      ...(sameFormat && first?.format ? { format: first.format } : {}),
+      ...(sameHref && first?.href ? { href: first.href } : {}),
+    }];
+  }
   return content;
 }
 
@@ -50,6 +60,114 @@ function richInlineHasSemantics(content) {
       Boolean(item.href) ||
       (item.format && Object.keys(item.format).length > 0),
   );
+}
+
+/**
+ * Compare authored document meaning without native package locators or carry
+ * metadata. Native package bytes remain authoritative for untouched regions;
+ * this value is only used to decide whether the editor authored a change.
+ */
+export function authoredSemanticValue(value, parentKey) {
+  if (Array.isArray(value))
+    return value.map((item) => authoredSemanticValue(item, parentKey));
+  if (!value || typeof value !== "object") return value;
+  const source = value;
+  const isImage = source.kind === "image";
+  const hasInlineContent = Array.isArray(source.inlineContent);
+  return Object.fromEntries(
+    Object.entries(source).flatMap(([key, child]) => {
+      if (
+        (parentKey === "image" || isImage) &&
+        (key === "partName" || key === "assetId" || key === "occurrenceId")
+      )
+        return [];
+      if (key === "ommlXml" || key === "ommlSourceLatex") return [];
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId")
+        return [];
+      // Inline runs are the authored formatting source. attrs.format is a
+      // resolved native convenience value and would otherwise disagree with a
+      // sparse editor mark such as bold-only.
+      if (
+        key === "attrs" &&
+        hasInlineContent &&
+        child &&
+        typeof child === "object"
+      ) {
+        const attrs = { ...child };
+        delete attrs.format;
+        if (source.type === "equation") delete attrs.paragraphFormat;
+        return [[key, authoredSemanticValue(attrs, key)]];
+      }
+      if (
+        parentKey === "format" &&
+        ((["bold", "italic", "strike", "underline"].includes(key) &&
+          child === false) ||
+          (["color", "highlight", "shading"].includes(key) && child === null) ||
+          (key === "fontFamily" && child === "Calibri") ||
+          (key === "fontSizePoints" && child === 11))
+      )
+        return [];
+      // Native Word often carries padding spaces at the end of a run while
+      // the editor projection trims the paragraph's visible text. Those
+      // spaces are not authored meaning and must not turn compaction into a
+      // rewrite of an otherwise untouched run.
+      const semanticChild =
+        source.kind === "text" && key === "text" && typeof child === "string"
+          ? child.trimEnd()
+          : child;
+      const normalizedChild = authoredSemanticValue(semanticChild, key);
+      if (
+        key === "format" &&
+        normalizedChild &&
+        typeof normalizedChild === "object" &&
+        !Array.isArray(normalizedChild) &&
+        Object.keys(normalizedChild).length === 0
+      )
+        return [];
+      return [[key, normalizedChild]];
+    }),
+  );
+}
+
+export function authoredSemanticsEqual(left, right) {
+  return JSON.stringify(authoredSemanticValue(left)) ===
+    JSON.stringify(authoredSemanticValue(right));
+}
+
+/**
+ * Reattach exact OMML only when the editor still carries the source LaTeX
+ * represented by the bound native subtree. This never searches a latest
+ * revision or treats a changed equation as unchanged.
+ */
+export function restoreDocxEquationCarryMetadata(previousContent, nextContent) {
+  if (!Array.isArray(nextContent)) return nextContent;
+  const previousEquations = Array.isArray(previousContent)
+    ? previousContent.filter((item) => item?.kind === "equation")
+    : [];
+  const used = new Set();
+  return nextContent.map((item) => {
+    if (
+      item?.kind !== "equation" ||
+      typeof item.latex !== "string" ||
+      typeof item.ommlXml === "string"
+    )
+      return item;
+    const matchIndex = previousEquations.findIndex(
+      (candidate, index) =>
+        !used.has(index) &&
+        typeof candidate?.ommlXml === "string" &&
+        typeof candidate?.ommlSourceLatex === "string" &&
+        candidate.ommlSourceLatex === item.latex,
+    );
+    if (matchIndex < 0) return item;
+    used.add(matchIndex);
+    const match = previousEquations[matchIndex];
+    return {
+      ...item,
+      ommlXml: match.ommlXml,
+      ommlSourceLatex: match.ommlSourceLatex,
+    };
+  });
 }
 
 export function docxNativeMediaUrl(binding, image) {
@@ -107,6 +225,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           type: "inlineEquation",
           attrs: {
             latex: item.latex,
+            display: item.display === "block" ? "block" : "inline",
             ...(typeof item.ommlXml === "string" ? { ommlXml: item.ommlXml } : {}),
             ...(typeof item.ommlSourceLatex === "string" ? { ommlSourceLatex: item.ommlSourceLatex } : {}),
             ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
@@ -120,6 +239,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
         attrs: {
           src: authored ? docxAssetMediaUrl(item.assetId) : docxNativeMediaUrl(binding, item),
           ...(item.partName ? { partName: item.partName } : {}),
+          ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
           ...(authored ? { assetId: item.assetId } : {}),
           mediaType: item.mediaType,
           alt: item.altText,
@@ -192,7 +312,7 @@ export function docxRichBlockToJson(value, binding) {
       attrs: {
         ...nativeAttrs,
         latex: equation?.latex ?? block.text,
-        display: "block",
+        display: attrs.display === "inline" ? "inline" : "block",
         alignment: attrs.alignment ?? "center",
         ...(typeof equation?.ommlXml === "string"
           ? { ommlXml: equation.ommlXml }
@@ -376,7 +496,12 @@ export function documentNodeText(node) {
 
 function appendRichInline(output, item) {
   const previous = output.at(-1);
-  if (item.kind === "text" && previous?.kind === "text") {
+  if (
+    item.kind === "text" &&
+    previous?.kind === "text" &&
+    JSON.stringify(previous.format ?? null) === JSON.stringify(item.format ?? null) &&
+    previous.href === item.href
+  ) {
     previous.text += item.text;
     return;
   }
@@ -402,6 +527,7 @@ function imageFromJsonNode(node) {
   return {
     kind: "image",
     ...(typeof partName === "string" ? { partName } : {}),
+    ...(typeof attrs.occurrenceId === "string" && attrs.occurrenceId ? { occurrenceId: attrs.occurrenceId } : {}),
     ...(typeof assetId === "string" ? { assetId } : {}),
     mediaType,
     altText,
@@ -483,7 +609,9 @@ export function documentRichInlineFromJson(node) {
       appendRichInline(output, {
         kind: "equation",
         latex: String(current.attrs?.latex ?? ""),
-        display: current.type === "equation" ? "block" : "inline",
+        display: current.type === "equation"
+          ? current.attrs?.display === "inline" ? "inline" : "block"
+          : "inline",
         ...(typeof current.attrs?.ommlXml === "string"
           ? { ommlXml: current.attrs.ommlXml }
           : {}),
@@ -602,14 +730,17 @@ export function documentBlocksFromJson(json) {
         text,
         attrs: { tone: node.attrs?.type ?? node.attrs?.tone ?? "info" },
       };
-    if (node?.type === "equation") {
-      const latex = String(node.attrs?.latex ?? "");
-      return {
-        id,
-        type: "equation",
-        text: latex,
-        latex,
-        inlineContent: [{ kind: "equation", latex, display: "block" }],
+  if (node?.type === "equation") {
+    const latex = String(node.attrs?.latex ?? "");
+    const inlineContent = documentRichInlineFromJson(node);
+    return {
+      id,
+      type: "equation",
+      text: latex,
+      latex,
+      inlineContent: inlineContent.length
+        ? inlineContent
+        : [{ kind: "equation", latex, display: node.attrs?.display === "inline" ? "inline" : "block" }],
         attrs: {
           display: node.attrs?.display ?? "block",
           alignment: node.attrs?.alignment ?? "center",

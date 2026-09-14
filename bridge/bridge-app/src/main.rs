@@ -43,6 +43,37 @@ struct BridgeRuntime {
 
 type ActiveMountSyncs = Arc<Mutex<HashSet<String>>>;
 
+struct ActiveMountSyncGuard {
+    active_mount_syncs: ActiveMountSyncs,
+    grant_id: String,
+}
+
+impl ActiveMountSyncGuard {
+    fn acquire(active_mount_syncs: &ActiveMountSyncs, grant_id: &str) -> Option<Self> {
+        let acquired = active_mount_syncs
+            .lock()
+            .expect("mount sync gate is not poisoned")
+            .insert(grant_id.to_owned());
+        acquired.then(|| Self {
+            active_mount_syncs: active_mount_syncs.clone(),
+            grant_id: grant_id.to_owned(),
+        })
+    }
+}
+
+impl Drop for ActiveMountSyncGuard {
+    fn drop(&mut self) {
+        match self.active_mount_syncs.lock() {
+            Ok(mut active_mount_syncs) => {
+                active_mount_syncs.remove(&self.grant_id);
+            }
+            Err(poisoned) => {
+                poisoned.into_inner().remove(&self.grant_id);
+            }
+        }
+    }
+}
+
 fn resolve_bridge_data_dir(
     isolated_runtime: Option<std::ffi::OsString>,
     app_data_dir: std::path::PathBuf,
@@ -2090,13 +2121,10 @@ async fn sync_grant(
     journal: &Journal,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<(), String> {
-    let acquired = active_mount_syncs
-        .lock()
-        .expect("mount sync gate is not poisoned")
-        .insert(grant.id.clone());
-    if !acquired {
+    let Some(_active_mount_sync) = ActiveMountSyncGuard::acquire(active_mount_syncs, &grant.id)
+    else {
         return Ok(());
-    }
+    };
     let result = if !grant.is_available() {
         set_mount_status(
             journal,
@@ -2115,10 +2143,6 @@ async fn sync_grant(
             }
         }
     };
-    active_mount_syncs
-        .lock()
-        .expect("mount sync gate is not poisoned")
-        .remove(&grant.id);
     result
 }
 
@@ -2935,7 +2959,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{configured_deployment_url, resolve_bridge_data_dir};
+    use super::{
+        ActiveMountSyncGuard, configured_deployment_url, resolve_bridge_data_dir,
+    };
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn bridge_requires_an_explicit_convex_url() {
@@ -2980,5 +3008,28 @@ mod tests {
             std::path::PathBuf::from(r"C:\Users\test\AppData\Roaming\com.spectra.bridge");
         let error = resolve_bridge_data_dir(Some(".tmp-bridge".into()), app_data).unwrap_err();
         assert!(error.to_string().contains("must be absolute"));
+    }
+
+    #[test]
+    fn active_mount_sync_gate_releases_when_scan_returns() {
+        let active = Arc::new(Mutex::new(HashSet::new()));
+        let guard = ActiveMountSyncGuard::acquire(&active, "grant-1");
+        assert!(guard.is_some());
+        assert!(!ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
+        drop(guard);
+        assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
+    }
+
+    #[tokio::test]
+    async fn active_mount_sync_gate_releases_when_scan_panics() {
+        let active = Arc::new(Mutex::new(HashSet::new()));
+        let task_active = active.clone();
+        let task = tokio::spawn(async move {
+            let _guard = ActiveMountSyncGuard::acquire(&task_active, "grant-1")
+                .expect("test scan should acquire the gate");
+            panic!("simulated repair scan panic");
+        });
+        assert!(task.await.is_err());
+        assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
     }
 }

@@ -169,6 +169,42 @@ describe("DOCX materialization route", () => {
     );
   });
 
+  it("materializes a supported equation insertion through the actual DOCX route", async () => {
+    const { opened } = await baseProjection();
+    const latex = String.raw`\begin{bmatrix}1&2\\3&4\end{bmatrix}`;
+    const content = {
+      blocks: [
+        ...opened.projection.blocks,
+        {
+          id: "docx:paragraph:deadbeef",
+          type: "equation" as const,
+          text: latex,
+          latex,
+          inlineContent: [{ kind: "equation" as const, latex, display: "block" as const }],
+          attrs: { display: "block" as const, alignment: "center" as const },
+        },
+      ],
+      nativeProjectionComplete: true as const,
+    };
+    const response = await routePost(content);
+    if (response.status !== 200) console.log("equation", await response.clone().text());
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.receipt.semantic.resultDigest).toBe(result.receipt.semantic.readbackDigest);
+    const reopened = await docxLens.open(storedPayload!);
+    expect(reopened.projection.blocks.at(-1)).toMatchObject({
+      type: "equation",
+      attrs: { display: "block", alignment: "center" },
+    });
+    expect(reopened.projection.blocks.at(-1)?.inlineContent?.[0]).toMatchObject({
+      kind: "equation",
+      display: "block",
+    });
+    const equation = reopened.projection.blocks.at(-1)?.inlineContent?.[0];
+    if (equation?.kind !== "equation") throw new Error("route equation was not projected");
+    expect(equation.ommlXml).toContain("oMathPara");
+  });
+
   it("materializes margins and section header/footer text with semantic readback", async () => {
     const { opened } = await baseProjection();
     const content = {

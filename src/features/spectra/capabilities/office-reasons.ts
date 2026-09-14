@@ -9,13 +9,13 @@ export const DOCUMENT_NATIVE_REASONS = {
   tableStructure:
     "Spectra edits safe text inside a linked Word table but preserves its rows, columns, merges, and formatting. Reshape the table in Word.",
   image:
-    "Set or add supported PNG/JPEG pictures natively in Spectra, including durable asset bytes, alternative text, dimensions, crop, insertion, and replacement; change text wrapping or remove a retained picture in Word.",
+    "Set, add, replace, or remove supported PNG/JPEG pictures natively in Spectra, including durable asset bytes, alternative text, dimensions, and crop; change text wrapping in Word.",
   equation:
     "Edit supported Word equation source in place. Unsupported native math remains preserved until it is explicitly replaced.",
   equationInsert:
-    "Spectra edits supported existing Word equations but cannot insert a new equation into a linked native file yet. Add the new equation in Word or use an unlinked copy.",
+    "Insert supported school-math equations into a linked Word file; unsupported syntax stays as editable source with a concise diagnostic.",
   equationLayout:
-    "Change equation placement or alignment in Word; the native writer edits equation source but does not rewrite layout properties yet.",
+    "Change supported equation placement or paragraph alignment natively; the bounded math engine preserves the equation body and rejects unsupported syntax.",
   section:
     "Set basic Word section page size, orientation, margins, and column count in Spectra. To add a section break or change advanced section layout, use Word.",
   headerFooter:

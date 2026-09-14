@@ -1228,6 +1228,16 @@ export const myOverview = query({
         q.eq("integrationId", integration._id).eq("accountId", actor.accountId),
       )
       .unique();
+    const selectedClassKeys = new Set(
+      (await ctx.db
+        .query("managebacClassSelections")
+        .withIndex("by_account_integration", (q) =>
+          q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
+        )
+        .collect())
+        .filter((row) => row.selected)
+        .map((row) => `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`),
+    );
     const [capabilities, syncRuns, conflicts, records] = await Promise.all([
       ctx.db
         .query("integrationCapabilities")
@@ -1246,7 +1256,10 @@ export const myOverview = query({
           rows.filter(
             (item) =>
               item.integrationId === integration._id &&
-              item.schoolId === actor.schoolId,
+              item.schoolId === actor.schoolId &&
+              (!item.providerClassId ||
+                selectedClassKeys.has(`${item.providerClassId}|${item.academicPeriodKey ?? "unknown"}`) ||
+                selectedClassKeys.has(`${item.providerClassId}|unknown`)),
           ),
         ),
       ctx.db
@@ -1313,6 +1326,7 @@ export const myOverview = query({
         providerClassId: item.providerClassId,
         academicPeriodKey: item.academicPeriodKey,
         normalized: item.normalized,
+        sourceHash: item.sourceHash,
         sourceModifiedAt: item.sourceModifiedAt,
         fetchedAt: item.fetchedAt,
         tombstone: item.tombstone,
@@ -3983,6 +3997,7 @@ export const recordsForPurpose = query({
         academicPeriodKey: item.academicPeriodKey,
         sourceIdentityKey: item.sourceIdentityKey,
         sourceState: item.sourceState ?? (item.tombstone ? "removed" : "available"),
+        sourceHash: item.sourceHash,
         sourceModifiedAt: item.sourceModifiedAt,
         fetchedAt: item.fetchedAt,
         provenanceUrl: item.provenanceUrl,
@@ -3994,6 +4009,306 @@ export const recordsForPurpose = query({
         purpose: args.purpose,
       },
     };
+  },
+});
+
+async function permissionedResourceImportSource(
+  ctx: Ctx,
+  sourceRecordId: Id<"externalRecords">,
+) {
+  const actor = await requireActor(ctx);
+  const integration = await integrationForSchool(ctx, actor.schoolId);
+  if (!integration || integration.status === "revoked")
+    throw new Error("INTEGRATION_NOT_CONNECTED: ManageBac is not connected.");
+  const mapping = await ctx.db
+    .query("externalIdentityMappings")
+    .withIndex("by_integration_account", (q) =>
+      q.eq("integrationId", integration._id).eq("accountId", actor.accountId),
+    )
+    .unique();
+  if (actor.schoolRole !== "school_admin" && (!mapping || mapping.status !== "verified"))
+    throw new Error("INTEGRATION_IDENTITY_REQUIRED: Resolve your verified provider identity first.");
+  const source = await ctx.db.get(sourceRecordId);
+  if (
+    !source ||
+    source.integrationId !== integration._id ||
+    source.schoolId !== actor.schoolId ||
+    !["resource", "class_resource", "school_resource", "file"].includes(
+      source.recordType,
+    ) ||
+    (source.mappedAccountId !== undefined &&
+      source.mappedAccountId !== actor.accountId) ||
+    !source.providerClassId
+  )
+    throw new Error(
+      "INTEGRATION_RESOURCE_NOT_ALLOWED: Choose a resource from your selected class shelf.",
+    );
+  const selected = await ctx.db
+    .query("managebacClassSelections")
+    .withIndex("by_integration_account_class", (q) =>
+      q
+        .eq("integrationId", integration._id)
+        .eq("accountId", actor.accountId)
+        .eq("providerClassId", source.providerClassId!),
+    )
+    .collect();
+  if (
+    !selected.some(
+      (row) =>
+        row.selected &&
+        (row.academicPeriodKey ?? "unknown") ===
+          (source.academicPeriodKey ?? "unknown"),
+    )
+  )
+    throw new Error(
+      "INTEGRATION_RESOURCE_CLASS_NOT_SELECTED: Select this class before importing its resources.",
+    );
+  return { actor, integration, source };
+}
+
+export const beginResourceImport = mutation({
+  args: {
+    sourceRecordId: v.id("externalRecords"),
+    requestKey: v.optional(v.string()),
+    refresh: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, integration, source } = await permissionedResourceImportSource(
+      ctx,
+      args.sourceRecordId,
+    );
+    const requestKey =
+      args.requestKey?.trim() || `${source._id}:${source.sourceHash}`;
+    if (!requestKey || requestKey.length > 240)
+      throw new Error("INTEGRATION_RESOURCE_REQUEST_KEY_INVALID");
+    const priorForRequest = await ctx.db
+      .query("managebacResourceImports")
+      .withIndex("by_account_request", (q) =>
+        q.eq("accountId", actor.accountId).eq("requestKey", requestKey),
+      )
+      .unique();
+    if (priorForRequest && priorForRequest.sourceRecordId !== source._id)
+      throw new Error("INTEGRATION_RESOURCE_REQUEST_REUSED");
+    const prior =
+      priorForRequest ??
+      (
+        await ctx.db
+          .query("managebacResourceImports")
+          .withIndex("by_account_source", (q) =>
+            q
+              .eq("accountId", actor.accountId)
+              .eq("sourceRecordId", source._id)
+              .eq("sourceHash", source.sourceHash),
+          )
+          .collect()
+      ).sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const sourceState = source.sourceState ?? (source.tombstone ? "removed" : "available");
+    if (["temporarily_unavailable", "missing", "removed"].includes(sourceState)) {
+      const retained = (await ctx.db
+        .query("managebacResourceImports")
+        .withIndex("by_account_source_record", (q) =>
+          q.eq("accountId", actor.accountId).eq("sourceRecordId", source._id),
+        )
+        .collect())
+        .find((row) => row.status === "imported" && row.artifactId);
+      if (retained)
+        return {
+          status: "source_unavailable" as const,
+          importId: retained._id,
+          artifactId: retained.artifactId,
+          sourceHash: retained.sourceHash,
+          sourceState,
+        };
+      throw new Error(
+        `INTEGRATION_RESOURCE_UNAVAILABLE: This resource is currently ${sourceState.replaceAll("_", " ")}.`,
+      );
+    }
+    if (prior && prior.status === "imported")
+      return {
+        status: "imported" as const,
+        importId: prior._id,
+        artifactId: prior.artifactId,
+        sourceHash: prior.sourceHash,
+        providerRecordId: source.providerRecordId,
+        providerClassId: source.providerClassId,
+        title: typeof source.normalized?.title === "string" ? source.normalized.title : "School resource",
+        normalized: source.normalized,
+        replayed: true,
+      };
+    if (prior && prior.status !== "failed")
+      return {
+        status: "resume" as const,
+        importId: prior._id,
+        artifactId: prior.artifactId,
+        sourceHash: prior.sourceHash,
+        providerRecordId: source.providerRecordId,
+        providerClassId: source.providerClassId,
+        title: typeof source.normalized?.title === "string" ? source.normalized.title : "School resource",
+        normalized: source.normalized,
+        replayed: true,
+      };
+    if (prior && prior.status === "failed") {
+      await ctx.db.patch(prior._id, {
+        status: "started",
+        errorCode: undefined,
+        errorSummary: undefined,
+        updatedAt: Date.now(),
+      });
+      return {
+        status: "resume" as const,
+        importId: prior._id,
+        artifactId: prior.artifactId,
+        sourceHash: prior.sourceHash,
+        providerRecordId: source.providerRecordId,
+        providerClassId: source.providerClassId,
+        title: typeof source.normalized?.title === "string" ? source.normalized.title : "School resource",
+        normalized: source.normalized,
+        replayed: true,
+      };
+    }
+    const priorRevision = await ctx.db
+      .query("managebacResourceImports")
+      .withIndex("by_account_source_record", (q) =>
+        q
+          .eq("accountId", actor.accountId)
+          .eq("sourceRecordId", source._id),
+      )
+      .collect();
+    if (!args.refresh && priorRevision.some((row) => row.status === "imported"))
+      return {
+        status: "update_available" as const,
+        sourceHash: source.sourceHash,
+        priorArtifactId: priorRevision.find((row) => row.status === "imported")
+          ?.artifactId,
+      };
+    const now = Date.now();
+    const importId = await ctx.db.insert("managebacResourceImports", {
+      integrationId: integration._id,
+      schoolId: actor.schoolId,
+      accountId: actor.accountId,
+      sourceRecordId: source._id,
+      sourceHash: source.sourceHash,
+      requestKey,
+      status: "started",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return {
+      status: "started" as const,
+      importId,
+      sourceHash: source.sourceHash,
+      providerRecordId: source.providerRecordId,
+      providerClassId: source.providerClassId,
+      title:
+        typeof source.normalized?.title === "string"
+          ? source.normalized.title
+          : "School resource",
+      normalized: source.normalized,
+    };
+  },
+});
+
+export const attachResourceImportArtifact = mutation({
+  args: {
+    importId: v.id("managebacResourceImports"),
+    artifactId: v.id("spectraArtifacts"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.importId);
+    const artifact = await ctx.db.get(args.artifactId);
+    if (
+      !row ||
+      row.accountId !== actor.accountId ||
+      row.schoolId !== actor.schoolId ||
+      !artifact ||
+      artifact.ownerAccountId !== actor.accountId ||
+      artifact.schoolId !== actor.schoolId
+    )
+      throw new Error("INTEGRATION_RESOURCE_IMPORT_NOT_ALLOWED");
+    if (row.artifactId && row.artifactId !== artifact._id)
+      throw new Error("INTEGRATION_RESOURCE_IMPORT_ARTIFACT_CONFLICT");
+    await ctx.db.patch(row._id, {
+      artifactId: artifact._id,
+      status: "importing",
+      updatedAt: Date.now(),
+    });
+    return { importId: row._id, artifactId: artifact._id };
+  },
+});
+
+export const completeResourceImport = mutation({
+  args: {
+    importId: v.id("managebacResourceImports"),
+    sourceHash: v.string(),
+    contentHash: v.string(),
+    bytes: v.number(),
+    mimeType: v.string(),
+    nativeFormat: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.importId);
+    if (!row || row.accountId !== actor.accountId || row.schoolId !== actor.schoolId)
+      throw new Error("INTEGRATION_RESOURCE_IMPORT_NOT_ALLOWED");
+    if (row.status === "imported")
+      return { status: "imported" as const, importId: row._id, artifactId: row.artifactId, replayed: true };
+    const { source } = await permissionedResourceImportSource(ctx, row.sourceRecordId);
+    if (["temporarily_unavailable", "missing", "removed"].includes(source.sourceState ?? (source.tombstone ? "removed" : "available")))
+      throw new Error("INTEGRATION_RESOURCE_UNAVAILABLE: The provider resource is no longer available; the existing Library copy remains retained.");
+    if (source.sourceHash !== args.sourceHash || row.sourceHash !== args.sourceHash)
+      throw new Error("INTEGRATION_RESOURCE_SOURCE_CHANGED: Refresh the source and import the new revision explicitly.");
+    if (!row.artifactId) throw new Error("INTEGRATION_RESOURCE_ARTIFACT_MISSING");
+    const artifact = await ctx.db.get(row.artifactId);
+    if (!artifact || artifact.ownerAccountId !== actor.accountId || artifact.schoolId !== actor.schoolId)
+      throw new Error("INTEGRATION_RESOURCE_ARTIFACT_NOT_OWNED");
+    const now = Date.now();
+    await ctx.db.patch(row._id, {
+      status: "imported",
+      contentHash: args.contentHash,
+      bytes: args.bytes,
+      mimeType: args.mimeType.slice(0, 160),
+      nativeFormat: args.nativeFormat.slice(0, 40),
+      errorCode: undefined,
+      errorSummary: undefined,
+      updatedAt: now,
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.resource_imported",
+      targetType: "spectra_artifact",
+      targetId: String(row.artifactId),
+      metadata: {
+        sourceRecordId: String(row.sourceRecordId),
+        sourceHash: args.sourceHash,
+        bytes: args.bytes,
+      },
+      retentionClass: "operational",
+    });
+    return { status: "imported" as const, importId: row._id, artifactId: row.artifactId };
+  },
+});
+
+export const failResourceImport = mutation({
+  args: {
+    importId: v.id("managebacResourceImports"),
+    errorCode: v.string(),
+    errorSummary: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.importId);
+    if (!row || row.accountId !== actor.accountId || row.schoolId !== actor.schoolId)
+      throw new Error("INTEGRATION_RESOURCE_IMPORT_NOT_ALLOWED");
+    await ctx.db.patch(row._id, {
+      status: "failed",
+      artifactId: undefined,
+      errorCode: args.errorCode.slice(0, 120),
+      errorSummary: args.errorSummary.slice(0, 500),
+      updatedAt: Date.now(),
+    });
+    return { importId: row._id, status: "failed" as const };
   },
 });
 

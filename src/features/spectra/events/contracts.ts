@@ -87,6 +87,11 @@ export type SpectraCommands = {
     expectedRevision?: number;
     retention?: "keep_in_spectra" | "archive_projection";
   };
+  "managebac.importResource": {
+    sourceRecordId: string;
+    refresh?: boolean;
+    requestKey?: string;
+  };
 };
 
 export type SpectraEvents = {

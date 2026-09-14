@@ -1181,6 +1181,39 @@ export default defineSchema({
     .index("by_projection", ["projectionType", "projectionId"])
     .index("by_account_updated", ["accountId", "updatedAt"]),
 
+  /**
+   * Account-scoped receipt for an explicit provider-resource download. The
+   * provider record id never comes from a URL, and a source revision is never
+   * overwritten by a later import. This ledger is also the retry/replay seam.
+   */
+  managebacResourceImports: defineTable({
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    accountId: v.id("accounts"),
+    sourceRecordId: v.id("externalRecords"),
+    sourceHash: v.string(),
+    requestKey: v.string(),
+    status: v.union(
+      v.literal("started"),
+      v.literal("importing"),
+      v.literal("imported"),
+      v.literal("failed"),
+    ),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    contentHash: v.optional(v.string()),
+    bytes: v.optional(v.number()),
+    mimeType: v.optional(v.string()),
+    nativeFormat: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    errorSummary: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_source", ["accountId", "sourceRecordId", "sourceHash"])
+    .index("by_account_source_record", ["accountId", "sourceRecordId"])
+    .index("by_account_request", ["accountId", "requestKey"])
+    .index("by_school_updated", ["schoolId", "updatedAt"]),
+
   calendarItems: defineTable({
     ownerAccountId: v.id("accounts"),
     schoolId: v.id("schools"),

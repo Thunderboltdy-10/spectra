@@ -266,6 +266,14 @@ const APP_SPECS: readonly AppSpec[] = [
     exposed: true,
   },
   {
+    id: "app.managebac.import-resource",
+    description: "Fetch one permissioned resource from a selected ManageBac class shelf into Library.",
+    risk: "confirm",
+    availability: "editable",
+    choreography: { target: "school-resource-row" },
+    exposed: true,
+  },
+  {
     id: "app.managebac.mapping",
     description: "Change how normalized ManageBac records map into Spectra.",
     risk: "always-confirm",

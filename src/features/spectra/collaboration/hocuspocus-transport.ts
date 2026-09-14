@@ -760,19 +760,32 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           this.durablePendingUpdateIds.clear();
           const revoked =
             event.code === 4403 && collaborationAccessRevoked(event.reason);
+          // 4409 is Spectra's durable-reject close. Keep unsynchronized + error
+          // even when the provider reports zero pending (pre-apply rejection),
+          // and do not wipe a prior spectra.durable_failed message.
+          const durableReject = event.code === 4409;
           const pending =
             this.providerUnsynchronizedChanges +
             (this.localDurabilityPending ? 1 : 0);
+          const unsynchronizedChanges =
+            durableReject && pending === 0 ? 1 : pending;
           this.update({
             state: revoked
               ? "permission_lost"
-              : event.code === 4403
-                ? "reconnecting"
-                : pending > 0
-                  ? "unsynchronized"
-                  : "reconnecting",
-            unsynchronizedChanges: pending,
-            error: revoked ? event.reason || "Access was removed." : undefined,
+              : durableReject
+                ? "unsynchronized"
+                : event.code === 4403
+                  ? "reconnecting"
+                  : pending > 0
+                    ? "unsynchronized"
+                    : "reconnecting",
+            unsynchronizedChanges,
+            error: revoked
+              ? event.reason || "Access was removed."
+              : durableReject
+                ? this.error ||
+                  "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review."
+                : undefined,
           });
         },
       });

@@ -23,7 +23,10 @@ import {
 import {
   MAX_DURABLE_UPDATE_BYTES,
   MAX_REALTIME_MESSAGE_BYTES,
+  DURABLE_FAILURE_USER_MESSAGE,
+  DURABLE_REJECT_CLOSE_CODE,
   canonicalDurableUpdate,
+  projectionExceedsDurableBound,
 } from "./collaboration-update-envelope.mjs";
 import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "./collaboration-gateway-bridge-client.mjs";
 import {
@@ -276,14 +279,27 @@ function forceCanonicalReconnect(context, reason) {
       continue;
     sendGatewayState(peer, {
       type: "spectra.durable_failed",
-      message:
-        "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.",
+      message: DURABLE_FAILURE_USER_MESSAGE,
     });
     try {
-      peer.webSocket.close(4409, reason);
+      peer.webSocket.close(DURABLE_REJECT_CLOSE_CODE, reason);
     } catch {
       // Another policy path may already have closed the peer.
     }
+  }
+}
+
+function rejectPeerUpdate(connection, reason) {
+  // Pre-apply rejection only advances this peer's local Y.Doc. Tell that peer
+  // the truth before closing so the UI does not silently reconnect as clean.
+  sendGatewayState(connection, {
+    type: "spectra.durable_failed",
+    message: DURABLE_FAILURE_USER_MESSAGE,
+  });
+  try {
+    connection.webSocket.close(DURABLE_REJECT_CLOSE_CODE, reason);
+  } catch {
+    // The peer may already have disconnected while authorization ran.
   }
 }
 
@@ -356,6 +372,9 @@ async function appendWithRetry(payload, entries) {
       attempt += 1;
       if (attempt >= 12) {
         lastPersistenceFailure = persistenceRecord;
+        // Exhausted transient retries still leave the shared room ahead of Convex.
+        // Surface unsynchronized/reconnect honesty instead of dropping the ack.
+        forceCanonicalReconnect(entries[0].context, persistenceMessage);
         throw error;
       }
       const retryMs = Math.min(
@@ -722,7 +741,7 @@ function artifactProjection(document, fallbackSchemaVersion) {
     if (nativeProjection.typeKey === "timetable")
       assertSharedTimetableProjection(nativeProjection.content);
     const projection = JSON.stringify(nativeProjection);
-    if (projection.length > 900_000)
+    if (projectionExceedsDurableBound(projection))
       throw new Error("COLLABORATION_PROJECTION_SIZE");
     return projection;
   }
@@ -756,7 +775,7 @@ function artifactProjection(document, fallbackSchemaVersion) {
     schemaVersion,
     content,
   });
-  return projection.length <= 900_000 ? projection : null;
+  return projectionExceedsDurableBound(projection) ? null : projection;
 }
 
 function artifactModelState(document) {
@@ -1012,13 +1031,9 @@ const server = new Server({
           : "COLLABORATION_UPDATE_REJECTED";
       process.stderr.write(`[beforeHandleMessage] ${reason}\n`);
       // A rejected update leaves this peer's local Y.Doc ahead of the canonical
-      // room. Force a canonical reconnect instead of letting it advertise a
-      // false synchronized state until a generic client timeout expires.
-      try {
-        connection.webSocket.close(4409, "COLLABORATION_UPDATE_REJECTED");
-      } catch {
-        // The peer may already have disconnected while authorization ran.
-      }
+      // room. Emit durable_failed before the close so the client marks
+      // unsynchronized with a truthful message instead of a silent reconnect.
+      rejectPeerUpdate(connection, reason);
       throw error;
     }
   },

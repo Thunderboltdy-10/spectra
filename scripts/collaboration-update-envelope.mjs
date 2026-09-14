@@ -3,6 +3,26 @@
 // one atomic Yjs update while leaving room for row metadata.
 export const MAX_DURABLE_UPDATE_BYTES = 760 * 1024;
 export const MAX_REALTIME_MESSAGE_BYTES = 1024 * 1024;
+// Projection JSON is gated by both JS string length (legacy callers) and UTF-8
+// bytes. Multibyte text can pass a 900k character check and still exceed the
+// Convex document ceiling; fail closed on either bound.
+export const MAX_PROJECTION_JSON_CHARS = 900_000;
+export const MAX_PROJECTION_JSON_UTF8_BYTES = 900_000;
+export const DURABLE_FAILURE_USER_MESSAGE =
+  "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.";
+export const DURABLE_REJECT_CLOSE_CODE = 4409;
+
+export function utf8ByteLength(value) {
+  if (typeof value !== "string") return 0;
+  if (typeof Buffer !== "undefined") return Buffer.byteLength(value, "utf8");
+  return new TextEncoder().encode(value).byteLength;
+}
+
+export function projectionExceedsDurableBound(projectionJson) {
+  if (typeof projectionJson !== "string") return true;
+  if (projectionJson.length > MAX_PROJECTION_JSON_CHARS) return true;
+  return utf8ByteLength(projectionJson) > MAX_PROJECTION_JSON_UTF8_BYTES;
+}
 
 function bytesEqual(left, right) {
   if (left.byteLength !== right.byteLength) return false;

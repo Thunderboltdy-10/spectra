@@ -22,6 +22,19 @@ import {
 
 const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
 const MAX_GATEWAY_UPDATE_BYTES = 760 * 1024;
+// Keep aligned with scripts/collaboration-update-envelope.mjs — fail closed on
+// either JS string length or UTF-8 bytes so multibyte Office text cannot pass
+// the character gate and still overflow the Convex document ceiling.
+const MAX_PROJECTION_JSON_CHARS = 900_000;
+const MAX_PROJECTION_JSON_UTF8_BYTES = 900_000;
+
+function projectionExceedsDurableBound(projectionJson: string): boolean {
+  if (projectionJson.length > MAX_PROJECTION_JSON_CHARS) return true;
+  return (
+    new TextEncoder().encode(projectionJson).byteLength >
+    MAX_PROJECTION_JSON_UTF8_BYTES
+  );
+}
 
 type GatewayProjection = {
   title: string;
@@ -117,7 +130,7 @@ function parseGatewayProjection(
 ): GatewayProjection | null {
   if (!projectionJson) return null;
   if (
-    projectionJson.length > 900_000 ||
+    projectionExceedsDurableBound(projectionJson) ||
     !projectionHash ||
     projectionHash.length < 16
   )

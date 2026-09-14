@@ -10,7 +10,11 @@ import { collaborationPath, isCollaborationProxyRequest } from "../../../../scri
 import {
   MAX_DURABLE_UPDATE_BYTES,
   MAX_REALTIME_MESSAGE_BYTES,
+  MAX_PROJECTION_JSON_CHARS,
+  MAX_PROJECTION_JSON_UTF8_BYTES,
   canonicalDurableUpdate,
+  projectionExceedsDurableBound,
+  utf8ByteLength,
 } from "../../../../scripts/collaboration-update-envelope.mjs";
 import { MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS } from "../../../../shared/collaboration-bridge";
 import {
@@ -334,6 +338,19 @@ describe("P5.I2 gateway production helpers", () => {
       permanentPersistenceFailure(new Error("COLLABORATION_ACCESS_REVOKED")),
     ).toBe(true);
     expect(
+      permanentPersistenceFailure(new Error("COLLABORATION_PROJECTION_SIZE")),
+    ).toBe(true);
+    expect(
+      permanentPersistenceFailure(
+        new Error("COLLABORATION_PROJECTION_INVALID"),
+      ),
+    ).toBe(true);
+    expect(
+      permanentPersistenceFailure(
+        new Error("COLLABORATION_GATEWAY_UPDATE_SIZE"),
+      ),
+    ).toBe(true);
+    expect(
       appendBaseStateVectorHash({
         lastPersistedHash: "b".repeat(43),
         capturedBaseHash: "a".repeat(43),
@@ -456,6 +473,19 @@ describe("P5.I2 gateway production helpers", () => {
         ),
       ),
     ).toBe("Too many writes per second.");
+  });
+
+  it("fails closed when projection JSON exceeds UTF-8 or character bounds", () => {
+    expect(MAX_PROJECTION_JSON_CHARS).toBe(900_000);
+    expect(MAX_PROJECTION_JSON_UTF8_BYTES).toBe(900_000);
+    expect(projectionExceedsDurableBound("x".repeat(900_000))).toBe(false);
+    expect(projectionExceedsDurableBound("x".repeat(900_001))).toBe(true);
+    // One BMP code unit can expand to multiple UTF-8 bytes; character length
+    // alone must not admit an envelope that Convex cannot store.
+    const multibyte = "é".repeat(500_000);
+    expect(multibyte.length).toBe(500_000);
+    expect(utf8ByteLength(multibyte)).toBeGreaterThan(900_000);
+    expect(projectionExceedsDurableBound(multibyte)).toBe(true);
   });
 
   it("compacts when the update log crosses size, count, or idle", () => {

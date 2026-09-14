@@ -221,4 +221,33 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     });
     transport.destroy();
   });
+
+  it("marks unsynchronized with a truthful error on durable-reject close 4409", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-oversize");
+    await transport.connect();
+    if (!hocuspocus.callbacks || !hocuspocus.provider)
+      throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    hocuspocus.provider.synced = true;
+    hocuspocus.callbacks.onSynced({ state: true });
+    hocuspocus.callbacks.onUnsyncedChanges({ number: 0 });
+    expect(transport.getSyncSnapshot().state).toBe("synchronized");
+
+    hocuspocus.callbacks.onStateless({
+      payload: JSON.stringify({
+        type: "spectra.durable_failed",
+        message:
+          "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.",
+      }),
+    });
+    hocuspocus.callbacks.onDisconnect({
+      event: { code: 4409, reason: "COLLABORATION_GATEWAY_UPDATE_SIZE" },
+    });
+    expect(transport.getSyncSnapshot()).toMatchObject({
+      state: "unsynchronized",
+      unsynchronizedChanges: 1,
+      error:
+        "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.",
+    });
+    transport.destroy();
+  });
 });

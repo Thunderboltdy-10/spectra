@@ -144,4 +144,92 @@ describe("P4.I3 honest execution and authority", () => {
     expect(writing).not.toMatch(/local model|Local writing suggestions/i);
     expect(writing).toContain("never insert text until you accept them");
   });
+
+  it("arms Live Dock Undo after durable AI artifact.create as well as update", () => {
+    const runtime = read("src/app/api/spectra/run/runtime.ts");
+    expect(runtime).toContain("function operationTypesArmRunUndo");
+    expect(runtime).toContain('operation.type === "artifact.create"');
+    expect(runtime).toContain("operationTypesArmRunUndo(plan.operations)");
+    expect(runtime).toContain("operationTypesArmRunUndo(operations)");
+    expect(runtime).toContain("durableArtifactWritesFromOutcomes");
+    // Stop mid-run must still expose revert when creates already landed.
+    const stopArm = runtime.slice(
+      runtime.indexOf("const durableArtifactWrite = durableArtifactWritesFromOutcomes"),
+      runtime.indexOf('publish({\n        type: "stopped"'),
+    );
+    expect(stopArm).toContain("revertRunResultAction(params.runId)");
+    // Empty worker outcomes must not replace stopRun card actions (would strip Undo).
+    expect(stopArm).toContain("...(durableArtifactWrite");
+    expect(stopArm).toContain("resultActions:");
+    expect(runtime).toContain(
+      "durableArtifactWritesFromOutcomes(operationOutcomes)",
+    );
+    const errorPublish = runtime.indexOf('type: "error"');
+    const failedBlock = runtime.slice(
+      Math.max(0, errorPublish - 1200),
+      errorPublish,
+    );
+    expect(failedBlock).toContain("revertRunResultAction(params.runId)");
+    expect(failedBlock).toContain(
+      "durableArtifactWritesFromOutcomes(operationOutcomes)",
+    );
+    const stopRun = read("convex/spectraRuns.ts");
+    expect(stopRun).toContain("function durableArtifactWritesArmRunUndo");
+    expect(stopRun).toContain('operation.type === "artifact.create"');
+    expect(stopRun).toContain('operation.status === "executed"');
+    const stopMutation = stopRun.slice(
+      stopRun.indexOf("export const stopRun = mutation"),
+      stopRun.indexOf("export const setSuggestedThreadMetadata"),
+    );
+    expect(stopMutation).toContain('key: "revert"');
+    expect(stopMutation).toContain(
+      "durableArtifactWritesArmRunUndoIncludingPending",
+    );
+    // Stop while awaiting approval must not 409; Apply can still land durable work.
+    expect(stopMutation).toContain('run.status !== "awaiting_confirmation"');
+    expect(stopRun).toContain(
+      "function durableArtifactWritesArmRunUndoIncludingPending",
+    );
+    expect(stopRun).toContain("artifact?.currentVersionId");
+    // Confirmation Apply completion arms Undo from post-Apply outcomes.
+    expect(runtime).toContain(
+      "durableArtifactWritesFromOutcomes(outcomes)",
+    );
+  });
+
+  it("exits single-creation whenever Calendar action is requested (note+schedule)", () => {
+    const plan = read("src/app/api/spectra/run/loop/plan.ts");
+    const gate = plan.slice(
+      plan.indexOf("const calendarActionRequested = promptRequestsCalendarAction"),
+      plan.indexOf("const openArtifactCreateCollision"),
+    );
+    // Must not keep note+personal-event on create_note-only tool list.
+    expect(gate).toContain(
+      "const calendarNeedsCoordination = calendarActionRequested",
+    );
+    expect(gate).not.toContain(
+      "const calendarNeedsCoordination = calendarCreatesPlannerTask",
+    );
+    expect(plan).toContain("create_calendar_personal_event");
+  });
+
+  it("exposes AI personal-event create on the same path as human Add event", () => {
+    const tools = read("src/features/spectra/tools/registry/application-tools.ts");
+    expect(tools).toContain('id: "create_calendar_personal_event"');
+    // Must be on the agent allowlist — registry define alone does not expose it.
+    const allowlistStart = tools.indexOf("export const APPLICATION_AGENT_TOOL_IDS");
+    const allowlist = tools.slice(
+      allowlistStart,
+      tools.indexOf("] as const;", allowlistStart) + 12,
+    );
+    expect(allowlist).toContain("create_calendar_personal_event");
+    const command = read("src/features/spectra/calendar/domain/command.ts");
+    expect(command).toContain('create_calendar_personal_event: "calendar:createPersonalItem"');
+    expect(command).toContain('"calendar.create_personal_event"');
+    const convex = read("convex/calendar.ts");
+    expect(convex).toContain('createdBy: args.actorKind === "ai" ? "ai" : "human"');
+    const plan = read("src/app/api/spectra/run/loop/plan.ts");
+    expect(plan).toContain("create_calendar_personal_event");
+    expect(plan).toContain('refuse with "scheduling unavailable"');
+  });
 });

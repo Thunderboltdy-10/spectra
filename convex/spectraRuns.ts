@@ -405,6 +405,58 @@ async function runHasAttachmentInput(
   return serializedInput && !hasRetainedBytes;
 }
 
+
+function durableArtifactWritesArmRunUndo(
+  operations: ReadonlyArray<{
+    type: string;
+    status: string;
+    affected: Array<{ type: string; id: string }>;
+    pendingArtifactId?: string;
+  }>,
+) {
+  return operations.some(
+    (operation) =>
+      operation.status === "executed" &&
+      (operation.type === "artifact.create" ||
+        operation.type === "artifact.update") &&
+      operation.affected.some(
+        (item) => item.type === "artifact" && Boolean(item.id),
+      ),
+  );
+}
+
+/** Stop can land after finalizePendingLive and before markExecuted. */
+async function durableArtifactWritesArmRunUndoIncludingPending(
+  ctx: MutationCtx,
+  operations: ReadonlyArray<{
+    type: string;
+    status: string;
+    affected: Array<{ type: string; id: string }>;
+    pendingArtifactId?: string;
+  }>,
+) {
+  if (durableArtifactWritesArmRunUndo(operations)) return true;
+  for (const operation of operations) {
+    if (
+      operation.status !== "executing" &&
+      operation.status !== "executed"
+    )
+      continue;
+    if (
+      operation.type !== "artifact.create" &&
+      operation.type !== "artifact.update"
+    )
+      continue;
+    const pendingId = operation.pendingArtifactId;
+    if (!pendingId) continue;
+    const artifactId = ctx.db.normalizeId("spectraArtifacts", pendingId);
+    if (!artifactId) continue;
+    const artifact = await ctx.db.get(artifactId);
+    if (artifact?.currentVersionId) return true;
+  }
+  return false;
+}
+
 function recoveryForRun(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
@@ -1864,6 +1916,42 @@ export const reconcileStaleRuns = internalMutation({
         .query("spectraResultCards")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
         .collect();
+      const interruptArmsUndo =
+        await durableArtifactWritesArmRunUndoIncludingPending(
+          ctx,
+          currentOperations,
+        );
+      const interruptActions = [
+        ...(recovery.retryable
+          ? [
+              {
+                key: "retry" as const,
+                label: "Retry",
+                targetType: "run" as const,
+                targetId: run._id,
+              },
+            ]
+          : run.threadId
+            ? [
+                {
+                  key: "continue" as const,
+                  label: "Continue in thread",
+                  targetType: "thread" as const,
+                  targetId: run.threadId,
+                },
+              ]
+            : []),
+        ...(interruptArmsUndo
+          ? [
+              {
+                key: "revert" as const,
+                label: "Undo this run",
+                targetType: "run" as const,
+                targetId: run._id,
+              },
+            ]
+          : []),
+      ];
       await Promise.all(
         cards.map((card) =>
           ctx.db.patch(card._id, {
@@ -1874,25 +1962,7 @@ export const reconcileStaleRuns = internalMutation({
                 ? "Partial work preserved"
                 : "Run interrupted",
             summary: error,
-            actions: recovery.retryable
-              ? [
-                  {
-                    key: "retry",
-                    label: "Retry",
-                    targetType: "run",
-                    targetId: run._id,
-                  },
-                ]
-              : run.threadId
-                ? [
-                    {
-                      key: "continue",
-                      label: "Continue in thread",
-                      targetType: "thread",
-                      targetId: run.threadId,
-                    },
-                  ]
-                : [],
+            actions: interruptActions,
             updatedAt: now,
           }),
         ),
@@ -2447,6 +2517,7 @@ export const stopRun = mutation({
     if (
       run.status !== "queued" &&
       run.status !== "running" &&
+      run.status !== "awaiting_confirmation" &&
       run.status !== "awaiting_resolution"
     )
       throw new Error("This run is no longer active.");
@@ -2524,6 +2595,42 @@ export const stopRun = mutation({
       .query("spectraResultCards")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .collect();
+    const durableArtifactWrite =
+      await durableArtifactWritesArmRunUndoIncludingPending(
+        ctx,
+        currentOperations,
+      );
+    const stopActions = [
+      ...(recovery.retryable
+        ? [
+            {
+              key: "retry" as const,
+              label: "Retry",
+              targetType: "run" as const,
+              targetId: args.runId,
+            },
+          ]
+        : run.threadId
+          ? [
+              {
+                key: "continue" as const,
+                label: "Continue in thread",
+                targetType: "thread" as const,
+                targetId: run.threadId,
+              },
+            ]
+          : []),
+      ...(durableArtifactWrite
+        ? [
+            {
+              key: "revert" as const,
+              label: "Undo this run",
+              targetType: "run" as const,
+              targetId: args.runId,
+            },
+          ]
+        : []),
+    ];
     await Promise.all(
       cards.map((card) =>
         ctx.db.patch(card._id, {
@@ -2534,25 +2641,7 @@ export const stopRun = mutation({
             : recovery.retryable
               ? "Stopped by you. Any partial response remains available in the thread."
               : "Stopped by you. Some work may already be visible — review it before continuing.",
-          actions: recovery.retryable
-            ? [
-                {
-                  key: "retry",
-                  label: "Retry",
-                  targetType: "run",
-                  targetId: args.runId,
-                },
-              ]
-            : run.threadId
-              ? [
-                  {
-                    key: "continue",
-                    label: "Continue in thread",
-                    targetType: "thread",
-                    targetId: run.threadId,
-                  },
-                ]
-              : [],
+          actions: stopActions,
           updatedAt: now,
         }),
       ),

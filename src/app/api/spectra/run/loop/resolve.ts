@@ -1344,6 +1344,7 @@ export function toolFulfillsEntireRequest(prompt: string, toolName: string) {
   const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");
   const calendarTools = new Set([
     "schedule_calendar_task",
+    "create_calendar_personal_event",
     "move_calendar_block",
     "resize_calendar_block",
   ]);
@@ -1436,6 +1437,7 @@ export function applicationToolMayCompleteRequest(
     (typeof result?.status === "string" ? result.status : undefined);
   const calendarTools = new Set([
     "schedule_calendar_task",
+    "create_calendar_personal_event",
     "move_calendar_block",
     "resize_calendar_block",
   ]);

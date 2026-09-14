@@ -147,6 +147,40 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   return createNdjsonResponse(task, publicError);
 }
 
+
+function operationTypesArmRunUndo(
+  operations: ReadonlyArray<{ type: string }>,
+): boolean {
+  return operations.some(
+    (operation) =>
+      operation.type === "artifact.create" ||
+      operation.type === "artifact.update",
+  );
+}
+
+function revertRunResultAction(runId: string): ResultAction {
+  return {
+    key: "revert",
+    label: "Undo this run",
+    targetType: "run",
+    targetId: runId,
+  };
+}
+
+function durableArtifactWritesFromOutcomes(
+  outcomes: ReadonlyArray<{
+    operation: { type: string };
+    affected: Array<{ type: string; id: string }>;
+  }>,
+): boolean {
+  return outcomes.some(
+    ({ operation, affected }) =>
+      (operation.type === "artifact.create" ||
+        operation.type === "artifact.update") &&
+      affected.some((item) => item.type === "artifact" && Boolean(item.id)),
+  );
+}
+
 function recoveryForAttempt(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
@@ -2367,17 +2401,8 @@ async function runAttempt(
         targetType: "artifact" as const,
         targetId,
       })),
-      ...(plan.operations.some(
-        (operation) => operation.type === "artifact.update",
-      )
-        ? [
-            {
-              key: "revert" as const,
-              label: "Undo this run",
-              targetType: "run" as const,
-              targetId: params.runId,
-            },
-          ]
+      ...(operationTypesArmRunUndo(plan.operations)
+        ? [revertRunResultAction(params.runId)]
         : []),
     ];
     const mergedProvenance = {
@@ -2516,6 +2541,13 @@ async function runAttempt(
         Boolean(publicText.trim()),
         false,
       );
+      const durableArtifactWrite = durableArtifactWritesFromOutcomes(
+        operationOutcomes,
+      );
+      // Stop API's spectraRuns:stopRun may already have armed retry/continue and
+      // revert from durable executed ops. Only replace resultActions when this
+      // worker still holds outcome evidence; otherwise preserve stopRun's card
+      // actions so a late empty-outcomes cancel cannot strip Undo.
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
@@ -2527,25 +2559,32 @@ async function runAttempt(
               ? "Stopped by you. The partial response remains available, and you can retry when ready."
               : "Stopped before the response began. You can retry when ready."
             : "Stopped by you. Some work may already be visible — review it before continuing.",
-        resultActions: recovery.retryable
-          ? [
-              {
-                key: "retry",
-                label: "Retry",
-                targetType: "run",
-                targetId: params.runId,
-              },
-            ]
-          : params.threadId
-            ? [
-                {
-                  key: "continue",
-                  label: "Continue in thread",
-                  targetType: "thread",
-                  targetId: params.threadId,
-                },
-              ]
-            : [],
+        ...(durableArtifactWrite
+          ? {
+              resultActions: [
+                ...(recovery.retryable
+                  ? [
+                      {
+                        key: "retry" as const,
+                        label: "Retry",
+                        targetType: "run" as const,
+                        targetId: params.runId,
+                      },
+                    ]
+                  : params.threadId
+                    ? [
+                        {
+                          key: "continue" as const,
+                          label: "Continue in thread",
+                          targetType: "thread" as const,
+                          targetId: params.threadId,
+                        },
+                      ]
+                    : []),
+                revertRunResultAction(params.runId),
+              ],
+            }
+          : {}),
         recoveryState: recovery.recoveryState,
         retryable: recovery.retryable,
         preservedPartial: recovery.preservedPartial,
@@ -2613,25 +2652,30 @@ async function runAttempt(
           : "Needs review",
       resultSummary,
       resultVariant: "status",
-      resultActions: recovery.retryable
-        ? [
-            {
-              key: "retry",
-              label: "Retry",
-              targetType: "run",
-              targetId: params.runId,
-            },
-          ]
-        : params.threadId
+      resultActions: [
+        ...(recovery.retryable
           ? [
               {
-                key: "continue",
-                label: "Continue in thread",
-                targetType: "thread",
-                targetId: params.threadId,
+                key: "retry" as const,
+                label: "Retry",
+                targetType: "run" as const,
+                targetId: params.runId,
               },
             ]
-          : [],
+          : params.threadId
+            ? [
+                {
+                  key: "continue" as const,
+                  label: "Continue in thread",
+                  targetType: "thread" as const,
+                  targetId: params.threadId,
+                },
+              ]
+            : []),
+        ...(durableArtifactWritesFromOutcomes(operationOutcomes)
+          ? [revertRunResultAction(params.runId)]
+          : []),
+      ],
       recoveryState: recovery.recoveryState,
       retryable: recovery.retryable,
       preservedPartial: recovery.preservedPartial,
@@ -3308,15 +3352,12 @@ async function resumeOperationsAttempt(params: {
               },
             ]
           : []),
-        ...(operations.some((row) => row.type === "artifact.update")
-          ? [
-              {
-                key: "revert" as const,
-                label: "Undo this run",
-                targetType: "run" as const,
-                targetId: params.runId,
-              },
-            ]
+        // Prefer post-Apply outcomes (affected ids) so Undo arms after
+        // confirmation Apply even when the pre-claim ledger snapshot was empty
+        // of executed rows; fall back to operation types for the same create/update.
+        ...(durableArtifactWritesFromOutcomes(outcomes) ||
+        operationTypesArmRunUndo(operations)
+          ? [revertRunResultAction(params.runId)]
           : []),
       ],
       outcome: "canonical_saved",
@@ -3940,6 +3981,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       // stop. Persist the terminal run state through the existing transition
       // mutation; the worker heartbeat then aborts the operation at its next
       // safe boundary and the cleanup below removes provisional state.
+      const fallbackDetail = await query<
+        { actorClerkId: string; runId: string },
+        RunDetail
+      >("spectraRuns:get", { actorClerkId: actor.clerkId, runId }).catch(
+        () => null,
+      );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: actor.clerkId,
         runId,
@@ -3947,6 +3994,21 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         status: "cancelled",
         resultTitle: "Stopped",
         resultSummary: "Stopped by you. Any completed work remains available.",
+        resultActions: [
+          ...(fallbackDetail?.run.threadId
+            ? [
+                {
+                  key: "continue" as const,
+                  label: "Continue in thread",
+                  targetType: "thread" as const,
+                  targetId: fallbackDetail.run.threadId,
+                },
+              ]
+            : []),
+          // Committing path already has visible work; arm Undo so Dock matches
+          // stopRun's durable-write behavior instead of leaving an empty card.
+          revertRunResultAction(runId),
+        ],
         recoveryState: "partial",
         retryable: false,
         preservedPartial: true,

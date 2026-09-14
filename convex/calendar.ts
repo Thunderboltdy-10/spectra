@@ -351,6 +351,7 @@ export const createPersonalItem = mutation({
     allDay: v.optional(v.boolean()),
     timezone: v.string(),
     linkedArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
+    actorKind: v.optional(v.union(v.literal("human"), v.literal("ai"))),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -372,7 +373,7 @@ export const createPersonalItem = mutation({
       sourceLocked: false,
       linkedArtifactIds: args.linkedArtifactIds ?? [],
       revision: 1,
-      createdBy: "human",
+      createdBy: args.actorKind === "ai" ? "ai" : "human",
       createdAt: now,
       updatedAt: now,
     });

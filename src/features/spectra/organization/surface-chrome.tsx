@@ -355,7 +355,7 @@ export function SurfaceNewMenu({
   placeChoices,
 }: {
   disabled?: boolean;
-  /** Why the control is inactive — shown as title / accessible description. */
+  /** Why the control is inactive — visible status text plus title / aria. */
   disabledTitle?: string;
   importing?: boolean;
   onNewFolder?: () => void;
@@ -381,6 +381,27 @@ export function SurfaceNewMenu({
     ? blueprintChoices.filter((choice) => choice.key === fixedTypeKey)
     : blueprintChoices;
 
+  /* Hover-only title failed live honesty on Recent/quick; keep title/aria and
+     also show the reason as visible muted status text beside the control. */
+  const disabledReason =
+    disabled && disabledTitle ? (
+      <span
+        role="status"
+        className="max-w-[14rem] text-micro leading-4 text-[var(--text-tertiary)]"
+      >
+        {disabledTitle}
+      </span>
+    ) : null;
+  const withDisabledReason = (control: ReactNode) =>
+    disabledReason ? (
+      <span className="inline-flex max-w-full flex-wrap items-center gap-2">
+        {control}
+        {disabledReason}
+      </span>
+    ) : (
+      control
+    );
+
   /* The type is settled and there is exactly one thing this button can make, so
      it makes it. A menu of one item asks a question with one answer. */
   if (
@@ -392,7 +413,7 @@ export function SurfaceNewMenu({
     !placeChoices?.length
   ) {
     const only = choices[0]!;
-    return (
+    return withDisabledReason(
       <button
         type="button"
         disabled={disabled}
@@ -403,7 +424,7 @@ export function SurfaceNewMenu({
       >
         <Plus className="size-3.5" />
         {label}
-      </button>
+      </button>,
     );
   }
 
@@ -420,7 +441,7 @@ export function SurfaceNewMenu({
     </span>
   );
 
-  return (
+  return withDisabledReason(
     <DropdownMenu>
       <span
         className="inline-flex"
@@ -491,7 +512,7 @@ export function SurfaceNewMenu({
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
-    </DropdownMenu>
+    </DropdownMenu>,
   );
 }
 

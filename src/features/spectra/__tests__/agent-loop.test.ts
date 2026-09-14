@@ -189,4 +189,40 @@ describe("runSpectraAgentLoop", () => {
       }),
     );
   });
+
+  it("does not execute later mutations after Stop aborts the signal", async () => {
+    const controller = new AbortController();
+    const requestTurn = vi.fn().mockResolvedValue({
+      text: "",
+      toolCalls: [
+        {
+          id: "mut-1",
+          name: "schedule_calendar_task",
+          arguments: '{"startAt":1,"endAt":2,"timezone":"UTC"}',
+        },
+        {
+          id: "mut-2",
+          name: "schedule_calendar_task",
+          arguments: '{"startAt":3,"endAt":4,"timezone":"UTC"}',
+        },
+      ],
+    });
+    let calls = 0;
+    const executeTool = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) controller.abort();
+      return { ok: true, item: { id: `item-${calls}` } };
+    });
+    await expect(
+      runSpectraAgentLoop({
+        messages: [{ role: "user", content: "Schedule two blocks" }],
+        requestTurn,
+        executeTool,
+        isTerminalTool: () => false,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+  });
 });
+

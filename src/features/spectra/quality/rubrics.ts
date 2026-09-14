@@ -297,13 +297,98 @@ function requestedSlideCount(prompt: string) {
   return raw ? (COUNT_WORDS[raw] ?? Number(raw)) : undefined;
 }
 
+function chartHasEditableNumericSeries(
+  object: PresentationContent["slides"][number]["objects"][number],
+) {
+  if (object.type !== "chart" || object.hidden) return false;
+  const content =
+    object.content && typeof object.content === "object"
+      ? (object.content as Record<string, unknown>)
+      : {};
+  const series = Array.isArray(content.series) ? content.series : [];
+  const legacyValues = Array.isArray(content.values) ? content.values : [];
+  const numericLegacy = legacyValues
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+  if (numericLegacy.length >= 2) return true;
+  return series.some((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const values = Array.isArray((candidate as { values?: unknown }).values)
+      ? ((candidate as { values: unknown[] }).values)
+          .map(Number)
+          .filter((value) => Number.isFinite(value))
+      : [];
+    return values.length >= 2;
+  });
+}
+
+function tableHasEditableNumericCells(
+  object: PresentationContent["slides"][number]["objects"][number],
+) {
+  if (object.type !== "table" || object.hidden) return false;
+  const content =
+    object.content && typeof object.content === "object"
+      ? (object.content as Record<string, unknown>)
+      : {};
+  const rows = Array.isArray(content.rows) ? content.rows : [];
+  let numeric = 0;
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      const text =
+        typeof cell === "string"
+          ? cell
+          : cell && typeof cell === "object" && typeof (cell as { text?: unknown }).text === "string"
+            ? (cell as { text: string }).text
+            : "";
+      if (Number.isFinite(Number(String(text).replace(/[%°,]/g, "").trim())))
+        numeric += 1;
+    }
+  }
+  return numeric >= 2;
+}
+
 function isPurposefulPresentationVisual(
   object: PresentationContent["slides"][number]["objects"][number],
 ) {
   if (object.hidden) return false;
-  if (["image", "video", "chart", "table", "embed"].includes(object.type))
+  if (object.type === "chart") return chartHasEditableNumericSeries(object);
+  if (object.type === "table") return true;
+  if (["image", "video", "embed"].includes(object.type)) return true;
+  // A shape labelled "chart" is not an editable numeric series.
+  if (object.type === "shape") {
+    const label = presentationObjectText(object).trim().toLowerCase();
+    if (/^(?:chart|graph|plot|figure|visual|add a visual)$/i.test(label))
+      return false;
+    return words(label) <= 12 && label.length > 0;
+  }
+  return false;
+}
+
+function promptRequiresEditableNumericVisual(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  if (/\b(?:chart|graph|plot|histogram|numeric series)\b/.test(normalized))
     return true;
-  return object.type === "shape" && words(presentationObjectText(object)) <= 12;
+  if (
+    /\b(?:csv|dataset|data table|spreadsheet|measurements?|values?)\b/.test(
+      normalized,
+    ) &&
+    /\b(?:present|presentation|deck|slides?|study|visuali[sz]e|compare|comparison)\b/.test(
+      normalized,
+    )
+  )
+    return true;
+  return false;
+}
+
+function presentationHasEditableNumericVisual(deck: PresentationContent) {
+  return deck.slides.some((slide) =>
+    slide.objects.some(
+      (object) =>
+        chartHasEditableNumericSeries(object) ||
+        tableHasEditableNumericCells(object),
+    ),
+  );
 }
 
 function evaluatePresentation(content: unknown, prompt: string) {
@@ -316,6 +401,18 @@ function evaluatePresentation(content: unknown, prompt: string) {
         "structure",
         "blocker",
         `Create exactly ${requestedCount} slides; the draft has ${deck.slides.length}.`,
+        "/slides",
+      ),
+    );
+  if (
+    promptRequiresEditableNumericVisual(prompt) &&
+    !presentationHasEditableNumericVisual(deck)
+  )
+    structureFindings.push(
+      finding(
+        "structure",
+        "blocker",
+        "Include a real editable chart or table with numeric series, categories, and units — not a shape labelled chart or a screenshot stand-in.",
         "/slides",
       ),
     );

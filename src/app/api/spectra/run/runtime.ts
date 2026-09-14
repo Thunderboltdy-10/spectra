@@ -4155,9 +4155,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         await applyAiArtifactMutation({
           artifactId: item.artifactId,
           runId,
-          operationId: `revert:${runId}:${item.artifactId}`,
+          // restore:* ids are human Undo fencing, never AI claim identities.
+          operationId: `restore:${runId}:${item.artifactId}`,
           executionId:
-            expectedExecutionId ?? state.run.executionId ?? `revert:${runId}`,
+            expectedExecutionId ??
+            state.run.executionId ??
+            `restore:${runId}`,
           checkpointBeforeAi: false,
           claimActorKind: "human",
           resolveDesired: (current) => ({
@@ -4192,7 +4195,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       outcome: "failed",
     }).catch(() => null);
     const executionId =
-      expectedExecutionId ?? state.run.executionId ?? `revert:${runId}`;
+      expectedExecutionId ?? state.run.executionId ?? `restore:${runId}`;
     await Promise.all(
       state.cards.map((card) =>
         mutate("spectraRuns:patchResultCard", {

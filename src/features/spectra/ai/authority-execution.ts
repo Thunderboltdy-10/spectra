@@ -53,12 +53,28 @@ export function evaluateApplicationAuthority(input: {
   command: string;
   args: Record<string, unknown>;
   localFileCount: number;
+  localFileCountUnknown?: boolean;
   authorityTarget?: AiTargetClass;
 }): ApplicationAuthorityEvaluation {
   const diskCounted =
     input.command === "organize_library" ||
     input.command === "delete_library_items" ||
     input.command === "change_sync_policy";
+  if (diskCounted && input.localFileCountUnknown) {
+    const result = decideAiAuthority({
+      target: "local_file",
+      fileCount: undefined,
+    });
+    return {
+      ...result,
+      target: "local_file",
+      notice: undefined,
+      reason:
+        "Spectra could not verify how many local files this change would affect.",
+      consequence:
+        "Approval is required because the local-file effect is unknown — not because zero files are affected.",
+    };
+  }
   const resolved = diskCounted
     ? applicationAuthorityTarget(
         input.command,

@@ -103,4 +103,30 @@ describe("AI UI events", () => {
     expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
     __resetAppChoreographyHost();
   });
+
+  it("emits a durable failure receipt when reference host is unmounted", async () => {
+    const receipts: Array<Record<string, unknown>> = [];
+    const remove = spectraBus.on("ai.ui.referenceReceipt", (payload) => {
+      receipts.push(payload as Record<string, unknown>);
+    });
+    handleSpectraAiUiEvent({
+      key: "reference_insert",
+      runId: "run-ref",
+      payload: {
+        hostWorkId: "host-1",
+        targetWorkId: "target-1",
+        targetWorkType: "document",
+        note: "Insert a live reference",
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(receipts.some((row) => row.phase === "queued_refresh")).toBe(true);
+    expect(
+      receipts.some(
+        (row) => row.phase === "host_unmounted" && row.ok === false,
+      ),
+    ).toBe(true);
+    remove();
+  });
 });
+

@@ -73,9 +73,19 @@ describe("treeFailureMessage LIBRARY_* humanization", () => {
       resolve(__dirname, "../organization/surface-chrome.tsx"),
       "utf8",
     );
+    expect(organizer).toContain("const inFolder = location.kind === \"folder\"");
+    expect(organizer).toContain("disabled={!inFolder || busy}");
     expect(organizer).toContain('disabledTitle={');
     expect(organizer).toContain('"Open a folder to create here"');
+    // Recent / Favorites / Shared are quick views → !inFolder → disabled + reason.
+    expect(organizer).toContain('location.kind === "quick"');
     expect(chrome).toContain("disabledTitle");
     expect(chrome).toContain("aria-description");
+    // Visible honesty (not hover-only): muted status text when disabled.
+    expect(chrome).toContain('role="status"');
+    expect(chrome).toContain("{disabledTitle}");
+    expect(chrome).toContain("text-micro");
+    expect(chrome).toContain("--text-tertiary");
+    expect(chrome).toContain("withDisabledReason");
   });
 });

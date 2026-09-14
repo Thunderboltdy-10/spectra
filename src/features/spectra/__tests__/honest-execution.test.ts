@@ -158,11 +158,43 @@ describe("P4.I3 honest execution and authority", () => {
       runtime.indexOf('publish({\n        type: "stopped"'),
     );
     expect(stopArm).toContain("revertRunResultAction(params.runId)");
+    // Empty worker outcomes must not replace stopRun card actions (would strip Undo).
+    expect(stopArm).toContain("...(durableArtifactWrite");
+    expect(stopArm).toContain("resultActions:");
+    expect(runtime).toContain(
+      "durableArtifactWritesFromOutcomes(operationOutcomes)",
+    );
+    const errorPublish = runtime.indexOf('type: "error"');
+    const failedBlock = runtime.slice(
+      Math.max(0, errorPublish - 1200),
+      errorPublish,
+    );
+    expect(failedBlock).toContain("revertRunResultAction(params.runId)");
+    expect(failedBlock).toContain(
+      "durableArtifactWritesFromOutcomes(operationOutcomes)",
+    );
+    const stopRun = read("convex/spectraRuns.ts");
+    expect(stopRun).toContain("function durableArtifactWritesArmRunUndo");
+    expect(stopRun).toContain('operation.type === "artifact.create"');
+    expect(stopRun).toContain('operation.status === "executed"');
+    const stopMutation = stopRun.slice(
+      stopRun.indexOf("export const stopRun = mutation"),
+      stopRun.indexOf("export const setSuggestedThreadMetadata"),
+    );
+    expect(stopMutation).toContain('key: "revert"');
+    expect(stopMutation).toContain("durableArtifactWritesArmRunUndo(currentOperations)");
   });
 
   it("exposes AI personal-event create on the same path as human Add event", () => {
     const tools = read("src/features/spectra/tools/registry/application-tools.ts");
     expect(tools).toContain('id: "create_calendar_personal_event"');
+    // Must be on the agent allowlist — registry define alone does not expose it.
+    const allowlistStart = tools.indexOf("export const APPLICATION_AGENT_TOOL_IDS");
+    const allowlist = tools.slice(
+      allowlistStart,
+      tools.indexOf("] as const;", allowlistStart) + 12,
+    );
+    expect(allowlist).toContain("create_calendar_personal_event");
     const command = read("src/features/spectra/calendar/domain/command.ts");
     expect(command).toContain('create_calendar_personal_event: "calendar:createPersonalItem"');
     expect(command).toContain('"calendar.create_personal_event"');

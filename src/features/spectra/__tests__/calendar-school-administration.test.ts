@@ -50,10 +50,52 @@ describe("Calendar, School, and administration V2", () => {
       expect.arrayContaining([
         "read_calendar",
         "schedule_calendar_task",
+        "create_calendar_personal_event",
         "move_calendar_block",
         "resize_calendar_block",
       ]),
     );
+  });
+
+  it("accepts personal-event create postconditions matching Add event", () => {
+    const event = calendarItemFromWire({
+      id: "personal-1",
+      kind: "personal_event",
+      title: "Study hall",
+      sourceLocked: false,
+      startAt: 1_000,
+      endAt: 2_000,
+      allDay: false,
+      timezone: "UTC",
+      timePrecision: "exact",
+      status: "active",
+      linkedWorkIds: [],
+      revision: 1,
+    });
+    const postcondition = verifyCalendarActionPostcondition(
+      {
+        type: "calendar.create_personal_event",
+        title: "Study hall",
+        startAt: 1_000,
+        endAt: 2_000,
+        timezone: "UTC",
+      },
+      event,
+    );
+    expect(postcondition).toEqual({
+      itemId: "personal-1",
+      kind: "personal_event",
+      startAt: 1_000,
+      endAt: 2_000,
+      linkedTask: false,
+    });
+    expect(calendarActionPolicy({
+      type: "calendar.create_personal_event",
+      title: "Study hall",
+      startAt: 1_000,
+      endAt: 2_000,
+      timezone: "UTC",
+    }).target.kind).toBe("personal_event");
   });
 
   it("keeps official deadlines immutable and scheduled work distinct", () => {

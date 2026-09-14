@@ -144,4 +144,32 @@ describe("P4.I3 honest execution and authority", () => {
     expect(writing).not.toMatch(/local model|Local writing suggestions/i);
     expect(writing).toContain("never insert text until you accept them");
   });
+
+  it("arms Live Dock Undo after durable AI artifact.create as well as update", () => {
+    const runtime = read("src/app/api/spectra/run/runtime.ts");
+    expect(runtime).toContain("function operationTypesArmRunUndo");
+    expect(runtime).toContain('operation.type === "artifact.create"');
+    expect(runtime).toContain("operationTypesArmRunUndo(plan.operations)");
+    expect(runtime).toContain("operationTypesArmRunUndo(operations)");
+    expect(runtime).toContain("durableArtifactWritesFromOutcomes");
+    // Stop mid-run must still expose revert when creates already landed.
+    const stopArm = runtime.slice(
+      runtime.indexOf("const durableArtifactWrite = durableArtifactWritesFromOutcomes"),
+      runtime.indexOf('publish({\n        type: "stopped"'),
+    );
+    expect(stopArm).toContain("revertRunResultAction(params.runId)");
+  });
+
+  it("exposes AI personal-event create on the same path as human Add event", () => {
+    const tools = read("src/features/spectra/tools/registry/application-tools.ts");
+    expect(tools).toContain('id: "create_calendar_personal_event"');
+    const command = read("src/features/spectra/calendar/domain/command.ts");
+    expect(command).toContain('create_calendar_personal_event: "calendar:createPersonalItem"');
+    expect(command).toContain('"calendar.create_personal_event"');
+    const convex = read("convex/calendar.ts");
+    expect(convex).toContain('createdBy: args.actorKind === "ai" ? "ai" : "human"');
+    const plan = read("src/app/api/spectra/run/loop/plan.ts");
+    expect(plan).toContain("create_calendar_personal_event");
+    expect(plan).toContain('refuse with "scheduling unavailable"');
+  });
 });

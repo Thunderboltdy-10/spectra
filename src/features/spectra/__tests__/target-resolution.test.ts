@@ -1041,5 +1041,20 @@ describe("P4.I2 artifact target resolution", () => {
       ),
     ).toBe(true);
   });
-});
 
+  it("treats personal-event create as a Calendar write that can complete a sole Add-event request", () => {
+    expect(
+      toolFulfillsEntireRequest(
+        "Add a personal event called Study hall tomorrow at 3pm",
+        "create_calendar_personal_event",
+      ),
+    ).toBe(true);
+    expect(
+      toolFulfillsEntireRequest(
+        "Create a verification note and add a calendar event for the review",
+        "create_calendar_personal_event",
+      ),
+    ).toBe(false);
+  });
+
+});

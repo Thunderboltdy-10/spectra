@@ -65,8 +65,12 @@ const rawBridge = createCollaborationGatewayBridgeClient({
   bridgeKey,
 });
 const serializedBridge = serializeCollaborationBridge(rawBridge);
+// authorize/policy must not wait behind load/spill/snapshot — those can run for
+// seconds on large rooms while beforeHandleMessage only has a 1s Convex budget
+// once the action finally starts. append stays parallel for the same reason.
+const PARALLEL_BRIDGE_OPS = new Set(["append", "authorize", "policy"]);
 const bridge = (operation, payload, options) =>
-  operation === "append"
+  PARALLEL_BRIDGE_OPS.has(operation)
     ? rawBridge(operation, payload, options)
     : serializedBridge(operation, payload, options);
 const jwtKey = new TextEncoder().encode(tokenSecret);
@@ -1018,13 +1022,7 @@ function extractYjsUpdate(frame) {
   return decoding.readVarUint8Array(decoder);
 }
 
-async function reauthorize(context) {
-  const now = Date.now();
-  if (
-    context.authorizationCheckedAt &&
-    now - context.authorizationCheckedAt < COLLABORATION_AUTHORIZE_CACHE_MS
-  )
-    return context;
+async function refreshAuthorization(context) {
   // Handshake JWT expiry is enforced by jwtVerify on connect. Closing an
   // already-authenticated socket at `exp` turns every 10-minute classroom into
   // a reconnect storm (4205 / unauthenticated queue overflow). Revocation is
@@ -1046,7 +1044,7 @@ async function reauthorize(context) {
       throw new Error("COLLABORATION_ACCESS_REVOKED");
     }
     context.canModify = result.canModify === true;
-    context.authorizationCheckedAt = now;
+    context.authorizationCheckedAt = Date.now();
     return context;
   } catch (error) {
     if (
@@ -1060,6 +1058,40 @@ async function reauthorize(context) {
     }
     throw error;
   }
+}
+
+async function reauthorize(context, { allowStale = false } = {}) {
+  const now = Date.now();
+  if (
+    context.authorizationCheckedAt &&
+    now - context.authorizationCheckedAt < COLLABORATION_AUTHORIZE_CACHE_MS
+  )
+    return context;
+  // Sync beforeHandleMessage must not await Convex. A 1s authorize timeout on a
+  // large sheet previously closed the socket (Aw Snap / reconnect). Keep the
+  // last good grant and refresh in the background; connect/load still block.
+  if (allowStale && context.authorizationCheckedAt) {
+    if (!context.authorizationRefreshInFlight) {
+      context.authorizationRefreshInFlight = refreshAuthorization(context)
+        .catch((error) => {
+          const reason =
+            error instanceof Error ? error.message : String(error);
+          if (
+            reason.includes("COLLABORATION_ACCESS_REVOKED") ||
+            reason.includes("COLLABORATION_READ_ONLY")
+          ) {
+            forceCanonicalReconnect(context, reason);
+          } else {
+            process.stderr.write(`[reauthorize:bg] ${reason}\n`);
+          }
+        })
+        .finally(() => {
+          context.authorizationRefreshInFlight = null;
+        });
+    }
+    return context;
+  }
+  return refreshAuthorization(context);
 }
 
 const server = new Server({
@@ -1148,7 +1180,7 @@ const server = new Server({
     socketId,
     connection,
   }) {
-    await reauthorize(context);
+    await reauthorize(context, { allowStale: true });
     const incomingUpdate = extractYjsUpdate(frame);
     if (!incomingUpdate || incomingUpdate.byteLength === 0) return;
     // Hocuspocus can run hooks from different sockets concurrently. Hold a
@@ -1254,7 +1286,7 @@ const server = new Server({
       states.clear();
       return;
     }
-    await reauthorize(context);
+    await reauthorize(context, { allowStale: true });
     for (const [clientId, state] of states) {
       const supplied =
         state?.user && typeof state.user === "object" ? state.user : {};

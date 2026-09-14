@@ -100,3 +100,29 @@ Implemented without rewriting Native honesty (`rejectPeerUpdate`, `forceCanonica
 5. **Worker parity** — Cloudflare `MAX_UPDATE_BYTES` aligned to **760 KiB** durable; `MAX_REALTIME_MESSAGE_BYTES` remains 1 MiB.
 
 Still OPEN for product/live dual-gate: end-to-end 200k workbook + formal-paper round-trip on live Convex, pin/retention GC against spilled payloads, and whether launch serves self-hosted only (worker path is parity-locked for defense in depth).
+
+## Live E2E launch-gap fix (`2f1f2c0` follow-up)
+
+Evidence: `/workspace/live-verify-fixtures/s9-durable-e2e/fail-2f1f2c0/` plus gateway logs
+`/tmp/collab-gateway-1234.log` (signature verification failed) and
+`/tmp/collab-gateway-3001.log` (`beforeHandleMessage` → Convex `maximum duration: 1s`).
+
+| Symptom | Root cause | Fix |
+| --- | --- | --- |
+| Formal-paper reconnect / auth fail | Gateway started without the same `SPECTRA_COLLAB_TOKEN_SECRET` (+ CRLF risk) as Next | `scripts/load-collaboration-env.mjs` + `scripts/serve-collaboration-gateway.mjs`; `npm run start:collab` / `dev:collab` load `.env.local`, strip CRLF, refuse `example.convex.cloud` |
+| 200k Aw Snap / socket close on edit | `beforeHandleMessage` → `reauthorize` → bridge `authorize` did `ctx.db.get(spectraArtifacts)` (full 200k body) inside a **1s** Convex query; timeout closed the peer | Authorize/policy use `evaluateArtifactAccessForActor` / `loadArtifactAuthority` (summary only); authorize/policy bypass the serialized bridge queue; sync path soft-reauths (`allowStale`) and treats Convex timeouts as transient |
+
+Honesty helpers (`rejectPeerUpdate`, `forceCanonicalReconnect`, `projectionExceedsDurableBound`, client `4409`) remain 0-diff vs Native.
+
+### Live start recipe (matched secrets)
+
+```bash
+# terminal A — web (loads .env.local; example port 3040)
+npm run dev:web
+
+# terminal B — gateway with the same SPECTRA_COLLAB_* secrets
+node scripts/serve-collaboration-gateway.mjs
+# or: npm run start:collab
+```
+
+Do not start `scripts/collaboration-gateway.mjs` bare unless the shell already exports identical secrets to the Next process.

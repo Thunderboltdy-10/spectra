@@ -14,8 +14,8 @@
     "local:add-instance": "node scripts/local/stack.mjs add-instance",
     "local:status": "node scripts/local/stack.mjs status",
     "dev:web": "node --env-file=.env.local scripts/dev-web.mjs",
-    "dev:collab": "node --env-file=.env.local scripts/dev-collaboration-gateway.mjs",
-    "start:collab": "node scripts/collaboration-gateway.mjs",
+    "dev:collab": "node scripts/serve-collaboration-gateway.mjs --supervise",
+    "start:collab": "node scripts/serve-collaboration-gateway.mjs",
     "collaboration:classroom-load": "node --env-file-if-exists=.env.local scripts/collaboration-classroom-load.mjs",
     "prebuild": "npm run check:secrets && npm run check:capabilities",
     "build": "next build",
@@ -38,7 +38,8 @@
     "fidelity:seam": "vitest run src/features/spectra/__tests__/seam-contract.test.ts",
     "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
     "convex:dev": "convex dev",
-    "lint:design": "node scripts/report-design-census.mjs"
+    "lint:design": "node scripts/report-design-census.mjs",
+    "start:collab:raw": "node scripts/collaboration-gateway.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.79",

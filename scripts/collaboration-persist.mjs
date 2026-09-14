@@ -31,7 +31,7 @@ export function isTransientCollaborationFailure(error) {
   if (persistenceFailureCode(error) === "COLLABORATION_GATEWAY_UNAVAILABLE")
     return true;
   const message = collaborationFailureMessage(error);
-  return /InternalServerError|Try again later|TooManyWrites|Too many writes|TooManyReads|OptimisticConcurrency|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up|UND_ERR_/i.test(
+  return /InternalServerError|Try again later|TooManyWrites|Too many writes|TooManyReads|OptimisticConcurrency|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up|UND_ERR_|timed out|maximum duration|Function execution timed out/i.test(
     message,
   );
 }

@@ -3,7 +3,11 @@ import { internalMutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { evaluateAccessForActor } from "./authorityShared";
+import {
+  evaluateAccessForActor,
+  evaluateArtifactAccessForActor,
+  loadArtifactAuthority,
+} from "./authorityShared";
 import { getActorForAccountId } from "./identityShared";
 import { internal } from "./_generated/api";
 import { commitChangeGroup, HUMAN_CHANGE_IDLE_MS } from "./changeGroups";
@@ -184,8 +188,9 @@ function parseGatewayProjection(
 export const policy = internalQuery({
   args: { artifactId: v.id("spectraArtifacts"), partitionKey: v.string() },
   handler: async (ctx, args) => {
-    const [artifact, room] = await Promise.all([
-      ctx.db.get(args.artifactId),
+    // Authority summary only — never db.get the fat artifact row (200k sheets).
+    const [authority, room] = await Promise.all([
+      loadArtifactAuthority(ctx, args.artifactId),
       ctx.db
         .query("collaborationRooms")
         .withIndex("by_artifact_partition", (q) =>
@@ -196,10 +201,10 @@ export const policy = internalQuery({
         .unique(),
     ]);
     if (
-      !artifact ||
+      !authority ||
       !room ||
       room.status === "closed" ||
-      artifact.status === "deleted"
+      authority.lifecycle === "deleted"
     )
       return {
         available: false as const,
@@ -221,9 +226,11 @@ export const authorize = internalQuery({
     policyVersion: v.number(),
   },
   handler: async (ctx, args) => {
-    const [actor, artifact, room] = await Promise.all([
+    // Hot path for every collab message refresh: use the compact authority
+    // summary, never spectraArtifacts.content. Loading a 200k-cell sheet body
+    // inside this 1s query was the live beforeHandleMessage Convex timeout.
+    const [actor, room] = await Promise.all([
       getActorForAccountId(ctx, args.accountId),
-      ctx.db.get(args.artifactId),
       ctx.db
         .query("collaborationRooms")
         .withIndex("by_artifact_partition", (q) =>
@@ -233,29 +240,28 @@ export const authorize = internalQuery({
         )
         .unique(),
     ]);
+    if (!actor || !room || room.status === "closed")
+      return { allowed: false as const, reason: "unavailable" as const };
+    const decision = await evaluateArtifactAccessForActor(
+      ctx,
+      actor,
+      args.artifactId,
+    );
+    const loaded = "loaded" in decision ? decision.loaded : null;
     if (
-      !actor ||
-      !artifact ||
-      !room ||
-      room.status === "closed" ||
-      (artifact.status !== "active" && artifact.status !== "draft") ||
-      artifact.schoolId !== actor.schoolId
+      !loaded ||
+      (loaded.lifecycle !== "active" && loaded.lifecycle !== "draft") ||
+      loaded.schoolId !== actor.schoolId
     )
       return { allowed: false as const, reason: "unavailable" as const };
     const resourceType =
-      artifact.blueprintKey === "agent"
+      loaded.resource.blueprintKey === "agent"
         ? ("agent" as const)
         : ("artifact" as const);
-    const decision = await evaluateAccessForActor(
-      ctx,
-      actor,
-      resourceType,
-      artifact._id,
-    );
     const policy = await ctx.db
       .query("resourcePolicies")
       .withIndex("by_resource", (q) =>
-        q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+        q.eq("resourceType", resourceType).eq("resourceId", args.artifactId),
       )
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
@@ -263,9 +269,13 @@ export const authorize = internalQuery({
     // projection must never turn an owner into a read-level room participant;
     // the surrounding policy version checks still fail closed on revocation.
     const canModify =
-      artifact.ownerAccountId === actor.accountId ||
+      loaded.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
-    if (artifact.blueprintKey === "quiz" && decision.allowed && !canModify) {
+    if (
+      loaded.resource.blueprintKey === "quiz" &&
+      decision.allowed &&
+      !canModify
+    ) {
       return {
         allowed: false as const,
         reason: "quiz_practice_projection_required" as const,

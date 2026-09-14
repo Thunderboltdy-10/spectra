@@ -408,6 +408,20 @@ describe("P5.I2 gateway production helpers", () => {
     ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
   });
 
+  it("treats Convex 1s function timeouts as transient so soft-reauth can keep the tab alive", () => {
+    expect(
+      isTransientCollaborationFailure(
+        new Error("Function execution timed out (maximum duration: 1s)"),
+      ),
+    ).toBe(true);
+    expect(
+      isTransientCollaborationFailure(
+        new Error("[Request ID: abc] Server Error\nUncaught Error: Function execution timed out (maximum duration: 1s)"),
+      ),
+    ).toBe(true);
+  });
+
+
   it("coalesces same-account human edits in one durable batch and keeps AI per client", () => {
     const human = (clientId: string) => ({
       nativeInitialization: false,

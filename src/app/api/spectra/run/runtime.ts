@@ -3352,7 +3352,11 @@ async function resumeOperationsAttempt(params: {
               },
             ]
           : []),
-        ...(operationTypesArmRunUndo(operations)
+        // Prefer post-Apply outcomes (affected ids) so Undo arms after
+        // confirmation Apply even when the pre-claim ledger snapshot was empty
+        // of executed rows; fall back to operation types for the same create/update.
+        ...(durableArtifactWritesFromOutcomes(outcomes) ||
+        operationTypesArmRunUndo(operations)
           ? [revertRunResultAction(params.runId)]
           : []),
       ],
@@ -3977,6 +3981,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       // stop. Persist the terminal run state through the existing transition
       // mutation; the worker heartbeat then aborts the operation at its next
       // safe boundary and the cleanup below removes provisional state.
+      const fallbackDetail = await query<
+        { actorClerkId: string; runId: string },
+        RunDetail
+      >("spectraRuns:get", { actorClerkId: actor.clerkId, runId }).catch(
+        () => null,
+      );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: actor.clerkId,
         runId,
@@ -3984,6 +3994,21 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         status: "cancelled",
         resultTitle: "Stopped",
         resultSummary: "Stopped by you. Any completed work remains available.",
+        resultActions: [
+          ...(fallbackDetail?.run.threadId
+            ? [
+                {
+                  key: "continue" as const,
+                  label: "Continue in thread",
+                  targetType: "thread" as const,
+                  targetId: fallbackDetail.run.threadId,
+                },
+              ]
+            : []),
+          // Committing path already has visible work; arm Undo so Dock matches
+          // stopRun's durable-write behavior instead of leaving an empty card.
+          revertRunResultAction(runId),
+        ],
         recoveryState: "partial",
         retryable: false,
         preservedPartial: true,

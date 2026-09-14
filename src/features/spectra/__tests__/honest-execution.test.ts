@@ -182,7 +182,35 @@ describe("P4.I3 honest execution and authority", () => {
       stopRun.indexOf("export const setSuggestedThreadMetadata"),
     );
     expect(stopMutation).toContain('key: "revert"');
-    expect(stopMutation).toContain("durableArtifactWritesArmRunUndo(currentOperations)");
+    expect(stopMutation).toContain(
+      "durableArtifactWritesArmRunUndoIncludingPending",
+    );
+    // Stop while awaiting approval must not 409; Apply can still land durable work.
+    expect(stopMutation).toContain('run.status !== "awaiting_confirmation"');
+    expect(stopRun).toContain(
+      "function durableArtifactWritesArmRunUndoIncludingPending",
+    );
+    expect(stopRun).toContain("artifact?.currentVersionId");
+    // Confirmation Apply completion arms Undo from post-Apply outcomes.
+    expect(runtime).toContain(
+      "durableArtifactWritesFromOutcomes(outcomes)",
+    );
+  });
+
+  it("exits single-creation whenever Calendar action is requested (note+schedule)", () => {
+    const plan = read("src/app/api/spectra/run/loop/plan.ts");
+    const gate = plan.slice(
+      plan.indexOf("const calendarActionRequested = promptRequestsCalendarAction"),
+      plan.indexOf("const openArtifactCreateCollision"),
+    );
+    // Must not keep note+personal-event on create_note-only tool list.
+    expect(gate).toContain(
+      "const calendarNeedsCoordination = calendarActionRequested",
+    );
+    expect(gate).not.toContain(
+      "const calendarNeedsCoordination = calendarCreatesPlannerTask",
+    );
+    expect(plan).toContain("create_calendar_personal_event");
   });
 
   it("exposes AI personal-event create on the same path as human Add event", () => {

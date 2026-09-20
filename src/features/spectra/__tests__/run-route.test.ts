@@ -306,7 +306,10 @@ function setup(
   });
 
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
-  vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+  vi.doMock("@/lib/convex-server", () => ({
+    convexQuery, convexMutation,
+    storeArtifactContent: async (_artifactId: string, content: unknown) => content,
+  }));
   const materializeDocxArtifact = vi.fn(
     async (): Promise<{
       state: "conflicted" | "pending" | "verified" | "claimed";
@@ -2029,7 +2032,7 @@ describe("Spectra run route", () => {
         "propose_operation",
       );
       expect(
-        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_")),
+        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_") && tool.function.name !== "create_calendar_personal_event"),
       ).toBe(false);
       const propose = payload.tools?.find(
         (tool) => tool.function?.name === "propose_operation",
@@ -2251,7 +2254,7 @@ describe("Spectra run route", () => {
       };
       expect(payload.response_format).toBeUndefined();
       expect(
-        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_")),
+        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_") && tool.function.name !== "create_calendar_personal_event"),
       ).toBe(false);
       expect(payload.tools?.map((tool) => tool.function?.name)).toContain(
         "propose_operation",

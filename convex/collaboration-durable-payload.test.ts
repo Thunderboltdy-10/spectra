@@ -72,6 +72,81 @@ describe("durable payload adoption", () => {
   });
 });
 
+describe("AI content reference writes", () => {
+  async function stagedWorkbook() {
+    const { t, ids } = await fixture();
+    const actor = t.withIdentity({ subject: "durable", email: "durable@example.test", emailVerified: true });
+    const runId = await t.run(async ctx => {
+      const artifact = (await ctx.db.get(ids.artifactId))!;
+      await ctx.db.patch(ids.artifactId, { blueprintKey: "sheets", summary: "Workbook with 200000 filled cells about Durable." });
+      return ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: ids.accountId, schoolId: artifact.schoolId, sourceSurface: "artifact",
+        status: "running", userPrompt: "Change the distant cell", executionId: "durable-ai",
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    const body = JSON.stringify({ sheets: [{ id: "large", name: "Large", cells: {
+      A1: { value: "界".repeat(100_000) }, P9996: { value: 919296 },
+    } }] });
+    const storageId = await t.run(ctx => ctx.storage.store(new Blob([body])));
+    const digest = createHash("sha256").update(body).digest("hex");
+    const adopted = await actor.mutation(api.artifactContent.adopt, {
+      artifactId: ids.artifactId, storageId, digest, byteLength: Buffer.byteLength(body), policyVersion: 0,
+    });
+    const content = { spectraContentRef: {
+      version: 1 as const, artifactId: ids.artifactId, payloadRef: adopted.payloadRef,
+      digest, byteLength: Buffer.byteLength(body), path: "value" as const, dependencies: adopted.dependencies,
+    } };
+    const args = { artifactId: ids.artifactId, runId, executionId: "durable-ai", content, commit: true };
+    return { t, ids, actor, args };
+  }
+
+  it("commits a bounded reference and retains its body and preview without an empty-sheet substitution", async () => {
+    const { t, actor, args } = await stagedWorkbook();
+    expect(Buffer.byteLength(JSON.stringify(args))).toBeLessThan(1024);
+    await actor.mutation(api.spectraArtifacts.stageAiPatch, args);
+    const artifact = await t.run(ctx => ctx.db.get(args.artifactId));
+    expect(artifact?.content).toEqual(args.content);
+    expect(artifact?.aiPreview?.content).toEqual(args.content);
+    expect(artifact?.summary).toBe("Workbook with 200000 filled cells about Durable.");
+    const owners = await t.run(ctx => ctx.db.query("collaborationPayloadOwners")
+      .withIndex("by_payload", q => q.eq("payloadRef", args.content.spectraContentRef.payloadRef)).collect());
+    expect(owners).toEqual(expect.arrayContaining([expect.objectContaining({ ownerTable: "spectraArtifacts", ownerId: args.artifactId })]));
+    await actor.mutation(api.spectraArtifacts.stageAiPatch, { ...args, summary: "Updated the distant cell." });
+    expect((await t.run(ctx => ctx.db.get(args.artifactId)))?.summary).toBe("Updated the distant cell.");
+  });
+
+  it.each(["digest", "bytes", "malformed", "foreign artifact", "foreign actor", "stale epoch", "dependencies"])("rejects %s at commit without changing the artifact", async failure => {
+    const { t, actor, args } = await stagedWorkbook();
+    const content = structuredClone(args.content);
+    if (failure === "digest") content.spectraContentRef.digest = "0".repeat(64);
+    if (failure === "bytes") content.spectraContentRef.byteLength++;
+    if (failure === "malformed") content.spectraContentRef.digest = "invalid";
+    if (failure === "foreign artifact") content.spectraContentRef.artifactId = "foreign" as typeof args.artifactId;
+    if (failure === "dependencies") content.spectraContentRef.dependencies = { assetIds: ["foreign"], nativePayloadHashes: [], nativePayloadRefs: [] };
+    if (failure === "foreign actor" || failure === "stale epoch") await t.run(async ctx => {
+      const id = ctx.db.normalizeId("collaborationDurablePayloads", content.spectraContentRef.payloadRef)!;
+      if (failure === "stale epoch") await ctx.db.patch(id, { policyVersion: 1 });
+      else {
+        const other = await ctx.db.insert("accounts", { clerkId: "other", email: "other@example.test", emailVerified: true, name: "Other", status: "active", createdAt: Date.now(), updatedAt: Date.now() });
+        await ctx.db.patch(id, { accountId: other });
+      }
+    });
+    const before = await t.run(ctx => ctx.db.get(args.artifactId));
+    await expect(actor.mutation(api.spectraArtifacts.stageAiPatch, { ...args, content })).rejects.toThrow(/INVALID/);
+    expect(await t.run(ctx => ctx.db.get(args.artifactId))).toEqual(before);
+  });
+
+  it("preserves references in pending previews and refuses references on a new artifact", async () => {
+    const { t, actor, args } = await stagedWorkbook();
+    await t.run(ctx => ctx.db.patch(args.artifactId, { aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId }));
+    const { commit: _commit, ...pending } = args;
+    await actor.mutation(api.spectraArtifacts.patchPendingContent, { ...pending, progress: 0.5 });
+    expect((await t.run(ctx => ctx.db.get(args.artifactId)))?.aiPreview?.content).toEqual(args.content);
+    await expect(actor.mutation(api.spectraArtifacts.create, { blueprintKey: "sheets", title: "Foreign copy", content: args.content })).rejects.toThrow("COLLABORATION_DURABLE_PAYLOAD_INVALID");
+  });
+});
+
 
 it("keeps a pinned large body and native base through real deletion coordination, then releases both", async () => {
   const {t,ids} = await fixture();

@@ -58,8 +58,23 @@ import {
 import { validateArtifactContent } from "../src/features/spectra/artifacts/registry";
 import { normalizeSheetsContent } from "../src/features/spectra/sheets/model";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
+import { isDurableContentRef } from "../shared/durable-content";
+import { validateContentAdoption } from "./collaborationDurablePayload";
 
-function contentForArtifactStorage(typeKey: string, content: unknown) {
+async function contentForArtifactStorage(
+  ctx: MutationCtx,
+  typeKey: string,
+  content: unknown,
+  adoption?: { artifactId: Id<"spectraArtifacts">; accountId: Id<"accounts"> },
+) {
+  if (content && typeof content === "object" && "spectraContentRef" in content) {
+    // A newly created artifact has no identity to which a payload can belong.
+    // Existing artifacts reach this point only after current modify/run checks.
+    if (!adoption || !isDurableContentRef(content))
+      throw new Error("COLLABORATION_DURABLE_PAYLOAD_INVALID");
+    await validateContentAdoption(ctx, adoption.artifactId, adoption.accountId, content);
+    return content;
+  }
   const canonical =
     typeKey === "sheets" ? normalizeSheetsContent(content) : content;
   const validated = validateArtifactContent(typeKey, canonical);
@@ -1910,7 +1925,8 @@ export const create = mutation({
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/g, "")
       .slice(0, 32);
-    const content = contentForArtifactStorage(
+    const content = await contentForArtifactStorage(
+      ctx,
       args.blueprintKey,
       args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
     );
@@ -2283,7 +2299,9 @@ export const finalizePendingLive = mutation({
     // pending so fail/discard cleanup (or a quiet retry) can remove it.
     if (isHollowDefaultContent(blueprintKey, artifact.content))
       throw new Error(hollowFinalizeFailureMessage(blueprintKey));
-    const summary = finalizeArtifactSummary({
+    const summary = isDurableContentRef(artifact.content)
+      ? args.summary?.trim() || artifact.summary || fallbackArtifactSummary(blueprintKey)
+      : finalizeArtifactSummary({
       blueprintKey,
       title: artifact.title,
       summary: args.summary?.trim() || artifact.summary,
@@ -2418,9 +2436,11 @@ export const patchPendingContent = mutation({
       );
     const progress = Math.max(0, Math.min(0.98, args.progress));
     const title = args.title?.trim() || artifact.title;
-    const content = contentForArtifactStorage(
+    const content = await contentForArtifactStorage(
+      ctx,
       artifact.blueprintKey,
       args.content,
+      { artifactId: artifact._id, accountId: actor.accountId },
     );
     await ctx.db.patch(args.artifactId, {
       title,
@@ -2613,7 +2633,10 @@ export const stageAiPatch = mutation({
     const content =
       args.content === undefined
         ? undefined
-        : contentForArtifactStorage(artifact.blueprintKey, args.content);
+        : await contentForArtifactStorage(ctx, artifact.blueprintKey, args.content, {
+            artifactId: artifact._id,
+            accountId: actor.accountId,
+          });
     const changedPaths = (args.changedPaths ?? [])
       .map((path) => path.trim().slice(0, 500))
       .filter(Boolean)
@@ -2646,6 +2669,7 @@ export const stageAiPatch = mutation({
     });
     const shouldRefreshGeneratedSummary =
       content !== undefined &&
+      !isDurableContentRef(content) &&
       (artifact.summary === previousGeneratedSummary ||
         isGeneratedArtifactSummary(artifact.summary, artifact.blueprintKey as BlueprintKey));
     const nextSummary = shouldRefreshGeneratedSummary

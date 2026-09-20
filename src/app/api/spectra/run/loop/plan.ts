@@ -4373,7 +4373,9 @@ export async function callModel(
   // + schedule) needs the ordinary agent tool set. Single-creation note/planner
   // blueprints would strip create_calendar_personal_event / schedule tools even
   // when the allowlist includes them — note+schedule stayed on create_note only.
-  const calendarNeedsCoordination = calendarActionRequested;
+  // An explicitly assigned creation worker owns only its blueprint. The
+  // parent coordination worker handles any Calendar scheduling alongside it.
+  const calendarNeedsCoordination = !forcedSingleCreation && calendarActionRequested;
   // An open presentation + "make slide 3 more concise" still matches create
   // shorthand for the same blueprint. Keep that as a focused update unless the
   // user explicitly asked to create/build another object (or a worker was

@@ -36,6 +36,7 @@ import {
 } from "../sheets/model";
 import { dateToSerial } from "../sheets/excel-serial";
 import { patchSheetCellRecord } from "../sheets/cell-overlay";
+import { cachedFormulaCells } from "../sheets/cached-formulas";
 
 /**
  * The workbook's operations, tested without a grid.
@@ -866,6 +867,20 @@ describe("sheets engine correctness", () => {
     expect(marked.sheets[0]!.cells.B1?.value).toBe(10);
     expect(marked.sheets[0]!.cells.B1?.cachedValueStale).toBe(true);
     expect(sheetsCalculation(marked).get("s1:B1")?.value).toBe(10);
+  });
+
+  it("marks a cached native lookup stale after a small precedent overlay and preserves its cached value", () => {
+    const previous = sheetOf({ A2: { value: 2 }, B2: { value: 3 }, C2: cached("=XLOOKUP(A2,A2:A2,B2:B2)", 3) });
+    const original = previous.sheets[0]!;
+    const next = { ...previous, sheets: [{ ...original, cells: patchSheetCellRecord(original.cells, { B2: { value: 9 } }) }] };
+    expect(cachedFormulaCells(next.sheets[0]!.cells).size).toBe(1);
+    const marked = applyCachedStaleness(previous, next);
+    expect(marked.sheets[0]!.cells.C2).toMatchObject({ value: 3, cachedValueStale: true, formula: "=XLOOKUP(A2,A2:A2,B2:B2)" });
+    expect(marked.sheets[0]!.cells.A2).toBe(original.cells.A2);
+    expect([...cachedFormulaCells(marked.sheets[0]!.cells).values()]).toEqual([marked.sheets[0]!.cells.C2]);
+    const removed = patchSheetCellRecord(marked.sheets[0]!.cells, { C2: undefined });
+    expect(cachedFormulaCells(removed).size).toBe(0);
+    expect(cachedFormulaCells(original.cells).size).toBe(1);
   });
 
   it("patches one dense-sheet cell without cloning the workbook", () => {

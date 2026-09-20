@@ -10,7 +10,6 @@ import {
   normalizeSheetsContent,
   type SheetCell,
   type SheetsContent,
-  type WorkbookSheet,
 } from "../../../sheets/model";
 import { changedSheetCellAddresses } from "../../../sheets/cell-overlay";
 import { sharedTimetableContent } from "../../../timetable/model";

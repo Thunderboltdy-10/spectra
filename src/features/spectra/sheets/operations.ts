@@ -17,7 +17,8 @@ import {
   refTouchesAddress,
 } from "./formula-refs";
 import { dateToSerial, isIsoDateString } from "./excel-serial";
-import { changedSheetCellAddresses } from "./cell-overlay";
+import { changedSheetCellAddresses, patchSheetCellRecord } from "./cell-overlay";
+import { cachedFormulaCells } from "./cached-formulas";
 
 export { offsetFormula } from "./formula-refs";
 
@@ -655,7 +656,6 @@ export function applyCachedStaleness(
 ): SheetsContent {
   const previousById = new Map(previous.sheets.map((sheet) => [sheet.id, sheet]));
   const changedBySheet = new Map<string, Set<string>>();
-  let formulaTouched = false;
   for (const sheet of next.sheets) {
     const before = previousById.get(sheet.id);
     const hinted = changedSheetCellAddresses(before?.cells, sheet.cells);
@@ -664,9 +664,6 @@ export function applyCachedStaleness(
       for (const address of hinted) {
         if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
           changed.add(address);
-        const previousCell = before?.cells[address];
-        const nextCell = sheet.cells[address];
-        if (previousCell?.formula || nextCell?.formula) formulaTouched = true;
       }
     } else {
       const addresses = new Set([
@@ -677,22 +674,20 @@ export function applyCachedStaleness(
         if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
           changed.add(address);
       }
-      formulaTouched = true;
     }
     changedBySheet.set(sheet.id, changed);
   }
-  if (!formulaTouched) return next;
+  if (![...changedBySheet.values()].some(changed => changed.size)) return next;
   return {
     ...next,
     sheets: next.sheets.map((sheet) => {
       let touched = false;
-      const cells: Record<string, SheetCell> = { ...sheet.cells };
-      for (const [address, cell] of Object.entries(cells)) {
-        if (cell.nativeFormulaSupport !== "cached-only" || !cell.formula) continue;
+      const patch: Record<string, SheetCell> = {};
+      for (const [address, cell] of cachedFormulaCells(sheet.cells)) {
         const ownChanged = changedBySheet.get(sheet.id)?.has(address);
         const stale =
           Boolean(ownChanged) ||
-          collectFormulaReferences(cell.formula).some((ref) => {
+          collectFormulaReferences(cell.formula!).some((ref) => {
             const target =
               next.sheets.find((candidate) =>
                 ref.sheet
@@ -703,17 +698,16 @@ export function applyCachedStaleness(
             const changed = changedBySheet.get(target.id);
             if (!changed?.size) return false;
             for (const changedAddress of changed) {
-              if (changedAddress === address) continue;
               if (refTouchesAddress(ref, changedAddress, sheet.name, target.name))
                 return true;
             }
             return false;
           });
         if (!stale || cell.cachedValueStale) continue;
-        cells[address] = { ...cell, cachedValueStale: true };
+        patch[address] = { ...cell, cachedValueStale: true };
         touched = true;
       }
-      return touched ? { ...sheet, cells } : sheet;
+      return touched ? { ...sheet, cells: patchSheetCellRecord(sheet.cells, patch) } : sheet;
     }),
   };
 }

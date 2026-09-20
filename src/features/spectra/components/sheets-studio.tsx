@@ -149,8 +149,8 @@ import {
 } from "./artifact-studio-shell";
 import {
   patchSheetCellRecord,
-  readSheetCellsOverlay,
 } from "../sheets/cell-overlay";
+import { cachedFormulaCells } from "../sheets/cached-formulas";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
@@ -1536,47 +1536,14 @@ export const SheetsStudio = memo(function SheetsStudio({
     () =>
       !workbook.nativeBinding
         ? 0
-        : workbook.sheets.reduce((count, sheet) => {
-            const overlay = readSheetCellsOverlay(sheet.cells);
-            const cells = overlay ? Object.values(overlay.patch) : null;
-            if (cells) {
-              return (
-                count +
-                cells.filter(
-                  (cell) => cell?.nativeFormulaSupport === "cached-only",
-                ).length
-              );
-            }
-            for (const address in sheet.cells) {
-              if (sheet.cells[address]?.nativeFormulaSupport === "cached-only")
-                count += 1;
-            }
-            return count;
-          }, 0),
+        : workbook.sheets.reduce((count, sheet) => count + cachedFormulaCells(sheet.cells).size, 0),
     [workbook.nativeBinding, workbook.sheets],
   );
   const staleCachedFormulaCount = useMemo(
     () =>
       workbook.sheets.reduce((count, sheet) => {
-        const overlay = readSheetCellsOverlay(sheet.cells);
-        if (overlay) {
-          return (
-            count +
-            Object.values(overlay.patch).filter(
-              (cell) =>
-                cell?.nativeFormulaSupport === "cached-only" &&
-                cell.cachedValueStale,
-            ).length
-          );
-        }
-        for (const address in sheet.cells) {
-          const cell = sheet.cells[address];
-          if (
-            cell?.nativeFormulaSupport === "cached-only" &&
-            cell.cachedValueStale
-          )
-            count += 1;
-        }
+        for (const cell of cachedFormulaCells(sheet.cells).values())
+          if (cell.cachedValueStale) count += 1;
         return count;
       }, 0),
     [workbook.sheets],

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { boundedArtifactRead } from "../ai/bounded-artifact-read";
 import { encodeSheetCellsForStorage } from "../../../../shared/sheet-cells";
-import { initializeNativeArtifactDocument, nativeArtifactProjection } from "../../../../scripts/collaboration-native-projection.mjs";
+import { initializeNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds } from "../../../../scripts/collaboration-native-projection.mjs";
 import { docxProjectionFromContent } from "../lenses/document-projection";
 import type { DocxProjection } from "../lenses/projection-contracts";
 import { normalizeArtifactContent } from "../ai/content-normalization";
@@ -36,6 +36,9 @@ describe("large Office model boundaries", () => {
       const plan = planNativeArtifactYjsMutation(doc, "sheets", next, { clientId: "ai-validation-test", kind: "ai" });
       expect(plan.regions).toHaveLength(1);
       expect(plan.regions[0]!.regionId).toContain("9996");
+      const gatewayBefore = nativeArtifactProjection(doc, 4)!;
+      plan.apply();
+      expect(nativeChangedRegionIds(gatewayBefore, nativeArtifactProjection(doc, 4)!)).toEqual(plan.regions.map(region => region.regionId));
       const invalid = structuredClone(result);
       invalid.sheets[0]!.cells.A1!.format!.rotation = 91;
       expect(validateArtifactContent("sheets", invalid).success).toBe(false);

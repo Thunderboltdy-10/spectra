@@ -5,6 +5,7 @@ import { normalizeArtifactContent } from "../../../ai/content-normalization";
 import { normalizeFoundryContent } from "../../../agents/foundry/foundry-document";
 import { normalizePresentationContent } from "../../../presentation/model";
 import { sheetCellEntries } from "../../../../../../shared/sheet-cells";
+import { sheetCellRegionId } from "../../../../../../shared/sheet-regions.mjs";
 import {
   normalizeSheetsContent,
   type SheetCell,
@@ -343,28 +344,6 @@ export type SheetsCellProjectionPlan = {
   content: SheetsContent;
   changes: SheetsCellProjectionChange[];
 };
-
-function sheetColumnIndex(name: string) {
-  return name
-    .split("")
-    .reduce(
-      (total, character) => total * 26 + character.charCodeAt(0) - 64,
-      0,
-    ) - 1;
-}
-
-function sheetCellRegionId(sheet: WorkbookSheet, address: string) {
-  const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(address);
-  if (!match) return `${sheet.id}:${address}:${address}`;
-  const rowId =
-    sheet.rowIdentities?.[String(Number(match[2]) - 1)] ??
-    `${sheet.id}:row:${match[2]}`;
-  const column = sheetColumnIndex(match[1]!);
-  const columnId =
-    sheet.columnIdentities?.[String(column)] ??
-    `${sheet.id}:column:${column + 1}`;
-  return `${sheet.id}:${rowId}:${columnId}`;
-}
 
 /**
  * Returns a cell-only plan when workbook and sheet structure are unchanged.

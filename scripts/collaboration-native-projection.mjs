@@ -1,5 +1,6 @@
 import { yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import * as Y from "yjs";
+import { sheetCellRegionId } from "../shared/sheet-regions.mjs";
 import {
   documentBlocksFromJson as canonicalDocumentBlocksFromJson,
   documentContentToProseMirrorJson,
@@ -650,6 +651,24 @@ export function nativeChangedRegionIds(beforeProjection, afterProjection) {
     JSON.stringify(afterProjection.tags)
   )
     changed.push("metadata:tags");
+  if (afterProjection.typeKey === "sheets") {
+    const { sheets: beforeSheets, ...beforeRoot } = beforeProjection.content;
+    const { sheets: afterSheets, ...afterRoot } = afterProjection.content;
+    if (JSON.stringify(beforeRoot) !== JSON.stringify(afterRoot) || beforeSheets.length !== afterSheets.length)
+      return ["artifact:structure", ...changed];
+    for (let index = 0; index < beforeSheets.length; index += 1) {
+      const { cells: beforeCells, ...beforeStructure } = beforeSheets[index];
+      const { cells: afterCells, ...afterStructure } = afterSheets[index];
+      if (JSON.stringify(beforeStructure) !== JSON.stringify(afterStructure))
+        return ["artifact:structure", ...changed];
+      for (const address of new Set([...Object.keys(beforeCells), ...Object.keys(afterCells)])) {
+        if (JSON.stringify(beforeCells[address]) === JSON.stringify(afterCells[address])) continue;
+        changed.push(sheetCellRegionId(afterSheets[index], address));
+        if (changed.length > 128) return ["artifact:structure"];
+      }
+    }
+    return changed.length ? changed : [NATIVE_PROJECTION_REGION];
+  }
   const beforeContent = JSON.stringify(beforeProjection.content);
   const afterContent = JSON.stringify(afterProjection.content);
   if (beforeContent === afterContent)

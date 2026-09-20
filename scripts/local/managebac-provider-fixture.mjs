@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 
 const DEFAULT_TOKEN = "spectra-managebac-fixture-token";
 
@@ -88,12 +89,17 @@ function timetablePayload(classId, revision) {
 }
 
 function resourcePayload(classId, revision) {
+  const office = classId === "202";
   return {
     resources: [
       {
         id: classId === "202" ? 5202 : 5101,
-        title: classId === "202" ? "Primary sources pack" : "Functions reference sheet",
-        description: "Fixture resource with a deterministic source URL.",
+        title: classId === "202" ? "Primary sources pack.xlsx" : "Functions reference sheet.pdf",
+        filename: classId === "202" ? "primary-sources-pack.xlsx" : "functions-reference-sheet.pdf",
+        mime_type: office
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "application/pdf",
+        description: "Fixture resource with a deterministic provider identity.",
         url: `https://fixture.invalid/resources/${classId}/${revision}`,
         updated_at: revision,
       },
@@ -112,14 +118,31 @@ export function createManageBacProviderFixture({
   initialRevision = 1,
   noMatch = false,
   delayMs = 0,
+  resourceState = "available",
+  resourceFormat = "mixed",
+  redirectResource = false,
 } = {}) {
   const requests = [];
   let revision = initialRevision;
+  let currentDelayMs = delayMs;
+  let currentResourceState = resourceState;
+  let currentResourceFormat = resourceFormat;
+  let currentRedirectResource = redirectResource;
+  const officeBytes = readFileSync(new URL("../../fixtures/office/xlsx/representative.xlsm", import.meta.url));
+  const pdfBytes = (nextRevision) => Buffer.from(`%PDF-1.4\n% Spectra fixture revision ${nextRevision}\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`, "ascii");
+  function sendBytes(response, status, bytes, contentType) {
+    response.writeHead(status, {
+      "content-type": contentType,
+      "content-length": bytes.byteLength,
+      "cache-control": "no-store",
+    });
+    response.end(bytes);
+  }
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     requests.push({ method: request.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams) });
-    if (Number.isFinite(delayMs) && delayMs > 0)
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (Number.isFinite(currentDelayMs) && currentDelayMs > 0)
+      await new Promise((resolve) => setTimeout(resolve, currentDelayMs));
     if (
       request.headers["x-api-key"] !== token &&
       request.headers["auth-token"] !== token
@@ -150,6 +173,23 @@ export function createManageBacProviderFixture({
         ],
         meta: { next_page: null },
       });
+    const downloadMatch = url.pathname.match(/^\/v2p2\/classes\/(\d+)\/resources\/(\d+)\/download$/);
+    if (downloadMatch) {
+      if (currentRedirectResource) {
+        response.writeHead(302, { location: "https://not-allowed.invalid/redirect" });
+        return response.end();
+      }
+      if (currentResourceState === "missing") return send(response, 404, { error: "fixture resource missing" });
+      if (currentResourceState === "revoked") return send(response, 403, { error: "fixture resource revoked" });
+      const isOffice = currentResourceFormat === "office" ||
+        (currentResourceFormat === "mixed" && downloadMatch[1] === "202");
+      return sendBytes(
+        response,
+        200,
+        isOffice ? officeBytes : pdfBytes(revision),
+        isOffice ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/pdf",
+      );
+    }
     const classMatch = url.pathname.match(/^\/v2p2\/classes\/(\d+)(?:\/(tasks|timetable|resources))?$/);
     if (classMatch) {
       const [, classId, child] = classMatch;
@@ -173,6 +213,21 @@ export function createManageBacProviderFixture({
       if (!Number.isInteger(nextRevision) || nextRevision < 1)
         throw new Error("Fixture revision must be a positive integer.");
       revision = nextRevision;
+    },
+    setResourceState(nextState) {
+      if (!["available", "missing", "revoked"].includes(nextState)) throw new Error("Fixture resource state is invalid.");
+      currentResourceState = nextState;
+    },
+    setDelay(nextDelayMs) {
+      if (!Number.isFinite(nextDelayMs) || nextDelayMs < 0) throw new Error("Fixture delay must be non-negative.");
+      currentDelayMs = nextDelayMs;
+    },
+    setResourceFormat(nextFormat) {
+      if (!["mixed", "pdf", "office"].includes(nextFormat)) throw new Error("Fixture resource format is invalid.");
+      currentResourceFormat = nextFormat;
+    },
+    setRedirectResource(enabled) {
+      currentRedirectResource = Boolean(enabled);
     },
     async start(port = 0) {
       await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));

@@ -1,3 +1,4 @@
+/* eslint-disable spectra/no-raw-hex-in-styles -- Native workbook fixture colors, not UI styles. */
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { boundedArtifactRead } from "../ai/bounded-artifact-read";

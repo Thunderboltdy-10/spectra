@@ -718,6 +718,13 @@ export const sheetsContentSchema = z
               sourceRange: z.string().min(2).max(100),
               title: z.string().max(300),
               showLegend: z.boolean().optional(),
+              series: z.array(z.object({
+                name: z.string().max(300).optional(),
+                categories: z.string().optional(),
+                values: z.string().optional(),
+                chartType: z.enum(["column", "bar", "line", "area", "scatter"]).optional(),
+                axis: z.enum(["primary", "secondary"]).optional(),
+              })).optional(),
               position: z.object({
                 x: z.number(),
                 y: z.number(),

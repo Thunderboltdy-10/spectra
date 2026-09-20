@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -163,7 +163,7 @@ describe("Calendar scheduled work blocks", () => {
 });
 
 describe("Calendar overview range-bounded reads", () => {
-  it("returns in-range timed items, keeps off-range work blocks for AI, and preserves MB task joins", async () => {
+  it("returns indexed in-range items, resolves a named off-range block, and preserves planner scheduling", async () => {
     const t = setupTest();
     const seeded = await seedCalendarTask(t);
     const planArtifactId = await seedPlanner(t, seeded.accountId, seeded.schoolId);
@@ -225,18 +225,21 @@ describe("Calendar overview range-bounded reads", () => {
       idempotencyKey: "ai:overview-offrange-block",
     });
 
+    await t.mutation(internal.calendar.backfillItemReadModels, { cursor: null });
+    await t.mutation(internal.calendar.backfillArtifactReadModels, { cursor: null });
     const overview = await user.query(api.calendar.overview, {
       from: weekFrom,
       to: weekTo,
+      targetItemId: scheduled.id,
     });
 
     const visibleTitles = overview.items.map((item: { title: string }) => item.title);
     expect(visibleTitles).toContain("This week meetup");
     expect(visibleTitles).not.toContain("Ancient personal event");
 
-    // Cross-range AI identity index remains complete.
+    // Explicit off-range lookup preserves the requested block identity.
     expect(
-      overview.scheduledWorkBlocks.some(
+      overview.targetedItems.some(
         (item: { id: string }) => item.id === scheduled.id,
       ),
     ).toBe(true);

@@ -133,6 +133,17 @@ function updatePlan(
 }
 
 describe("P4.I2 artifact target resolution", () => {
+  it("retains each bounded Calendar page and exact off-range targets for the next model read", () => {
+    const compact = compactCalendarForAgent({
+      range: { from: 1, to: 2 },
+      items: Array.from({ length: 100 }, (_, index) => ({ id: `event-${index}`, kind: "personal_event", title: `Event ${index}` })),
+      targetedItems: [{ id: "distant-block", kind: "scheduled_work_block", title: "Distant", revision: 3 }],
+      pagination: { visible: "next-page" },
+    }) as { items: unknown[]; targetedItems: unknown[]; pagination: unknown };
+    expect(compact.items).toHaveLength(100);
+    expect(compact.targetedItems).toMatchObject([{ id: "distant-block", revision: 3 }]);
+    expect(compact.pagination).toEqual({ visible: "next-page" });
+  });
   it("keeps Calendar work-block identity ahead of noisy imported task rows", () => {
     const compact = compactCalendarForAgent({
       timezone: "UTC",

@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import type { ArtifactRegionController } from "../../../collaboration/region-controller";
 import type { ArtifactCollaborationTransport } from "../../../collaboration/types";
+import { boundedRegionClaims } from "../../../../../../shared/region-claim-policy";
 import {
   changedArtifactRegionIds,
   readArtifactYjsDocument,
@@ -520,7 +521,7 @@ export class NativeArtifactYjsModel {
       return { applied: true as const, claims: [] };
     }
     let applyProjectionRan = false;
-    const result = await controller.editMany(claims.slice(0, 128), () => {
+    const result = await controller.editMany(boundedRegionClaims(claims), () => {
       if (contentChanged && sheetPlan)
         applySheetsCellProjection(
           this.transport.document,

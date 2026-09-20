@@ -122,6 +122,7 @@ import {
 import {
   syncSpectraManageBac,
   selectSpectraManageBacClasses,
+  importSpectraManageBacResource,
   rememberSpectraMemory,
   correctSpectraMemory,
 } from "../data/api";
@@ -2064,6 +2065,26 @@ export function SpectraShell({
         });
       },
     );
+    const removeManageBacResource = spectraBus.handle(
+      "managebac.importResource",
+      async ({ sourceRecordId, refresh, requestKey }) => {
+        const result = await importSpectraManageBacResource({
+          sourceRecordId,
+          ...(refresh ? { refresh: true } : {}),
+          ...(requestKey ? { requestKey } : {}),
+        });
+        return {
+          status: result.status === "update_available" ? "pending" : "completed",
+          message:
+            result.status === "update_available"
+              ? "A newer school resource revision is available; import it explicitly to update your Library copy."
+              : result.status === "imported"
+                ? "The school resource is saved in Library."
+                : "The school resource import is ready to finish.",
+          data: result,
+        } satisfies SpectraCommandOutcome;
+      },
+    );
     const removeImport = spectraBus.handle("library.import", ({ kind }) => {
       if (kind === "file") importInputRef.current?.click();
       else workspaceImportInputRef.current?.click();
@@ -2075,6 +2096,7 @@ export function SpectraShell({
       removeSharing();
       removeManageBac();
       removeManageBacSelection();
+      removeManageBacResource();
       removeImport();
     };
   }, [patchItemSyncPolicies, preferences, replacePreferences, router]);

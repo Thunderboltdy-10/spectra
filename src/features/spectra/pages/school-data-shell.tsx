@@ -7,7 +7,6 @@ import {
   ChevronRight,
   ClipboardCheck,
   Clock3,
-  ExternalLink,
   FileText,
   GraduationCap,
   LoaderCircle,
@@ -34,7 +33,10 @@ import {
   CapabilityTruthBadge,
   CapabilityTruthState,
 } from "../integrations/status/capability-truth";
-import { syncSpectraManageBac } from "../data/api";
+import {
+  importSpectraManageBacResource,
+  syncSpectraManageBac,
+} from "../data/api";
 import { ClassShelfEditor } from "../components/class-shelf-editor";
 import {
   fetchMyClassCandidates,
@@ -61,6 +63,7 @@ type RecordRow = {
   normalized: Record<string, unknown>;
   fetchedAt: number;
   sourceModifiedAt?: number;
+  sourceState?: "available" | "changed" | "temporarily_unavailable" | "missing" | "removed";
   provenanceUrl?: string;
   tombstone: boolean;
 };
@@ -302,6 +305,9 @@ export function SchoolDataShell() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [resourceOutcomes, setResourceOutcomes] = useState<
+    Record<string, { status: string; artifactId?: string; priorArtifactId?: string }>
+  >({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -374,6 +380,21 @@ export function SchoolDataShell() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function importResource(record: RecordRow, refresh = false) {
+    const result = await importSpectraManageBacResource({
+      sourceRecordId: record._id,
+      ...(refresh ? { refresh: true } : {}),
+    });
+    setResourceOutcomes((current) => ({
+      ...current,
+      [record._id]: {
+        status: result.status,
+        artifactId: result.artifactId,
+        priorArtifactId: result.priorArtifactId,
+      },
+    }));
   }
 
   const liveRecords = useMemo(
@@ -500,6 +521,12 @@ export function SchoolDataShell() {
                     payload={payload}
                     records={liveRecords}
                     onSelect={setActive}
+                    onImportResource={(record, refresh) =>
+                      void run(`resource:${record._id}`, () =>
+                        importResource(record, refresh),
+                      )}
+                    busy={busy}
+                    resourceOutcomes={resourceOutcomes}
                   />
                 ) : active === "classes" ? (
                   <ClassShelfEditor
@@ -520,6 +547,12 @@ export function SchoolDataShell() {
                     section={activeSection}
                     records={activeRecords}
                     state={activeState}
+                    onImportResource={(record, refresh) =>
+                      void run(`resource:${record._id}`, () =>
+                        importResource(record, refresh),
+                      )}
+                    busy={busy}
+                    resourceOutcomes={resourceOutcomes}
                   />
                 )}
               </>
@@ -535,10 +568,16 @@ function Overview({
   payload,
   records,
   onSelect,
+  onImportResource,
+  busy,
+  resourceOutcomes,
 }: {
   payload: SchoolPayload;
   records: RecordRow[];
   onSelect: (key: SectionKey) => void;
+  onImportResource: (record: RecordRow, refresh?: boolean) => void;
+  busy: string;
+  resourceOutcomes: Record<string, { status: string; artifactId?: string; priorArtifactId?: string }>;
 }) {
   const [contextOpen, setContextOpen] = useState(true);
   const upcoming = records
@@ -598,7 +637,14 @@ function Overview({
         {upcoming.length ? (
           <div className="mt-4 space-y-1">
             {upcoming.map(({ record, at }) => (
-              <RecordLine key={record._id} record={record} date={at} />
+              <RecordLine
+                key={record._id}
+                record={record}
+                date={at}
+                onImportResource={onImportResource}
+                busy={busy}
+                outcome={resourceOutcomes[record._id]}
+              />
             ))}
           </div>
         ) : recent.length ? (
@@ -609,7 +655,13 @@ function Overview({
             </p>
             <div className="mt-4 space-y-1">
               {recent.map((record) => (
-                <RecordLine key={record._id} record={record} />
+                <RecordLine
+                  key={record._id}
+                  record={record}
+                  onImportResource={onImportResource}
+                  busy={busy}
+                  outcome={resourceOutcomes[record._id]}
+                />
               ))}
             </div>
           </>
@@ -685,10 +737,16 @@ function RecordSection({
   section,
   records,
   state,
+  onImportResource,
+  busy,
+  resourceOutcomes,
 }: {
   section: (typeof sections)[number];
   records: RecordRow[];
   state: CapabilityState;
+  onImportResource: (record: RecordRow, refresh?: boolean) => void;
+  busy: string;
+  resourceOutcomes: Record<string, { status: string; artifactId?: string; priorArtifactId?: string }>;
 }) {
   if (!records.length && state.kind !== "available") return null;
   return (
@@ -700,7 +758,13 @@ function RecordSection({
           </p>
           <div className="mt-3 space-y-1">
             {records.map((record) => (
-              <RecordLine key={record._id} record={record} />
+              <RecordLine
+                key={record._id}
+                record={record}
+                onImportResource={onImportResource}
+                busy={busy}
+                outcome={resourceOutcomes[record._id]}
+              />
             ))}
           </div>
         </>
@@ -718,7 +782,19 @@ function RecordSection({
   );
 }
 
-function RecordLine({ record, date }: { record: RecordRow; date?: number }) {
+function RecordLine({
+  record,
+  date,
+  onImportResource,
+  busy,
+  outcome,
+}: {
+  record: RecordRow;
+  date?: number;
+  onImportResource: (record: RecordRow, refresh?: boolean) => void;
+  busy: string;
+  outcome?: { status: string; artifactId?: string; priorArtifactId?: string };
+}) {
   const value = record.normalized;
   const title = text(
     value.title ?? value.name ?? value.subject,
@@ -751,16 +827,32 @@ function RecordLine({ record, date }: { record: RecordRow; date?: number }) {
           fetched {formatDate(record.fetchedAt)}
         </span>
       </div>
-      {record.provenanceUrl ? (
-        <a
-          href={record.provenanceUrl}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Open provider source"
-          className="grid size-7 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
-        >
-          <ExternalLink className="size-3" />
-        </a>
+      {/resource|file/.test(record.recordType) ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {outcome?.status === "imported" || outcome?.status === "source_unavailable" ? (
+            <span className="text-micro font-semibold text-emerald-700">
+              {outcome.status === "source_unavailable" ? "Saved copy retained" : "Saved to Library"}
+            </span>
+          ) : outcome?.status === "update_available" ? (
+            <button
+              type="button"
+              disabled={busy === `resource:${record._id}`}
+              onClick={() => onImportResource(record, true)}
+              className="rounded-control border border-[var(--border-default)] px-2.5 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-45"
+            >
+              Import updated copy
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => onImportResource(record)}
+              className="rounded-control border border-[var(--border-default)] px-2.5 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-45"
+            >
+              {busy === `resource:${record._id}` ? "Importing…" : "Import to Library"}
+            </button>
+          )}
+        </div>
       ) : null}
     </div>
   );

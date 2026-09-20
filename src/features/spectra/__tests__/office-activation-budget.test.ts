@@ -149,9 +149,6 @@ describe("Library import complete Convex field ceiling", () => {
     expect(route).toContain("encodeArtifactContentForStorage");
     expect(route).toContain("artifactImports:complete");
     // Encode must wrap materialize output before the complete mutation.
-    const encodeAt = route.indexOf(
-      "encodeArtifactContentForStorage(\n          typeKey,\n          await materializeImportedMedia",
-    );
     const altEncodeAt = route.indexOf(
       "sanitizedContent = encodeArtifactContentForStorage(",
     );

@@ -177,6 +177,8 @@ export type SpectraManageBacRecord = {
   sourceModifiedAt?: number;
   fetchedAt: number;
   tombstone: boolean;
+  sourceHash?: string;
+  sourceState?: "available" | "changed" | "temporarily_unavailable" | "missing" | "removed";
   provenanceUrl?: string;
 };
 
@@ -1294,6 +1296,21 @@ export async function selectSpectraManageBacClasses(input: {
     };
     outcome?: "selection_saved";
   }>({ action: "selectClasses", ...input });
+}
+
+export async function importSpectraManageBacResource(input: {
+  sourceRecordId: string;
+  refresh?: boolean;
+  requestKey?: string;
+}) {
+  return postManageBac<{
+    status: "started" | "resume" | "imported" | "update_available" | "source_unavailable";
+    importId?: string;
+    artifactId?: string;
+    priorArtifactId?: string;
+    sourceHash?: string;
+    replayed?: boolean;
+  }>({ action: "importResource", ...input });
 }
 
 export async function resolveSpectraManageBacConflict(input: {

@@ -28,7 +28,14 @@ export async function GET(request: NextRequest) {
     const to = finite(request.nextUrl.searchParams.get("to"));
     if (from === undefined || to === undefined || to <= from)
       return badRequest("Calendar requires a valid time range.");
-    const data = await convexQuery("calendar:overview", { from, to });
+    const args: Record<string, unknown> = { from, to };
+    const targetItemId = request.nextUrl.searchParams.get("targetItemId");
+    const targetTitle = request.nextUrl.searchParams.get("targetTitle");
+    const limit = finite(request.nextUrl.searchParams.get("limit"));
+    if (targetItemId?.trim()) args.targetItemId = targetItemId.trim();
+    if (targetTitle?.trim()) args.targetTitle = targetTitle.trim();
+    if (limit !== undefined) args.limit = limit;
+    const data = await convexQuery("calendar:overview", args);
     return ok({ data });
   }, request);
 }
@@ -39,7 +46,9 @@ export async function POST(request: NextRequest) {
     const body = object(await request.json());
     const action = text(body.action, 100);
     if (action === "ensureMigration")
-      return ok({ data: await convexMutation("calendar:ensureLegacyMigration", {}) });
+      return ok({
+        data: await convexMutation("calendar:ensureLegacyMigration", {}),
+      });
     if (action === "createPersonalItem") {
       const kind = ["personal_event", "task", "milestone", "reminder"].includes(
         String(body.kind),
@@ -90,7 +99,9 @@ export async function POST(request: NextRequest) {
         endAt === undefined ||
         expectedRevision === undefined
       )
-        return badRequest("Moving a work block requires exact times and its current revision.");
+        return badRequest(
+          "Moving a work block requires exact times and its current revision.",
+        );
       return ok({
         data: await convexMutation("calendar:moveWorkBlock", {
           itemId: text(body.itemId, 180),
@@ -104,7 +115,9 @@ export async function POST(request: NextRequest) {
       const endAt = finite(body.endAt);
       const expectedRevision = finite(body.expectedRevision);
       if (endAt === undefined || expectedRevision === undefined)
-        return badRequest("Resizing a work block requires an exact end time and its current revision.");
+        return badRequest(
+          "Resizing a work block requires an exact end time and its current revision.",
+        );
       return ok({
         data: await convexMutation("calendar:resizeWorkBlock", {
           itemId: text(body.itemId, 180),
@@ -116,7 +129,9 @@ export async function POST(request: NextRequest) {
     if (action === "completeWorkBlock") {
       const expectedRevision = finite(body.expectedRevision);
       if (expectedRevision === undefined)
-        return badRequest("Completing a work block requires its current revision.");
+        return badRequest(
+          "Completing a work block requires its current revision.",
+        );
       return ok({
         data: await convexMutation("calendar:completeWorkBlock", {
           itemId: text(body.itemId, 180),

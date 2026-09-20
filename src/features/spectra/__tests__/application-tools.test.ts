@@ -6,6 +6,11 @@ import {
 import { decideAiAuthority } from "../ai/authority-policy";
 
 describe("application capability registry", () => {
+  it("preserves bounded Office selectors and paginated Calendar discovery after integration", () => {
+    expect(spectraToolRegistry.parseInput("read_artifact", { artifactId: "dense", cellAddresses: ["P9996"], sheetId: "first" })).toMatchObject({ cellAddresses: ["P9996"], sheetId: "first" });
+    expect(spectraToolRegistry.parseInput("read_calendar", { from: 1, to: 2, targetItemId: "block", cursor: "next" })).toMatchObject({ targetItemId: "block", cursor: "next" });
+    expect(APPLICATION_AGENT_TOOL_IDS).toEqual(expect.arrayContaining(["create_calendar_personal_event", "import_managebac_resource"]));
+  });
   it("exposes canonical Library search separately from artifact retrieval", () => {
     expect(
       spectraToolRegistry.parseInput("search_library", {

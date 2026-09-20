@@ -457,6 +457,16 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
           ...(params.retention === "archive_projection" || params.retention === "keep_in_spectra" ? { retention: params.retention } : {}),
         }, "ManageBac class selection requested.");
       }
+      case "app.managebac.import-resource": {
+        const sourceRecordId = typeof params.sourceRecordId === "string" ? params.sourceRecordId.trim() : "";
+        if (!sourceRecordId)
+          throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.managebac.import-resource requires sourceRecordId");
+        return dispatchSemantic(commandId, "mutate", "managebac.importResource", {
+          sourceRecordId,
+          ...(params.refresh === true ? { refresh: true } : {}),
+          ...(typeof params.requestKey === "string" && params.requestKey.trim() ? { requestKey: params.requestKey.trim() } : {}),
+        }, "ManageBac resource import requested.");
+      }
       case "app.settings.manage-account": {
         const readiness = readinessFrom(await host.navigate("settings", "account"));
         return completed(commandId, "navigate", "Account settings opened.", readiness);

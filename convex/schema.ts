@@ -872,7 +872,11 @@ export default defineSchema({
       "accountId",
       "providerClassId",
     ])
-    .index("by_selection_revision", ["integrationId", "accountId", "selectionRevision"]),
+    .index("by_selection_revision", [
+      "integrationId",
+      "accountId",
+      "selectionRevision",
+    ]),
 
   externalRecords: defineTable({
     integrationId: v.id("schoolIntegrations"),
@@ -1036,6 +1040,9 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     /** Snapshot of the account's class selection at claim time. */
     selectionRevision: v.optional(v.number()),
+    /** Optional class scope carried by class-specific sync runs. */
+    providerClassId: v.optional(v.string()),
+    academicPeriodKey: v.optional(v.string()),
     attemptCount: v.number(),
     nextAttemptAt: v.number(),
     errorCode: v.optional(v.string()),
@@ -1048,7 +1055,11 @@ export default defineSchema({
     .index("by_status_next_attempt", ["status", "nextAttemptAt"])
     .index("by_integration_created", ["integrationId", "createdAt"])
     .index("by_account_created", ["accountId", "createdAt"])
-    .index("by_integration_account_status", ["integrationId", "accountId", "status"])
+    .index("by_integration_account_status", [
+      "integrationId",
+      "accountId",
+      "status",
+    ])
     .index("by_school_created", ["schoolId", "createdAt"]),
 
   externalSyncCapabilityRuns: defineTable({
@@ -1181,6 +1192,39 @@ export default defineSchema({
     .index("by_projection", ["projectionType", "projectionId"])
     .index("by_account_updated", ["accountId", "updatedAt"]),
 
+  /**
+   * Account-scoped receipt for an explicit provider-resource download. The
+   * provider record id never comes from a URL, and a source revision is never
+   * overwritten by a later import. This ledger is also the retry/replay seam.
+   */
+  managebacResourceImports: defineTable({
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    accountId: v.id("accounts"),
+    sourceRecordId: v.id("externalRecords"),
+    sourceHash: v.string(),
+    requestKey: v.string(),
+    status: v.union(
+      v.literal("started"),
+      v.literal("importing"),
+      v.literal("imported"),
+      v.literal("failed"),
+    ),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    contentHash: v.optional(v.string()),
+    bytes: v.optional(v.number()),
+    mimeType: v.optional(v.string()),
+    nativeFormat: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    errorSummary: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_source", ["accountId", "sourceRecordId", "sourceHash"])
+    .index("by_account_source_record", ["accountId", "sourceRecordId"])
+    .index("by_account_request", ["accountId", "requestKey"])
+    .index("by_school_updated", ["schoolId", "updatedAt"]),
+
   calendarItems: defineTable({
     ownerAccountId: v.id("accounts"),
     schoolId: v.id("schools"),
@@ -1264,6 +1308,210 @@ export default defineSchema({
     .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"])
     .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"]),
 
+  // Calendar discovery never needs the payload-bearing planner/timetable
+  // artifact or the canonical calendar row. These two compact tables are
+  // maintained by the same mutation trigger as their canonical writers.
+  calendarItemReadModels: defineTable({
+    readModelVersion: v.number(),
+    itemId: v.id("calendarItems"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    kind: v.union(
+      v.literal("official_event"),
+      v.literal("official_deadline"),
+      v.literal("task"),
+      v.literal("scheduled_work_block"),
+      v.literal("personal_event"),
+      v.literal("milestone"),
+      v.literal("reminder"),
+    ),
+    title: v.string(),
+    notes: v.optional(v.string()),
+    startAt: v.optional(v.number()),
+    endAt: v.optional(v.number()),
+    allDay: v.boolean(),
+    timezone: v.string(),
+    timePrecision: v.union(
+      v.literal("exact"),
+      v.literal("verified_period"),
+      v.literal("date_only"),
+      v.literal("unknown"),
+    ),
+    status: v.union(
+      v.literal("active"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+      v.literal("removed"),
+    ),
+    sourceLocked: v.boolean(),
+    sourceProvider: v.optional(v.string()),
+    sourceRecordId: v.optional(v.id("externalRecords")),
+    sourceKey: v.optional(v.string()),
+    sourceHash: v.optional(v.string()),
+    sourceUrl: v.optional(v.string()),
+    sourceFreshAt: v.optional(v.number()),
+    sourceCapabilityState: v.optional(
+      v.union(
+        v.literal("available"),
+        v.literal("refreshing"),
+        v.literal("stale"),
+        v.literal("partial"),
+        v.literal("permission_denied"),
+        v.literal("unsupported"),
+        v.literal("schema_incompatible"),
+        v.literal("unavailable"),
+      ),
+    ),
+    location: v.optional(v.string()),
+    teacher: v.optional(v.string()),
+    classId: v.optional(v.string()),
+    planArtifactId: v.optional(v.id("spectraArtifacts")),
+    planTaskId: v.optional(v.string()),
+    taskItemId: v.optional(v.id("calendarItems")),
+    officialDeadlineItemId: v.optional(v.id("calendarItems")),
+    linkedArtifactIds: v.array(v.id("spectraArtifacts")),
+    recurrence: v.optional(v.string()),
+    legacyArtifactId: v.optional(v.id("spectraArtifacts")),
+    legacyEventId: v.optional(v.string()),
+    idempotencyKey: v.optional(v.string()),
+    revision: v.number(),
+    createdBy: v.union(
+      v.literal("human"),
+      v.literal("ai"),
+      v.literal("source"),
+      v.literal("migration"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_item", ["itemId"])
+    .index("by_account_status_start", ["ownerAccountId", "status", "startAt"])
+    .index("by_account_status_end", ["ownerAccountId", "status", "endAt"])
+    .index("by_account_status_kind", ["ownerAccountId", "status", "kind"])
+    .index("by_account_status_title", ["ownerAccountId", "status", "title"])
+    .index("by_account_status_source", [
+      "ownerAccountId",
+      "status",
+      "kind",
+      "sourceRecordId",
+    ])
+    .index("by_account_status_kind_updated_item", [
+      "ownerAccountId",
+      "status",
+      "kind",
+      "updatedAt",
+      "itemId",
+    ])
+    .index("by_account_updated", ["ownerAccountId", "updatedAt"]),
+
+  // One row per UTC day makes overlap discovery indexed and bounded. Very
+  // long-running items also get a `__wide__` row so no date range is silently
+  // truncated when a block spans more than the materialized horizon.
+  calendarItemRangeBuckets: defineTable({
+    readModelVersion: v.number(),
+    itemId: v.id("calendarItems"),
+    ownerAccountId: v.id("accounts"),
+    status: v.union(
+      v.literal("active"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+      v.literal("removed"),
+    ),
+    bucketKey: v.string(),
+    startAt: v.optional(v.number()),
+    endAt: v.optional(v.number()),
+  })
+    .index("by_account_status_bucket", [
+      "ownerAccountId",
+      "status",
+      "bucketKey",
+    ])
+    .index("by_item_bucket", ["itemId", "bucketKey"]),
+
+  calendarPlanTaskReadModels: defineTable({
+    readModelVersion: v.number(),
+    planArtifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    planUpdatedAt: v.number(),
+    planTitle: v.string(),
+    taskId: v.string(),
+    title: v.string(),
+    notes: v.optional(v.string()),
+    dueAt: v.optional(v.number()),
+    taskStatus: v.union(v.literal("active"), v.literal("completed")),
+    scheduled: v.boolean(),
+    planStatus: v.union(
+      v.literal("active"),
+      v.literal("draft"),
+      v.literal("archived"),
+      v.literal("deleted"),
+    ),
+    sourceRecordId: v.optional(v.id("externalRecords")),
+    updatedAt: v.number(),
+  })
+    .index("by_plan_task", ["planArtifactId", "taskId"])
+    .index("by_plan", ["planArtifactId"])
+    .index("by_account_status", ["ownerAccountId", "planStatus", "taskStatus"])
+    .index("by_account_plan_status_updated", [
+      "ownerAccountId",
+      "planStatus",
+      "updatedAt",
+    ])
+    .index("by_account_plan_status_updated_task", [
+      "ownerAccountId",
+      "planStatus",
+      "updatedAt",
+      "planArtifactId",
+      "taskId",
+    ])
+    .index("by_account_updated", ["ownerAccountId", "updatedAt"]),
+
+  // Calendar migration state is a compact, resumable companion to the legacy
+  // timetable artifact. It avoids reopening every timetable body on mount.
+  calendarMigrationReadModels: defineTable({
+    readModelVersion: v.number(),
+    legacyArtifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    artifactStatus: v.union(
+      v.literal("active"),
+      v.literal("draft"),
+      v.literal("archived"),
+      v.literal("deleted"),
+    ),
+    migrationStatus: v.union(
+      v.literal("missing"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("partial"),
+      v.literal("failed"),
+    ),
+    migratedCount: v.number(),
+    skippedCount: v.number(),
+    eventOffset: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_legacy_artifact", ["legacyArtifactId"])
+    .index("by_account_status", [
+      "ownerAccountId",
+      "artifactStatus",
+      "migrationStatus",
+    ])
+    .index("by_account_artifact_status", [
+      "ownerAccountId",
+      "artifactStatus",
+      "updatedAt",
+    ])
+    .index("by_account_artifact_status_updated_legacy", [
+      "ownerAccountId",
+      "artifactStatus",
+      "updatedAt",
+      "legacyArtifactId",
+    ])
+    .index("by_account_updated", ["ownerAccountId", "updatedAt"]),
+
   calendarPeriodMaps: defineTable({
     schoolId: v.id("schools"),
     periodKey: v.string(),
@@ -1296,6 +1544,7 @@ export default defineSchema({
     migratedCount: v.number(),
     skippedCount: v.number(),
     errorSummary: v.optional(v.string()),
+    eventOffset: v.optional(v.number()),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
     updatedAt: v.number(),
@@ -1375,11 +1624,19 @@ export default defineSchema({
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
     resourceClass: v.optional(
-      v.union(v.literal("artifact"), v.literal("resource"), v.literal("thread_reference")),
+      v.union(
+        v.literal("artifact"),
+        v.literal("resource"),
+        v.literal("thread_reference"),
+      ),
     ),
     nativeFormat: v.optional(v.string()),
     compatibilityProfile: v.optional(
-      v.union(v.literal("strict-native"), v.literal("enhanced"), v.literal("spectra-native")),
+      v.union(
+        v.literal("strict-native"),
+        v.literal("enhanced"),
+        v.literal("spectra-native"),
+      ),
     ),
     blueprintKey: v.string(),
     title: v.string(),
@@ -1608,7 +1865,11 @@ export default defineSchema({
     appVersion: v.string(),
     pairedAt: v.number(),
     lastSeenAt: v.number(),
-    state: v.union(v.literal("active"), v.literal("revoked"), v.literal("lost")),
+    state: v.union(
+      v.literal("active"),
+      v.literal("revoked"),
+      v.literal("lost"),
+    ),
   })
     .index("by_account_installation", ["accountId", "installationId"])
     .index("by_account_state", ["accountId", "state"])
@@ -1629,12 +1890,16 @@ export default defineSchema({
   bridgeMounts: defineTable({
     accountId: v.id("accounts"),
     deviceId: v.id("bridgeDevices"),
-      rootLabel: v.string(),
-      grantId: v.string(),
-      rootKey: v.optional(v.string()),
-      rootOrgNodeId: v.optional(v.id("orgNodes")),
+    rootLabel: v.string(),
+    grantId: v.string(),
+    rootKey: v.optional(v.string()),
+    rootOrgNodeId: v.optional(v.id("orgNodes")),
     policyId: v.optional(v.id("syncPolicies")),
-    state: v.union(v.literal("active"), v.literal("detached"), v.literal("revoked")),
+    state: v.union(
+      v.literal("active"),
+      v.literal("detached"),
+      v.literal("revoked"),
+    ),
     fileCount: v.number(),
     lastScanAt: v.optional(v.number()),
     lastScanId: v.optional(v.string()),
@@ -1643,50 +1908,114 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_account_state", ["accountId", "state"])
-      .index("by_device_state", ["deviceId", "state"])
-      .index("by_device_root_key", ["deviceId", "rootKey"])
-      .index("by_device_grant", ["deviceId", "grantId"]),
+    .index("by_device_state", ["deviceId", "state"])
+    .index("by_device_root_key", ["deviceId", "rootKey"])
+    .index("by_device_grant", ["deviceId", "grantId"]),
 
   syncPolicies: defineTable({
     accountId: v.id("accounts"),
-    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeKind: v.union(
+      v.literal("account"),
+      v.literal("mount"),
+      v.literal("workspace"),
+      v.literal("folder"),
+      v.literal("item"),
+    ),
     scopeId: v.string(),
-    preset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
-    contentDirection: v.union(v.literal("local-to-spectra"), v.literal("spectra-to-local"), v.literal("bidirectional"), v.literal("manual")),
-    discovery: v.union(v.literal("auto"), v.literal("ask"), v.literal("explicit")),
-    structure: v.union(v.literal("independent"), v.literal("mirror-to-disk"), v.literal("mirror-from-disk"), v.literal("mirror-both"), v.literal("ask")),
-    cloudContent: v.union(v.literal("full"), v.literal("metadata-only"), v.literal("none")),
+    preset: v.union(
+      v.literal("spectra"),
+      v.literal("device"),
+      v.literal("both"),
+      v.literal("linked"),
+    ),
+    contentDirection: v.union(
+      v.literal("local-to-spectra"),
+      v.literal("spectra-to-local"),
+      v.literal("bidirectional"),
+      v.literal("manual"),
+    ),
+    discovery: v.union(
+      v.literal("auto"),
+      v.literal("ask"),
+      v.literal("explicit"),
+    ),
+    structure: v.union(
+      v.literal("independent"),
+      v.literal("mirror-to-disk"),
+      v.literal("mirror-from-disk"),
+      v.literal("mirror-both"),
+      v.literal("ask"),
+    ),
+    cloudContent: v.union(
+      v.literal("full"),
+      v.literal("metadata-only"),
+      v.literal("none"),
+    ),
     localMirrorGrantId: v.optional(v.string()),
     includeGlobs: v.array(v.string()),
     excludeGlobs: v.array(v.string()),
-    timing: v.union(v.literal("continuous"), v.literal("on-save-open"), v.literal("manual")),
+    timing: v.union(
+      v.literal("continuous"),
+      v.literal("on-save-open"),
+      v.literal("manual"),
+    ),
     protectedOriginal: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  })
-    .index("by_account_scope", ["accountId", "scopeKind", "scopeId"]),
+  }).index("by_account_scope", ["accountId", "scopeKind", "scopeId"]),
 
   syncPolicyChanges: defineTable({
     accountId: v.id("accounts"),
-    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeKind: v.union(
+      v.literal("account"),
+      v.literal("mount"),
+      v.literal("workspace"),
+      v.literal("folder"),
+      v.literal("item"),
+    ),
     scopeId: v.string(),
     action: v.union(v.literal("override"), v.literal("revert")),
     before: v.optional(v.any()),
     after: v.optional(v.any()),
-    actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("migration")),
+    actorKind: v.union(
+      v.literal("user"),
+      v.literal("ai"),
+      v.literal("migration"),
+    ),
     idempotencyKey: v.string(),
     createdAt: v.number(),
   })
     .index("by_account_key", ["accountId", "idempotencyKey"])
-    .index("by_scope_created", ["accountId", "scopeKind", "scopeId", "createdAt"]),
+    .index("by_scope_created", [
+      "accountId",
+      "scopeKind",
+      "scopeId",
+      "createdAt",
+    ]),
 
   storageStrategyTransitions: defineTable({
     accountId: v.id("accounts"),
     workId: v.id("spectraArtifacts"),
     idempotencyKey: v.string(),
-    fromPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
-    toPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
-    state: v.union(v.literal("pending"), v.literal("verified"), v.literal("failed"), v.literal("conflicted"), v.literal("cancelled")),
+    fromPreset: v.union(
+      v.literal("spectra"),
+      v.literal("device"),
+      v.literal("both"),
+      v.literal("linked"),
+    ),
+    toPreset: v.union(
+      v.literal("spectra"),
+      v.literal("device"),
+      v.literal("both"),
+      v.literal("linked"),
+    ),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("verified"),
+      v.literal("failed"),
+      v.literal("conflicted"),
+      v.literal("cancelled"),
+    ),
     before: v.any(),
     after: v.optional(v.any()),
     errorCode: v.optional(v.string()),
@@ -1700,14 +2029,27 @@ export default defineSchema({
 
   syncStructureDecisions: defineTable({
     accountId: v.id("accounts"),
-    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeKind: v.union(
+      v.literal("account"),
+      v.literal("mount"),
+      v.literal("workspace"),
+      v.literal("folder"),
+      v.literal("item"),
+    ),
     scopeId: v.string(),
-    direction: v.union(v.literal("spectra-to-disk"), v.literal("disk-to-spectra")),
+    direction: v.union(
+      v.literal("spectra-to-disk"),
+      v.literal("disk-to-spectra"),
+    ),
     action: v.union(v.literal("propagate"), v.literal("ignore")),
     createdAt: v.number(),
     updatedAt: v.number(),
-  })
-    .index("by_account_scope_direction", ["accountId", "scopeKind", "scopeId", "direction"]),
+  }).index("by_account_scope_direction", [
+    "accountId",
+    "scopeKind",
+    "scopeId",
+    "direction",
+  ]),
 
   syncDiscoveryRequests: defineTable({
     accountId: v.id("accounts"),
@@ -1747,7 +2089,11 @@ export default defineSchema({
     preservedCarryVersion: v.optional(v.number()),
     fidelityMap: v.optional(v.any()),
     compatibilityProfile: v.optional(
-      v.union(v.literal("strict-native"), v.literal("enhanced"), v.literal("spectra-native")),
+      v.union(
+        v.literal("strict-native"),
+        v.literal("enhanced"),
+        v.literal("spectra-native"),
+      ),
     ),
     revision: v.string(),
     baseRevision: v.optional(v.string()),
@@ -1759,7 +2105,15 @@ export default defineSchema({
     projectionBaseTextIndex: v.optional(v.string()),
     projectionBaseFidelityMap: v.optional(v.any()),
     nativeReceipt: v.optional(v.any()),
-    state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
+    state: v.union(
+      v.literal("current"),
+      v.literal("ahead"),
+      v.literal("behind"),
+      v.literal("diverged"),
+      v.literal("pending"),
+      v.literal("error"),
+      v.literal("unavailable"),
+    ),
     lastVerifiedAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
@@ -1784,11 +2138,29 @@ export default defineSchema({
     workId: v.id("spectraArtifacts"),
     replicaId: v.optional(v.id("workReplicas")),
     idempotencyKey: v.string(),
-    direction: v.union(v.literal("local-to-cloud"), v.literal("cloud-to-local"), v.literal("migration"), v.literal("external")),
+    direction: v.union(
+      v.literal("local-to-cloud"),
+      v.literal("cloud-to-local"),
+      v.literal("migration"),
+      v.literal("external"),
+    ),
     revisionBefore: v.optional(v.string()),
     revisionAfter: v.optional(v.string()),
-    state: v.union(v.literal("pending"), v.literal("applied"), v.literal("verified"), v.literal("failed"), v.literal("conflicted")),
-    actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("external-edit"), v.literal("reconciliation"), v.literal("migration"), v.literal("restore")),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("applied"),
+      v.literal("verified"),
+      v.literal("failed"),
+      v.literal("conflicted"),
+    ),
+    actorKind: v.union(
+      v.literal("user"),
+      v.literal("ai"),
+      v.literal("external-edit"),
+      v.literal("reconciliation"),
+      v.literal("migration"),
+      v.literal("restore"),
+    ),
     runId: v.optional(v.id("spectraAiRuns")),
     nativeReceipt: v.optional(v.any()),
     errorCode: v.optional(v.string()),
@@ -1805,11 +2177,15 @@ export default defineSchema({
     replicaIds: v.array(v.id("workReplicas")),
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
-    previews: v.optional(v.array(v.object({
-      regionId: v.string(),
-      spectra: v.string(),
-      external: v.string(),
-    }))),
+    previews: v.optional(
+      v.array(
+        v.object({
+          regionId: v.string(),
+          spectra: v.string(),
+          external: v.string(),
+        }),
+      ),
+    ),
     localRevision: v.string(),
     spectraRevision: v.string(),
     localPayloadRef: v.optional(v.string()),
@@ -1891,7 +2267,10 @@ export default defineSchema({
     mountId: v.id("bridgeMounts"),
     nodeId: v.optional(v.id("orgNodes")),
     localResourceId: v.string(),
-    direction: v.union(v.literal("spectra-to-disk"), v.literal("disk-to-spectra")),
+    direction: v.union(
+      v.literal("spectra-to-disk"),
+      v.literal("disk-to-spectra"),
+    ),
     kind: v.union(v.literal("move"), v.literal("rename"), v.literal("delete")),
     sourceRelativePath: v.string(),
     targetRelativePath: v.optional(v.string()),
@@ -1926,7 +2305,11 @@ export default defineSchema({
     bytes: v.number(),
     mediaType: v.string(),
     refCount: v.number(),
-    state: v.union(v.literal("active"), v.literal("quarantined"), v.literal("released")),
+    state: v.union(
+      v.literal("active"),
+      v.literal("quarantined"),
+      v.literal("released"),
+    ),
     releasedAt: v.optional(v.number()),
     createdAt: v.number(),
     verifiedAt: v.number(),
@@ -1937,7 +2320,11 @@ export default defineSchema({
 
   replicaTruthMigrations: defineTable({
     key: v.string(),
-    state: v.union(v.literal("running"), v.literal("complete"), v.literal("failed")),
+    state: v.union(
+      v.literal("running"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
     cursor: v.optional(v.string()),
     scanned: v.number(),
     repaired: v.number(),
@@ -3005,18 +3392,24 @@ export default defineSchema({
     // Source deletion makes the source unavailable, but does not remove a
     // surviving placement/container owner of a pinned version.
     sourceUnavailableAt: v.optional(v.number()),
-    placementState: v.optional(v.union(
-      v.literal("provisional"),
-      v.literal("confirmed"),
-      v.literal("removed"),
-    )),
+    placementState: v.optional(
+      v.union(
+        v.literal("provisional"),
+        v.literal("confirmed"),
+        v.literal("removed"),
+      ),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
     removedAt: v.optional(v.number()),
   })
     .index("by_container", ["containerType", "containerId"])
     .index("by_source", ["sourceArtifactId", "createdAt"])
-    .index("by_placement_operation", ["containerType", "containerId", "placementOperationId"])
+    .index("by_placement_operation", [
+      "containerType",
+      "containerId",
+      "placementOperationId",
+    ])
     .index("by_pinned_version", ["pinnedVersionId"]),
 
   artifactAccessRequests: defineTable({
@@ -3119,7 +3512,9 @@ export default defineSchema({
     family: v.string(),
     sourceId: v.string(),
     releasedAt: v.number(),
-  }).index("by_storage", ["storageId"]).index("by_artifact", ["artifactId", "releasedAt"]),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_artifact", ["artifactId", "releasedAt"]),
 
   artifactDeletionJobs: defineTable({
     artifactId: v.id("spectraArtifacts"),
@@ -3327,11 +3722,7 @@ export default defineSchema({
     ])
     .index("by_account_deleted", ["accountId", "deletedAt"])
     .index("by_trashed_root", ["trashedRootId"])
-    .index("by_account_trash_root", [
-      "accountId",
-      "isTrashRoot",
-      "deletedAt",
-    ])
+    .index("by_account_trash_root", ["accountId", "isTrashRoot", "deletedAt"])
     /* The board's windows. `deletedAt` sits in each one so a trashed subtree is
        excluded by the range rather than filtered out of it, which keeps a page
        of results exactly a page of reads. */
@@ -3556,16 +3947,41 @@ export default defineSchema({
         id: v.string(),
         messageId: v.optional(v.id("spectraMessages")),
         executionId: v.string(),
-        status: v.union(v.literal("pending"), v.literal("selected"), v.literal("consumed"), v.literal("expired")),
-        options: v.array(v.object({ key: v.string(), title: v.string(), description: v.optional(v.string()) })),
-        questions: v.optional(v.array(v.object({
-          id: v.string(),
-          prompt: v.string(),
-          options: v.array(v.object({ key: v.string(), title: v.string(), description: v.optional(v.string()) })),
-        }))),
+        status: v.union(
+          v.literal("pending"),
+          v.literal("selected"),
+          v.literal("consumed"),
+          v.literal("expired"),
+        ),
+        options: v.array(
+          v.object({
+            key: v.string(),
+            title: v.string(),
+            description: v.optional(v.string()),
+          }),
+        ),
+        questions: v.optional(
+          v.array(
+            v.object({
+              id: v.string(),
+              prompt: v.string(),
+              options: v.array(
+                v.object({
+                  key: v.string(),
+                  title: v.string(),
+                  description: v.optional(v.string()),
+                }),
+              ),
+            }),
+          ),
+        ),
         targetIds: v.array(v.string()),
         targetRevisions: v.optional(v.any()),
-        authority: v.object({ ownerAccountId: v.string(), schoolId: v.optional(v.string()), capturedAt: v.number() }),
+        authority: v.object({
+          ownerAccountId: v.string(),
+          schoolId: v.optional(v.string()),
+          capturedAt: v.number(),
+        }),
         createdAt: v.number(),
         selectedAt: v.optional(v.number()),
         selectedKey: v.optional(v.string()),
@@ -3648,7 +4064,11 @@ export default defineSchema({
     originalFileId: v.optional(v.string()),
     sha256: v.optional(v.string()),
     status: v.optional(
-      v.union(v.literal("uploading"), v.literal("active"), v.literal("quarantined")),
+      v.union(
+        v.literal("uploading"),
+        v.literal("active"),
+        v.literal("quarantined"),
+      ),
     ),
     uploadReceipt: v.optional(v.string()),
     quarantineReason: v.optional(v.string()),
@@ -3768,9 +4188,21 @@ export default defineSchema({
   })
     .index("by_run", ["runId"])
     .index("by_owner_updated", ["ownerAccountId", "updatedAt"])
-    .index("by_owner_surface_updated", ["ownerAccountId", "surface", "updatedAt"])
-    .index("by_owner_workspace_updated", ["ownerAccountId", "workspaceId", "updatedAt"])
-    .index("by_owner_artifact_updated", ["ownerAccountId", "artifactId", "updatedAt"])
+    .index("by_owner_surface_updated", [
+      "ownerAccountId",
+      "surface",
+      "updatedAt",
+    ])
+    .index("by_owner_workspace_updated", [
+      "ownerAccountId",
+      "workspaceId",
+      "updatedAt",
+    ])
+    .index("by_owner_artifact_updated", [
+      "ownerAccountId",
+      "artifactId",
+      "updatedAt",
+    ])
     .index("by_updated", ["updatedAt"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_artifact_status", ["artifactId", "status"]),
@@ -3838,9 +4270,21 @@ export default defineSchema({
     .index("by_card", ["cardId"])
     .index("by_run", ["runId"])
     .index("by_owner_updated", ["ownerAccountId", "updatedAt"])
-    .index("by_owner_surface_updated", ["ownerAccountId", "surface", "updatedAt"])
-    .index("by_owner_workspace_updated", ["ownerAccountId", "workspaceId", "updatedAt"])
-    .index("by_owner_artifact_updated", ["ownerAccountId", "artifactId", "updatedAt"])
+    .index("by_owner_surface_updated", [
+      "ownerAccountId",
+      "surface",
+      "updatedAt",
+    ])
+    .index("by_owner_workspace_updated", [
+      "ownerAccountId",
+      "workspaceId",
+      "updatedAt",
+    ])
+    .index("by_owner_artifact_updated", [
+      "ownerAccountId",
+      "artifactId",
+      "updatedAt",
+    ])
     .index("by_updated", ["updatedAt"]),
 
   // A single durable fence lets hot readers retain a bounded legacy fallback
@@ -3985,7 +4429,11 @@ export default defineSchema({
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
     .index("by_account_run", ["ownerAccountId", "runId"])
     .index("by_account_thread", ["ownerAccountId", "threadId"])
-    .index("by_account_workspace", ["ownerAccountId", "workspaceId", "updatedAt"])
+    .index("by_account_workspace", [
+      "ownerAccountId",
+      "workspaceId",
+      "updatedAt",
+    ])
     .index("by_account_artifact", ["ownerAccountId", "artifactId", "updatedAt"])
     .index("by_run", ["runId"])
     .index("by_thread", ["threadId"])

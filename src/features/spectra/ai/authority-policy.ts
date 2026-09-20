@@ -10,6 +10,7 @@ export type AiTargetClass =
   | "local_file"
   | "managebac_sync"
   | "managebac_selection"
+  | "managebac_resource_import"
   | "managebac_mapping"
   | "memory"
   | "credential"
@@ -112,6 +113,12 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
         decision: "confirm",
         reason:
           "Changing selected ManageBac classes changes which school data may enter personal planning.",
+      };
+    case "managebac_resource_import":
+      return {
+        decision: "confirm",
+        reason:
+          "Importing a school resource creates a personal Library copy and requires explicit approval.",
       };
     case "managebac_mapping":
       return {

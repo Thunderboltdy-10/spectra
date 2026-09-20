@@ -418,7 +418,6 @@ export function SurfaceNewMenu({
         type="button"
         disabled={disabled}
         title={disabled ? disabledTitle : undefined}
-        aria-description={disabled ? disabledTitle : undefined}
         onClick={() => onNewWork(only.key)}
         className={cn(controlClass, "w-full justify-center")}
       >

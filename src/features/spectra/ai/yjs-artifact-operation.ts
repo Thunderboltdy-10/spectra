@@ -58,7 +58,7 @@ import {
 import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
 import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
-import { claimAcquireAction } from "../../../../shared/region-claim-policy";
+import { boundedRegionClaims, claimAcquireAction } from "../../../../shared/region-claim-policy";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
@@ -718,7 +718,7 @@ async function acquirePlanClaims(params: {
 }) {
   const claims: RegionClaim[] = [];
   const claimActorKind = params.claimActorKind ?? "ai";
-  for (const region of params.plan.regions) {
+  for (const region of boundedRegionClaims(params.plan.regions)) {
     let notified = false;
     for (;;) {
       const aborted = abortError(params.signal);

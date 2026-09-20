@@ -83,6 +83,7 @@ const K_BAR_COMMAND_IDS = new Set([
   "app.sharing.change",
   "app.managebac.sync",
   "app.managebac.select-classes",
+  "app.managebac.import-resource",
   "app.bridge.pair",
   "app.bridge.setup",
   "app.bridge.policy.change",

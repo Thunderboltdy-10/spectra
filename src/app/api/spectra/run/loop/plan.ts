@@ -16,10 +16,7 @@ import {
 import type { ProvisionalCreation } from "./intake";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { act, mutate, query, readQuery, safeJson } from "./io";
-import {
-  evaluateCommandAuthority,
-  recordAuthorityDecision,
-} from "./authority";
+import { evaluateCommandAuthority, recordAuthorityDecision } from "./authority";
 import { publicError } from "./report";
 import {
   assertCalendarActionContract,
@@ -30,7 +27,6 @@ import {
   promptExplicitlyTargetsFocusedArtifact,
   reconcileExplicitDocumentOperation,
   applicationToolMayCompleteRequest,
-  toolFulfillsEntireRequest,
 } from "./resolve";
 import { runSpectraAgentLoop } from "@/features/spectra/ai/agent-loop";
 import type { SpectraAgentMessage } from "@/features/spectra/ai/agent-loop";
@@ -979,7 +975,12 @@ export function parseStreamedPlanText(
       !Array.isArray(raw.choices)
     ) {
       const choices = raw.choices as Record<string, unknown>;
-      const choiceKey = (value: unknown, index: number, prefix: string, usedKeys: Set<string>) => {
+      const choiceKey = (
+        value: unknown,
+        index: number,
+        prefix: string,
+        usedKeys: Set<string>,
+      ) => {
         const supplied = typeof value === "string" ? value.trim() : "";
         const slug = (typeof value === "string" ? value : "option")
           .toLowerCase()
@@ -988,7 +989,9 @@ export function parseStreamedPlanText(
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "")
           .slice(0, 72);
-        const base = (supplied || `${prefix}:${index}:${slug || "option"}`).slice(0, 120);
+        const base = (
+          supplied || `${prefix}:${index}:${slug || "option"}`
+        ).slice(0, 120);
         if (!usedKeys.has(base)) {
           usedKeys.add(base);
           return base;
@@ -1044,9 +1047,12 @@ export function parseStreamedPlanText(
           const row = question as Record<string, unknown>;
           const prompt =
             typeof row.question === "string" ? row.question.trim() : "";
-          const options = cleanChoiceOptions(row.options, `question-${index + 1}`);
+          const options = cleanChoiceOptions(
+            row.options,
+            `question-${index + 1}`,
+          );
           return prompt && options.length >= 2
-          ? [
+            ? [
                 {
                   id:
                     typeof row.id === "string" && row.id.trim()
@@ -2979,20 +2985,15 @@ function compactCalendarItem(value: Record<string, unknown>) {
 }
 
 /**
- * Calendar overview is a range-bounded projection (Shell `e3ac373` uses
- * by_account_start + kind indexes with a ~90d overlap lookback residual). The
- * agent needs exact work-block identity/revision and concise event context —
- * never treat `items` as complete calendar truth. Keep the AI egress slice
- * honest about truncation, range, lookback residual, and kind separation.
+ * Calendar overview is an indexed, paginated range projection. Preserve its
+ * cursors and explicit target identities; bound legacy unpaginated responses.
  */
 export const CALENDAR_AGENT_VISIBLE_ITEM_LIMIT = 80;
-/** Matches Shell overview RANGE_OVERLAP_LOOKBACK_MS after merge; documented here
- * so AI egress stays honest even while this seat still has the older overview. */
-export const CALENDAR_OVERVIEW_LOOKBACK_MS = 90 * 24 * 60 * 60_000;
 
 export function compactCalendarForAgent(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
+  const itemLimit = record.pagination ? 250 : CALENDAR_AGENT_VISIBLE_ITEM_LIMIT;
   const visible = rows(record.items);
   const scheduled = rows(record.scheduledWorkBlocks).length
     ? rows(record.scheduledWorkBlocks)
@@ -3002,10 +3003,10 @@ export function compactCalendarForAgent(value: unknown) {
   const unscheduled = rows(record.unscheduledTasks);
   const partialTimeItems = rows(record.partialTimeItems);
   const returnedItems = [...nonTaskVisible, ...taskVisible]
-    .slice(0, CALENDAR_AGENT_VISIBLE_ITEM_LIMIT)
+    .slice(0, itemLimit)
     .map(compactCalendarItem);
   const returnedUnscheduled = unscheduled
-    .slice(0, CALENDAR_AGENT_VISIBLE_ITEM_LIMIT)
+    .slice(0, itemLimit)
     .map(compactCalendarItem);
   const rangeRecord =
     record.range && typeof record.range === "object" && !Array.isArray(record.range)
@@ -3015,9 +3016,9 @@ export function compactCalendarForAgent(value: unknown) {
   const rangeTo = Number(rangeRecord?.to);
   const rangeBounded =
     Number.isFinite(rangeFrom) && Number.isFinite(rangeTo) && rangeTo > rangeFrom;
-  const truncatedVisible = visible.length > CALENDAR_AGENT_VISIBLE_ITEM_LIMIT;
+  const truncatedVisible = visible.length > itemLimit;
   const truncatedUnscheduled =
-    unscheduled.length > CALENDAR_AGENT_VISIBLE_ITEM_LIMIT;
+    unscheduled.length > itemLimit;
   return {
     timezone: record.timezone,
     range: record.range,
@@ -3028,6 +3029,8 @@ export function compactCalendarForAgent(value: unknown) {
     sourceState: record.sourceState,
     lastUpdatedAt: record.lastUpdatedAt,
     migration: record.migration,
+    targetedItems: rows(record.targetedItems).map(compactCalendarItem),
+    pagination: record.pagination,
     coverage: {
       // Overview is always a windowed projection, never the whole calendar.
       complete: false,
@@ -3036,13 +3039,12 @@ export function compactCalendarForAgent(value: unknown) {
         ? {
             rangeFrom,
             rangeTo,
-            lookbackMs: CALENDAR_OVERVIEW_LOOKBACK_MS,
           }
         : {}),
       truncatedVisibleItems: truncatedVisible,
       truncatedUnscheduledTasks: truncatedUnscheduled,
-      lookbackResidual:
-        "Timed items that start more than ~90 days before the requested range may be omitted from items even if they still overlap the window. Prefer scheduledWorkBlocks for work-block identity outside the visible window.",
+      discovery:
+        "Follow pagination cursors for more range items. Use targetItemId or targetTitle for an off-range item; its identity is returned in targetedItems.",
       emptyIsNotComplete:
         "An empty items array is not proof the calendar has no events — check range, sourceState, migration.partial, partialTimeItems, and scheduledWorkBlocks.",
     },
@@ -3562,7 +3564,7 @@ export async function executeAgentReadTool(
         results: results.map((result, index) => ({
           sourceId: evidence.sources[index]?.id,
           evidenceIds: evidence.sources[index]
-            ? evidenceBySource.get(evidence.sources[index]!.id) ?? []
+            ? (evidenceBySource.get(evidence.sources[index]!.id) ?? [])
             : [],
           title: result.title,
           url: result.url,
@@ -3990,13 +3992,28 @@ export async function executeAgentReadTool(
       const to = Number(args.to);
       if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from)
         return { ok: false, code: "calendar_range_invalid" };
-      const calendar = await convexQuery("calendar:overview", { from, to });
+      const calendarArgs: Record<string, unknown> = { from, to };
+      for (const key of [
+        "targetItemId",
+        "targetTitle",
+        "cursor",
+        "unscheduledCursor",
+        "partialCursor",
+        "migrationCursor",
+        "plannerCursor",
+        "targetCursor",
+      ]) {
+        if (typeof args[key] === "string" && args[key].trim())
+          calendarArgs[key] = args[key];
+      }
+      if (typeof args.limit === "number") calendarArgs.limit = args.limit;
+      const calendar = await convexQuery("calendar:overview", calendarArgs);
       const compact = compactCalendarForAgent(calendar);
       return {
         ok: true,
         calendar: compact,
         warning:
-          "Official deadlines and scheduled work blocks are distinct. Never describe a moved block as a changed source deadline. calendar.items is range-bounded (with a ~90-day overlap lookback residual) and may be truncated for the model — use coverage/counts and scheduledWorkBlocks; an empty items list is not a complete calendar.",
+          "Official deadlines and scheduled work blocks are distinct. Never describe a moved block as a changed source deadline. Calendar items are range-bounded; follow pagination and targetedItems for further discovery. An empty items list is not a complete calendar.",
         partial:
           Boolean(
             compact &&
@@ -4026,35 +4043,40 @@ export async function executeAgentReadTool(
     }
     return { ok: false, code: "unknown_tool" };
   };
-  return spectraToolExecutor.execute(
-    {
-      id: `run-tool:${call.name}:${createHash("sha256").update(call.arguments).digest("hex").slice(0, 12)}`,
-      name: call.name,
-      input: parsedArguments,
-    },
-    {
-      signal: scope?.signal,
-      executeRegisteredTool: async (_toolId, _input, executionContext) => {
-        if (executionContext.signal?.aborted)
-          throw executionContext.signal.reason;
-        return run(executionContext.signal);
+  return spectraToolExecutor
+    .execute(
+      {
+        id: `run-tool:${call.name}:${createHash("sha256").update(call.arguments).digest("hex").slice(0, 12)}`,
+        name: call.name,
+        input: parsedArguments,
       },
-    },
-  ).then((result) => {
-    if (
-      pendingNotice &&
-      result &&
-      typeof result === "object" &&
-      (result as { ok?: unknown }).ok
-    ) {
-      onUiEvent?.({
-        key: "authority_notice",
-        payload: { note: pendingNotice, command: call.name },
-      });
-      return { ...(result as Record<string, unknown>), notice: pendingNotice };
-    }
-    return result;
-  });
+      {
+        signal: scope?.signal,
+        executeRegisteredTool: async (_toolId, _input, executionContext) => {
+          if (executionContext.signal?.aborted)
+            throw executionContext.signal.reason;
+          return run(executionContext.signal);
+        },
+      },
+    )
+    .then((result) => {
+      if (
+        pendingNotice &&
+        result &&
+        typeof result === "object" &&
+        (result as { ok?: unknown }).ok
+      ) {
+        onUiEvent?.({
+          key: "authority_notice",
+          payload: { note: pendingNotice, command: call.name },
+        });
+        return {
+          ...(result as Record<string, unknown>),
+          notice: pendingNotice,
+        };
+      }
+      return result;
+    });
 }
 
 export function promptDirectlyUsesFocusedContent(prompt: string) {
@@ -4404,26 +4426,25 @@ export async function callModel(
   const boundedSingleCreation = calendarNeedsCoordination
     ? null
     : forcedSingleCreation
-    ? forcedSingleCreation
-    : forceGeneralPlan ||
-        directFocusedAction ||
-        openArtifactCreateCollision ||
-        (Boolean(updateTarget) &&
-          promptLooksLikeFocusedStructuralEdit(prompt) &&
-          !/\b(?:new|another|separate)\b/i.test(prompt))
-      ? null
-      : speculativeSingleCreation;
+      ? forcedSingleCreation
+      : forceGeneralPlan ||
+          directFocusedAction ||
+          openArtifactCreateCollision ||
+          (Boolean(updateTarget) &&
+            promptLooksLikeFocusedStructuralEdit(prompt) &&
+            !/\b(?:new|another|separate)\b/i.test(prompt))
+        ? null
+        : speculativeSingleCreation;
   const singleCreationBlueprint = boundedSingleCreation?.blueprintKey;
   const complexReasoningRequest = shouldUseComplexReasoning({
     prompt,
     attachmentCount: attachments.length,
     boundedSingleCreation: Boolean(boundedSingleCreation),
   });
-  const agentRequiresDiscovery =
-    forcedCoordination
-      ? false
-      : calendarNeedsCoordination
-        ? true
+  const agentRequiresDiscovery = forcedCoordination
+    ? false
+    : calendarNeedsCoordination
+      ? true
       : shouldAllowAgentDiscovery({
           prompt,
           hasFocusedArtifact: Boolean(focusedTarget),
@@ -4754,8 +4775,10 @@ export async function callModel(
               if (ownedArtifactBlueprints.get(artifactId) !== "planner_task")
                 return false;
               return (
-                title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() ===
-                titleKey
+                title
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, " ")
+                  .trim() === titleKey
               );
             },
           );
@@ -4918,8 +4941,14 @@ export async function callModel(
   const researchBundles: ResearchEvidenceBundle[] = [];
   const mergedResearchEvidence = () => {
     if (!researchBundles.length) return undefined;
-    const sources = new Map<string, ResearchEvidenceBundle["sources"][number]>();
-    const evidence = new Map<string, ResearchEvidenceBundle["evidence"][number]>();
+    const sources = new Map<
+      string,
+      ResearchEvidenceBundle["sources"][number]
+    >();
+    const evidence = new Map<
+      string,
+      ResearchEvidenceBundle["evidence"][number]
+    >();
     let partial = false;
     for (const bundle of researchBundles) {
       partial ||= bundle.partial;
@@ -5077,7 +5106,9 @@ export async function callModel(
           (candidate) => {
             const id =
               typeof candidate.id === "string" ? candidate.id.trim() : "";
-            return id && ownedArtifactTitles.has(id) && ownedArtifactBlueprints.has(id)
+            return id &&
+              ownedArtifactTitles.has(id) &&
+              ownedArtifactBlueprints.has(id)
               ? [id]
               : [];
           },
@@ -5087,7 +5118,9 @@ export async function callModel(
   };
   const buildAgentSystemContent = async (encouragementNudge = "") => {
     const qualityBlueprint =
-      (calendarNeedsCoordination ? undefined : forcedSingleCreation?.blueprintKey) ??
+      (calendarNeedsCoordination
+        ? undefined
+        : forcedSingleCreation?.blueprintKey) ??
       singleCreationBlueprint ??
       (directFocusedAction ? focusedBlueprintKey : undefined);
     return (
@@ -5141,8 +5174,7 @@ export async function callModel(
         Array.isArray(parsedInput.candidates)
           ? (parsedInput.candidates as Array<Record<string, unknown>>).flatMap(
               (candidate) => {
-                const id =
-                  typeof candidate.id === "string" ? candidate.id : "";
+                const id = typeof candidate.id === "string" ? candidate.id : "";
                 const title = ownedArtifactTitles.get(id);
                 const blueprintKey = ownedArtifactBlueprints.get(id);
                 const metadata = ownedArtifactMetadata.get(id);
@@ -5166,8 +5198,7 @@ export async function callModel(
       const candidateTitle = (candidate: Record<string, unknown>) => {
         const title = String(candidate.title);
         const duplicates = candidates.filter(
-          (other) =>
-            String(other.title).toLowerCase() === title.toLowerCase(),
+          (other) => String(other.title).toLowerCase() === title.toLowerCase(),
         );
         if (duplicates.length < 2) return title;
         const workspaceTitle =
@@ -5176,9 +5207,8 @@ export async function callModel(
             : null;
         const workspaceIsUnique =
           workspaceTitle &&
-          duplicates.filter(
-            (other) => other.workspaceTitle === workspaceTitle,
-          ).length === 1;
+          duplicates.filter((other) => other.workspaceTitle === workspaceTitle)
+            .length === 1;
         const summary =
           typeof candidate.summary === "string"
             ? candidate.summary.slice(0, 44)
@@ -5352,6 +5382,7 @@ export async function callModel(
             : agentResult.completedTool.name === "resize_calendar_block"
               ? "Resized the Calendar work block."
               : agentResult.completedTool.name === "setup_bridge"
+
           ? (() => {
               const action =
                 typeof completedArgs.action === "string"
@@ -5379,6 +5410,37 @@ export async function callModel(
                 .replace(/\b\w/g, (character) => character.toUpperCase());
               return `Opened ${label}.`;
             })();
+                /* W9-02 contributes only formatting changes in this shared response branch.
+                ? (() => {
+                    const action =
+                      typeof completedArgs.action === "string"
+                        ? completedArgs.action
+                        : "pair";
+                    const actionLabel =
+                      action === "select-location"
+                        ? "Folder selection"
+                        : action === "retry-connection"
+                          ? "The Bridge connection retry"
+                          : action === "retry-folder"
+                            ? "The Bridge folder retry"
+                            : "Bridge pairing";
+                    return `${actionLabel} is ready in Settings. Complete the local setup step and any consent there.`;
+                  })()
+                : agentResult.completedTool.name === "insert_reference"
+                  ? "The live reference is ready in the focused work surface."
+                  : (() => {
+                      const destination =
+                        typeof completedArgs.destination === "string"
+                          ? completedArgs.destination
+                          : "the requested Spectra view";
+                      const label = destination
+                        .replaceAll("-", " ")
+                        .replace(/\b\w/g, (character) =>
+                          character.toUpperCase(),
+                        );
+                      return `Opened ${label}.`;
+                    })();
+                */
       nextPlan = parseSpectraPlan({
         decision: "answer",
         intent: {
@@ -5516,8 +5578,7 @@ export async function callModel(
               ok: true,
               code: "single_target_resolved",
               target: candidate,
-              message:
-                `Only one permissioned Spectra work matches this request: “${candidate.title}”. Use its exact id (${id}) and call propose_operation for the requested mutation; do not ask the user to choose.`,
+              message: `Only one permissioned Spectra work matches this request: “${candidate.title}”. Use its exact id (${id}) and call propose_operation for the requested mutation; do not ask the user to choose.`,
             };
           }
           return {
@@ -6416,14 +6477,25 @@ export async function callParallelCreationWorkers(
       .join(", "),
     usage: { ...usage, elapsedMs: Date.now() - startedAt },
     researchEvidence: results
-      .flatMap((result) => (result.researchEvidence ? [result.researchEvidence] : []))
+      .flatMap((result) =>
+        result.researchEvidence ? [result.researchEvidence] : [],
+      )
       .reduce<ResearchEvidenceBundle | undefined>((merged, bundle) => {
         if (!merged) return bundle;
-        const sources = new Map(merged.sources.map((source) => [source.id, source]));
-        const evidence = new Map(merged.evidence.map((span) => [span.id, span]));
+        const sources = new Map(
+          merged.sources.map((source) => [source.id, source]),
+        );
+        const evidence = new Map(
+          merged.evidence.map((span) => [span.id, span]),
+        );
         for (const source of bundle.sources) sources.set(source.id, source);
         for (const span of bundle.evidence) evidence.set(span.id, span);
-        return { sources: [...sources.values()], evidence: [...evidence.values()], citations: [] as ResearchEvidenceBundle["citations"], partial: merged.partial || bundle.partial };
+        return {
+          sources: [...sources.values()],
+          evidence: [...evidence.values()],
+          citations: [] as ResearchEvidenceBundle["citations"],
+          partial: merged.partial || bundle.partial,
+        };
       }, undefined),
   };
 }
@@ -6711,14 +6783,25 @@ ${prompt}`;
       elapsedMs: Date.now() - startedAt,
     },
     researchEvidence: [creationResult, coordinationResult]
-      .flatMap((result) => (result.researchEvidence ? [result.researchEvidence] : []))
+      .flatMap((result) =>
+        result.researchEvidence ? [result.researchEvidence] : [],
+      )
       .reduce<ResearchEvidenceBundle | undefined>((merged, bundle) => {
         if (!merged) return bundle;
-        const sources = new Map(merged.sources.map((source) => [source.id, source]));
-        const evidence = new Map(merged.evidence.map((span) => [span.id, span]));
+        const sources = new Map(
+          merged.sources.map((source) => [source.id, source]),
+        );
+        const evidence = new Map(
+          merged.evidence.map((span) => [span.id, span]),
+        );
         for (const source of bundle.sources) sources.set(source.id, source);
         for (const span of bundle.evidence) evidence.set(span.id, span);
-        return { sources: [...sources.values()], evidence: [...evidence.values()], citations: [] as ResearchEvidenceBundle["citations"], partial: merged.partial || bundle.partial };
+        return {
+          sources: [...sources.values()],
+          evidence: [...evidence.values()],
+          citations: [] as ResearchEvidenceBundle["citations"],
+          partial: merged.partial || bundle.partial,
+        };
       }, undefined),
   };
 }

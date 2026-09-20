@@ -356,7 +356,35 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     entries.push({ regionId: "xlsx:feature:macro", feature: "macro", class: "PRESERVED", partName, readOnly: true, reason: "Macros remain byte-identical and are never executed by Spectra." });
   }
   const fidelityMap: LensFidelityMap = { version: 1, profile, entries };
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify({
+  const semanticDigest = await xlsxSemanticDigest({ calculationMode, activeSheetId, sheets, definedNames });
+  const projection = xlsxProjectionSchema.parse({
+    sheets,
+    definedNames,
+    calculationMode,
+    ...(activeSheetId ? { activeSheetId } : {}),
+    nativeBinding: {
+      version: 1,
+      format: workbook.office.format.extension as XlsxProjection["nativeBinding"]["format"],
+      profile,
+      macroEnabled: workbook.office.format.macroEnabled,
+      semanticDigest,
+      recognizedFormulaFunctions: [...XLSX_RECOGNIZED_FORMULAS].sort(),
+      ...(workbook._date1904() ? { date1904: true } : {}),
+    },
+  });
+  return { projection, fidelityMap };
+}
+
+function findSheet(workbook: Workbook, sheetId: string) {
+  try { return nativeSheetById(workbook, sheetId); }
+  catch { throw new XlsxLensError("XLSX_SHEET_MISSING", "The target Excel sheet no longer exists."); }
+}
+
+/** Hash the intended semantic state, not the binding retained from import. */
+export async function xlsxSemanticDigest(
+  { calculationMode, activeSheetId, sheets, definedNames }: Pick<XlsxProjection, "calculationMode" | "activeSheetId" | "sheets" | "definedNames">,
+) {
+  return sha256Payload(new TextEncoder().encode(JSON.stringify({
     calculationMode,
     activeSheetId,
     sheets: sheets.map((sheet) => ({
@@ -381,27 +409,6 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     })),
     definedNames,
   })));
-  const projection = xlsxProjectionSchema.parse({
-    sheets,
-    definedNames,
-    calculationMode,
-    ...(activeSheetId ? { activeSheetId } : {}),
-    nativeBinding: {
-      version: 1,
-      format: workbook.office.format.extension as XlsxProjection["nativeBinding"]["format"],
-      profile,
-      macroEnabled: workbook.office.format.macroEnabled,
-      semanticDigest,
-      recognizedFormulaFunctions: [...XLSX_RECOGNIZED_FORMULAS].sort(),
-      ...(workbook._date1904() ? { date1904: true } : {}),
-    },
-  });
-  return { projection, fidelityMap };
-}
-
-function findSheet(workbook: Workbook, sheetId: string) {
-  try { return nativeSheetById(workbook, sheetId); }
-  catch { throw new XlsxLensError("XLSX_SHEET_MISSING", "The target Excel sheet no longer exists."); }
 }
 
 async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: XlsxSemanticDelta) {

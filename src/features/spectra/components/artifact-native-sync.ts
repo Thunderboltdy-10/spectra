@@ -1,5 +1,6 @@
 "use client";
 
+import { contentForDurableRequest } from "../data/durable-content";
 import {
   useCallback,
   useEffect,
@@ -333,7 +334,7 @@ export function useArtifactNativeSync({
           body: JSON.stringify({
             action: "materialize",
             artifactId,
-            content: snapshot.content,
+            content: await contentForDurableRequest(artifactId, snapshot.content),
           }),
         });
         const result = (await response.json().catch(() => null)) as {

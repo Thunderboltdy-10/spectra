@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
+import { convexQuery, storeArtifactContent } from "@/lib/convex-server";
 import { docxLens } from "@/features/spectra/lenses/docx-lens";
 import { xlsxLens } from "@/features/spectra/lenses/xlsx-lens";
 import { pptxLens } from "@/features/spectra/lenses/pptx-lens";
 import {
   xlsxArtifactContent,
   pptxArtifactContent,
-  convexSafeOfficeActivationContent,
   convexSafeFidelityMap,
 } from "@/features/spectra/lenses/office-content";
-import { compactDocxProjectionForStorage } from "@/features/spectra/lenses/document-projection";
-import { MAX_PERSISTED_CONTENT_BYTES } from "../../../../../../shared/intake-limits";
+import { bindDocxProjectionSource } from "@/features/spectra/lenses/document-projection";
+import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
+import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +26,6 @@ const presentationFormats = new Set([
   "ppsm",
   "ppam",
 ]);
-
-function utf8JsonBytes(value: unknown) {
-  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
-}
 
 function fidelityReportFromMap(
   entries: Array<{
@@ -61,25 +58,6 @@ function fidelityReportFromMap(
   ];
 }
 
-function tooLargeResponse(kind: "document" | "sheets" | "presentation") {
-  const label =
-    kind === "sheets"
-      ? "workbook"
-      : kind === "presentation"
-        ? "deck"
-        : "document";
-  return NextResponse.json(
-    {
-      ok: false,
-      error: "IMPORT_SNAPSHOT_TOO_LARGE",
-      // Soft fail — never ship a multi-MB projection into the tab (Aw Snap 9).
-      message: `This ${label} is too large to open as editable Spectra content in one step. The original file was not imported. Try a smaller file, or open it through Bridge so the native package stays off the hot artifact row.`,
-      durableFailed: true,
-    },
-    { status: 413 },
-  );
-}
-
 export async function POST(request: Request) {
   try {
     await requireActor();
@@ -88,12 +66,20 @@ export async function POST(request: Request) {
     if (!(file instanceof File))
       return NextResponse.json({ error: "IMPORT_FILE_REQUIRED" }, { status: 400 });
     const format = file.name.split(".").pop()?.toLowerCase() ?? "";
+    if (format !== "docx" && !spreadsheetFormats.has(format) && !presentationFormats.has(format))
+      return NextResponse.json({ error: "IMPORT_OFFICE_FORMAT_UNSUPPORTED" }, { status: 400 });
+    const artifactId = form.get("artifactId");
+    if (typeof artifactId !== "string" || !artifactId)
+      throw new Error("IMPORT_ARTIFACT_REQUIRED");
+    // Check access before parsing an expensive package; adoption rechecks the
+    // current permission epoch when the immutable body is complete.
+    await convexQuery("spectraArtifacts:get", { artifactId });
     const payload = new Uint8Array(await file.arrayBuffer());
     if (format === "docx") {
       const opened = await docxLens.open(payload, "strict-native");
-      const content = compactDocxProjectionForStorage(opened.projection);
-      if (utf8JsonBytes(content) > MAX_PERSISTED_CONTENT_BYTES)
-        return tooLargeResponse("document");
+      const content = await storeArtifactContent(artifactId, bindDocxProjectionSource(
+        opened.projection, artifactId, createHash("sha256").update(payload).digest("hex"),
+      ));
       return NextResponse.json({
         ok: true,
         blueprintKey: "document",
@@ -109,15 +95,12 @@ export async function POST(request: Request) {
     }
     if (spreadsheetFormats.has(format)) {
       const opened = await xlsxLens.open(payload, "strict-native");
-      // Never return the full 200k-cell map to the browser — that OOMs the tab
-      // (Chrome Aw Snap error code 9). Persist/open use the activation stub;
-      // occupied cells live in the native package + lens HTTP open.
-      const content = convexSafeOfficeActivationContent(
+      opened.projection.nativeBinding.sourceArtifactId = artifactId;
+      opened.projection.nativeBinding.sourcePayloadHash = createHash("sha256").update(payload).digest("hex");
+      const content = await storeArtifactContent(artifactId, encodeArtifactContentForStorage(
         "sheets",
         xlsxArtifactContent(opened.projection),
-      );
-      if (utf8JsonBytes(content) > MAX_PERSISTED_CONTENT_BYTES)
-        return tooLargeResponse("sheets");
+      ));
       return NextResponse.json({
         ok: true,
         blueprintKey: "sheets",
@@ -128,17 +111,17 @@ export async function POST(request: Request) {
           .filter((entry) => entry.class === "EXTENSION")
           .map((entry) => entry.feature),
         parserVersion: "spectra-office-lens/1",
-        activationStub: true,
+        activationStub: false,
       });
     }
     if (presentationFormats.has(format)) {
       const opened = await pptxLens.open(payload, "strict-native");
-      const content = convexSafeOfficeActivationContent(
+      opened.projection.nativeBinding.sourceArtifactId = artifactId;
+      opened.projection.nativeBinding.sourcePayloadHash = createHash("sha256").update(payload).digest("hex");
+      const content = await storeArtifactContent(artifactId, encodeArtifactContentForStorage(
         "presentation",
         pptxArtifactContent(opened.projection),
-      );
-      if (utf8JsonBytes(content) > MAX_PERSISTED_CONTENT_BYTES)
-        return tooLargeResponse("presentation");
+      ));
       return NextResponse.json({
         ok: true,
         blueprintKey: "presentation",
@@ -149,7 +132,7 @@ export async function POST(request: Request) {
           .filter((entry) => entry.class === "EXTENSION")
           .map((entry) => entry.feature),
         parserVersion: "spectra-office-lens/1",
-        activationStub: true,
+        activationStub: false,
       });
     }
     return NextResponse.json(

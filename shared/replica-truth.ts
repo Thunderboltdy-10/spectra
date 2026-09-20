@@ -1,3 +1,5 @@
+import { isDurableContentRef } from "./durable-content";
+
 export const BRIDGE_CLAIM_REDRIVE_MS = 2 * 60_000;
 export const BRIDGE_WRITE_EXPIRES_MS = 30 * 60_000;
 export const STRATEGY_TRANSITION_EXPIRES_MS = 30 * 60_000;
@@ -67,6 +69,8 @@ export function deriveStorageTransitionIdempotencyKey(intent: {
 }
 
 export async function deriveProjectionSnapshotHash(value: unknown) {
+  if (isDurableContentRef(value) && value.spectraContentRef.path === "value")
+    return value.spectraContentRef.digest;
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(JSON.stringify(value)),

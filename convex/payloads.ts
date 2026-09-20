@@ -4,6 +4,7 @@ import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import type { Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
+import { canReadPinnedContent, snapshotReferencesNative } from "./retainedContentAccess";
 
 function assertHash(hash: string) {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("PAYLOAD_HASH_INVALID");
@@ -15,14 +16,20 @@ async function payloadForWork(
   workId: Id<"spectraArtifacts">,
   hash: string,
 ) {
-  await requireActorArtifactCapability(ctx, actor, workId, "read");
+  let retained = false;
+  const pinnedRefs = new Set<string>();
+  try { await requireActorArtifactCapability(ctx, actor, workId, "read"); }
+  catch (error) {
+    retained = await canReadPinnedContent(ctx, actor, workId, snapshot => snapshotReferencesNative(snapshot, hash, pinnedRefs));
+    if (!retained) throw error;
+  }
   const work = await ctx.db.get(workId);
   if (!work) return null;
   const replicas = await ctx.db
     .query("workReplicas")
     .withIndex("by_work", (q) => q.eq("workId", workId))
     .take(20);
-  const references = [
+  const references = retained ? [...pinnedRefs] : [
     work.pendingPayloadRef,
     ...replicas.flatMap((replica) => [
       replica.payloadRef,
@@ -35,6 +42,9 @@ async function payloadForWork(
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
     if (payload?.state === "active" && payload.hash === hash) return payload;
   }
+  const originals = await ctx.db.query("artifactImportJobs").withIndex("by_artifact", q => q.eq("artifactId", workId)).collect();
+  const original = originals.find(job => job.originalSha256 === hash && job.originalStorageId && job.status === "imported");
+  if (original?.originalStorageId) return { state: "active", storageId: original.originalStorageId, hash, bytes: original.originalBytes ?? 0, mediaType: original.originalMimeType ?? "application/octet-stream" };
   return null;
 }
 

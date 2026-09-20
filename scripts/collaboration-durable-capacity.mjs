@@ -148,28 +148,29 @@ export function planMergedUpdatePersist(Y, updates, maxBytes = MAX_DURABLE_UPDAT
   if (bodies.some((body) => !(body instanceof Uint8Array) || body.byteLength <= 0))
     throw new Error("DURABLE_MERGE_UPDATE_INVALID");
 
-  for (const body of bodies) {
-    if (body.byteLength > maxBytes) {
+  const mergedAll = bodies.length === 1 ? bodies[0] : Y.mergeUpdates(bodies);
+  // A group is one durable CAS/ack boundary. Spilling the entire merged update
+  // preserves every member and prevents recording the final vector against a
+  // partial sub-batch (including a large update between two small updates).
+    if (mergedAll.byteLength > maxBytes) {
       return {
         mode: "spill",
         reason: "single_update_exceeds_envelope",
-        update: body,
+        update: mergedAll,
         manifest: createDurablePayloadManifest({
           kind: "yjs-update",
-          bytes: body,
+          bytes: mergedAll,
           encoding: "payload-ref",
           payloadRef: "pending",
         }),
         batches: [],
       };
-    }
   }
 
   if (bodies.length === 1) {
     return { mode: "inline", batches: [{ updates: [bodies[0]], merged: bodies[0] }] };
   }
 
-  const mergedAll = Y.mergeUpdates(bodies);
   if (mergedAll.byteLength <= maxBytes) {
     return {
       mode: "inline",
@@ -177,37 +178,7 @@ export function planMergedUpdatePersist(Y, updates, maxBytes = MAX_DURABLE_UPDAT
     };
   }
 
-  // Greedy pack: grow a sub-batch while the merged size stays in envelope.
-  const batches = [];
-  let current = [];
-  for (const body of bodies) {
-    const trial = current.length === 0 ? [body] : [...current, body];
-    const merged = trial.length === 1 ? trial[0] : Y.mergeUpdates(trial);
-    if (merged.byteLength <= maxBytes) {
-      current = trial;
-      continue;
-    }
-    if (current.length === 0) {
-      // Defensive: should be unreachable because singles were gated above.
-      return {
-        mode: "spill",
-        reason: "single_update_exceeds_envelope",
-        update: body,
-        batches: [],
-      };
-    }
-    batches.push({
-      updates: current,
-      merged: current.length === 1 ? current[0] : Y.mergeUpdates(current),
-    });
-    current = [body];
-  }
-  if (current.length)
-    batches.push({
-      updates: current,
-      merged: current.length === 1 ? current[0] : Y.mergeUpdates(current),
-    });
-  return { mode: "split", reason: "merged_batch_exceeds_envelope", batches };
+
 }
 
 export function planProjectionStorage(projectionJson, {

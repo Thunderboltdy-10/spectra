@@ -109,7 +109,7 @@ describe("Library Import resource citizens (D29)", () => {
     const importFnAt = shell.indexOf("async function importLibraryFile");
     expect(importFnAt).toBeGreaterThan(-1);
     const importFnSlice = shell.slice(importFnAt, importFnAt + 5500);
-    expect(importFnSlice).toContain("await projectOfficeImportWithLens(file)");
+    expect(importFnSlice).toContain("await projectOfficeImportWithLens(file, created.artifactId)");
     // Blueprint-only gate must not remain (would POST .txt/.md to office).
     expect(importFnSlice).not.toMatch(
       /blueprintKey === "document"[\s\S]{0,120}projectOfficeImportWithLens/,

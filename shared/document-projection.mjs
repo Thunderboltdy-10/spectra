@@ -257,6 +257,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           ...(item.widthEmu ? { widthEmu: item.widthEmu } : {}),
           ...(item.heightEmu ? { heightEmu: item.heightEmu } : {}),
           placement: item.placement,
+          ...(item.crop ? { crop: item.crop } : {}),
           ...(!authored || nativeReadOnly ? { nativeReadOnly: true } : {}),
         },
       },
@@ -285,6 +286,9 @@ function cellJsonFromRichContent(content, binding, nativeReadOnly) {
           alignment: "center",
           ...(typeof displayEquation.ommlXml === "string"
             ? { ommlXml: displayEquation.ommlXml }
+            : {}),
+          ...(typeof displayEquation.ommlSourceLatex === "string"
+            ? { ommlSourceLatex: displayEquation.ommlSourceLatex }
             : {}),
           ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
         },

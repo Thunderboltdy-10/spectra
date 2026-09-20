@@ -26,6 +26,8 @@ export async function releasePayloadIfUnreferenced(
   if (!payloadId) return 0;
   const payload = await ctx.db.get(payloadId);
   if (!payload || payload.state !== "active") return 0;
+  const contentOwner = await ctx.db.query("collaborationPayloadOwners").withIndex("by_payload", q => q.eq("payloadRef", payloadRef)).first();
+  if (contentOwner) return 0;
 
   const [replica, pendingReplica, projectionReplica, pendingWork, writeRefs, fsRefs, localConflicts, spectraConflicts] = await Promise.all([
     ctx.db.query("workReplicas").withIndex("by_payload_ref", (q) => q.eq("payloadRef", payloadRef)).take(1),

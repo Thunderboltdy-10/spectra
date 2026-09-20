@@ -13,11 +13,13 @@ const uploadNativePayload = vi.fn();
 vi.mock("@/lib/convex-server", () => ({
   convexMutation,
   convexQuery,
+  hydrateContentForWrite: async (_artifactId:string,content:unknown)=>content,
 }));
 vi.mock("@/features/spectra/lenses/native-payload-server", () => ({
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
   uploadNativePayload,
+  ensureImportedNativePayload: async ()=>undefined,
 }));
 
 const artifactId = "artifact-route-docx";

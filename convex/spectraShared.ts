@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { isDurableContentRef } from "../shared/durable-content";
 import { sheetCellEntries } from "../shared/sheet-cells";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -509,6 +510,9 @@ export function isHollowDefaultContent(
   blueprintKey: BlueprintKey | string,
   content: unknown,
 ) {
+  // A verified immutable body is hydrated at the server boundary. Its compact
+  // manifest must never be mistaken for an empty editor document.
+  if (isDurableContentRef(content)) return false;
   const record = asContentRecord(content);
   switch (blueprintKey) {
     case "timetable":

@@ -1,4 +1,5 @@
 "use client";
+import { contentForDurableRequest } from "../data/durable-content";
 
 import {
   AlignCenter,
@@ -1392,15 +1393,15 @@ export const SheetsStudio = memo(function SheetsStudio({
   const refuseFormulaLiteralization = useCallback(
     (speculative: SheetsContent) => {
       setNotice({ tone: "warning", message: FORMULA_LITERALIZATION_MESSAGE });
-      void fetch("/api/spectra/lenses/office", {
+      void contentForDurableRequest(artifactId, speculative).then(content => fetch("/api/spectra/lenses/office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "materialize",
           artifactId,
-          content: speculative,
+          content,
         }),
-      });
+      })).catch(() => { /* The local refusal remains visible if diagnostics fail. */ });
     },
     [artifactId, setNotice],
   );

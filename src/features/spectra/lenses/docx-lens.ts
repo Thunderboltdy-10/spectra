@@ -2470,7 +2470,7 @@ function parseTableText(value: string) {
 function richTextWithoutImages(content: readonly DocxRichInline[]) {
   return content
     .filter((item) => item.kind !== "image")
-    .map((item) => (item.kind === "text" ? item.text : item.latex))
+    .map((item) => (item.kind === "equation" ? item.latex : item.text))
     .join("");
 }
 

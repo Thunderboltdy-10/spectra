@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { requireActor } from "@/lib/auth-server";
 import { signTrustedIntakeAttestation } from "@/lib/server-secrets";
-import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexAction, convexMutation, convexQuery, storeArtifactContent } from "@/lib/convex-server";
+import { isDurableContentRef } from "../../../../../shared/durable-content";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
-import { MAX_IMPORT_REQUEST_BYTES, MAX_PERSISTED_CONTENT_BYTES } from "../../../../../shared/intake-limits";
+import { MAX_IMPORT_REQUEST_BYTES } from "../../../../../shared/intake-limits";
 import { encodeArtifactContentForStorage } from "../../../../../shared/sheet-cells";
 import { normalizeMediaType } from "../../../../../shared/intake-integrity";
 
@@ -207,18 +208,22 @@ export async function POST(request: NextRequest) {
       const typeKey = text(body.typeKey, "type_key");
       let sanitizedContent: unknown;
       if (body.importedContent !== undefined) {
+        const job = await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") });
+        if (isDurableContentRef(body.importedContent)) {
+          if (body.importedContent.spectraContentRef.artifactId !== job.artifactId)
+            throw new Error("IMPORT_CONTENT_INVALID");
+          sanitizedContent = body.importedContent;
+        } else {
         const parsed = validateArtifactContent(typeKey, body.importedContent);
         if (!parsed.success) throw new Error("IMPORT_CONTENT_INVALID");
-        const job = await convexQuery<{ jobId: string }, { artifactId: string }>("artifactImports:getForOwner", { jobId: text(body.jobId, "job_id") });
         // Match createArtifact: chunk sheets before Convex mutation args.
         // validate/materialize can expand address-keyed cells past the 1024-field
         // ceiling → Live false "Could not import this file." after create ok.
-        sanitizedContent = encodeArtifactContentForStorage(
+        sanitizedContent = await storeArtifactContent(job.artifactId, encodeArtifactContentForStorage(
           typeKey,
           await materializeImportedMedia(parsed.data, job.artifactId, actor),
-        );
-        const encoded = Buffer.from(JSON.stringify(sanitizedContent), "utf8");
-        if (encoded.byteLength > MAX_PERSISTED_CONTENT_BYTES) throw new Error("IMPORT_SNAPSHOT_TOO_LARGE");
+        ));
+        }
       }
       if (!["imported", "quarantined", "failed"].includes(status))
         throw new Error("IMPORT_STATUS_INVALID");
@@ -265,7 +270,8 @@ export async function POST(request: NextRequest) {
             importJobId: text(body.jobId, "job_id"),
           });
           return NextResponse.json({ ok: true, ...result, status: "imported", ...committed });
-        } catch {
+        } catch (error) {
+          if (isDurableContentRef(sanitizedContent)) throw error;
           // Job is awaiting_commit with importedContent; artifact already holds
           // the projection from createArtifact. Failing here previously toasted
           // false "Could not import this file." despite usable Library content

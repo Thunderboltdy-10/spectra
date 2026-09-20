@@ -35,7 +35,7 @@ type State = {
   embedScope?: EmbedScope; embedId?: string; embedParentCursor?: string | null; linkDirection?: LinkDirection; nodeId?: string; nodeParentCursor?: string | null;
   commentId?: string; commentParentCursor?: string | null; claimCursor?: string | null; claimId?: string;
   child?: "capsules" | "evidence" | "relations" | "relationsTo"; capsuleCursor?: string | null; regionClaimCursor?: string | null; claimsDrained?: boolean; roomId?: string; roomParentCursor?: string | null;
-  roomChild?: "updates" | "snapshots"; roomCursor?: string | null; runId?: string; runParentCursor?: string | null;
+  roomChild?: "updates" | "snapshots" | "receipts"; roomCursor?: string | null; runId?: string; runParentCursor?: string | null;
   runChild?: RunChild; runRetained?: boolean;
 };
 type PageResult = { state: State; done: boolean; scanned: number; changed: number; retained: number; terminal: number; released: number };
@@ -293,8 +293,14 @@ async function processCollaborationPage(ctx: MutationCtx, job: Job, state: State
       if (!rows.isDone) return resultBase(stateFor(job, "collaboration", state.cursor ?? null, { claimsDrained: true, roomId: state.roomId, roomChild: "updates", roomParentCursor: state.roomParentCursor, roomCursor: rows.continueCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
       return resultBase(stateFor(job, "collaboration", state.cursor ?? null, { claimsDrained: true, roomId: state.roomId, roomChild: "snapshots", roomParentCursor: state.roomParentCursor, roomCursor: null }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
     }
-    const rows = await ctx.db.query("collaborationSnapshots").withIndex("by_room_sequence", (q) => q.eq("roomId", roomId)).paginate({ numItems: PAGE, cursor: state.roomCursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id);
-    if (!rows.isDone) return resultBase(stateFor(job, "collaboration", state.cursor ?? null, { claimsDrained: true, roomId: state.roomId, roomChild: "snapshots", roomParentCursor: state.roomParentCursor, roomCursor: rows.continueCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
+    if (state.roomChild === "snapshots") {
+      const rows = await ctx.db.query("collaborationSnapshots").withIndex("by_room_sequence", q => q.eq("roomId", roomId)).paginate({ numItems: PAGE, cursor: state.roomCursor ?? null });
+      for (const row of rows.page) await ctx.db.delete(row._id);
+      return resultBase(stateFor(job, "collaboration", state.cursor ?? null, { claimsDrained: true, roomId: state.roomId, roomChild: rows.isDone ? "receipts" : "snapshots", roomParentCursor: state.roomParentCursor, roomCursor: rows.isDone ? null : rows.continueCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
+    }
+    const rows = await ctx.db.query("collaborationReceipts").withIndex("by_room_idempotency", q => q.eq("roomId", roomId)).paginate({ numItems: PAGE, cursor: state.roomCursor ?? null });
+    for (const row of rows.page) await ctx.db.delete(row._id);
+    if (!rows.isDone) return resultBase(stateFor(job, "collaboration", state.cursor ?? null, { claimsDrained: true, roomId: state.roomId, roomChild: "receipts", roomParentCursor: state.roomParentCursor, roomCursor: rows.continueCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
     await ctx.db.delete(roomId); return resultBase(stateFor(job, "collaboration", state.roomParentCursor ?? null, { claimsDrained: true }), { done: false, scanned: rows.page.length + 1, changed: rows.page.length + 1, retained: 0, terminal: 0, released: 0 });
   }
   const rows = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", (q) => q.eq("artifactId", job.artifactId)).paginate({ numItems: 1, cursor: state.cursor ?? null }); const room = rows.page[0];

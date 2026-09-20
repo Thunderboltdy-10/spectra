@@ -14,6 +14,10 @@ const actor = {
 vi.mock("@/lib/auth-server", () => ({
   requireActor: vi.fn(async () => actor),
 }));
+vi.mock("@/lib/convex-server", () => ({
+  convexQuery: vi.fn(async () => ({ content: {} })),
+  storeArtifactContent: vi.fn(async (_id: string, content: unknown) => content),
+}));
 
 vi.mock("@/features/spectra/lenses/docx-lens", () => ({
   docxLens: {
@@ -26,7 +30,7 @@ vi.mock("@/features/spectra/lenses/docx-lens", () => ({
 }));
 
 vi.mock("@/features/spectra/lenses/document-projection", () => ({
-  compactDocxProjectionForStorage: vi.fn((projection: unknown) => projection),
+  bindDocxProjectionSource: vi.fn((projection: unknown) => projection),
 }));
 
 vi.mock("@/features/spectra/lenses/xlsx-lens", () => ({
@@ -40,6 +44,7 @@ vi.mock("@/features/spectra/lenses/pptx-lens", () => ({
 vi.mock("@/features/spectra/lenses/office-content", () => ({
   xlsxArtifactContent: vi.fn(),
   pptxArtifactContent: vi.fn(),
+  convexSafeFidelityMap: vi.fn((entries: unknown) => entries),
 }));
 
 describe("imports/office route legacy .doc refuse", () => {
@@ -51,7 +56,8 @@ describe("imports/office route legacy .doc refuse", () => {
   async function postNamedFile(name: string, bytes: Uint8Array = new Uint8Array([1, 2, 3])) {
     const { POST } = await import("../imports/office/route");
     const body = new FormData();
-    body.set("file", new File([bytes], name, { type: "application/octet-stream" }));
+    body.set("file", new File([new Uint8Array(bytes)], name, { type: "application/octet-stream" }));
+    body.set("artifactId", "artifact-office-import");
     return POST(new Request("http://localhost/api/spectra/imports/office", {
       method: "POST",
       body,
@@ -78,5 +84,22 @@ describe("imports/office route legacy .doc refuse", () => {
     });
     const { docxLens } = await import("@/features/spectra/lenses/docx-lens");
     expect(docxLens.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores every distant workbook cell and returns only the adopted handle", async () => {
+    const { xlsxLens } = await import("@/features/spectra/lenses/xlsx-lens");
+    const { xlsxArtifactContent } = await import("@/features/spectra/lenses/office-content");
+    const { storeArtifactContent } = await import("@/lib/convex-server");
+    const cells = Object.fromEntries(Array.from({ length: 10_000 }, (_, i) => [`T${i + 1}`, { input: `${i + 1}`, format: { bold: i === 9999 } }]));
+    vi.mocked(xlsxLens.open).mockResolvedValue({ projection: { nativeBinding: {} }, fidelityMap: { entries: [] } } as never);
+    vi.mocked(xlsxArtifactContent).mockReturnValue({ sheets: [{ id: "density", cells }] } as never);
+    vi.mocked(storeArtifactContent).mockResolvedValueOnce({ spectraContentRef: { payloadRef: "saved-complete-body" } });
+    const response = await postNamedFile("density.xlsx");
+    expect(await response.json()).toMatchObject({ activationStub: false, content: { spectraContentRef: { payloadRef: "saved-complete-body" } } });
+    const content = vi.mocked(storeArtifactContent).mock.calls.at(-1)![1];
+    const { sheetCellEntries } = await import("../../../../../shared/sheet-cells");
+    const entries = sheetCellEntries((content as { sheets: Array<{ cells: unknown }> }).sheets[0].cells);
+    expect(entries).toHaveLength(10_000);
+    expect(entries.at(-1)).toEqual(["T10000", { input: "10000", format: { bold: true } }]);
   });
 });

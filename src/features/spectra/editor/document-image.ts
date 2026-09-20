@@ -81,6 +81,7 @@ export const NativeDocxImage = Node.create({
       heightEmu: { default: null },
       placement: { default: "inline" },
       nativeReadOnly: { default: true },
+      crop: { default: null },
     };
   },
   parseHTML() {

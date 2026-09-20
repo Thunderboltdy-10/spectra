@@ -1,4 +1,6 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { reconcileDurablePayloadOwners } from "./durablePayloadOwnership";
+import { internalQuery } from "./_generated/server";
+import { internalMutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -136,6 +138,7 @@ export async function releaseVersionIfUnpinned(
   if (activePin && isSurvivingPinnedEmbed(activePin)) return false;
   const artifact = await ctx.db.get(version.artifactId);
   if (!artifact || artifact.status !== "deleted") return false;
+  await reconcileDurablePayloadOwners(ctx,"spectraArtifactVersions",String(version._id),null);
   await ctx.db.delete(version._id);
   if (version.snapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
   if (version.beforeSnapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.beforeSnapshotRef);

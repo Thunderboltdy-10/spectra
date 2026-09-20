@@ -665,6 +665,9 @@ export function nativeChangedRegionIds(beforeProjection, afterProjection) {
     return ["artifact:structure", ...changed];
   for (const [id, signature] of afterIds)
     if (beforeIds.get(id) !== signature) changed.push(id);
+  // A whole-document edit uses the existing structural claim. Never truncate
+  // the changed tail or send an unbounded attribution list to the ledger.
+  if (changed.length > 128) return ["artifact:structure"];
   return changed.length > 0
     ? [...new Set(changed)]
     : [NATIVE_PROJECTION_REGION];

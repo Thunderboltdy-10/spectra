@@ -1,3 +1,5 @@
+import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
 import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
@@ -16,6 +18,7 @@ import {
 } from "@/features/spectra/lenses/native-reconciliation";
 import {
   xlsxLens,
+  xlsxSemanticDigest,
   XlsxLensError,
   type XlsxProjection,
 } from "@/features/spectra/lenses/xlsx-lens";
@@ -31,7 +34,6 @@ import type {
 import {
   bindPptxProjectionSource,
   convexSafeFidelityMap,
-  convexSafeOfficeActivationContent,
   pptxArtifactContent,
   pptxProjectionUpdateFromContent,
   pptxProjectionFromContent,
@@ -50,6 +52,7 @@ import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../sha
 import { normalizePresentationContent, type PresentationContent } from "@/features/spectra/presentation/model";
 import { refreshPresentationLinkedCharts } from "@/features/spectra/presentation/linked-chart";
 import type { SpectraArtifact } from "@/features/spectra/data/api";
+import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 
 // Compatibility exports for existing callers. The implementation lives in the
 // canonical office-content module; routes only re-export the shared transform.
@@ -127,7 +130,7 @@ function contentForStorage(
   isSheet: boolean,
   source: NativeSource,
 ) {
-  return convexSafeOfficeActivationContent(
+  return encodeArtifactContentForStorage(
     isSheet ? "sheets" : "presentation",
     contentFor(projection, isSheet, source),
   );
@@ -355,7 +358,23 @@ async function materializeOfficeArtifactAttempt(
     comparePackages(materializationPayload, output),
   ]);
   const readbackDigest = (next.projection as OfficeProjection).nativeBinding.semanticDigest;
-  if (readbackDigest !== projection.nativeBinding.semanticDigest)
+  // Editor projections retain the imported binding. Its digest is the base,
+  // never an attestation of the requested edit. Input edits deliberately clear
+  // all native formula caches; Excel will calculate them on reopen.
+  const invalidatesFormulaCaches = update.operations.some(operation =>
+    ["set-cell", "set-formula", "clear-cell", "rename-sheet", "reorder-sheets", "set-defined-names", "mutate-sheet-axis"].includes(operation.kind));
+  const requestedDigest = isSheet
+    ? await xlsxSemanticDigest({
+        ...(projection as XlsxProjection),
+        sheets: (projection as XlsxProjection).sheets.map(sheet => ({
+          ...sheet,
+          cells: sheet.cells.map(cell => invalidatesFormulaCaches && cell.formula ? { ...cell, value: null } : cell),
+        })),
+      })
+    : await sha256Payload(new TextEncoder().encode(JSON.stringify(
+        (projection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
+      )));
+  if (readbackDigest !== requestedDigest)
     throw new Error("OFFICE_READBACK_MISMATCH");
   /**
    * The preservation promise, checked against the bytes before anything is
@@ -384,7 +403,7 @@ async function materializeOfficeArtifactAttempt(
     baseRevision: materializationTruth.revision,
     resultRevision: hash,
     targets: { regionIds, partNames: changedPartNames },
-    semantic: { baseDigest: baseProjection.nativeBinding.semanticDigest, resultDigest: projection.nativeBinding.semanticDigest, readbackDigest },
+    semantic: { baseDigest: baseProjection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest },
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };
@@ -394,7 +413,14 @@ async function materializeOfficeArtifactAttempt(
     hash,
     materializationTruth.nativeFormat,
   );
+  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", {
+    workId, payloadRef: stored.payloadRef, contentHash: hash,
+    baseRevision: materializationTruth.revision,
+    projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
+    projectionContentHash: readbackDigest, fidelityMap: convexSafeFidelityMap(next.fidelityMap), nativeReceipt,
+  });
   if (!local) {
+    await saveCloud();
     return {
       state: "cloud_saved" as const,
       hash,
@@ -444,6 +470,7 @@ async function materializeOfficeArtifactAttempt(
       error instanceof Error &&
       error.message.includes("LOCAL_REPLICA_UNAVAILABLE")
     ) {
+      await saveCloud();
       return {
         state: "cloud_saved" as const,
         hash,
@@ -510,6 +537,10 @@ export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
     const workId = id(input.artifactId);
+    if (input.action === "materialize") {
+      await ensureImportedNativePayload(workId);
+      input.content = await hydrateContentForWrite(input.artifactId, input.content);
+    }
     let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
     try {
       cloud = await fetchVerifiedNativePayload(workId, "cloud");
@@ -650,10 +681,10 @@ export async function POST(request: Request) {
         artifactId: String(workId),
         payloadHash: cloud.truth.hash,
       });
-      await convexMutation("replicas:activateLens", {
+      const activation = await convexMutation<Record<string, unknown>, { activated: boolean }>("replicas:activateLens", {
         workId,
         payloadHash: cloud.truth.hash,
-        content: convexSafeOfficeActivationContent(
+        content: encodeArtifactContentForStorage(
           isSheet ? "sheets" : "presentation",
           content,
         ),
@@ -673,6 +704,7 @@ export async function POST(request: Request) {
               .join("\n")
               .slice(0, 200_000),
       });
+      if (!activation.activated) return NextResponse.json({ state: "opened" });
       return NextResponse.json({
         state: "opened",
         content,
@@ -712,7 +744,7 @@ export async function POST(request: Request) {
         await convexMutation("replicas:activateLens", {
           workId,
           payloadHash: local.truth.hash,
-          content: convexSafeOfficeActivationContent(
+          content: encodeArtifactContentForStorage(
             isSheet ? "sheets" : "presentation",
             projection,
           ),
@@ -884,7 +916,7 @@ export async function POST(request: Request) {
         localReplicaId: local.truth.replicaId,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: convexSafeOfficeActivationContent(
+        content: encodeArtifactContentForStorage(
           isSheet ? "sheets" : "presentation",
           mergedContent,
         ),
@@ -910,6 +942,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const code = officeLensErrorCode(error);
+    console.error("[office lens]", error instanceof Error ? error.message : code);
     return NextResponse.json(
       {
         error: code,

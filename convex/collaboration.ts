@@ -11,6 +11,7 @@ import { bumpPolicyVersion } from "./authorityShared";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { requireDurablePayloadAuthority, validateDurablePayload } from "./collaborationDurablePayload";
 
 const RETIRED_ROOM_CLEANUP_BATCH = 128;
 
@@ -241,7 +242,7 @@ export const compactRetiredRoom = internalMutation({
       !room.partitionKey.startsWith("__retired__:")
     )
       return { cleaned: 0, done: true };
-    const [updates, snapshots] = await Promise.all([
+    const [updates, snapshots, receipts] = await Promise.all([
       ctx.db
         .query("collaborationUpdates")
         .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
@@ -250,14 +251,16 @@ export const compactRetiredRoom = internalMutation({
         .query("collaborationSnapshots")
         .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
         .take(RETIRED_ROOM_CLEANUP_BATCH),
+      ctx.db.query("collaborationReceipts").withIndex("by_room_idempotency", q => q.eq("roomId", room._id)).take(RETIRED_ROOM_CLEANUP_BATCH),
     ]);
     await Promise.all([
       ...updates.map((update) => ctx.db.delete(update._id)),
       ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
+      ...receipts.map((receipt) => ctx.db.delete(receipt._id)),
     ]);
     const done =
       updates.length < RETIRED_ROOM_CLEANUP_BATCH &&
-      snapshots.length < RETIRED_ROOM_CLEANUP_BATCH;
+      snapshots.length < RETIRED_ROOM_CLEANUP_BATCH && receipts.length < RETIRED_ROOM_CLEANUP_BATCH;
     if (done) {
       await ctx.db.patch(room._id, {
         nextSequence: 1,
@@ -278,6 +281,8 @@ export const compactRetiredRoom = internalMutation({
 
 export const storeSnapshot = internalMutation({
   args: {
+    accountId: v.optional(v.id("accounts")),
+    policyVersion: v.optional(v.number()),
     roomId: v.id("collaborationRooms"),
     throughSequence: v.number(),
     update: v.bytes(),
@@ -296,6 +301,8 @@ export const storeSnapshot = internalMutation({
   },
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.roomId);
+    if (room && args.accountId !== undefined && args.policyVersion !== undefined)
+      await requireDurablePayloadAuthority(ctx, { accountId: args.accountId, policyVersion: args.policyVersion, artifactId: room.artifactId, partitionKey: room.partitionKey }, true);
     if (
       !room ||
       args.throughSequence <= room.snapshotSequence ||
@@ -326,6 +333,8 @@ export const storeSnapshot = internalMutation({
       );
     const now = Date.now();
     if (args.payloadRef) {
+      await validateDurablePayload(ctx, { artifactId: room.artifactId, accountId: args.accountId, policyVersion: args.policyVersion,
+        payloadRef: args.payloadRef, digest: args.payloadDigest ?? "", byteLength: args.byteLength, kind: "yjs-snapshot" });
       if (!args.payloadDigest || !args.byteLength)
         throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_INVALID");
       if (args.update.byteLength !== 0)
@@ -345,6 +354,8 @@ export const storeSnapshot = internalMutation({
       status: "pending",
       createdBy: args.createdBy,
       createdAt: now,
+      accountId: args.accountId,
+      policyVersion: args.policyVersion,
       payloadRef: args.payloadRef,
       payloadDigest: args.payloadDigest,
       payloadManifest: args.payloadManifest,
@@ -356,32 +367,28 @@ export const storeSnapshot = internalMutation({
 });
 
 export const verifySnapshot = internalMutation({
-  args: { snapshotId: v.id("collaborationSnapshots") },
+  args: { snapshotId: v.id("collaborationSnapshots"), verifiedPayloadDigest: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const snapshot = await ctx.db.get(args.snapshotId);
     if (!snapshot) throw new Error("COLLABORATION_SNAPSHOT_NOT_FOUND");
     const room = await ctx.db.get(snapshot.roomId);
     if (!room) throw new Error("COLLABORATION_ROOM_NOT_FOUND");
+    if (snapshot.accountId !== undefined && snapshot.policyVersion !== undefined)
+      await requireDurablePayloadAuthority(ctx, { accountId: snapshot.accountId, policyVersion: snapshot.policyVersion, artifactId: room.artifactId, partitionKey: room.partitionKey }, true);
     const now = Date.now();
+    if (snapshot.status === "verified") return { status: "verified" as const, compacted: 0 };
+    if (snapshot.throughSequence <= room.snapshotSequence) {
+      await ctx.db.patch(snapshot._id, { status: "superseded", verifiedAt: now });
+      return { status: "superseded" as const, compacted: 0 };
+    }
     let valid = false;
     try {
-      let updateBytes = new Uint8Array(snapshot.update);
+      const updateBytes = new Uint8Array(snapshot.update);
       if (snapshot.payloadRef) {
-        const payloadId = ctx.db.normalizeId(
-          "collaborationDurablePayloads",
-          snapshot.payloadRef,
-        );
-        const payload = payloadId ? await ctx.db.get(payloadId) : null;
-        if (
-          !payload ||
-          payload.status !== "active" ||
-          payload.digest !== snapshot.payloadDigest
-        )
-          throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_MISSING");
-        const blob = await ctx.storage.get(payload.storageId);
-        if (!blob) throw new Error("COLLABORATION_SNAPSHOT_PAYLOAD_MISSING");
-        updateBytes = new Uint8Array(await blob.arrayBuffer());
-      }
+        await validateDurablePayload(ctx, { artifactId: snapshot.artifactId, payloadRef: snapshot.payloadRef,
+          digest: snapshot.payloadDigest ?? "", byteLength: snapshot.byteLength, kind: "yjs-snapshot" });
+        valid = args.verifiedPayloadDigest === snapshot.payloadDigest;
+      } else {
       const digest = await crypto.subtle.digest("SHA-256", updateBytes);
       const hash = btoa(String.fromCharCode(...new Uint8Array(digest)))
         .replaceAll("+", "-")
@@ -398,6 +405,7 @@ export const verifySnapshot = internalMutation({
           (byte, index) => byte === storedStateVector[index],
         );
       document.destroy();
+      }
     } catch {
       valid = false;
     }

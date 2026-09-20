@@ -34,7 +34,12 @@ export function createCheckpointScheduler({
     pending = null;
     firstAt = null;
     if (!payload) return null;
-    return persist(payload);
+    try { return await persist(payload); }
+    catch (error) {
+      // Preserve the failed candidate unless a newer durable head is waiting.
+      if (!pending) pending = payload;
+      throw error;
+    }
   }
 
   function schedule() {
@@ -44,7 +49,8 @@ export function createCheckpointScheduler({
     const wait = Math.max(0, Math.min(idleMs, maxMs - elapsed));
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      tail = tail.then(flush).catch(() => undefined);
+      tail = tail.catch(() => undefined).then(flush);
+      void tail.catch(() => undefined);
     }, wait);
     idleTimer.unref?.();
   }
@@ -56,7 +62,8 @@ export function createCheckpointScheduler({
       schedule();
     },
     flush() {
-      tail = tail.then(flush);
+      tail = tail.catch(() => undefined).then(flush);
+      void tail.catch(() => undefined);
       return tail;
     },
     pending() {

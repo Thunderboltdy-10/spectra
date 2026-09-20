@@ -2658,13 +2658,24 @@ export default defineSchema({
     byteLength: v.number(),
     mediaType: v.string(),
     manifestVersion: v.number(),
+    policyVersion: v.optional(v.number()),
+    dependencies: v.optional(v.object({ assetIds: v.array(v.string()), nativePayloadHashes: v.array(v.string()), nativePayloadRefs: v.array(v.string()) })),
     status: v.union(v.literal("active"), v.literal("released")),
     createdAt: v.number(),
     releasedAt: v.optional(v.number()),
   })
     .index("by_digest", ["digest"])
+    .index("by_artifact_digest", ["artifactId", "digest"])
     .index("by_artifact_kind", ["artifactId", "kind"])
     .index("by_status_created", ["status", "createdAt"]),
+
+  collaborationPayloadOwners: defineTable({
+    payloadRef: v.string(),
+    ownerId: v.string(),
+    ownerTable: v.string(),
+  })
+    .index("by_payload", ["payloadRef"])
+    .index("by_owner", ["ownerId"]),
 
   collaborationRooms: defineTable({
     artifactId: v.id("spectraArtifacts"),
@@ -2691,6 +2702,19 @@ export default defineSchema({
   })
     .index("by_artifact_partition", ["artifactId", "partitionKey"])
     .index("by_school_status", ["schoolId", "status"]),
+
+  collaborationReceipts: defineTable({
+    roomId: v.id("collaborationRooms"),
+    idempotencyKey: v.string(),
+    sequence: v.number(),
+    actorAccountId: v.id("accounts"),
+    clientId: v.string(),
+    stateVectorHash: v.string(),
+    digest: v.string(),
+    byteLength: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_room_idempotency", ["roomId", "idempotencyKey"]),
 
   collaborationUpdates: defineTable({
     roomId: v.id("collaborationRooms"),
@@ -2739,6 +2763,8 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     verifiedAt: v.optional(v.number()),
+    accountId: v.optional(v.id("accounts")),
+    policyVersion: v.optional(v.number()),
   })
     .index("by_room_sequence", ["roomId", "throughSequence"])
     .index("by_artifact_created", ["artifactId", "createdAt"])

@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
-import { fetchVerifiedNativePayload, uploadNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { fetchVerifiedNativePayload, uploadNativePayload, ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { createSpectraPackage, SPECTRA_PACKAGE_TYPES } from "@/features/spectra/lenses/spectra-package";
 
 export const runtime = "nodejs";
@@ -53,6 +53,7 @@ async function ensurePortablePayload(
   workId: Id<"spectraArtifacts">,
   artifactPromise?: Promise<ArtifactTruth>,
 ) {
+  await ensureImportedNativePayload(workId);
   const existing = await verifiedPayload(workId);
   if (existing) return existing;
   const artifact = await (artifactPromise ?? convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId }));

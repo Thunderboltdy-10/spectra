@@ -133,8 +133,10 @@ export function chainPersistThenCompact({
             .then(() => compact(work, result))
             .catch(onCompactError);
           return result;
-        })
-        .catch(() => undefined);
+        });
+      // Keep the failure on the durable barrier. Observe it separately so a
+      // timer caller cannot create an unhandled rejection or a false clean ack.
+      void persistTail.catch(() => undefined);
       return persistTail;
     },
     get persistTail() {

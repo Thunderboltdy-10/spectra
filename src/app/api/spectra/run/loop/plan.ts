@@ -4,6 +4,7 @@ import type {
   Surface,
 } from "./contract";
 import { rows, summarizeArtifact } from "./gather";
+import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
 import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
@@ -3247,10 +3248,14 @@ export async function executeAgentReadTool(
       return artifact && typeof artifact === "object"
         ? {
             ok: true,
-            artifact: summarizeArtifact(
+            artifact: boundedArtifactRead(summarizeArtifact(
               artifact as Record<string, unknown>,
               true,
-            ),
+            ), {
+              cellAddresses: Array.isArray(args.cellAddresses) ? args.cellAddresses.filter((value): value is string => typeof value === "string") : undefined,
+              sheetId: typeof args.sheetId === "string" ? args.sheetId : undefined,
+              blockIds: Array.isArray(args.blockIds) ? args.blockIds.filter((value): value is string => typeof value === "string") : undefined,
+            }),
           }
         : { ok: false, code: "artifact_not_found" };
     }

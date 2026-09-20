@@ -1,7 +1,7 @@
 import { internalQuery } from "./_generated/server";
 import { internalMutation } from "./orgNodeMutation";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
   evaluateAccessForActor,
@@ -19,6 +19,8 @@ import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization"
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 import { fitChangeGroupSnapshots } from "../shared/collaboration-change-group-capacity";
 import { filenameFromRelativePath } from "../shared/native-filename";
+import { isDurableContentRef } from "../shared/durable-content";
+import { validateDurablePayload } from "./collaborationDurablePayload";
 import {
   finalizeArtifactSummary,
   isGeneratedArtifactSummary,
@@ -125,14 +127,17 @@ async function syncListingAfterProjection(
   await syncSourceNodes(ctx, "work", artifact._id, listingTitle);
 }
 
-function parseGatewayProjection(
+async function parseGatewayProjection(
+  ctx: MutationCtx,
   projectionJson: string | undefined,
   projectionHash: string | undefined,
   artifact: {
+    _id: Id<"spectraArtifacts">;
     blueprintKey: string;
     summary?: string;
   },
-): GatewayProjection | null {
+  authority?: { accountId: Id<"accounts">; policyVersion: number },
+): Promise<GatewayProjection | null> {
   if (!projectionJson) return null;
   if (
     projectionExceedsDurableBound(projectionJson) ||
@@ -144,6 +149,16 @@ function parseGatewayProjection(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new Error("COLLABORATION_PROJECTION_INVALID");
   const value = parsed as Record<string, unknown>;
+  if (isDurableContentRef(value.content)) {
+    const ref = value.content.spectraContentRef;
+    if (ref.artifactId !== artifact._id) throw new Error("COLLABORATION_DURABLE_PAYLOAD_INVALID");
+    const payload = await validateDurablePayload(ctx, {
+      artifactId: ref.artifactId as Id<"spectraArtifacts">,
+      payloadRef: ref.payloadRef, digest: ref.digest, kind: "projection", byteLength: ref.byteLength,
+      ...authority,
+    });
+    if (JSON.stringify(ref.dependencies) !== JSON.stringify(payload.dependencies)) throw new Error("COLLABORATION_CONTENT_DEPENDENCY_INVALID");
+  }
   const title = typeof value.title === "string" ? value.title.trim() : "";
   const rawSummary =
     typeof value.summary === "string" ? value.summary.trim() : undefined;
@@ -329,7 +344,7 @@ export const load = internalQuery({
     if (!room || room.status === "closed") return null;
     const artifact = await ctx.db.get(args.artifactId);
     if (!artifact) return null;
-    const snapshot = await ctx.db
+    const snapshot = args.afterSequence > 0 || args.includeInitialProjection ? null : await ctx.db
       .query("collaborationSnapshots")
       .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
       .order("desc")
@@ -337,13 +352,17 @@ export const load = internalQuery({
       .first();
     const start = Math.max(args.afterSequence, snapshot?.throughSequence ?? 0);
     const limit = Math.max(1, Math.min(Math.floor(args.limit), 500));
-    const updates = await ctx.db
-      .query("collaborationUpdates")
-      .withIndex("by_room_sequence", (q) =>
-        q.eq("roomId", room._id).gt("sequence", start),
-      )
-      .order("asc")
-      .take(limit);
+    const updates: Doc<"collaborationUpdates">[] = [];
+    let inlineBytes = snapshot ? Math.ceil(snapshot.update.byteLength * 4 / 3) + snapshot.stateVector.byteLength * 2 : 0;
+    if (!args.includeInitialProjection) {
+      for await (const update of ctx.db.query("collaborationUpdates")
+        .withIndex("by_room_sequence", q => q.eq("roomId", room._id).gt("sequence", start)).order("asc")) {
+        const bytes = Math.ceil(update.update.byteLength * 4 / 3) + 2048;
+        if (inlineBytes + bytes > 1400 * 1024 || updates.length >= limit) break;
+        updates.push(update);
+        inlineBytes += bytes;
+      }
+    }
     return {
       roomId: room._id,
       schemaVersion: room.schemaVersion,
@@ -369,8 +388,8 @@ export const load = internalQuery({
         payloadManifest: update.payloadManifest ?? null,
       })),
       hasMore:
-        updates.length === limit &&
-        updates[updates.length - 1]!.sequence < room.nextSequence - 1,
+        !args.includeInitialProjection && (updates.at(-1)?.sequence ?? start) < room.nextSequence - 1,
+      afterSequence: updates.at(-1)?.sequence ?? start,
       uncompactedBytes: room.uncompactedBytes,
       lastSnapshotAt: room.lastSnapshotAt ?? null,
       lastProjectionSequence: room.lastProjectionSequence ?? null,
@@ -475,10 +494,12 @@ export const recoverNativeSnapshot = internalMutation({
     const clientId = args.clientId.trim().slice(0, 180);
     let projectionMatchesArtifact = false;
     if (args.observedProjectionJson) {
-      const observedProjection = parseGatewayProjection(
+      const observedProjection = await parseGatewayProjection(
+      ctx,
         args.observedProjectionJson,
         args.observedProjectionHash,
         artifact,
+      { accountId: args.accountId, policyVersion: args.policyVersion },
       );
       const observedProjectionDigest = await crypto.subtle.digest(
         "SHA-256",
@@ -702,6 +723,10 @@ export const bootstrapNative = internalMutation({
     )
       throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
     if (spilled) {
+      await validateDurablePayload(ctx, {
+        artifactId: args.artifactId, accountId: args.accountId, policyVersion: args.policyVersion,
+        payloadRef: args.payloadRef!, digest: args.payloadDigest ?? "", byteLength: effectiveByteLength, kind: "yjs-update",
+      });
       if (
         !args.payloadDigest ||
         args.update.byteLength !== 0 ||
@@ -716,10 +741,12 @@ export const bootstrapNative = internalMutation({
       throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
     }
     const projection = args.projectionJson
-      ? parseGatewayProjection(
+      ? await parseGatewayProjection(
+          ctx,
           args.projectionJson,
           args.projectionHash,
           artifact,
+      { accountId: args.accountId, policyVersion: args.policyVersion },
         )
       : null;
     if (args.projectionJson && !projection)
@@ -841,7 +868,7 @@ export const append = internalMutation({
       !actor ||
       !artifact ||
       !room ||
-      room.status !== "active" ||
+      !["active", "compacting"].includes(room.status) ||
       (artifact.status !== "active" && artifact.status !== "draft") ||
       artifact.schoolId !== actor.schoolId
     )
@@ -878,6 +905,10 @@ export const append = internalMutation({
       ? (args.byteLength ?? 0)
       : args.update.byteLength;
     if (spilled) {
+      await validateDurablePayload(ctx, {
+        artifactId: args.artifactId, accountId: args.accountId, policyVersion: args.policyVersion,
+        payloadRef: args.payloadRef!, digest: args.payloadDigest ?? "", byteLength: effectiveByteLength, kind: "yjs-update",
+      });
       if (
         !args.payloadDigest ||
         args.update.byteLength !== 0 ||
@@ -900,7 +931,9 @@ export const append = internalMutation({
       args.stateVectorHash.length < 16
     )
       throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
-    const duplicate = await ctx.db
+    const updateDigest = args.payloadDigest ?? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", args.update)), byte => byte.toString(16).padStart(2, "0")).join("");
+    const receipt = await ctx.db.query("collaborationReceipts").withIndex("by_room_idempotency", q => q.eq("roomId", room._id).eq("idempotencyKey", idempotencyKey)).unique();
+    const duplicate = receipt ?? await ctx.db
       .query("collaborationUpdates")
       .withIndex("by_room_idempotency", (q) =>
         q.eq("roomId", room._id).eq("idempotencyKey", idempotencyKey),
@@ -911,6 +944,7 @@ export const append = internalMutation({
         duplicate.actorAccountId !== actor.accountId ||
         duplicate.clientId !== clientId ||
         duplicate.stateVectorHash !== args.stateVectorHash ||
+        (receipt && receipt.digest !== updateDigest) ||
         duplicate.byteLength !== effectiveByteLength
       )
         throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
@@ -927,10 +961,12 @@ export const append = internalMutation({
     const rebased =
       Boolean(artifact.liveStateVectorHash) &&
       artifact.liveStateVectorHash !== args.baseStateVectorHash;
-    const projection = parseGatewayProjection(
+    const projection = await parseGatewayProjection(
+      ctx,
       args.projectionJson,
       args.projectionHash,
       artifact,
+      { accountId: args.accountId, policyVersion: args.policyVersion },
     );
     const now = Date.now();
     const [activeClaims, releasedClaims] = await Promise.all(
@@ -1003,7 +1039,10 @@ export const append = internalMutation({
           schoolId: room.schoolId,
           sequence,
           update: args.update,
-          byteLength: args.update.byteLength,
+          byteLength: effectiveByteLength,
+          payloadRef: args.payloadRef,
+          payloadDigest: args.payloadDigest,
+          payloadManifest: args.payloadManifest,
           stateVectorHash: args.stateVectorHash,
           actorAccountId: actor.accountId,
           clientId,
@@ -1013,7 +1052,7 @@ export const append = internalMutation({
         }),
         ctx.db.patch(room._id, {
           nextSequence: sequence + 1,
-          uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+          uncompactedBytes: room.uncompactedBytes + effectiveByteLength,
           updatedAt: now,
         }),
         ctx.db.patch(artifact._id, {
@@ -1022,6 +1061,8 @@ export const append = internalMutation({
           lastSynchronizedAt: now,
         }),
       ]);
+      await ctx.db.insert("collaborationReceipts", { roomId: room._id, idempotencyKey, clientId, actorAccountId: actor.accountId,
+        sequence, stateVectorHash: args.stateVectorHash, digest: updateDigest, byteLength: effectiveByteLength, createdAt: now });
       return { sequence, duplicate: false, rebased, regionIds: [] };
     }
     if (regionIds.length === 0 || regionIds.length > 128)
@@ -1130,8 +1171,8 @@ export const append = internalMutation({
       changeGroup &&
       now - changeGroup.lastActivityAt > HUMAN_CHANGE_IDLE_MS
     ) {
-      await commitChangeGroup(ctx, changeGroup._id);
-      changeGroup = undefined;
+      const committed = await commitChangeGroup(ctx, changeGroup._id);
+      if (committed.status !== "pending_projection") changeGroup = undefined;
     }
     const snapshotIntegrityHash =
       args.projectionHash ?? args.stateVectorHash;
@@ -1188,6 +1229,11 @@ export const append = internalMutation({
       });
     }
     const sequence = room.nextSequence;
+    await ctx.db.insert("collaborationReceipts", {
+      roomId: room._id, idempotencyKey, sequence, actorAccountId: actor.accountId,
+      clientId, stateVectorHash: args.stateVectorHash, digest: updateDigest,
+      byteLength: effectiveByteLength, createdAt: now,
+    });
     await ctx.db.insert("collaborationUpdates", {
       roomId: room._id,
       schoolId: room.schoolId,
@@ -1207,6 +1253,7 @@ export const append = internalMutation({
     });
     await ctx.db.patch(room._id, {
       nextSequence: sequence + 1,
+      ...(projection ? {lastProjectionSequence:sequence,lastProjectionAt:now} : {}),
       uncompactedBytes: room.uncompactedBytes + effectiveByteLength,
       updatedAt: now,
     });
@@ -1358,10 +1405,12 @@ export const checkpoint = internalMutation({
       room.policyVersion !== currentPolicyVersion
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
-    const projection = parseGatewayProjection(
+    const projection = await parseGatewayProjection(
+      ctx,
       args.projectionJson,
       args.projectionHash,
       artifact,
+      { accountId: args.accountId, policyVersion: args.policyVersion },
     );
     if (!projection) throw new Error("COLLABORATION_PROJECTION_INVALID");
     if (args.roomId !== undefined && room._id !== args.roomId)
@@ -1396,6 +1445,7 @@ export const checkpoint = internalMutation({
           args.expectedLastProjectionSequence < 0 ||
           currentProjectionSequence !== args.expectedLastProjectionSequence)) ||
       requestedSequence < currentProjectionSequence
+      || requestedSequence !== room.nextSequence - 1
     )
       return {
         sequence: currentProjectionSequence,

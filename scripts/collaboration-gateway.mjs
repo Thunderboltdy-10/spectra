@@ -1,5 +1,6 @@
 import { Server } from "@hocuspocus/server";
 import { createHash } from "node:crypto";
+import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
 import * as decoding from "lib0/decoding";
@@ -30,9 +31,6 @@ import {
 } from "./collaboration-update-envelope.mjs";
 import {
   planMergedUpdatePersist,
-  planProjectionStorage,
-  planBootstrapProjectionTransport,
-  durablePayloadFitsBridgeEnvelope,
   compactionSnapshotDecision,
   compactionDeferredHealthRecord,
   createDurablePayloadManifest,
@@ -98,13 +96,12 @@ const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 // Must match shared/collaboration-bridge.ts — recover/repair projections that
 // exceed this cannot ride the signed exchange envelope.
-const MAX_BRIDGE_ENVELOPE_CHARS = 2_000_000;
-const BRIDGE_ENVELOPE_METADATA_HEADROOM = 64_000;
 const PERSISTENCE_DEBOUNCE_MS = 180;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
 const activeConnections = new Set();
+const authenticatedRequests = new WeakSet();
 const documentMessageTails = new WeakMap();
 const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
@@ -131,7 +128,7 @@ async function probeConvexReadiness() {
     convexReadiness = response.ok && text
       ? { at: now, status: "ready", detail: text }
       : { at: now, status: "not_ready", detail: `HTTP ${response.status}` };
-  } catch {
+  } catch (error) {
     convexReadiness = {
       at: now,
       status: "not_ready",
@@ -194,12 +191,30 @@ function checkpointScheduler(document) {
   const existing = documentCheckpointSchedulers.get(document);
   if (existing) return existing;
   const created = createCheckpointScheduler({
-    persist: (payload) =>
-      bridge("checkpoint", payload).catch((error) => {
+    idleMs: 30_000,
+    maxMs: Number.POSITIVE_INFINITY,
+    persist: async (payload) => {
+      try {
+        const stored = await bridge("load", payload);
+        if (!stored || (stored.lastProjectionSequence ?? 0) >= stored.nextSequence - 1) return;
+        const canonical = applyStoredRoomUpdates(Y, stored);
+        try {
+          const projectionJson = artifactProjection(canonical, payload.schemaVersion);
+          if (!projectionJson) return;
+          return await bridge("checkpoint", {
+            ...payload, throughSequence: stored.nextSequence - 1,
+            stateVectorHash: createHash("sha256").update(Y.encodeStateVector(canonical)).digest("base64url"),
+            projectionJson, projectionHash: createHash("sha256").update(projectionJson).digest("base64url"),
+          });
+        } finally { canonical.destroy(); }
+      } catch (error) {
         process.stderr.write(
           `[checkpoint] ${error instanceof Error ? error.message : String(error)}\n`,
         );
-      }),
+        forceCanonicalReconnect(payload, "COLLABORATION_CHECKPOINT_FAILED");
+        throw error;
+      }
+    },
   });
   documentCheckpointSchedulers.set(document, created);
   checkpointSchedulers.add(created);
@@ -261,6 +276,8 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
     const stored = await bridge("load", {
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
     });
     const throughSequence = (stored?.nextSequence ?? 1) - 1;
     const currentSnapshotSequence = stored?.snapshot?.throughSequence ?? 0;
@@ -312,6 +329,7 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
           digest: manifest.digest,
           mediaType: manifest.mediaType,
           bytesBase64: Buffer.from(update).toString("base64"),
+      policyVersion: context.policyVersion,
         });
         manifest.payloadRef = storedPayload.payloadRef;
         await bridge("snapshot", {
@@ -327,6 +345,8 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
           payloadRef: storedPayload.payloadRef,
           payloadDigest: manifest.digest,
           byteLength: update.byteLength,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
         });
         lastCompactionDeferred = null;
       } else {
@@ -342,6 +362,8 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
       stateVector: Buffer.from(stateVector).toString("base64"),
       contentHash: createHash("sha256").update(update).digest("base64url"),
       schemaVersion: stored.schemaVersion,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
     });
     }
     local.appends = 0;
@@ -416,6 +438,8 @@ async function appendWithRetry(payload, entries) {
             const stored = await bridge("load", {
               artifactId: context.artifactId,
               partitionKey: context.partitionKey,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
             });
             liveHash = resolveRebaseHead({
               lastPersistedHash: liveHash,
@@ -510,54 +534,12 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
       const immediateProjection =
         first.context.actorKind === "ai" ||
         group.some((entry) => entry.nativeInitialization);
-      let projectionJson = null;
-      let projectionPayloadRef = null;
-      let projectionPayloadDigest = null;
-      let projectionHotStub = null;
-      if (immediateProjection) {
-        // Return the string even when oversize so planProjectionStorage can
-        // spill. Never swallow PROJECTION_SIZE → null and continue append.
-        projectionJson = artifactProjection(
-          scratch,
-          first.context.schemaVersion,
-        );
-        if (projectionJson) {
-          const projectionPlan = planProjectionStorage(projectionJson);
-          if (projectionPlan.mode === "spill") {
-            try {
-              const storedPayload = await bridge("storeDurablePayload", {
-                artifactId: first.context.artifactId,
-                partitionKey: first.context.partitionKey,
-                accountId: first.context.accountId,
-                kind: "projection",
-                digest: projectionPlan.manifest.digest,
-                mediaType: projectionPlan.manifest.mediaType,
-                bytesBase64: Buffer.from(projectionPlan.bytes).toString(
-                  "base64",
-                ),
-              });
-              projectionPayloadRef = storedPayload.payloadRef;
-              projectionPayloadDigest = projectionPlan.manifest.digest;
-              // Keep $spectraProjectionPayload stubs off hot artifact.content
-              // until a reader exists; spill refs live in dedicated fields only.
-              projectionHotStub = null;
-              projectionJson = null;
-            } catch (error) {
-              const sizeError = new Error("COLLABORATION_PROJECTION_SIZE");
-              lastPersistenceFailure = {
-                code: "COLLABORATION_PROJECTION_SIZE",
-                at: Date.now(),
-                attempt: 1,
-              };
-              forceCanonicalReconnect(
-                first.context,
-                collaborationFailureMessage(sizeError),
-              );
-              throw sizeError;
-            }
-          }
-        }
-      }
+      const projectionJson = immediateProjection
+        ? artifactProjection(scratch, first.context.schemaVersion)
+        : null;
+      const projectionPayloadRef = null;
+      const projectionPayloadDigest = null;
+      const projectionHotStub = null;
       const mergePlan = planMergedUpdatePersist(
         Y,
         group.map((entry) => entry.documentUpdate),
@@ -580,6 +562,7 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           digest: mergePlan.manifest.digest,
           mediaType: mergePlan.manifest.mediaType,
           bytesBase64: Buffer.from(mergePlan.update).toString("base64"),
+      policyVersion: first.context.policyVersion,
         });
         const manifest = {
           ...mergePlan.manifest,
@@ -672,31 +655,7 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
         throughSequence: appendResult?.sequence ?? null,
       };
     }
-    if (lastCheckpoint) {
-      const projectionJson = artifactProjection(
-        scratch,
-        lastCheckpoint.schemaVersion,
-      );
-      if (
-        projectionJson &&
-        planProjectionStorage(projectionJson).mode === "inline"
-      ) {
-        checkpointScheduler(document).note({
-          artifactId: lastCheckpoint.artifactId,
-          partitionKey: lastCheckpoint.partitionKey,
-          accountId: lastCheckpoint.accountId,
-          clientId: lastCheckpoint.clientId,
-          policyVersion: lastCheckpoint.policyVersion,
-          roomId: lastCheckpoint.roomId,
-          stateVectorHash: lastCheckpoint.stateVectorHash,
-          projectionJson,
-          projectionHash: createHash("sha256")
-            .update(projectionJson)
-            .digest("base64url"),
-          throughSequence: lastCheckpoint.throughSequence,
-        });
-      }
-    }
+    if (lastCheckpoint) checkpointScheduler(document).note(lastCheckpoint);
   } finally {
     scratch.destroy();
   }
@@ -714,15 +673,26 @@ function schedulePersistence(document, entry) {
   if (queue.timer) clearTimeout(queue.timer);
   queue.timer = setTimeout(() => {
     queue.timer = null;
-    const entries = queue.pending.splice(0);
-    const snapshotAfterFirst = queue.snapshotAfterFirst;
-    queue.snapshotAfterFirst = null;
-    queue.chain.enqueue({
-      entries,
-      snapshotAfterFirst,
-    });
+    void flushPersistence(document).catch(() => undefined);
   }, PERSISTENCE_DEBOUNCE_MS);
   queue.timer.unref?.();
+}
+
+async function flushPersistence(document) {
+  const queue = documentPersistenceQueues.get(document);
+  if (!queue) return;
+  clearTimeout(queue.timer);
+  queue.timer = null;
+  const entries = queue.pending.splice(0);
+  if (!entries.length) return queue.chain.persistTail;
+  const snapshotAfterFirst = queue.snapshotAfterFirst;
+  queue.snapshotAfterFirst = null;
+  try { return await queue.chain.enqueue({ entries, snapshotAfterFirst }); }
+  catch (error) {
+    lastPersistenceFailure = { code: "COLLABORATION_APPEND_FAILED", at: Date.now(), attempt: 1 };
+    forceCanonicalReconnect(entries[0].context, collaborationFailureMessage(error));
+    throw error;
+  }
 }
 
 function sessionClaims(payload, documentName) {
@@ -1122,7 +1092,12 @@ const server = new Server({
   debounce: 2_000,
   maxDebounce: 10_000,
   quiet: true,
-  websocketOptions: { maxPayload: MAX_REALTIME_MESSAGE_BYTES },
+  websocketOptions: {
+    maxPayload: MAX_REALTIME_MESSAGE_BYTES,
+    // crossws defaults to declining every subprotocol. Browsers reject that
+    // handshake when the framing client has offered one.
+    handleProtocols: selectFrameProtocol,
+  },
   maxUnauthenticatedQueueSize: MAX_REALTIME_MESSAGE_BYTES,
   maxUnauthenticatedQueueMessages: 64,
   maxPendingDocuments: 4,
@@ -1151,7 +1126,7 @@ const server = new Server({
     throw null;
   },
 
-  async onAuthenticate({ token, documentName, connectionConfig }) {
+  async onAuthenticate({ token, documentName, connectionConfig, request }) {
     try {
       const verified = await jwtVerify(token, jwtKey, {
         issuer: "spectra",
@@ -1175,6 +1150,7 @@ const server = new Server({
         authorizationCheckedAt: 0,
       };
       await reauthorize(context);
+      authenticatedRequests.add(request);
       connectionConfig.readOnly = !context.canModify;
       return context;
     } catch (error) {
@@ -1228,10 +1204,12 @@ const server = new Server({
         incomingUpdate,
       );
       if (!documentUpdate) {
-        releaseDocumentMessage(socketId);
+        // A retry after a lost acknowledgement may already be in this Y.Doc.
+        // Its no-op is acknowledged only after earlier accepted writes drain.
+        messageQueue(socketId).push({ context: { ...context }, connection, noop: true });
         return;
       }
-      if (documentUpdate.byteLength > MAX_DURABLE_UPDATE_BYTES) {
+      if (documentUpdate.byteLength > MAX_ASSEMBLED_BYTES) {
         process.stderr.write(
           `[beforeHandleMessage] oversized canonical delta incoming=${incomingUpdate.byteLength} durable=${documentUpdate.byteLength} canonical=${Y.encodeStateAsUpdate(document).byteLength} native=${nativeBefore}\n`,
         );
@@ -1274,6 +1252,14 @@ const server = new Server({
     if (!queue?.length) acceptedDocumentMessages.delete(socketId);
     try {
       if (!accepted) return;
+      if (accepted.noop) {
+        await flushPersistence(document);
+        sendGatewayState(accepted.connection, {
+          type: "spectra.durable_ack", updateIds: [],
+          documentHash: createHash("sha256").update(Y.encodeStateAsUpdate(document)).digest("hex"),
+        });
+        return;
+      }
       const stateVectorHash = documentStateVectorHash(document);
       const nativeAfter = isNativeArtifactDocument(document);
       const regionIds = nativeAfter
@@ -1391,6 +1377,8 @@ const server = new Server({
     let stored = await bridge("load", {
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
     });
     let storedDocument = applyStoredRoomUpdates(Y, stored);
     rememberDurableHead(context, stored?.liveStateVectorHash);
@@ -1429,46 +1417,8 @@ const server = new Server({
             const observedProjectionHash = createHash("sha256")
               .update(observedProjectionJson)
               .digest("base64url");
-            const transport = planBootstrapProjectionTransport(
-              observedProjectionJson,
-              {
-                maxEnvelopeChars: MAX_BRIDGE_ENVELOPE_CHARS,
-                metadataHeadroom: BRIDGE_ENVELOPE_METADATA_HEADROOM,
-              },
-            );
-            let projectionForBridge = null;
-            let spilledRef = null;
-            if (transport.transport === "inline" || transport.mode === "inline") {
-              projectionForBridge = observedProjectionJson;
-            } else if (transport.transport === "spill" || transport.mode === "spill") {
-              try {
-                const storedPayload = await bridge("storeDurablePayload", {
-                  artifactId: context.artifactId,
-                  partitionKey: context.partitionKey,
-                  accountId: context.accountId,
-                  kind: "projection",
-                  digest: transport.manifest.digest,
-                  mediaType: transport.manifest.mediaType,
-                  bytesBase64: Buffer.from(transport.bytes).toString("base64"),
-                });
-                spilledRef = storedPayload.payloadRef;
-                process.stderr.write(
-                  `[onLoadDocument:repair] spilled projection chars=${observedProjectionJson.length} ref=${spilledRef}\n`,
-                );
-              } catch (spillError) {
-                const spillReason =
-                  spillError instanceof Error
-                    ? spillError.message
-                    : String(spillError);
-                process.stderr.write(
-                  `[onLoadDocument:repair] spill failed (${spillReason}) — hash-only recover\n`,
-                );
-              }
-            } else {
-              process.stderr.write(
-                `[onLoadDocument:repair] projection chars=${observedProjectionJson.length} exceeds bridge spill — hash-only recover\n`,
-              );
-            }
+            const projectionForBridge = observedProjectionJson;
+            const spilledRef = null;
             if (shouldRecover) {
               await bridge("recover", {
                 artifactId: context.artifactId,
@@ -1490,6 +1440,8 @@ const server = new Server({
               stored = await bridge("load", {
                 artifactId: context.artifactId,
                 partitionKey: context.partitionKey,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
               });
               storedDocument.destroy();
               storedDocument = applyStoredRoomUpdates(Y, stored);
@@ -1513,6 +1465,8 @@ const server = new Server({
               stored = await bridge("load", {
                 artifactId: context.artifactId,
                 partitionKey: context.partitionKey,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
               });
               storedDocument.destroy();
               storedDocument = applyStoredRoomUpdates(Y, stored);
@@ -1545,6 +1499,8 @@ const server = new Server({
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
       includeInitialProjection: true,
+      accountId: context.accountId,
+      policyVersion: context.policyVersion,
     });
     const document = new Y.Doc();
     if (stored?.initialProjection) {
@@ -1563,10 +1519,6 @@ const server = new Server({
       const projectionHash = createHash("sha256")
         .update(projectionJson)
         .digest("base64url");
-      const transport = planBootstrapProjectionTransport(projectionJson, {
-        maxEnvelopeChars: MAX_BRIDGE_ENVELOPE_CHARS,
-        metadataHeadroom: BRIDGE_ENVELOPE_METADATA_HEADROOM,
-      });
       const bootstrapPayload = {
         artifactId: context.artifactId,
         partitionKey: context.partitionKey,
@@ -1578,25 +1530,8 @@ const server = new Server({
         stateVectorHash,
         projectionHash,
       };
-      // Persist Yjs head first — spill update when it exceeds durable row budget.
-      if (
-        update.byteLength > MAX_DURABLE_UPDATE_BYTES ||
-        !durablePayloadFitsBridgeEnvelope(update.byteLength, {
-          maxEnvelopeChars: MAX_BRIDGE_ENVELOPE_CHARS,
-          // Leave headroom for projection fields when shipping inline update.
-          metadataHeadroom:
-            BRIDGE_ENVELOPE_METADATA_HEADROOM +
-            (transport.transport === "inline" ? transport.charLength : 0),
-        })
-      ) {
-        if (
-          !durablePayloadFitsBridgeEnvelope(update.byteLength, {
-            maxEnvelopeChars: MAX_BRIDGE_ENVELOPE_CHARS,
-            metadataHeadroom: BRIDGE_ENVELOPE_METADATA_HEADROOM,
-          })
-        ) {
-          throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_UPDATE_TOO_LARGE");
-        }
+      // Blob bodies never enter a Convex function argument.
+      if (update.byteLength > MAX_DURABLE_UPDATE_BYTES) {
         const updateManifest = createDurablePayloadManifest({
           kind: "yjs-update",
           bytes: Buffer.from(update),
@@ -1611,6 +1546,7 @@ const server = new Server({
           digest: updateManifest.digest,
           mediaType: updateManifest.mediaType,
           bytesBase64: Buffer.from(update).toString("base64"),
+      policyVersion: context.policyVersion,
         });
         bootstrapPayload.update = "";
         bootstrapPayload.payloadRef = storedUpdate.payloadRef;
@@ -1626,29 +1562,7 @@ const server = new Server({
       } else {
         bootstrapPayload.update = Buffer.from(update).toString("base64");
       }
-      if (transport.transport === "inline" || transport.mode === "inline") {
-        bootstrapPayload.projectionJson = projectionJson;
-      } else if (transport.transport === "spill" || transport.mode === "spill") {
-        const storedProjection = await bridge("storeDurablePayload", {
-          artifactId: context.artifactId,
-          partitionKey: context.partitionKey,
-          accountId: context.accountId,
-          kind: "projection",
-          digest: transport.manifest.digest,
-          mediaType: transport.manifest.mediaType,
-          bytesBase64: Buffer.from(transport.bytes).toString("base64"),
-        });
-        bootstrapPayload.projectionPayloadRef = storedProjection.payloadRef;
-        bootstrapPayload.projectionPayloadDigest = transport.manifest.digest;
-        process.stderr.write(
-          `[onLoadDocument:bootstrap] spilled projection chars=${transport.charLength} ref=${storedProjection.payloadRef}\n`,
-        );
-      } else {
-        // Omit: import already wrote artifact.content; still persist Yjs head.
-        process.stderr.write(
-          `[onLoadDocument:bootstrap] omitting oversized projection chars=${transport.charLength} — durable Yjs head only\n`,
-        );
-      }
+      bootstrapPayload.projectionJson = projectionJson;
       await bridge("bootstrap", bootstrapPayload);
       rememberDurableHead(context, stateVectorHash);
     }
@@ -1659,6 +1573,18 @@ const server = new Server({
     if (!lastContext) return;
     await reauthorize(lastContext);
     await compactStoredRoom(lastContext, { countAppend: false });
+  },
+  async onDisconnect({ document, clientsCount }) {
+    if (clientsCount === 0) {
+      try {
+        await flushPersistence(document);
+        await documentCheckpointSchedulers.get(document)?.flush();
+      } catch (error) {
+        // The durable failure has already been surfaced. Hocuspocus does not
+        // await close hooks, so rejecting here would crash unrelated rooms.
+        process.stderr.write(`[disconnect] ${collaborationFailureMessage(error)}\n`);
+      }
+    }
   },
 });
 
@@ -1718,6 +1644,7 @@ const policySweep = setInterval(() => {
 }, 5_000);
 policySweep.unref?.();
 
+installServerFraming(server, request => authenticatedRequests.has(request));
 await server.listen();
 process.stdout.write(
   `Spectra collaboration gateway listening on ${process.env.SPECTRA_COLLAB_PORT || 1234}\n`,

@@ -402,9 +402,10 @@ export async function importLibraryResourceFile(
  * The bridge is deliberately not involved here: the server only needs the
  * uploaded bytes to produce the canonical native Spectra projection.
  */
-export async function projectOfficeImportWithLens(file: File) {
+export async function projectOfficeImportWithLens(file: File, artifactId: string) {
   const body = new FormData();
   body.set("file", file, file.name);
+  body.set("artifactId", artifactId);
   const response = await fetch("/api/spectra/imports/office", {
     method: "POST",
     body,

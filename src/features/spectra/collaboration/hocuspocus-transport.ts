@@ -2,6 +2,7 @@
 
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import * as Y from "yjs";
+import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import type {
   ArtifactCollaborationTransport,
   CollaborationPresence,
@@ -448,6 +449,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         displayName: initial.displayName,
       });
       const websocketProvider = new HocuspocusProviderWebsocket({
+        WebSocketPolyfill: framedWebSocket(WebSocket),
         url: initial.url,
         autoConnect: false,
         delay: COLLAB_RECONNECT.delay,
@@ -680,6 +682,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             const message = JSON.parse(payload) as {
               type?: string;
               updateIds?: unknown;
+            documentHash?: unknown;
               message?: unknown;
             };
             if (message?.type === "spectra.permission_changed") {
@@ -733,6 +736,19 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               return;
             }
             if (message.type === "spectra.durable_ack") {
+              if (typeof message.documentHash === "string" && /^[a-f0-9]{64}$/.test(message.documentHash)) {
+                const confirmedHash = message.documentHash;
+                const captured = Y.encodeStateAsUpdate(this.document);
+                void crypto.subtle.digest("SHA-256", new Uint8Array(captured)).then((digest) => {
+                  const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+                  const current = Y.encodeStateAsUpdate(this.document);
+                  if (hash !== confirmedHash || captured.length !== current.length || !captured.every((byte, index) => byte === current[index])) return;
+                  this.durablePendingUpdateIds.clear();
+                  this.localDurabilityPending = false;
+                  this.updateSynchronizationState();
+                });
+                return;
+              }
               for (const updateId of updateIds)
                 this.durablePendingUpdateIds.delete(updateId);
               if (

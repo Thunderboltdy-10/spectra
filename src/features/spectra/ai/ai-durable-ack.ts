@@ -19,6 +19,12 @@ export class AiDurableAckGate {
     return this.ackedEpoch < this.requiredEpoch;
   }
 
+  confirmCurrentDocument() {
+    this.ackedEpoch = this.requiredEpoch;
+    this.pendingIds.clear();
+    this.epochIds.clear();
+  }
+
   handleGatewayMessage(type: string, updateIds: readonly string[]) {
     if (type === "spectra.durable_pending") {
       const ids = this.epochIds.get(this.requiredEpoch);

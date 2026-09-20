@@ -7,6 +7,7 @@ import { requireArtifactCapability } from "./spectraShared";
 import { getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";
 import { evaluateAccessForActor } from "./authorityShared";
 import { loadVersionAfter } from "./artifactSnapshots";
+import { isDurableContentRef } from "../shared/durable-content";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestation";
 import type { IntakeAttestation } from "../shared/intake-attestation";
@@ -25,6 +26,7 @@ import {
 const MAX_RETAINED_ASSET_BYTES = 2_000_000_000;
 
 function snapshotContainsAsset(value: unknown, assetId: string, depth = 0): boolean {
+  if (isDurableContentRef(value)) return value.spectraContentRef.dependencies?.assetIds.includes(assetId) === true;
   if (depth > 14 || value === null || value === undefined) return false;
   if (Array.isArray(value))
     return value.some((child) => snapshotContainsAsset(child, assetId, depth + 1));

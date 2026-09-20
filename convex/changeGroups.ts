@@ -1,5 +1,7 @@
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import { validateContentAdoption } from "./collaborationDurablePayload";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
@@ -20,6 +22,15 @@ import {
 import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
+
+async function hasPendingProjection(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">) {
+  const room = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", q => q.eq("artifactId", artifactId).eq("partitionKey", "root")).unique();
+  return Boolean(room && room.status !== "closed" && (room.lastProjectionSequence ?? 0) < room.nextSequence - 1);
+}
+
+async function requireCurrentProjection(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">) {
+  if (await hasPendingProjection(ctx, artifactId)) throw new Error("COLLABORATION_CHECKPOINT_REQUIRED");
+}
 
 function preferImportContent(
   blueprintKey: string,
@@ -111,6 +122,7 @@ async function commitImportJob(
   }
   if (job.importedContent === undefined)
     throw new Error("ARTIFACT_IMPORT_CONTENT_MISSING");
+  await validateContentAdoption(ctx, artifact._id, actorAccountId, job.importedContent);
   const computedImportHash = await importedContentHash(job.importedContent);
   if (job.importedContentHash && computedImportHash !== job.importedContentHash)
     throw new Error("ARTIFACT_IMPORT_CONTENT_CHANGED");
@@ -310,6 +322,8 @@ export async function commitChangeGroup(
     });
     return { status: "abandoned" as const };
   }
+  if (group.source === "human" && await hasPendingProjection(ctx, group.artifactId))
+    return { status: "pending_projection" as const };
   let before = group.baseSnapshot;
   let after = group.finalSnapshot;
   const now = Date.now();
@@ -412,6 +426,7 @@ export async function commitHumanCheckpoint(
       q.eq("artifactId", artifactId).eq("status", "open"),
     )
     .collect();
+  await requireCurrentProjection(ctx, artifactId);
   const humanGroups = groups.filter((group) => group.source === "human");
   if (humanGroups.length === 0) return [];
   const artifact = await ctx.db.get(artifactId);
@@ -557,7 +572,9 @@ export const commitIdle = internalMutation({
       return { status: "superseded" as const };
     if (Date.now() - group.lastActivityAt < HUMAN_CHANGE_IDLE_MS - 500)
       return { status: "not_idle" as const };
-    return commitChangeGroup(ctx, group._id);
+    const result = await commitChangeGroup(ctx, group._id);
+    if (result.status === "pending_projection") await ctx.scheduler.runAfter(5_000, internal.changeGroups.commitIdle, args);
+    return result;
   },
 });
 
@@ -596,6 +613,7 @@ export const commitCurrent = mutation({
       args.artifactId,
       "modify",
     );
+    await requireCurrentProjection(ctx, args.artifactId);
     const groups = await ctx.db
       .query("changeGroups")
       .withIndex("by_artifact_status_activity", (q) =>
@@ -629,6 +647,7 @@ export const createNamedCheckpoint = mutation({
       args.artifactId,
       "modify",
     );
+    await requireCurrentProjection(ctx, args.artifactId);
     const name = args.name.trim().slice(0, 180);
     if (!name) throw new Error("ARTIFACT_CHECKPOINT_NAME_REQUIRED");
     const openGroups = await ctx.db

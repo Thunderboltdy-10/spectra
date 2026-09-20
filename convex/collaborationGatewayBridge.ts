@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Id } from "./_generated/dataModel";
 import { MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS } from "../shared/collaboration-bridge";
+import { isDurableContentRef, MAX_BRIDGE_ENVELOPE_BYTES } from "../shared/durable-content";
 import {
   MAX_PROJECTION_JSON_CHARS,
   MAX_PROJECTION_JSON_UTF8_BYTES,
@@ -22,6 +23,7 @@ const operation = v.union(
   v.literal("checkpoint"),
   v.literal("snapshot"),
   v.literal("storeDurablePayload"),
+  v.literal("issueDurableUpload"),
 );
 
 function bridgeKey() {
@@ -47,7 +49,7 @@ function verify(
     throw new Error(
       `COLLABORATION_BRIDGE_NONCE_INVALID: len=${typeof nonce === "string" ? nonce.length : -1} op=${operationName}`,
     );
-  if (payloadJson.length > MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS)
+  if (payloadJson.length > MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS || Buffer.byteLength(payloadJson) > MAX_BRIDGE_ENVELOPE_BYTES)
     throw new Error(
       `COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE: chars=${payloadJson.length} max=${MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS} op=${operationName}`,
     );
@@ -164,6 +166,16 @@ export const exchange = action({
     ) as Id<"spectraArtifacts">;
     const partitionKey = text(payload.partitionKey, "partition_key", 180);
 
+    if (["load", "snapshot", "issueDurableUpload", "storeDurablePayload"].includes(args.operation)) {
+      const authorization = await ctx.runQuery(internal.collaborationGatewayStore.authorize, {
+        artifactId, partitionKey,
+        accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        policyVersion: integer(payload.policyVersion, "policy_version"),
+      });
+      if (!authorization.allowed || (args.operation !== "load" && !authorization.canModify))
+        throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    }
+
     if (args.operation === "authorize") {
       return ctx.runQuery(internal.collaborationGatewayStore.authorize, {
         accountId: text(payload.accountId, "account_id") as Id<"accounts">,
@@ -181,14 +193,16 @@ export const exchange = action({
     }
 
     if (args.operation === "load") {
-      let afterSequence = 0;
+      let afterSequence = integer(payload.afterSequence ?? 0, "after_sequence");
+      let hasMore = false;
       let snapshot: {
         throughSequence: number;
         update: string;
         stateVector: string;
         contentHash: string;
+        payload?: { url: string; digest: string; byteLength: number };
       } | null = null;
-      const updates: Array<{ sequence: number; update: string }> = [];
+      const updates: Array<{ sequence: number; update: string; payload?: { url: string; digest: string; byteLength: number } }> = [];
       let roomId: string | null = null;
       let schemaVersion = 1;
       let nextSequence = 1;
@@ -197,7 +211,7 @@ export const exchange = action({
       let lastSnapshotAt: number | null = null;
       let lastProjectionSequence: number | null = null;
       let liveStateVectorHash: string | null = null;
-      for (let page = 0; page < 20; page += 1) {
+      {
         const result = await ctx.runQuery(
           internal.collaborationGatewayStore.load,
           {
@@ -222,7 +236,8 @@ export const exchange = action({
         if (!initialProjection && result.initialProjection)
           initialProjection = result.initialProjection;
         if (!snapshot && result.snapshot) {
-          let snapUpdate = Buffer.from(result.snapshot.update);
+          const snapUpdate = Buffer.from(result.snapshot.update);
+          let descriptor;
           const snapRef = (result.snapshot as { payloadRef?: string | null })
             .payloadRef;
           const snapDigest = (
@@ -233,10 +248,10 @@ export const exchange = action({
               internal.collaborationDurablePayload.getMeta,
               { payloadRef: snapRef, digest: snapDigest },
             );
-            if (!meta) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
-            const blob = await ctx.storage.get(meta.storageId);
-            if (!blob) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
-            snapUpdate = Buffer.from(await blob.arrayBuffer());
+            if (!meta || meta.artifactId !== artifactId) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+            const url = await ctx.storage.getUrl(meta.storageId);
+            if (!url) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+            descriptor = { url, digest: meta.digest, byteLength: meta.byteLength };
           }
           snapshot = {
             throughSequence: result.snapshot.throughSequence,
@@ -245,10 +260,12 @@ export const exchange = action({
               "base64",
             ),
             contentHash: result.snapshot.contentHash,
+            ...(descriptor ? { payload: descriptor } : {}),
           };
         }
         for (const update of result.updates) {
-          let updateBytes = Buffer.from(update.update);
+          const updateBytes = Buffer.from(update.update);
+          let descriptor;
           const payloadRef =
             "payloadRef" in update ? (update as { payloadRef?: string | null }).payloadRef : null;
           const payloadDigest =
@@ -260,25 +277,34 @@ export const exchange = action({
               internal.collaborationDurablePayload.getMeta,
               { payloadRef, digest: payloadDigest },
             );
-            if (!meta) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
-            const blob = await ctx.storage.get(meta.storageId);
-            if (!blob) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
-            updateBytes = Buffer.from(await blob.arrayBuffer());
+            if (!meta || meta.artifactId !== artifactId) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+            const url = await ctx.storage.getUrl(meta.storageId);
+            if (!url) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+            descriptor = { url, digest: meta.digest, byteLength: meta.byteLength };
           }
           updates.push({
             sequence: update.sequence,
             update: updateBytes.toString("base64"),
+            ...(descriptor ? { payload: descriptor } : {}),
           });
         }
-        if (!result.hasMore) break;
-        afterSequence = result.updates[result.updates.length - 1]!.sequence;
-        if (page === 19)
-          throw new Error("COLLABORATION_BRIDGE_SNAPSHOT_REQUIRED");
+        hasMore = result.hasMore;
+        afterSequence = result.afterSequence;
+      }
+      if (initialProjection && typeof initialProjection === "object" && "content" in initialProjection && isDurableContentRef(initialProjection.content)) {
+        const ref = initialProjection.content.spectraContentRef;
+        const meta = await ctx.runQuery(internal.collaborationDurablePayload.getMeta, { payloadRef: ref.payloadRef, digest: ref.digest });
+        if (!meta || meta.artifactId !== artifactId) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+        const url = await ctx.storage.getUrl(meta.storageId);
+        if (!url) throw new Error("COLLABORATION_BRIDGE_PAYLOAD_MISSING");
+        initialProjection = { ...initialProjection, contentPayload: { url, digest: meta.digest, byteLength: meta.byteLength, path: ref.path } };
       }
       return {
         roomId,
         schemaVersion,
         nextSequence,
+        afterSequence,
+        hasMore,
         snapshot,
         updates,
         initialProjection,
@@ -508,6 +534,13 @@ export const exchange = action({
     }
 
 
+    if (args.operation === "issueDurableUpload") {
+      return ctx.runMutation(internal.collaborationDurablePayload.issueUpload, {
+        artifactId, partitionKey,
+        accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        policyVersion: integer(payload.policyVersion, "policy_version"),
+      });
+    }
     if (args.operation === "storeDurablePayload") {
       const kindValue = text(payload.kind, "kind", 40);
       if (
@@ -517,25 +550,19 @@ export const exchange = action({
       )
         throw new Error("COLLABORATION_BRIDGE_KIND_INVALID");
       const digest = text(payload.digest, "digest", 80);
-      const bytesBase64 = text(payload.bytesBase64, "bytes_base64", 2_000_000);
-      const bytes = Buffer.from(bytesBase64, "base64");
-      if (bytes.byteLength <= 0) throw new Error("COLLABORATION_BRIDGE_BYTES_INVALID");
-      const hex = createHash("sha256").update(bytes).digest("hex");
-      if (hex !== digest) throw new Error("COLLABORATION_BRIDGE_DIGEST_MISMATCH");
-      const storageId = await ctx.storage.store(
-        new Blob([new Uint8Array(bytes)], {
-          type: text(payload.mediaType, "media_type", 120),
-        }),
-      );
+      const storageId = text(payload.storageId, "storage_id") as Id<"_storage">;
       return ctx.runMutation(internal.collaborationDurablePayload.put, {
         artifactId,
         accountId: text(payload.accountId, "account_id") as Id<"accounts">,
         kind: kindValue,
         digest,
         storageId,
-        byteLength: bytes.byteLength,
+        byteLength: integer(payload.byteLength, "byte_length"),
         mediaType: text(payload.mediaType, "media_type", 120),
-        manifestVersion: DURABLE_PAYLOAD_MANIFEST_VERSION,
+          manifestVersion: DURABLE_PAYLOAD_MANIFEST_VERSION,
+          dependencies: payload.dependencies as { assetIds: string[]; nativePayloadHashes: string[] } | undefined,
+        partitionKey,
+        policyVersion: integer(payload.policyVersion, "policy_version"),
       });
     }
 
@@ -557,6 +584,8 @@ export const exchange = action({
     const snapshotId = await ctx.runMutation(
       internal.collaboration.storeSnapshot,
       {
+        accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        policyVersion: integer(payload.policyVersion, "policy_version"),
         roomId,
         throughSequence: integer(payload.throughSequence, "through_sequence"),
         update: update.buffer.slice(
@@ -586,6 +615,7 @@ export const exchange = action({
             : integer(payload.byteLength, "byte_length"),
       },
     );
+    if (snapshotPayloadRef) return ctx.runAction(internal.collaborationSnapshotVerification.verify, { snapshotId });
     return ctx.runMutation(internal.collaboration.verifySnapshot, {
       snapshotId,
     });

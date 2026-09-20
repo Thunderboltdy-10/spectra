@@ -345,13 +345,13 @@ describe("P5.V1 classroom load metrics and termination", () => {
       client: {
         action: async (_reference: unknown, request: Record<string, unknown>) => {
           requests.push(request);
-          return { ok: true };
+          return { ok: true, updates: [], nextSequence: 1, roomId: "room" };
         },
       } as never,
     });
     const payload = { artifactId: "artifact-classroom", partitionKey: "root" };
 
-    await expect(bridge("load", payload)).resolves.toEqual({ ok: true });
+    await expect(bridge("load", payload)).resolves.toMatchObject({ ok: true, updates: [], nextSequence: 1, roomId: "room" });
 
     const payloadJson = JSON.stringify(payload);
     const digest = createHash("sha256")
@@ -387,13 +387,13 @@ describe("P5.V1 classroom load metrics and termination", () => {
             throw new Error(
               '{"code":"InternalServerError","message":"Your request couldn\'t be completed. Try again later."}',
             );
-          return { ok: true };
+          return { ok: true, updates: [], nextSequence: 1, roomId: "room" };
         },
       } as never,
     });
     await expect(
       bridge("load", { artifactId: "artifact-classroom", partitionKey: "root" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toMatchObject({ ok: true, updates: [], nextSequence: 1, roomId: "room" });
     expect(attempts).toBe(3);
   });
 

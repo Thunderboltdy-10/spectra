@@ -3629,6 +3629,7 @@ export function SpectraShell({
   ) {
     const classification = classifyLibraryImport(file);
     let importJobId: string | null = null;
+    let pendingOfficeArtifactId: string | null = null;
     setBusyKey("library:import");
     try {
       const titleHint = file.name.replace(/\.[^.]+$/, "") || "Untitled file";
@@ -3670,18 +3671,13 @@ export function SpectraShell({
       // Office lens only for OOXML natives. Text/md share the document
       // blueprint but must keep projectLibraryImportContent. Lens failures
       // must toast and abort — never hollow createArtifact fallback.
-      const officeProjection =
-        !portable && isOfficeNativeImportFile(file)
-          ? await projectOfficeImportWithLens(file)
-          : null;
+      const officeImport = !portable && isOfficeNativeImportFile(file);
       const importedContent =
         portable?.content ??
-        officeProjection?.content ??
-        (await projectLibraryImportContent(file, blueprintKey)) ??
+        (officeImport ? fallback.content : await projectLibraryImportContent(file, blueprintKey)) ??
         fallback.content;
       const title = titleHint || fallback.title;
       const importedNativeFormat =
-        officeProjection?.nativeFormat ||
         classification.nativeFormat ||
         undefined;
       const created = await postSpectra<{ artifactId: string }>({
@@ -3698,6 +3694,10 @@ export function SpectraShell({
           ? { nativeFormat: importedNativeFormat }
           : {}),
       });
+      if (officeImport) pendingOfficeArtifactId = created.artifactId;
+      const officeProjection = officeImport
+        ? await projectOfficeImportWithLens(file, created.artifactId)
+        : null;
       // Prefer the server lens projection. Re-parsing a formal paper in the
       // tab (mammoth + TipTap) after a successful office import previously
       // spiked memory into Chrome Aw Snap 9.
@@ -3707,7 +3707,7 @@ export function SpectraShell({
         file.name.toLowerCase().endsWith(".docx") &&
         !officeProjection
           ? await projectDocxImportWithDurableImages(file, created.artifactId)
-          : importedContent;
+          : officeProjection?.content ?? importedContent;
       const digest = await crypto.subtle.digest("SHA-256", originalBuffer);
       const sha256 = [...new Uint8Array(digest)]
         .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -3741,6 +3741,9 @@ export function SpectraShell({
         unsupportedFeatures: officeProjection?.unsupportedFeatures ?? [],
         importedContent: canonicalImportedContent,
       });
+      if (officeImport && !completedImport.versionId)
+        throw new Error("The import has not been saved yet. Please retry the import.");
+      pendingOfficeArtifactId = null;
       // complete already attempts commitImport. Skip/soft-fail the redundant
       // version commit so a deferred commit cannot toast false import failure
       // after createArtifact already persisted usable content.
@@ -3779,6 +3782,8 @@ export function SpectraShell({
           : `${title} imported into your Library.`,
       );
     } catch (error) {
+      if (pendingOfficeArtifactId)
+        await postSpectra({ action: "deleteArtifact", artifactId: pendingOfficeArtifactId }).catch(() => undefined);
       if (importJobId)
         await abortArtifactImportUpload(
           importJobId,

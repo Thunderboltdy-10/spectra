@@ -431,6 +431,8 @@ export const xlsxProjectionSchema = z
       .object({
         ...nativeBindingBase,
         format: z.enum(["xlsx", "xlsm", "xltx", "xltm", "xlam"]),
+        sourceArtifactId: z.string().min(1).optional(),
+        sourcePayloadHash: semanticDigestSchema.optional(),
         recognizedFormulaFunctions: z.array(z.string()),
         date1904: z.boolean().optional(),
       })

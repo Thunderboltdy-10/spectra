@@ -32,6 +32,7 @@ import {
 } from "./syncOperationLifecycle";
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
+import { validateContentAdoption } from "./collaborationDurablePayload";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -762,6 +763,7 @@ export const activateLens = mutation({
       textIndex: z.string().max(200_000).optional(),
     }).parse(args);
     await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.content);
     const work = await ctx.db.get(args.workId);
     if (!work) throw new Error("WORK_NOT_FOUND");
     const cloud = await ctx.db.query("workReplicas")
@@ -774,6 +776,10 @@ export const activateLens = mutation({
     const changesArtifactType = work.blueprintKey !== nextBlueprintKey;
     if (changesArtifactType && work.blueprintKey !== "resource")
       throw new Error("LENS_TYPE_TRANSITION_UNSAFE");
+    // Opening a retained package must not reset an already-live authored head.
+    // External revisions use recordExternalReconciliation before reaching here.
+    if (!changesArtifactType && work.liveStateVectorHash)
+      return { activated: false, workId: args.workId };
     const nextSchemaVersion =
       nextBlueprintKey === "document"
           ? 2
@@ -914,6 +920,8 @@ export const queueMaterialization = mutation({
       promotionMode: z.enum(["verified-first", "immediate-projection"]).optional(),
     }).parse(args);
     await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.baseContent);
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.projectionContent);
     const work = await ctx.db.get(args.workId);
     if (!work) throw new Error("WORK_NOT_FOUND");
     const payloadId = ctx.db.normalizeId("payloadObjects", input.payloadRef);
@@ -1101,6 +1109,59 @@ export const queueMaterialization = mutation({
       updatedAt: now,
     });
     return { requestId, state: "pending" as const };
+  },
+});
+
+/** Commit a verified native package for work without an available local target.
+ * Yjs remains the authored-content authority; only the native replica advances. */
+export const commitCloudMaterialization = mutation({
+  args: {
+    workId: v.id("spectraArtifacts"), payloadRef: v.string(), contentHash: v.string(),
+    baseRevision: v.string(), projectionContent: v.any(), projectionContentHash: v.string(),
+    fidelityMap: v.any(), nativeReceipt: nativeSaveReceiptValidator,
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.projectionContent);
+    const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", q =>
+      q.eq("workId", args.workId).eq("kind", "cloud")).unique();
+    if (!cloud) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
+    const payloadId = ctx.db.normalizeId("payloadObjects", args.payloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (!payload || payload.accountId !== actor.accountId || payload.hash !== args.contentHash || payload.state !== "active")
+      throw new Error("MATERIALIZATION_PAYLOAD_INVALID");
+    const receipt = validateNativeSaveReceipt(args.nativeReceipt, {
+      artifactId: String(args.workId), baseRevision: args.baseRevision,
+      targetRevision: args.contentHash, resultPayloadHash: args.contentHash,
+      nativeFormat: cloud.nativeFormat, target: args.nativeReceipt.targets,
+    });
+    if (receipt.semantic.readbackDigest !== args.projectionContentHash ||
+      receipt.semantic.resultDigest !== receipt.semantic.readbackDigest)
+      throw new Error("NATIVE_RECEIPT_SEMANTIC_MISMATCH");
+    const idempotencyKey = await deriveSyncIdempotencyKey({ workId: String(args.workId),
+      target: "cloud", baseRevision: args.baseRevision, targetRevision: args.contentHash, direction: "cloud-to-local" });
+    const prior = await ctx.db.query("syncOperations").withIndex("by_account_key", q =>
+      q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique();
+    if (prior) return { state: "cloud_saved" as const, operationId: prior._id };
+    if (cloud.revision !== args.baseRevision || cloud.contentHash !== receipt.basePayloadHash)
+      throw new Error("MATERIALIZATION_BASE_STALE");
+    const now = Date.now();
+    await ctx.db.patch(cloud._id, {
+      payloadRef: args.payloadRef, contentHash: args.contentHash, revision: args.contentHash,
+      baseRevision: args.baseRevision, projectionBasePayloadRef: args.payloadRef,
+      projectionBaseRevision: args.contentHash, projectionBaseContent: args.projectionContent,
+      projectionBaseContentHash: args.projectionContentHash, fidelityMap: args.fidelityMap,
+      projectionBaseFidelityMap: args.fidelityMap, state: "current", lastVerifiedAt: now, updatedAt: now,
+    });
+    const operationId = await ctx.db.insert("syncOperations", {
+      accountId: actor.accountId, workId: args.workId, replicaId: cloud._id, idempotencyKey,
+      direction: "cloud-to-local", revisionBefore: args.baseRevision, revisionAfter: args.contentHash,
+      state: "verified", actorKind: "user", nativeReceipt: { ...receipt, state: "cloud_saved" },
+      createdAt: now, updatedAt: now,
+    });
+    return { state: "cloud_saved" as const, operationId };
   },
 });
 
@@ -1347,6 +1408,7 @@ export const attachPortablePayload = mutation({
     payloadRef: v.string(),
     contentHash: v.string(),
     nativeFormat: v.string(),
+    projectionBaseContent: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -1361,6 +1423,9 @@ export const attachPortablePayload = mutation({
     const payloadId = ctx.db.normalizeId("payloadObjects", input.payloadRef);
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
     if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== input.contentHash) throw new Error("PORTABLE_PAYLOAD_INVALID");
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.projectionBaseContent);
+    const baseContent = args.projectionBaseContent ?? work.content;
+    const baseContentHash = args.projectionBaseContent === undefined ? work.contentHash : await deriveProjectionSnapshotHash(baseContent);
     const now = Date.now();
     const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).first();
     if (cloud) {
@@ -1396,8 +1461,8 @@ export const attachPortablePayload = mutation({
         nativeFormat: input.nativeFormat,
         projectionBasePayloadRef: input.payloadRef,
         projectionBaseRevision: input.contentHash,
-        projectionBaseContent: work.content,
-        projectionBaseContentHash: work.contentHash,
+        projectionBaseContent: baseContent,
+        projectionBaseContentHash: baseContentHash,
         projectionBaseTextIndex: work.textIndex,
         state: "current",
         lastVerifiedAt: now,
@@ -1405,7 +1470,7 @@ export const attachPortablePayload = mutation({
       });
       return { state: "attached" as const, replicaId: cloud._id };
     }
-    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "cloud", payloadRef: input.payloadRef, nativeFormat: input.nativeFormat, revision: input.contentHash, contentHash: input.contentHash, projectionBasePayloadRef: input.payloadRef, projectionBaseRevision: input.contentHash, projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, state: "current", lastVerifiedAt: now, updatedAt: now });
+    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "cloud", payloadRef: input.payloadRef, nativeFormat: input.nativeFormat, revision: input.contentHash, contentHash: input.contentHash, projectionBasePayloadRef: input.payloadRef, projectionBaseRevision: input.contentHash, projectionBaseContent: baseContent, projectionBaseContentHash: baseContentHash, projectionBaseTextIndex: work.textIndex, state: "current", lastVerifiedAt: now, updatedAt: now });
     return { state: "attached" as const, replicaId };
   },
 });
@@ -1433,6 +1498,7 @@ export const recordExternalReconciliation = mutation({
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    await validateContentAdoption(ctx, args.workId, actor.accountId, args.content);
     // A work may legitimately have one local replica per device. Reconcile
     // against the exact replica reported by the Bridge, never an arbitrary
     // `unique()` local row that only happened to exist before N6.

@@ -579,14 +579,15 @@ describe("collaboration bridge verify precision", () => {
     );
   });
 
-  it("bootstraps oversized projections via spill/omit so envelopes cannot block open", async () => {
+  it("keeps the complete bootstrap projection for verified payload storage", async () => {
     const { readFileSync } = await import("node:fs");
     const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
-    expect(gateway).toContain("planBootstrapProjectionTransport");
+    expect(gateway).toContain("bootstrapPayload.projectionJson = projectionJson");
     expect(gateway).toContain("onLoadDocument:bootstrap");
-    expect(gateway).toContain("omitting oversized projection");
-    expect(gateway).toContain("durable Yjs head only");
-    expect(gateway).toContain("MAX_BRIDGE_ENVELOPE_CHARS");
+    expect(gateway).not.toContain("omitting oversized projection");
+    const transport = readFileSync("scripts/collaboration-gateway-bridge-client.mjs", "utf8");
+    expect(transport).toContain("spectraContentRef");
+    expect(transport).toContain("COLLABORATION_BRIDGE_ENVELOPE_SIZE");
     const bridge = readFileSync("convex/collaborationGatewayBridge.ts", "utf8");
     expect(bridge).toContain("optionalProjectionText");
     expect(bridge).toContain("projectionPayloadRef");

@@ -182,6 +182,52 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
 }
 
 describe("replica truth machine", () => {
+  it("does not reactivate an original package over a durable authored head", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const content = { blocks: [{ id: "edited", text: "saved edit" }] };
+    await t.run(ctx => ctx.db.patch(fixture.workId, { blueprintKey: "document", content, liveStateVectorHash: "durable-head" }));
+    expect(await t.withIdentity(identity).mutation(api.replicas.activateLens, {
+      workId: fixture.workId, payloadHash: baseHash, content: { blocks: [] }, fidelityMap: {},
+      semanticDigest: baseHash, nativeFormat: "docx", blueprintKey: "document",
+    })).toMatchObject({ activated: false });
+    expect((await t.run(ctx => ctx.db.get(fixture.workId)))?.content).toEqual(content);
+  });
+
+  it("commits cloud native bytes once and fences stale materializations without replacing authored content", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const actor = t.withIdentity(identity);
+    const semantic = "c".repeat(64);
+    const input = {
+      workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash,
+      baseRevision: baseHash, projectionContent: { blocks: [{ text: "native result" }] },
+      projectionContentHash: semantic, fidelityMap: { entries: [] },
+      nativeReceipt: {
+        kind: "native-office-save" as const, format: "docx" as const,
+        operationId: `native:${fixture.workId}:${baseHash}:${nextHash}`, artifactId: String(fixture.workId),
+        basePayloadHash: baseHash, resultPayloadHash: nextHash, baseRevision: baseHash, resultRevision: nextHash,
+        targets: { regionIds: ["docx:p:1"], partNames: ["/word/document.xml"] },
+        semantic: { resultDigest: semantic, readbackDigest: semantic }, preservedPartNames: [], state: "cloud_saved" as const,
+      },
+    };
+    const before = await t.run(ctx => ctx.db.get(fixture.workId));
+    const first = await actor.mutation(api.replicas.commitCloudMaterialization, input);
+    expect(await actor.mutation(api.replicas.commitCloudMaterialization, input)).toEqual(first);
+    expect(await t.run(ctx => ctx.db.get(fixture.cloudId))).toMatchObject({ revision: nextHash, payloadRef: String(fixture.nextPayloadId) });
+    expect((await t.run(ctx => ctx.db.get(fixture.workId)))?.content).toEqual(before?.content);
+    const newer = "d".repeat(64);
+    await t.run(ctx => ctx.db.patch(fixture.cloudId, { revision: newer, contentHash: newer }));
+    expect(await actor.mutation(api.replicas.commitCloudMaterialization, input)).toEqual(first);
+    expect((await t.run(ctx => ctx.db.get(fixture.cloudId)))?.revision).toBe(newer);
+    await expect(actor.mutation(api.replicas.commitCloudMaterialization, {
+      ...input, baseRevision: nextHash,
+      nativeReceipt: { ...input.nativeReceipt, baseRevision: nextHash, basePayloadHash: nextHash, operationId: `native:${fixture.workId}:${nextHash}:${nextHash}` },
+    })).rejects.toThrow("MATERIALIZATION_BASE_STALE");
+    await t.run(ctx => ctx.db.patch(fixture.workId, { status: "deleted" }));
+    await expect(actor.mutation(api.replicas.commitCloudMaterialization, input)).rejects.toThrow();
+  });
+
   it("activates and materializes a workbook beyond Convex's object-field limit", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

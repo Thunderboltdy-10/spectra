@@ -34,8 +34,15 @@ import {
   timetableReminderUserStateChanged,
   timetableReminderUserStateGeneration,
 } from "./timetableReminders";
+import { reconcileDurablePayloadOwners, durablePayloadReferences } from "./durablePayloadOwnership";
 
 const triggers = new Triggers<DataModel>();
+for (const table of ["spectraArtifacts", "spectraArtifactVersions", "artifactSnapshotObjects", "artifactImportJobs", "changeGroups", "workReplicas", "bridgeWriteRequests", "syncConflicts", "collaborationUpdates", "collaborationSnapshots"] as const) {
+  triggers.register(table, async (ctx, change) => {
+    if (change.oldDoc && change.newDoc && JSON.stringify([...durablePayloadReferences(change.oldDoc)].sort()) === JSON.stringify([...durablePayloadReferences(change.newDoc)].sort())) return;
+    await reconcileDurablePayloadOwners({ ...ctx, db: ctx.innerDb }, table, String(change.id), change.newDoc);
+  });
+}
 const orgNodeCountKinds = [
   "type",
   "workspace",

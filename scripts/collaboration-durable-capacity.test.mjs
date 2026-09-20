@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
@@ -98,7 +97,7 @@ describe("collaboration durable capacity", () => {
     expect(resolved).toEqual(bytes);
   });
 
-  it("keeps under-budget merges inline and splits oversize merge batches", () => {
+  it("keeps small merges inline and durably spills every member of an oversized group", () => {
     const small = yUpdateWithPayload(100);
     const planSmall = planMergedUpdatePersist(Y, [small, small]);
     expect(planSmall.mode).toBe("inline");
@@ -120,12 +119,26 @@ describe("collaboration durable capacity", () => {
       true,
     );
     const plan = planMergedUpdatePersist(Y, pieces);
-    expect(plan.mode).toBe("split");
-    expect(plan.batches.length).toBeGreaterThan(1);
-    for (const batch of plan.batches) {
-      expect(batch.merged.byteLength).toBeLessThanOrEqual(MAX_DURABLE_UPDATE_BYTES);
-      expect(batch.merged.byteLength).toBeGreaterThan(0);
-    }
+    expect(plan.mode).toBe("spill");
+    const replay = new Y.Doc();
+    Y.applyUpdate(replay, plan.update);
+    expect(replay.getMap("m").size).toBe(8);
+    for (let i = 0; i < 8; i++) expect(replay.getMap("m").get(`k${i}`)).toBe("y".repeat(120_000));
+    replay.destroy();
+  });
+
+  it("does not drop the small updates adjacent to an oversized update", () => {
+    const doc = new Y.Doc();
+    const updates = [];
+    doc.on("update", update => updates.push(update));
+    doc.getMap("m").set("first", "first");
+    doc.getMap("m").set("middle", "界".repeat(300_000));
+    doc.getMap("m").set("last", "last");
+    const plan = planMergedUpdatePersist(Y, updates);
+    const replay = new Y.Doc();
+    Y.applyUpdate(replay, plan.update);
+    expect(replay.getMap("m").toJSON()).toEqual(doc.getMap("m").toJSON());
+    replay.destroy(); doc.destroy();
   });
 
   it("spills a single update that already exceeds the durable envelope", () => {

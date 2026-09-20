@@ -19,7 +19,7 @@ function setupTest() {
   return t;
 }
 
-async function seedPlacementFixture(t: ReturnType<typeof convexTest>) {
+async function seedPlacementFixture(t: ReturnType<typeof setupTest>) {
   return t.run(async (ctx) => {
     const now = Date.now();
     const schoolId = await ctx.db.insert("schools", {
@@ -99,7 +99,7 @@ function createArgs(
 }
 
 async function rowsForOp(
-  t: ReturnType<typeof convexTest>,
+  t: ReturnType<typeof setupTest>,
   containerArtifactId: string,
   placementOperationId: string,
 ) {

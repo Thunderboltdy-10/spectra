@@ -56,7 +56,7 @@ async function releaseOnce(ctx: MutationCtx, input: { artifactId: Id<"spectraArt
 type IntakeRow = { _id: string; storageId?: Id<"_storage">; candidateStorageId?: Id<"_storage">; originalStorageId?: Id<"_storage">; originalBytes?: number; originalSha256?: string; originalMimeType?: string; bytes?: number; sha256?: string; mediaType?: string };
 
 function referenceKeys(row: IntakeRow) {
-  const values = [row._id, row.storageId, row.candidateStorageId, row.originalStorageId].filter((value): value is string => Boolean(value));
+  const values = [row._id, row.storageId, row.candidateStorageId, row.originalStorageId, row.originalSha256].filter((value): value is string => Boolean(value));
   return new Set(values.flatMap((value) => [value, `asset:${value}`, `storage:${value}`]));
 }
 

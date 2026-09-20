@@ -1,3 +1,4 @@
+import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
 import {
   applyContentPatch,
   effectChangedPathsForUpdate,
@@ -983,7 +984,7 @@ async function runAttempt(
             ...(explicitlyTargetsFocusedArtifact &&
             promptDirectlyUsesFocusedContent(params.prompt) &&
             context.focusedArtifact
-              ? { focusedArtifact: context.focusedArtifact }
+              ? { focusedArtifact: boundedArtifactRead(context.focusedArtifact, { prompt: params.prompt }) }
               : {}),
             conversation,
           },

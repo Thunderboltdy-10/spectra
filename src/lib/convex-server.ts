@@ -93,6 +93,11 @@ async function getConvexClient() {
   return new ConvexHttpClient(getConvexUrl(), { logger: false, auth: token });
 }
 
+export async function storeArtifactContent(artifactId: string, content: unknown) {
+  const { persistDurableContent } = await import("./durable-content-server");
+  return persistDurableContent(content, artifactId, await getConvexClient());
+}
+
 function getPublicConvexClient() {
   return new ConvexHttpClient(getConvexUrl(), { logger: false });
 }
@@ -115,10 +120,13 @@ export async function convexQuery<TArgs extends object, TResult>(
   args: TArgs,
 ) {
   const fn = ref<"query">(name);
-  return (await getConvexClient()).query(
+  const client = await getConvexClient();
+  const result = await client.query(
     fn,
     authenticatedArgs(args),
-  ) as Promise<TResult>;
+  );
+  const { hydrateDurableContent } = await import("./durable-content-server");
+  return await hydrateDurableContent(result, client) as TResult;
 }
 
 export async function convexMutation<TArgs extends object, TResult>(
@@ -126,9 +134,22 @@ export async function convexMutation<TArgs extends object, TResult>(
   args: TArgs,
 ) {
   const fn = ref<"mutation">(name);
-  return (await getConvexClient()).mutation(
+  const client = await getConvexClient();
+  const input = authenticatedArgs(args) as Record<string, unknown>;
+  if (["changeGroups:commitCurrent", "changeGroups:createNamedCheckpoint", "changeGroups:checkpointBeforeAi"].includes(name) && typeof input.artifactId === "string") {
+    const { checkpointDurableContent } = await import("./durable-checkpoint-server");
+    await checkpointDurableContent(input.artifactId, client);
+  }
+  // These fields are immutable projection snapshots. The destination mutation
+  // still owns authorization, revision CAS, adoption and all native semantics.
+  if (name.startsWith("replicas:") && typeof input.workId === "string") {
+    const { persistDurableContent } = await import("./durable-content-server");
+    for (const key of ["content", "projectionBaseContent", "baseContent", "projectionContent"])
+      if (input[key] !== undefined) input[key] = await persistDurableContent(input[key], input.workId, client);
+  }
+  return client.mutation(
     fn,
-    authenticatedArgs(args),
+    input,
   ) as Promise<TResult>;
 }
 
@@ -165,4 +186,13 @@ export async function convexPublicAction<TArgs extends object, TResult>(
 ) {
   const fn = ref<"action">(name);
   return getPublicConvexClient().action(fn, args) as Promise<TResult>;
+}
+
+export async function hydrateContentForWrite(artifactId: string, content: unknown) {
+  const { isDurableContentRef } = await import("../../shared/durable-content");
+  if (!isDurableContentRef(content)) return content;
+  const client = await getConvexClient();
+  await client.query(ref<"query">("artifactContent:validateWrite"), {artifactId,content});
+  const {hydrateDurableContent} = await import("./durable-content-server");
+  return hydrateDurableContent(content,client);
 }

@@ -129,3 +129,18 @@ export async function uploadNativePayload(
     mediaType,
   });
 }
+
+/** Legacy Library imports kept their exact original but lacked a native replica.
+ * Adopt a separate verified copy into the existing payload/replica lifecycle. */
+export async function ensureImportedNativePayload(workId: Id<"spectraArtifacts">) {
+  const existing = await convexQuery("replicas:payloadForWork",{workId,prefer:"cloud"});
+  if (existing) return;
+  const original = await convexQuery<{artifactId:Id<"spectraArtifacts">},{url:string|null;hash:string;bytes:number;nativeFormat:string;content:unknown}|null>("artifactImports:nativeOriginal",{artifactId:workId});
+  if (!original?.url) return;
+  const response = await fetch(original.url,{cache:"no-store"});
+  if (!response.ok) throw new Error("NATIVE_PAYLOAD_FETCH_FAILED");
+  const payload = new Uint8Array(await response.arrayBuffer());
+  if (payload.byteLength !== original.bytes || await sha256Payload(payload) !== original.hash) throw new Error("NATIVE_PAYLOAD_VERIFICATION_FAILED");
+  const stored = await uploadNativePayload(workId,payload,original.hash,original.nativeFormat);
+  await convexMutation("replicas:attachPortablePayload",{workId,payloadRef:stored.payloadRef,contentHash:original.hash,nativeFormat:original.nativeFormat,projectionBaseContent:original.content});
+}

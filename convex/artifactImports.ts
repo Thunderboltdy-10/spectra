@@ -1,6 +1,8 @@
+import { loadVersionAfter } from "./artifactSnapshots";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { action, internalMutation } from "./_generated/server";
+import { validateContentAdoption } from "./collaborationDurablePayload";
+import { action, query } from "./_generated/server";
+import { mutation, internalMutation } from "./orgNodeMutation";
 import { api, internal } from "./_generated/api";
 import { writeAuditEvent } from "./auditShared";
 import { recordMeterEvent } from "./metering";
@@ -332,6 +334,7 @@ export const complete = mutation({
       throw new Error("IMPORT_ORIGINAL_REQUIRED");
     let importedContent: unknown = undefined;
     if (args.status === "imported" && args.importedContent !== undefined) {
+      await validateContentAdoption(ctx, artifact._id, actor.accountId, args.importedContent);
       const encoded = JSON.stringify(args.importedContent);
       if (new TextEncoder().encode(encoded).byteLength > MAX_PERSISTED_CONTENT_BYTES)
         throw new Error("IMPORT_SNAPSHOT_TOO_LARGE");
@@ -447,5 +450,20 @@ export const getForOwner = query({
     const { actor } = await requireArtifactCapability(ctx, job.artifactId, "modify");
     if (job.ownerAccountId !== actor.accountId) throw new Error("AUTH_NO_ACCESS");
     return { jobId: job._id, artifactId: job.artifactId, status: job.status, ownerAccountId: job.ownerAccountId };
+  },
+});
+
+/** Read the verified imported base through current artifact authority. */
+export const nativeOriginal = query({
+  args:{artifactId:v.id("spectraArtifacts")},
+  handler:async(ctx,args) => {
+    await requireArtifactCapability(ctx,args.artifactId,"modify");
+    const jobs = await ctx.db.query("artifactImportJobs").withIndex("by_artifact",q=>q.eq("artifactId",args.artifactId)).order("desc").take(50);
+    const job = jobs.find(row => row.status === "imported" && row.originalStorageId && row.artifactVersionId && /^(docx|xlsx|xlsm|xltx|xltm|xlam|pptx|pptm|potx|potm|ppsx|ppsm|ppam)$/.test(row.format));
+    if (!job?.originalStorageId || !job.artifactVersionId) return null;
+    const version = await ctx.db.get(job.artifactVersionId);
+    if (!version || version.artifactId !== args.artifactId) return null;
+    const snapshot = await loadVersionAfter(ctx,version) as {content?:unknown};
+    return {url:await ctx.storage.getUrl(job.originalStorageId),hash:job.originalSha256,bytes:job.originalBytes,nativeFormat:job.format,content:snapshot.content};
   },
 });

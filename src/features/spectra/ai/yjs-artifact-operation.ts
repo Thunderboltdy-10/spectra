@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import WebSocket from "ws";
+import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { AiDurableAckGate } from "@/features/spectra/ai/ai-durable-ack";
@@ -207,6 +208,7 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
       const message = JSON.parse(payload) as {
         type?: string;
         updateIds?: unknown;
+        documentHash?: string;
       };
       const updateIds = Array.isArray(message.updateIds)
         ? message.updateIds.filter(
@@ -214,6 +216,11 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
               typeof value === "string" && value.length <= 400,
           )
         : [];
+      if (message.type === "spectra.durable_ack" && message.documentHash) {
+        const hash = createHash("sha256").update(Y.encodeStateAsUpdate(this.document)).digest("hex");
+        if (hash === message.documentHash) this.durableAck.confirmCurrentDocument();
+        return;
+      }
       if (typeof message.type === "string")
         this.durableAck.handleGatewayMessage(message.type, updateIds);
     } catch {
@@ -307,7 +314,7 @@ async function createAiRealtimeProvider(params: {
   const providerBox: { current?: HocuspocusAiRealtimeProvider } = {};
   const rawProvider = new HocuspocusProvider({
     url: session.url,
-    WebSocketPolyfill: WebSocket,
+    WebSocketPolyfill: framedWebSocket(WebSocket),
     name: session.documentName,
     document,
     token: session.token,
@@ -338,7 +345,7 @@ async function createAiRealtimeProvider(params: {
         );
     },
   } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
-    WebSocketPolyfill: typeof WebSocket;
+    WebSocketPolyfill: ReturnType<typeof framedWebSocket>;
   });
   providerBox.current = new HocuspocusAiRealtimeProvider(rawProvider);
   return providerBox.current;

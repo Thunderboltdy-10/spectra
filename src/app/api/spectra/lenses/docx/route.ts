@@ -1,3 +1,5 @@
+import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
 import { z } from "zod";
@@ -234,7 +236,13 @@ async function materializeDocxArtifactAttempt(
     state: local ? "pending" : "cloud_saved",
   };
   const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
+  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", {
+    workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: truth.revision,
+    projectionContent: compactDocxProjectionForStorage(nextProjection),
+    projectionContentHash: nextProjection.nativeBinding.semanticDigest, fidelityMap: next.fidelityMap, nativeReceipt,
+  });
   if (!local) {
+    await saveCloud();
     return {
       state: "cloud_saved" as const,
       hash,
@@ -297,6 +305,7 @@ async function materializeDocxArtifactAttempt(
     if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
       return materializeDocxArtifactAttempt(workId, content, attempt + 1, options);
     if (error instanceof Error && error.message.includes("LOCAL_REPLICA_UNAVAILABLE")) {
+      await saveCloud();
       return {
         state: "cloud_saved" as const,
         hash,
@@ -404,6 +413,10 @@ export async function POST(request: Request) {
   try {
     const input = requestSchema.parse(await request.json());
     const workId = artifactId(input.artifactId);
+    if (input.action === "materialize") {
+      await ensureImportedNativePayload(workId);
+      input.content = await hydrateContentForWrite(input.artifactId, input.content);
+    }
 
     if (input.action === "open") {
       let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
@@ -498,7 +511,7 @@ export async function POST(request: Request) {
         String(workId),
         truth.hash,
       );
-      await convexMutation<
+      const activation = await convexMutation<
         {
           workId: Id<"spectraArtifacts">;
           payloadHash: string;
@@ -507,7 +520,7 @@ export async function POST(request: Request) {
           semanticDigest: string;
           nativeFormat: string;
         },
-        unknown
+        { activated: boolean }
       >("replicas:activateLens", {
         workId,
         payloadHash: truth.hash,
@@ -516,6 +529,7 @@ export async function POST(request: Request) {
         semanticDigest: activatedProjection.nativeBinding.semanticDigest,
         nativeFormat: activatedProjection.nativeBinding.format,
       });
+      if (!activation.activated) return NextResponse.json({ state: "opened" });
       return NextResponse.json({
         state: "opened",
         projection: activatedProjection,

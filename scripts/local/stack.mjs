@@ -570,9 +570,18 @@ async function existingLocalBackend(paths, ports) {
   ) {
     return null;
   }
-  const runningName = await fetchText(
+  const listening = !(await portIsFree(ports.convexCloud, "127.0.0.1"));
+  let runningName = await fetchText(
     `http://127.0.0.1:${ports.convexCloud}/instance_name`,
+    listening ? 30_000 : 1_500,
   );
+  if (listening && !runningName) {
+    process.stdout.write("Waiting for the saved local Convex backend to finish its startup work.\n");
+    await waitFor("saved local Convex backend", async () => {
+      runningName = await fetchText(`http://127.0.0.1:${ports.convexCloud}/instance_name`, 30_000);
+      return Boolean(runningName);
+    }, { timeoutMs: LOCAL_CONVEX_READY_TIMEOUT_MS });
+  }
   return runningName?.trim() === deploymentName
     ? { deploymentName, adminKey }
     : null;

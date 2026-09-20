@@ -160,6 +160,8 @@ describe("P4.I2 artifact target resolution", () => {
     }) as {
       scheduledWorkBlocks: Array<Record<string, unknown>>;
       items: Array<Record<string, unknown>>;
+      coverage: Record<string, unknown>;
+      counts: Record<string, unknown>;
     };
     expect(compact.scheduledWorkBlocks).toMatchObject([
       {

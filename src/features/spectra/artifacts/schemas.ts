@@ -600,6 +600,11 @@ export const presentationContentSchema = z
     });
   });
 
+const sheetBorderEdgeSchema = z.object({
+  style: z.enum(["thin", "medium", "thick", "dashed", "dotted", "double", "hair"]),
+  color: z.string().max(80).optional(),
+});
+
 const cellSchema = z.object({
   value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
   formula: z.string().max(8_000).optional(),
@@ -610,15 +615,29 @@ const cellSchema = z.object({
       bold: z.boolean().optional(),
       italic: z.boolean().optional(),
       underline: z.boolean().optional(),
-      align: z.enum(["left", "center", "right"]).optional(),
+      strike: z.boolean().optional(),
+      align: z.enum(["left", "center", "right", "justify"]).optional(),
+      verticalAlign: z.enum(["top", "middle", "bottom"]).optional(),
+      wrap: z.boolean().optional(),
+      rotation: z.number().min(-90).max(90).optional(),
+      indent: z.number().int().min(0).max(250).optional(),
       numberFormat: z
-        .enum(["general", "number", "currency", "percent", "date"])
+        .enum(["general", "number", "currency", "accounting", "percent", "fraction", "scientific", "date", "time", "text", "custom"])
         .optional(),
+      customFormat: z.string().max(2_000).optional(),
+      currency: z.string().max(10).optional(),
       decimals: z.number().int().min(0).max(12).optional(),
-      fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
-      fontSize: z.number().min(6).max(72).optional(),
+      thousands: z.boolean().optional(),
+      fontFamily: z.string().min(1).max(500).optional(),
+      fontSize: z.number().positive().max(409).optional(),
       textColor: z.string().max(80).optional(),
       fillColor: z.string().max(80).optional(),
+      borders: z.object({
+        top: sheetBorderEdgeSchema.nullable().optional(),
+        right: sheetBorderEdgeSchema.nullable().optional(),
+        bottom: sheetBorderEdgeSchema.nullable().optional(),
+        left: sheetBorderEdgeSchema.nullable().optional(),
+      }).optional(),
     })
     .optional(),
   validation: z.record(z.string(), z.unknown()).optional(),
@@ -651,6 +670,12 @@ export const sheetsContentSchema = z
               id,
               name: z.string().min(1).max(100),
               range: z.string().min(2).max(100),
+              style: z.enum(["plain", "striped", "accent"]).optional(),
+              totalsRow: z.boolean().optional(),
+              sortKeys: z.array(z.object({
+                column: z.number().int().nonnegative().max(16_383),
+                direction: z.enum(["asc", "desc"]),
+              })).optional(),
               filters: z
                 .array(
                   z.object({
@@ -692,6 +717,7 @@ export const sheetsContentSchema = z
               ]),
               sourceRange: z.string().min(2).max(100),
               title: z.string().max(300),
+              showLegend: z.boolean().optional(),
               position: z.object({
                 x: z.number(),
                 y: z.number(),
@@ -762,6 +788,11 @@ export const sheetsContentSchema = z
             .optional(),
           rowIdentities: z.record(z.string(), id).optional(),
           columnIdentities: z.record(z.string(), id).optional(),
+          tabColor: z.string().max(80).optional(),
+          hidden: z.boolean().optional(),
+          showGridlines: z.boolean().optional(),
+          showHeadings: z.boolean().optional(),
+          protection: z.object({ locked: z.boolean(), note: z.string().max(20_000).optional() }).optional(),
         }),
       )
       .min(1),

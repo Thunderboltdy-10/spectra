@@ -527,6 +527,11 @@ function stateVectorHash(document: Y.Doc) {
     .digest("base64url");
 }
 
+// Dense native models can take seconds to project/validate. Let socket messages
+// and lease heartbeats run between stages instead of blocking them for a whole
+// read/validate/plan/rebase pipeline.
+const yieldForCollaboration = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 async function createCollaborationSession(
   artifactId: string,
   clientId: string,
@@ -946,14 +951,14 @@ async function synchronizeMutation(params: {
    * visible performance and conflict snapshots must start from that new truth,
    * not from the value that existed when the model response first arrived.
    */
-  rebaseAfterHumanWait?: () => {
+  rebaseAfterHumanWait?: () => Promise<{
     plan: ArtifactYjsMutationPlan;
     desired: ArtifactLiveValue;
     streamBase: ArtifactLiveValue;
     streamBeats: readonly AiStreamBeat[];
     baseSnapshot: ArtifactRegionSnapshot;
     proposedSnapshot: ArtifactRegionSnapshot;
-  };
+  } | undefined>;
 }) {
   const logPhase = (phase: string, detail: Record<string, unknown> = {}) =>
     console.info("[spectra.ai.artifact.phase]", {
@@ -1029,7 +1034,7 @@ async function synchronizeMutation(params: {
       onConflictResolved: params.onConflictResolved,
     });
   }
-  const rebased = params.rebaseAfterHumanWait?.();
+  const rebased = await params.rebaseAfterHumanWait?.();
   if (rebased) {
     plan = rebased.plan;
     desired = rebased.desired;
@@ -1055,7 +1060,7 @@ async function synchronizeMutation(params: {
     baseSnapshot,
     proposedSnapshot,
   });
-  const afterClaimWait = params.rebaseAfterHumanWait?.();
+  const afterClaimWait = await params.rebaseAfterHumanWait?.();
   if (afterClaimWait) {
     plan = afterClaimWait.plan;
     desired = afterClaimWait.desired;
@@ -1777,6 +1782,7 @@ export async function applyAiArtifactMutation(params: {
     }
 
     let current = readLiveYjsDocument(document, typeKey);
+    await yieldForCollaboration();
     if (!current) {
       const baselineContent = normalizeArtifactContent(
         typeKey,
@@ -1878,11 +1884,13 @@ export async function applyAiArtifactMutation(params: {
       };
     };
     const normalizedDesired = resolveValidatedValue(current);
+    await yieldForCollaboration();
     const initialPlan = planLiveYjsMutation(
       document,
       typeKey,
       normalizedDesired,
     );
+    await yieldForCollaboration();
     if (initialPlan.regions.length === 0)
       return {
         artifactId: params.artifactId,
@@ -1911,11 +1919,14 @@ export async function applyAiArtifactMutation(params: {
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
     // preserved by field-level patch operations rather than overwritten from
     // an earlier database projection.
+    let plannedStateVector = stateVectorHash(document);
     const refreshed = readLiveYjsDocument(document, typeKey);
+    await yieldForCollaboration();
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
     const refreshedValue = pendingCreate
       ? normalizedDesired
       : resolveValidatedValue(refreshed);
+    await yieldForCollaboration();
     const refreshedPlan = pendingCreate
       ? {
           regions: [
@@ -1942,6 +1953,7 @@ export async function applyAiArtifactMutation(params: {
           },
         }
       : planLiveYjsMutation(document, typeKey, refreshedValue);
+    await yieldForCollaboration();
     const changedRegionIds = refreshedPlan.regions.map(
       (region) => region.regionId,
     );
@@ -1950,6 +1962,11 @@ export async function applyAiArtifactMutation(params: {
       refreshedValue,
       choreographyForOperations(typeKey, params.operations),
     );
+    await yieldForCollaboration();
+    const baseSnapshot = snapshotArtifactRegions(typeKey, refreshed, changedRegionIds);
+    await yieldForCollaboration();
+    const proposedSnapshot = snapshotArtifactRegions(typeKey, refreshedValue, changedRegionIds);
+    await yieldForCollaboration();
     const result = await synchronizeMutation({
       document,
       provider,
@@ -1967,18 +1984,14 @@ export async function applyAiArtifactMutation(params: {
       onConflict: params.onConflict,
       onConflictResolved: params.onConflictResolved,
       beforeCommit: params.beforeCommit,
-      baseSnapshot: snapshotArtifactRegions(
-        typeKey,
-        refreshed,
-        changedRegionIds,
-      ),
-      proposedSnapshot: snapshotArtifactRegions(
-        typeKey,
-        refreshedValue,
-        changedRegionIds,
-      ),
-      rebaseAfterHumanWait: () => {
+      baseSnapshot,
+      proposedSnapshot,
+      rebaseAfterHumanWait: async () => {
+        const nextStateVector = stateVectorHash(document);
+        if (nextStateVector === plannedStateVector) return undefined;
+        plannedStateVector = nextStateVector;
         const liveBase = readLiveYjsDocument(document, typeKey);
+        await yieldForCollaboration();
         if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
         if (pendingCreate) {
           return {
@@ -2001,7 +2014,9 @@ export async function applyAiArtifactMutation(params: {
           };
         }
         const liveDesired = resolveValidatedValue(liveBase);
+        await yieldForCollaboration();
         const livePlan = planLiveYjsMutation(document, typeKey, liveDesired);
+        await yieldForCollaboration();
         const liveRegionIds = livePlan.regions.map((region) => region.regionId);
         return {
           plan: livePlan,

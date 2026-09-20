@@ -1,4 +1,5 @@
 import type { NativeProgressUpdate, Surface } from "./contract";
+import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
@@ -1054,10 +1055,10 @@ export async function executeOperation(
           executionId: context.executionId,
           title: live.title,
           ...(live.summary !== undefined ? { summary: live.summary } : {}),
-          content: encodeArtifactContentForStorage(
+          content: await storeArtifactContent(input.artifactId, encodeArtifactContentForStorage(
             artifact.blueprintKey,
             live.content,
-          ),
+          )),
           tags: live.tags,
           changedPaths: effectChangedPathsForUpdate(operation),
           ...(context.operationIndex !== undefined

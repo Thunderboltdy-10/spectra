@@ -701,7 +701,7 @@ async function startInstance(instanceId, options, environment) {
     const collaboration = spawnService(
       "Collaboration gateway",
       process.execPath,
-      [resolve(repositoryRoot, "scripts", "serve-collaboration-gateway.mjs"), "--supervise"],
+      [resolve(repositoryRoot, "scripts", "serve-collaboration-gateway.mjs"), "--supervise", "--env-file", paths.appEnv],
       { cwd: repositoryRoot, env: finalEnv },
     );
     const web = spawnService(

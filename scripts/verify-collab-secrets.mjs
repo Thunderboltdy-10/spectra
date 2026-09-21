@@ -23,16 +23,16 @@ const gatewayEnv = { ...process.env };
 
 // Simulate Next: --env-file=.env.local fills empty keys including ports.
 loadCollaborationEnv(envPath, nextEnv, { applyFilePorts: true });
-// Simulate serve-collaboration-gateway: secrets from file, ports from process/default.
-loadCollaborationEnv(envPath, gatewayEnv, { applyFilePorts: false });
+// The supported gateway uses the same environment precedence, including ports.
+loadCollaborationEnv(envPath, gatewayEnv);
 if (!stripEnvValue(gatewayEnv.SPECTRA_COLLAB_PORT)) {
   gatewayEnv.SPECTRA_COLLAB_PORT = stripEnvValue(process.env.SPECTRA_COLLAB_PORT) || "1234";
 }
 
-const nextToken = stripEnvValue(nextEnv.SPECTRA_COLLAB_TOKEN_SECRET);
-const gwToken = stripEnvValue(gatewayEnv.SPECTRA_COLLAB_TOKEN_SECRET);
-const nextBridge = stripEnvValue(nextEnv.SPECTRA_COLLAB_BRIDGE_KEY);
-const gwBridge = stripEnvValue(gatewayEnv.SPECTRA_COLLAB_BRIDGE_KEY);
+const nextToken = nextEnv.SPECTRA_COLLAB_TOKEN_SECRET;
+const gwToken = gatewayEnv.SPECTRA_COLLAB_TOKEN_SECRET;
+const nextBridge = nextEnv.SPECTRA_COLLAB_BRIDGE_KEY;
+const gwBridge = gatewayEnv.SPECTRA_COLLAB_BRIDGE_KEY;
 
 const nextTokenFp = secretFingerprint(nextToken);
 const gwTokenFp = secretFingerprint(gwToken);

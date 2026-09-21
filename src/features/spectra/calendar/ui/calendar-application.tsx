@@ -46,6 +46,7 @@ import {
   type CalendarLayerKey,
   type CalendarOverview,
 } from "../domain/model";
+import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -359,24 +360,6 @@ function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
   return [...next.values()];
 }
 
-function parseOverview(data: Record<string, unknown>): CalendarOverview {
-  return {
-    timezone: String(data.timezone ?? "UTC"),
-    range: data.range as CalendarOverview["range"],
-    items: Array.isArray(data.items) ? data.items.map(calendarItemFromWire) : [],
-    unscheduledTasks: Array.isArray(data.unscheduledTasks)
-      ? data.unscheduledTasks.map(calendarItemFromWire)
-      : [],
-    partialTimeItems: Array.isArray(data.partialTimeItems)
-      ? data.partialTimeItems.map(calendarItemFromWire)
-      : [],
-    sourceState: data.sourceState as CalendarOverview["sourceState"],
-    lastUpdatedAt:
-      typeof data.lastUpdatedAt === "number" ? data.lastUpdatedAt : undefined,
-    migration: data.migration as CalendarOverview["migration"],
-  };
-}
-
 async function calendarPost(body: Record<string, unknown>) {
   const response = await fetch("/api/spectra/calendar", {
     method: "POST",
@@ -387,14 +370,6 @@ async function calendarPost(body: Record<string, unknown>) {
   if (!response.ok)
     throw new Error(payload?.error?.message ?? "Calendar action failed.");
   return payload.data;
-}
-
-async function fetchOverview(from: number, to: number) {
-  const response = await fetch(`/api/spectra/calendar?from=${from}&to=${to}`);
-  const payload = await response.json();
-  if (!response.ok)
-    throw new Error(payload?.error?.message ?? "Could not load Calendar.");
-  return parseOverview(payload.data as Record<string, unknown>);
 }
 
 type DragPayload =
@@ -425,6 +400,8 @@ export function CalendarApplication() {
   const [overview, setOverview] = useState<CalendarOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
+  const overviewRequestRef = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<CalendarItem | null>(null);
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
@@ -471,9 +448,14 @@ export function CalendarApplication() {
   );
 
   const applyOverview = useCallback(
-    (incoming: CalendarOverview, mode: "replace" | "merge") => {
+    (incoming: CalendarOverview, mode: "replace" | "merge", appendPage = false) => {
       setOverview((current) => {
         if (!current || mode === "replace") return incoming;
+        if (appendPage) {
+          const merged = mergeCalendarPages(current, incoming);
+          merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
+          return merged;
+        }
         const retainFrom = visibleRange.from - EXTEND_DAYS * DAY;
         const retainTo = visibleRange.to + EXTEND_DAYS * DAY;
         return {
@@ -492,26 +474,44 @@ export function CalendarApplication() {
   );
 
   const load = useCallback(
-    async (mode: "replace" | "merge" = "replace", from?: number, to?: number, showRefresh = false) => {
+    async (mode: "replace" | "merge" = "replace", from?: number, to?: number, showRefresh = false, nextPage?: CalendarContinuation) => {
+      // Extending the view while its old range is incomplete must not discard
+      // that range's undiscovered tail. Restart the bounded combined range;
+      // completed ordinary extensions still read only the newly exposed days.
+      const includeCurrentRange = mode === "merge" && !nextPage && Boolean(continuation || overviewRequestRef.current);
+      const requestFrom = includeCurrentRange ? Math.min(from ?? visibleRange.from, visibleRange.from) : from ?? visibleRange.from;
+      const requestTo = includeCurrentRange ? Math.max(to ?? visibleRange.to, visibleRange.to) : to ?? visibleRange.to;
+      overviewRequestRef.current?.abort();
+      const request = new AbortController();
+      overviewRequestRef.current = request;
+      if (!nextPage) setContinuation(null);
       if (showRefresh) setRefreshing(true);
       setError("");
       try {
-        const data = await fetchOverview(from ?? visibleRange.from, to ?? visibleRange.to);
-        applyOverview(data, mode);
+        const result = await fetchCalendarOverview(requestFrom, requestTo, { signal: request.signal, continuation: nextPage });
+        if (request.signal.aborted || overviewRequestRef.current !== request) return;
+        applyOverview(result.overview, mode, Boolean(nextPage));
+        setContinuation(result.continuation);
       } catch (nextError) {
+        if (request.signal.aborted || overviewRequestRef.current !== request) return;
         setError(
           describeFailure(nextError, {
             fallback: "Check your connection, then try loading Calendar again.",
           }).message,
         );
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (overviewRequestRef.current === request) {
+          overviewRequestRef.current = null;
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
-    [applyOverview, visibleRange.from, visibleRange.to],
+    [applyOverview, continuation, visibleRange.from, visibleRange.to],
   );
   loadRef.current = load;
+
+  useEffect(() => () => overviewRequestRef.current?.abort(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1139,6 +1139,14 @@ export function CalendarApplication() {
             </button>
           </div>
         </div>
+        {continuation && !error ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-[var(--text-secondary)]" role="status">
+            <span>Calendar is partially loaded.</span>
+            <Button variant="secondary" size="sm" disabled={refreshing} onClick={() => void load("merge", continuation.from, continuation.to, true, continuation)}>
+              {refreshing ? "Loading more…" : "Load more"}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="spectra-item-rail-stage spectra-calendar-body min-h-0 flex-1">
@@ -1198,7 +1206,9 @@ export function CalendarApplication() {
               </p>
             ) : !unscheduledPlans.length ? (
               <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
-                {planQuery
+                {continuation?.cursors.planner
+                  ? "Load more to finish checking plans."
+                  : planQuery
                   ? `No plans match “${planQuery}”.`
                   : "No unscheduled plans. Create one from Library, then drag it onto a day."}
               </p>

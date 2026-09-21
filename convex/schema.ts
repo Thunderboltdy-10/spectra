@@ -1390,6 +1390,7 @@ export default defineSchema({
     .index("by_account_status_end", ["ownerAccountId", "status", "endAt"])
     .index("by_account_status_kind", ["ownerAccountId", "status", "kind"])
     .index("by_account_status_title", ["ownerAccountId", "status", "title"])
+    .index("by_account_status_title_item", ["ownerAccountId", "status", "title", "itemId"])
     .index("by_account_status_source", [
       "ownerAccountId",
       "status",

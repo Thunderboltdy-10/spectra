@@ -4,8 +4,10 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
+import { CALENDAR_DONE_CURSOR } from "../shared/calendar-pagination";
 import {
   CALENDAR_RANGE_BUCKET_MS,
+  CALENDAR_RANGE_BUCKET_LIMIT,
   calendarBucketKey,
   calendarItemReadModelFor,
   calendarItemWire,
@@ -103,9 +105,9 @@ type CalendarCursor = {
   kind: "visible" | "partial";
   kindIndex?: number;
   cursor?: string | null;
+  phase?: "range" | "wide" | "unscheduled";
   updatedAt?: number;
   key?: string;
-  seen?: string[];
 };
 
 type KeysetCursor = { updatedAt: number; key: string };
@@ -149,18 +151,6 @@ function decodeKeysetCursor(
   }
 }
 
-function afterKeyset(
-  updatedAt: number,
-  key: string,
-  cursor: KeysetCursor | undefined,
-) {
-  return (
-    !cursor ||
-    updatedAt > cursor.updatedAt ||
-    (updatedAt === cursor.updatedAt && key > cursor.key)
-  );
-}
-
 function rowKeyset(updatedAt: number, key: string): KeysetCursor {
   return { updatedAt, key };
 }
@@ -189,8 +179,8 @@ async function readVisibleCalendarItems(
   cursor: CalendarCursor | undefined,
   metrics: CalendarReadMetrics,
 ) {
-  const seen = new Set(cursor?.kind === "visible" ? (cursor.seen ?? []) : []);
-  const rows = new Map<string, ReadModelRow>();
+  const phase = cursor?.kind === "visible" ? (cursor.phase ?? "range") : "range";
+  const rows: ReadModelRow[] = [];
   const firstBucket = calendarBucketKey(
     Math.floor(from / CALENDAR_RANGE_BUCKET_MS),
   );
@@ -198,43 +188,32 @@ async function readVisibleCalendarItems(
     Math.floor(to / CALENDAR_RANGE_BUCKET_MS),
   );
   metrics.compactQueries += 1;
+  // Only one native pagination call per overview query. Each bucket stream
+  // owns its continuation, including long and undated events.
   const bucketPage = await ctx.db
     .query("calendarItemRangeBuckets")
     .withIndex("by_account_status_bucket", (q) =>
-      q
-        .eq("ownerAccountId", accountId)
-        .eq("status", "active")
-        .gte("bucketKey", firstBucket)
-        .lte("bucketKey", lastBucket),
+      phase === "range"
+        ? q.eq("ownerAccountId", accountId).eq("status", "active")
+            .gte("bucketKey", firstBucket).lte("bucketKey", lastBucket)
+        : q.eq("ownerAccountId", accountId).eq("status", "active")
+            .eq("bucketKey", phase === "wide" ? "__wide__" : "__unscheduled__"),
     )
     .paginate({
       cursor: cursor?.kind === "visible" ? (cursor.cursor ?? null) : null,
       numItems: limit,
     });
   metrics.rangeRowsRead += bucketPage.page.length;
-  const wideRows = await ctx.db
-    .query("calendarItemRangeBuckets")
-    .withIndex("by_account_status_bucket", (q) =>
-      q
-        .eq("ownerAccountId", accountId)
-        .eq("status", "active")
-        .eq("bucketKey", "__wide__"),
-    )
-    .take(limit);
-  metrics.compactQueries += 1;
-  const unscheduledRows = await ctx.db
-    .query("calendarItemRangeBuckets")
-    .withIndex("by_account_status_bucket", (q) =>
-      q
-        .eq("ownerAccountId", accountId)
-        .eq("status", "active")
-        .eq("bucketKey", "__unscheduled__"),
-    )
-    .take(limit);
-  metrics.rangeRowsRead += wideRows.length + unscheduledRows.length;
-  for (const bucket of [...bucketPage.page, ...wideRows, ...unscheduledRows]) {
-    const itemKey = String(bucket.itemId);
-    if (seen.has(itemKey) || rows.has(itemKey)) continue;
+  for (const bucket of bucketPage.page) {
+    if (bucket.startAt !== undefined) {
+      if (bucket.startAt > to || (bucket.endAt ?? bucket.startAt) < from) continue;
+      const startBucket = Math.floor(bucket.startAt / CALENDAR_RANGE_BUCKET_MS);
+      const firstOverlapBucket = Math.max(startBucket, Math.floor(from / CALENDAR_RANGE_BUCKET_MS));
+      // An event has one deterministic discovery bucket. No growing seen-id
+      // cursor and no duplicate when a long event crosses page boundaries.
+      if (phase === "range" && bucket.bucketKey !== calendarBucketKey(firstOverlapBucket)) continue;
+      if (phase === "wide" && firstOverlapBucket < startBucket + CALENDAR_RANGE_BUCKET_LIMIT - 1) continue;
+    }
     const item = await calendarItemReadModelFor(ctx, bucket.itemId, metrics);
     if (!item) continue;
     if (
@@ -242,20 +221,44 @@ async function readVisibleCalendarItems(
       !(item.startAt <= to && (item.endAt ?? item.startAt) >= from)
     )
       continue;
-    rows.set(itemKey, item);
-    seen.add(itemKey);
-    if (rows.size >= limit) break;
+    rows.push(item);
   }
+  const nextPhase = phase === "range" ? "wide" : phase === "wide" ? "unscheduled" : null;
   return {
-    rows: [...rows.values()].slice(0, limit),
+    rows,
     nextCursor: bucketPage.isDone
-      ? null
+      ? nextPhase ? encodeCursor({ kind: "visible", phase: nextPhase }) : null
       : encodeCursor({
           kind: "visible",
+          phase,
           cursor: bucketPage.continueCursor,
-          seen: [...seen].slice(-CALENDAR_MAX_PAGE_SIZE),
         }),
   };
+}
+
+async function readItemKeysetPage(
+  ctx: QueryCtx,
+  accountId: Id<"accounts">,
+  kind: "task" | "official_event" | "official_deadline",
+  count: number,
+  keyset: KeysetCursor | undefined,
+  metrics: CalendarReadMetrics,
+) {
+  const query = () => ctx.db.query("calendarItemReadModels");
+  const tieId = keyset && ctx.db.normalizeId("calendarItems", keyset.key);
+  const tied = keyset && tieId
+    ? await query().withIndex("by_account_status_kind_updated_item", q =>
+        q.eq("ownerAccountId", accountId).eq("status", "active").eq("kind", kind)
+          .eq("updatedAt", keyset.updatedAt).gt("itemId", tieId)).take(count)
+    : [];
+  if (keyset && tieId) metrics.compactQueries += 1;
+  if (tied.length === count) return tied;
+  metrics.compactQueries += 1;
+  const later = await query().withIndex("by_account_status_kind_updated_item", q => {
+    const scoped = q.eq("ownerAccountId", accountId).eq("status", "active").eq("kind", kind);
+    return keyset ? scoped.gt("updatedAt", keyset.updatedAt) : scoped;
+  }).take(count - tied.length);
+  return [...tied, ...later];
 }
 
 async function readUnscheduledTasks(
@@ -266,32 +269,15 @@ async function readUnscheduledTasks(
   metrics: CalendarReadMetrics,
 ) {
   const keyset = decodeKeysetCursor(cursor);
-  metrics.compactQueries += 1;
-  const page = await ctx.db
-    .query("calendarItemReadModels")
-    .withIndex("by_account_status_kind_updated_item", (q) => {
-      const scoped = q
-        .eq("ownerAccountId", accountId)
-        .eq("status", "active")
-        .eq("kind", "task");
-      return keyset ? scoped.gte("updatedAt", keyset.updatedAt) : scoped;
-    })
-    .take(limit + 1);
-  const candidates = page.filter((row) =>
-    afterKeyset(row.updatedAt, String(row.itemId), keyset),
-  );
+  const page = await readItemKeysetPage(ctx, accountId, "task", limit + 1, keyset, metrics);
+  const candidates = page.slice(0, limit);
   const rows = candidates
     .filter(
       (row) =>
         row.startAt === undefined && !row.sourceProvider && !row.planArtifactId,
     )
     .slice(0, limit);
-  const cursorRow =
-    rows.length >= limit
-      ? rows.at(-1)
-      : page.length > limit
-        ? page.at(-1)
-        : undefined;
+  const cursorRow = page.length > limit ? candidates.at(-1) : undefined;
   return {
     rows,
     nextCursor: cursorRow
@@ -311,23 +297,35 @@ async function readPlannerTasks(
 ) {
   const keyset = decodeKeysetCursor(cursor);
   const pageSize = Math.max(limit * 4, 25);
-  metrics.compactQueries += 1;
-  const page = await ctx.db
-    .query("calendarPlanTaskReadModels")
-    .withIndex("by_account_plan_status_updated_task", (q) => {
-      const scoped = q
-        .eq("ownerAccountId", accountId)
-        .eq("planStatus", "active");
-      return keyset ? scoped.gte("updatedAt", keyset.updatedAt) : scoped;
-    })
-    .take(pageSize + 1);
-  const candidates = page.filter((row) =>
-    afterKeyset(
-      row.updatedAt,
-      `${String(row.planArtifactId)}:${row.taskId}`,
-      keyset,
-    ),
-  );
+  const page: Doc<"calendarPlanTaskReadModels">[] = [];
+  const separator = keyset?.key.indexOf(":") ?? -1;
+  const planId = keyset && separator >= 0
+    ? ctx.db.normalizeId("spectraArtifacts", keyset.key.slice(0, separator)) : null;
+  if (keyset && planId) {
+    metrics.compactQueries += 1;
+    page.push(...await ctx.db.query("calendarPlanTaskReadModels")
+      .withIndex("by_account_plan_status_updated_task", q =>
+        q.eq("ownerAccountId", accountId).eq("planStatus", "active")
+          .eq("updatedAt", keyset.updatedAt).eq("planArtifactId", planId)
+          .gt("taskId", keyset.key.slice(separator + 1))).take(pageSize + 1));
+    if (page.length <= pageSize) {
+      metrics.compactQueries += 1;
+      page.push(...await ctx.db.query("calendarPlanTaskReadModels")
+        .withIndex("by_account_plan_status_updated_task", q =>
+          q.eq("ownerAccountId", accountId).eq("planStatus", "active")
+            .eq("updatedAt", keyset.updatedAt).gt("planArtifactId", planId))
+        .take(pageSize + 1 - page.length));
+    }
+  }
+  if (page.length <= pageSize) {
+    metrics.compactQueries += 1;
+    page.push(...await ctx.db.query("calendarPlanTaskReadModels")
+      .withIndex("by_account_plan_status_updated_task", q => {
+        const scoped = q.eq("ownerAccountId", accountId).eq("planStatus", "active");
+        return keyset ? scoped.gt("updatedAt", keyset.updatedAt) : scoped;
+      }).take(pageSize + 1 - page.length));
+  }
+  const candidates = page.slice(0, pageSize);
   const grouped = new Map<
     string,
     { rows: (typeof page)[number][]; last: (typeof page)[number] }
@@ -382,7 +380,7 @@ async function readPlannerTasks(
     };
   });
   const cursorRow =
-    selectedGroups.length >= limit
+    grouped.size > selectedGroups.length && selectedGroups.length >= limit
       ? selectedGroups.at(-1)?.[1].last
       : page.length > pageSize
         ? candidates.at(-1)
@@ -416,20 +414,8 @@ async function readPartialTimeItems(
   const rows: ReadModelRow[] = [];
   while (kindIndex < kinds.length) {
     const kind = kinds[kindIndex]!;
-    metrics.compactQueries += 1;
-    const page = await ctx.db
-      .query("calendarItemReadModels")
-      .withIndex("by_account_status_kind_updated_item", (q) => {
-        const scoped = q
-          .eq("ownerAccountId", accountId)
-          .eq("status", "active")
-          .eq("kind", kind);
-        return keyset ? scoped.gte("updatedAt", keyset.updatedAt) : scoped;
-      })
-      .take(limit + 1);
-    const candidates = page.filter((row) =>
-      afterKeyset(row.updatedAt, String(row.itemId), keyset),
-    );
+    const page = await readItemKeysetPage(ctx, accountId, kind, limit + 1, keyset, metrics);
+    const candidates = page.slice(0, limit);
     const partialRows = candidates.filter(
       (row) => row.timePrecision === "unknown" || row.startAt === undefined,
     );
@@ -490,7 +476,7 @@ export const overview = query({
       throw new Error("CALENDAR_RANGE_INVALID");
     const metrics = createCalendarReadMetrics();
     const limit = pageSize(args.limit);
-    const visiblePage = await readVisibleCalendarItems(
+    const visiblePage = args.cursor === CALENDAR_DONE_CURSOR ? { rows: [], nextCursor: null } : await readVisibleCalendarItems(
       ctx,
       actor.accountId,
       args.from,
@@ -499,21 +485,21 @@ export const overview = query({
       decodeCursor(args.cursor),
       metrics,
     );
-    const unscheduledPage = await readUnscheduledTasks(
+    const unscheduledPage = args.unscheduledCursor === CALENDAR_DONE_CURSOR ? { rows: [], nextCursor: null } : await readUnscheduledTasks(
       ctx,
       actor.accountId,
       limit,
       args.unscheduledCursor,
       metrics,
     );
-    const plannerPage = await readPlannerTasks(
+    const plannerPage = args.plannerCursor === CALENDAR_DONE_CURSOR ? { plans: [], nextCursor: null } : await readPlannerTasks(
       ctx,
       actor.accountId,
       limit,
       args.plannerCursor,
       metrics,
     );
-    const partialPage = await readPartialTimeItems(
+    const partialPage = args.partialCursor === CALENDAR_DONE_CURSOR ? { rows: [], nextCursor: null } : await readPartialTimeItems(
       ctx,
       actor.accountId,
       limit,
@@ -521,28 +507,32 @@ export const overview = query({
       metrics,
     );
     const migrationKeyset = decodeKeysetCursor(args.migrationCursor);
-    metrics.compactQueries += 1;
-    const migrationRows = await ctx.db
+    const migrationRows: Doc<"calendarMigrationReadModels">[] = [];
+    const migrationId = migrationKeyset && ctx.db.normalizeId("spectraArtifacts", migrationKeyset.key);
+    if (args.migrationCursor !== CALENDAR_DONE_CURSOR && migrationKeyset && migrationId) {
+      metrics.compactQueries += 1;
+      migrationRows.push(...await ctx.db.query("calendarMigrationReadModels")
+        .withIndex("by_account_artifact_status_updated_legacy", q =>
+          q.eq("ownerAccountId", actor.accountId).eq("artifactStatus", "active")
+            .eq("updatedAt", migrationKeyset.updatedAt).gt("legacyArtifactId", migrationId))
+        .take(limit + 1));
+    }
+    if (args.migrationCursor !== CALENDAR_DONE_CURSOR && migrationRows.length <= limit) {
+      metrics.compactQueries += 1;
+      migrationRows.push(...await ctx.db
       .query("calendarMigrationReadModels")
       .withIndex("by_account_artifact_status_updated_legacy", (q) => {
         const scoped = q
           .eq("ownerAccountId", actor.accountId)
           .eq("artifactStatus", "active");
         return migrationKeyset
-          ? scoped.gte("updatedAt", migrationKeyset.updatedAt)
+          ? scoped.gt("updatedAt", migrationKeyset.updatedAt)
           : scoped;
       })
-      .take(limit + 1);
-    const migrationCandidates = migrationRows.filter((row) =>
-      afterKeyset(row.updatedAt, String(row.legacyArtifactId), migrationKeyset),
-    );
-    const migrationPage = migrationCandidates.slice(0, limit);
-    const migrationCursorRow =
-      migrationPage.length >= limit
-        ? migrationPage.at(-1)
-        : migrationRows.length > limit
-          ? migrationRows.at(-1)
-          : undefined;
+      .take(limit + 1 - migrationRows.length));
+    }
+    const migrationPage = migrationRows.slice(0, limit);
+    const migrationCursorRow = migrationRows.length > limit ? migrationPage.at(-1) : undefined;
     const nextMigrationCursor = migrationCursorRow
       ? encodeKeysetCursor(
           rowKeyset(
@@ -585,27 +575,22 @@ export const overview = query({
       metrics.compactQueries += 1;
       const titleRows = await ctx.db
         .query("calendarItemReadModels")
-        .withIndex("by_account_status_title", (q) =>
-          q
+        .withIndex("by_account_status_title_item", (q) => {
+          const scoped = q
             .eq("ownerAccountId", actor.accountId)
             .eq("status", "active")
-            .eq("title", targetTitle),
-        )
+            .eq("title", targetTitle);
+          const itemId = titleKeyset && ctx.db.normalizeId("calendarItems", titleKeyset.key);
+          return itemId ? scoped.gt("itemId", itemId) : scoped;
+        })
         .take(limit + 1);
-      const matches = titleRows
-        .filter((row) => !titleKeyset || String(row.itemId) > titleKeyset.key)
-        .slice(0, limit);
+      const matches = titleRows.slice(0, limit);
       for (const row of matches) {
         const wire = calendarReadModelWire(row);
         if (wire && !targetItems.some((item) => item.id === wire.id))
           targetItems.push(wire);
       }
-      const titleCursorRow =
-        matches.length >= limit
-          ? matches.at(-1)
-          : titleRows.length > limit
-            ? titleRows.at(-1)
-            : undefined;
+      const titleCursorRow = titleRows.length > limit ? matches.at(-1) : undefined;
       targetTitleCursor = titleCursorRow
         ? encodeKeysetCursor(rowKeyset(0, String(titleCursorRow.itemId)))
         : null;
@@ -662,6 +647,7 @@ export const overview = query({
           : { kind: "available" as const, updatedAt: integration.lastSyncAt },
       lastUpdatedAt: lastUpdatedAt || undefined,
       migration: {
+        pageComplete: migrationPage.every(migration => migration.migrationStatus === "completed"),
         complete:
           nextMigrationCursor === null &&
           migrationPage.every(

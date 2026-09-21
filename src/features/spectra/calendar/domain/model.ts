@@ -104,6 +104,7 @@ export type CalendarOverview = {
   lastUpdatedAt?: number;
   migration: {
     complete: boolean;
+    pageComplete?: boolean;
     partial?: boolean;
     migratedArtifacts: number;
     migratedEvents: number;

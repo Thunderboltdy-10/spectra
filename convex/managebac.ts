@@ -119,6 +119,33 @@ async function assertCurrentSyncLease(
   }
 }
 
+/** A kept or archived class stops following at the source boundary, not just
+ * at the provider fan-out. Whole-account routes and shared reconciliations
+ * must also preserve that account's existing projections. */
+function classFollowPolicy(ctx: Ctx, integrationId: Id<"schoolIntegrations">) {
+  const selections = new Map<string, Promise<Doc<"managebacClassSelections">[]>>();
+  return async (
+    accountId: Id<"accounts"> | undefined,
+    source: { providerClassId?: string; academicPeriodKey?: string; recordType: string },
+  ) => {
+    if (!accountId || !source.providerClassId || ["class", "course", "membership"].includes(source.recordType)) return true;
+    const key = JSON.stringify([accountId, source.providerClassId]);
+    let pending = selections.get(key);
+    if (!pending) {
+      pending = ctx.db.query("managebacClassSelections")
+        .withIndex("by_integration_account_class", q => q.eq("integrationId", integrationId).eq("accountId", accountId).eq("providerClassId", source.providerClassId!))
+        .collect();
+      selections.set(key, pending);
+    }
+    const rows = await pending;
+    const matching = rows.filter(row =>
+      row.providerClassId === source.providerClassId &&
+      (!source.academicPeriodKey || !row.academicPeriodKey || row.academicPeriodKey === source.academicPeriodKey));
+    // Rows with no selection history retain the prior whole-account behavior.
+    return matching.length === 0 || matching.some(row => row.selected);
+  };
+}
+
 async function activeRunForScope(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
@@ -2826,7 +2853,12 @@ export const commitNormalizedPage = mutation({
     const now = Date.now();
     const counts = { ...syncRun.counts };
     counts.fetched += args.records.length;
+    const followsClass = classFollowPolicy(ctx, integration._id);
     for (const input of args.records) {
+      if (!await followsClass(syncRun.accountId, { ...input, recordType: capability.recordType })) {
+        counts.skipped += 1;
+        continue;
+      }
       const mappedAccountId =
         input.audienceScope === "mapped_user" ? syncRun.accountId : undefined;
       const canonicalKey = sourceIdentityKey(integration._id, mappedAccountId, {
@@ -2902,7 +2934,7 @@ export const commitNormalizedPage = mutation({
         });
         source = (await ctx.db.get(existing._id))!;
         counts.updated += 1;
-        const projections = await ctx.db
+        const candidateProjections = await ctx.db
           .query("externalProjections")
           .withIndex("by_record_type", (q) => q.eq("recordId", existing._id))
           .collect()
@@ -2911,6 +2943,8 @@ export const commitNormalizedPage = mutation({
               ? rows.filter((item) => item.accountId === syncRun.accountId)
               : rows,
           );
+        const following = await Promise.all(candidateProjections.map(projection => followsClass(projection.accountId, source)));
+        const projections = candidateProjections.filter((_, index) => following[index]);
         const overlays = syncRun.accountId
           ? await ctx.db
               .query("externalRecordOverlays")
@@ -3441,9 +3475,11 @@ export const completeSync = mutation({
         updatedAt: now,
       });
     let tombstoned = 0;
+    const followsClass = classFollowPolicy(ctx, integration._id);
     for (const source of currentRecords) {
       if (
         source.tombstone ||
+        !await followsClass(source.mappedAccountId ?? syncRun.accountId, source) ||
         (source.sourceIdentityKey !== undefined
           ? seenSourceIdentities.has(source.sourceIdentityKey)
           : seen.has(source.providerRecordKey))
@@ -3458,7 +3494,7 @@ export const completeSync = mutation({
         fetchedAt: now,
         updatedAt: now,
       });
-      const projections = await ctx.db
+      const candidateProjections = await ctx.db
         .query("externalProjections")
         .withIndex("by_record_type", (q) => q.eq("recordId", source._id))
         .collect()
@@ -3467,6 +3503,8 @@ export const completeSync = mutation({
             ? rows.filter((item) => item.accountId === syncRun.accountId)
             : rows,
         );
+      const following = await Promise.all(candidateProjections.map(projection => followsClass(projection.accountId, source)));
+      const projections = candidateProjections.filter((_, index) => following[index]);
       for (const projection of projections) {
         await markProjectionSourceRemoved(ctx, projection);
         await ctx.db.patch(projection._id, {

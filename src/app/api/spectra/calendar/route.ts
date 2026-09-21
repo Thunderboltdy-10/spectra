@@ -3,6 +3,7 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { CALENDAR_CURSOR_ARGS } from "../../../../../shared/calendar-pagination";
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -35,6 +36,10 @@ export async function GET(request: NextRequest) {
     if (targetItemId?.trim()) args.targetItemId = targetItemId.trim();
     if (targetTitle?.trim()) args.targetTitle = targetTitle.trim();
     if (limit !== undefined) args.limit = limit;
+    for (const key of [...Object.values(CALENDAR_CURSOR_ARGS), "targetCursor"]) {
+      const cursor = request.nextUrl.searchParams.get(key);
+      if (cursor) args[key] = cursor;
+    }
     const data = await convexQuery("calendar:overview", args);
     return ok({ data });
   }, request);

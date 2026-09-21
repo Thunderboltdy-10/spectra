@@ -2164,7 +2164,12 @@ function calculationCore(content: SheetsContent) {
               candidate.name.toUpperCase() === sheetName.toUpperCase(),
           );
           const targetRange = parseRange(
-            separator >= 0 ? named.slice(separator + 1) : named,
+            (separator >= 0 ? named.slice(separator + 1) : named)
+              .split(":")
+              // Named ranges retain Excel's absolute/mixed A1 locks. Strip
+              // only valid locks; malformed references must still be #REF!.
+              .map((address) => address.trim().replace(/^\$?([A-Z]{1,3})\$?([1-9][0-9]*)$/i, "$1$2"))
+              .join(":"),
           );
           if (!targetSheet || !targetRange) throw new Error("#REF!");
           const values = (

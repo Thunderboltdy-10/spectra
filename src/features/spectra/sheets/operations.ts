@@ -11,14 +11,11 @@ import {
   type SheetScalar,
   type SheetsContent,
 } from "./model";
-import {
-  collectFormulaReferences,
-  offsetFormula,
-  refTouchesAddress,
-} from "./formula-refs";
+import { offsetFormula } from "./formula-refs";
 import { dateToSerial, isIsoDateString } from "./excel-serial";
 import { changedSheetCellAddresses, patchSheetCellRecord } from "./cell-overlay";
 import { cachedFormulaCells } from "./cached-formulas";
+import { affectedFormulaCells } from "./formula-dependencies";
 
 export { offsetFormula } from "./formula-refs";
 
@@ -678,31 +675,15 @@ export function applyCachedStaleness(
     changedBySheet.set(sheet.id, changed);
   }
   if (![...changedBySheet.values()].some(changed => changed.size)) return next;
+  if (next.sheets.every(sheet => cachedFormulaCells(sheet.cells).size === 0)) return next;
+  const affected = affectedFormulaCells(next, changedBySheet);
   return {
     ...next,
     sheets: next.sheets.map((sheet) => {
       let touched = false;
       const patch: Record<string, SheetCell> = {};
       for (const [address, cell] of cachedFormulaCells(sheet.cells)) {
-        const ownChanged = changedBySheet.get(sheet.id)?.has(address);
-        const stale =
-          Boolean(ownChanged) ||
-          collectFormulaReferences(cell.formula!).some((ref) => {
-            const target =
-              next.sheets.find((candidate) =>
-                ref.sheet
-                  ? candidate.name.toUpperCase() ===
-                    ref.sheet.replace(/^'|'$/g, "").toUpperCase()
-                  : candidate.id === sheet.id,
-              ) ?? sheet;
-            const changed = changedBySheet.get(target.id);
-            if (!changed?.size) return false;
-            for (const changedAddress of changed) {
-              if (refTouchesAddress(ref, changedAddress, sheet.name, target.name))
-                return true;
-            }
-            return false;
-          });
+        const stale = affected.get(sheet.id)?.has(address);
         if (!stale || cell.cachedValueStale) continue;
         patch[address] = { ...cell, cachedValueStale: true };
         touched = true;

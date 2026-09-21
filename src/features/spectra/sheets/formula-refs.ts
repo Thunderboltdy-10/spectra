@@ -94,7 +94,7 @@ function renderHit(hit: FormulaRefHit, sheet = hit.sheet) {
  */
 export function mapFormulaReferences(
   formula: string,
-  mapper: (hit: FormulaRefHit) => string,
+  mapper: (hit: FormulaRefHit, span: { start: number; end: number }) => string,
 ): string {
   if (!formula) return formula;
   let out = "";
@@ -122,7 +122,7 @@ export function mapFormulaReferences(
     const refAt = sheet ? sheet.next : index;
     const rest = formula.slice(refAt);
 
-    const colRange = /^(\$?)([A-Z]{1,3}):(\$?)([A-Z]{1,3})(?![A-Z0-9_(])/.exec(rest);
+    const colRange = /^(\$?)([A-Z]{1,3}):(\$?)([A-Z]{1,3})(?![A-Z0-9_(])/i.exec(rest);
     if (colRange) {
       out += mapper({
         sheet: effectiveSheet,
@@ -137,13 +137,13 @@ export function mapFormulaReferences(
         endRowLock: "",
         wholeColumn: true,
         wholeRow: false,
-      });
+      }, { start: index, end: refAt + colRange[0].length });
       index = refAt + colRange[0].length;
       rangeSheet = null;
       continue;
     }
 
-    const rowRange = /^(\$?)([1-9][0-9]*):(\$?)([1-9][0-9]*)(?![0-9A-Z_(])/.exec(rest);
+    const rowRange = /^(\$?)([1-9][0-9]*):(\$?)([1-9][0-9]*)(?![0-9A-Z_(])/i.exec(rest);
     if (rowRange) {
       out += mapper({
         sheet: effectiveSheet,
@@ -158,13 +158,13 @@ export function mapFormulaReferences(
         endRowLock: rowRange[3]!,
         wholeColumn: false,
         wholeRow: true,
-      });
+      }, { start: index, end: refAt + rowRange[0].length });
       index = refAt + rowRange[0].length;
       rangeSheet = null;
       continue;
     }
 
-    const cell = /^(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)/.exec(rest);
+    const cell = /^(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)/i.exec(rest);
     if (cell) {
       const after = formula[refAt + cell[0].length];
       if (after && /[A-Za-z0-9_(]/.test(after)) {
@@ -185,7 +185,7 @@ export function mapFormulaReferences(
         endRowLock: cell[3]!,
         wholeColumn: false,
         wholeRow: false,
-      });
+      }, { start: index, end: refAt + cell[0].length });
       index = refAt + cell[0].length;
       rangeSheet = formula[index] === ":" ? (effectiveSheet ?? null) : null;
       continue;
@@ -342,9 +342,13 @@ export type CollectedRef = {
   end: CellCoordinate;
 };
 
-export function collectFormulaReferences(formula: string): CollectedRef[] {
+export function collectFormulaReferences(
+  formula: string,
+  namedRanges: ReadonlyMap<string, string> = new Map(),
+): CollectedRef[] {
   const refs: CollectedRef[] = [];
-  mapFormulaReferences(formula, (hit) => {
+  let previousEnd = -1;
+  const withoutReferences = mapFormulaReferences(formula, (hit, span) => {
     if (hit.wholeColumn) {
       const start = columnIndex(hit.letters);
       const end = columnIndex(hit.endLetters);
@@ -363,10 +367,25 @@ export function collectFormulaReferences(formula: string): CollectedRef[] {
       });
     } else {
       const coord = parseAddress(`${hit.letters}${hit.digits}`);
-      if (coord) refs.push({ sheet: hit.sheet, start: coord, end: coord });
+      if (coord) {
+        const previous = refs.at(-1);
+        if (previous && formula.slice(previousEnd, span.start).trim() === ":" &&
+          (hit.sheet === null || (previous.sheet !== null && sheetNamesEqual(previous.sheet, hit.sheet)))) {
+          previous.end = coord;
+        } else refs.push({ sheet: hit.sheet, start: coord, end: coord });
+      }
     }
-    return renderHit(hit);
+    previousEnd = span.end;
+    return " ".repeat(span.end - span.start);
   });
+  // Match the workbook-scoped range names supported by the calculation engine.
+  // Quoted strings, sheet prefixes and function calls must not become names.
+  const names = withoutReferences.replace(/"(?:[^"]|"")*"/g, " ");
+  for (const match of names.matchAll(/[A-Za-z_][A-Za-z0-9_.]*/g)) {
+    if (names.slice(match.index + match[0].length).trimStart().startsWith("(")) continue;
+    const definition = namedRanges.get(match[0].toUpperCase());
+    if (definition) refs.push(...collectFormulaReferences(definition));
+  }
   return refs;
 }
 

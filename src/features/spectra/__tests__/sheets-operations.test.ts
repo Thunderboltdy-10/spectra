@@ -36,7 +36,7 @@ import {
 } from "../sheets/model";
 import { dateToSerial } from "../sheets/excel-serial";
 import { patchSheetCellRecord } from "../sheets/cell-overlay";
-import { cachedFormulaCells } from "../sheets/cached-formulas";
+import { cachedFormulaCells, formulaCellTexts } from "../sheets/cached-formulas";
 
 /**
  * The workbook's operations, tested without a grid.
@@ -881,6 +881,151 @@ describe("sheets engine correctness", () => {
     const removed = patchSheetCellRecord(marked.sheets[0]!.cells, { C2: undefined });
     expect(cachedFormulaCells(removed).size).toBe(0);
     expect(cachedFormulaCells(original.cells).size).toBe(1);
+  });
+
+  it("propagates cached invalidation through cached and recalculable links without rewriting numbers", () => {
+    const previous = sheetOf({
+      D1: cached("=XLOOKUP(C1,C1:C1,C1:C1)", 10),
+      C1: live("=B1*10", 10),
+      B1: cached("=XLOOKUP(A1,A1:A1,A1:A1)", 1),
+      A1: { value: 1 }, E1: live("=A1+1", 2), F1: cached("=XLOOKUP(A9,A9:A9,A9:A9)", 9),
+    });
+    const sheet = previous.sheets[0]!;
+    const next = { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { A1: { value: 2 } }) }] };
+    const marked = applyCachedStaleness(previous, next);
+    expect(marked.sheets[0]!.cells.B1).toMatchObject({ value: 1, cachedValueStale: true });
+    expect(marked.sheets[0]!.cells.D1).toMatchObject({ value: 10, cachedValueStale: true });
+    for (const address of ["C1", "E1", "F1"]) expect(marked.sheets[0]!.cells[address]).toBe(sheet.cells[address]);
+    expect(sheetsCalculation(marked).get("s1:E1")?.value).toBe(3);
+    expect(sheetsCalculation(marked).get("s1:D1")?.value).toBe(10);
+  });
+
+  it("terminates seeded dependency cycles and leaves disconnected cycles clean", () => {
+    const previous = sheetOf({
+      A1: { value: 1 }, B1: cached("=A1+C1", 2), C1: cached("=B1", 2),
+      D1: cached("=E1", 3), E1: cached("=D1", 3), F1: cached("=F1", 4),
+    });
+    const sheet = previous.sheets[0]!;
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { A1: { value: 9 } }) }] });
+    expect(marked.sheets[0]!.cells.B1?.cachedValueStale).toBe(true);
+    expect(marked.sheets[0]!.cells.C1?.cachedValueStale).toBe(true);
+    for (const address of ["D1", "E1", "F1"]) expect(marked.sheets[0]!.cells[address]).toBe(sheet.cells[address]);
+  });
+
+  it("follows range interiors across quoted worksheets without invalidating adjacent ranges", () => {
+    const previous = normalizeSheetsContent({ activeSheetId: "input", sheets: [
+      { id: "input", name: "Input's data", cells: { B3: { value: 1 } } },
+      { id: "output", name: "Output", cells: {
+        A1: live("=SUM('Input''s data'!a1:c5)", 1),
+        B1: cached("=XLOOKUP(A1,A1:A1,A1:A1)", 1),
+        C1: cached("=SUM('Input''s data'!D1:F5)", 5),
+      } },
+    ] });
+    const [input, output] = previous.sheets;
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...input!, cells: patchSheetCellRecord(input!.cells, { B3: { value: 9 } }) }, output!] });
+    expect(marked.sheets[1]!.cells.B1).toMatchObject({ value: 1, cachedValueStale: true });
+    expect(marked.sheets[1]!.cells.A1).toBe(output!.cells.A1);
+    expect(marked.sheets[1]!.cells.C1).toBe(output!.cells.C1);
+    expect(sheetsCalculation(marked).get("output:A1")?.value).toBe(9);
+  });
+
+  it("resolves supported named ranges while ignoring quoted names and function names", () => {
+    const previous = normalizeSheetsContent({ workbook: { namedRanges: { Source: "Sheet1!$A$1:$A$5", AbsoluteSource: "Sheet1!$A$1:$A$5", SUM: "Sheet1!A1" } }, sheets: [
+      { id: "s1", name: "Sheet1", cells: {
+        A3: { value: 1 }, B1: live("=SUM(source)", 1), C1: cached("=B1*10", 10),
+        D1: cached('=IF(A9="Source",1,0)', 0), E1: cached("=SUM(F1:F2)", 0), G1: cached("=SUM(AbsoluteSource)", 1),
+      } },
+    ] });
+    const sheet = previous.sheets[0]!;
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { A3: { value: 2 }, A1: { value: 3 } }) }] });
+    expect(marked.sheets[0]!.cells.C1).toMatchObject({ value: 10, cachedValueStale: true });
+    expect(marked.sheets[0]!.cells.G1).toMatchObject({ value: 1, cachedValueStale: true });
+    expect(marked.sheets[0]!.cells.D1).toBe(sheet.cells.D1);
+    expect(marked.sheets[0]!.cells.E1).toBe(sheet.cells.E1);
+    expect(sheetsCalculation(marked).get("s1:B1")?.value).toBe(5);
+  });
+
+  it.each(["$A$1:$A$3", "$A1:A$3", "$A$3:$A$1", "$A:$A", "$1:$3", "$A$1"])("evaluates valid locked named range %s without recalculating cached formulas", (reference) => {
+    const workbook = normalizeSheetsContent({ workbook: { namedRanges: { Source: `'Input''s data'!${reference}` } }, sheets: [
+      { id: "input", name: "Input's data", cells: { A1: { value: 1 }, A2: { value: 2 }, A3: { value: 3 } } },
+      { id: "output", name: "Output", cells: { A1: live("=SUM(Source)", 0), B1: cached("=SUM(Source)", 99) } },
+    ] });
+    const calculation = sheetsCalculation(workbook);
+    expect(calculation.get("output:A1")).toEqual({ value: reference === "$A$1" ? 1 : 6 });
+    expect(calculation.get("output:B1")).toEqual({ value: 99 });
+  });
+
+  it.each(["Sheet1!$A$$1:$A$3", "Sheet1!$$A$1", "Missing!$A$1:$A$3", "Sheet1!#REF!"])("keeps invalid named reference %s as an error", (reference) => {
+    const workbook = normalizeSheetsContent({ workbook: { namedRanges: { Source: reference } }, sheets: [
+      { id: "s1", name: "Sheet1", cells: { A1: { value: 1 }, B1: live("=SUM(Source)", 0) } },
+    ] });
+    expect(sheetsCalculation(workbook).get("s1:B1")).toEqual({ value: null, error: "#REF!" });
+  });
+
+  it("keeps whole-column and whole-row dependencies sparse and respects their boundaries", () => {
+    const previous = sheetOf({
+      B900000: { value: 1 }, D1: live("=SUM(B:B)", 1), E1: cached("=D1", 1),
+      F1: cached("=SUM(900000:900000)", 1), G1: cached("=SUM(C:C)", 0), H1: cached("=SUM(899999:899999)", 0),
+    });
+    const sheet = previous.sheets[0]!;
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { B900000: { value: 2 } }) }] });
+    expect(marked.sheets[0]!.cells.E1?.cachedValueStale).toBe(true);
+    expect(marked.sheets[0]!.cells.F1?.cachedValueStale).toBe(true);
+    expect(marked.sheets[0]!.cells.G1).toBe(sheet.cells.G1);
+    expect(marked.sheets[0]!.cells.H1).toBe(sheet.cells.H1);
+  });
+
+  it("reuses formula definitions through value and format overlays and updates them for formula changes", () => {
+    const original = sheetOf({ A1: { value: 1 }, B1: live("=A1+1", 2), C1: cached("=B1", 2) }).sheets[0]!.cells;
+    const formulas = formulaCellTexts(original);
+    const valueEdit = patchSheetCellRecord(original, { A1: { value: 2 } });
+    const formatEdit = patchSheetCellRecord(valueEdit, { B1: { ...original.B1!, format: { bold: true } } });
+    expect(formulaCellTexts(valueEdit)).toBe(formulas);
+    expect(formulaCellTexts(formatEdit)).toBe(formulas);
+    const formulaEdit = patchSheetCellRecord(formatEdit, { B1: live("=D1+1", 2) });
+    expect(formulaCellTexts(formulaEdit).get("B1")).toBe("=D1+1");
+    const removed = patchSheetCellRecord(formulaEdit, { B1: undefined });
+    expect(formulaCellTexts(removed).has("B1")).toBe(false);
+    expect(formulaCellTexts(original).get("B1")).toBe("=A1+1");
+  });
+
+  it("finds the affected branch among many disjoint range dependencies", () => {
+    const cells: Record<string, SheetCell> = { A33: { value: 1 }, C1: cached("=SUM(B1:B32)", 1) };
+    for (let row = 1; row <= 32; row++) cells[`B${row}`] = cached(`=SUM(A${row * 2 - 1}:A${row * 2})`, row === 17 ? 1 : 0);
+    const previous = sheetOf(cells);
+    const sheet = previous.sheets[0]!;
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { A33: { value: 2 } }) }] });
+    const stale = [...cachedFormulaCells(marked.sheets[0]!.cells)].filter(([, cell]) => cell.cachedValueStale).map(([address]) => address).sort();
+    expect(stale).toEqual(["B17", "C1"]);
+    expect(marked.sheets[0]!.cells.B16).toBe(sheet.cells.B16);
+    expect(marked.sheets[0]!.cells.B18).toBe(sheet.cells.B18);
+  });
+
+  it("walks a long reversed chain without recursion or repeated full-sheet scans", () => {
+    const cells: Record<string, SheetCell> = {};
+    for (let row = 5000; row > 1; row--) cells[`A${row}`] = row === 5000 ? cached(`=A${row - 1}`, 1) : live(`=A${row - 1}`, 1);
+    cells.A1 = { value: 1 };
+    const previous = sheetOf(cells);
+    const sheet = previous.sheets[0]!;
+    const started = performance.now();
+    const marked = applyCachedStaleness(previous, { ...previous, sheets: [{ ...sheet, cells: patchSheetCellRecord(sheet.cells, { A1: { value: 2 } }) }] });
+    expect(marked.sheets[0]!.cells.A5000).toMatchObject({ value: 1, cachedValueStale: true });
+    expect(marked.sheets[0]!.cells.A4999).toBe(sheet.cells.A4999);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("refreshes cached dependencies when formula text changes and does not mark format-only edits", () => {
+    const original = sheetOf({ A1: { value: 1 }, B1: live("=A1", 1), C1: cached("=B1", 1), D1: { value: 1 } });
+    const sheet = original.sheets[0]!;
+    const edit = (content: SheetsContent, patch: Record<string, SheetCell | undefined>) => ({ ...content, sheets: [{ ...content.sheets[0]!, cells: patchSheetCellRecord(content.sheets[0]!.cells, patch) }] });
+    const formatted = edit(original, { A1: { ...sheet.cells.A1!, format: { bold: true } } });
+    expect(applyCachedStaleness(original, formatted)).toBe(formatted);
+    // Build the first dependency graph, then use a refreshed workbook with a different formula.
+    expect(applyCachedStaleness(original, edit(original, { A1: { value: 2 } })).sheets[0]!.cells.C1?.cachedValueStale).toBe(true);
+    const refreshed = edit(original, { B1: live("=D1", 1) });
+    expect(applyCachedStaleness(refreshed, edit(refreshed, { A1: { value: 2 } })).sheets[0]!.cells.C1?.cachedValueStale).toBeUndefined();
+    expect(applyCachedStaleness(refreshed, edit(refreshed, { D1: { value: 2 } })).sheets[0]!.cells.C1?.cachedValueStale).toBe(true);
+    expect(applyCachedStaleness(refreshed, edit(refreshed, { B1: undefined })).sheets[0]!.cells.C1?.cachedValueStale).toBe(true);
   });
 
   it("patches one dense-sheet cell without cloning the workbook", () => {

@@ -31,6 +31,11 @@ async function listen(server) {
 }
 
 describe("gateway address ownership", () => {
+  it("keeps generic/hosted wildcard binding and honors the local stack's explicit loopback", () => {
+    expect(gatewayBinding({})).toEqual({ host: "0.0.0.0", port: 1234 });
+    expect(gatewayBinding({ SPECTRA_COLLAB_HOST: "127.0.0.1", SPECTRA_COLLAB_PORT: "3001" }))
+      .toEqual({ host: "127.0.0.1", port: 3001 });
+  });
   it.each(["ready", "degraded", "not_ready", "legacy", "foreign"])("leaves an existing %s listener alive", async (status) => {
     const response = status === "legacy" ? "Welcome to Hocuspocus!" :
       JSON.stringify({ service: status === "foreign" ? "other" : "spectra-collaboration-gateway", status });

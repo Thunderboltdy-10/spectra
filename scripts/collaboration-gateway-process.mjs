@@ -8,7 +8,7 @@ export function gatewayBinding(environment = process.env) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("SPECTRA_COLLAB_PORT must be an integer between 1 and 65535.");
   }
-  return { port, host: environment.SPECTRA_COLLAB_HOST || "127.0.0.1" };
+  return { port, host: environment.SPECTRA_COLLAB_HOST || "0.0.0.0" };
 }
 
 // A health marker proves neither ownership nor matching secrets. Reserve the

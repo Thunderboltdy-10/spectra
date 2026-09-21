@@ -1087,7 +1087,7 @@ async function reauthorize(context, { allowStale = false } = {}) {
 
 const server = new Server({
   name: "spectra-collaboration",
-  address: process.env.SPECTRA_COLLAB_HOST || "127.0.0.1",
+  address: process.env.SPECTRA_COLLAB_HOST || "0.0.0.0",
   port: Number(process.env.SPECTRA_COLLAB_PORT || 1234),
   timeout: 30_000,
   debounce: 2_000,

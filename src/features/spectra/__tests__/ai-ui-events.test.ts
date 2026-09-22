@@ -104,7 +104,7 @@ describe("AI UI events", () => {
     __resetAppChoreographyHost();
   });
 
-  it("emits a durable failure receipt when reference host is unmounted", async () => {
+  it("does not turn an unacknowledged reference event into a save claim", async () => {
     const receipts: Array<Record<string, unknown>> = [];
     const remove = spectraBus.on("ai.ui.referenceReceipt", (payload) => {
       receipts.push(payload as Record<string, unknown>);
@@ -121,12 +121,24 @@ describe("AI UI events", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(receipts.some((row) => row.phase === "queued_refresh")).toBe(true);
-    expect(
-      receipts.some(
-        (row) => row.phase === "host_unmounted" && row.ok === false,
-      ),
-    ).toBe(true);
+    expect(receipts.every((row) => row.ok === false)).toBe(true);
     remove();
+  });
+
+  it("displays a saved reference on replay without asking any editor to insert it", () => {
+    const receipts: Array<Record<string, unknown>> = [];
+    let inserted = 0;
+    const stopInsert = spectraBus.handle("reference.insert", () => { inserted += 1; });
+    const stopReceipt = spectraBus.on("ai.ui.referenceReceipt", (payload) => { receipts.push(payload); });
+    const event = { key: "reference_insert", payload: { hostWorkId: "host", targetWorkId: "target",
+      receipt: { phase: "canonical_write", operationId: "operation", embedId: "embed", versionId: "version" } } };
+    handleSpectraAiUiEvent(event);
+    handleSpectraAiUiEvent(event);
+    expect(inserted).toBe(0);
+    expect(receipts).toHaveLength(2);
+    expect(receipts.every((row) => row.ok === true && row.phase === "canonical_write")).toBe(true);
+    stopInsert();
+    stopReceipt();
   });
 });
 

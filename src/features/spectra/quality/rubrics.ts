@@ -307,18 +307,20 @@ function chartHasEditableNumericSeries(
       : {};
   const series = Array.isArray(content.series) ? content.series : [];
   const legacyValues = Array.isArray(content.values) ? content.values : [];
-  const numericLegacy = legacyValues
-    .map(Number)
-    .filter((value) => Number.isFinite(value));
-  if (numericLegacy.length >= 2) return true;
+  const labels = Array.isArray(content.categories) ? content.categories : Array.isArray(content.labels) ? content.labels : [];
+  const validSeries = (values: unknown[], categories: unknown[]) => values.length >= 2 &&
+    values.every((value) => typeof value === "number" && Number.isFinite(value)) &&
+    categories.length === values.length && categories.every((label) => typeof label === "string" && label.trim());
+  if (validSeries(legacyValues, labels)) return true;
   return series.some((candidate) => {
     if (!candidate || typeof candidate !== "object") return false;
     const values = Array.isArray((candidate as { values?: unknown }).values)
       ? ((candidate as { values: unknown[] }).values)
-          .map(Number)
-          .filter((value) => Number.isFinite(value))
       : [];
-    return values.length >= 2;
+    const categories = Array.isArray((candidate as { categories?: unknown }).categories)
+      ? (candidate as { categories: unknown[] }).categories : labels;
+    return typeof (candidate as { name?: unknown }).name === "string" &&
+      Boolean((candidate as { name: string }).name.trim()) && validSeries(values, categories);
   });
 }
 
@@ -341,7 +343,8 @@ function tableHasEditableNumericCells(
           : cell && typeof cell === "object" && typeof (cell as { text?: unknown }).text === "string"
             ? (cell as { text: string }).text
             : "";
-      if (Number.isFinite(Number(String(text).replace(/[%°,]/g, "").trim())))
+      const value = text.replace(/[%°,]/g, "").trim();
+      if (value && Number.isFinite(Number(value)))
         numeric += 1;
     }
   }
@@ -391,7 +394,7 @@ function presentationHasEditableNumericVisual(deck: PresentationContent) {
   );
 }
 
-function evaluatePresentation(content: unknown, prompt: string) {
+function evaluatePresentation(content: unknown, prompt: string, numericSourceRequired = false) {
   const deck = normalizePresentationContent(content);
   const structureFindings: ArtifactQualityFinding[] = [];
   const requestedCount = requestedSlideCount(prompt);
@@ -405,7 +408,7 @@ function evaluatePresentation(content: unknown, prompt: string) {
       ),
     );
   if (
-    promptRequiresEditableNumericVisual(prompt) &&
+    (numericSourceRequired || promptRequiresEditableNumericVisual(prompt)) &&
     !presentationHasEditableNumericVisual(deck)
   )
     structureFindings.push(
@@ -1156,10 +1159,11 @@ export function evaluateArtifactQuality(params: {
   blueprintKey: QualityBlueprintKey;
   content: unknown;
   prompt?: string;
+  numericSourceRequired?: boolean;
 }) {
   const prompt = params.prompt ?? "";
   if (params.blueprintKey === "presentation")
-    return evaluatePresentation(params.content, prompt);
+    return evaluatePresentation(params.content, prompt, params.numericSourceRequired);
   if (params.blueprintKey === "sheets")
     return evaluateSheets(params.content, prompt);
   return evaluateDocument(params.content, prompt);
@@ -1169,12 +1173,14 @@ export function assertArtifactQuality(params: {
   blueprintKey: ArtifactTypeKey;
   content: unknown;
   prompt?: string;
+  numericSourceRequired?: boolean;
 }) {
   if (!isQualityBlueprintKey(params.blueprintKey)) return null;
   const report = evaluateArtifactQuality({
     blueprintKey: params.blueprintKey,
     content: params.content,
     prompt: params.prompt,
+    numericSourceRequired: params.numericSourceRequired,
   });
   if (!report.passed) throw new ArtifactQualityError(report);
   return report;

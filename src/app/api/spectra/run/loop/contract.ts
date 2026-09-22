@@ -172,6 +172,7 @@ export type RunState = {
     requestedAgentId?: string;
     disableAgentRouting?: boolean;
     researchEvidence?: unknown;
+    qualityRequirements?: { numericSourceRequired: boolean };
   };
 };
 

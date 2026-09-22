@@ -1,4 +1,5 @@
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
+import { hasNumericTableSource } from "@/features/spectra/quality/source-requirements";
 import {
   applyContentPatch,
   effectChangedPathsForUpdate,
@@ -748,6 +749,7 @@ async function runAttempt(
       runId: params.runId,
       executionId: params.executionId,
       contextSnapshot: {
+        qualityRequirements: { numericSourceRequired: hasNumericTableSource(params.attachments ?? []) },
         workspaceId: params.workspaceId,
         scopeNodeId: params.scopeNodeId,
         artifactId: params.artifactId,
@@ -1307,6 +1309,8 @@ async function runAttempt(
         ? modelResult.researchEvidence
         : undefined;
     const requiresResearchEvidence = Boolean(researchEvidence);
+    const verificationOptions = { requireResearchEvidence: requiresResearchEvidence, prompt: params.prompt,
+      numericSourceRequired: hasNumericTableSource(params.attachments ?? []) };
     if (researchEvidence) {
       await mutate("spectraRuns:setResearchEvidence", {
         actorClerkId: params.actorClerkId,
@@ -2027,7 +2031,7 @@ async function runAttempt(
               await verifyCommittedOutcomes(
                 params.actorClerkId,
                 [{ operation, affected: alreadyLanded }],
-                { requireResearchEvidence: requiresResearchEvidence },
+                verificationOptions,
               );
               affected = alreadyLanded;
               recoveredFromLive = true;
@@ -2103,7 +2107,7 @@ async function runAttempt(
           const outcome = { operation, affected };
           try {
             await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-              requireResearchEvidence: requiresResearchEvidence,
+              ...verificationOptions,
             });
           } catch (firstVerifyError) {
             if (!isQuietRetryableApplyFailure(firstVerifyError))
@@ -2115,7 +2119,7 @@ async function runAttempt(
             await new Promise((resolve) => setTimeout(resolve, 400));
             try {
               await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-                requireResearchEvidence: requiresResearchEvidence,
+                ...verificationOptions,
               });
             } catch (secondVerifyError) {
               if (!isQuietRetryableApplyFailure(secondVerifyError))
@@ -2157,7 +2161,7 @@ async function runAttempt(
               await verifyCommittedOutcomes(
                 params.actorClerkId,
                 [{ operation, affected }],
-                { requireResearchEvidence: requiresResearchEvidence },
+                verificationOptions,
               );
             }
           }
@@ -2296,7 +2300,7 @@ async function runAttempt(
     loop.enter("verify");
     try {
       await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes, {
-        requireResearchEvidence: requiresResearchEvidence,
+        ...verificationOptions,
       });
     } catch (firstVerifyError) {
       // Projection/Yjs races can fail verify once after a successful apply.
@@ -2306,7 +2310,7 @@ async function runAttempt(
           !(await committedCreatesAreUsable(
             params.actorClerkId,
             operationOutcomes,
-            { requireResearchEvidence: requiresResearchEvidence },
+            verificationOptions,
           ))
         )
           return false;
@@ -2345,7 +2349,7 @@ async function runAttempt(
           await verifyCommittedOutcomes(
             params.actorClerkId,
             operationOutcomes,
-            { requireResearchEvidence: requiresResearchEvidence },
+            verificationOptions,
           );
         } catch (secondVerifyError) {
           if (!(await softCompleteCreates(secondVerifyError)))
@@ -3253,15 +3257,17 @@ async function resumeOperationsAttempt(params: {
     const requireResearchEvidence = Boolean(
       state.run.contextSnapshot?.researchEvidence,
     );
+    const verificationOptions = { requireResearchEvidence, prompt: state.run.userPrompt,
+      numericSourceRequired: state.run.contextSnapshot?.qualityRequirements?.numericSourceRequired === true };
     try {
       await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
-        requireResearchEvidence,
+        ...verificationOptions,
       });
     } catch (firstVerifyError) {
       const softCompleteCreates = async (error: unknown) => {
         if (
           !(await committedCreatesAreUsable(params.actorClerkId, outcomes, {
-            requireResearchEvidence,
+            ...verificationOptions,
           }))
         )
           return false;
@@ -3300,7 +3306,7 @@ async function resumeOperationsAttempt(params: {
         await new Promise((resolve) => setTimeout(resolve, 400));
         try {
           await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
-            requireResearchEvidence,
+            ...verificationOptions,
           });
         } catch (secondVerifyError) {
           if (!(await softCompleteCreates(secondVerifyError)))

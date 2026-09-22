@@ -7,6 +7,7 @@ import {
 import { PRESENTATION_LAYOUTS } from "../commands/office/presentation-commands";
 import { isRepairablePlanFailure } from "../operations/plan-diagnostics";
 import { creationToolContentJsonSchema, parseSpectraPlan } from "../operations/schema";
+import { hasNumericTableSource } from "../quality/source-requirements";
 import { auditDeck } from "../presentation/audit";
 import {
   PRESENTATION_LAYOUT_OPTIONS,
@@ -221,6 +222,27 @@ function structuredDocument() {
 }
 
 describe("P4.I4 quality machinery", () => {
+  it("requires real numeric output from inspected sources even for vague wording", () => {
+    const numericSourceRequired = hasNumericTableSource([{ name: "observations.csv", mimeType: "text/csv", extractedText: "Site,Temperature (C)\nNorth,31.8\nSouth,33.1" }]);
+    expect(numericSourceRequired).toBe(true);
+    expect(hasNumericTableSource([{ name: "empty.csv", mimeType: "text/csv", extractedText: "Site,Value\nNorth,\nSouth, " }])).toBe(false);
+    const draft = presentationDraft();
+    const withoutData = { ...draft, slides: draft.slides.map((slide) => ({ ...slide, objects: slide.objects.filter((object) => object.type !== "chart") })) };
+    const report = evaluateArtifactQuality({ blueprintKey: "presentation", content: withoutData, prompt: "Help me study and present this", numericSourceRequired });
+    expect(report.findings.some((finding) => /editable chart or table with numeric series/i.test(finding.message))).toBe(true);
+  });
+
+  it.each([
+    { type: "chart", content: { labels: ["A", "B"], values: [null, ""] } },
+    { type: "chart", content: { labels: ["A"], values: [1, 2] } },
+    { type: "table", content: { rows: [["Site", "Value"], ["North", ""], ["South", " "]] } },
+  ])("does not turn missing data into numeric evidence ($type)", (visual) => {
+    const draft = presentationDraft();
+    const content = { ...draft, slides: draft.slides.map((slide) => ({ ...slide, objects: slide.objects.map((object) => object.type === "chart" ? { ...object, ...visual } : object) })) };
+    const report = evaluateArtifactQuality({ blueprintKey: "presentation", content, numericSourceRequired: true });
+    expect(report.findings.some((finding) => /editable chart or table with numeric series/i.test(finding.message))).toBe(true);
+  });
+
   it("rejects a shape labelled chart when numeric presentation data is required", () => {
     const placeholderDeck = {
       ...presentationDraft(),

@@ -18,28 +18,28 @@ import {
   type CalendarUndoInverse,
 } from "@/features/spectra/calendar/domain/command";
 import type { CalendarItem } from "@/features/spectra/calendar/domain/model";
+import type { CalendarActionPostcondition } from "@/features/spectra/calendar/domain/actions";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
+import { normalizeCalendarTimeInput } from "../../../../../../shared/calendar-time";
 
 export type CalendarMutationResult = {
   ok: true;
   toolId: CanonicalCalendarTool;
   item: CalendarItem;
   undo: CalendarUndoInverse;
+  status: "canonical_write";
+  postcondition: CalendarActionPostcondition;
 };
 
 function asArgs(value: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...value,
-    ...(typeof value.timezone === "string" && value.timezone.trim()
-      ? {}
-      : { timezone: "UTC" }),
-  };
+  return normalizeCalendarTimeInput(value);
 }
 
 export async function executeRegisteredCalendarMutation(input: {
   actorClerkId: string;
   runId?: string;
   executionId?: string;
+  operationId?: string;
   command: string;
   args: Record<string, unknown>;
   mutationScopeId?: string;
@@ -94,6 +94,7 @@ export async function executeRegisteredCalendarMutation(input: {
   throwIfAborted(input.signal);
   const action = calendarSemanticAction(toolId, parsed);
   const scopeId =
+    input.operationId?.trim() ||
     input.runId?.trim() ||
     input.mutationScopeId?.trim() ||
     input.executionId?.trim() ||
@@ -111,7 +112,7 @@ export async function executeRegisteredCalendarMutation(input: {
     Record<string, unknown>,
     Record<string, unknown>
   >(calendarConvexMutation(toolId), calendarMutationPayload(action, idempotencyKey));
-  const { item } = interpretCalendarMutationResult(action, itemWire);
+  const { item, postcondition } = interpretCalendarMutationResult(action, itemWire);
   const undo = calendarUndoInverse(toolId, item);
   input.onUiEvent?.({
     key: "calendar_changed",
@@ -121,5 +122,5 @@ export async function executeRegisteredCalendarMutation(input: {
       undo,
     },
   });
-  return { ok: true, toolId, item, undo };
+  return { ok: true, status: "canonical_write", toolId, item, undo, postcondition };
 }

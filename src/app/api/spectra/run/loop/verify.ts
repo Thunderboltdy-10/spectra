@@ -126,12 +126,14 @@ export async function committedCreatesAreUsable(
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }>,
-  options: { requireResearchEvidence?: boolean } = {},
+  options: { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean } = {},
 ) {
   const creates = outcomes.filter(
     (outcome) => outcome.operation.type === "artifact.create",
   );
-  if (creates.length === 0) return false;
+  // A usable create cannot excuse a failed update, action or native write in
+  // the same request. Every outcome must pass its own verification boundary.
+  if (creates.length === 0 || creates.length !== outcomes.length) return false;
   for (const outcome of creates) {
     const operation = outcome.operation;
     if (operation.type !== "artifact.create") continue;
@@ -163,6 +165,11 @@ export async function committedCreatesAreUsable(
         return false;
       }
     }
+    try {
+      assertArtifactQuality({ blueprintKey: operation.input.blueprintKey, content: artifact.content,
+        prompt: options.prompt, numericSourceRequired: options.numericSourceRequired });
+      if (artifactHasNativeBacking(artifact)) await assertNativeReplicaHonest(artifactId);
+    } catch { return false; }
   }
   return true;
 }
@@ -251,7 +258,7 @@ export async function verifyCommittedOutcomes(
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }>,
-  options: { requireResearchEvidence?: boolean } = {},
+  options: { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean } = {},
 ) {
   for (const outcome of outcomes) {
     const operation = outcome.operation;
@@ -315,6 +322,8 @@ export async function verifyCommittedOutcomes(
         assertArtifactQuality({
           blueprintKey,
           content: artifact.content,
+          prompt: options.prompt,
+          numericSourceRequired: options.numericSourceRequired,
         });
         // Spectra-native artifacts can have stale local replica rows left by
         // an earlier Bridge session, but their canonical save is complete and

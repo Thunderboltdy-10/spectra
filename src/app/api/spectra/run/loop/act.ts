@@ -3,6 +3,8 @@ import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
+import { normalizeApplicationCommand } from "@/features/spectra/operations/application-command";
+import { executeReferenceInsertion } from "./reference-command";
 import { rows } from "./gather";
 import { mutate, query } from "./io";
 import { normalizeCreationSummary, operationLabel } from "./plan";
@@ -33,6 +35,7 @@ import {
 } from "@/features/spectra/components/ai-region-path";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
+import { mapOperationArtifactReferences } from "@/features/spectra/operations/dependencies";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
@@ -50,6 +53,7 @@ async function executeLegacyCalendarCommand(
     payload?: Record<string, unknown>;
   }) => void,
   signal?: AbortSignal,
+  operationId?: string,
 ) {
   return executeRegisteredCalendarMutation({
     actorClerkId,
@@ -60,6 +64,7 @@ async function executeLegacyCalendarCommand(
     mutationScopeId: runId,
     signal,
     onUiEvent,
+    operationId,
   });
 }
 
@@ -75,15 +80,11 @@ export async function executeApplicationCommand(
     payload?: Record<string, unknown>;
   }) => void,
   signal?: AbortSignal,
+  operationId?: string,
 ) {
   throwIfAborted(signal);
-  if (
-    command === "school.sync" ||
-    command === "school_data.sync" ||
-    command === "managebac.sync"
-  )
-    command = "trigger_managebac_sync";
-  if (command.startsWith("calendar."))
+  command = normalizeApplicationCommand(command);
+  if (normalizeCalendarCommand(command))
     return executeLegacyCalendarCommand(
       actorClerkId,
       runId,
@@ -92,6 +93,7 @@ export async function executeApplicationCommand(
       args,
       onUiEvent,
       signal,
+      operationId,
     );
   const definition = spectraToolRegistry.get(command);
   if (!definition || definition.capability !== "operate_application")
@@ -496,46 +498,16 @@ export async function executeApplicationCommand(
     return result;
   }
   if (command === "insert_reference") {
-    const hostWorkId = String(parsed.hostWorkId ?? "").trim();
-    const targetWorkId = String(parsed.targetWorkId ?? "").trim();
-    if (!hostWorkId || !targetWorkId)
-      throw new Error("REFERENCE_WORKS_REQUIRED");
-    const target = await query<
-      { actorClerkId: string; artifactId: string },
-      Record<string, unknown>
-    >("spectraArtifacts:get", { actorClerkId, artifactId: targetWorkId });
-    const workType = String(target.blueprintKey ?? "").trim();
-    if (!workType) throw new Error("REFERENCE_TARGET_UNAVAILABLE");
-    const targetLabel =
-      typeof parsed.label === "string" && parsed.label.trim()
-        ? parsed.label.trim().slice(0, 160)
-        : String(target.title ?? "Referenced work").slice(0, 160);
-    onUiEvent?.({
-      key: "reference_insert",
-      payload: {
-        hostWorkId,
-        targetWorkId,
-        targetWorkType: workType,
-        schemaVersion:
-          typeof target.schemaVersion === "number" ? target.schemaVersion : 1,
-        label: targetLabel,
-        fallbackExcerpt: targetLabel,
-        note: `Insert a live reference to ${targetLabel}`,
-      },
+    if (!operationId) throw new Error("REFERENCE_OPERATION_ID_REQUIRED");
+    const result = await executeReferenceInsertion({
+      actorClerkId, runId, executionId, operationId,
+      hostWorkId: String(parsed.hostWorkId), targetWorkId: String(parsed.targetWorkId),
+      label: typeof parsed.label === "string" ? parsed.label : undefined, signal,
     });
-    return {
-      ok: true,
-      status: "queued_refresh",
-      receipt: {
-        phase: "queued_refresh",
-        hostWorkId,
-        targetWorkId,
-      },
-      message:
-        "The reference is queued for the host work surface. Insertion is not complete until a canonical or verified native write acknowledges it.",
-      hostWorkId,
-      targetWorkId,
-    };
+    onUiEvent?.({ key: "reference_insert", payload: {
+      ...result, note: "Live reference saved", phase: result.receipt.phase,
+    } });
+    return result;
   }
   throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
 }
@@ -1213,13 +1185,16 @@ export async function executeOperation(
       context.scopeNodeId,
       context.onUiEvent,
       context.signal,
+      operationId,
     )) as Record<string, unknown>;
     context.onApplicationResult?.({
       command: operation.input.command,
       args: operation.input.args,
       result: output,
     });
-    affected = [];
+    affected = operation.input.command === "insert_reference"
+      ? [{ type: "artifact", id: String(operation.input.args.hostWorkId) }]
+      : [];
   }
   await mutate("spectraOperations:markExecuted", {
     actorClerkId,
@@ -1245,16 +1220,9 @@ export function resolveCreatedArtifactDependencies(
       );
     return artifactId;
   };
+  operation = mapOperationArtifactReferences(operation, resolve);
   if (operation.type === "app.command") {
     const args = { ...operation.input.args };
-    for (const key of [
-      "artifactId",
-      "planArtifactId",
-      "sourceArtifactId",
-      "targetArtifactId",
-    ]) {
-      if (typeof args[key] === "string") args[key] = resolve(args[key]);
-    }
     const isCalendarSchedule =
       normalizeCalendarCommand(operation.input.command) ===
       "schedule_calendar_task";
@@ -1275,13 +1243,5 @@ export function resolveCreatedArtifactDependencies(
       input: { ...operation.input, args },
     };
   }
-  if (operation.type !== "artifact.link") return operation;
-  return {
-    ...operation,
-    input: {
-      ...operation.input,
-      sourceArtifactId: resolve(operation.input.sourceArtifactId),
-      targetArtifactId: resolve(operation.input.targetArtifactId),
-    },
-  };
+  return operation;
 }

@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -117,6 +118,49 @@ async function rowsForOp(
 }
 
 describe("Spectra embed placementOperationId idempotency", () => {
+  it("returns only a verified canonical-version receipt and does not resurrect a saved removal", async () => {
+    const t = setupTest();
+    const fixture = await seedPlacementFixture(t);
+    const asOwner = t.withIdentity(identity);
+    const args = createArgs(fixture, "saved-insert");
+    const { embedId } = await asOwner.mutation(api.artifactEmbeds.create, args);
+    const receiptArgs = { embedId, placementOperationId: args.placementOperationId };
+    expect(await asOwner.query(api.artifactEmbeds.getPlacementReceipt, receiptArgs)).toBeNull();
+    const versionId = await t.run(async (ctx) => {
+      const host = (await ctx.db.get(fixture.containerArtifactId))!;
+      const versionId = await ctx.db.insert("spectraArtifactVersions", {
+        artifactId: host._id, ownerAccountId: host.ownerAccountId, schoolId: host.schoolId,
+        source: "ai", createdAt: Date.now(), after: { content: { blocks: [{ reference: {
+          embedId, placementOperationId: args.placementOperationId, containerRegionId: args.containerRegionId,
+        } }] } },
+      });
+      expect(await confirmCanonicalPlacements(ctx, versionId)).toBe(1);
+      return versionId;
+    });
+    expect(await asOwner.query(api.artifactEmbeds.getPlacementReceipt, receiptArgs)).toEqual({
+      embedId, versionId, operationId: args.placementOperationId, phase: "canonical_write",
+    });
+    await expect(asOwner.query(api.artifactEmbeds.getPlacementReceipt, { ...receiptArgs, placementOperationId: "other-operation" })).rejects.toThrow("NOT_FOUND");
+    await asOwner.mutation(api.artifactEmbeds.remove, { embedId });
+    await expect(asOwner.mutation(api.artifactEmbeds.create, args)).rejects.toThrow("PLACEMENT_REMOVED");
+    expect((await t.run((ctx) => ctx.db.get(embedId)))?.removedAt).toBeTypeOf("number");
+  });
+
+  it("rejects a receipt whose stored version does not contain the placement", async () => {
+    const t = setupTest();
+    const fixture = await seedPlacementFixture(t);
+    const asOwner = t.withIdentity(identity);
+    const args = createArgs(fixture, "wrong-version");
+    const { embedId } = await asOwner.mutation(api.artifactEmbeds.create, args);
+    await t.run(async (ctx) => {
+      const host = (await ctx.db.get(fixture.containerArtifactId))!;
+      const versionId = await ctx.db.insert("spectraArtifactVersions", { artifactId: host._id,
+        ownerAccountId: host.ownerAccountId, source: "ai", createdAt: Date.now(), after: { content: { blocks: [] } } });
+      await ctx.db.patch(embedId, { placementState: "confirmed", placementReceipt: `canonical-version:${versionId}` });
+    });
+    await expect(asOwner.query(api.artifactEmbeds.getPlacementReceipt, { embedId, placementOperationId: args.placementOperationId })).rejects.toThrow("RECEIPT_INVALID");
+  });
+
   it("revives the soft-removed row instead of inserting a second live embed for the same placementOperationId", async () => {
     const t = setupTest();
     const fixture = await seedPlacementFixture(t);

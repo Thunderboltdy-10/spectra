@@ -17,6 +17,7 @@ import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
 import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
 import { normalizeAiPreferencePatch } from "../settings/schema/preferences";
 import { documentAcademicOperationsSchema } from "../commands/office/document-academic-operations";
+import { createdDependencyIndex, mapOperationArtifactReferences } from "./dependencies";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 export const SPECTRA_CREATABLE_BLUEPRINT_KEYS = WORK_TYPE_KEYS;
@@ -384,6 +385,13 @@ export const requestIntentSchema = z
     requestedVisibleArtifactCount: z.number().int().min(0),
     targetArtifactId: idText.nullable(),
     targetWorkspaceId: idText.nullable(),
+    // Persist the complete request alongside the existing plan/operation
+    // identities. Receipt state belongs to the journal, never to model text.
+    obligations: z.array(z.object({
+      id: z.string().trim().min(1).max(80),
+      description: z.string().trim().min(1).max(500),
+      operationIndexes: z.array(z.number().int().min(0)).min(1),
+    }).strict()).optional(),
   })
   .strict();
 
@@ -768,29 +776,17 @@ export function compactOperationsRemappingCreated(
     indexMap.set(index, kept.length);
     kept.push(operation);
   });
-  const rewrite = (value: unknown): unknown => {
-    if (typeof value === "string") {
-      const match = /^@created:(\d+)$/.exec(value);
-      if (!match) return value;
-      const old = Number(match[1]);
+  const rewrite = (value: string): string => {
+      const old = createdDependencyIndex(value);
+      if (old === null) return value;
       const next = indexMap.get(old);
       if (next === undefined)
         throw new Error(
           `Operation dependency @created:${old} pointed at a dropped operation.`,
         );
       return `@created:${next}`;
-    }
-    if (Array.isArray(value)) return value.map(rewrite);
-    if (value && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([key, child]) => [
-          key,
-          rewrite(child),
-        ]),
-      );
-    return value;
   };
-  return kept.map((operation) => parseModelOperation(rewrite(operation)));
+  return kept.map((operation) => parseModelOperation(mapOperationArtifactReferences(operation, rewrite)));
 }
 
 export function parseSpectraPlan(value: unknown) {
@@ -800,21 +796,38 @@ export function parseSpectraPlan(value: unknown) {
     ),
   );
   const operations = plan.operations.map(parseModelOperation);
-  let manageBacRefreshSeen = false;
+  let previousRefresh: string | undefined;
+  const remappedIndexes = new Map<number, number>();
+  let nextIndex = 0;
   const dedupedOperations = compactOperationsRemappingCreated(
     operations,
-    (operation) => {
+    (operation, index) => {
       if (
         operation.type === "app.command" &&
         operation.input.command === "trigger_managebac_sync"
       ) {
-        if (manageBacRefreshSeen) return false;
-        manageBacRefreshSeen = true;
+        const identity = JSON.stringify(Object.entries(operation.input.args).sort(([a], [b]) => a.localeCompare(b)));
+        if (previousRefresh === identity) {
+          remappedIndexes.set(index, nextIndex - 1);
+          return false;
+        }
+        previousRefresh = identity;
+      } else {
+        previousRefresh = undefined;
       }
+      remappedIndexes.set(index, nextIndex++);
       return true;
     },
   );
-  return { ...plan, operations: dedupedOperations };
+  const obligations = plan.intent.obligations?.map((obligation) => ({
+    ...obligation,
+    operationIndexes: [...new Set(obligation.operationIndexes.map((index) => {
+      const mapped = remappedIndexes.get(index);
+      if (mapped === undefined) throw new Error(`Request obligation ${obligation.id} refers to missing operation ${index}.`);
+      return mapped;
+    }))],
+  }));
+  return { ...plan, intent: { ...plan.intent, ...(obligations ? { obligations } : {}) }, operations: dedupedOperations };
 }
 
 const nullableString = {
@@ -1357,6 +1370,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         "requestedVisibleArtifactCount",
         "targetArtifactId",
         "targetWorkspaceId",
+        "obligations",
       ],
       properties: {
         mode: { enum: REQUEST_INTENT_MODES },
@@ -1368,6 +1382,17 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         requestedVisibleArtifactCount: { type: "integer", minimum: 0 },
         targetArtifactId: nullableString,
         targetWorkspaceId: nullableString,
+        obligations: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false,
+            required: ["id", "description", "operationIndexes"],
+            properties: {
+              id: { type: "string" }, description: { type: "string" },
+              operationIndexes: { type: "array", minItems: 1, items: { type: "integer", minimum: 0 } },
+            },
+          },
+        },
       },
     },
     conversationTitle: nullableString,

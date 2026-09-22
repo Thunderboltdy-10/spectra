@@ -2,6 +2,37 @@ import { describe, expect, it, vi } from "vitest";
 import { runSpectraAgentLoop } from "../ai/agent-loop";
 
 describe("runSpectraAgentLoop", () => {
+  it("feeds back a saved mutation receipt on retry without executing it again", async () => {
+    const call = { id: "write", name: "schedule_calendar_task", arguments: '{"planTaskId":"essay"}' };
+    const requestTurn = vi.fn().mockResolvedValueOnce({ text: "", toolCalls: [call] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...call, id: "retry" }] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }] });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, receipt: { itemId: "saved-item", revision: 1 } });
+    await runSpectraAgentLoop({ messages: [], requestTurn, executeTool, isMutationTool: () => true, isTerminalTool: (call) => call.name === "submit_plan" });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(requestTurn.mock.calls[2]![0]).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "retry", content: expect.stringContaining("saved-item") }));
+  });
+
+  it("does not fast-complete a mixed tool turn after its first successful action", async () => {
+    const requestTurn = vi.fn().mockResolvedValueOnce({ text: "", toolCalls: [
+      { id: "one", name: "write", arguments: '{"id":1}' }, { id: "two", name: "write", arguments: '{"id":2}' },
+    ] }).mockResolvedValueOnce({ text: "", toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }] });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool: vi.fn().mockResolvedValue({ ok: true }),
+      isCompleteAfterTool: () => true, isTerminalTool: (call) => call.name === "submit_plan" });
+    expect(result.terminalTool?.id).toBe("done");
+    expect(requestTurn.mock.calls[1]![0].filter((message: { role: string }) => message.role === "tool")).toHaveLength(2);
+  });
+
+  it("offers bounded schema repair instead of abandoning the request on a tool exception", async () => {
+    const requestTurn = vi.fn().mockResolvedValueOnce({ text: "", toolCalls: [{ id: "bad", name: "read", arguments: "{}" }] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ id: "good", name: "read", arguments: '{"id":"resolved"}' }] })
+      .mockResolvedValueOnce({ text: "done", toolCalls: [] });
+    const executeTool = vi.fn().mockRejectedValueOnce(new Error("artifactId is required")).mockResolvedValueOnce({ ok: true });
+    await runSpectraAgentLoop({ messages: [], requestTurn, executeTool, isTerminalTool: () => false });
+    expect(requestTurn.mock.calls[1]![0]).toContainEqual(expect.objectContaining({ content: expect.stringContaining("artifactId is required") }));
+    expect(executeTool).toHaveBeenCalledTimes(2);
+  });
+
   it("executes on-demand reads and returns the terminal plan without a turn cap", async () => {
     const requestTurn = vi
       .fn()

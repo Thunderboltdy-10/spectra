@@ -77,6 +77,7 @@ export async function runSpectraAgentLoop(input: {
   ) => Promise<OpenRouterAgentTurn>;
   executeTool: (call: OpenRouterAgentToolCall) => Promise<unknown>;
   isParallelSafeTool?: (call: OpenRouterAgentToolCall) => boolean;
+  isMutationTool?: (call: OpenRouterAgentToolCall) => boolean;
   isTerminalTool: (call: OpenRouterAgentToolCall) => boolean;
   isCompleteAfterTool?: (
     call: OpenRouterAgentToolCall,
@@ -93,6 +94,7 @@ export async function runSpectraAgentLoop(input: {
 }) {
   const messages = [...input.messages];
   const repeatedCalls = new Map<string, number>();
+  const savedResults = new Map<string, unknown>();
   let usage: OpenRouterUsage | undefined;
   let model: string | undefined;
   let provider: string | undefined;
@@ -195,8 +197,10 @@ export async function runSpectraAgentLoop(input: {
         throw new Error(
           `Spectra stopped after the agent repeated the identical ${call.name} request without making progress.`,
         );
-      return repetition === 2
-        ? {
+      if (repetition === 2 && savedResults.has(fingerprint))
+        return savedResults.get(fingerprint);
+      if (repetition === 2)
+        return {
             status: 1,
             ok: false,
             code: "identical_tool_call_repeated",
@@ -204,8 +208,19 @@ export async function runSpectraAgentLoop(input: {
               "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
             message:
               "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
-          }
-        : input.executeTool(call);
+          };
+      try {
+        const result = await input.executeTool(call);
+        if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const normalized = toModelToolResult(result);
+        if (input.isMutationTool?.(call) && normalized.status === 0)
+          savedResults.set(fingerprint, result);
+        return result;
+      } catch (error) {
+        if (input.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+        return { ok: false, code: "tool_execution_failed", retryable: true,
+          message: error instanceof Error ? error.message : String(error) };
+      }
     };
     const terminalCallIds = new Set(terminalCalls.map((call) => call.id));
     const terminalCallError = {
@@ -252,7 +267,7 @@ export async function runSpectraAgentLoop(input: {
         tool_call_id: call.id,
         content: JSON.stringify(result),
       });
-      if (input.isCompleteAfterTool?.(call, result))
+      if (turn.toolCalls.length === 1 && input.isCompleteAfterTool?.(call, result))
         return {
           completedTool: call,
           text: turn.text,

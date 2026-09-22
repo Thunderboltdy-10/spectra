@@ -688,6 +688,7 @@ export const createPersonalItem = mutation({
     timezone: v.string(),
     linkedArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
     actorKind: v.optional(v.union(v.literal("human"), v.literal("ai"))),
+    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -697,6 +698,20 @@ export const createPersonalItem = mutation({
       args.endAt <= args.startAt
     )
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
+    const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
+    if (args.idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length < 8))
+      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+    const previous = idempotencyKey ? await ctx.db.query("calendarItems")
+      .withIndex("by_schedule_idempotency", (q) => q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique() : null;
+    if (previous) {
+      const same = previous.kind === args.kind && previous.title === (text(args.title) || "Untitled item") &&
+        previous.notes === (text(args.notes, 20_000) || undefined) && previous.startAt === args.startAt &&
+        previous.endAt === args.endAt && previous.timezone === args.timezone && previous.allDay === (args.allDay === true) &&
+        JSON.stringify(previous.linkedArtifactIds) === JSON.stringify(args.linkedArtifactIds ?? []);
+      if (!same) throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This key was already used for another event.");
+      if (previous.status !== "active") throw new Error("CALENDAR_IDEMPOTENCY_REPLAY_REMOVED: This event is no longer active.");
+      return itemWire(previous);
+    }
     const now = Date.now();
     const itemId = await ctx.db.insert("calendarItems", {
       ownerAccountId: actor.accountId,
@@ -714,6 +729,7 @@ export const createPersonalItem = mutation({
       linkedArtifactIds: args.linkedArtifactIds ?? [],
       revision: 1,
       createdBy: args.actorKind === "ai" ? "ai" : "human",
+      idempotencyKey,
       createdAt: now,
       updatedAt: now,
     });

@@ -97,6 +97,14 @@ export function calendarSemanticAction(
   toolId: CanonicalCalendarTool,
   args: Record<string, unknown>,
 ): CalendarSemanticAction {
+  if (toolId !== "resize_calendar_block" && finiteNumber(args, "endAt") <= finiteNumber(args, "startAt"))
+    throw new Error("CALENDAR_RANGE_INVALID: End must be after start.");
+  if (toolId === "schedule_calendar_task" || toolId === "create_calendar_personal_event") {
+    if (typeof args.timezone !== "string" || !args.timezone.trim())
+      throw new Error("CALENDAR_TIMEZONE_REQUIRED: Use the intended IANA timezone.");
+    try { new Intl.DateTimeFormat("en", { timeZone: args.timezone }); }
+    catch { throw new Error("CALENDAR_TIMEZONE_INVALID"); }
+  }
   if (toolId === "schedule_calendar_task") {
     const taskItemId =
       typeof args.taskItemId === "string" && args.taskItemId.trim()
@@ -119,7 +127,7 @@ export function calendarSemanticAction(
       ...(planTaskId ? { planTaskId } : {}),
       startAt: finiteNumber(args, "startAt"),
       endAt: finiteNumber(args, "endAt"),
-      timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
+      timezone: String(args.timezone),
       ...(typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
         ? { idempotencyKey: args.idempotencyKey.trim().slice(0, 240) }
         : {}),
@@ -140,7 +148,7 @@ export function calendarSemanticAction(
       title,
       startAt: finiteNumber(args, "startAt"),
       endAt: finiteNumber(args, "endAt"),
-      timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
+      timezone: String(args.timezone),
       ...(typeof args.notes === "string" && args.notes.trim()
         ? { notes: args.notes.trim().slice(0, 20_000) }
         : {}),
@@ -191,6 +199,7 @@ export function calendarMutationPayload(
       allDay: action.allDay === true,
       timezone: action.timezone,
       actorKind: "ai" as const,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
       ...(action.linkedArtifactIds?.length
         ? { linkedArtifactIds: action.linkedArtifactIds }
         : {}),
@@ -215,6 +224,8 @@ export function calendarScheduleIdempotencyKey(input: {
   action: CalendarSemanticAction;
   requestedKey?: string;
 }) {
+  if (input.action.type === "calendar.create_personal_event")
+    return `ai:${createHash("sha256").update(`${input.scopeId}\0${input.toolId}\0${JSON.stringify(input.action)}`).digest("hex")}`;
   if (input.action.type !== "calendar.schedule_task") return undefined;
   const requested =
     input.requestedKey?.trim() || input.action.idempotencyKey?.trim() || "";

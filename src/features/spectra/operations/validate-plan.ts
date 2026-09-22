@@ -1,4 +1,5 @@
 import type { SpectraPlan } from "./schema";
+import { mapOperationArtifactReferences, validateOperationDependencies } from "./dependencies";
 
 export type OwnedOperationReferences = {
   artifactIds: ReadonlySet<string>;
@@ -13,7 +14,22 @@ function requireOwnedReference(kind: string, id: string, allowed: ReadonlySet<st
 }
 
 export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOperationReferences) {
+  validateOperationDependencies(plan.operations);
   const { intent } = plan;
+  if (intent.obligations) {
+    const ids = new Set<string>();
+    const covered = new Set<number>();
+    for (const obligation of intent.obligations) {
+      if (ids.has(obligation.id)) throw new Error("Request obligation ids must be unique.");
+      ids.add(obligation.id);
+      for (const index of obligation.operationIndexes) {
+        if (!plan.operations[index]) throw new Error(`The request still lacks an operation for ${obligation.description}`);
+        covered.add(index);
+      }
+    }
+    if (plan.operations.some((_, index) => !covered.has(index)))
+      throw new Error("Every operation must fulfill an explicit request obligation.");
+  }
   const creates = plan.operations.filter((operation) => operation.type === "artifact.create");
 
   if (creates.length > 0 && intent.mode !== "create" && intent.mode !== "mixed") {
@@ -34,6 +50,8 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
   if (creates.length > requestedVisibleArtifactCount && !oneRepeatedRequestedType) {
     throw new Error("The plan creates more visible artifacts than the interpreted request.");
   }
+  if ((intent.mode === "create" || intent.mode === "mixed") && creates.length < requestedVisibleArtifactCount)
+    throw new Error("The plan does not create every artifact in the interpreted request. Complete the remaining outcomes before submitting.");
   for (const operation of creates) {
     if (!intent.requestedArtifactTypes.includes(operation.input.blueprintKey)) {
       throw new Error(`The proposed ${operation.input.blueprintKey} artifact is unrelated to the interpreted request.`);
@@ -43,7 +61,6 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
       throw new Error("The artifact destination does not match the interpreted request.");
     }
     if (operation.input.blueprintKey === "planner_task") {
-      for (const artifactId of operation.input.content.linkedArtifactIds ?? []) requireOwnedReference("artifact", artifactId, references.artifactIds);
       for (const threadId of operation.input.content.linkedThreadIds ?? []) requireOwnedReference("thread", threadId, references.threadIds ?? new Set());
     }
   }
@@ -51,6 +68,7 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
   const requireOwnedOrCreatedArtifact = (id: string, operationIndex: number) => {
     if (references.artifactIds.has(id)) return;
     const match = /^@created:(\d+)$/.exec(id);
+    if (!match) return requireOwnedReference("artifact", id, references.artifactIds);
     const sourceIndex = match ? Number(match[1]) : -1;
     if (sourceIndex < 0 || sourceIndex >= operationIndex || plan.operations[sourceIndex]?.type !== "artifact.create") {
       throw new Error("Invalid artifact reference. New artifacts may only be referenced by a prior @created:<operation index> dependency.");
@@ -58,16 +76,26 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
   };
 
   for (const [operationIndex, operation] of plan.operations.entries()) {
+    // Application arguments and placement/link consumers use the same graph
+    // identities as normalization and execution, including reference hosts.
+    mapOperationArtifactReferences(operation, (id) => {
+      requireOwnedOrCreatedArtifact(id, operationIndex);
+      return id;
+    });
     if (operation.type === "artifact.update") {
       if (intent.mode !== "update" && intent.mode !== "mixed") throw new Error("The proposed artifact update is unrelated to the interpreted request.");
-      requireOwnedReference("artifact", operation.input.artifactId, references.artifactIds);
-      const ownedBlueprint = references.artifactBlueprints?.get(operation.input.artifactId);
+      requireOwnedOrCreatedArtifact(operation.input.artifactId, operationIndex);
+      const producerMatch = /^@created:(\d+)$/.exec(operation.input.artifactId);
+      const producer = producerMatch ? plan.operations[Number(producerMatch[1])] : undefined;
+      const ownedBlueprint = producer?.type === "artifact.create"
+        ? producer.input.blueprintKey
+        : references.artifactBlueprints?.get(operation.input.artifactId);
       if (ownedBlueprint && ownedBlueprint !== operation.input.blueprintKey) throw new Error("The artifact update blueprint does not match the owned artifact.");
       if (intent.targetArtifactId && operation.input.artifactId !== intent.targetArtifactId) throw new Error("The artifact update target does not match the interpreted request.");
     }
     if (operation.type === "workspaceItem.add") {
       if (intent.mode !== "place" && intent.mode !== "mixed") throw new Error("The proposed workspace placement is unrelated to the interpreted request.");
-      requireOwnedReference("artifact", operation.input.artifactId, references.artifactIds);
+      requireOwnedOrCreatedArtifact(operation.input.artifactId, operationIndex);
       requireOwnedReference("workspace", operation.input.workspaceId, references.workspaceIds);
       if (intent.targetArtifactId && operation.input.artifactId !== intent.targetArtifactId) throw new Error("The placement artifact does not match the interpreted request.");
       if (intent.targetWorkspaceId && operation.input.workspaceId !== intent.targetWorkspaceId) throw new Error("The placement workspace does not match the interpreted request.");
@@ -81,7 +109,7 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     }
     if (operation.type === "artifact.archive") {
       if (intent.mode !== "archive" && intent.mode !== "mixed") throw new Error("The proposed artifact archive is unrelated to the interpreted request.");
-      requireOwnedReference("artifact", operation.input.artifactId, references.artifactIds);
+      requireOwnedOrCreatedArtifact(operation.input.artifactId, operationIndex);
       if (intent.targetArtifactId && operation.input.artifactId !== intent.targetArtifactId) throw new Error("The archive target does not match the interpreted request.");
     }
     if (operation.type === "workspaceItem.setPinned") {

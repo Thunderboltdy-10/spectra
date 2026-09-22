@@ -97,7 +97,7 @@ export function normalizedReference(value: string) {
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
 
@@ -1667,46 +1667,9 @@ export function resolveAndValidatePlan(
       : plan;
   const reconciled = reconcileExplicitRequestContract(promoted, prompt);
   let resolved = resolvePlanReferences(reconciled, context);
-  const promptWorkspaceId = resolveWorkspaceMention(
-    prompt,
-    [
-      ...context.workspaces,
-      ...(context.currentWorkspace
-        ? [
-            {
-              id: context.currentWorkspace.id,
-              title: context.currentWorkspace.title,
-            },
-          ]
-        : []),
-    ],
-    { requireDestinationLanguage: true },
-  );
-  if (promptWorkspaceId) {
-    const operations = resolved.operations.map((operation) => {
-      if (operation.type === "workspaceItem.add") {
-        return parseModelOperation({
-          ...operation,
-          input: { ...operation.input, workspaceId: promptWorkspaceId },
-        });
-      }
-      if (operation.type === "artifact.create") {
-        return parseModelOperation({
-          ...operation,
-          input: { ...operation.input, workspaceId: promptWorkspaceId },
-        });
-      }
-      return operation;
-    });
-    resolved = parseSpectraPlan({
-      ...resolved,
-      intent: {
-        ...resolved.intent,
-        targetWorkspaceId: promptWorkspaceId,
-      },
-      operations,
-    });
-  }
+  // Workspace mentions are discovery hints. The model's verified typed
+  // destination and selected clarification govern placement; a source phrase
+  // must never rewrite every create or add operation.
   const targetOutcome = resolvePlanArtifactTargets(resolved, context, prompt);
   const targetResolutions = targetOutcome.targetResolutions;
   resolved = targetOutcome.plan;
@@ -1733,7 +1696,6 @@ export function resolveAndValidatePlan(
   }
   resolved = narrateResolvedTargets(resolved, targetResolutions);
   assertRequestedArtifactMutation(resolved.operations, prompt);
-  assertCalendarActionContract(resolved.operations, prompt);
   assertPresentationLayoutContract(resolved.operations, prompt);
   console.info(
     `[spectra.plan.summary] ${JSON.stringify({

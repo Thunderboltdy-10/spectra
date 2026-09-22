@@ -94,6 +94,24 @@ async function seedPlanner(
 }
 
 describe("Calendar scheduled work blocks", () => {
+  it("reconciles a lost personal-event acknowledgement without duplicate effects", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const input = { kind: "personal_event" as const, title: "Révision — energía", startAt: 1_790_330_400_000,
+      endAt: 1_790_334_000_000, timezone: "Europe/Madrid", actorKind: "ai" as const, idempotencyKey: "ai:personal-operation-01" };
+    const first = await user.mutation(api.calendar.createPersonalItem, input);
+    const replay = await user.mutation(api.calendar.createPersonalItem, input);
+    expect(replay.id).toBe(first.id);
+    await expect(user.mutation(api.calendar.createPersonalItem, { ...input, title: "Changed scope" })).rejects.toThrow("CALENDAR_IDEMPOTENCY_CONFLICT");
+    const separate = await user.mutation(api.calendar.createPersonalItem, { ...input, idempotencyKey: "ai:personal-operation-02" });
+    expect(separate.id).not.toBe(first.id);
+    const saved = await t.run((ctx) => ctx.db.query("calendarItems").withIndex("by_account_kind", (q) => q.eq("ownerAccountId", seeded.accountId).eq("kind", "personal_event")).collect());
+    expect(saved).toHaveLength(2);
+    await user.mutation(api.calendar.removePersonalItem, { itemId: first.id });
+    await expect(user.mutation(api.calendar.createPersonalItem, input)).rejects.toThrow("CALENDAR_IDEMPOTENCY_REPLAY_REMOVED");
+  });
+
   it("reuses one scheduled block for a retried request and rejects key reuse with different data", async () => {
     const t = setupTest();
     const seeded = await seedCalendarTask(t);

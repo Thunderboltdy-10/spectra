@@ -558,6 +558,7 @@ export const create = mutation({
       }
       const removed = matches.find((embed) => embed.removedAt !== undefined);
       if (removed) {
+        if (removed.placementReceipt) throw new Error("EMBED_PLACEMENT_REMOVED: A saved insertion was later removed. Replaying its operation cannot restore it.");
         if (
           removed.placementFingerprint &&
           removed.placementFingerprint !== placementFingerprint
@@ -1052,6 +1053,24 @@ export const listForContainer = query({
           ),
       ),
     };
+  },
+});
+
+/** A receipt is immutable saved evidence, never a mounted editor callback. */
+export const getPlacementReceipt = query({
+  args: { embedId: v.id("artifactEmbeds"), placementOperationId: v.string() },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const embed = await ctx.db.get(args.embedId);
+    if (!embed || embed.placementOperationId !== args.placementOperationId) throw new Error("EMBED_PLACEMENT_NOT_FOUND");
+    await requireContainer(ctx, actorValue, embed.containerType, embed.containerId, "read");
+    if (embed.removedAt) throw new Error("EMBED_PLACEMENT_REMOVED");
+    if (embed.placementState !== "confirmed" || !embed.placementReceipt?.startsWith("canonical-version:")) return null;
+    const versionId = ctx.db.normalizeId("spectraArtifactVersions", embed.placementReceipt.slice("canonical-version:".length));
+    const version = versionId ? await ctx.db.get(versionId) : null;
+    if (!version || String(version.artifactId) !== embed.containerId || !containsCanonicalPlacement(await loadVersionAfter(ctx, version), String(embed._id), args.placementOperationId, embed.containerRegionId))
+      throw new Error("EMBED_CANONICAL_RECEIPT_INVALID");
+    return { phase: "canonical_write" as const, embedId: embed._id, operationId: args.placementOperationId, versionId: version._id };
   },
 });
 

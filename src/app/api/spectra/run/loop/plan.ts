@@ -14,19 +14,21 @@ import {
   selectedAgentRecord,
 } from "./intake";
 import type { ProvisionalCreation } from "./intake";
-import { executeRegisteredCalendarMutation } from "./calendar-command";
-import { act, mutate, query, readQuery, safeJson } from "./io";
-import { evaluateCommandAuthority, recordAuthorityDecision } from "./authority";
+import { mergeStagedOperations } from "@/features/spectra/operations/dependencies";
+import { isRegisteredApplicationAction, prepareApplicationCommand } from "@/features/spectra/operations/application-command";
+import { hasNumericTableSource } from "@/features/spectra/quality/source-requirements";
+import { act, query, readQuery, safeJson } from "./io";
+import {
+  evaluateCommandAuthority,
+  recordAuthorityDecision,
+} from "./authority";
 import { publicError } from "./report";
 import {
-  assertCalendarActionContract,
   assertPresentationLayoutContract,
   assertRequestedArtifactMutation,
   promptRequestsCalendarAction,
-  promptRequestsNewPlannerTask,
   promptExplicitlyTargetsFocusedArtifact,
   reconcileExplicitDocumentOperation,
-  applicationToolMayCompleteRequest,
 } from "./resolve";
 import { runSpectraAgentLoop } from "@/features/spectra/ai/agent-loop";
 import type { SpectraAgentMessage } from "@/features/spectra/ai/agent-loop";
@@ -34,13 +36,11 @@ import {
   committedApplicationObservation,
   describeApplicationObservation,
 } from "@/features/spectra/ai/application-tool-observation";
-import { decideAiAuthority } from "@/features/spectra/ai/authority-policy";
 import {
   authorityPublicMessage,
   authorityRequiresConfirmation,
 } from "@/features/spectra/ai/authority-execution";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
-import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
 import {
   SPECTRA_FALLBACK_PROVIDERS,
   SPECTRA_PRIMARY_PROVIDER,
@@ -69,7 +69,6 @@ import {
   canonicalizeWhiteboardPatchChange,
   remapWhiteboardRecolorChanges,
 } from "@/features/spectra/ai/whiteboard-content-patch";
-import { isCalendarMutationCommand } from "@/features/spectra/calendar/domain/command";
 import { loadArtifactSkill } from "@/features/spectra/artifacts/blueprint-catalog";
 import type { ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import { nativeOpenRouterAttachmentContent } from "@/features/spectra/compute/files/model-attachment-bundle";
@@ -98,7 +97,6 @@ import {
   SPECTRA_PLAN_JSON_SCHEMA,
   creationToolContentJsonSchema,
   parseModelOperation,
-  compactOperationsRemappingCreated,
   parseSpectraPlan,
 } from "@/features/spectra/operations/schema";
 import type {
@@ -162,7 +160,7 @@ progressUpdates is the hidden native progress-event channel. Use zero for greeti
 
 Available actions in this wave:\n${activeToolContractPrompt()}\nUse an action only when it materially advances the user's request. Do not call tools for small explanatory steps.
 
-Application control is part of Spectra's normal capability: when the user asks to open, take them to, or navigate to a Spectra surface, call navigate_spectra with the matching destination instead of merely explaining where the surface is. When the user asks to pair Bridge, choose a folder, or retry Bridge, call setup_bridge with the matching action; pairing and local consent remain the user's responsibility, but a pairing grant is not needed just to open the handoff. These navigation and setup handoffs are complete when the tool returns ok=true: do not repeat the tool, ask for a grant that was not requested, or call submit_plan afterward.
+Application control is part of Spectra's normal capability: when the user asks to open, take them to, or navigate to a Spectra surface, call navigate_spectra with the matching destination instead of merely explaining where the surface is. When the user asks to pair Bridge, choose a folder, or retry Bridge, call setup_bridge with the matching action; pairing and local consent remain the user's responsibility, but a pairing grant is not needed just to open the handoff. Application tools stage actions in the current plan. Continue until every requested outcome is represented, then submit_plan. A staged action is not a saved result; navigation requires actual surface readiness and Bridge setup still requires the user's local consent.
 
 First classify the request as answer, operate, clarify, or refuse. The intent mode must describe the requested operation; focus is only a hint. Advice, explanation, and questions use decision=answer with zero operations. Ambiguous targets use clarify with zero operations. Unsupported or unsafe work uses refuse with zero operations.
 
@@ -1665,6 +1663,7 @@ export function explicitPlannerSubtaskCount(prompt: string) {
 export function assertRequestedArtifactContent(
   operations: ModelOperation[],
   prompt: string,
+  numericSourceRequired = false,
 ) {
   const plannerOperation = operations.find(
     (operation) =>
@@ -1883,6 +1882,7 @@ export function assertRequestedArtifactContent(
         blueprintKey: operation.input.blueprintKey,
         content: operation.input.content,
         prompt,
+        numericSourceRequired,
       });
     } else if (
       operation.input.content !== null &&
@@ -1892,6 +1892,7 @@ export function assertRequestedArtifactContent(
         blueprintKey: operation.input.blueprintKey,
         content: operation.input.content,
         prompt,
+        numericSourceRequired,
       });
     }
   }
@@ -2698,7 +2699,7 @@ export function agentSystemPrompt(
           ? " Keep sketch/diagram SVGs and HTML compact so the tool call finishes promptly; after a successful create_code call the task is done — do not rebuild, re-author, or propose a second create."
           : ""
       }`
-    : "For requested mutations, call propose_operation once for each complete independent change as soon as it is ready, wait for Spectra's observation, and continue. Use exactly one tool call per turn. When all work is represented, call submit_plan exactly once. Its operations array contains only mutations not already accepted by propose_operation (normally []).";
+    : "For requested mutations, call propose_operation once for each complete independent change as soon as it is ready, wait for Spectra's observation, and continue. Application tools also stage operations; they do not perform writes during planning. Use exactly one tool call per turn. When all work is represented, call submit_plan exactly once. Its operations array contains only mutations not already accepted (normally []). Include intent.obligations: one id, description and operationIndexes array for each requested outcome, covering the entire request and using final indexes (staged operations first). Source workspaces are read context, destination workspaces govern placement, and mutation targets are separate. Never substitute one role for another. Do not say an operation is saved because it is staged. If a single focused propose_operation fulfills the entire request, set fulfillsRequest:true; otherwise leave it false and continue.";
   const retrievalGuidance = singleCreationBlueprint
     ? "Prefer the compact orientation and attachments. Skip discovery tools for a fresh create."
     : "Do not guess missing context and do not preload everything. Use search_objects and the read tools whenever the compact orientation is insufficient. If two or more permissioned work items remain plausible mutation targets, call request_context_target with those evidence-backed candidates and stop. If exactly one permissioned candidate remains, use its exact id and continue the mutation without asking the user to choose. For other bounded ambiguity, call ask_user_choice. Never use visible focus as a fallback for a failed named target.";
@@ -3077,6 +3078,12 @@ export async function executeAgentReadTool(
     payload?: Record<string, unknown>;
   }) => void,
 ) {
+  // Application mutations must have a durable operation id before they run.
+  // The agent loop stages them below; callers of this read boundary cannot
+  // bypass that journal, approval revision, Stop fence or saved receipt.
+  if (isRegisteredApplicationAction(call.name))
+    return { ok: false, code: "application_operation_required", retryable: true,
+      message: "Stage this registered action as app.command in the run plan. It has not executed." };
   let parsedArguments: Record<string, unknown>;
   try {
     parsedArguments = JSON.parse(call.arguments) as Record<string, unknown>;
@@ -3406,32 +3413,6 @@ export async function executeAgentReadTool(
           }
         : { ok: false, code: "school_data_unavailable" };
     }
-    if (call.name === "trigger_managebac_sync") {
-      const purpose =
-        typeof args.purpose === "string" ? args.purpose : "upcoming_deadlines";
-      const refresh = await mutate("managebac:requestAiRefresh", {
-        reason: `ai_${purpose}`,
-        // An explicit AI sync request is a user-directed retry. The Convex
-        // mutation still enforces its short cooldown and active-run fence,
-        // while allowing a stale failed refresh to be retried sooner than a
-        // passive background read.
-        force: args.force !== false,
-      });
-      onUiEvent?.({
-        key: "managebac_sync_requested",
-        payload: {
-          targetId: "managebac",
-          purpose,
-          note: "Requested a ManageBac refresh",
-        },
-      });
-      return {
-        ok: true,
-        refresh,
-        message:
-          "ManageBac refresh was requested. Use the returned status and cached freshness to report whether new data is available; never claim freshness before the provider confirms it.",
-      };
-    }
     if (call.name === "read_embeds") {
       const hostWorkId =
         typeof args.hostWorkId === "string" ? args.hostWorkId.trim() : "";
@@ -3451,62 +3432,6 @@ export async function executeAgentReadTool(
         embeds: embedsRead.value,
         warning:
           "References are permission-bound projections. Preserve unavailable or stale source state and never treat an embed as a copy of the source work.",
-      };
-    }
-    if (call.name === "insert_reference") {
-      const hostWorkId =
-        typeof args.hostWorkId === "string" ? args.hostWorkId.trim() : "";
-      const targetWorkId =
-        typeof args.targetWorkId === "string" ? args.targetWorkId.trim() : "";
-      if (!hostWorkId || !targetWorkId)
-        return { ok: false, code: "reference_works_required" };
-      const targetRead = await readQuery<
-        { actorClerkId: string; artifactId: string },
-        unknown
-      >(
-        "spectraArtifacts:get",
-        { actorClerkId, artifactId: targetWorkId },
-        "the referenced work",
-      );
-      if (!targetRead.ok) return targetRead;
-      const target =
-        targetRead.value &&
-        typeof targetRead.value === "object" &&
-        !Array.isArray(targetRead.value)
-          ? (targetRead.value as Record<string, unknown>)
-          : null;
-      const workType = String(target?.blueprintKey ?? "").trim();
-      if (!target || !workType)
-        return { ok: false, code: "reference_target_unavailable" };
-      const targetLabel =
-        typeof args.label === "string" && args.label.trim()
-          ? args.label.trim().slice(0, 160)
-          : String(target.title ?? "Referenced work").slice(0, 160);
-      onUiEvent?.({
-        key: "reference_insert",
-        payload: {
-          hostWorkId,
-          targetWorkId,
-          targetWorkType: workType,
-          schemaVersion:
-            typeof target.schemaVersion === "number" ? target.schemaVersion : 1,
-          label: targetLabel,
-          fallbackExcerpt: targetLabel,
-          note: `Insert a live reference to ${targetLabel}`,
-        },
-      });
-      return {
-        ok: true,
-        status: "queued_refresh",
-        receipt: {
-          phase: "queued_refresh",
-          hostWorkId,
-          targetWorkId,
-        },
-        message:
-          "The reference is queued for the host work surface. Insertion is not complete until a canonical or verified native write acknowledges it.",
-        hostWorkId,
-        targetWorkId,
       };
     }
     if (call.name === "web_search") {
@@ -3587,71 +3512,6 @@ export async function executeAgentReadTool(
         partial: research.stoppedEarly || evidence.partial,
       };
     }
-    if (call.name === "navigate_spectra") {
-      const destination = args.destination;
-      if (
-        destination !== "library" &&
-        destination !== "calendar" &&
-        destination !== "settings" &&
-        destination !== "workspace" &&
-        destination !== "artifact"
-      )
-        return { ok: false, code: "navigation_destination_invalid" };
-      // Navigation is a semantic command result. The client-side Follow AI
-      // controller consumes this descriptor when the actor is followed; the
-      // server never reaches into the browser or manufactures coordinates.
-      const command = {
-        id: "app.navigate",
-        destination,
-        ...(typeof args.targetId === "string" && args.targetId.trim()
-          ? { targetId: args.targetId.trim() }
-          : {}),
-      };
-      onUiEvent?.({ key: "navigate", payload: command });
-      return {
-        ok: true,
-        command,
-      };
-    }
-    if (call.name === "setup_bridge") {
-      const action = args.action;
-      const grantId =
-        typeof args.grantId === "string" ? args.grantId.trim() : "";
-      if (
-        action !== "pair" &&
-        action !== "select-location" &&
-        action !== "retry-connection" &&
-        action !== "retry-folder"
-      )
-        return { ok: false, code: "bridge_action_invalid" };
-      if (action === "retry-folder" && !grantId)
-        return { ok: false, code: "bridge_grant_required" };
-      // Bridge pairing and local folder grants remain human-authorized. The
-      // AI can take the user to the exact settings handoff, but never performs
-      // the pairing or grants native access itself.
-      onUiEvent?.({
-        key: "bridge_setup",
-        payload: {
-          action,
-          actionId: scope?.mutationScopeId ?? call.id,
-          ...(grantId ? { grantId } : {}),
-          targetId: "devices",
-          note: "Open Bridge settings to finish this setup step",
-        },
-      });
-      return {
-        ok: true,
-        status: "needs-human",
-        message:
-          "Bridge settings are ready. Complete the setup step and any local consent there.",
-        command: {
-          id: "app.bridge.setup",
-          actionId: scope?.mutationScopeId ?? call.id,
-          action,
-          ...(grantId ? { grantId } : {}),
-        },
-      };
-    }
     if (call.name === "search_library") {
       const search = typeof args.query === "string" ? args.query.trim() : "";
       if (!search) return { ok: false, code: "query_required", results: [] };
@@ -3705,288 +3565,6 @@ export async function executeAgentReadTool(
         })),
       };
     }
-    if (call.name === "delete_library_items") {
-      const targetIds = Array.isArray(args.targetIds)
-        ? args.targetIds.filter(
-            (value): value is string =>
-              typeof value === "string" && value.trim().length > 0,
-          )
-        : [];
-      const authority = decideAiAuthority({
-        target: "tree_delete",
-        fileCount: targetIds.length,
-      });
-      return {
-        ok: false,
-        code: "approval_required",
-        message: `${authority.reason} This would affect ${targetIds.length} Library item${targetIds.length === 1 ? "" : "s"}.`,
-      };
-    }
-    if (call.name === "organize_library") {
-      const action = args.action;
-      const targetIds = Array.isArray(args.targetIds)
-        ? args.targetIds.filter(
-            (value): value is string =>
-              typeof value === "string" && value.trim().length > 0,
-          )
-        : [];
-      const destinationId = resolveLibraryDestinationId(
-        args.destinationId,
-        scope?.libraryNodeId,
-      );
-      const name = typeof args.name === "string" ? args.name.trim() : undefined;
-      if (action === "create_folder") {
-        if (!name) return { ok: false, code: "folder_name_required" };
-        const existingSearch = await query<unknown & object, unknown>(
-          "orgTree:search",
-          {
-            term: name,
-            kinds: ["folder"],
-            scopeNodeId: destinationId ?? null,
-            limit: 20,
-          },
-        );
-        const existing = rows(
-          existingSearch &&
-            typeof existingSearch === "object" &&
-            !Array.isArray(existingSearch)
-            ? (existingSearch as Record<string, unknown>).results
-            : [],
-        ).find(
-          (item) =>
-            String(item.name ?? "")
-              .trim()
-              .toLocaleLowerCase() === name.toLocaleLowerCase() &&
-            String(item.parentId ?? "") === String(destinationId ?? ""),
-        );
-        if (existing) {
-          return {
-            ok: true,
-            action,
-            observation: {
-              kind: "library.create_folder",
-              name: String(existing.name ?? name),
-              nodeId: String(
-                existing.nodeId ?? existing._id ?? existing.id ?? "",
-              ),
-              parentId: destinationId ?? null,
-              reused: true,
-            },
-          };
-        }
-        const created = await mutate("orgTree:createFolder", {
-          actorClerkId,
-          name,
-          parentId: destinationId ?? null,
-        });
-        onUiEvent?.({
-          key: "organize_library",
-          payload: {
-            action,
-            targetId:
-              created && typeof created === "object"
-                ? String(
-                    (created as Record<string, unknown>).nodeId ??
-                      (created as Record<string, unknown>)._id ??
-                      "",
-                  )
-                : "",
-            destinationId: destinationId ?? null,
-            note: `Created ${name}`,
-          },
-        });
-        const createdRecord =
-          created && typeof created === "object" && !Array.isArray(created)
-            ? (created as Record<string, unknown>)
-            : {};
-        const nodeId = String(createdRecord.nodeId ?? createdRecord._id ?? "");
-        const observed = nodeId
-          ? await query<unknown & object, unknown>("orgTree:path", { nodeId })
-          : null;
-        const observedRecord =
-          observed && typeof observed === "object" && !Array.isArray(observed)
-            ? (observed as Record<string, unknown>)
-            : {};
-        const observedNode =
-          observedRecord.node &&
-          typeof observedRecord.node === "object" &&
-          !Array.isArray(observedRecord.node)
-            ? (observedRecord.node as Record<string, unknown>)
-            : createdRecord;
-        if (
-          String(observedNode.name ?? "") !== name ||
-          String(observedNode.parentId ?? "") !== String(destinationId ?? "")
-        )
-          throw new Error("LIBRARY_CREATE_POSTCONDITION_FAILED");
-        return {
-          ok: true,
-          action,
-          created,
-          observation: {
-            kind: "library.create_folder",
-            name,
-            nodeId,
-            parentId: destinationId ?? null,
-            reused: false,
-          },
-        };
-      }
-      if (targetIds.length === 0)
-        return { ok: false, code: "library_targets_required" };
-      if (action === "rename") {
-        if (targetIds.length !== 1 || !name)
-          return { ok: false, code: "single_target_name_required" };
-        const renamed = await mutate("orgTree:rename", {
-          actorClerkId,
-          nodeId: targetIds[0],
-          name,
-        });
-        onUiEvent?.({
-          key: "organize_library",
-          payload: {
-            action,
-            targetId: targetIds[0],
-            note: `Renamed to ${name}`,
-          },
-        });
-        return {
-          ok: true,
-          action,
-          renamed,
-          observation: {
-            kind: "library.rename",
-            name,
-            nodeId: targetIds[0],
-          },
-        };
-      }
-      if (action === "move") {
-        if (!destinationId) return { ok: false, code: "destination_required" };
-        const moved = await mutate("orgTree:move", {
-          actorClerkId,
-          nodeIds: targetIds,
-          parentId: destinationId,
-        });
-        onUiEvent?.({
-          key: "organize_library",
-          payload: {
-            action,
-            targetId: destinationId,
-            note: `Moved ${targetIds.length} item${targetIds.length === 1 ? "" : "s"}`,
-          },
-        });
-        return {
-          ok: true,
-          action,
-          moved,
-          observation: {
-            kind: "library.move",
-            count: targetIds.length,
-            destinationId,
-          },
-        };
-      }
-      if (action === "link") {
-        if (!destinationId || targetIds.length !== 1)
-          return { ok: false, code: "single_target_destination_required" };
-        const linked = await mutate("orgTree:createReference", {
-          actorClerkId,
-          targetNodeId: targetIds[0],
-          parentId: destinationId,
-        });
-        onUiEvent?.({
-          key: "organize_library",
-          payload: {
-            action,
-            targetId: destinationId,
-            note: "Created a Library reference",
-          },
-        });
-        const linkedRecord =
-          linked && typeof linked === "object" && !Array.isArray(linked)
-            ? (linked as Record<string, unknown>)
-            : {};
-        return {
-          ok: true,
-          action,
-          linked,
-          observation: {
-            kind: "library.link",
-            nodeId: String(linkedRecord.nodeId ?? ""),
-            destinationId,
-          },
-        };
-      }
-      return { ok: false, code: "library_action_invalid" };
-    }
-    if (call.name === "write_memory") {
-      const content =
-        typeof args.content === "string" ? args.content.trim() : "";
-      if (!content) return { ok: false, code: "memory_content_required" };
-      if (args.action !== "create")
-        return {
-          ok: false,
-          code: "memory_revision_requires_explicit_claim_id",
-        };
-      const memory = await mutate("memory:remember", {
-        actorClerkId,
-        proposition: content,
-        scope: "private_global",
-        claimType: "inferred_preference",
-        sourceType: "user_statement",
-        captureReason: "You explicitly asked Spectra to remember this.",
-      });
-      return { ok: true, memory };
-    }
-    if (call.name === "change_spectra_settings") {
-      const authority = decideAiAuthority({ target: "settings" });
-      return {
-        ok: false,
-        code: "approval_required",
-        message: authority.reason,
-      };
-    }
-    if (call.name === "change_sharing") {
-      const authority = decideAiAuthority({ target: "sharing" });
-      return {
-        ok: false,
-        code: "approval_required",
-        message: authority.reason,
-      };
-    }
-    if (call.name === "change_sync_policy") {
-      const targetIds = Array.isArray(args.targetIds)
-        ? args.targetIds.filter(
-            (value): value is string =>
-              typeof value === "string" && value.trim().length > 0,
-          )
-        : [];
-      const patch =
-        args.patch &&
-        typeof args.patch === "object" &&
-        !Array.isArray(args.patch)
-          ? (args.patch as Record<string, unknown>)
-          : {};
-      if (targetIds.length === 0)
-        return { ok: false, code: "sync_targets_required" };
-      const current = await query("syncPolicy:effective", {
-        actorClerkId,
-        itemId: targetIds[0],
-      });
-      const values = {
-        ...(current && typeof current === "object" ? current : {}),
-        ...patch,
-      };
-      const changed = await mutate("syncPolicy:override", {
-        actorClerkId,
-        scopeKind: "item",
-        scopeId: targetIds[0],
-        values,
-        actorKind: "ai",
-        idempotencyKey: `ai:${actorClerkId}:${targetIds[0]}:${JSON.stringify(values).slice(0, 120)}`,
-      });
-      return { ok: true, changed, targetIds };
-    }
     if (call.name === "read_calendar") {
       const from = Number(args.from);
       const to = Number(args.to);
@@ -4025,21 +3603,6 @@ export async function executeAgentReadTool(
                   ?.complete === false),
           ),
       };
-    }
-    if (
-      call.name === "schedule_calendar_task" ||
-      call.name === "create_calendar_personal_event" ||
-      call.name === "move_calendar_block" ||
-      call.name === "resize_calendar_block"
-    ) {
-      return executeRegisteredCalendarMutation({
-        actorClerkId,
-        command: call.name,
-        args,
-        mutationScopeId: scope?.mutationScopeId ?? call.id,
-        signal: executionSignal,
-        onUiEvent,
-      });
     }
     return { ok: false, code: "unknown_tool" };
   };
@@ -4255,6 +3818,7 @@ export async function callModel(
   }) => void,
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const numericSourceRequired = hasNumericTableSource(attachments);
   const mutationScopeId = crypto.randomUUID();
   if (!apiKey)
     throw new Error("OpenRouter is not configured for Spectra runs.");
@@ -4365,10 +3929,6 @@ export async function callModel(
   const speculativeSingleCreation =
     forcedSingleCreation ?? provisionalSingleCreation(prompt);
   const calendarActionRequested = promptRequestsCalendarAction(prompt);
-  const calendarCreatesPlannerTask =
-    !forcedSingleCreation &&
-    calendarActionRequested &&
-    promptRequestsNewPlannerTask(prompt);
   // Any Calendar write (personal event, schedule existing task, or new planner
   // + schedule) needs the ordinary agent tool set. Single-creation note/planner
   // blueprints would strip create_calendar_personal_event / schedule tools even
@@ -4421,7 +3981,7 @@ export async function callModel(
   // it inside every new user packet destroys the byte-stable prefix that the
   // configured provider can reuse across continuation turns.
   const currentOrientation = { ...orientation, conversation: undefined };
-  const userText = `Current date and time: ${new Date().toISOString()}\n\nUser request:\n${prompt}${textAttachments}\n\nCompact owned orientation (valid JSON):\n${safeJson(currentOrientation)}`;
+  const userText = `${numericSourceRequired ? "Source requirement: the attached table contains numeric data. A presentation must include an editable chart or table with the actual values, categories, units and explanation; a labelled shape or image does not fulfill this.\n\n" : ""}Current date and time: ${new Date().toISOString()}\n\nUser request:\n${prompt}${textAttachments}\n\nCompact owned orientation (valid JSON):\n${safeJson(currentOrientation)}`;
   const userContent = nativeOpenRouterAttachmentContent(userText, attachments);
   const primaryRouting = getSpectraProviderRouting("primary");
   assertPrimarySpectraRouting(primaryRouting);
@@ -4687,7 +4247,7 @@ export async function callModel(
         const terminalOperations = Array.isArray(raw.operations)
           ? raw.operations
           : [];
-        raw.operations = [...acceptedAgentOperations, ...terminalOperations];
+        raw.operations = mergeStagedOperations(acceptedAgentOperations, terminalOperations.map(parseModelOperation));
         candidateText = JSON.stringify(raw);
       } catch {
         // Keep the provider text intact so the normal bounded repair path can
@@ -4702,19 +4262,8 @@ export async function callModel(
       defaultPlacement,
       ownedArtifactBlueprints,
     );
-    if (acceptedAgentOperations.length) {
-      const seen = new Set<string>();
-      const operations = [
-        ...acceptedAgentOperations,
-        ...parsed.operations,
-      ].filter((operation) => {
-        const key = JSON.stringify(operation);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      parsed = parseSpectraPlan({ ...parsed, operations });
-    }
+    if (parsed.operations.length > 1 && !parsed.intent.obligations?.length)
+      throw new Error("List every requested outcome in intent.obligations with id, description and final operationIndexes (including staged operations). A multi-action request is incomplete until all outcomes have operations.");
     const cleanText = (value: string | null | undefined) =>
       value == null
         ? value
@@ -4748,88 +4297,10 @@ export async function callModel(
         finalResponse: groundedSummary,
       });
     }
-    // A Calendar request for an existing task can still arrive from a model
-    // turn that drafted a stale duplicate `artifact.create` before discovery
-    // completed. If the duplicate title matches exactly one owned planner
-    // artifact and a real Calendar command is present, repair the graph locally
-    // at the executable-plan boundary: reuse the owned artifact and drop only
-    // that redundant create. Explicit new-task requests never enter this path.
-    if (calendarActionRequested && !calendarCreatesPlannerTask) {
-      const hasCalendarCommand = parsed.operations.some(
-        (operation) =>
-          operation.type === "app.command" &&
-          isCalendarMutationCommand(operation.input.command),
-      );
-      if (hasCalendarCommand) {
-        const aliases = new Map<string, string>();
-        for (const [operationIndex, operation] of parsed.operations.entries()) {
-          if (
-            operation.type !== "artifact.create" ||
-            operation.input.blueprintKey !== "planner_task"
-          )
-            continue;
-          const titleKey = operation.input.title
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, " ")
-            .trim();
-          const matches = [...ownedArtifactTitles.entries()].filter(
-            ([artifactId, title]) => {
-              if (ownedArtifactBlueprints.get(artifactId) !== "planner_task")
-                return false;
-              return (
-                title
-                  .toLowerCase()
-                  .replace(/[^a-z0-9]+/g, " ")
-                  .trim() === titleKey
-              );
-            },
-          );
-          if (matches.length === 1)
-            aliases.set(`@created:${operationIndex}`, matches[0]![0]);
-        }
-        if (aliases.size > 0) {
-          const rewriteAliasLeaves = (value: unknown): unknown => {
-            if (typeof value === "string") return aliases.get(value) ?? value;
-            if (Array.isArray(value)) return value.map(rewriteAliasLeaves);
-            if (value && typeof value === "object")
-              return Object.fromEntries(
-                Object.entries(value as Record<string, unknown>).map(
-                  ([key, child]) => [key, rewriteAliasLeaves(child)],
-                ),
-              );
-            return value;
-          };
-          const rewritten = parsed.operations.map((operation) =>
-            parseModelOperation(rewriteAliasLeaves(operation)),
-          );
-          const operations = compactOperationsRemappingCreated(
-            rewritten,
-            (operation, operationIndex) =>
-              !(
-                operation.type === "artifact.create" &&
-                aliases.has(`@created:${operationIndex}`)
-              ),
-          );
-          const existingTitle = [...aliases.values()]
-            .map((artifactId) => ownedArtifactTitles.get(artifactId))
-            .find((title): title is string => Boolean(title));
-          parsed = parseSpectraPlan({
-            ...parsed,
-            intent: {
-              ...parsed.intent,
-              mode: "mixed",
-              requestedArtifactTypes: [],
-              requestedVisibleArtifactCount: 0,
-            },
-            operations,
-            finalResponse: existingTitle
-              ? `Scheduled “${existingTitle}” on Calendar.`
-              : parsed.finalResponse,
-          });
-        }
-      }
-    }
-    assertRequestedArtifactContent(parsed.operations, prompt);
+    // Exact title matches prove candidate identity, not permission to replace a
+    // requested create. Keep the model's typed graph; resolve ambiguity explicitly.
+    assertRequestedArtifactContent(parsed.operations, prompt, numericSourceRequired);
+
     return parsed;
   };
   const parseSingleCreationArguments = (
@@ -4920,7 +4391,7 @@ export async function callModel(
           ? parsed.finalResponse.trim()
           : `Created ${title}.`,
     });
-    assertRequestedArtifactContent(plan.operations, prompt);
+    assertRequestedArtifactContent(plan.operations, prompt, numericSourceRequired);
     return plan;
   };
   const parseRecoveredModelText = (text: string) =>
@@ -5321,6 +4792,7 @@ export async function callModel(
               : [],
           requestedVisibleArtifactCount: 1,
           targetArtifactId: updateTarget?.artifactId ?? null,
+          obligations: [{ id: "focused-change", description: prompt.slice(0, 500), operationIndexes: [0] }],
           targetWorkspaceId:
             typeof contextRecord.workspace === "object" &&
             contextRecord.workspace &&
@@ -5532,6 +5004,7 @@ export async function callModel(
       signal,
       isParallelSafeTool: (call) =>
         spectraToolRegistry.get(call.name)?.parallelSafe === true,
+      isMutationTool: (call) => spectraToolRegistry.get(call.name)?.category === "write",
       isTerminalTool: (call) =>
         call.name === "submit_plan" ||
         call.name === "ask_user_choice" ||
@@ -5556,16 +5029,32 @@ export async function callModel(
         if (
           directFocusedAction &&
           call.name === "propose_operation" &&
-          resultRecord?.accepted === true
+          resultRecord?.accepted === true &&
+          resultRecord?.fulfillsRequest === true &&
+          acceptedAgentOperations.length === 1
         )
           return true;
-        return applicationToolMayCompleteRequest(
-          prompt,
-          call.name,
-          toolResult,
-        );
+        return false;
       },
       executeTool: async (call) => {
+        if (isRegisteredApplicationAction(call.name)) {
+          try {
+            const args = JSON.parse(call.arguments) as Record<string, unknown>;
+            const operation = parseModelOperation(prepareApplicationCommand(call.name, args));
+            const fingerprint = JSON.stringify(operation);
+            const previous = acceptedAgentOperations.findIndex((entry) => JSON.stringify(entry) === fingerprint);
+            const index = previous >= 0 ? previous : acceptedAgentOperations.push(operation) - 1;
+            if (previous < 0) {
+              acceptedAgentWorkSummaries.push(operationLabel(operation));
+              onProgressUpdate?.(operationLabel(operation));
+              onPlanOperation?.(operation, index);
+            }
+            return { ok: true, accepted: true, operationIndex: index, phase: "staged",
+              message: "This action is staged, not executed. Continue all remaining requested work, then submit_plan. Use the returned operation indexes for dependencies; do not repeat staged operations. Authority and required approval are checked before execution." };
+          } catch (error) {
+            return { ok: false, code: "invalid_application_operation", retryable: true, message: publicError(error) };
+          }
+        }
         if (call.name === "request_context_target") {
           const candidateIds = parseContextTargetCandidateIds(call);
           if (candidateIds.length === 1) {
@@ -5628,9 +5117,8 @@ export async function callModel(
               ),
             );
             assertSelectedAgentAllowsOperations(contextRecord, [operation]);
-            assertRequestedArtifactContent([operation], prompt);
+            assertRequestedArtifactContent([operation], prompt, numericSourceRequired);
             assertRequestedArtifactMutation([operation], prompt);
-            assertCalendarActionContract([operation], prompt);
             assertPresentationLayoutContract([operation], prompt);
             const fingerprint = JSON.stringify(operation);
             const existingIndex = acceptedAgentOperations.findIndex(
@@ -5656,11 +5144,10 @@ export async function callModel(
             return {
               ok: true,
               accepted: true,
+              fulfillsRequest: args.fulfillsRequest === true,
               operationIndex: index,
               preview: safeOperationPreview(operation),
-              message: directFocusedAction
-                ? "The requested focused mutation passed structural validation and its visible preview is staged. Call submit_plan now with no repeated operation and do not retrieve or propose additional work."
-                : "The typed mutation passed structural validation and its visible preview is staged. Continue with remaining work or submit the final plan.",
+              message: "The typed mutation passed structural validation and its visible preview is staged. Continue with remaining requested work, or submit the final plan without repeating staged operations.",
             };
           } catch (error) {
             if (isArtifactQualityError(error)) {

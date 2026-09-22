@@ -1,181 +1,49 @@
-# S9-DURABLE — large Office durable path audit
+# S9-DURABLE — large Office durable content
 
-Date: 2026-09-14 (Europe/Madrid)
-Branch: `grokbot/launch-review/native-durable` (from `cb277f3`)
-Status: **OPEN** for capacity redesign; **honesty seam repaired** in this branch. Dual-gate (Atlas+Spectra) still required. No push, no merge, no Actions, no original-file mutation.
+Date: 2026-09-23 (Europe/Madrid)
 
-## Measured root cause (not “just raise the limit”)
+Branch: `main`
+Status: **implementation complete; live acceptance pending**. This report records local implementation and deterministic checks only. It does not claim launch acceptance.
 
-Accepted Office content, live Yjs, Convex rows, and native materialization do not share one byte budget. Dense workbooks and formal papers therefore open in the lens and later enter reconnect/unsynchronized collaboration, or require compaction before import persistence.
+## Integrated implementation
 
-| Boundary | Constant / check | Units | Where enforced |
-| --- | --- | --- | --- |
-| Durable Yjs append / bootstrap / snapshot row | `MAX_DURABLE_UPDATE_BYTES` = `760 * 1024` | UTF-8/binary **bytes** | `scripts/collaboration-update-envelope.mjs`; gateway `beforeHandleMessage`; Convex `MAX_GATEWAY_UPDATE_BYTES` in `convex/collaborationGatewayStore.ts` |
-| Realtime WebSocket frame | `MAX_REALTIME_MESSAGE_BYTES` = `1024 * 1024` | bytes | gateway `websocketOptions.maxPayload` / unauthenticated queue |
-| Projection JSON (legacy) | `900_000` via `.length` | JS string length (UTF-16 code units), **not** UTF-8 bytes | gateway `artifactProjection`; Convex `parseGatewayProjection`; bridge `text(..., 900_000)` |
-| Product persisted-content ceiling | `MAX_PERSISTED_CONTENT_BYTES = 900_000` | named “bytes” in `shared/intake-limits.ts` | import/product paths; historically conflated with projection `.length` |
-| Sheet “chunking” | `SHEET_CELLS_CHUNK_SIZE = 256` | array partitions **inside one Convex value** | `shared/sheet-cells.ts` — does **not** partition the document or reduce total bytes |
-| Cloudflare worker room | `MAX_UPDATE_BYTES = 1_048_576` | bytes | `workers/collaboration/src/protocol.ts` (separate from self-hosted durable envelope) |
-| Bridge outer envelope | `MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS = 2_000_000` | characters | `shared/collaboration-bridge.ts` |
+The capacity foundation was integrated on main in `9aa76b15`, `7d5ce3b0`, `64a4bfb9`, `12d3813c`, and `ae480a67`. This pass adds `0ff1f359` (durable recovery, storage ownership, authorization, and regressions). The current main also retains the independently integrated gateway, Calendar, Keep-class, and formula-cache fixes (`5250792d`, `52ff743f`, `d7713584`, `fa72dc4a`). The remaining local gateway launcher change was reconciled: its shebang is retained and `.gitattributes` pins LF so the launcher works on Windows. Uncommitted W9 recovery/handoff notes were left untouched.
 
-**UTF-8 vs character mismatch (confirmed):** a projection of ~500k `"é"` characters is 500k `.length` but >900k UTF-8 bytes. Before this branch, character gates could admit JSON that Convex cannot store. This branch fails closed on **either** char or UTF-8 byte bound (`projectionExceedsDurableBound`).
+The root cause was a mismatch between accepted Office content and single-message/Convex bounds: a 200,000-cell workbook or formal paper could fit import parsing but exceed the 760 KiB durable append, projection, bootstrap, or snapshot envelope. Sheet arrays chunked inside one value did not make that value small. The integrated path keeps one logical artifact and the existing Yjs/ledger authority. Large updates and projections use immutable storage bodies referenced by bounded manifests, while small/legacy updates remain inline. Adopted bodies are complete and digest checked before a head or replay can use them. Oversized merged batches split or spill; checkpoints, saved versions, replay, AI writes, and native materialization resolve the same durable content references. Small Yjs edits remain deltas; an unchanged semantic projection no longer triggers a full-body durable acknowledgement.
 
-**Merged-batch inflation (confirmed):** `persistAcceptedMessages` merges same-batch updates with `Y.mergeUpdates` and appends without a pre-merge `MAX_DURABLE_UPDATE_BYTES` check (`scripts/collaboration-gateway.mjs`). Individually legal deltas can combine past 760 KiB; Convex then rejects with `COLLABORATION_GATEWAY_UPDATE_SIZE`.
+This pass closes three recovery findings:
 
-**Compaction silence (confirmed):** room snapshot compaction returns early when encoded snapshot >760 KiB or state vector >128 KiB (`collaboration-gateway.mjs` ~250) with no UI signal — large rooms stop compacting quietly.
+- **R1:** Both incoming reconciliation entry points distinguish provisional bootstrap from live/persisted remote changes. Legitimate shorter text, empty content, nontext changes, and local clears are accepted; stale/provisional hollow state still cannot overwrite a real head. The invalid Sheets head-heal and blanket Yjs hollow guard were removed.
+- **R3:** The public content endpoint streams a bounded body to server storage, then a signed, actor-bound content attestation authorizes adoption. The internal mutation rechecks current artifact authority and policy epoch. Indexed ownership checks block cross-artifact/native/intake aliases during adoption and deduplication. Durable, native, intake, asset, replica-sweep, and bridge-upload cleanup retain storage until its last binding releases. Lost-receipt retry is idempotent even after a redundant upload was deleted.
+- **R6:** Definite account, room, or artifact denial revokes a cached collaboration write grant. The quiet-connection sweep refreshes current actor authority even when artifact policy version has not changed. Transient transport failures keep their distinct retry behavior.
 
-## Reconnect / lost-ack honesty (pre-fix)
+The append receipt is returned for already persisted sequence IDs before requiring a spilled body that may since have been compacted, but only after current authorization. Replay rejects missing, incomplete, wrong-digest, out-of-order, or wrong-generation data; manifest reads fall back to inline records only for legacy records without a manifest. Pinned versions and other owners retain referenced bytes through the existing ownership coordinator. No provider, retention policy, product control, or native identity changed.
 
-| Path | Pre-fix behavior | After this branch |
-| --- | --- | --- |
-| Oversized canonical delta in `beforeHandleMessage` | Closed `4409` **without** `spectra.durable_failed` | `rejectPeerUpdate` sends `spectra.durable_failed` then closes `4409` |
-| Client `onDisconnect` for `4409` | Treated like ordinary disconnect; **cleared** `error`; could show `reconnecting` with `pending === 0` | Always `unsynchronized` with truthful user message; `unsynchronizedChanges` at least 1 |
-| `COLLABORATION_PROJECTION_SIZE` / `_INVALID` on append | **Not** matched by `permanentPersistenceFailure` → retried as transient up to 12× then thrown **without** `forceCanonicalReconnect` | Treated permanent → `forceCanonicalReconnect` |
-| Exhausted transient retries (`attempt >= 12`) | Threw without room-wide durable_failed | Calls `forceCanonicalReconnect` before throw |
-| Permanent size/forbidden failures | Already `forceCanonicalReconnect` | Unchanged |
+## Automated evidence
 
-Acknowledgement still means durable Convex append (`spectra.durable_ack`). Network receipt alone is insufficient — preserved.
+All checks used local fixtures/packages; no shared stack, browser, live AI, or native Office application was started.
 
-## Large native Office seams (still OPEN — Collab)
-
-1. **Import → Yjs init → canonical update:** Formal paper (~695 equations) needed compaction (`compactDocxProjectionForStorage`) to fit persistence; W9-00 fixed no-op regeneration, not end-to-end capacity.
-2. **200k-cell workbook:** Lens opens projection; collaboration hits durable/realtime envelope and reconnect stress (V8-04 / WAVE-9). `sheet-cells` chunking is cosmetic for Convex document size.
-3. **Checkpoint / saved version / native materialization:** Immediate AI/native-init projections ride the same 900k gate; deferred human checkpoints can omit projection then later fail size. Snapshot compaction cannot land >760 KiB full state.
-4. **Small edits on large artifacts:** Sync step 2 can send a near-1 MiB realtime frame; `canonicalDurableUpdate` correctly persists only the delta, but a **genuinely large first import/bootstrap** still cannot fit one append + projection + metadata set under Convex’s ~1 MiB document ceiling.
-
-Raising 760 KiB or 900k alone cannot establish end-to-end capacity. Required design (handoff below): immutable payload/blob + versioned manifest, hot metadata separate, digest-verified commit/replay, bounded chunks with authorization at adopt/read/replay.
-
-## What changed on this branch
-
-Surgical honesty + bound reconciliation **without** rewriting the gateway orchestrator:
-
-- `scripts/collaboration-update-envelope.mjs` — projection UTF-8/char helpers + shared durable-failure message/close code
-- `scripts/collaboration-persist.mjs` — permanent projection size/invalid
-- `scripts/collaboration-gateway.mjs` — `rejectPeerUpdate`, exhausted-retry reconnect, projection bound helper (no partition redesign)
-- `convex/collaborationGatewayStore.ts` — UTF-8-aware projection gate
-- `src/features/spectra/collaboration/hocuspocus-transport.ts` — `4409` honesty
-- Tests locking the seams in `collaboration-gateway.test.ts` and `hocuspocus-transport-lifecycle.test.ts`
-
-## Explicit Collab handoff (`C-Collab+Share`)
-
-Do **not** solo-rewrite `scripts/collaboration-gateway.mjs` as a monolith. Proposed partition:
-
-1. **Durable storage adapter** — payload/blob + manifest for large native Office; keep Yjs ledger authority; digest-verified versions; migration/read fallback for small legacy rows.
-2. **Append pipeline** — pre-check merged batch bytes; split or spill to payload refs when `Y.mergeUpdates` exceeds `MAX_DURABLE_UPDATE_BYTES` (`persistAcceptedMessages` ~415–446).
-3. **Projection path** — stream/chunk native projection separate from hot artifact row; reconcile `MAX_PERSISTED_CONTENT_BYTES` (true UTF-8) with bridge `text(..., 900_000)` character gate (`collaborationGatewayBridge.ts`).
-4. **Compaction** — replace silent >760 KiB skip (~250) with spill-to-payload snapshot or truthful degraded health.
-5. **Worker parity** — Cloudflare `MAX_UPDATE_BYTES = 1 MiB` vs self-hosted durable 760 KiB; document which provider large Office uses at launch.
-
-Evidence anchors: `collaboration-gateway.mjs:250`, `:415–446`, `:725–759`, `:985–1022`, `:270–288`; `collaboration-persist.mjs:20–26`; `collaborationGatewayStore.ts` projection/append guards; `shared/sheet-cells.ts:1–84`; V8-04 200k / Maths EE fixtures.
-
-## Verification run this session
-
-- Focused Vitest: collaboration-gateway + hocuspocus-transport-lifecycle (see commit evidence)
-- `npm run check:capabilities` / `npm run check:architecture` after code changes
-- **NOT run:** full `local:start:all`, live 200k workbook, formal-paper native round-trip, two-session lost-ack live Convex, AI large-item edit, pin/source-delete retention against new storage (storage not redesigned)
-
-## Remaining OPEN for S9-DURABLE / Spectra
-
-- End-to-end capacity for formal paper + 200k workbook (open/edit/save/reload/reconnect/native readback)
-- Payload/manifest storage design + migration
-- Merged-batch and compaction structural fixes (Collab)
-- Live latency/byte report for small vs large fixtures
-- Dual-gate Atlas+Spectra sign-off; no merge until Collab capacity path lands or is explicitly deferred with truthful product limits
-
-## Suggested Audit scale-room status (Atlas/Spectra)
-
-S9-DURABLE remains OPEN on capacity: 760 KiB durable append, 900k projection (now UTF-8-honest), and in-value sheet chunking still cannot host dense Sheets/Word state end-to-end — Collab needs payload/manifest partitioning, not threshold bumps. This branch closed concrete honesty gaps (pre-apply `durable_failed`, permanent projection failures, exhausted-retry reconnect, client `4409` unsynchronized messaging) under ≤2 commits without a gateway rewrite; live 200k/formal-paper acceptance and dual-gate are still outstanding.
-
-
-## Collab capacity landing (`C-Collab+Share`)
-
-Branch: `grokbot/launch-review/collab-share-capacity` (from main tip including Native honesty `2e126fb`).
-
-Implemented without rewriting Native honesty (`rejectPeerUpdate`, `forceCanonicalReconnect`, `projectionExceedsDurableBound`, permanent projection regex, client `4409`):
-
-1. **Payload/blob + versioned manifest** — `scripts/collaboration-durable-capacity.mjs` + `convex/collaborationDurablePayloads` / `collaborationDurablePayload.ts`; digest-verified manifests; legacy inline read fallback on load.
-2. **Pre-check/spill for merged batches** — `persistAcceptedMessages` uses `planMergedUpdatePersist` (split under 760 KiB; spill single oversized updates via `storeDurablePayload`).
-3. **Projection off hot row** — spill plan + `projectionPayloadRef` / hot stub on `spectraArtifacts`; bridge projection gates use **true UTF-8** (`projectionText`).
-4. **Compaction silent-skip** — `compactionSnapshotDecision` + `lastCompactionDeferred` health (`degraded`); spill path for oversized snapshot updates.
-5. **Worker parity** — Cloudflare `MAX_UPDATE_BYTES` aligned to **760 KiB** durable; `MAX_REALTIME_MESSAGE_BYTES` remains 1 MiB.
-
-Still OPEN for product/live dual-gate: end-to-end 200k workbook + formal-paper round-trip on live Convex, pin/retention GC against spilled payloads, and whether launch serves self-hosted only (worker path is parity-locked for defense in depth).
-
-## Live E2E launch-gap fix (`2f1f2c0` follow-up)
-
-Evidence: `/workspace/live-verify-fixtures/s9-durable-e2e/fail-2f1f2c0/` plus gateway logs
-`/tmp/collab-gateway-1234.log` (signature verification failed) and
-`/tmp/collab-gateway-3001.log` (`beforeHandleMessage` → Convex `maximum duration: 1s`).
-
-| Symptom | Root cause | Fix |
-| --- | --- | --- |
-| Formal-paper reconnect / auth fail | Gateway started without the same `SPECTRA_COLLAB_TOKEN_SECRET` (+ CRLF risk) as Next | `scripts/load-collaboration-env.mjs` + `scripts/serve-collaboration-gateway.mjs`; `npm run start:collab` / `dev:collab` load `.env.local`, strip CRLF, refuse `example.convex.cloud` |
-| 200k Aw Snap / socket close on edit | `beforeHandleMessage` → `reauthorize` → bridge `authorize` did `ctx.db.get(spectraArtifacts)` (full 200k body) inside a **1s** Convex query; timeout closed the peer | Authorize/policy use `evaluateArtifactAccessForActor` / `loadArtifactAuthority` (summary only); authorize/policy bypass the serialized bridge queue; sync path soft-reauths (`allowStale`) and treats Convex timeouts as transient |
-
-Honesty helpers (`rejectPeerUpdate`, `forceCanonicalReconnect`, `projectionExceedsDurableBound`, client `4409`) remain 0-diff vs Native.
-
-### Live start recipe (matched secrets)
-
-```bash
-# terminal A — web (loads .env.local; example port 3040)
-npm run dev:web
-
-# terminal B — gateway with the same SPECTRA_COLLAB_* secrets
-node scripts/serve-collaboration-gateway.mjs
-# or: npm run start:collab
-```
-
-Do not start `scripts/collaboration-gateway.mjs` bare unless the shell already exports identical secrets to the Next process.
-
-
-## Live E2E follow-up (`serve` port + import Aw Snap)
-
-Evidence: `/workspace/live-verify-fixtures/s9-durable-e2e/fail-863b5e4/` (docx-crash.webp, xlsx-crash.webp).
-
-| Symptom | Root cause | Fix |
-| --- | --- | --- |
-| Gateway on wrong port / signature noise | `.env.local` instance `SPECTRA_COLLAB_PORT=3001` applied by serve while Live web used `:1234` | `loadCollaborationEnv` ignores file ports by default; prefer exported `SPECTRA_COLLAB_PORT`; serve defaults to **1234**, prints `tokenFp` + bind port, clears stale Spectra listeners |
-| 200k / formal-paper Aw Snap 9 on Library import | `/api/spectra/imports/office` returned full `xlsxArtifactContent` (and client re-parsed DOCX) into the tab | Import route returns `convexSafeOfficeActivationContent` stub for sheets/pptx; soft `IMPORT_SNAPSHOT_TOO_LARGE` / `durableFailed` instead of OOM; shell skips client mammoth re-parse when lens content exists |
-
-### Live start recipe (matched secrets + fingerprint)
-
-```bash
-# Prove secrets would match (fingerprints only)
-npm run verify:collab-secrets
-
-# terminal A — web (example Live ports)
-SPECTRA_WEB_PORT=3040 SPECTRA_COLLAB_PORT=1234 npm run dev:web
-
-# terminal B — gateway ONLY via serve (matched .env.local secrets)
-SPECTRA_COLLAB_PORT=1234 node scripts/serve-collaboration-gateway.mjs
-# expect: tokenFp=… bind=1234  and NO "signature verification failed"
-```
-
-Do not start `scripts/collaboration-gateway.mjs` bare (`SPECTRA_COLLAB_ALLOW_RAW=1` only for deliberate debugging).
-
-## Bridge verify precision + load soft-fail
-
-Live auth-clean FAIL (`/tmp/collab-gateway-serve-1234.log`): every `onLoadDocument` threw `COLLABORATION_BRIDGE_INVALID` at verify(). Source maps aliased the payload/nonce branch; oversized recover/repair `observedProjectionJson` blew the 2M signed envelope and blocked room open (DOCX Reconnecting).
-
-| Fix | Detail |
+| Check | Result |
 | --- | --- |
-| Precise verify reasons | `EXPIRED` / `NONCE_INVALID` / `PAYLOAD_TOO_LARGE` / `FORBIDDEN` (no umbrella INVALID) |
-| Load soft-fail | `onLoadDocument` recover/repair try/catch — spill oversized projection via `storeDurablePayload`, skip inline recover/checkpoint, still return stored Yjs |
+| Durable/recovery/checkpoint focused Convex tests | 38/38 passed after the final ownership fix |
+| Replica truth/property tests | 47/47 passed |
+| Durable capacity/replay, remote clears, import route, and 200k-cell Yjs fixtures | Passed in the 28-file suite; exact multibyte bounds, incomplete adoption, small distant edits, replay, and first/middle/last values covered |
+| Broad relevant Vitest suite | 27/28 files, 430/431 tests passed. One unchanged Sheets microbenchmark asserted `<40 ms` and measured 58.6 ms under parallel suite load; its complete file passed 77/77 in isolation. The threshold was not weakened. |
+| TypeScript `tsc --noEmit` | Passed after the final change |
+| `npm run lint` | Passed; final touched files also passed focused ESLint |
+| `npm run check:capabilities` and `npm run check:architecture` | Passed |
+| `git diff --check` | Passed |
 
-## Bootstrap spill/omit durable head (post-1da880c)
+There is no known implementation blocker. The parallel-load microbenchmark result is a test-run limitation, not evidence of a functional failure or a verified latency target. No live latency, transfer-byte, or native fidelity claim is made here.
 
-Live FAIL on `1da880c` (`/tmp/collab-gateway-serve-1234-1da880c.log`): every
-`onLoadDocument` threw `COLLABORATION_BRIDGE_PAYLOAD_TOO_LARGE … op=bootstrap`
-(chars≈2.15M). Soft-fail only wrapped recover/repair; first-open **bootstrap**
-still stuffed `projectionJson` into the signed envelope → Hocuspocus load
-failed → UI Reconnecting loop. Soft-open without a repaired Yjs head is NOT PASS.
+## Deferred live acceptance
 
-| Fix | Detail |
-| --- | --- |
-| `planBootstrapProjectionTransport` | inline / spill / **omit** — never put oversized JSON in verify envelope |
-| `bootstrapNative` | optional `projectionJson` + `projectionPayloadRef` + spilled `payloadRef` for Yjs update; omit keeps import content, still writes durable update + `liveStateVectorHash` |
-| recover hash-only | optional `observedProjectionJson`; when omitted, attest via `artifact.contentHash === observedProjectionHash` |
-| Gateway bootstrap | spill update/projection when they fit; otherwise omit projection and still persist Yjs head |
+These finite tests remain from the original prompt and require a separately authorized live run:
 
-Restart: `SPECTRA_COLLAB_PORT=1234 SPECTRA_COLLAB_HOST=127.0.0.1 node scripts/serve-collaboration-gateway.mjs` after Convex redeploy (`--typecheck=disable`).
+1. On copies of the actual 200k-cell workbook and 695-equation paper, open, edit a distant cell/formula/style and equation/text, save, reload, reconnect, and read a saved version. Check first/middle/last cells, cached-formula truth, unchanged OMML/styles/media/relationships, and native materialization/reopen.
+2. Use two ordinary sessions on separate disposable artifacts and two sessions on one deliberate shared artifact for disjoint edits/rebase. Force one lost receipt and one gateway restart after durable commit; verify single convergence, truthful unsynchronized errors, and small-edit transfer bytes.
+3. Apply one real AI edit to a large work item, then verify its exact durable version and native result separately.
+4. Pin a large version, delete its source, release owners in sequence, and verify retention followed by final-owner garbage collection.
+5. Record cold/warm open, save, and reload latency plus read/write/transport bytes for both fixtures; compare full import against small edits without an SLA or cost claim.
 
+Rollback is by reverting the integrated implementation commits together; existing small/legacy inline records remain readable through the no-manifest fallback. A manifest-bearing record requires the digest-verified resolver and must never be treated as an inline fallback when incomplete.

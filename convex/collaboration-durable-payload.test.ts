@@ -90,7 +90,7 @@ describe("AI content reference writes", () => {
     } }] });
     const storageId = await t.run(ctx => ctx.storage.store(new Blob([body])));
     const digest = createHash("sha256").update(body).digest("hex");
-    const adopted = await actor.mutation(api.artifactContent.adopt, {
+    const adopted = await actor.mutation(internal.artifactContent.adopt, {
       artifactId: ids.artifactId, storageId, digest, byteLength: Buffer.byteLength(body), policyVersion: 0,
     });
     const content = { spectraContentRef: {
@@ -162,7 +162,7 @@ it("keeps a pinned large body and native base through real deletion coordination
   const body=JSON.stringify({blocks:[{id:"p",text:"界".repeat(100_000)}],nativeBinding:{sourcePayloadHash:nativeHash}});
   const storageId=await t.run(ctx=>ctx.storage.store(new Blob([body])));
   const digest=createHash("sha256").update(body).digest("hex");
-  const adopted=await actor.mutation(api.artifactContent.adopt,{artifactId:ids.artifactId,storageId,digest,byteLength:Buffer.byteLength(body),policyVersion:0,dependencies:{assetIds:[],nativePayloadHashes:[nativeHash]}});
+  const adopted=await actor.mutation(internal.artifactContent.adopt,{artifactId:ids.artifactId,storageId,digest,byteLength:Buffer.byteLength(body),policyVersion:0,dependencies:{assetIds:[],nativePayloadHashes:[nativeHash]}});
   const content={spectraContentRef:{version:1,artifactId:ids.artifactId,payloadRef:adopted.payloadRef,digest,byteLength:Buffer.byteLength(body),path:"value",dependencies:adopted.dependencies}};
   const containerId = await t.run(async ctx=>{
     const artifact=await ctx.db.get(ids.artifactId);

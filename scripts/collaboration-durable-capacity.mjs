@@ -130,8 +130,8 @@ export function resolveDurableUpdateBytes(record, loadPayloadBytes) {
     if (!verified.ok) throw new Error(`DURABLE_PAYLOAD_${verified.reason.toUpperCase()}`);
     return bytes;
   }
-  // Unknown manifest encoding: fall back to legacy inline when present.
-  if (inline && inline.byteLength > 0) return inline;
+  // Only records without a manifest are legacy. An advertised manifest may
+  // never bypass integrity verification by falling back to unchecked bytes.
   throw new Error("DURABLE_PAYLOAD_ENCODING_UNSUPPORTED");
 }
 

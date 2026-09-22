@@ -1,7 +1,7 @@
 export const INTAKE_ATTESTATION_PURPOSE = "spectra-intake-attestation-v1" as const;
 export const INTAKE_ATTESTATION_VERSION = 1 as const;
 
-export type IntakeAttestationKind = "asset" | "original";
+export type IntakeAttestationKind = "asset" | "original" | "content";
 
 export type IntakeAttestation = {
   version: typeof INTAKE_ATTESTATION_VERSION;

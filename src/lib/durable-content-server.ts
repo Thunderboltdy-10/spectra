@@ -1,7 +1,8 @@
+import { signTrustedIntakeAttestation } from "./server-secrets";
 import { createHash } from "node:crypto";
 import { makeFunctionReference } from "convex/server";
 import type { ConvexHttpClient } from "convex/browser";
-import { isDurableContentRef, MAX_INLINE_CONTENT_BYTES, type DurableContentRef } from "../../shared/durable-content";
+import { isDurableContentRef, MAX_INLINE_CONTENT_BYTES, MAX_DURABLE_PAYLOAD_BYTES, type DurableContentRef } from "../../shared/durable-content";
 import { contentDependencies } from "../../shared/durable-dependencies.mjs";
 
 /** Hydration happens outside Convex values; permission is checked on each read. */
@@ -39,14 +40,17 @@ export async function persistDurableContent(value: unknown, artifactId: string, 
   if (isDurableContentRef(value)) return value;
   const bytes = Buffer.from(JSON.stringify(value));
   if (bytes.length <= MAX_INLINE_CONTENT_BYTES) return value;
+  if (bytes.length > MAX_DURABLE_PAYLOAD_BYTES) throw new Error("COLLABORATION_DURABLE_PAYLOAD_SIZE");
   const digest = createHash("sha256").update(bytes).digest("hex");
   const upload = await client.mutation(makeFunctionReference<"mutation">("artifactContent:issueUpload"), { artifactId });
   const response = await fetch(upload.url, { method: "POST", headers: { "Content-Type": "application/vnd.spectra.content+json" }, body: bytes });
   if (!response.ok) throw new Error("COLLABORATION_DURABLE_UPLOAD_FAILED");
   const { storageId } = await response.json();
-  const stored = await client.mutation(makeFunctionReference<"mutation">("artifactContent:adopt"), {
-    artifactId, storageId, digest, byteLength: bytes.length, policyVersion: upload.policyVersion,
-    dependencies: contentDependencies(value),
+  const dependencies = contentDependencies(value);
+  const stored = await client.action(makeFunctionReference<"action">("artifactIntakeActions:adoptDurableContent"), {
+    artifactId, policyVersion: upload.policyVersion,
+    attestation: signTrustedIntakeAttestation({kind: "content", actorClerkId: upload.clerkId, actorAccountId: upload.accountId, targetId: artifactId, attemptId: JSON.stringify([upload.policyVersion, dependencies]), storageId, sha256: digest, bytes: bytes.length, mediaType: "application/vnd.spectra.content+json"}),
+    dependencies,
   });
   return { spectraContentRef: { version: 1, artifactId, payloadRef: stored.payloadRef,
     digest, byteLength: bytes.length, path: "value", dependencies: stored.dependencies } } satisfies DurableContentRef;

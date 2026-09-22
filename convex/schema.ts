@@ -2370,7 +2370,8 @@ export default defineSchema({
     supersededAt: v.optional(v.number()),
   })
     .index("by_artifact_status", ["artifactId", "status"])
-    .index("by_artifact_version", ["artifactId", "artifactVersionId"])
+    .index("by_storage", ["storageId"])
+      .index("by_artifact_version", ["artifactId", "artifactVersionId"])
     .index("by_creator_created", ["createdByAccountId", "createdAt"]),
 
   artifactUserStates: defineTable({
@@ -3052,6 +3053,7 @@ export default defineSchema({
     createdAt: v.number(),
     releasedAt: v.optional(v.number()),
   })
+    .index("by_storage", ["storageId"])
     .index("by_digest", ["digest"])
     .index("by_artifact_digest", ["artifactId", "digest"])
     .index("by_artifact_kind", ["artifactId", "kind"])
@@ -3501,6 +3503,8 @@ export default defineSchema({
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })
+    .index("by_storage", ["originalStorageId"])
+    .index("by_candidate_storage", ["candidateStorageId"])
     .index("by_owner_status", ["ownerAccountId", "status"])
     .index("by_artifact", ["artifactId"])
     .index("by_school_created", ["schoolId", "createdAt"]),
@@ -3579,6 +3583,8 @@ export default defineSchema({
     revokedByAccountId: v.optional(v.id("accounts")),
   })
     .index("by_artifact_status", ["artifactId", "status"])
+    .index("by_storage", ["storageId"])
+    .index("by_candidate_storage", ["candidateStorageId"])
     .index("by_artifact_path", ["artifactId", "path"])
     .index("by_artifact_digest", ["artifactId", "sha256"])
     .index("by_uploader_created", ["uploadedByAccountId", "createdAt"]),
@@ -4091,7 +4097,8 @@ export default defineSchema({
     updatedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
-    .index("by_run_execution", ["runId", "executionId"])
+    .index("by_storage", ["storageId"])
+      .index("by_run_execution", ["runId", "executionId"])
     .index("by_owner_created", ["ownerAccountId", "createdAt"]),
 
   spectraOperations: defineTable({

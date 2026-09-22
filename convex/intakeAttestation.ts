@@ -11,7 +11,7 @@ import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity"
 export const vIntakeAttestation = v.object({
   version: v.literal(INTAKE_ATTESTATION_VERSION),
   purpose: v.literal(INTAKE_ATTESTATION_PURPOSE),
-  kind: v.union(v.literal("asset"), v.literal("original")),
+  kind: v.union(v.literal("asset"), v.literal("original"), v.literal("content")),
   actorClerkId: v.string(),
   actorAccountId: v.string(),
   targetId: v.string(),

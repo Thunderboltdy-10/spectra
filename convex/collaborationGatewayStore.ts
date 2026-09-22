@@ -257,7 +257,7 @@ export const authorize = internalQuery({
         .unique(),
     ]);
     if (!actor || !room || room.status === "closed")
-      return { allowed: false as const, reason: "unavailable" as const };
+      return { allowed: false as const, reason: "access_revoked" as const };
     const decision = await evaluateArtifactAccessForActor(
       ctx,
       actor,
@@ -269,7 +269,7 @@ export const authorize = internalQuery({
       (loaded.lifecycle !== "active" && loaded.lifecycle !== "draft") ||
       loaded.schoolId !== actor.schoolId
     )
-      return { allowed: false as const, reason: "unavailable" as const };
+      return { allowed: false as const, reason: "access_revoked" as const };
     const resourceType =
       loaded.resource.blueprintKey === "agent"
         ? ("agent" as const)
@@ -458,7 +458,7 @@ export const recoverNativeSnapshot = internalMutation({
       artifact.schoolId !== actor.schoolId ||
       !isArtifactTypeKey(artifact.blueprintKey)
     )
-      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
@@ -680,7 +680,7 @@ export const bootstrapNative = internalMutation({
         .unique(),
     ]);
     if (!actor || !artifact || !room || room.status !== "active")
-      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
@@ -872,7 +872,7 @@ export const append = internalMutation({
       (artifact.status !== "active" && artifact.status !== "draft") ||
       artifact.schoolId !== actor.schoolId
     )
-      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
@@ -905,10 +905,6 @@ export const append = internalMutation({
       ? (args.byteLength ?? 0)
       : args.update.byteLength;
     if (spilled) {
-      await validateDurablePayload(ctx, {
-        artifactId: args.artifactId, accountId: args.accountId, policyVersion: args.policyVersion,
-        payloadRef: args.payloadRef!, digest: args.payloadDigest ?? "", byteLength: effectiveByteLength, kind: "yjs-update",
-      });
       if (
         !args.payloadDigest ||
         args.update.byteLength !== 0 ||
@@ -953,6 +949,14 @@ export const append = internalMutation({
         duplicate: true,
         projected: false,
       };
+    }
+    // Receipts survive log compaction and body GC; require old bytes only for
+    // new appends, after current authority and exact receipt matching above.
+    if (spilled) {
+      await validateDurablePayload(ctx, {
+        artifactId: args.artifactId, accountId: args.accountId, policyVersion: args.policyVersion,
+        payloadRef: args.payloadRef!, digest: args.payloadDigest ?? "", byteLength: effectiveByteLength, kind: "yjs-update",
+      });
     }
     // Overlapping Yjs writers capture `baseStateVectorHash` at apply time, then
     // Convex appends later. A later CAS-lose is a CRDT rebase, not a dead
@@ -1377,7 +1381,7 @@ export const checkpoint = internalMutation({
       (artifact.status !== "active" && artifact.status !== "draft") ||
       artifact.schoolId !== actor.schoolId
     )
-      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"
         ? ("agent" as const)

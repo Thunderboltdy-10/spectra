@@ -1,0 +1,2 @@
+# Keep the executable hashbang importable by Node and Vitest on Windows.
+scripts/serve-collaboration-gateway.mjs text eol=lf

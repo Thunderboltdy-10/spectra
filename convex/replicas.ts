@@ -1,3 +1,4 @@
+import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { internalMutation, mutation } from "./orgNodeMutation";
@@ -2256,8 +2257,8 @@ export const sweepReplicaTruth = internalMutation({
       const payloadRef = String(payload._id);
       const referenced = await payloadHasRemainingRefs(ctx, payloadRef, budget);
       if (referenced) continue;
-      await ctx.storage.delete(payload.storageId);
       await ctx.db.patch(payload._id, { refCount: 0, state: "released", releasedAt: now });
+      await deleteUnboundDurableStorage(ctx, payload.storageId);
       releasedPayloads += 1;
     }
     const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, expiredExternalOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads, documentsRead: SWEEP_DOCUMENT_BUDGET - budget.remaining() };

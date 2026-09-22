@@ -19,8 +19,29 @@ export function reconciliationSnapshotKey(snapshot: ReconciliationSnapshot) {
 export function incomingReconciliationKey(
   artifactId: string,
   snapshot: ReconciliationSnapshot,
+  provenance?: { source: StudioIncomingSource; revision: number; localSync: boolean },
 ) {
-  return `${artifactId}\u0000${reconciliationSnapshotKey(snapshot)}`;
+  return `${artifactId}\u0000${reconciliationSnapshotKey(snapshot)}${
+    provenance ? `\u0000${JSON.stringify(provenance)}` : ""
+  }`;
+}
+
+export type StudioIncomingSource = "provisional" | "live" | "persisted" | "stale";
+
+/** A content projection is not proof of a new write; the room or saved revision is. */
+export function studioIncomingSource(input: {
+  liveValueSource: "provisional" | "live" | "persisted";
+  revision: number;
+  initialRevision: number;
+  latestRevision: number;
+  hasAcceptedLiveValue: boolean;
+}): StudioIncomingSource {
+  if (input.liveValueSource !== "persisted") return input.liveValueSource;
+  if (
+    input.revision < input.latestRevision ||
+    (input.hasAcceptedLiveValue && input.revision <= input.latestRevision)
+  ) return "stale";
+  return input.revision > input.initialRevision ? "persisted" : "provisional";
 }
 
 /**
@@ -59,9 +80,8 @@ export function shouldEmitRichTextChange(input: {
 
 
 /**
- * Lightweight hollow check for studio reconciliation. Aligns with Convex
- * `isHollowDefaultContent` / `hollow-content.ts` across studio shapes so an
- * empty Yjs/Convex bootstrap cannot wipe a just-imported or peer-edited body.
+ * Heuristic for provisional bootstrap content only. This is not a validity
+ * check: short text, nontext slides and deliberate clears are valid edits.
  * Shape is sniffed from the payload (call sites do not always have typeKey).
  */
 function asStudioRecord(value: unknown): Record<string, unknown> {
@@ -215,8 +235,10 @@ export function studioContentLooksHollow(content: unknown) {
 export function shouldRejectHollowStudioIncoming(input: {
   currentContent: unknown;
   incomingContent: unknown;
+  incomingSource: StudioIncomingSource;
 }) {
   return (
+    input.incomingSource === "provisional" &&
     !studioContentLooksHollow(input.currentContent) &&
     studioContentLooksHollow(input.incomingContent)
   );
@@ -243,15 +265,21 @@ export function decideRemoteStudioIncoming(input: {
   isLocalSyncKey: boolean;
   isCollaborative: boolean;
   nativeOfficeDocument: boolean;
+  incomingSource: StudioIncomingSource;
   currentContent?: unknown;
   incomingContent?: unknown;
 }): RemoteStudioIncomingDecision {
+  if (input.incomingSource === "stale") return "ignore";
+  // A local acknowledgement can intentionally contain a clear. It must meet
+  // the pending write before any bootstrap/quality heuristic.
+  if (input.isLocalSyncKey) return "accept-local-sync";
   if (
     input.currentContent !== undefined &&
     input.incomingContent !== undefined &&
     shouldRejectHollowStudioIncoming({
       currentContent: input.currentContent,
       incomingContent: input.incomingContent,
+      incomingSource: input.incomingSource,
     })
   ) {
     return "ignore";
@@ -263,7 +291,6 @@ export function decideRemoteStudioIncoming(input: {
   ) {
     return "ignore";
   }
-  if (input.isLocalSyncKey) return "accept-local-sync";
   if (!input.userHasEdited) return "accept-bootstrap";
   if (input.nativeOfficeDocument) return "ignore";
   if (input.isCollaborative) return "rebase";

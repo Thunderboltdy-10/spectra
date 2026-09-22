@@ -1,3 +1,4 @@
+import { assertExclusiveDurableStorage, deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -90,19 +91,21 @@ export const put = internalMutation({
     await requireDurablePayloadAuthority(ctx, args, true);
     if (args.manifestVersion !== 1 || !Number.isSafeInteger(args.byteLength) || args.byteLength <= 0 || args.byteLength > MAX_DURABLE_PAYLOAD_BYTES)
       throw new Error("DURABLE_PAYLOAD_BYTES_INVALID");
-    const metadata = await ctx.db.system.get(args.storageId);
-    if (!metadata || metadata.size !== args.byteLength || normalizeSha256(metadata.sha256) !== args.digest)
-      throw new Error("DURABLE_PAYLOAD_SIZE_MISMATCH");
+    await assertExclusiveDurableStorage(ctx, args.storageId, args.artifactId, args.accountId);
     const existing = await ctx.db
       .query("collaborationDurablePayloads")
       .withIndex("by_artifact_digest", (q) => q.eq("artifactId", args.artifactId).eq("digest", args.digest))
-      .filter(q => q.and(q.eq(q.field("accountId"), args.accountId), q.eq(q.field("policyVersion"), args.policyVersion), q.eq(q.field("kind"), args.kind)))
+      .filter(q => q.and(q.eq(q.field("accountId"), args.accountId), q.eq(q.field("policyVersion"), args.policyVersion), q.eq(q.field("kind"), args.kind), q.eq(q.field("status"), "active")))
       .first();
     if (existing && existing.status === "active") {
+      await validateDurablePayload(ctx, {...args, payloadRef: String(existing._id)});
       if (existing.storageId !== args.storageId)
-        await ctx.storage.delete(args.storageId);
+        await deleteUnboundDurableStorage(ctx, args.storageId);
       return { payloadRef: String(existing._id), dependencies: existing.dependencies, deduplicated: true };
     }
+    const metadata = await ctx.db.system.get(args.storageId);
+    if (!metadata || metadata.size !== args.byteLength || normalizeSha256(metadata.sha256) !== args.digest)
+      throw new Error("DURABLE_PAYLOAD_SIZE_MISMATCH");
     const dependencies = args.kind === "projection" ? await resolveContentDependencies(ctx, args.artifactId, args.dependencies) : undefined;
     const id = await ctx.db.insert("collaborationDurablePayloads", {
       artifactId: args.artifactId,

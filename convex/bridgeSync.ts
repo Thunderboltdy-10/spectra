@@ -23,6 +23,7 @@ import {
 import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
+import { deleteUnboundDurableStorage, storageHasOtherBinding } from "./durableStorageBindings";
 
 type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
 
@@ -759,20 +760,23 @@ export const commitPayloadUpload = mutation({
       await requireArtifactModify(ctx, actor, replica.workId);
       await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
     } catch (error) {
-      if (args.storageId) await ctx.storage.delete(args.storageId);
+      if (args.storageId) await deleteUnboundDurableStorage(ctx, args.storageId);
       throw error;
     }
     let payload = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
     if (payload?.state === "quarantined") {
-      if (args.storageId && args.storageId !== payload.storageId) await ctx.storage.delete(args.storageId);
+      if (args.storageId && args.storageId !== payload.storageId) await deleteUnboundDurableStorage(ctx, args.storageId);
       throw new Error("PAYLOAD_HASH_QUARANTINED");
     }
     if (!payload || payload.state === "released") {
       if (!args.storageId) throw new Error("PAYLOAD_STORAGE_REQUIRED");
       const metadata = await ctx.db.system.get(args.storageId);
       if (!metadata || metadata.size !== input.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
+      if (await storageHasOtherBinding(ctx, args.storageId,
+        { table: "payloadObjects", id: payload ? String(payload._id) : "" }))
+        throw new Error("PAYLOAD_STORAGE_OWNERSHIP");
       if (payload) {
         await ctx.db.patch(payload._id, { storageId: args.storageId, bytes: input.bytes, mediaType: input.mediaType, refCount: 0, state: "active", releasedAt: undefined, verifiedAt: Date.now() });
         payload = (await ctx.db.get(payload._id))!;
@@ -791,7 +795,7 @@ export const commitPayloadUpload = mutation({
         payload = (await ctx.db.get(payloadId))!;
       }
     } else if (args.storageId && args.storageId !== payload.storageId) {
-      await ctx.storage.delete(args.storageId);
+      await deleteUnboundDurableStorage(ctx, args.storageId);
     }
     if (input.payloadRef && input.payloadRef !== String(payload._id))
       throw new Error("PAYLOAD_REFERENCE_MISMATCH");

@@ -218,7 +218,7 @@ import {
   rebaseCollaborativeSnapshot,
   reconciliationSnapshotKey,
   shouldEmitRichTextChange,
-  shouldRejectHollowStudioIncoming,
+  studioIncomingSource,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
 import {
@@ -3165,6 +3165,11 @@ function ArtifactStudioEditor({
   const reconcilingRemoteRef = useRef(false);
   const activeArtifactIdRef = useRef(artifact._id);
   const lastReconciledIncomingKeyRef = useRef<string | null>(null);
+  const reconciliationOriginRef = useRef({
+    initialRevision: artifact.updatedAt,
+    latestRevision: artifact.updatedAt,
+    hasAcceptedLiveValue: false,
+  });
   const generatedSummaryRepairRef = useRef<string | null>(null);
   const currentSnapshotRef = useRef(artifactEditorSnapshot(artifact));
   const aiMergeRef = useRef<{
@@ -4701,43 +4706,62 @@ function ArtifactStudioEditor({
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
     const incomingKey = snapshotKey(incomingSnapshot);
-    // Key reconciliation by artifact and value, rather than by the derived
-    // object identity. The live projection is recreated during the batched
-    // state updates below; treating that new object as a fresh remote write
-    // creates a setState -> render -> effect loop in native editors.
+    if (switchedArtifacts) {
+      reconciliationOriginRef.current = {
+        initialRevision: artifact.updatedAt,
+        latestRevision: artifact.updatedAt,
+        hasAcceptedLiveValue: false,
+      };
+    }
+    const incomingSource = studioIncomingSource({
+      ...reconciliationOriginRef.current,
+      revision: artifact.updatedAt,
+      liveValueSource: live.liveValueSource,
+    });
+    const isLocalSyncKey = localSyncKeysRef.current.has(incomingKey);
+    // Identical content must be reconsidered when the room initializes, a
+    // saved revision advances, or a local acknowledgement arrives. Object
+    // identity alone still must not cause a new reconciliation on every render.
     const reconciliationKey = incomingReconciliationKey(
       artifact._id,
       incomingSnapshot,
+      { source: incomingSource, revision: artifact.updatedAt, localSync: isLocalSyncKey },
     );
     if (lastReconciledIncomingKeyRef.current === reconciliationKey) {
       return;
     }
     lastReconciledIncomingKeyRef.current = reconciliationKey;
-    if (!switchedArtifacts && dirtyRef.current) {
-      const decision = decideRemoteStudioIncoming({
-        dirty: true,
+    const decision = switchedArtifacts ? "accept-bootstrap" : decideRemoteStudioIncoming({
+        dirty: dirtyRef.current,
         userHasEdited: userHasEditedRef.current,
         incomingKey,
         baselineKey: snapshotKey(baseline),
         dismissedRemoteKey,
-        isLocalSyncKey: localSyncKeysRef.current.has(incomingKey),
+        isLocalSyncKey,
         isCollaborative: isCollaborativeArtifact,
         nativeOfficeDocument,
         currentContent: currentSnapshotRef.current.content,
         incomingContent: incomingSnapshot.content,
+        incomingSource,
       });
-      if (decision === "ignore") {
+    reconciliationOriginRef.current.latestRevision = Math.max(
+      reconciliationOriginRef.current.latestRevision, artifact.updatedAt,
+    );
+    if (incomingSource === "live")
+      reconciliationOriginRef.current.hasAcceptedLiveValue = true;
+    if (decision === "ignore") {
         // Native Office bodies already live on the bound Yjs fragment. A Yjs
         // echo is not a new human draft; keep React still and clear claim noise.
         if (nativeOfficeDocument) setLiveConflict(null);
         return;
-      }
-      if (decision === "accept-local-sync") {
+    }
+    if (decision === "accept-local-sync") {
         localSyncKeysRef.current.delete(incomingKey);
         setBaseline(incomingSnapshot);
         setLiveConflict(null);
         return;
-      }
+    }
+    if (!switchedArtifacts && dirtyRef.current) {
       if (decision === "accept-bootstrap") {
         // Normalize/bootstrap echoes can report dirty without a human edit.
         // Accept the saved projection instead of raising a false conflict.
@@ -4803,17 +4827,6 @@ function ArtifactStudioEditor({
       } else setRemoteConflict(incomingSnapshot);
       return;
     }
-    // A hollow Convex/Yjs bootstrap must not erase an already-populated studio
-    // body (Library import PDF/DOCX text that appeared, then vanished).
-    if (
-      !switchedArtifacts &&
-      shouldRejectHollowStudioIncoming({
-        currentContent: currentSnapshotRef.current.content,
-        incomingContent: incomingSnapshot.content,
-      })
-    ) {
-      return;
-    }
     activeArtifactIdRef.current = artifact._id;
     reconcilingRemoteRef.current = true;
     userHasEditedRef.current = false;
@@ -4842,6 +4855,7 @@ function ArtifactStudioEditor({
     dismissedRemoteKey,
     incomingSnapshot,
     isCollaborativeArtifact,
+    live.liveValueSource,
     nativeOfficeDocument,
   ]);
 

@@ -1,3 +1,4 @@
+import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
@@ -48,8 +49,8 @@ export const release = internalMutation({
       await ctx.scheduler.runAfter(wait, internal.durablePayloadOwnership.release, args);
       return false;
     }
-    await ctx.storage.delete(payload.storageId);
     await ctx.db.patch(payload._id, { status: "released", releasedAt: Date.now() });
+    await deleteUnboundDurableStorage(ctx, payload.storageId);
     await reconcileDurablePayloadOwners(ctx, "collaborationDurablePayloads", String(payload._id), null);
     return true;
   },

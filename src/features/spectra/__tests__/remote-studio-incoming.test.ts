@@ -7,6 +7,8 @@ import {
   shouldEmitRichTextChange,
   shouldRejectHollowStudioIncoming,
   studioContentLooksHollow,
+  studioIncomingSource,
+  incomingReconciliationKey,
 } from "../components/artifact-studio-value-utils";
 import {
   createWhiteboardNode,
@@ -67,6 +69,7 @@ describe("remote studio incoming decisions", () => {
     isLocalSyncKey: false,
     isCollaborative: true,
     nativeOfficeDocument: false,
+        incomingSource: "provisional" as const,
   };
 
   it("accepts bootstrap echoes when dirty without a human edit", () => {
@@ -118,6 +121,7 @@ describe("remote studio incoming decisions", () => {
     expect(studioContentLooksHollow(hollow)).toBe(true);
     expect(
       shouldRejectHollowStudioIncoming({
+        incomingSource: "provisional",
         currentContent: populated,
         incomingContent: hollow,
       }),
@@ -245,6 +249,7 @@ describe("whiteboard sticky reconcile stability", () => {
         isLocalSyncKey: true,
         isCollaborative: true,
         nativeOfficeDocument: false,
+        incomingSource: "provisional",
       }),
     ).toBe("accept-local-sync");
   });
@@ -272,6 +277,7 @@ describe("whiteboard sticky reconcile stability", () => {
         isLocalSyncKey: false,
         isCollaborative: true,
         nativeOfficeDocument: false,
+        incomingSource: "provisional",
       }),
     ).toBe("accept-bootstrap");
   });
@@ -332,6 +338,7 @@ describe("presentation default reconcile stability", () => {
         isLocalSyncKey: true,
         isCollaborative: true,
         nativeOfficeDocument: false,
+        incomingSource: "provisional",
       }),
     ).toBe("accept-local-sync");
   });
@@ -361,6 +368,7 @@ describe("presentation default reconcile stability", () => {
         isLocalSyncKey: false,
         isCollaborative: true,
         nativeOfficeDocument: false,
+        incomingSource: "provisional",
       }),
     ).toBe("accept-bootstrap");
   });
@@ -374,6 +382,7 @@ describe("hydrate hollow protection across studios", () => {
     isLocalSyncKey: false,
     isCollaborative: true,
     nativeOfficeDocument: false,
+        incomingSource: "provisional" as const,
   };
 
   it("rejects hollow quiz bootstrap that would wipe populated questions", () => {
@@ -413,6 +422,7 @@ describe("hydrate hollow protection across studios", () => {
     expect(studioContentLooksHollow(hollow)).toBe(true);
     expect(
       shouldRejectHollowStudioIncoming({
+        incomingSource: "provisional",
         currentContent: populated,
         incomingContent: hollow,
       }),
@@ -448,6 +458,7 @@ describe("hydrate hollow protection across studios", () => {
     expect(studioContentLooksHollow(populated)).toBe(false);
     expect(
       shouldRejectHollowStudioIncoming({
+        incomingSource: "provisional",
         currentContent: populated,
         incomingContent: {},
       }),
@@ -504,6 +515,7 @@ describe("hydrate hollow protection across studios", () => {
       expect(studioContentLooksHollow(row.hollow)).toBe(true);
       expect(
         shouldRejectHollowStudioIncoming({
+        incomingSource: "provisional",
           currentContent: row.populated,
           incomingContent: row.hollow,
         }),
@@ -729,5 +741,39 @@ describe("two-user keyed collaborative rebase", () => {
         },
       ],
     });
+  });
+});
+
+
+describe("authoritative shorter, empty and nontext edits (R1)", () => {
+  const changes: [unknown, unknown][] = [
+    [{description: "Read chapter 5"}, {description: "Read"}],
+    [{questions: [{id: "q", question: "Why?"}]}, {questions: []}],
+    [{slides: [{id: "s", elements: [{type: "text", text: "Explanation"}]}]},
+      {slides: [{id: "s", elements: [{type: "chart", chart: {data: [{x: 1, y: 2}]}}]}]}],
+    [{sheets: [{id: "s", cells: {A1: {value: 1}}}]}, {sheets: [{id: "s", cells: {}}]}],
+  ];
+  it.each(changes)("accepts committed/live content and acknowledges local clears", (currentContent, incomingContent) => {
+    const args = {currentContent, incomingContent, dirty: false, userHasEdited: false,
+      incomingKey: "new", baselineKey: "old", dismissedRemoteKey: null,
+      isLocalSyncKey: false, isCollaborative: true, nativeOfficeDocument: false};
+    for (const incomingSource of ["persisted", "live"] as const) {
+      expect(shouldRejectHollowStudioIncoming({...args, incomingSource})).toBe(false);
+      expect(decideRemoteStudioIncoming({...args, incomingSource})).toBe("accept-bootstrap");
+      expect(decideRemoteStudioIncoming({...args, incomingSource, dirty: true, userHasEdited: true})).toBe("rebase");
+    }
+    expect(decideRemoteStudioIncoming({...args, incomingSource: "provisional", isLocalSyncKey: true})).toBe("accept-local-sync");
+    expect(decideRemoteStudioIncoming({...args, incomingSource: "stale"})).toBe("ignore");
+  });
+  it("uses revision and hydration provenance, including equal-content transitions", () => {
+    const origin = {initialRevision: 10, latestRevision: 10, hasAcceptedLiveValue: false};
+    expect(studioIncomingSource({...origin, revision: 10, liveValueSource: "persisted"})).toBe("provisional");
+    expect(studioIncomingSource({...origin, revision: 11, liveValueSource: "persisted"})).toBe("persisted");
+    expect(studioIncomingSource({...origin, revision: 10, liveValueSource: "live"})).toBe("live");
+    expect(studioIncomingSource({...origin, hasAcceptedLiveValue: true, revision: 10, liveValueSource: "persisted"})).toBe("stale");
+    const snapshot = {title: "Quiz", summary: "", tagDraft: "", content: {questions: []}};
+    const key = (source: "provisional" | "live") => incomingReconciliationKey("a", snapshot, {source, revision: 10, localSync: false});
+    expect(key("provisional")).not.toBe(key("live"));
+    expect(key("live")).toBe(key("live"));
   });
 });

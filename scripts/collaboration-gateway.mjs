@@ -520,17 +520,12 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
       const afterProjection = nativeAfter
         ? nativeArtifactProjection(scratch, first.context.schemaVersion)
         : null;
-      const regionIds = nativeAfter
+      let regionIds = nativeAfter
         ? nativeChangedRegionIds(first.nativeProjectionBefore, afterProjection)
         : [...new Set(group.flatMap((entry) => entry.regionIds))];
-      if (!regionIds.length) {
-        for (const entry of group)
-          sendGatewayState(entry.connection, {
-            type: "spectra.durable_ack",
-            updateIds: [entry.messageId],
-          });
-        continue;
-      }
+      // Semantically unchanged Yjs structs/delete sets still affect replay and
+      // future offline deltas. They must reach the log before acknowledgement.
+      if (!regionIds.length && nativeAfter) regionIds = [NATIVE_PROJECTION_REGION];
       const immediateProjection =
         first.context.actorKind === "ai" ||
         group.some((entry) => entry.nativeInitialization);
@@ -1030,8 +1025,8 @@ async function refreshAuthorization(context) {
       { retryAttempts: 1 },
     );
     if (!result?.allowed) {
-      if (result?.reason === "unavailable")
-        throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      context.canModify = false;
+      context.authorizationRevoked = true;
       throw new Error("COLLABORATION_ACCESS_REVOKED");
     }
     context.canModify = result.canModify === true;
@@ -1052,6 +1047,7 @@ async function refreshAuthorization(context) {
 }
 
 async function reauthorize(context, { allowStale = false } = {}) {
+  if (context.authorizationRevoked) throw new Error("COLLABORATION_ACCESS_REVOKED");
   const now = Date.now();
   if (
     context.authorizationCheckedAt &&
@@ -1616,7 +1612,13 @@ async function enforceActivePolicyVersions() {
           const nowSeconds = Math.floor(Date.now() / 1000);
           for (const connection of group.connections) {
             const context = connection.context;
+            let actorRevoked = context.authorizationRevoked === true;
+            try { await refreshAuthorization(context); }
+            catch (error) {
+              if (String(error).includes("COLLABORATION_ACCESS_REVOKED")) actorRevoked = true;
+            }
             const stale =
+              actorRevoked ||
               !current?.available ||
               current.policyVersion !== context.policyVersion ||
               context.expiresAt <= nowSeconds;

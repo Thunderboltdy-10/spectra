@@ -1,3 +1,4 @@
+import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { recordMeterEvent } from "./metering";
@@ -46,8 +47,8 @@ export async function releasePayloadIfUnreferenced(
   if (!storageMatchesPayload) return 0;
 
   const now = Date.now();
-  await ctx.storage.delete(payload.storageId);
   await ctx.db.patch(payload._id, { refCount: 0, state: "released", releasedAt: now });
+  await deleteUnboundDurableStorage(ctx, payload.storageId);
   if (options.schoolId && payload.bytes > 0) {
     await recordMeterEvent(ctx, {
       schoolId: options.schoolId,

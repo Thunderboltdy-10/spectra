@@ -5,6 +5,7 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import type { Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
 import { canReadPinnedContent, snapshotReferencesNative } from "./retainedContentAccess";
+import { storageHasOtherBinding } from "./durableStorageBindings";
 
 function assertHash(hash: string) {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("PAYLOAD_HASH_INVALID");
@@ -76,13 +77,16 @@ export const put = mutation({
     const metadata = await ctx.db.system.get(args.storageId);
     if (!metadata || metadata.size !== args.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
     const existing = await ctx.db.query("payloadObjects").withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("hash", args.hash)).unique();
+    if (await storageHasOtherBinding(ctx, args.storageId,
+      { table: "payloadObjects", id: existing ? String(existing._id) : "" }))
+      throw new Error("PAYLOAD_STORAGE_OWNERSHIP");
     if (existing) {
       if (existing.state === "quarantined") {
-        if (existing.storageId !== args.storageId) await ctx.storage.delete(args.storageId);
+        // A caller-supplied redundant storage ID is not proof of upload ownership.
         throw new Error("PAYLOAD_HASH_QUARANTINED");
       }
       if (existing.state === "active") {
-        if (existing.storageId !== args.storageId) await ctx.storage.delete(args.storageId);
+        // A caller-supplied redundant storage ID is not proof of upload ownership.
         return { payloadRef: String(existing._id), deduplicated: true };
       }
       await ctx.db.patch(existing._id, {

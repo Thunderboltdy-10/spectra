@@ -8,7 +8,7 @@ import { docxProjectionFromContent } from "../lenses/document-projection";
 import type { DocxProjection } from "../lenses/projection-contracts";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateArtifactContent } from "../artifacts/registry";
-import { readNativeArtifactYjsDocument, planNativeArtifactYjsMutation } from "../work/models/yjs/native-artifact-model";
+import { NativeArtifactYjsModel, readNativeArtifactYjsDocument, planNativeArtifactYjsMutation } from "../work/models/yjs/native-artifact-model";
 import type { SheetsContent } from "../sheets/model";
 
 describe("large Office model boundaries", () => {
@@ -75,4 +75,56 @@ describe("large Office model boundaries", () => {
       expect(docxProjectionFromContent(edited, base).operations).toEqual([expect.objectContaining({ kind: "edit-table-cell", regionId: "table" })]);
     } finally { doc.destroy(); }
   });
+});
+
+
+it("persists a distant edit and a legitimate clear as small replayable deltas in a 200k-cell room", () => {
+  const doc = new Y.Doc();
+  const peer = new Y.Doc();
+  try {
+    const cells = Object.fromEntries(Array.from({length: 200_000}, (_, i) => [`A${i + 1}`, {value: i === 99_999 ? "界é" : i}]));
+    initializeNativeArtifactDocument(doc, {title: "Dense", typeKey: "sheets", schemaVersion: 4, tags: [],
+      content: {sheets: [{id: "dense", name: "Dense", cells}]}});
+    const baseline = Y.encodeStateAsUpdate(doc);
+    expect(baseline.byteLength).toBeGreaterThan(760 * 1024);
+    Y.applyUpdate(peer, baseline);
+    const value = readNativeArtifactYjsDocument(doc, "sheets")!;
+    const next = structuredClone(value);
+    (next.content as SheetsContent).sheets[0]!.cells.A200000!.value = "distant edit";
+    const vector = Y.encodeStateVector(doc);
+    planNativeArtifactYjsMutation(doc, "sheets", next, {clientId: "human", kind: "human"}).apply();
+    const delta = Y.encodeStateAsUpdate(doc, vector);
+    expect(delta.byteLength).toBeLessThan(2048);
+    Y.applyUpdate(peer, delta);
+    Y.applyUpdate(peer, delta); // lost receipt replay
+    const replayed = readNativeArtifactYjsDocument(peer, "sheets")!.content as SheetsContent;
+    expect(Object.keys(replayed.sheets[0]!.cells)).toHaveLength(200_000);
+    expect(replayed.sheets[0]!.cells.A1!.value).toBe(0);
+    expect(replayed.sheets[0]!.cells.A100000!.value).toBe("界é");
+    expect(replayed.sheets[0]!.cells.A200000!.value).toBe("distant edit");
+    const cleared = readNativeArtifactYjsDocument(doc, "sheets")!;
+    delete (cleared.content as SheetsContent).sheets[0]!.cells.A200000;
+    const beforeClear = Y.encodeStateVector(doc);
+    planNativeArtifactYjsMutation(doc, "sheets", cleared, {clientId: "human", kind: "human"}).apply();
+    const clearDelta = Y.encodeStateAsUpdate(doc, beforeClear);
+    expect(clearDelta.byteLength).toBeLessThan(2048);
+    Y.applyUpdate(peer, clearDelta);
+    expect((readNativeArtifactYjsDocument(peer, "sheets")!.content as SheetsContent).sheets[0]!.cells.A200000).toBeUndefined();
+  } finally {doc.destroy(); peer.destroy();}
+}, 60_000);
+
+it("allows an explicit empty replacement through the live model API", async () => {
+  const doc = new Y.Doc();
+  initializeNativeArtifactDocument(doc, {title: "Sheet", typeKey: "sheets", schemaVersion: 4, tags: [],
+    content: {sheets: [{id: "s", name: "Sheet", cells: {A1: {value: "Keep until cleared"}}}]}});
+  const model = new NativeArtifactYjsModel("sheets", {clientId: "clear", document: doc,
+    getSnapshot: () => ({state: "synchronized", level: "modify", accountId: "account", displayName: "Fixture", unsynchronizedChanges: 0, presence: []}),
+  } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+  try {
+    const value = readNativeArtifactYjsDocument(doc, "sheets")!;
+    (value.content as SheetsContent).sheets[0]!.cells = {};
+    const edit = async (...args: unknown[]) => {doc.transact(args.at(-1) as () => void); return {applied: true, claims: []};};
+    await model.replaceSnapshot(value, {edit, editMany: edit} as unknown as Parameters<typeof model.replaceSnapshot>[1]);
+    expect((readNativeArtifactYjsDocument(doc, "sheets")!.content as SheetsContent).sheets[0]!.cells).toEqual({});
+  } finally {model.destroy(); doc.destroy();}
 });

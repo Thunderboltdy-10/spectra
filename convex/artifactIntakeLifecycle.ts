@@ -1,3 +1,4 @@
+import { storageHasOtherBinding } from "./durableStorageBindings";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -47,6 +48,7 @@ async function releaseOnce(ctx: MutationCtx, input: { artifactId: Id<"spectraArt
   // The row's trusted storage binding and the verified object facts must agree.
   // Size alone cannot distinguish another owner's same-sized object.
   if (!storageMatches(metadata, input.expected)) return 0;
+  if (await storageHasOtherBinding(ctx, input.storageId, {table: input.family === "asset" ? "artifactAssets" : "artifactImportJobs", id: input.sourceId})) return 0;
   await ctx.storage.delete(input.storageId);
   await ctx.db.insert("artifactIntakeReleaseReceipts", { artifactId: input.artifactId, ownerAccountId: input.ownerAccountId, storageId: input.storageId, bytes: input.expected.bytes, family: input.family, sourceId: input.sourceId, releasedAt: Date.now() });
   if (input.schoolId && input.expected.bytes > 0) await recordMeterEvent(ctx, { schoolId: input.schoolId, accountId: input.ownerAccountId, category: "storage_bytes", quantity: -input.expected.bytes, sourceType: "artifact_intake_release", sourceId: input.sourceId, idempotencyKey: `intake-release:${String(input.storageId)}`, dimensions: { family: input.family }, occurredAt: Date.now() });

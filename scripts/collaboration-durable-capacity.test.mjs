@@ -385,3 +385,17 @@ describe("version commit snapshot strategy", () => {
   });
 });
 
+
+
+it("checks exact UTF-8 boundaries and refuses incomplete or unknown manifests", () => {
+  for (const offset of [-1, 0, 1]) {
+    const bytes = MAX_PROJECTION_JSON_UTF8_BYTES + offset;
+    const text = "界".repeat(Math.floor(bytes / 3)) + "x".repeat(bytes % 3);
+    expect(Buffer.byteLength(text)).toBe(bytes);
+    expect(planProjectionStorage(text).mode).toBe(offset > 0 ? "spill" : "inline");
+  }
+  const body = new Uint8Array([1,2,3]);
+  const manifest = createDurablePayloadManifest({kind: "yjs-update", bytes: body, payloadRef: "p"});
+  expect(() => resolveDurableUpdateBytes({payloadManifest: manifest}, () => body.slice(0,2))).toThrow("BYTE_LENGTH_MISMATCH");
+  expect(() => resolveDurableUpdateBytes({payloadManifest: {...manifest, encoding: "future"}, update: body})).toThrow("ENCODING_UNSUPPORTED");
+});

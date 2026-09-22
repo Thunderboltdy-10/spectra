@@ -302,3 +302,23 @@ export const verifyUploadedRunAttachment = action({
     });
   },
 });
+
+/** Only the trusted server that uploaded these bytes can attest their origin.
+ * Replays remain valid, but the atomic adoption rechecks current actor/epoch. */
+export const adoptDurableContent = action({
+  args: { artifactId: v.id("spectraArtifacts"), policyVersion: v.number(),
+    attestation: vIntakeAttestation,
+    dependencies: v.optional(v.object({assetIds: v.array(v.string()), nativePayloadHashes: v.array(v.string())})),
+  },
+  handler: async (ctx, args): Promise<{payloadRef: string; dependencies?: {assetIds: string[]; nativePayloadHashes: string[]; nativePayloadRefs: string[]}}> => {
+    const attestation = args.attestation;
+    await verifyEnvelopeAndActor(ctx, attestation, {
+      kind: "content", targetId: args.artifactId, attemptId: JSON.stringify([args.policyVersion, args.dependencies ?? null]),
+    });
+    return ctx.runMutation(internal.artifactContent.adopt, {
+      artifactId: args.artifactId, policyVersion: args.policyVersion,
+      storageId: attestation.storageId as import("./_generated/dataModel").Id<"_storage">,
+      digest: attestation.sha256, byteLength: attestation.bytes, dependencies: args.dependencies,
+    });
+  },
+});

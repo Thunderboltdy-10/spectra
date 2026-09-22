@@ -935,3 +935,46 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(recovered.snapshots).toHaveLength(0);
   });
 });
+
+
+it("retains spilled append/snapshot owners and a lost receipt after compaction", async () => {
+  const t = convexTest(schema, modules);
+  const seed = await seedRoom(t);
+  const encoded = yjsUpdate("界".repeat(300_000));
+  const digest = createHash("sha256").update(encoded.update).digest("hex");
+  const store = async (kind: "yjs-update" | "yjs-snapshot") => {
+    const storageId = await t.run(ctx => ctx.storage.store(new Blob([arrayBufferCopy(encoded.update)])));
+    return t.mutation(internal.collaborationDurablePayload.put, {artifactId: seed.artifactId, accountId: seed.accountId,
+      kind, digest, storageId, byteLength: encoded.update.byteLength, mediaType: "application/octet-stream",
+      manifestVersion: 1, partitionKey: "root", policyVersion: 0});
+  };
+  const stored = await store("yjs-update");
+  const args = {accountId: seed.accountId, artifactId: seed.artifactId, actorKind: "human" as const,
+    partitionKey: "root", clientId: "spilled", policyVersion: 0, idempotencyKey: "lost-receipt",
+    update: new ArrayBuffer(0), payloadRef: stored.payloadRef, payloadDigest: digest, byteLength: encoded.update.byteLength,
+    baseStateVectorHash: "initial-state-vector", stateVectorHash: encoded.hash, regionIds: ["intro"]};
+  expect(await t.mutation(internal.collaborationGatewayStore.append,args)).toMatchObject({sequence: 1, duplicate: false});
+  const owners = await t.run(ctx => ctx.db.query("collaborationPayloadOwners").withIndex("by_payload", q => q.eq("payloadRef", stored.payloadRef)).collect());
+  expect(owners).toEqual(expect.arrayContaining([expect.objectContaining({ownerTable: "collaborationUpdates"})]));
+  const snapshot = await store("yjs-snapshot");
+  const snapshotId = await t.mutation(internal.collaboration.storeSnapshot,{roomId: seed.roomId, accountId: seed.accountId,
+    policyVersion: 0, throughSequence: 1, update: new ArrayBuffer(0), stateVector: arrayBufferCopy(encoded.stateVector),
+    contentHash: hashBytes(encoded.update), schemaVersion: 2, createdBy: "compactor",
+    payloadRef: snapshot.payloadRef, payloadDigest: digest, byteLength: encoded.update.byteLength});
+  const before = await t.query(internal.collaborationGatewayStore.load,{artifactId:seed.artifactId,partitionKey:"root",afterSequence:0,limit:100});
+  expect(before?.snapshot).toBeNull(); // candidate cannot hide the log before verification
+  expect(before?.updates).toHaveLength(1);
+  expect(await t.action(internal.collaborationSnapshotVerification.verify,{snapshotId})).toMatchObject({status:"verified",compacted:1});
+  await t.run(async ctx => {
+    await ctx.db.patch(ctx.db.normalizeId("collaborationDurablePayloads", stored.payloadRef)!, {createdAt: Date.now() - 2 * 86_400_000});
+  });
+  expect(await t.mutation(internal.durablePayloadOwnership.release, {payloadRef: stored.payloadRef})).toBe(true);
+  expect(await t.mutation(internal.collaborationGatewayStore.append,args)).toMatchObject({sequence:1,duplicate:true});
+  await expect(t.mutation(internal.collaborationGatewayStore.append,{...args, byteLength: encoded.update.byteLength+1})).rejects.toThrow("INVALID");
+  const loaded=await t.query(internal.collaborationGatewayStore.load,{artifactId:seed.artifactId,partitionKey:"root",afterSequence:0,limit:100});
+  expect(loaded?.snapshot?.payloadRef).toBe(snapshot.payloadRef);
+  expect(loaded?.updates).toHaveLength(0);
+  expect(loaded?.nextSequence).toBe(2);
+  await t.run(ctx=>ctx.db.patch(seed.accountId,{status:"deactivated"}));
+  await expect(t.mutation(internal.collaborationGatewayStore.append,args)).rejects.toThrow("FORBIDDEN");
+});

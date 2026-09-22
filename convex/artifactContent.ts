@@ -1,6 +1,7 @@
-import { validateContentAdoption } from "./collaborationDurablePayload";
+import { assertExclusiveDurableStorage, deleteUnboundDurableStorage } from "./durableStorageBindings";
+import { validateContentAdoption, validateDurablePayload } from "./collaborationDurablePayload";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { canReadPinnedContent } from "./retainedContentAccess";
@@ -26,8 +27,8 @@ async function authority(ctx: QueryCtx | MutationCtx, artifactId: Id<"spectraArt
 export const issueUpload = mutation({
   args: { artifactId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const { policyVersion } = await authority(ctx, args.artifactId, true);
-    return { url: await ctx.storage.generateUploadUrl(), policyVersion };
+    const { actor, policyVersion } = await authority(ctx, args.artifactId, true);
+    return { url: await ctx.storage.generateUploadUrl(), policyVersion, accountId: actor.accountId, clerkId: actor.clerkId };
   },
 });
 
@@ -41,23 +42,25 @@ export const checkpointHead = query({
   },
 });
 
-export const adopt = mutation({
+export const adopt = internalMutation({
   args: { artifactId: v.id("spectraArtifacts"), storageId: v.id("_storage"), digest: v.string(), byteLength: v.number(), policyVersion: v.number(), dependencies: v.optional(contentDependencyValidator) },
   handler: async (ctx, args) => {
     const { actor, policyVersion } = await authority(ctx, args.artifactId, true);
     if (policyVersion !== args.policyVersion) throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
-    const meta = await ctx.db.system.get(args.storageId);
-    if (!/^[a-f0-9]{64}$/.test(args.digest) || !meta || meta.size !== args.byteLength ||
-      normalizeSha256(meta.sha256) !== args.digest || args.byteLength <= 0 || args.byteLength > MAX_DURABLE_PAYLOAD_BYTES)
-      throw new Error("COLLABORATION_DURABLE_PAYLOAD_INTEGRITY");
+    await assertExclusiveDurableStorage(ctx, args.storageId, args.artifactId, actor.accountId);
     const existing = await ctx.db.query("collaborationDurablePayloads").withIndex("by_artifact_digest", q =>
       q.eq("artifactId", args.artifactId).eq("digest", args.digest)).filter(q => q.and(
         q.eq(q.field("status"), "active"), q.eq(q.field("kind"), "projection"),
         q.eq(q.field("accountId"), actor.accountId), q.eq(q.field("policyVersion"), policyVersion))).first();
     if (existing) {
-      if (existing.storageId !== args.storageId) await ctx.storage.delete(args.storageId);
+      await validateDurablePayload(ctx, {artifactId: args.artifactId, payloadRef: String(existing._id), digest: args.digest, byteLength: args.byteLength, kind: "projection"});
+      if (existing.storageId !== args.storageId) await deleteUnboundDurableStorage(ctx, args.storageId);
       return { payloadRef: String(existing._id), dependencies: existing.dependencies };
     }
+    const meta = await ctx.db.system.get(args.storageId);
+    if (!/^[a-f0-9]{64}$/.test(args.digest) || !meta || meta.size !== args.byteLength ||
+      normalizeSha256(meta.sha256) !== args.digest || args.byteLength <= 0 || args.byteLength > MAX_DURABLE_PAYLOAD_BYTES)
+      throw new Error("COLLABORATION_DURABLE_PAYLOAD_INTEGRITY");
     const dependencies = await resolveContentDependencies(ctx, args.artifactId, args.dependencies);
     const id = await ctx.db.insert("collaborationDurablePayloads", {
       ...args, accountId: actor.accountId, kind: "projection", manifestVersion: 1,

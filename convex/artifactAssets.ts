@@ -1,3 +1,4 @@
+import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
@@ -558,7 +559,7 @@ export const revoke = mutation({
     );
     if (asset.status !== "active") return { revoked: false };
     const now = Date.now();
-    if (asset.storageId) await ctx.storage.delete(asset.storageId);
+    if (asset.storageId) await deleteStorageIfNoOtherBinding(ctx, asset.storageId, {table: "artifactAssets", id: String(asset._id)});
     await ctx.db.patch(asset._id, {
       status: "revoked",
       storageId: undefined,

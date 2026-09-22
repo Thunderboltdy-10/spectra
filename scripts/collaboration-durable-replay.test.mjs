@@ -1,0 +1,52 @@
+import {readFileSync} from "node:fs";
+import {createHash} from "node:crypto";
+import {afterEach, expect, it, vi} from "vitest";
+import * as Y from "yjs";
+import {createCollaborationGatewayBridgeClient} from "./collaboration-gateway-bridge-client.mjs";
+import {planMergedUpdatePersist} from "./collaboration-durable-capacity.mjs";
+import {appendBaseStateVectorHash, durableHeadKey, samePersistenceBatch} from "./collaboration-persist.mjs";
+import {MAX_DURABLE_UPDATE_BYTES} from "./collaboration-update-envelope.mjs";
+import {initializeNativeArtifactDocument, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds} from "./collaboration-native-projection.mjs";
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("does not acknowledge semantically unchanged Yjs structs before their durable append", async () => {
+  const source=readFileSync("scripts/collaboration-gateway.mjs","utf8");
+  const code=source.slice(source.indexOf("async function persistAcceptedMessages("),source.indexOf("function schedulePersistence("));
+  const doc=new Y.Doc();
+  initializeNativeArtifactDocument(doc,{title:"Sheet",typeKey:"sheets",schemaVersion:4,tags:[],content:{sheets:[{id:"s",name:"Sheet",cells:{A1:{value:1}}}]}});
+  const before=nativeArtifactProjection(doc,4);
+  const vector=Y.encodeStateVector(doc);
+  doc.getMap("causal-only-metadata").set("operation","one");
+  const delta=Y.encodeStateAsUpdate(doc,vector);
+  const ack=vi.fn();
+  const append=vi.fn(async () => {throw new Error("fixture persistence failure");});
+  const deps={Y, samePersistenceBatch, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds,
+    NATIVE_PROJECTION_REGION:"$spectra:native-projection",sendGatewayState:ack,planMergedUpdatePersist,
+    MAX_DURABLE_UPDATE_BYTES,appendBaseStateVectorHash,durableHeads:new Map(),durableHeadKey,
+    createHash,appendWithRetry:append,checkpointScheduler:()=>({note:vi.fn()})};
+  const persist=new Function(...Object.keys(deps),`${code}; return persistAcceptedMessages;`)(...Object.values(deps));
+  const context={artifactId:"a",partitionKey:"root",accountId:"owner",clientId:"human",actorKind:"human",schemaVersion:4,policyVersion:0};
+  try {
+    await expect(persist(doc,[{context,documentUpdate:delta,nativeProjectionBefore:before,baseStateVectorHash:"base-hash",stateVectorHash:"new-hash",messageId:"m"}],Y.encodeStateAsUpdate(doc))).rejects.toThrow("fixture persistence failure");
+    expect(append).toHaveBeenCalledOnce();
+    expect(append.mock.calls[0][0].regionIds).toEqual(["$spectra:native-projection"]);
+    expect(ack).not.toHaveBeenCalled();
+  } finally {doc.destroy();}
+});
+
+it.each(["missing", "digest", "sequence", "generation"])("refuses incomplete replay: %s", async failure => {
+  const body=Buffer.from([1,2,3]);
+  const payload={url:"https://fixture.invalid/blob",digest:createHash("sha256").update(body).digest("hex"),byteLength:body.length};
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(failure === "digest" ? new Uint8Array([4,5,6]) : body,{status:failure === "missing" ? 404 : 200})));
+  let page=0;
+  const bridge=createCollaborationGatewayBridgeClient({convexUrl:"https://fixture.invalid",bridgeKey:"fixture-key".repeat(4),
+    client:{action:async()=> {
+      page++;
+      if(failure === "generation") return page===1
+        ? {roomId:"one",nextSequence:3,afterSequence:1,hasMore:true,updates:[{sequence:1,update:"AQ=="}]}
+        : {roomId:"two",nextSequence:3,afterSequence:2,updates:[{sequence:2,update:"Ag=="}]};
+      return {roomId:"one",nextSequence:2,afterSequence:1,updates:[{sequence:failure === "sequence" ? 2 : 1,payload}]};
+    }}});
+  await expect(bridge("load",{artifactId:"a",partitionKey:"root"})).rejects.toThrow(/COLLABORATION_(DURABLE_PAYLOAD|REPLAY_GENERATION)/);
+});

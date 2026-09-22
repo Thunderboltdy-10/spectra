@@ -79,6 +79,8 @@ describe("DOCX materialization route", () => {
             },
           ],
         };
+      if (name === "spectraArtifacts:get")
+        return { title: "Physics copy", currentVersionId: "saved-v2", content: { blocks: [] } };
       if (name === "artifactAssets:getContent")
         return {
           assetId: args.assetId,
@@ -102,6 +104,48 @@ describe("DOCX materialization route", () => {
         return new Response(imageBytes, { status: 200, headers: { "Content-Type": "image/png" } });
       }),
     );
+  });
+
+  it("downloads the saved native revision as a copy without queueing a linked write", async () => {
+    const { opened, block } = await baseProjection();
+    const savedText = "Saved route paragraph";
+    const savedContent = {
+      blocks: opened.projection.blocks.map((entry) =>
+        entry.id === block.id ? { ...entry, text: savedText, inlineContent: [{ kind: "text", text: savedText }] } : entry,
+      ),
+      nativeProjectionComplete: true as const,
+    };
+    const originalQuery = convexQuery.getMockImplementation()!;
+    convexQuery.mockImplementation((name: string, args: Record<string, unknown>) =>
+      name === "spectraArtifacts:get"
+        ? { title: "Physics copy.docx", currentVersionId: "saved-v2", content: savedContent }
+        : originalQuery(name, args),
+    );
+    const { POST } = await import("./route");
+    const response = await POST(new NextRequest("http://localhost/api/spectra/lenses/docx", {
+      method: "POST",
+      body: JSON.stringify({ action: "download-copy", artifactId }),
+    }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toContain("Physics%20copy.docx");
+    expect(response.headers.get("x-spectra-saved-version")).toBe("saved-v2");
+    const output = new Uint8Array(await response.arrayBuffer());
+    expect((await docxLens.open(output, "strict-native")).projection.blocks.some((entry) => entry.text === savedText)).toBe(true);
+    expect(convexMutation).not.toHaveBeenCalled();
+    expect(uploadNativePayload).not.toHaveBeenCalled();
+  });
+
+  it("returns an explicit failure instead of downloading an old or missing native base", async () => {
+    fetchVerifiedNativePayload.mockRejectedValue(new Error("NATIVE_PAYLOAD_UNAVAILABLE"));
+    const { POST } = await import("./route");
+    const response = await POST(new NextRequest("http://localhost/api/spectra/lenses/docx", {
+      method: "POST",
+      body: JSON.stringify({ action: "download-copy", artifactId }),
+    }));
+    expect(response.ok).toBe(false);
+    expect(response.headers.get("content-disposition")).toBeNull();
+    expect((await response.json()).error).toBeTruthy();
+    expect(convexMutation).not.toHaveBeenCalled();
   });
 
   it("materializes a formatting edit and verifies semantic readback", async () => {

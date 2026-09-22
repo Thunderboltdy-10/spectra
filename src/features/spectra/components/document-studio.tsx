@@ -135,6 +135,7 @@ import { exportDocxCopy, importDocxPayload, type DocxAssetResolver } from "../le
 import { record } from "./artifact-content-model";
 import {
   artifactBlobSha256,
+  downloadDocumentBlob,
   downloadDocumentText,
   escapeDocumentHtml,
   markdownToDocumentHtml,
@@ -1863,6 +1864,19 @@ export function DocumentStudio({
       });
       document.save(`${safeTitle}.pdf`);
     } else {
+      if (nativeBinding.format === "docx") {
+        const response = await fetch("/api/spectra/lenses/docx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "download-copy", artifactId }),
+        });
+        if (!response.ok) {
+          const failure = await response.json().catch(() => null) as { message?: string } | null;
+          throw new Error(failure?.message ?? "The saved Word copy could not be prepared.");
+        }
+        downloadDocumentBlob(`${safeTitle}.docx`, await response.blob());
+        return;
+      }
       const editorJson = editor.getJSON();
       const resolveAsset: DocxAssetResolver = async ({ assetId }) => {
         if (!assetId) return undefined;
@@ -1878,12 +1892,7 @@ export function DocumentStudio({
       const blob = new Blob([new Uint8Array(copy.bytes).buffer as ArrayBuffer], {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
-      const url = URL.createObjectURL(blob);
-      const anchor = window.document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${safeTitle}.docx`;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
+      downloadDocumentBlob(`${safeTitle}.docx`, blob);
     }
   }
 

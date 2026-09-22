@@ -1767,7 +1767,9 @@ function orderedChild(parent: XmlElement, localName: string, order: readonly str
   const rank = order.indexOf(localName);
   const reference =
     parent.elements().find((child) => {
-      if (child.namespaceUri() !== WML_NAMESPACE) return false;
+      // Newly created prefixed children may not resolve their inherited
+      // namespace until attached to the package. The parent is a Word
+      // property element, so order its known Word children by local name.
       const childRank = order.indexOf(child.localName);
       return childRank >= 0 && childRank > rank;
     }) ?? null;

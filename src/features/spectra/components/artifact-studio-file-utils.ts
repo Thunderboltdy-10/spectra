@@ -11,8 +11,15 @@ export function downloadDocumentBlob(name: string, blob: Blob) {
   const anchor = window.document.createElement("a");
   anchor.href = url;
   anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  window.document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    // The browser may consume the blob after the click task has returned.
+    // Keep it alive through the download handoff, including large Office copies.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
 }
 
 export async function artifactBlobSha256(blob: Blob) {

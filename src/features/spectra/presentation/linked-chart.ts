@@ -146,11 +146,9 @@ function readSheetRange(
     };
   }
   const workbook = normalizeSheetsContent(source.content);
-  const sheet = (sheetName
+  const sheet = sheetName
     ? workbook.sheets.find((candidate) => candidate.name === sheetName)
-    : undefined) ??
-    workbook.sheets.find((candidate) => candidate.id === workbook.activeSheetId) ??
-    workbook.sheets[0];
+    : workbook.sheets.find((candidate) => candidate.id === workbook.activeSheetId) ?? workbook.sheets[0];
   if (!sheet) {
     return {
       status: "unavailable",

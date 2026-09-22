@@ -197,6 +197,7 @@ import {
   WorkbarSelect,
 } from "./artifact-workbar";
 import {
+  downloadDocumentBlob,
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
@@ -3353,11 +3354,7 @@ function ArtifactStudioEditor({
       const name = match
         ? decodeURIComponent(match[1]!)
         : `${artifact.title}.spectra-pkg`;
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = name;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      downloadDocumentBlob(name, blob);
       setNativeAttribution("Downloaded a verified native copy");
     } catch (error) {
       setNativeRecoveryError(

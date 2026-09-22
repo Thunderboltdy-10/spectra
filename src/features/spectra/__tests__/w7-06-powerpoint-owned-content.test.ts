@@ -175,6 +175,20 @@ describe("W7-06 PowerPoint-owned content", () => {
     expect(available.chart?.series.map((series) => series.values)).toEqual([[10, 20, 30], [2, 3, 4]]);
     const saved = applyLinkedChartResolution(chart, available);
     expect((saved.content as { series: unknown[] }).series).toHaveLength(2);
+    const renamedSource = sourceArtifact({
+      activeSheetId: "replacement",
+      sheets: [{ id: "replacement", name: "Replacement", cells: {
+        A1: { value: "Wrong" }, B1: { value: "Wrong series" },
+        A2: { value: "Wrong category" }, B2: { value: 999 },
+      } }],
+    });
+    expect(resolveLinkedChart(saved, [renamedSource]).status).toBe("unavailable");
+    const unavailableSheet = refreshPresentationLinkedCharts(
+      { theme: { id: "test" }, slides: [{ id: "s", title: "s", objects: [saved] }] },
+      [renamedSource],
+    );
+    expect(unavailableSheet.unavailable).toEqual(["chart"]);
+    expect(unavailableSheet.deck.slides[0]!.objects[0]!.content).toEqual(saved.content);
     const pinned = resolveLinkedChart({ ...saved, sourceBinding: { ...saved.sourceBinding!, live: false } }, [sourceArtifact(undefined, "deleted")]);
     expect(pinned.status).toBe("pinned");
     expect(pinned.chart?.series[1]?.values).toEqual([2, 3, 4]);

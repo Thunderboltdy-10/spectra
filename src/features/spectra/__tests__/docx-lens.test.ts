@@ -332,6 +332,22 @@ describe("DOCX preservation lens", () => {
       .toMatchObject({ fontFamily: "游ゴシック" });
   });
 
+  it("orders newly authored font properties before bold in Word run XML", async () => {
+    const sourceDocument = Document.create();
+    sourceDocument.addParagraph("Original");
+    const opened = await docxLens.open(await sourceDocument.save());
+    const target = opened.projection.blocks[0]!;
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: target.id,
+      text: "Edited",
+      inlineContent: [{ kind: "text", text: "Edited", format: { bold: true, fontFamily: "Calibri", fontSizePoints: 12 } }],
+    });
+    const document = await Document.open(output);
+    const properties = mainElements(document.body()).find((element) => element.localName === "rPr")!;
+    expect(properties.elements().map((element) => element.localName)).toEqual(["rFonts", "b", "sz", "szCs"]);
+  });
+
   it("refuses a style alias that has no native style definition", async () => {
     const opened = await docxLens.open(await fixture("complex-structure.docx"));
     const target = opened.projection.blocks.find(

@@ -37,6 +37,7 @@ export const runtime = "nodejs";
 
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("open"), artifactId: z.string().min(1) }),
+  z.object({ action: z.literal("download-copy"), artifactId: z.string().min(1) }),
   z.object({
     action: z.literal("materialize"),
     artifactId: z.string().min(1),
@@ -413,6 +414,37 @@ export async function POST(request: Request) {
   try {
     const input = requestSchema.parse(await request.json());
     const workId = artifactId(input.artifactId);
+    if (input.action === "download-copy") {
+      await ensureImportedNativePayload(workId);
+      const [cloud, artifact] = await Promise.all([
+        fetchVerifiedNativePayload(workId, "cloud"),
+        convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth & { currentVersionId?: string }>(
+          "spectraArtifacts:get", { artifactId: workId },
+        ),
+      ]);
+      const savedContent = await hydrateContentForWrite(input.artifactId, artifact.content);
+      const opened = await docxLens.open(cloud.payload, "strict-native");
+      const { projection, operations } = docxProjectionFromContent(savedContent, opened.projection);
+      const output = operations.length
+        ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations }, nativeWriteOptions)
+        : cloud.payload;
+      const [reopened, comparison] = await Promise.all([
+        docxLens.open(output, "strict-native"),
+        comparePackages(cloud.payload, output),
+      ]);
+      if (reopened.projection.nativeBinding.semanticDigest !== await docxProjectionSemanticDigest(projection))
+        throw new DocxLensError("DOCX_READBACK_MISMATCH", "The downloaded Word copy did not match the saved document.");
+      assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
+      const fileName = `${(artifact.title || "Spectra document").replace(/\.docx$/i, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")}.docx`;
+      return new NextResponse(Buffer.from(output), { headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Length": String(output.byteLength),
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+        "X-Spectra-Saved-Version": artifact.currentVersionId ?? "unversioned",
+      } });
+    }
     if (input.action === "materialize") {
       await ensureImportedNativePayload(workId);
       input.content = await hydrateContentForWrite(input.artifactId, input.content);

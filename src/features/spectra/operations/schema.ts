@@ -16,6 +16,7 @@ import {
 import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
 import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
 import { normalizeAiPreferencePatch } from "../settings/schema/preferences";
+import { documentAcademicOperationsSchema } from "../commands/office/document-academic-operations";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 export const SPECTRA_CREATABLE_BLUEPRINT_KEYS = WORK_TYPE_KEYS;
@@ -232,6 +233,7 @@ function updateInput<T extends z.ZodTypeAny>(
       summary: summaryText.nullable(),
       content: content.nullable(),
       contentPatch: contentPatchSchema.nullable().optional(),
+      documentOperations: documentAcademicOperationsSchema.nullable().optional(),
       tags: tagsSchema.nullable(),
     })
     .strict();
@@ -673,9 +675,13 @@ export function parseModelOperation(value: unknown) {
     operation.input.summary === null &&
     operation.input.content === null &&
     !operation.input.contentPatch &&
+    !operation.input.documentOperations &&
     operation.input.tags === null
   ) {
     throw new Error("artifact.update requires at least one changed field");
+  }
+  if (operation.type === "artifact.update" && operation.input.documentOperations && (operation.input.blueprintKey !== "document" || operation.input.content !== null || operation.input.contentPatch)) {
+    throw new Error("Typed document operations require a document target and cannot be combined with replacement content or JSON patches.");
   }
   return operation;
 }
@@ -1313,6 +1319,7 @@ function artifactUpdateVariant(
               { type: "null" },
             ],
           },
+          ...(blueprintKey === "document" ? { documentOperations: { anyOf: [z.toJSONSchema(documentAcademicOperationsSchema), { type: "null" }] } } : {}),
           tags: {
             anyOf: [
               { type: "array", items: { type: "string" }, maxItems: 16 },

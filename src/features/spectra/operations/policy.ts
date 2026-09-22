@@ -75,6 +75,7 @@ export function evaluatePlanPolicy(
   ).length;
 
   const reasons: string[] = [];
+  if (operations.reduce((count, operation) => count + (operation.type === "artifact.update" ? operation.input.documentOperations?.filter((item) => item.kind === "review-revision").length ?? 0 : 0), 0) > 1) reasons.push("Review the selected Word revisions before accepting or rejecting them together");
   if (operations.some((operation) => operation.type === "workspace.create"))
     reasons.push("Create a new workspace");
   const appCommands = operations.filter((operation) => operation.type === "app.command");

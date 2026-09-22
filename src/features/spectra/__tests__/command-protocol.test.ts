@@ -208,7 +208,7 @@ describe("artifact command protocol", () => {
     const rows = capabilityMatrixRows("document", [
       { id: "history.undo", label: "Undo", general: true, onSelect: () => {} },
       { id: "history.undo", label: "Undo again", general: true, onSelect: () => {} },
-      { id: "review.accept", label: "Accept revision", touches: ["trackedChanges"], onSelect: () => {} },
+      { id: "macro.edit", label: "Edit macro", touches: ["macros"], onSelect: () => {} },
       { id: "insert.table", label: "Table", tab: "Insert", touches: ["tables"], undo: "none(explain)", onSelect: () => {} },
       { id: "layout.margins", label: "Margins", tab: "Layout", onSelect: () => {} },
       {

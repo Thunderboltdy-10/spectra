@@ -92,6 +92,12 @@ import {
   type FindOptions,
 } from "../editor/document-navigation";
 import { Endnote, Footnote, SpectraNotes } from "../editor/document-notes";
+import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
+import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
+import { documentBlocksFromJson } from "../lenses/document-projection";
+import type { WordTextAnchor } from "../lenses/docx-academic-schema";
+import type { WordSource } from "../lenses/docx-citation-schema";
+import { editNoteText } from "../editor/note-text-edit";
 import {
   PageBreak,
   ParagraphFrame,
@@ -101,6 +107,8 @@ import { DragHandle } from "../editor/drag-handle";
 import { Equation, InlineEquation } from "../editor/equation-node";
 import {
   SpectraCitationNode,
+  WordCommentBoundary,
+  WordRevision,
   SpectraReferenceNode,
 } from "../editor/reference-citation-nodes";
 import {
@@ -474,6 +482,7 @@ function DocumentInlinePanel({
   onChange,
   onCancel,
   onConfirm,
+  children,
 }: {
   label: string;
   detail?: string;
@@ -484,6 +493,7 @@ function DocumentInlinePanel({
   onChange: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
+  children?: ReactNode;
 }) {
   return (
     <div
@@ -523,6 +533,7 @@ function DocumentInlinePanel({
           }}
         />
       )}
+      {children}
       <button type="button" onClick={onCancel}>
         Cancel
       </button>
@@ -871,6 +882,8 @@ export function DocumentStudio({
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [spellcheckOn, setSpellcheckOn] = useState(true);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const [academicDraft, setAcademicDraft] = useState<{ kind: "comment" | "revision" | "citation"; anchor: WordTextAnchor; text: string; author: string; year: string; pages: string; url: string; citationId?: string; expectedText?: string; source?: WordSource } | null>(null);
+  const [academicError, setAcademicError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<string | null>(null);
   /** Small in-canvas editors, each opened by its command and nothing else. */
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
@@ -1005,6 +1018,8 @@ export function DocumentStudio({
         InlineEquation,
         SpectraReferenceNode,
         SpectraCitationNode,
+        WordCommentBoundary,
+        WordRevision,
         DragHandle,
         StableBlockId.configure({
           nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
@@ -1757,6 +1772,12 @@ export function DocumentStudio({
    */
   function insertBibliography() {
     if (!editor || readOnly) return;
+    if (nativeBinding.format || editor.getJSON().content?.some((node) => JSON.stringify(node).includes('"native"'))) {
+      const blocks = documentBlocksFromJson(editor.getJSON());
+      const existing = blocks.find((block) => block.inlineContent?.some((item) => item.kind === "bibliography"));
+      runAcademic([{ kind: "regenerate-word-bibliography", ...(existing ? { regionId: existing.id, expectedText: existing.text } : {}) }]);
+      return;
+    }
     const block = bibliographyNode(bibliography);
     const existing: { from: number; to: number }[] = [];
     let inReferences = false;
@@ -2123,6 +2144,90 @@ export function DocumentStudio({
     },
     [canEdit, editor],
   );
+
+  function runAcademic(operations: DocumentAcademicOperation[]) {
+    if (!editor || !canEdit) return false;
+    try {
+      editorReadyForUserChanges.current = true;
+      executeAcademicEditorOperations(editor, content, operations);
+      setAcademicError(null);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The academic edit could not be applied.";
+      setAcademicError(message);
+      toast.error(message);
+      return false;
+    }
+  }
+
+  function openAcademic(kind: "comment" | "revision" | "citation") {
+    if (!editor || !canEdit) return;
+    try { setAcademicDraft({ kind, anchor: academicSelection(editor), text: "", author: "", year: "", pages: "", url: "" }); setAcademicError(null); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Select a paragraph first."); }
+  }
+
+  function addAcademicNote(noteType: "footnote" | "endnote") {
+    if (!editor) return;
+    try {
+      const noteId = String((crypto.getRandomValues(new Uint32Array(1))[0]! % 2_147_483_646) + 1);
+      if (runAcademic([{ kind: "insert-note", anchor: academicSelection(editor), noteType, noteId, content: [[{ text: "" }]] }])) editor.state.doc.descendants((node, pos) => { if (node.attrs.nativeNoteId === noteId) editor.commands.setNodeSelection(pos); });
+    }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Select a paragraph first."); }
+  }
+
+  const academicBlocks = editor ? documentBlocksFromJson(editor.getJSON()) : [];
+  const academicItems = academicBlocks.flatMap((block) => (block.inlineContent ?? []).map((item) => ({ block, item })));
+  const editableRevisions = academicItems.flatMap(({ block, item }) => item.kind === "revision" ? [{ block, item }] : []);
+  const editableComments = academicItems.flatMap(({ block, item }) => item.kind === "commentBoundary" && item.boundary === "start" && item.comment ? [{ block, item }] : []);
+  const academicNotes = academicItems.flatMap(({ item }) => item.kind === "noteRef" ? [item] : []);
+  const academicCitations = academicItems.flatMap(({ block, item }) => item.kind === "citation" ? [{ block, item }] : []);
+  const availableWordSources = [...new Map([
+    ...((record(content).nativeBinding as { wordSources?: WordSource[] } | undefined)?.wordSources ?? []).map((source) => [source.tag, source] as const),
+    ...academicCitations.map(({ item }) => [item.source.tag, item.source] as const),
+  ]).values()];
+  const sourceAuthor = (source: WordSource) => source.corporate || source.authors?.map((person) => [person.first, person.middle, person.last].filter(Boolean).join(" ")).join("; ") || "";
+  function chooseWordSource(source: WordSource) {
+    if (academicDraft) setAcademicDraft({ ...academicDraft, source, text: source.title, author: sourceAuthor(source), year: source.year ?? "", url: source.url ?? "" });
+  }
+  function editAcademicCitation(id?: string) {
+    const found = academicCitations.find(({ item }) => item.citationId === id);
+    if (!found) { setRevisionsOpen(true); return; }
+    const { block, item } = found;
+    setAcademicDraft({ kind: "citation", citationId: item.citationId, expectedText: item.text, source: item.source, anchor: { regionId: block.id, expectedText: block.text, start: 0, end: 0 }, text: item.source.title, author: sourceAuthor(item.source), year: item.source.year ?? "", pages: item.pages ?? "", url: item.source.url ?? "" });
+  }
+  function removeAcademicCitation(id?: string) {
+    const found = academicCitations.find(({ item }) => item.citationId === id);
+    if (found) runAcademic([{ kind: "remove-word-citation", citationId: found.item.citationId, expectedText: found.item.text }]);
+    else setRevisionsOpen(true);
+  }
+  function changeAcademicNote(action: "move" | "delete", key?: string) {
+    const note = academicNotes.find((item) => `${item.noteType}:${item.noteId}` === key);
+    if (!note || !editor) { setRevisionsOpen(true); return; }
+    try {
+      runAcademic([action === "delete" ? { kind: "delete-note", noteType: note.noteType, noteId: note.noteId, expectedText: note.text } : { kind: "move-note", noteType: note.noteType, noteId: note.noteId, anchor: academicSelection(editor) }]);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Select a destination paragraph first."); }
+  }
+  function reviewAcademicRevision(key: string | undefined, decision: "accept" | "reject") {
+    const found = editableRevisions.find(({ block, item }) => `${block.id}:${item.revisionId}:${item.revisionKind}` === key);
+    if (found) runAcademic([{ kind: "review-revision", regionId: found.block.id, revisionId: found.item.revisionId, revisionKind: found.item.revisionKind, expectedText: found.item.text, decision }]);
+    else setRevisionsOpen(true);
+  }
+
+  function submitAcademicDraft() {
+    if (!academicDraft) return;
+    const id = String((crypto.getRandomValues(new Uint32Array(1))[0]! % 2_147_483_646) + 1);
+    const draft = academicDraft;
+    let operation: DocumentAcademicOperation;
+    if (draft.kind === "comment") operation = { kind: "add-word-comment", anchor: draft.anchor, commentId: id, comment: { author: draft.author.trim(), text: draft.text, date: new Date().toISOString() } };
+    else if (draft.kind === "revision") operation = { kind: "track-text", anchor: draft.anchor, revisionId: id, replacement: draft.text, provenance: { author: draft.author.trim(), date: new Date().toISOString() } };
+    else {
+      const { authors: _authors, corporate: _corporate, year: _year, url: _url, ...retained } = draft.source ?? { tag: `Source${id}`, sourceType: "Misc" as const };
+      const author = draft.source && sourceAuthor(draft.source) === draft.author ? { ...(draft.source.authors ? { authors: draft.source.authors } : {}), ...(draft.source.corporate ? { corporate: draft.source.corporate } : {}) } : draft.author.trim() ? { authors: [{ last: draft.author.trim() }] } : {};
+      const source: WordSource = { ...retained, title: draft.text.trim(), ...author, ...(draft.year.trim() ? { year: draft.year.trim() } : {}), ...(draft.url.trim() ? { url: draft.url.trim() } : {}) };
+      operation = draft.citationId ? { kind: "edit-word-citation", citationId: draft.citationId, expectedText: draft.expectedText!, source, ...(draft.pages.trim() ? { pages: draft.pages.trim() } : {}) } : { kind: "insert-word-citation", citationId: `citation-${id}`, anchor: draft.anchor, source, ...(draft.pages.trim() ? { pages: draft.pages.trim() } : {}) };
+    }
+    if (runAcademic([operation])) { setAcademicDraft(null); setRevisionsOpen(draft.kind !== "citation"); }
+  }
 
   /** Writes one key of the document's own content record beside the blocks. */
   const patchContent = useCallback(
@@ -2654,17 +2759,15 @@ export function DocumentStudio({
         spectraBus.command("reference.beginPicking", {
           hostWorkId: artifactId,
         }),
-      citation: insertCitation,
-      ...(sourcesHaveWork
+      citation: () => nativeBinding.format || !sourcesHaveWork ? openAcademic("citation") : insertCitation(),
+      ...(sourcesHaveWork || nativeBinding.format
         ? {}
         : {
             citationHint:
               "Cite a source once this document carries one; the Sources rail opens instead",
           }),
-      footnote: () =>
-        withEdit(() => editor!.chain().focus().insertFootnote().run()),
-      endnote: () =>
-        withEdit(() => editor!.chain().focus().insertEndnote().run()),
+      footnote: () => addAcademicNote("footnote"),
+      endnote: () => addAcademicNote("endnote"),
       pageBreak: () =>
         withEdit(() => editor!.chain().focus().insertPageBreak().run()),
       sectionBreak: () =>
@@ -2870,17 +2973,29 @@ export function DocumentStudio({
           bibliographyStyle:
             style === "author_date" ? "author_date" : "numeric",
         }),
-      addSource: () => setSourcesOpen(true),
-      addSourceReason:
-        "A source has to be verified before this document can cite it, so sources arrive with research rather than being typed in here. The rail shows what this copy carries.",
+      addSource: () => openAcademic("citation"),
       crossReference: insertCrossReference,
     },
     review: {
+      editNote: () => setRevisionsOpen(true),
+      moveNote: (key) => changeAcademicNote("move", key),
+      deleteNote: (key) => changeAcademicNote("delete", key),
+      editWordComment: () => setRevisionsOpen(true),
+      editCitation: editAcademicCitation,
+      removeCitation: removeAcademicCitation,
+      addWordComment: () => openAcademic("comment"),
+      proposeText: () => openAcademic("revision"),
+      acceptRevision: (key) => reviewAcademicRevision(key, "accept"),
+      rejectRevision: (key) => reviewAcademicRevision(key, "reject"),
+      deleteWordComment: (id) => {
+        const found = editableComments.find(({ item }) => item.commentId === id);
+        if (found?.item.comment) runAcademic([{ kind: "delete-word-comment", commentId: id, expectedText: found.item.comment.text }]);
+      },
       showTrackedChanges: () => setRevisionsOpen((open) => !open),
       trackedChangesOpen: revisionsOpen,
       trackedChangeCount: trackedPlaceholders.length,
       revisionsPreservedReason:
-        "Word revision marks are preserved exactly as the file has them. Accepting or rejecting them would rewrite parts Spectra does not model, so it belongs in Word.",
+        "Review individual supported revisions in the rail. Whole-document review is unavailable when native structural or formatting revisions may be present.",
       acceptRevisions: () => undefined,
       rejectRevisions: () => undefined,
       updateFields: () => undefined,
@@ -3320,6 +3435,29 @@ export function DocumentStudio({
             }}
           />
         ) : null}
+        {academicDraft ? (
+          <DocumentInlinePanel
+            label={academicDraft.kind === "citation" ? "Word citation" : academicDraft.kind === "comment" ? "Word comment" : "Proposed text"}
+            detail={academicDraft.kind === "citation" ? "Enter only metadata you know. These details are user supplied; adding a URL does not verify the source." : academicDraft.kind === "comment" ? "This annotation is stored in the Word file. Its author label does not invite anyone or change Spectra conversations." : "The selected original text remains available for review and undo. An empty replacement proposes a deletion."}
+            value={academicDraft.text}
+            placeholder={academicDraft.kind === "citation" ? "Source title" : academicDraft.kind === "comment" ? "Comment on this range" : "Replacement text"}
+            multiline={academicDraft.kind !== "citation"}
+            confirmLabel={academicDraft.citationId ? "Save citation" : academicDraft.kind === "revision" ? "Propose change" : "Insert"}
+            onChange={(text) => setAcademicDraft({ ...academicDraft, text })}
+            onCancel={() => setAcademicDraft(null)}
+            onConfirm={submitAcademicDraft}
+          >
+            <label>Author{academicDraft.kind === "citation" ? " (optional)" : ""}<input aria-label="Native author" value={academicDraft.author} onChange={(event) => setAcademicDraft({ ...academicDraft, author: event.target.value })} /></label>
+            {academicDraft.kind === "citation" ? <>
+              {!academicDraft.citationId && availableWordSources.length ? <label>Existing Word source<select aria-label="Existing Word source" value={academicDraft.source?.tag ?? ""} onChange={(event) => { const source = availableWordSources.find((item) => item.tag === event.target.value); if (source) chooseWordSource(source); else setAcademicDraft({ ...academicDraft, source: undefined, text: "", author: "", year: "", url: "" }); }}><option value="">New supplied source</option>{availableWordSources.map((source) => <option key={source.tag} value={source.tag}>{source.title || source.tag}</option>)}</select></label> : null}
+              <label>Source type<select aria-label="Source type" value={academicDraft.source?.sourceType ?? "Misc"} onChange={(event) => setAcademicDraft({ ...academicDraft, source: { ...(academicDraft.source ?? { tag: `Source${crypto.randomUUID().replaceAll("-", "")}`, title: academicDraft.text }), sourceType: event.target.value as WordSource["sourceType"] } })}><option value="Misc">Unspecified</option><option value="Book">Book</option><option value="JournalArticle">Journal article</option><option value="DocumentFromInternetSite">Web page</option><option value="Report">Report</option></select></label>
+              <label>Year (optional)<input aria-label="Source year" value={academicDraft.year} onChange={(event) => setAcademicDraft({ ...academicDraft, year: event.target.value })} /></label>
+              <label>Pages (optional)<input aria-label="Citation pages" value={academicDraft.pages} onChange={(event) => setAcademicDraft({ ...academicDraft, pages: event.target.value })} /></label>
+              <label>URL (optional)<input aria-label="Source URL" value={academicDraft.url} onChange={(event) => setAcademicDraft({ ...academicDraft, url: event.target.value })} /></label>
+            </> : null}
+            {academicError ? <p role="alert">{academicError}</p> : null}
+          </DocumentInlinePanel>
+        ) : null}
         {altDraft !== null ? (
           <DocumentInlinePanel
             label="Alternative text"
@@ -3551,30 +3689,45 @@ export function DocumentStudio({
                   <X className="h-4 w-4" />
                 </button>
               </header>
+              {editableRevisions.map(({ block, item }) => (
+                <div key={`${block.id}:${item.revisionId}:${item.revisionKind}`}>
+                  <strong>{item.revisionKind === "ins" ? "Insertion" : "Deletion"} · {item.author || "Word"}</strong>
+                  <small>{item.text || "Empty revision"}</small>
+                  <button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.review.trackChanges.acceptOne", `${block.id}:${item.revisionId}:${item.revisionKind}`)}>Accept</button>
+                  <button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.review.trackChanges.rejectOne", `${block.id}:${item.revisionId}:${item.revisionKind}`)}>Reject</button>
+                </div>
+              ))}
               {trackedPlaceholders.length ? (
                 <>
-                  {trackedPlaceholders.map((placeholder) => (
+                  {trackedPlaceholders.filter((placeholder) => !editableRevisions.some(({ item }) => placeholder.id === `docx:revision:${item.revisionKind}:${item.revisionId}`)).map((placeholder) => (
                     <div key={placeholder.id}>
                       <strong>{placeholder.label}</strong>
                       <small>{placeholder.detail}</small>
                     </div>
                   ))}
                   <p>
-                    These marks stay exactly as Word wrote them. Accepting or
-                    rejecting them would rewrite parts Spectra does not model,
-                    so that belongs in Word.
+                    Structural, formatting, moved and nested revision marks stay in Word. The supported text revisions above can be reviewed individually.
                   </p>
                 </>
               ) : (
                 <p>
-                  This document carries no Word revision marks. When a linked
-                  file has them, they are listed here read-only.
+                  {editableRevisions.length ? "Review each change above, or undo the operation." : "This document carries no tracked text changes. Select text and choose Propose text edit to create one."}
                 </p>
               )}
+              {editableComments.length ? <div className="spectra-document-word-comments">
+                <strong>Word comments</strong>
+                {editableComments.map(({ item }) => <div key={item.commentId}>
+                  <strong>{item.comment!.author || "Word"}</strong>
+                  <textarea key={item.comment!.text} aria-label={`Word comment ${item.commentId}`} defaultValue={item.comment!.text} disabled={!canEdit || Boolean(item.comment!.readOnlyReason)} onBlur={(event) => { if (event.target.value !== item.comment!.text) runAcademic([{ kind: "edit-word-comment", commentId: item.commentId, expectedText: item.comment!.text, text: event.target.value }]); }} />
+                  {item.comment!.readOnlyReason ? <small>{item.comment!.readOnlyReason}</small> : null}
+                  <button type="button" disabled={!canEdit || Boolean(item.comment!.readOnlyReason)} onClick={() => runDocumentCommand("document.review.comment.delete", item.commentId)}>Delete comment</button>
+                </div>)}
+                <p>Native author labels describe the Word file. Spectra conversations and access remain separate.</p>
+              </div> : null}
               {wordComments.length ? (
                 <div className="spectra-document-word-comments">
                   <strong>Word comments</strong>
-                  {wordComments.map((comment) => (
+                  {wordComments.filter((comment) => !editableComments.some(({ item }) => item.commentId === comment.id)).map((comment) => (
                     <div key={`word-comment-${comment.id}`}>
                       <strong>{comment.author?.trim() || "Word"}</strong>
                       <small>{comment.text}</small>
@@ -3587,10 +3740,26 @@ export function DocumentStudio({
                   </p>
                 </div>
               ) : null}
-              {wordNotes.length ? (
+              {academicCitations.length ? <div className="spectra-document-word-comments">
+                <strong>Word citations</strong>
+                {academicCitations.map(({ item }) => <div key={item.citationId}><small>{item.text}</small><button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.references.citation.edit", item.citationId)}>Edit citation</button><button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.references.citation.remove", item.citationId)}>Remove citation</button></div>)}
+                <button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.references.bibliography")}>Update bibliography</button>
+              </div> : null}
+              {academicNotes.length ? <div className="spectra-document-word-notes">
+                <strong>Word notes</strong>
+                <p>To move a reference, select its destination in the text, then choose Move here.</p>
+                {academicNotes.map((note) => <div key={`${note.noteType}:${note.noteId}`}>
+                  <strong>{note.noteType === "footnote" ? "Footnote" : "Endnote"} {note.noteId}</strong>
+                  <textarea key={note.text} aria-label={`${note.noteType} ${note.noteId} text`} defaultValue={note.text} disabled={!canEdit || Boolean(note.readOnlyReason)} onBlur={(event) => { if (event.target.value !== note.text) runAcademic([{ kind: "edit-note", noteType: note.noteType, noteId: note.noteId, expectedText: note.text, content: editNoteText(note.text, event.target.value, note.content) }]); }} />
+                  {note.readOnlyReason ? <small>{note.readOnlyReason}</small> : null}
+                  <button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.notes.move", `${note.noteType}:${note.noteId}`)}>Move here</button>
+                  <button type="button" disabled={!canEdit} onClick={() => runDocumentCommand("document.notes.delete", `${note.noteType}:${note.noteId}`)}>Delete note</button>
+                </div>)}
+              </div> : null}
+              {wordNotes.some((note) => !academicNotes.some((item) => item.noteType === note.type && item.noteId === note.id)) ? (
                 <div className="spectra-document-word-notes">
                   <strong>Word notes</strong>
-                  {wordNotes.map((note) => (
+                  {wordNotes.filter((note) => !academicNotes.some((item) => item.noteType === note.type && item.noteId === note.id)).map((note) => (
                     <div key={`word-note-${note.type}-${note.id}`}>
                       <strong>
                         {note.type === "endnote" ? "Endnote" : "Footnote"}{" "}

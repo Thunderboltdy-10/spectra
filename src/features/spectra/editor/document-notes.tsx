@@ -7,20 +7,15 @@ import {
   ReactNodeViewRenderer,
   type NodeViewProps,
 } from "@tiptap/react";
+import { editNoteText } from "./note-text-edit";
+import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 
 /**
  * Footnotes and endnotes.
  *
- * Word keeps note text in separate package parts, and Spectra preserves those
- * parts rather than rewriting them — so a note *written in Spectra* is a Spectra
- * note: an inline marker carrying its own text, numbered by CSS counters so the
- * sequence is always right without a field to refresh. The marker is the anchor
- * a reader clicks; the text is edited in place, where the writer is already
- * looking, instead of in a panel at the other end of the page.
- *
- * The distinction is stated in the workbar hint, not hidden: on a linked Word
- * file these commands are unavailable, because `footnotes` is a preserved region
- * and Spectra will not fabricate a `footnotes.xml` entry it cannot round-trip.
+ * The inline marker owns a stable native note ID. The shared command edits its
+ * rich story; the DOCX lens writes the separate footnote or endnote part.
+ * Unmodeled stories expose their precise read-only reason in the editor.
  */
 
 declare module "@tiptap/core" {
@@ -43,7 +38,7 @@ function isFocusedNode({ editor, getPos }: Pick<NodeViewProps, "editor" | "getPo
   return selection instanceof NodeSelection && selection.from === position;
 }
 
-function NoteView({ node, editor, getPos, selected, updateAttributes }: NodeViewProps) {
+function NoteView({ node, editor, getPos, selected }: NodeViewProps) {
   const text = typeof node.attrs.text === "string" ? node.attrs.text : "";
   const kind = node.type.name === "endnote" ? "endnote" : "footnote";
   const focused = Boolean(selected) && isFocusedNode({ editor, getPos });
@@ -66,7 +61,9 @@ function NoteView({ node, editor, getPos, selected, updateAttributes }: NodeView
                 ? "The note collected at the end of the document"
                 : "The note printed at the foot of the page"
             }
-            onChange={(event) => updateAttributes({ text: event.target.value })}
+            readOnly={Boolean(node.attrs.nativeReadOnly)}
+            title={node.attrs.readOnlyReason || undefined}
+            onChange={(event) => editor.commands.setNoteText(event.target.value)}
           />
         </span>
       ) : (
@@ -90,6 +87,8 @@ function noteNode(name: "footnote" | "endnote") {
         text: { default: "" },
         /** Present when this marker was projected from a Word note part. */
         nativeNoteId: { default: null },
+        noteContent: { default: null },
+        readOnlyReason: { default: null },
         nativeReadOnly: { default: false },
       };
     },
@@ -124,7 +123,7 @@ export const SpectraNotes = Extension.create({
       (type: "footnote" | "endnote") =>
       (attrs?: { text?: string }) =>
       ({ commands }: CommandProps) =>
-        commands.insertContent({ type, attrs: { text: attrs?.text ?? "" } });
+        commands.insertContent({ type, attrs: { text: attrs?.text ?? "", nativeNoteId: String((crypto.getRandomValues(new Uint32Array(1))[0]! % 2_147_483_646) + 1) } });
     return {
       insertFootnote: insert("footnote"),
       insertEndnote: insert("endnote"),
@@ -135,7 +134,10 @@ export const SpectraNotes = Extension.create({
           if (!(selection instanceof NodeSelection)) return false;
           const node = selection.node;
           if (node.type.name !== "footnote" && node.type.name !== "endnote") return false;
-          tr.setNodeMarkup(selection.from, undefined, { ...node.attrs, text });
+          if (node.attrs.nativeReadOnly) return false;
+          const noteContent = editNoteText(node.attrs.text, text, node.attrs.noteContent);
+          applyDocumentAcademicOperations({ tiptap: state.doc.toJSON() }, [{ kind: "edit-note", noteType: node.type.name, noteId: node.attrs.nativeNoteId, expectedText: node.attrs.text, content: noteContent }]);
+          tr.setNodeMarkup(selection.from, undefined, { ...node.attrs, text, noteContent });
           if (dispatch) dispatch(tr);
           return true;
         },

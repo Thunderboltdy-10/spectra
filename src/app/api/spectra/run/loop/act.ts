@@ -36,6 +36,8 @@ import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
+import { applyDocumentAcademicOperations, documentAcademicEffectsLanded } from "@/features/spectra/commands/office/document-academic-operations";
+import { verifyAcademicSourceHandles } from "@/features/spectra/commands/office/document-academic-source-verification";
 
 async function executeLegacyCalendarCommand(
   actorClerkId: string,
@@ -1004,6 +1006,14 @@ export async function executeOperation(
       artifact.nativeFormat ?? localNative?.nativeFormat
     )?.toLowerCase();
     const officeKind = localNative ? linkedOfficeKind(nativeFormat) : null;
+    let academicBefore: unknown;
+    let academicDesired: unknown;
+    const resolveAcademic = (current: unknown) => {
+      verifyAcademicSourceHandles(current, input.documentOperations!);
+      academicBefore = current;
+      academicDesired = applyDocumentAcademicOperations(current, input.documentOperations!);
+      return academicDesired;
+    };
     const mutationResult = await applyAiArtifactMutation({
       artifactId: input.artifactId,
       runId,
@@ -1033,7 +1043,9 @@ export async function executeOperation(
             ? { summary: current.summary }
             : {}),
         tags: input.tags ?? current.tags,
-        content: input.contentPatch
+        content: input.documentOperations
+          ? resolveAcademic(current.content)
+          : input.contentPatch
           ? applyContentPatch(current.content, input.contentPatch)
           : (input.content ?? current.content),
       }),
@@ -1047,6 +1059,7 @@ export async function executeOperation(
         artifactId: input.artifactId,
         timeoutMs: 5_000,
       }).catch(() => null);
+      if (input.documentOperations && (!live || !documentAcademicEffectsLanded(academicBefore, academicDesired, live.content))) throw new Error("The complete academic edit could not be verified in the saved collaborative document. Reload before retrying.");
       if (live) {
         await mutate("spectraArtifacts:stageAiPatch", {
           actorClerkId,

@@ -369,14 +369,14 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "insert.citation",
-    "Insert a Spectra research citation into the body. This does not create a Word citation field or Sources XML entry.",
-    { delta: "insert-paragraph", touches: ["body"], manifest: "add_citation" },
+    "Insert a Word citation field from supplied metadata or existing verified source/evidence handles.",
+    { delta: "insert-word-citation", touches: ["body"], manifest: "add_citation" },
   ],
   [
     "insert.footnote",
     "Insert a footnote at the caret.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.footnote,
+      delta: "insert-note",
       touches: ["footnotes"],
       manifest: "insert_blocks",
     },
@@ -385,7 +385,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.endnote",
     "Insert an endnote at the caret.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.footnote,
+      delta: "insert-note",
       touches: ["footnotes"],
       manifest: "insert_blocks",
     },
@@ -650,8 +650,8 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "references.bibliography",
-    "Insert a Spectra research bibliography from citations in this document. This does not write Word Sources/bibliography XML.",
-    { delta: "insert-paragraph", touches: ["body"] },
+    "Regenerate the native Word bibliography from used sources, or rebuild an existing Spectra research reference list.",
+    { delta: "regenerate-word-bibliography", touches: ["body"] },
   ],
   [
     "references.citationStyle",
@@ -660,8 +660,8 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "references.source.add",
-    "Add a Spectra research source to this document. This does not add a Word Sources XML entry.",
-    { delta: "insert-paragraph", touches: ["body"] },
+    "Insert a Word citation with supplied metadata or an existing verified source handle.",
+    { delta: "insert-word-citation", touches: ["body"] },
   ],
   [
     "references.crossRef",
@@ -673,6 +673,17 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Show tracked revisions in this document.",
     { requires: false, exposed: false },
   ],
+  ["review.comment.add", "Create a classic native Word comment on a fenced text range.", { delta: "add-word-comment", touches: ["comments"] }],
+  ["notes.edit", "Edit one note body with supported rich runs.", { params: text, delta: "edit-note", touches: ["footnotes"] }],
+  ["notes.move", "Move one note reference to a fenced paragraph position.", { params: text, delta: "move-note", touches: ["footnotes"] }],
+  ["notes.delete", "Delete one note and its reference.", { params: text, delta: "delete-note", touches: ["footnotes"] }],
+  ["review.comment.edit", "Edit one classic native comment body.", { params: text, delta: "edit-word-comment", touches: ["comments"] }],
+  ["references.citation.edit", "Edit one citation and its shared source metadata.", { params: text, delta: "edit-word-citation", touches: ["body"] }],
+  ["references.citation.remove", "Remove one native citation field.", { params: text, delta: "remove-word-citation", touches: ["body"] }],
+  ["review.comment.delete", "Delete one native Word annotation and its anchors.", { params: text, delta: "delete-word-comment", touches: ["comments"] }],
+  ["review.trackChanges.propose", "Author native insertion/deletion text revisions on a fenced range.", { delta: "track-text", touches: ["trackedChanges"] }],
+  ["review.trackChanges.acceptOne", "Accept one identified insertion or deletion.", { params: text, delta: "review-revision", touches: ["trackedChanges"] }],
+  ["review.trackChanges.rejectOne", "Reject one identified insertion or deletion.", { params: text, delta: "review-revision", touches: ["trackedChanges"] }],
   [
     "review.trackChanges.accept",
     "Accept every tracked revision in this document.",

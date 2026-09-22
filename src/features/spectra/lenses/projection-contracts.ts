@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { wordNoteContentSchema, wordNoteOperationSchemas, wordCommentBoundarySchema, wordRevisionInlineSchema, wordReviewOperationSchemas } from "./docx-academic-schema";
+import { wordCitationInlineSchema, wordBibliographyInlineSchema, wordCitationOperationSchemas, wordSourceSchema } from "./docx-citation-schema";
 
 const compatibilityProfileSchema = z.enum([
   "strict-native",
@@ -22,6 +24,9 @@ const wordNoteSchema = z
     id: z.string().min(1).max(64),
     type: z.enum(["footnote", "endnote"]),
     text: z.string().max(100_000),
+    partName: z.string().optional(),
+    content: wordNoteContentSchema.optional(),
+    readOnlyReason: z.string().optional(),
   })
   .strict();
 
@@ -32,6 +37,8 @@ const wordCommentSchema = z
     date: z.string().max(80).optional(),
     initials: z.string().max(40).optional(),
     text: z.string().max(100_000),
+    partName: z.string().optional(),
+    readOnlyReason: z.string().optional(),
   })
   .strict();
 
@@ -82,6 +89,10 @@ const docxParagraphFormatSchema = z
  * from the retained DOCX payload at render time.
  */
 export const docxRichInlineSchema = z.discriminatedUnion("kind", [
+  wordCommentBoundarySchema,
+  wordRevisionInlineSchema,
+  wordCitationInlineSchema,
+  wordBibliographyInlineSchema,
   z
     .object({
       kind: z.literal("text"),
@@ -134,6 +145,8 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       noteId: z.string().min(1).max(64),
       /** Note body text from footnotes.xml / endnotes.xml for display. */
       text: z.string().max(100_000),
+      content: wordNoteContentSchema.optional(),
+      readOnlyReason: z.string().optional(),
     })
     .strict(),
 ]);
@@ -211,6 +224,7 @@ export const docxProjectionSchema = z
         wordNotes: z.array(wordNoteSchema).max(10_000).optional(),
         /** Native Word comments from comments.xml (distinct from Spectra threads). */
         wordComments: z.array(wordCommentSchema).max(10_000).optional(),
+        wordSources: z.array(wordSourceSchema).max(500).optional(),
       })
       .passthrough(),
   })
@@ -223,6 +237,9 @@ export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 
 export const docxOperationSchema = z.discriminatedUnion("kind", [
+  ...wordNoteOperationSchemas,
+  ...wordReviewOperationSchemas,
+  ...wordCitationOperationSchemas,
   z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),

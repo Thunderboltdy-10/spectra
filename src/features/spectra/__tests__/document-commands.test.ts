@@ -110,7 +110,6 @@ describe("document command set", () => {
       "customXml",
       "smartArt",
       "ole",
-      "trackedChanges",
     ];
     for (const binding of bindings()) {
       for (const region of binding.touches ?? []) expect(forbidden).not.toContain(region);

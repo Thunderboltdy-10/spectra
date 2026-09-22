@@ -7,8 +7,14 @@ import {
   authoredSemanticsEqual,
 } from "../../../../shared/document-projection.mjs";
 import { firstNativeFontFamily } from "../office-fonts";
+import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr } from "./docx-academic";
+import { appendCommentBoundary, appendRevision, deleteNativeComment, hasUnsupportedRevision, nativeComment, supportedRevision, upsertNativeComment } from "./docx-academic-review";
+import type { WordCommentData } from "./docx-academic-schema";
+import { appendWordBibliography, appendWordCitation, bibliographyContainer, citationMappings, collectWordSources, projectAcademicFields, wordSourceParts, writeCitationMapping } from "./docx-citations";
+import type { WordSource, WordCitationInline } from "./docx-citation-schema";
+import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
-import { restoreDocxBlockCarryMetadata } from "./document-projection";
+import { restoreDocxBlockCarryMetadata, docxOperationsBetween } from "./document-projection";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -21,6 +27,7 @@ import type {
 } from "./types";
 import {
   docxProjectionSchema,
+  docxProjectionBlockSchema,
   type DocxOperation,
   type DocxParagraphFormat,
   type DocxProjection,
@@ -755,8 +762,11 @@ function projectedRichContent(
   root: XmlElement,
   paragraph?: Paragraph,
   noteBodies?: ReadonlyMap<string, WordNote>,
+  comments?: ReadonlyMap<string, WordCommentData>,
+  sourceInfo?: { sources: WordSource[]; usedSources: WordSource[]; mappings: Map<string, WordCitationInline["sourceRef"]>; regionId: string },
 ) {
   const content: DocxRichInline[] = [];
+  const fields = sourceInfo ? projectAcademicFields(root, sourceInfo.regionId, sourceInfo.sources, sourceInfo.mappings, sourceInfo.usedSources) : undefined;
   const formats = new Map(
     (paragraph?.runs() ?? []).map((run) => [run.element, compactRunFormat(run)] as const),
   );
@@ -765,6 +775,8 @@ function projectedRichContent(
     href?: string,
     format?: DocxRunFormat,
   ) => {
+    if (fields?.skipped.has(element)) return;
+    if (fields?.fields.has(element)) { content.push(fields.fields.get(element)!); return; }
     const namespace = element.namespaceUri();
     if (namespace === OMML_NAMESPACE && element.localName === "oMathPara") {
       content.push({
@@ -787,6 +799,16 @@ function projectedRichContent(
       return;
     }
     if (namespace === WML_NAMESPACE) {
+      const revision = supportedRevision(element);
+      if (revision) { content.push(revision); return; }
+      if (["commentRangeStart", "commentRangeEnd", "commentReference"].includes(element.localName)) {
+        const commentId = wordAttr(element, "id");
+        if (commentId) content.push({ kind: "commentBoundary", commentId,
+          boundary: element.localName === "commentRangeStart" ? "start" : element.localName === "commentRangeEnd" ? "end" : "reference",
+          ...(element.localName === "commentRangeStart" && comments?.has(commentId) ? { comment: comments.get(commentId)! } : {}),
+        });
+        return;
+      }
       if (element.localName === "t") {
         content.push({
           kind: "text",
@@ -836,6 +858,8 @@ function projectedRichContent(
             noteType,
             noteId,
             text: body?.text ?? "",
+            ...(body?.content ? { content: body.content } : {}),
+            ...(body?.readOnlyReason ? { readOnlyReason: body.readOnlyReason } : {}),
           });
         }
         return;
@@ -878,6 +902,9 @@ function semanticRichText(content: readonly DocxRichInline[]) {
       if (item.kind === "text") return item.text;
       if (item.kind === "equation") return item.latex;
       if (item.kind === "noteRef") return "";
+      if (item.kind === "commentBoundary") return "";
+      if (item.kind === "revision") return item.revisionKind === "ins" ? item.text : "";
+      if (item.kind === "citation" || item.kind === "bibliography") return item.text;
       return item.altText;
     })
     .join("");
@@ -900,16 +927,17 @@ function projectedCellRichContent(
   document: Document,
   cell: NativeTableCell,
   noteBodies?: ReadonlyMap<string, WordNote>,
+  comments?: ReadonlyMap<string, WordCommentData>,
 ) {
   const paragraphs = cell.paragraphElements();
   if (!paragraphs.length)
-    return projectedRichContent(document, cell.element, undefined, noteBodies);
+    return projectedRichContent(document, cell.element, undefined, noteBodies, comments);
   return mergeRichText(
     paragraphs.flatMap((paragraph, index) => {
       const wrapped = Paragraph._wrap(document, paragraph);
       return [
         ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
-        ...projectedRichContent(document, paragraph, wrapped, noteBodies),
+        ...projectedRichContent(document, paragraph, wrapped, noteBodies, comments),
       ];
     }),
   );
@@ -2159,9 +2187,15 @@ async function replaceParagraphRich(
       "This edit would remove a native Word picture and its neighboring structure. Keep the picture or replace it directly.",
     );
   const nativeByPart = new Map(nativeRuns.map((entry) => [entry.partName, entry.run]));
+  const revisions = new Map(paragraph.element.elements().filter((element) => supportedRevision(element)).map((element) => [`${element.localName}:${wordAttr(element, "id")}`, element]));
   const usedNativeRuns = new Set<XmlElement>();
   let nativeImageIndex = 0;
   const properties = paragraph.element.find(WML_NAMESPACE, "pPr");
+  const bibliography = bibliographyContainer(paragraph.element);
+  if (bibliography && inlineContent.some((item) => item.kind === "bibliography")) {
+    const body = bibliography.find(WML_NAMESPACE, "sdtContent")!;
+    for (const child of [...body.children]) if (child !== paragraph.element) body.removeChild(child);
+  }
   for (const child of [...paragraph.element.children])
     if (child !== properties) paragraph.element.removeChild(child);
   for (const item of inlineContent) {
@@ -2199,6 +2233,18 @@ async function replaceParagraphRich(
         interchange?.xml ?? item.ommlXml!,
         item.display,
       );
+    } else if (item.kind === "noteRef") {
+      await upsertNativeNote(document, item);
+      appendNoteReference(paragraph.element, item.noteType, item.noteId);
+    } else if (item.kind === "commentBoundary") {
+      if (item.comment) await upsertNativeComment(document, item.commentId, item.comment);
+      appendCommentBoundary(paragraph.element, item.commentId, item.boundary);
+    } else if (item.kind === "revision") {
+      appendRevision(paragraph.element, item, revisions.get(`${item.revisionKind}:${item.revisionId}`));
+    } else if (item.kind === "citation") {
+      await appendWordCitation(document, paragraph.element, item);
+    } else if (item.kind === "bibliography") {
+      await appendWordBibliography(document, paragraph.element, item);
     }
   }
   if (usedNativeRuns.size !== nativeRuns.length)
@@ -2470,7 +2516,7 @@ function parseTableText(value: string) {
 function richTextWithoutImages(content: readonly DocxRichInline[]) {
   return content
     .filter((item) => item.kind !== "image")
-    .map((item) => (item.kind === "equation" ? item.latex : item.text))
+    .map((item) => item.kind === "text" || item.kind === "citation" || item.kind === "bibliography" ? item.text : item.kind === "revision" ? item.revisionKind === "ins" ? item.text : "" : item.kind === "equation" ? item.latex : "")
     .join("");
 }
 
@@ -3037,9 +3083,9 @@ const REGION_FIDELITY: ReadonlyArray<{
   },
   {
     region: "footnotes",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Footnotes and endnotes live in their own Word parts, which Spectra keeps untouched. A note added here could not be written back.",
+      "Footnote/endnote references and supported rich note paragraphs are editable. Notes with tables, fields, drawings, revisions or unmodeled formatting keep their exact native body.",
   },
   {
     region: "headersFooters",
@@ -3057,19 +3103,19 @@ const REGION_FIDELITY: ReadonlyArray<{
     region: "fields",
     class: "PRESERVED",
     reason:
-      "Field codes and their last results are preserved. Spectra never recalculates a Word field.",
+      "General Word field codes and results are preserved. Supported citation and bibliography fields have separate academic commands.",
   },
   {
     region: "comments",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Word comment parts are preserved. Spectra's own threads live beside the document rather than inside the package.",
+      "Classic anchored Word comments are editable. Modern native threaded-comment extensions stay preserved; Spectra conversations keep separate identities.",
   },
   {
     region: "trackedChanges",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Word revision marks are kept exactly as Word wrote them. Spectra never rewrites them, so accepting or rejecting a revision belongs in Word.",
+      "Common insertion/deletion text spans can be proposed and individually reviewed. Moves, formatting, nested and structural revisions remain regional native carry.",
   },
 ];
 
@@ -3080,12 +3126,18 @@ async function projectDocument(
 ) {
   const fidelityEntries: LensFidelityEntry[] = [];
   const blocks: DocxProjectionBlock[] = [];
-  const [wordNotes, wordComments] = await Promise.all([
+  const [wordNotes, wordComments, wordSources, mappings] = await Promise.all([
     collectWordNotes(document),
     collectWordComments(document),
+    collectWordSources(document),
+    citationMappings(document),
   ]);
   const wordRevisions = collectWordRevisions(document.body());
   const noteBodies = noteBodyMap(wordNotes);
+  const commentBodies = new Map(wordComments.map((comment) => [comment.id, { text: comment.text, author: comment.author ?? "Word", ...(comment.initials ? { initials: comment.initials } : {}), ...(comment.date ? { date: comment.date } : {}), ...(comment.readOnlyReason ? { readOnlyReason: comment.readOnlyReason } : {}) }]));
+  const usedSourceMap = new Map<string, WordSource>();
+  for (const item of projectAcademicFields(document.body(), "inventory", wordSources, mappings).fields.values()) if (item.kind === "citation") usedSourceMap.set(item.source.tag, item.source);
+  const usedSources = [...usedSourceMap.values()];
   const bodyChildren = topLevelFlow(document.body());
   const topLevelTables = new Map(
     document
@@ -3101,14 +3153,27 @@ async function projectDocument(
     ) {
       const paragraph = Paragraph._wrap(document, element);
       const regionId = paragraphRegionId(paragraph, path);
+      const bibliography = bibliographyContainer(element);
+      if (bibliography && wordElements(bibliography).find((node) => node.localName === "p") !== element) continue;
       const styleId = paragraph.styleId();
       const list = paragraph.list();
-      const richContent = projectedRichContent(
+      const sourceInfo = { sources: wordSources, usedSources, mappings, regionId };
+      const richContent: DocxRichInline[] = bibliography ? [{ kind: "bibliography", sources: usedSources, text: storyText(bibliography.find(WML_NAMESPACE, "sdtContent")!).trimEnd() }] : projectedRichContent(
         document,
         element,
         paragraph,
         noteBodies,
+        commentBodies,
+        sourceInfo,
       );
+      const academicFields = projectAcademicFields(element, regionId, wordSources, mappings);
+      const protectedFields = wordElements(element).some((candidate) => {
+        if (!["fldSimple", "fldChar", "instrText", "sdt"].includes(candidate.localName)) return false;
+        if (bibliography) return false;
+        if ([...academicFields.fields.keys(), ...academicFields.skipped].some((field) => wordElements(field).includes(candidate))) return false;
+        if (candidate.localName === "sdt" && candidate.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "citation") && [...academicFields.fields.keys()].some((field) => wordElements(candidate).includes(field))) return false;
+        return true;
+      });
       const unsafeHyperlink = descendants(element).some(
         (candidate) =>
           candidate.namespaceUri() === WML_NAMESPACE &&
@@ -3117,10 +3182,9 @@ async function projectDocument(
             ["drawing", "pict", "object", "fldSimple"].includes(nested.localName),
           ),
       );
-      const readOnly = unsafeHyperlink || hasWml(
+      const unboundComment = wordElements(element).some((node) => ["commentRangeStart", "commentRangeEnd", "commentReference"].includes(node.localName) && !commentBodies.has(wordAttr(node, "id") ?? ""));
+      const readOnly = unsafeHyperlink || protectedFields || unboundComment || hasUnsupportedRevision(element) || hasWml(
         element,
-        "ins",
-        "del",
         "moveFrom",
         "moveTo",
         "rPrChange",
@@ -3128,12 +3192,6 @@ async function projectDocument(
         "tblPrChange",
         "trPrChange",
         "tcPrChange",
-        "fldChar",
-        "instrText",
-        "sdt",
-        "commentRangeStart",
-        "commentRangeEnd",
-        "commentReference",
       );
       // Some Word writers persist built-in Heading styles as the numeric
       // style IDs 1/2/3. Normalize those aliases to the semantic names used
@@ -3224,7 +3282,7 @@ async function projectDocument(
         );
         const richRows = table.rows().map((row) =>
           row.cells().map((cell) =>
-            projectedCellRichContent(document, cell, noteBodies),
+            projectedCellRichContent(document, cell, noteBodies, commentBodies),
           ),
         );
         const unsafeInterior = table.rows().some((_row, _rowIndex) =>
@@ -3292,15 +3350,15 @@ async function projectDocument(
       (element) =>
         element.namespaceUri() === WML_NAMESPACE && names.includes(element.localName),
     );
-  if (mainHas("fldChar", "instrText"))
+  const projectedFields = projectAcademicFields(document.body(), "features", wordSources, mappings);
+  const academicFieldNodes = new Set([...projectedFields.fields.keys(), ...projectedFields.skipped].flatMap(wordElements));
+  if (allMainElements.some((element) => ["fldSimple", "fldChar", "instrText"].includes(element.localName) && !academicFieldNodes.has(element) && !bibliographyContainer(element)))
     fidelityFeature(fidelityEntries, "field", "/word/document.xml", {
       readOnly: true,
-      reason: "Word fields are preserved and cannot be resolved or rewritten in Spectra yet.",
+      reason: "This field is outside the supported citation and bibliography fields. Refresh or edit it in Word.",
     });
   if (
-    mainHas(
-      "ins",
-      "del",
+    hasUnsupportedRevision(document.body()) || mainHas(
       "moveFrom",
       "moveTo",
       "rPrChange",
@@ -3312,9 +3370,9 @@ async function projectDocument(
   )
     fidelityFeature(fidelityEntries, "trackedChanges", "/word/document.xml", {
       readOnly: true,
-      reason: "Revision marks stay in Word; accepting or rejecting them is unavailable.",
+      reason: "This document contains structural, nested, moved or unmodeled formatting revisions. Those spans stay in Word; supported text revisions remain individually editable.",
     });
-  if (mainHas("sdt"))
+  if (allMainElements.some((element) => element.localName === "sdt" && !element.find(WML_NAMESPACE, "sdtPr")?.find(WML_NAMESPACE, "bibliography") && ![...projectedFields.fields.keys()].some((field) => wordElements(element).includes(field))))
     fidelityFeature(fidelityEntries, "contentControl", "/word/document.xml", {
       readOnly: true,
     });
@@ -3336,11 +3394,7 @@ async function projectDocument(
         ...(reason ? { reason } : {}),
       });
   };
-  partRule(
-    "bibliography",
-    (name) => /^\/customXml\/item\d*\.xml$/i.test(name),
-    "Word bibliography and Sources customXml parts are preserved. Spectra research citations live in the document body, not in Word Sources XML.",
-  );
+  for (const part of await wordSourceParts(document)) fidelityEntries.push({ regionId: `docx:feature:bibliography:${part.partName}`, feature: "bibliography", class: "NATIVE", partName: part.partName, reason: "Supported Word sources and citation/bibliography fields are editable; unmodeled custom XML entries remain carried." });
   partRule("customXml", (name) => name.toLowerCase().startsWith("/customxml/"));
   for (const partName of await boundCustomXmlPartNames(document)) {
     fidelityEntries.push({
@@ -3355,6 +3409,12 @@ async function projectDocument(
   partRule("footnotes", (name) => /\/word\/footnotes\.xml$/i.test(name));
   partRule("endnotes", (name) => /\/word\/endnotes\.xml$/i.test(name));
   partRule("comments", (name) => /\/word\/comments.*\.xml$/i.test(name));
+  for (const partName of new Set([
+    ...wordNotes.flatMap((note) => note.partName ? [note.partName] : []),
+    ...wordComments.flatMap((comment) => comment.partName ? [comment.partName] : []),
+    ...(await wordSourceParts(document)).map((part) => part.partName),
+    ...(document.office.package.getPart("/customXml/spectraAcademic.xml") ? ["/customXml/spectraAcademic.xml"] : []),
+  ])) fidelityEntries.push({ regionId: `docx:academic:${partName}`, feature: "academic-content", class: "NATIVE", partName });
   partRule("headers", (name) => /\/word\/header\d+\.xml$/i.test(name));
   partRule("footers", (name) => /\/word\/footer\d+\.xml$/i.test(name));
   partRule("unknownExtension", (name) => /unknown|future|extension/i.test(name));
@@ -3443,6 +3503,7 @@ async function projectDocument(
       ...(wordRevisions.length ? { wordRevisions } : {}),
       ...(wordNotes.length ? { wordNotes } : {}),
       ...(wordComments.length ? { wordComments } : {}),
+      ...(wordSources.length ? { wordSources } : {}),
     },
   });
   return { projection, fidelityMap };
@@ -3453,7 +3514,7 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
   return sha256Payload(
     new TextEncoder().encode(
       JSON.stringify({
-        blocks: authoredSemanticValue(projection.blocks),
+        blocks: authoredSemanticValue(projection.blocks.map((block) => docxProjectionBlockSchema.parse(block))),
         pageSetup: authoredSemanticValue(projection.pageSetup ?? null),
       }),
     ),
@@ -3482,13 +3543,22 @@ async function applyDelta(
   const identity = ensureStableRegionIds(document);
   const aliases = identity.aliases;
   const opened = await projectDocument(document, carry.profile, identity.identityStable);
-  const operations =
-    delta.kind === "ai-edit" ? delta.operations : [delta];
+  const commentMarkerShape = (id: string) => wordElements(document.body()).filter((node) => ["commentRangeStart", "commentRangeEnd", "commentReference"].includes(node.localName) && wordAttr(node, "id") === id).map((node) => node.localName).join(",");
+  const originalCommentShapes = new Map((opened.projection.nativeBinding.wordComments ?? []).map((comment) => [comment.id, commentMarkerShape(comment.id)]));
+  const operations = [...(delta.kind === "ai-edit" ? delta.operations : [delta])];
   const born = new Map<string, string>();
   const resolveRegionId = (regionId: string) =>
     born.get(regionId) ?? aliases.get(regionId) ?? regionId;
 
   for (const operation of operations) {
+    if (operation.kind === "insert-word-citation" || operation.kind === "edit-word-citation" || operation.kind === "remove-word-citation" || operation.kind === "regenerate-word-bibliography" || operation.kind === "insert-note" || operation.kind === "edit-note" || operation.kind === "move-note" || operation.kind === "delete-note" || operation.kind === "add-word-comment" || operation.kind === "edit-word-comment" || operation.kind === "delete-word-comment" || operation.kind === "track-text" || operation.kind === "review-revision") {
+      const current = await projectDocument(document, carry.profile, identity.identityStable);
+      const desired = applyDocumentAcademicOperations(current.projection, [operation]);
+      const next = docxProjectionSchema.parse({ ...current.projection, blocks: desired.blocks });
+      const inferred = docxOperationsBetween(current.projection, next);
+      operations.splice(operations.indexOf(operation) + 1, 0, ...inferred);
+      continue;
+    }
     if (operation.kind === "update-section") {
       setSectionPageSetup(document, operation);
       continue;
@@ -3568,7 +3638,11 @@ async function applyDelta(
         );
       if (operation.inlineContent)
         await replaceParagraphRich(document, region.paragraph, operation.inlineContent, options);
-      else replaceParagraphText(document, region.paragraph, operation.text);
+      else {
+        if (block.inlineContent?.some((item) => ["noteRef", "commentBoundary", "revision", "citation", "bibliography"].includes(item.kind)) && operation.text !== block.text)
+          throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "This paragraph has anchored Word content. Edit its rich text range so the references remain attached, or reload and select a different range.");
+        replaceParagraphText(document, region.paragraph, operation.text);
+      }
     } else if (operation.kind === "apply-style") {
       if (!region.paragraph)
         throw new DocxLensError(
@@ -3630,6 +3704,35 @@ async function applyDelta(
       applyEquationLayout(document, region.paragraph, operation);
     }
   }
+  // A paragraph/cell replacement can delete or move note markers. Collect only
+  // notes owned by the bound base; never prune unrelated imported orphan stories.
+  for (const note of carry.projection.nativeBinding.wordNotes ?? []) {
+    const owned = carry.projection.blocks.some((block) => [...(block.inlineContent ?? []), ...(block.richRows ?? []).flat(2)].some((item) => item.kind === "noteRef" && item.noteType === note.type && item.noteId === note.id));
+    if (!owned) continue;
+    const refs = noteReferences(document, note.type, note.id);
+    if (refs.length > 1) throw new DocxLensError("DOCX_IDENTITY_AMBIGUOUS", "A Word note can own only one reference.");
+    if (!refs.length && await nativeNote(document, note.type, note.id)) await removeNativeNote(document, note.type, note.id);
+  }
+  for (const type of ["footnote", "endnote"] as const) {
+    const ids = wordElements(document.body()).filter((element) => element.localName === `${type}Reference`).map((element) => wordAttr(element, "id"));
+    if (new Set(ids).size !== ids.length) throw new DocxLensError("DOCX_IDENTITY_AMBIGUOUS", "A Word note can own only one reference.");
+  }
+  for (const comment of carry.projection.nativeBinding.wordComments ?? []) {
+    const owned = carry.projection.blocks.some((block) => block.inlineContent?.some((item) => item.kind === "commentBoundary" && item.commentId === comment.id));
+    const remains = wordElements(document.body()).some((element) => element.localName === "commentRangeStart" && wordAttr(element, "id") === comment.id);
+    if (owned && !remains && originalCommentShapes.get(comment.id)?.startsWith("commentRangeStart,") && await nativeComment(document, comment.id)) await deleteNativeComment(document, comment.id);
+  }
+  const comments = wordElements(document.body()).filter((node) => ["commentRangeStart", "commentRangeEnd", "commentReference"].includes(node.localName));
+  for (const id of new Set(comments.map((node) => wordAttr(node, "id")))) {
+    const nodes = comments.filter((node) => wordAttr(node, "id") === id);
+    if (!id || !await nativeComment(document, id)) continue; // Existing unbound markup stays regional carry.
+    if (nodes.map((node) => node.localName).join(",") === originalCommentShapes.get(id)) continue;
+    if (["commentRangeStart", "commentRangeEnd", "commentReference"].some((name) => nodes.filter((node) => node.localName === name).length !== 1) || nodes[0]?.localName !== "commentRangeStart" || nodes[1]?.localName !== "commentRangeEnd")
+      throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "A native comment anchor was split or removed. Reload the paragraph and delete the whole comment or select its range again.");
+  }
+  for (const [id, shape] of originalCommentShapes) if (shape !== "commentRangeStart,commentRangeEnd,commentReference" && commentMarkerShape(id) !== shape) throw new DocxLensError("DOCX_REGION_READ_ONLY", "This native comment uses a point or complex anchor. Keep its markers unchanged and edit this annotation in Word.");
+  const retainedCitationIds = new Set((await projectDocument(document, carry.profile, identity.identityStable)).projection.blocks.flatMap((block) => block.inlineContent?.flatMap((item) => item.kind === "citation" ? [item.citationId] : []) ?? []));
+  for (const block of carry.projection.blocks) for (const item of block.inlineContent ?? []) if (item.kind === "citation" && item.sourceRef && !retainedCitationIds.has(item.citationId)) await writeCitationMapping(document, { ...item, sourceRef: undefined });
   return document.save();
 }
 
@@ -3950,10 +4053,11 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         { id: "edit-safe-paragraph", available: true },
         { id: "edit-safe-table-cell", available: true },
         { id: "insert-paragraph", available: true },
+        ...["insert-note", "edit-note", "move-note", "delete-note", "insert-word-citation", "edit-word-citation", "remove-word-citation", "regenerate-word-bibliography", "add-word-comment", "edit-word-comment", "delete-word-comment", "track-text", "review-revision"].map((id) => ({ id, available: true })),
         has("trackedChanges")
           ? unavailable(
               "accept-revisions",
-              "Accept or reject revisions in Word; Spectra is preserving the revision structure.",
+              "Review supported text revisions individually. Whole-document review is unavailable because structural and unmodeled formatting revisions remain in Word.",
             )
           : { id: "accept-revisions", available: false, reason: "No Word revisions are present." },
         has("field")
@@ -3976,6 +4080,9 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         "apply_paragraph_style",
         "format_runs",
         "format_paragraph",
+        "insert-note", "edit-note", "move-note", "delete-note",
+        "insert-word-citation", "edit-word-citation", "remove-word-citation", "regenerate-word-bibliography",
+        "add-word-comment", "edit-word-comment", "delete-word-comment", "track-text", "review-revision",
       ],
     };
   },

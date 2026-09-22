@@ -3,6 +3,10 @@ import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xm
 import { latexToEquation } from "./equation-interchange";
 import { docxLens, type DocxProjection } from "./docx-lens";
 import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
+import { docxRichInlineSchema } from "./projection-contracts";
+import { appendNoteReference, upsertNativeNote } from "./docx-academic";
+import { appendCommentBoundary, appendRevision, upsertNativeComment } from "./docx-academic-review";
+import { appendWordBibliography, appendWordCitation } from "./docx-citations";
 
 const RELATIONSHIP_NAMESPACE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -410,6 +414,19 @@ async function appendInlineContent(
   resolver: DocxAssetResolver | undefined,
 ) {
   for (const node of content) {
+    if (["wordRevision", "wordCommentBoundary", "spectraCitation"].includes(node.type ?? "") && node.attrs?.native) {
+      const item = docxRichInlineSchema.parse(node.attrs.native);
+      if (item.kind === "revision") appendRevision(paragraph, item);
+      if (item.kind === "commentBoundary") { if (item.comment) await upsertNativeComment(document, item.commentId, item.comment); appendCommentBoundary(paragraph, item.commentId, item.boundary); }
+      if (item.kind === "citation") await appendWordCitation(document, paragraph, item);
+      if (item.kind === "bibliography") await appendWordBibliography(document, paragraph, item);
+      continue;
+    }
+    if (node.type === "footnote" || node.type === "endnote") {
+      const item = docxRichInlineSchema.parse({ kind: "noteRef", noteType: node.type, noteId: node.attrs?.nativeNoteId, text: node.attrs?.text ?? "", ...(node.attrs?.noteContent ? { content: node.attrs.noteContent } : {}) });
+      if (item.kind === "noteRef") { await upsertNativeNote(document, item); appendNoteReference(paragraph, item.noteType, item.noteId); }
+      continue;
+    }
     if (node.type === "text" && node.text) appendTextRun(document, paragraph, node.text, node.marks);
     else if (node.type === "inlineEquation") {
       const attrs = record(node.attrs);
@@ -602,7 +619,8 @@ export async function exportDocxCopy(
       // A missing/revoked durable image is a failed export, not an unsupported
       // node. Replacing it with a text placeholder would silently drop user
       // media while reporting a successful Word copy.
-      if (node.type === "image") throw error;
+      const hasAcademicNode = (value: DocumentJsonNode): boolean => ["footnote", "endnote", "wordRevision", "wordCommentBoundary"].includes(value.type ?? "") || Boolean(value.type === "spectraCitation" && value.attrs?.native) || Boolean(value.content?.some(hasAcademicNode));
+      if (node.type === "image" || hasAcademicNode(node)) throw error;
       await appendParagraph(document, {
         type: "paragraph",
         content: [

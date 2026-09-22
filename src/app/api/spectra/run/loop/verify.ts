@@ -1,5 +1,6 @@
 import { query } from "./io";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import { documentAcademicOperationsLanded } from "@/features/spectra/commands/office/document-academic-operations";
 import {
   authoredValueLandedInContent,
   contentPatchChangeMatchesSaved,
@@ -350,6 +351,7 @@ export async function verifyCommittedOutcomes(
           "The saved artifact topics did not match the requested change.",
         );
       const matchesPatch = (content: unknown) => {
+        if (operation.input.documentOperations) return documentAcademicOperationsLanded(content, operation.input.documentOperations);
         const changes = operation.input.contentPatch?.changes ?? [];
         if (changes.length === 0) return true;
         let matched = 0;

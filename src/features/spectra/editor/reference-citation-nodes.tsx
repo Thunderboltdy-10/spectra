@@ -1,10 +1,40 @@
 import { Node, mergeAttributes } from "@tiptap/core";
+import type { DOMOutputSpec } from "@tiptap/pm/model";
 import {
   NodeViewWrapper,
   ReactNodeViewRenderer,
   type NodeViewProps,
 } from "@tiptap/react";
 import { ArtifactEmbedById } from "../components/artifact-embed-host";
+
+export const WordCommentBoundary = Node.create({
+  name: "wordCommentBoundary", group: "inline", inline: true, atom: true,
+  selectable: false,
+  addAttributes() { return { native: { default: null } }; },
+  parseHTML() { return [{ tag: "span[data-word-comment]" }]; },
+  renderHTML({ node }) {
+    const item = node.attrs.native;
+    return ["span", { "data-word-comment": item?.commentId, "aria-hidden": item?.boundary === "reference" ? undefined : "true", contenteditable: "false" }, item?.boundary === "reference" ? ["sup", { title: "Native Word comment" }, "Comment"] : ""];
+  },
+});
+
+export const WordRevision = Node.create({
+  name: "wordRevision", group: "inline", inline: true, atom: true, selectable: true,
+  addAttributes() { return { native: { default: null } }; },
+  parseHTML() { return [{ tag: "span[data-word-revision]" }]; },
+  renderHTML({ node }) {
+    const item = node.attrs.native;
+    const deleted = item?.revisionKind === "del";
+    const runs: Array<DOMOutputSpec | string> = (item?.content ?? [{ text: item?.text ?? "" }]).map((run: { text: string; bold?: boolean; italic?: boolean; underline?: boolean }) => {
+      let content: DOMOutputSpec | string = run.text;
+      if (run.bold) content = ["strong", {}, content];
+      if (run.italic) content = ["em", {}, content];
+      if (run.underline) content = ["u", {}, content];
+      return content;
+    });
+    return ["span", { "data-word-revision": item?.revisionId, contenteditable: "false", "aria-label": `${deleted ? "Deleted" : "Inserted"} by ${item?.author || "Word"}`, title: `${deleted ? "Deletion" : "Insertion"}: ${item?.author || "Word"}` }, [deleted ? "del" : "ins", {}, ...runs]];
+  },
+});
 
 function ReferenceNodeView({ node, selected, deleteNode }: NodeViewProps) {
   const embedId =
@@ -97,6 +127,7 @@ export const SpectraCitationNode = Node.create({
       id: { default: null },
       sourceId: { default: null },
       evidenceSpanId: { default: null },
+      native: { default: null },
       label: { default: "Citation" },
     };
   },

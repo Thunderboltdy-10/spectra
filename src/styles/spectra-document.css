@@ -517,6 +517,44 @@
   color: #fff;
 }
 
+.spectra-document-inline-panel:has(> label) {
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.spectra-document-inline-panel:has(> label) > span {
+  max-width: none;
+  flex-basis: 100%;
+}
+
+.spectra-document-inline-panel > label {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--text-small, 0.8125rem);
+}
+
+.spectra-document-inline-panel select {
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid #cfd6cd;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.spectra-document-word-comments textarea,
+.spectra-document-word-notes textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 6px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  font: inherit;
+}
+
 /* ---------------------------------------------------------------------------
    Tracked changes.
 

@@ -323,7 +323,7 @@ function richRowsFor(block: DocxProjection["blocks"][number]) {
 function richTextWithoutImages(content: readonly DocxRichInline[]) {
   return content
     .filter((item) => item.kind !== "image")
-    .map((item) => (item.kind === "equation" ? item.latex : item.text))
+    .map((item) => item.kind === "text" || item.kind === "citation" || item.kind === "bibliography" ? item.text : item.kind === "revision" ? item.revisionKind === "ins" ? item.text : "" : item.kind === "equation" ? item.latex : "")
     .join("");
 }
 
@@ -766,7 +766,9 @@ export function docxProjectionFromContent(
         : normalizedRichRows
           ? { richRows: normalizedRichRows }
           : {}),
-      ...(previous?.attrs || incoming.attrs
+      ...(!previous && inlineContent?.some((item) => item.kind === "bibliography") && !incoming.attrs
+        ? { attrs: { paragraphFormat: { alignment: "left", lineSpacing: 1, spacingAfterPoints: 0, indentLevel: 0, border: null, shading: null } } }
+        : previous?.attrs || incoming.attrs
         ? {
             attrs: {
               ...(previous?.attrs ?? {}),

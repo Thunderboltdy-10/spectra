@@ -27,11 +27,13 @@ import {
   ListOrdered,
   ListTree,
   Merge,
+  MessageSquare,
   Minus,
   Outdent,
   PaintBucket,
   PanelBottom,
   PanelTop,
+  Pencil,
   Plus,
   Quote,
   RefreshCw,
@@ -1349,9 +1351,8 @@ export type DocumentReferenceHandlers = {
   setCitationStyle: (style: string) => void;
   addSource: () => void;
   /**
-   * Set while a source cannot honestly be created here. A document may only
-   * cite a verified source, so typing one in would produce a citation nothing
-   * can prove — the command says that rather than pretending.
+   * Set while a source cannot be created here. Supplied bibliographic metadata
+   * is distinct from a verified research source with stored evidence handles.
    */
   addSourceReason?: string;
   /** A cross-reference to a heading in this document. */
@@ -1359,6 +1360,17 @@ export type DocumentReferenceHandlers = {
 };
 
 export type DocumentReviewHandlers = {
+  editNote?: (key?: string) => void;
+  moveNote?: (key?: string) => void;
+  deleteNote?: (key?: string) => void;
+  editWordComment?: (key?: string) => void;
+  editCitation?: (key?: string) => void;
+  removeCitation?: (key?: string) => void;
+  addWordComment?: () => void;
+  proposeText?: () => void;
+  acceptRevision?: (key?: string) => void;
+  rejectRevision?: (key?: string) => void;
+  deleteWordComment?: (id: string) => void;
   /** Opens the tracked-change review rail. Reading revisions, never resolving. */
   showTrackedChanges: () => void;
   trackedChangesOpen?: boolean;
@@ -1379,15 +1391,27 @@ export type DocumentReviewHandlers = {
  * References, and the review surface that belongs beside it.
  *
  * Spectra's bibliography is regenerated from the citations that are actually in
- * the text, so it cannot claim a source the document does not cite. Word's own
- * bibliography lives in custom XML and is preserved untouched — a different
- * thing, honestly labelled.
+ * the text. Native citations retain their source tags and evidence mapping;
+ * regeneration writes Word Sources XML and genuine bibliography fields.
  */
 function referenceBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   const references = handlers.references;
   const review = handlers.review;
   const disabled = !handlers.editable || undefined;
   const bindings: CommandBinding[] = [
+    ...([
+      ["notes.edit", "Edit note", "Edits a note body while retaining supported formatting", "footnotes", review.editNote],
+      ["notes.move", "Move note reference", "Select a destination in the text, then move a note from the review panel", "footnotes", review.moveNote],
+      ["notes.delete", "Delete note", "Deletes the chosen note and its reference", "footnotes", review.deleteNote],
+      ["review.comment.edit", "Edit Word comment", "Edits a classic native comment without moving its anchor", "comments", review.editWordComment],
+      ["references.citation.edit", "Edit Word citation", "Edits citation pages and the metadata shared by every use of its source", "body", review.editCitation],
+      ["references.citation.remove", "Remove Word citation", "Removes the chosen citation field; the source remains available for reuse", "body", review.removeCitation],
+    ] as const).map(([id, label, hint, region, action]) => ({ id, label, hint, icon: Pencil, tab: "References", group: "Review", priority: "advanced" as const, requires: "edit" as const, disabled, touches: [region], onSelect: (key: unknown) => action?.(typeof key === "string" ? key : undefined) })),
+    { id: "review.comment.add", label: "Comment in Word", icon: MessageSquare, tab: "References", group: "Review", priority: "secondary", requires: "edit", disabled, hint: "Annotates the selected range as a native Word comment; Spectra conversations stay separate", touches: ["comments"], onSelect: () => review.addWordComment?.() },
+    { id: "review.trackChanges.propose", label: "Propose text edit", icon: Pencil, tab: "References", group: "Review", priority: "secondary", requires: "edit", disabled, hint: "Keeps the original and proposed text for individual review", touches: ["trackedChanges"], onSelect: () => review.proposeText?.() },
+    { id: "review.trackChanges.acceptOne", label: "Accept selected revision", icon: Check, tab: "References", group: "Review", priority: "advanced", requires: "edit", disabled, hint: "Choose one identified insertion or deletion in the review panel", touches: ["trackedChanges"], undo: "operation-inverse", onSelect: (key) => review.acceptRevision?.(typeof key === "string" ? key : undefined) },
+    { id: "review.trackChanges.rejectOne", label: "Reject selected revision", icon: X, tab: "References", group: "Review", priority: "advanced", requires: "edit", disabled, hint: "Choose one identified insertion or deletion in the review panel", touches: ["trackedChanges"], undo: "operation-inverse", onSelect: (key) => review.rejectRevision?.(typeof key === "string" ? key : undefined) },
+    { id: "review.comment.delete", label: "Delete Word comment", icon: X, tab: "References", group: "Review", priority: "advanced", requires: "edit", disabled, hint: "Deletes the native annotation and its range markers", touches: ["comments"], undo: "operation-inverse", onSelect: (id) => { if (typeof id === "string") review.deleteWordComment?.(id); } },
     {
       id: "references.sources",
       label: "Sources",
@@ -1478,7 +1502,7 @@ function referenceBindings(handlers: DocumentCommandHandlers): CommandBinding[] 
       priority: "essential",
       active: review.trackedChangesOpen,
       hint: review.trackedChangeCount
-        ? `${review.trackedChangeCount} revision${review.trackedChangeCount === 1 ? "" : "s"} from Word, shown read-only`
+        ? `${review.trackedChangeCount} revision${review.trackedChangeCount === 1 ? "" : "s"} from Word; supported text spans can be reviewed individually`
         : "Shows Word revision marks this document carries",
       undo: "none(explain)",
       onSelect: () => review.showTrackedChanges(),

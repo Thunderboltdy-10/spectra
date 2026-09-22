@@ -97,7 +97,7 @@ const NATIVE_WRITE_REGIONS = new Set<FidelityRegionKey>([
  * says it writes one of these is a preservation bug, not a feature.
  */
 const PRESERVE_ONLY_REGIONS = new Set<FidelityRegionKey>([
-  "macros", "customXml", "smartArt", "ole", "trackedChanges", "pivotTables", "masters",
+  "macros", "customXml", "smartArt", "ole", "pivotTables", "masters",
 ]);
 
 export type CapabilityMatrixOptions = {

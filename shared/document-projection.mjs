@@ -20,6 +20,10 @@ export function richInlineText(content) {
     .map((item) => {
       if (item.kind === "text") return item.text;
       if (item.kind === "equation") return item.latex;
+      if (item.kind === "noteRef") return "";
+      if (item.kind === "commentBoundary") return "";
+      if (item.kind === "revision") return item.revisionKind === "ins" ? item.text : "";
+      if (item.kind === "citation" || item.kind === "bibliography") return item.text;
       return item.altText;
     })
     .join("");
@@ -72,6 +76,23 @@ export function authoredSemanticValue(value, parentKey) {
     return value.map((item) => authoredSemanticValue(item, parentKey));
   if (!value || typeof value !== "object") return value;
   const source = value;
+  if ((source.kind === "noteRef" || source.kind === "revision") && Array.isArray(source.content)) {
+    const paragraphs = source.kind === "revision" ? [source.content] : source.content;
+    const normalized = paragraphs.map((runs) => {
+      const result = [];
+      for (const run of runs) {
+        if (!run.text) continue;
+        const next = { text: run.text, ...(run.bold ? { bold: true } : {}), ...(run.italic ? { italic: true } : {}), ...(run.underline ? { underline: true } : {}) };
+        const prior = result.at(-1);
+        if (prior && prior.bold === next.bold && prior.italic === next.italic && prior.underline === next.underline) prior.text += next.text;
+        else result.push(next);
+      }
+      return result;
+    });
+    const { content: _content, ...rest } = source;
+    const rich = normalized.some((runs) => runs.some((run) => run.bold || run.italic || run.underline));
+    return authoredSemanticValue({ ...rest, ...(rich ? { academicRichContent: source.kind === "revision" ? normalized[0] : normalized } : {}) }, parentKey);
+  }
   const isImage = source.kind === "image";
   const hasInlineContent = Array.isArray(source.inlineContent);
   return Object.fromEntries(
@@ -82,7 +103,8 @@ export function authoredSemanticValue(value, parentKey) {
       )
         return [];
       if (key === "ommlXml" || key === "ommlSourceLatex") return [];
-      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId")
+      if (source.kind === "citation" && key === "instruction") return [];
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId" || key === "readOnlyReason")
         return [];
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
@@ -96,6 +118,7 @@ export function authoredSemanticValue(value, parentKey) {
         const attrs = { ...child };
         delete attrs.format;
         if (source.type === "equation") delete attrs.paragraphFormat;
+        if (source.type === "heading" && attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1])) delete attrs.level;
         return [[key, authoredSemanticValue(attrs, key)]];
       }
       if (
@@ -232,6 +255,10 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           },
         },
       ];
+    if (item.kind === "citation" || item.kind === "bibliography")
+      return [{ type: "spectraCitation", attrs: { native: item, id: item.kind === "citation" ? item.citationId : null, sourceId: item.kind === "citation" ? item.sourceRef?.sourceId : null, label: item.text } }];
+    if (item.kind === "commentBoundary" || item.kind === "revision")
+      return [{ type: item.kind === "revision" ? "wordRevision" : "wordCommentBoundary", attrs: { native: item } }];
     if (item.kind === "noteRef")
       return [
         {
@@ -239,7 +266,8 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           attrs: {
             text: typeof item.text === "string" ? item.text : "",
             nativeNoteId: item.noteId,
-            nativeReadOnly: true,
+            ...(item.content ? { noteContent: item.content } : {}),
+            ...(item.readOnlyReason ? { readOnlyReason: item.readOnlyReason, nativeReadOnly: true } : {}),
           },
         },
       ];
@@ -500,6 +528,9 @@ function blockToJson(blockValue, index, nativeBinding) {
 }
 
 export function documentNodeText(node) {
+  if (node?.type === "spectraCitation" && node.attrs?.native) return node.attrs.native.text;
+  if (node?.type === "wordCommentBoundary") return "";
+  if (node?.type === "wordRevision") return node.attrs?.native?.revisionKind === "ins" ? node.attrs.native.text : "";
   if (!node) return "";
   if (typeof node.text === "string") return node.text;
   if (node.type === "inlineEquation" || node.type === "equation")
@@ -637,6 +668,11 @@ export function documentRichInlineFromJson(node) {
       });
       return;
     }
+    if (current?.type === "spectraCitation" && current.attrs?.native) { appendRichInline(output, current.attrs.native); return; }
+    if (current?.type === "wordRevision" || current?.type === "wordCommentBoundary") {
+      if (current.attrs?.native) appendRichInline(output, current.attrs.native);
+      return;
+    }
     if (current?.type === "footnote" || current?.type === "endnote") {
       const noteId =
         typeof current.attrs?.nativeNoteId === "string" && current.attrs.nativeNoteId
@@ -647,6 +683,8 @@ export function documentRichInlineFromJson(node) {
         noteType: current.type === "endnote" ? "endnote" : "footnote",
         noteId,
         text: typeof current.attrs?.text === "string" ? current.attrs.text : "",
+        ...(Array.isArray(current.attrs?.noteContent) ? { content: current.attrs.noteContent } : {}),
+        ...(typeof current.attrs?.readOnlyReason === "string" ? { readOnlyReason: current.attrs.readOnlyReason } : {}),
       });
       return;
     }

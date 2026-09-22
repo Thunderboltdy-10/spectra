@@ -133,6 +133,29 @@ function adoptProjectionFragment(
   const nextNodes = nextDocument.content ?? [];
   const currentIds = currentNodes.map(nodeBlockId);
   const nextIds = nextNodes.map(nodeBlockId);
+  // A single semantic command can edit existing paragraphs and insert a
+  // bibliography. Preserve unchanged Yjs nodes while applying both effects;
+  // insert-only shortcuts must never silently drop the paragraph edits.
+  if (currentNodes.length === fragment.length && currentIds.every(Boolean) && nextIds.every(Boolean) && new Set(currentIds).size === currentIds.length && new Set(nextIds).size === nextIds.length) {
+    const desiredIds = new Set(nextIds);
+    for (let index = currentIds.length - 1; index >= 0; index--) {
+      if (!desiredIds.has(currentIds[index]!)) { fragment.delete(index, 1); currentIds.splice(index, 1); currentNodes.splice(index, 1); }
+    }
+    for (let index = 0; index < nextNodes.length; index++) {
+      if (currentIds[index] === nextIds[index]) {
+        if (JSON.stringify(currentNodes[index]) !== JSON.stringify(nextNodes[index])) {
+          fragment.delete(index, 1); insertJsonNode(fragment, index, nextNodes[index]!);
+          currentNodes[index] = nextNodes[index]!;
+        }
+        continue;
+      }
+      const previous = currentIds.indexOf(nextIds[index]!);
+      if (previous >= 0) { fragment.delete(previous, 1); currentIds.splice(previous, 1); currentNodes.splice(previous, 1); }
+      insertJsonNode(fragment, index, nextNodes[index]!);
+      currentIds.splice(index, 0, nextIds[index]!); currentNodes.splice(index, 0, nextNodes[index]!);
+    }
+    return;
+  }
   // A newly-created document is seeded with one editable placeholder so the
   // editor is never visually empty. Once AI has authored real blocks, that
   // shell must be replaced rather than treated as a user-authored paragraph.

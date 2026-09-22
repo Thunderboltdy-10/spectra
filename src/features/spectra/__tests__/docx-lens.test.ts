@@ -940,21 +940,21 @@ describe("DOCX preservation lens", () => {
     ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
   });
 
-  it("keeps native Word comment ranges read-only instead of flattening their anchors", async () => {
+  it("refuses an unanchored plain-text overwrite of a native Word comment range", async () => {
     const source = await fixture("macro-enabled.docm");
     const opened = await docxLens.open(source);
     const commented = opened.projection.blocks.find((block) =>
       block.text.includes("On the Insert tab"),
     );
     expect(commented).toBeTruthy();
-    expect(commented?.attrs?.nativeReadOnly).toBe(true);
+    expect(commented?.inlineContent?.some((item) => item.kind === "commentBoundary")).toBe(true);
     await expect(
       docxLens.mutate(opened.preservedCarry, {
         kind: "replace-paragraph",
         regionId: commented!.id,
         text: "Do not flatten native Word comment anchors.",
       }),
-    ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+    ).rejects.toMatchObject({ code: "DOCX_UNSUPPORTED_EDIT" });
   });
 
   it("preserves multilingual text exactly through a safe unrelated edit", async () => {
@@ -1015,13 +1015,12 @@ describe("DOCX preservation lens", () => {
 
     const plain = await docxLens.open(await fixture("complex-structure.docx"));
     expect(plain.projection.nativeBinding.nativePlaceholders).toEqual([]);
-    // The region is still preserved for the command surface, which is a
-    // different statement from "this file has revisions in it".
+    // Bounded text revision commands are available even when none are present.
     expect(
       plain.fidelityMap.entries.find(
         (entry) => entry.regionId === "docx:region:trackedChanges",
       ),
-    ).toMatchObject({ class: "PRESERVED", readOnly: true });
+    ).toMatchObject({ class: "NATIVE" });
   });
 
   it("writes text beside a picture run instead of over it", async () => {

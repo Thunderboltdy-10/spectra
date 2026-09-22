@@ -8,6 +8,9 @@
 import type { Document } from "@ariadng/office/docx";
 import { WML_NAMESPACE } from "@ariadng/office/docx";
 import type { XmlElement } from "@ariadng/office/xml";
+import { noteContent, relatedWordPart, storyText } from "./docx-academic";
+import type { WordNoteContent } from "./docx-academic-schema";
+import { nativeCommentReadOnlyReason } from "./docx-academic-review";
 
 export type WordRevisionKind = "ins" | "del" | "moveFrom" | "moveTo";
 
@@ -23,6 +26,9 @@ export type WordNote = {
   id: string;
   type: "footnote" | "endnote";
   text: string;
+  partName?: string;
+  content?: WordNoteContent;
+  readOnlyReason?: string;
 };
 
 export type WordComment = {
@@ -31,6 +37,8 @@ export type WordComment = {
   date?: string;
   initials?: string;
   text: string;
+  partName?: string;
+  readOnlyReason?: string;
 };
 
 const REVISION_KINDS = new Set<string>(["ins", "del", "moveFrom", "moveTo"]);
@@ -101,7 +109,8 @@ async function loadNotesFromPart(
   partName: string,
   type: "footnote" | "endnote",
 ): Promise<WordNote[]> {
-  const part = document.office.package.getPart(partName);
+  const related = await relatedWordPart(document, `${type}s`);
+  const part = document.office.package.getPart(related?.partName ?? partName);
   if (!part) return [];
   const xml = await document.office.xml(part.name);
   const local = type === "footnote" ? "footnote" : "endnote";
@@ -114,10 +123,13 @@ async function loadNotesFromPart(
       continue;
     const id = wmlAttr(element, "id");
     if (!id) continue;
+    const content = noteContent(element);
     notes.push({
       id,
       type,
-      text: projectedWmlPlainText(element),
+      text: storyText(element),
+      partName: part.name,
+      ...(content ? { content } : { readOnlyReason: "This note contains unmodeled native content; edit its body in Word." }),
     });
   }
   return notes;
@@ -134,9 +146,9 @@ export async function collectWordNotes(document: Document): Promise<WordNote[]> 
 export async function collectWordComments(
   document: Document,
 ): Promise<WordComment[]> {
-  const part = document.office.package.getPart("/word/comments.xml");
+  const part = await relatedWordPart(document, "comments");
   if (!part) return [];
-  const xml = await document.office.xml(part.name);
+  const xml = { root: part.root };
   const comments: WordComment[] = [];
   for (const element of [xml.root, ...descendants(xml.root)]) {
     if (
@@ -148,6 +160,8 @@ export async function collectWordComments(
     if (!id) continue;
     comments.push({
       id,
+      partName: part.partName,
+      ...(nativeCommentReadOnlyReason(document, element) ? { readOnlyReason: nativeCommentReadOnlyReason(document, element) } : {}),
       ...(wmlAttr(element, "author")
         ? { author: wmlAttr(element, "author") }
         : {}),
@@ -155,7 +169,7 @@ export async function collectWordComments(
       ...(wmlAttr(element, "initials")
         ? { initials: wmlAttr(element, "initials") }
         : {}),
-      text: projectedWmlPlainText(element),
+      text: storyText(element),
     });
   }
   return comments;

@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,6 +15,7 @@ import {
   normalizeInstanceId,
   parseEnv,
   portsForInstance,
+  savedBackendArguments,
   serializeEnv,
   upsertEnv,
   validateRequiredEnv,
@@ -337,6 +339,7 @@ async function fetchText(url, timeoutMs = 1_500) {
 
 async function waitFor(label, probe, { timeoutMs, child } = {}) {
   const deadline = Date.now() + (timeoutMs ?? 120_000);
+  let lastNotice = 0;
   while (Date.now() < deadline) {
     if (child && child.exitCode !== null) {
       throw new Error(
@@ -345,11 +348,34 @@ async function waitFor(label, probe, { timeoutMs, child } = {}) {
     }
     const result = await probe();
     if (result) return result;
+    if (Date.now() - lastNotice > 30_000) {
+      process.stdout.write(`Waiting for ${label}...\n`);
+      lastNotice = Date.now();
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(
     `${label} did not become ready within ${Math.round((timeoutMs ?? 120_000) / 1000)} seconds.`,
   );
+}
+
+function savedBackendBinary(version) {
+  if (!/^precompiled-\d{4}-\d{2}-\d{2}-[a-z0-9]+$/i.test(String(version ?? "")))
+    throw new Error("Saved local Convex backend version is invalid; refusing an unpinned backend.");
+  const cache = process.platform === "win32"
+    ? resolve(process.env.LOCALAPPDATA || resolve(homedir(), "AppData", "Local"), "convex")
+    : resolve(homedir(), ".cache", "convex");
+  return resolve(cache, "binaries", version, process.platform === "win32" ? "convex-local-backend.exe" : "convex-local-backend");
+}
+
+async function savedBackendConfig(paths, ports) {
+  if (!existsSync(paths.convexConfig)) return null;
+  const config = JSON.parse(await readFile(paths.convexConfig, "utf8"));
+  if (config.ports?.cloud !== ports.convexCloud || config.ports?.site !== ports.convexSite)
+    throw new Error("Saved local Convex ports differ from this instance; refusing to select another deployment.");
+  if (!config.deploymentName || !config.adminKey || !config.backendVersion || !config.instanceSecret)
+    throw new Error("Saved local Convex configuration is incomplete; refusing to select another deployment.");
+  return config;
 }
 
 function convexArguments(ports, env, configure) {
@@ -425,9 +451,7 @@ async function stopChild(child) {
   ]);
 }
 
-async function configureAndSyncConvex(paths, ports, appEnv) {
-  const reusable = await existingLocalBackend(paths, ports);
-  if (reusable !== null) {
+async function syncSavedLocalBackend(paths, ports, appEnv, reusable) {
     const selfHostedEnvPath = resolve(
       paths.projectRoot,
       ".convex-self-hosted.env",
@@ -493,9 +517,42 @@ async function configureAndSyncConvex(paths, ports, appEnv) {
       process.stdout.write(
         `Reused saved local Convex deployment ${reusable.deploymentName} through its local endpoint.\n`,
       );
-      return { deploymentName: reusable.deploymentName, child: null };
     } finally {
       await rm(selfHostedEnvPath, { force: true });
+    }
+}
+
+async function configureAndSyncConvex(paths, ports, appEnv) {
+  const reusable = await existingLocalBackend(paths, ports);
+  if (reusable !== null) {
+    await syncSavedLocalBackend(paths, ports, appEnv, reusable);
+    return { deploymentName: reusable.deploymentName, child: null };
+  }
+  const saved = await savedBackendConfig(paths, ports);
+  if (saved) {
+    const binary = savedBackendBinary(saved.backendVersion);
+    if (!existsSync(binary))
+      throw new Error(`The saved local Convex binary is missing at ${binary}. Restore that pinned version before starting; no cloud project will be selected automatically.`);
+    const database = resolve(paths.projectRoot, ".convex", "local", "default", "convex_local_backend.sqlite3");
+    if (!existsSync(database))
+      throw new Error(`Saved local Convex database is missing at ${database}; refusing to create an empty replacement.`);
+    const databaseGiB = ((await stat(database)).size / 1024 ** 3).toFixed(2);
+    process.stdout.write(`Starting saved local Convex backend (${databaseGiB} GiB database). A cold start may take several minutes; this is the existing database, not a new deployment.\n`);
+    const backend = spawnService(
+      "Convex",
+      binary,
+      savedBackendArguments(saved, resolve(paths.projectRoot, ".convex", "local", "default")),
+      { cwd: paths.projectRoot, env: process.env },
+    );
+    try {
+      await waitFor("saved local Convex backend", async () =>
+        (await fetchText(`http://127.0.0.1:${ports.convexCloud}/instance_name`, 4_000))?.trim() === saved.deploymentName,
+      { timeoutMs: LOCAL_CONVEX_READY_TIMEOUT_MS, child: backend });
+      await syncSavedLocalBackend(paths, ports, appEnv, saved);
+      return { deploymentName: saved.deploymentName, child: backend };
+    } catch (error) {
+      await stopChild(backend);
+      throw error;
     }
   }
   const firstConfiguration = !existsSync(paths.convexConfig);

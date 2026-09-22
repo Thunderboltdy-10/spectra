@@ -286,6 +286,8 @@ async function main() {
   const existingStack = await stackIsReady(ports);
 
   let stackPid = existingState?.launcherPid;
+  const stackStdoutPath = resolve(logDirectory, "start-all-stack.stdout.log");
+  const stackStderrPath = resolve(logDirectory, "start-all-stack.stderr.log");
   if (!existingStack && !processIsAlive(stackPid)) {
     const stack = startDetached(
       "start-all-stack",
@@ -296,14 +298,19 @@ async function main() {
       logDirectory,
     );
     stackPid = stack.pid;
-    process.stdout.write(`Started local stack (PID ${stack.pid}).\n`);
+    process.stdout.write(`Started local stack (PID ${stack.pid}). Startup progress: ${stackStdoutPath}\nErrors: ${stackStderrPath}\n`);
   } else if (existingStack) {
     process.stdout.write("Local stack is already ready; reusing it.\n");
   } else {
     process.stdout.write(`Local stack is starting already (PID ${stackPid}); waiting for it.\n`);
   }
 
-  await waitFor("Convex, collaboration gateway and web server", () => stackIsReady(ports), options.timeoutSeconds, stackPid);
+  try {
+    await waitFor("Convex, collaboration gateway and web server", () => stackIsReady(ports), options.timeoutSeconds, stackPid);
+  } catch (error) {
+    const status = await stackReadiness(ports);
+    throw new Error(`${error instanceof Error ? error.message : String(error)} Convex: ${status.convexName || "unavailable"}; web: ${status.webStatus}; gateway: ${status.gatewayStatus}. Startup log: ${stackStdoutPath}; errors: ${stackStderrPath}`);
+  }
   const stackReady = await stackReadiness(ports);
   process.stdout.write(
     `Local stack ready.\n` +

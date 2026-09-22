@@ -21,6 +21,26 @@ export function isFatalServiceExit(label) {
 /** Local SQLite can take ~5 minutes to bind after a restart (P6.V1). */
 export const LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS = 900;
 
+/** A saved local deployment can be restarted from its pinned cached backend
+ * without asking Convex Cloud to reselect the project. */
+export function savedBackendArguments(config, stateDirectory) {
+  const name = String(config?.deploymentName ?? "").trim();
+  const secret = String(config?.instanceSecret ?? "").trim();
+  const cloud = config?.ports?.cloud;
+  const site = config?.ports?.site;
+  if (!name || !secret || !Number.isSafeInteger(cloud) || !Number.isSafeInteger(site))
+    throw new Error("Saved local Convex configuration is incomplete; refusing to select another deployment.");
+  return [
+    "--port", String(cloud),
+    "--site-proxy-port", String(site),
+    "--instance-name", name,
+    "--instance-secret", secret,
+    "--local-storage", `${stateDirectory}/convex_local_storage`,
+    "--beacon-tag", "cli-local-dev",
+    `${stateDirectory}/convex_local_backend.sqlite3`,
+  ];
+}
+
 export function withLocalConvexCliEnv(env = {}) {
   return {
     ...env,

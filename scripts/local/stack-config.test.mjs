@@ -8,12 +8,25 @@ import {
   normalizeInstanceId,
   parseEnv,
   portsForInstance,
+  savedBackendArguments,
   upsertEnv,
   validateRequiredEnv,
   withLocalConvexCliEnv,
 } from "./stack-config.mjs";
 
 describe("local stack instance configuration", () => {
+  it("restarts only the saved Convex identity and database", () => {
+    const args = savedBackendArguments({
+      deploymentName: "local-saved",
+      instanceSecret: "test-secret",
+      ports: { cloud: 3002, site: 3003 },
+    }, "C:/saved/state");
+    expect(args).toContain("local-saved");
+    expect(args).toContain("C:/saved/state/convex_local_backend.sqlite3");
+    expect(args).toContain("3002");
+    expect(() => savedBackendArguments({ deploymentName: "new" }, "C:/saved/state"))
+      .toThrow("incomplete");
+  });
   it("maps at least three instances to non-overlapping deterministic port blocks", () => {
     const instances = [1, 2, 3].map((id) => portsForInstance(id));
 

@@ -1,109 +1,43 @@
-# S9-AI — complete the user's intent with useful, durable results
+# S9-AI — complete intent and durable quality
 
-Date: 2026-09-14 (Europe/Madrid)
-Seat: C-AI+Dock launch-review (`grokbot/launch-review/ai-dock`)
-Checkout: `/workspace/ai-school-worktrees/ai-dock`
-Status: **OPEN** — dual-gate ACCEPT on source batches; branch squashed to 2 commits on `f7106da` for merge. Never mark S9-AI closed until Profile A live acceptance.
+Date: 2026-09-23 (Europe/Madrid). Branch: `main`. Status: **implementation complete; live quality and end-to-end acceptance pending**.
 
-Evidence class: source audit + deterministic Vitest. No live provider run, no localhost stack start, no native Office journey in this seat.
+## Integration and contracts
 
-## Source findings (expected vs actual)
+Recovered the clean AI checkpoint `8b38f2e4` from `codex/s9-ai-complete-intent` and integrated it after DURABLE `0ff1f359` and OFFICE `c86bdeb1` as `b63daf0c`. The recovery worktree was read only. Conflict resolutions retained OFFICE academic operations and main's bounded Calendar read, while adding AI's typed wall times, graph and receipt changes. Pre-existing uncommitted W9 recovery/handoff notes were untouched. The earlier AI report named historical pre-recovery commits `bcb7647`/`3d69454`; those objects are unavailable in this checkout, so the reviewed recovery source is the checkpoint diff.
 
-1. **Whole-request completion after first tool** — `src/app/api/spectra/run/loop/plan.ts` `isCompleteAfterTool` (~5482).
-   - **Actual:** returned true for any successful Calendar mutation, `navigate_spectra`, `setup_bridge`, or `insert_reference` (`needs-ui`) without checking remaining prompt obligations.
-   - **Expected:** fast-path only when that tool fulfills the entire request; multi-step prompts must keep the agent loop open.
-   - **Fix:** gate application-tool completion through `toolFulfillsEntireRequest` in `resolve.ts`; keep direct focused `propose_operation` staging path.
+The existing plan and operation journal now stage registered application actions before execution. Calendar aliases normalize once; read tools cannot perform an application mutation outside the journal. Execution rechecks authority, exact operation identity and approval scope, and records distinct handoff, queued, canonical and native outcomes. Request obligations map to final operation indexes, so a single action cannot complete a mixed request. Staged and terminal operations share one dependency graph; dropped duplicate refreshes remap `@created:N` references and obligation indexes, while authored text is not rewritten. The old title-match planner substitution and destination keyword rewrite are gone: exact owned IDs, typed source/target/destination roles and clarification govern mutations. A requested new artifact is not silently turned into an old one.
 
-2. **Keyword Calendar veto on slide edits** — `promptRequestsCalendarAction` in `resolve.ts` (~1268).
-   - **Actual:** time signal accepted a bare `\d{1,2}`, so “Move the slide 2 heading…” classified as Calendar.
-   - **Expected:** slide/deck ordinal moves stay out of Calendar; wall-clock or weekday signals required.
-   - **Fix:** exclude slide/deck-only prompts without real time tokens; require `HH:MM` / am-pm / weekday / relative day for numeric times.
+Reference insertion writes the canonical document or whiteboard through the durable artifact path even with the host editor unmounted. Its placement operation ID is stable across replay; the receipt is checked against the saved version and removed placements cannot be replayed into existence. Stop fences further writes; saved earlier work remains visible as partial completion. Lost acknowledgement is reconciled by saved receipts. Approval and rejection paths retain run/execution scope. Unknown local-file effects do not become an asserted zero-file approval.
 
-3. **Planner update blocked during update-then-schedule** — `assertCalendarActionContract` in `resolve.ts` (~1304).
-   - **Actual:** any `planner_task` update in a Calendar-classified prompt threw, even when paired with `calendar.schedule`.
-   - **Expected:** reject planner updates only when they substitute for a missing Calendar mutation.
-   - **Fix:** require `!hasCalendarMutation` before throwing.
+Calendar accepts local civil times with an IANA zone, verifies supplied epoch values, and refuses nonexistent or unresolved ambiguous DST times. Native Calendar scheduling still preserves the official source deadline. Explicit navigation and Bridge setup are staged application actions; their UI readiness and local consent remain separate from canonical writes. The existing Follow, manual override, /chat and dock choreography are retained. Relevant numeric attachments require an editable chart or table with numeric values; a labelled shape is not accepted. OFFICE's verified source handle and passage checks remain in the shared document path. These are structural and deterministic contracts, not a claim that generated teaching material is good.
 
-4. **Source workspace rewritten as destination** — `resolveWorkspaceMention` + call site in `resolve.ts` (~1516).
-   - **Actual:** any unique workspace title mention overwrote every `artifact.create` / `workspaceItem.add` destination.
-   - **Expected:** distinguish source (“from Chemistry Lab”) vs destination (“put … in Chemistry Lab”).
-   - **Fix:** `promptPlacesIntoWorkspace` + `requireDestinationLanguage: true` at the plan-resolve call site.
+The executable application action matrix covers every currently AI-enabled registered application command plus Calendar aliases, denial at the read boundary, explicit prohibitions and approval rejection. `import_managebac_resource` is explicitly unavailable to AI because its school download path owns provider identity and import receipts; the user can import from the selected ManageBac class shelf. The human import path remains available. No second engine, provider/model/billing change or interface redesign was added.
 
-5. **Dropped operations shifted `@created:N`** — `parseSpectraPlan` ManageBac dedupe in `operations/schema.ts`; Calendar duplicate-create repair in `plan.ts` (~4718).
-   - **Actual:** filters dropped ops without remapping later dependency indexes.
-   - **Expected:** stable remap or fail loudly on dangling `@created`.
-   - **Fix:** `compactOperationsRemappingCreated`; Calendar repair rewrites aliased creates to owned ids then compacts with remap.
+## Automated evidence
 
-6. **Chart placeholder accepted as visual fulfilment** — `isPurposefulPresentationVisual` / `evaluatePresentation` in `quality/rubrics.ts`.
-   - **Actual:** any `type: "chart"` counted; shapes with short labels (including “Chart”) counted as purposeful visuals; no blocker when a data/present prompt lacked numeric series.
-   - **Expected:** data/present requests need a real editable chart/table with finite numeric series — not a labelled shape.
-   - **Fix:** numeric series/table checks; blocker when `promptRequiresEditableNumericVisual` and none present.
+All checks ran against local source with mocks or deterministic fixtures. No stack, browser, configured live AI, provider write, external message or native Office app was used.
 
-7. **Reference insert rejection swallowed** — `ai-ui-events.ts` `reference_insert` handler.
-   - **Actual:** `commandAsync(...).catch(() => undefined)`; run could treat `needs-ui` as success while the host insert failed silently.
-   - **Expected:** use awaited shared-command results; surface failure/unmounted host.
-   - **Fix:** `commandAsyncResults` with failure / zero-listener notes. Full durable mutation receipt back into the run remains residual.
+| Check | Result |
+| --- | --- |
+| Focused action, graph, time, reference, quality and loop Vitest | 7 files, 111/111 passed |
+| Neighbor target, UI event, registry, Convex Calendar and placement Vitest | 5 files, 54/54 passed |
+| `npx tsc --noEmit` | Passed |
+| `npm run lint` | Passed |
+| `npm run check:capabilities` | Passed |
+| `npm run check:architecture` | Passed |
+| `git diff --cached --check` before commit | Passed |
 
-## Fixes landed
+Fixtures cover mixed request completion, staged dispatch, duplicate-create dependency rejection/remapping, multiple creates and links, Unicode/duplicate targets, source versus destination, Stop and declined approval, lost reference receipt and host-unmounted insertion, Calendar wall time/DST, numeric chart/table structure and placeholder rejection. They establish contract behavior only. No model/provider/token/read-count/latency comparison was possible without the prohibited live run. No implementation blocker was observed in these checks; live quality remains unknown.
 
-| Area | Files |
-|---|---|
-| Completion gating | `src/app/api/spectra/run/loop/plan.ts`, `resolve.ts` (`toolFulfillsEntireRequest`) |
-| Calendar / workspace targeting | `resolve.ts` |
-| `@created` remap | `src/features/spectra/operations/schema.ts`, `plan.ts` |
-| Chart numeric quality | `src/features/spectra/quality/rubrics.ts` |
-| Reference insert honesty | `src/features/spectra/collaboration/ai-ui-events.ts` |
-| Tests | `target-resolution.test.ts`, `quality-machinery.test.ts` |
+## Finite deferred live acceptance corpus
 
-Preserved: V8-03 focused-edit fast path, durable run substrate (leases/heartbeats/NDJSON/Live Dock/required-input rail), shared registry/authority design (no second orchestration engine).
+Run these on integrated served source with normal authenticated Profile A only when live acceptance is authorized. Record source/run/attempt/operation/version IDs, saved and native receipts, exact times, token/read counts and latency. Use disposable fixtures and held-out wording; do not infer success from the first tool or a valid schema.
 
-## Tests
+1. **Study and present:** Give a PDF, small numeric CSV and short brief; ask vaguely for study material and a presentation. Inspect the saved guide and deck for useful explanation, checked values/units, an editable chart or table, and claim-level supporting passages/pages. Repeat with a held-out topic and phrasing. Reload persisted models and inspect DOCX/PPTX/native output independently.
+2. **Create and edit:** Create a guide and separate flashcards, then give a vague edit. Exercise a real duplicate-target clarification, changed focus, long/batch choice and reload. Verify preserved attachments and destination B when the source is workspace A and the current destination is B.
+3. **Mixed actions:** Update a saved task note and schedule it; schedule two distinct blocks; navigate and then edit/open another requested object. Check every result, exact account-zone wall time, unchanged official deadline and no duplicate artifacts. Move a presentation slide-number heading and verify it never enters Calendar handling.
+4. **Authority and references:** Approve one reversible setting change, fixture-backed ManageBac refresh and disposable Library deletion; reject counterparts and exercise undo. Check actual saved effects and unchanged rejected targets. Exercise Bridge's real local consent handoff. Insert references with the host unmounted, reload and inspect the saved placement. Contract-check remaining exposed actions and consequential denials.
+5. **Control and recovery:** Steer an active run and inspect changed saved output; Stop the displayed attempt and prove no later old mutation commits. Inject lost receipt/restart after persistence and verify one effect. Check /chat and dock continuation, navigation with Follow off, Follow readiness, manual override and result mounting using existing choreography.
 
-```
-./node_modules/.bin/vitest run \
-  src/features/spectra/__tests__/target-resolution.test.ts \
-  src/features/spectra/__tests__/quality-machinery.test.ts
-→ 2 files, 38 passed
-
-./node_modules/.bin/vitest run \
-  src/features/spectra/__tests__/live-dock.test.ts \
-  src/features/spectra/__tests__/agent-loop.test.ts
-→ 2 files, 30 passed
-```
-
-Covered seams: slide≠Calendar; update+schedule allowed; source≠destination workspace; multi-obligation completion false; sole schedule completion true; `@created` remap after drop / ManageBac dedupe; shape-“Chart” blocker; real series accepted.
-
-## Residual progress (this pass) — closed vs still open
-
-### Closed / improved on this seat (folded into squash; S9-AI still OPEN)
-- **Legacy Calendar unification:** shared `calendar/domain/command.ts` + `loop/calendar-command.ts`; `act.ts` and `executeAgentReadTool` Calendar mutations share aliases, schemas, authority, idempotency, postcondition, undo identity.
-- **Reference insert receipt:** `queued_refresh` (not silent `needs-ui` success); `ai.ui.referenceReceipt` durable events including `host_unmounted` / `failed` / `verified_native_write`; completion gate requires verified/canonical write.
-- **Stop / Undo / settle honesty (source):** abort fence before tools/mutations; Undo uses `restore:` + `claimActorKind: "human"` (not AI `revert:` claim); Dock still status-driven (completion gate helps).
-- **Stream / retention / local-file honesty:** unknown local-effect counts no longer coerce to zero files; NDJSON consumer-detach already continues task to final release (retained ownership).
-- **ManageBac harness copy:** plan harness no longer says “authenticated user’s permitted ManageBac”; Spectra-account / school-connection language.
-- **Calendar AI egress vs Shell bounded overview:** `compactCalendarForAgent` emits `coverage` (rangeBounded, lookback residual, truncation, empty≠complete). Does **not** rewrite Shell-owned `convex/calendar.ts` (`e3ac373` merge dependency).
-- **Negatives landed:** stop mid-run no later mutation; approval declined no execute; Unicode/dup workspace titles; empty chart; unmounted reference receipt; slide-number Calendar false positives; first-tool ≠ complete; truncated/empty Calendar coverage.
-
-### Still open
-- **Profile A live acceptance** (PDF+CSV study/present) — Spectra gate for closing S9-AI.
-- **Full durable reference write** when host unmounted (canonical embed create without mounted editor) — parked; would touch collab-share embed surfaces.
-- **Calendar TZ 13:00→14:00** reproduction (needs recorded account IANA).
-- **Passage-level citation corpus**.
-- **Full action-family contract matrix** (compact Calendar + reference + neighbors only this pass).
-- **Merge dependency:** Shell `convex/calendar.ts` overview bound (`e3ac373`) not on this tip — AI egress honesty is forward-compatible; do not re-implement Shell bind here.
-- **Sibling copy still lying (do not edit here):** `managebac-integration-shell.tsx`, `class-shelf-picker.tsx` “authenticated school email” / ManageBac account match copy — Shell-owned.
-
-## Never mark whole outcome passed on first-tool success
-
-Completion now requires `toolFulfillsEntireRequest` / `applicationToolMayCompleteRequest`. A green Calendar tool alone does not complete “schedule A then open B”. A queued reference insert is not request completion.
-
-## Commits (squashed for merge)
-
-Branch `grokbot/launch-review/ai-dock` — soft-reset onto `f7106da`, **2 commits**, docs folded into fix. No push. Dual-gate ACCEPT (Atlas tech + Spectra product) on pre-squash content.
-
-- `bcb7647` — fix(ai): S9 multi-step intent, targeting, chart honesty, Calendar unify, stop/reference/local-file honesty
-- `3d69454` — test(ai): S9 completion, targeting, chart, residual stop/approval/Calendar/reference negatives
-
-Pre-squash dual-gate SHAs (superseded by squash): `aebc9eb`, `4a23812`, `14d14fc`, `79fb7b0`.
-
-S9-AI remains **OPEN** (Profile A live acceptance still required).
+Live educational quality, browser behavior, native Office readback and end-to-end acceptance are **pending**. SDK/package validity or schema checks alone cannot satisfy them.

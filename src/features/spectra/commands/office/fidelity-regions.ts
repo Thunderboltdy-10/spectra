@@ -120,6 +120,7 @@ export function regionsForLensFeature(feature: string): readonly FidelityRegionK
 export type LensFidelityLike = {
   feature?: unknown;
   class?: unknown;
+  regionId?: unknown;
 };
 
 /**
@@ -135,10 +136,36 @@ export function fidelityRegionMap(
   entries: readonly LensFidelityLike[],
 ): Record<string, FidelityClass> {
   const result: Record<string, FidelityClass> = { artifact: "NATIVE" };
+
+  // DOCX reports two different kinds of facts with the same feature name:
+  // `docx:feature:*` records detected markup that must be carried, while
+  // `docx:region:*` declares what the lens can safely author in that region.
+  // A part can contain both supported items and preserved substructures (for
+  // example, editable classic comments alongside carried modern comment data).
+  // Let the explicit region capability drive the workbar gate; the lens's
+  // target-level guards and the package preservation check still protect the
+  // unsupported markup itself.
+  const docxDeclaredRegions = new Set<FidelityRegionKey>();
+  for (const entry of entries) {
+    if (
+      typeof entry.regionId !== "string" ||
+      !entry.regionId.startsWith("docx:region:") ||
+      typeof entry.feature !== "string" ||
+      !asFidelityClass(entry.class)
+    ) continue;
+    for (const region of regionsForLensFeature(entry.feature))
+      docxDeclaredRegions.add(region);
+  }
+
   for (const entry of entries) {
     const cls = asFidelityClass(entry.class);
     if (!cls || typeof entry.feature !== "string") continue;
     for (const region of regionsForLensFeature(entry.feature)) {
+      if (
+        typeof entry.regionId === "string" &&
+        entry.regionId.startsWith("docx:feature:") &&
+        docxDeclaredRegions.has(region)
+      ) continue;
       const current = result[region];
       if (!current || CLASS_SEVERITY[cls] > CLASS_SEVERITY[current]) result[region] = cls;
     }

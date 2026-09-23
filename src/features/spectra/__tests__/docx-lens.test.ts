@@ -13,6 +13,8 @@ import {
 import { comparePackages } from "@ariadng/office/preservation";
 import katex from "katex";
 import { assertPreservationKept } from "../commands/office/preservation-guard";
+import { fidelityRegionMap } from "../commands/office/fidelity-regions";
+import { regionBlockedBy } from "../commands";
 import { mergeDocxProjections, contentProjection } from "@/app/api/spectra/lenses/docx/route";
 import { compactDocxProjectionForStorage, docxProjectionFromContent } from "../lenses/document-projection";
 import { isEquationLatexSupported } from "../lenses/equation-interchange";
@@ -1088,6 +1090,21 @@ describe("DOCX preservation lens", () => {
         (entry) => entry.regionId === "docx:region:trackedChanges",
       ),
     ).toMatchObject({ class: "NATIVE" });
+  });
+
+  it("keeps supported DOCX regions editable when detected markup is carried", async () => {
+    const opened = await docxLens.open(await fixture("tracked-changes.docx"), "strict-native");
+    const fidelity = fidelityRegionMap(opened.fidelityMap.entries);
+
+    // This fixture has native feature-level carry records for notes, comments,
+    // revisions and header/footer parts, plus explicit region capability rows.
+    // The carry records protect unsupported markup without disabling supported
+    // edits elsewhere in those same package parts.
+    for (const region of ["footnotes", "comments", "trackedChanges", "headersFooters"] as const) {
+      expect(fidelity[region]).toBe("NATIVE");
+      expect(regionBlockedBy(fidelity, [region])).toBeUndefined();
+    }
+    expect(fidelity.ole).toBe("PRESERVED");
   });
 
   it("writes text beside a picture run instead of over it", async () => {

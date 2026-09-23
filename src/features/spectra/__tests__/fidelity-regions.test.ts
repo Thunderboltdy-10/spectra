@@ -80,6 +80,28 @@ describe("lens fidelity → command regions", () => {
     ]).headersFooters).toBe("PRESERVED");
   });
 
+  it("uses DOCX region capability while keeping detected native markup in carry", () => {
+    const map = fidelityRegionMap([
+      { regionId: "docx:feature:footnotes", feature: "footnotes", class: "PRESERVED" },
+      { regionId: "docx:region:footnotes", feature: "footnotes", class: "NATIVE" },
+      { regionId: "docx:feature:comments", feature: "comments", class: "PRESERVED" },
+      { regionId: "docx:region:comments", feature: "comments", class: "NATIVE" },
+      { regionId: "docx:feature:trackedChanges", feature: "trackedChanges", class: "PRESERVED" },
+      { regionId: "docx:region:trackedChanges", feature: "trackedChanges", class: "NATIVE" },
+      { regionId: "docx:feature:headers", feature: "headers", class: "PRESERVED" },
+      { regionId: "docx:region:headersFooters", feature: "headersFooters", class: "NATIVE" },
+      { regionId: "docx:feature:ole", feature: "ole", class: "PRESERVED" },
+    ]);
+
+    expect(map.footnotes).toBe("NATIVE");
+    expect(map.comments).toBe("NATIVE");
+    expect(map.trackedChanges).toBe("NATIVE");
+    expect(map.headersFooters).toBe("NATIVE");
+    expect(map.ole).toBe("PRESERVED");
+    expect(regionBlockedBy(map, ["footnotes", "comments", "trackedChanges", "headersFooters"])).toBeUndefined();
+    expect(regionBlockedBy(map, ["ole"])).toMatchObject({ region: "ole", state: "PRESERVED" });
+  });
+
   it("leaves a region absent rather than inventing a refusal for it", () => {
     const map = fidelityRegionMap([{ feature: "cell", class: "NATIVE" }]);
     // No lens said anything about validation, so Spectra does not claim it

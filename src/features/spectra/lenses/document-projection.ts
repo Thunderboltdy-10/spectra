@@ -701,9 +701,12 @@ export function docxOperationsBetween(
   );
   const priorOrder = before.blocks.map((block) => block.id);
   const order = after.blocks.map((block) => block.id);
+  const priorIds = new Set(priorOrder);
+  const afterIds = new Set(order);
+  const retainedBefore = priorOrder.filter((regionId) => afterIds.has(regionId));
+  const retainedAfter = order.filter((regionId) => priorIds.has(regionId));
   if (
-    order.length !== priorOrder.length ||
-    order.some((regionId, index) => regionId !== priorOrder[index])
+    retainedAfter.some((regionId, index) => regionId !== retainedBefore[index])
   )
     operations.push({ kind: "reorder-regions", order });
   return operations;

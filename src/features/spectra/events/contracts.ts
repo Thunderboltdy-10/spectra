@@ -23,6 +23,11 @@ export type SpectraCommands = {
     surface?: "full" | "panel" | "tile";
     anchor?: WorkAnchor;
   };
+  "document.executeCommand": {
+    artifactId: string;
+    commandId: string;
+    params?: string | number | boolean | null;
+  };
   "comments.open": { artifactId: string };
   "comments.add": { artifactId: string; body: string; regionId?: string };
   "library.import": { kind: "file" | "workspace" };

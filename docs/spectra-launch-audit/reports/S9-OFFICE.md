@@ -1,6 +1,6 @@
 # S9-OFFICE — integrated academic Word implementation
 
-Date: 2026-09-23 (Europe/Madrid). Branch: `main`. Status: **live acceptance partially completed with bounded limitations**. The smaller combined feature fixture completed a Spectra → Word → Spectra roundtrip plus a live AI edit and a separate Word reopen. The edited 695-equation formal paper saved its semantic operations in Spectra, but its native DOCX materialization was refused. K-bar, live undo, relationship cleanup/retention, and Bridge readback remain unverified in this acceptance.
+Date: 2026-09-23 (Europe/Madrid). Branch: `main`. Status: **source-side and offline Office acceptance extended; live Bridge acceptance remains blocked on the authenticated app session and safe mount**. The original live cases below remain as historical results. The continuation at the end records corrected formal-paper materialization, independent Word/SDK readback, academic deletion/retention checks, the OLE corpus, and K-bar wiring. No successful native Bridge receipt or readback is claimed.
 
 ## Integration
 
@@ -46,3 +46,55 @@ The imported feature fixture confirmed the human References controls for footnot
 The focused source regression run after the region-map fix passed **49/49 tests in 2 files** (`fidelity-regions.test.ts` and `docx-lens.test.ts`). The wider integration suite and checks above were recorded before this live run. Existing academic reducer/editor tests exercise collaboration undo/redo; live undo/redo was not performed here. K-bar was not exercised; the global K-bar command list does not currently surface the academic document operations. Relationship cleanup and retention were not exercised as live Office cases. These live cases remain acceptance gaps.
 
 No Actions, external sharing, production/provider/billing changes, or original IBDP1 edits were performed. The acceptance does not claim full native completion for the formal paper, Bridge verification, OLE import, live K-bar, live undo/redo, or live Office relationship cleanup/retention.
+
+## Continuation — offline source-side acceptance — 2026-09-23
+
+This continuation used the already-running local instance and disposable files. Canonical artifact saves, offline DOCX materialization, installed Word readback, and Bridge-native writes are separate evidence paths. Only the first three completed here.
+
+### Formal paper materialization and Word readback
+
+The formal paper's current canonical version is `ws788w3ybskn9vwzqp12stn6058ez23b` (artifact `wx7bckbz85gt17zwfyn4wanzf18ezat3`). Its supported footnote has a valid Word ID `27752` and exact text `S9-OFFICE formal-paper footnote, 23 September 2026.` The offline materializer produced `formal-offline-final.docx` with four paragraph operations and no preservation violations. Its semantic readback retained 963 blocks, 695 equations, the note, citation, comment, bibliography, and original inline image.
+
+Open XML SDK 3.0.1 / Microsoft365 validation reported `validAfter: true`, zero diagnostics before or after, and zero new diagnostics. Microsoft Word 16.0 opened the output read-only: 1,118 paragraphs, 7 tables, 1 inline image, 695 equations, 1 footnote, 1 classic comment, 0 endnotes, and 0 revisions. The citation, bibliography, and 109 fields were present. This closes the earlier offline package materialization gap; it does not supersede the earlier live native refusal or establish a Bridge write.
+
+### Academic deletion and package relationship integrity
+
+An offline follow-on deleted the footnote, classic comment, and citation, then regenerated the bibliography. Word readback showed zero footnotes, endnotes, comments, revisions, and citation fields; the bibliography field remained. The two source custom XML parts and source record `Source300588959` were retained for reuse. The package still had 15 parts; only `word/document.xml`, `word/footnotes.xml`, and `word/comments.xml` changed.
+
+Open XML SDK validation remained clean with zero diagnostics. A package-level relationship check found three relationship parts before and after, no dangling internal targets, and no changed relationship files. Word 16.0 reopened the result read-only with the same 7 tables, inline image, and 695 equations. This verifies safe record deletion plus intentional source retention on a disposable package; it is not a live cleanup/retention case.
+
+### Standalone native endnote cycle
+
+On a separate disposable Microsoft Open XML SDK footnote/endnote fixture, the native materializer inserted endnote ID `4` at the end of the second paragraph, edited its body, moved its reference to the third paragraph, and deleted it. Spectra reopen confirmed each intermediate state. Word 16.0 read-only reopen showed the count change from two endnotes to three, preserved the inserted bold body, displayed the edited italic body, placed the moved reference in paragraph three, and returned to two endnotes after deletion; both original endnotes and both original footnotes remained. Open XML SDK 3.0.1 validation reported zero diagnostics for all four transitions. Only `word/document.xml` and/or `word/endnotes.xml` changed; the three relationship parts stayed byte-identical with no dangling internal targets.
+
+This verifies standalone native DOCX materialization and Word compatibility for the endnote lifecycle. It does not replace the pending human selection/placement UI case or a Bridge-native receipt/readback.
+
+### Standalone Word edit/reimport and stale-edit refusal
+
+Starting from the inserted-endnote output, Word 16.0 added `S9-OFFICE Word disjoint marker.` to paragraph three. Reopening that exact saved file through `docxLens.open` showed the marker in paragraph three and retained the Spectra-inserted bold endnote/reference in paragraph two. Word renumbered that inserted endnote from ID `4` to ID `2` while preserving its body and reference; the readback was matched by body and anchor, not the assumed pre-Word ID. The Word-saved file SHA-256 is `e5b67cab998179e3db7eb14893e21469c1c78461d9e8667f75a32934d9d4c360`.
+
+On a separate copy, Word changed an existing endnote body. Reopening the saved DOCX through the lens showed the Word body; an edit carrying the old expected body was refused with “The note changed. Reload it before editing.” The source file hash remained identical before and after the refused operation. Word assigned that note ID `1` and added a leading space in its projected body. Both Word-saved packages pass Open XML SDK validation with zero diagnostics; the three relationship files are unchanged and have no dangling targets. The first verifier attempt falsely missed these outcomes because it assumed IDs and whitespace stayed fixed; verification now follows the saved body/reference identity.
+
+These are direct file-to-lens checks on disposable files, not an authenticated Spectra import artifact, canonical app save, or Bridge receipt. The application-level disjoint Word/import artifact case remains pending the sign-in session.
+
+### OLE corpus and Word open
+
+The full DOCX fidelity harness now passes **16 fixtures and 168 assertions**. On the embedded-OLE fixture, no-op open/save was byte-identical; paragraph text, insertion, style, run formatting, paragraph formatting, and AI text edits changed only `word/document.xml`, with the embedded OLE part preserved. Microsoft Word 16.0 opened a separate pristine fixture read-only, saw one embedded inline object, and left the file hash unchanged.
+
+A separate import completion record reports `status: imported` and exact OLE preservation. An earlier HTTP 500 import attempt remains recorded; it was not reproduced by this completed job. The OLE fixture work was offline and does not claim a live Bridge materialization.
+
+### K-bar wiring and code checks
+
+The global K-bar now adds the registered document academic commands only when a document artifact is mounted. It sends a typed `document.executeCommand` event to that artifact's editor, which rechecks registered command availability and returns unavailable feedback when the editor cannot handle it. Component and routing tests cover document-only visibility and active-artifact dispatch. K-bar was not exercised in the signed-in browser session.
+
+The same change set bounds new/edit/move Word note IDs at 32767 while allowing deletion of a larger positive legacy ID; avoids false block reorder detection when inserted/deleted paragraphs sit in shared Word regions; and fixes the DOCX harness to choose editable paragraphs and gate refusals by the exact command capability. The tracked-changes matrix now reflects its partial support: individual proposal/accept/reject commands can edit supported spans, while whole-document accept/reject remains refused.
+
+Focused Office suites passed **131/131 tests across 10 files**. `npx tsc --noEmit` and `git diff --check` passed. A nearby XLSX projection suite had earlier unrelated failures on fixture row/column counts and remains outside this change.
+
+### Pending live acceptance and UI follow-up
+
+The app's in-browser session is still awaiting the user's sign-in. The dedicated empty path `.spectra-local/launch-audit/S9-OFFICE-safe-mount` has not yet been added through Settings → Devices, and no file has been placed there. Until the picker flow confirms that exact root and `doubleSyncRisk: false`, no Bridge write is attempted. There is no current successful native receipt or native readback. The earlier canonical snapshot query had `pendingCount: 0` and zero conflicts; the old HTTP 400 `DOCX_READBACK_MISMATCH` remains a failed request, not a receipt. Live K-bar, undo/redo, selection/placement, source-evidence AI coverage, app-level disjoint Word-to-Spectra edit, stale/conflicting native edit, and live relationship ownership/cleanup also remain pending the authenticated browser session.
+
+Moderate UI follow-up: at the default short viewport, the review-rail Delete note action fell beneath the fixed Live Dock composer. It became clickable at 1600×1200, so the action is accessible with more vertical room, but it needs responsive placement or scrolling clearance. High-impact review targets are the legacy Word-ID deletion boundary, Word-renumbered note identity across body/reference anchors, projection reorder classification around shared Word wrappers, and the K-bar command event's active-artifact routing and availability recheck.
+
+No changes were made to the original IBDP1 mount, deployment selection, or W9 files in this commit. Canonical edits were limited to the designated disposable S9 artifact; the local database was not reset and the deployment was not switched.

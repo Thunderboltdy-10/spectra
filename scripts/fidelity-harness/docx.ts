@@ -139,8 +139,18 @@ async function availableParagraphStyle(
  * fixtures that have none.
  */
 function firstEditableParagraph(projection: DocxProjection) {
+  const anchoredContentKinds = new Set([
+    "noteRef",
+    "commentBoundary",
+    "revision",
+    "citation",
+    "bibliography",
+  ]);
   const editable = projection.blocks.filter(
-    (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+    (block) =>
+      block.type !== "table" &&
+      block.attrs?.nativeReadOnly !== true &&
+      !block.inlineContent?.some((item) => anchoredContentKinds.has(item.kind)),
   );
   return editable.find((block) => block.text.trim().length > 0) ?? editable[0];
 }

@@ -58,12 +58,16 @@ function commandFailureMessage(error: unknown, label: string) {
   return `${label} could not be completed. Try again when the target surface is ready.`;
 }
 
-function initialContext(pathname: string, searchParams: URLSearchParams, activeRunIds: readonly string[], followingAi: boolean, continueCurrentConversation: boolean, mountedArtifactId?: string): KBarContext {
+function initialContext(pathname: string, searchParams: URLSearchParams, activeRunIds: readonly string[], followingAi: boolean, continueCurrentConversation: boolean, mountedArtifactId?: string, mountedArtifactType?: string): KBarContext {
   const segments = pathname.split("/").filter(Boolean);
   const idAfter = (prefix: string) => pathname.startsWith(`/${prefix}/`) ? decodeURIComponent(segments[1] ?? "") : undefined;
+  const activeArtifactId = searchParams.get("artifactId") ?? idAfter("library") ?? idAfter("artifacts") ?? mountedArtifactId;
   return {
     pathname,
-    activeArtifactId: searchParams.get("artifactId") ?? idAfter("library") ?? idAfter("artifacts") ?? mountedArtifactId,
+    activeArtifactId,
+    ...(activeArtifactId && activeArtifactId === mountedArtifactId && mountedArtifactType
+      ? { activeArtifactType: mountedArtifactType as KBarContext["activeArtifactType"] }
+      : {}),
     activeWorkspaceId: searchParams.get("workspaceId") ?? idAfter("workspace"),
     activeThreadId: searchParams.get("threadId") ?? undefined,
     activeRunIds,
@@ -98,9 +102,11 @@ export function UniversalKBar() {
     setActiveRunIds(runIds);
   }), []);
 
-  const mountedArtifactId = open && typeof document !== "undefined"
-    ? document.querySelector<HTMLElement>("[data-spectra-studio]")?.dataset.spectraStudio
-    : undefined;
+  const mountedStudio = open && typeof document !== "undefined"
+    ? document.querySelector<HTMLElement>("[data-spectra-studio]")
+    : null;
+  const mountedArtifactId = mountedStudio?.dataset.spectraStudio;
+  const mountedArtifactType = mountedStudio?.dataset.spectraType;
   const context = useMemo(
     () => initialContext(
       pathname,
@@ -109,8 +115,9 @@ export function UniversalKBar() {
       following,
       preferences.ai.continueCurrentConversation,
       mountedArtifactId,
+      mountedArtifactType,
     ),
-    [activeRunIds, following, mountedArtifactId, pathname, preferences.ai.continueCurrentConversation, searchParams],
+    [activeRunIds, following, mountedArtifactId, mountedArtifactType, pathname, preferences.ai.continueCurrentConversation, searchParams],
   );
 
   const openKBar = useCallback(() => {
@@ -255,6 +262,10 @@ export function UniversalKBar() {
     setResultMessage(null);
     try {
       const value = await entry.command.execute(commandContext, params);
+      if (value?.status === "unavailable") {
+        setResultMessage(value.message);
+        return;
+      }
       const message = value?.message ?? `${entry.label} completed.`;
       setResultMessage(message);
       setParametersFor(null);

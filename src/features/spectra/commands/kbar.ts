@@ -1,11 +1,16 @@
 import { getSpectraThreads, searchSpectra, type SpectraThread } from "../data/api";
 import type { SpectraArtifact, SpectraWorkspace } from "../data/api";
+import { spectraBus } from "../events";
 import { APP_COMMANDS } from "./app-registry";
-import type { Command, CommandContext } from "./types";
+import { commandForBinding } from "./registry";
+import { documentCommandBindings, documentCommandStubHandlers } from "./office/document-commands";
+import type { Command, CommandContext, CommandExecutionResult, CommandParam } from "./types";
+import type { WorkType } from "../work/registry";
 
 export type KBarContext = {
   pathname: string;
   activeArtifactId?: string;
+  activeArtifactType?: WorkType;
   activeWorkspaceId?: string;
   activeThreadId?: string;
   activeRunIds: readonly string[];
@@ -96,6 +101,58 @@ const K_BAR_COMMAND_IDS = new Set([
   "app.work.open",
 ]);
 
+const DOCUMENT_KBAR_COMMAND_IDS = new Set([
+  "document.history.undo",
+  "document.history.redo",
+  "document.insert.citation",
+  "document.insert.footnote",
+  "document.insert.endnote",
+  "document.references.sources",
+  "document.references.bibliography",
+  "document.review.comments",
+  "document.review.comment.add",
+  "document.review.trackChanges.show",
+  "document.review.trackChanges.propose",
+]);
+
+const DOCUMENT_KBAR_COMMANDS: readonly Command<unknown>[] = documentCommandBindings(documentCommandStubHandlers)
+  .map((binding, index) => commandForBinding("document", binding, index))
+  .filter((command) => DOCUMENT_KBAR_COMMAND_IDS.has(command.id))
+  .map((registeredCommand) => {
+    const command = registeredCommand as unknown as Command<unknown>;
+    return {
+      ...command,
+      availability: (context) => context.artifactId ? command.availability(context) : { state: "hidden" as const },
+      execute: async (context, params) => {
+        if (!context.artifactId) {
+          return {
+            commandId: command.id,
+            status: "unavailable",
+            effect: "mutate",
+            message: "Open a document before running this command.",
+          } satisfies CommandExecutionResult;
+        }
+        const { listeners, results } = await spectraBus.commandAsyncResults("document.executeCommand", {
+          artifactId: context.artifactId,
+          commandId: command.id,
+          ...(params === undefined ? {} : { params: params as CommandParam }),
+        });
+        const outcome = results.find((result): result is CommandExecutionResult =>
+          Boolean(result && typeof result === "object" && "status" in result && "message" in result),
+        );
+        if (outcome) return outcome;
+        return {
+          commandId: command.id,
+          status: "unavailable",
+          effect: "mutate",
+          message: listeners
+            ? "This document command is not available on the active editor."
+            : "Open the document in an editor before running its commands.",
+        } satisfies CommandExecutionResult;
+      },
+    };
+  });
+
 function surfaceFor(pathname: string): keyof (typeof CONTEXT_BOOSTS)[string] | undefined {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/chat")) return "chat";
@@ -120,7 +177,8 @@ function textScore(text: string, query: string) {
 
 export function rankKBarCommand(command: Command<unknown>, context: KBarContext, query = "") {
   if (command.visibility === "internal") return Number.NEGATIVE_INFINITY;
-  if (!K_BAR_COMMAND_IDS.has(command.id)) return Number.NEGATIVE_INFINITY;
+  if (!K_BAR_COMMAND_IDS.has(command.id) && !DOCUMENT_KBAR_COMMAND_IDS.has(command.id)) return Number.NEGATIVE_INFINITY;
+  if (DOCUMENT_KBAR_COMMAND_IDS.has(command.id) && (context.activeArtifactType !== "document" || !context.activeArtifactId)) return Number.NEGATIVE_INFINITY;
   const score = textScore(`${command.title} ${command.description} ${command.id}`, query);
   if (score < 0) return Number.NEGATIVE_INFINITY;
   const surface = surfaceFor(context.pathname);
@@ -176,7 +234,10 @@ export function buildKBarEntries(
   query = "",
   results: readonly KBarSearchResult[] = [],
 ): KBarEntry[] {
-  const entries = commands
+  const visibleCommands = context.activeArtifactType === "document" && context.activeArtifactId
+    ? [...commands, ...DOCUMENT_KBAR_COMMANDS]
+    : commands;
+  const entries = visibleCommands
     .map((command) => commandEntry(command, context, query))
     .filter((entry): entry is KBarEntry => Boolean(entry));
   const workCommand = commands.find((command) => command.id === "app.work.open");

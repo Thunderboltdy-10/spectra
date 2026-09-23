@@ -6042,6 +6042,7 @@ function ArtifactStudioEditor({
         ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
         data-spectra-studio={artifact._id}
+        data-spectra-type={artifact.blueprintKey}
         data-spectra-surface="artifact"
         data-ai-preview={visibleAiWorking || undefined}
         data-ai-effect-count={activeAiEffects.length || undefined}

@@ -168,11 +168,24 @@ describe.each(SETS)("$type command set", ({ type, bindings, generalDefaults, def
 
   it("never claims it can edit what Spectra only preserves", () => {
     const PRESERVE_ONLY = new Set([
-      "macros", "customXml", "smartArt", "ole", "trackedChanges", "pivotTables", "masters",
+      "macros", "customXml", "smartArt", "ole", "pivotTables", "masters",
     ]);
     const overclaimed = rows
       .flatMap((row) => row.touches.filter((region) => PRESERVE_ONLY.has(region)).map((region) => `${row.commandId}: ${region}`));
     expect(overclaimed).toEqual([]);
+
+    // Common plain-text insertions and deletions are editable as individual
+    // revisions. Complex and structural Word revisions remain preserve-only,
+    // so only the bounded single-revision commands may touch this region.
+    const supportedTrackedChangeCommands = new Set([
+      "document.review.trackChanges.propose",
+      "document.review.trackChanges.acceptOne",
+      "document.review.trackChanges.rejectOne",
+    ]);
+    const unsupportedTrackedChangeClaims = rows
+      .filter((row) => row.touches.includes("trackedChanges") && !supportedTrackedChangeCommands.has(row.commandId))
+      .map((row) => `${row.commandId}: trackedChanges`);
+    expect(unsupportedTrackedChangeClaims).toEqual([]);
   });
 
   it("labels every command in words that fit the bar", () => {

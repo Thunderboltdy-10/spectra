@@ -201,6 +201,20 @@ describe("DOCX preservation lens", () => {
       type: "paragraph" as const,
       text: "A safe paragraph after the bibliography wrapper.",
     };
+    const update = docxProjectionFromContent({
+      ...opened.projection,
+      nativeProjectionComplete: true,
+      blocks: [...opened.projection.blocks, added],
+    }, opened.projection);
+    expect(update.operations.map((operation) => operation.kind)).toContain("insert-paragraph");
+    expect(update.operations.map((operation) => operation.kind)).not.toContain("reorder-regions");
+    const updated = await docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: update.operations,
+    });
+    const updatedReadback = await docxLens.open(updated);
+    expect(updatedReadback.projection.blocks.at(-1)?.text).toBe(added.text);
+
     const output = await docxLens.materialize({
       projection: {
         ...opened.projection,
@@ -210,6 +224,28 @@ describe("DOCX preservation lens", () => {
     });
     const reopened = await docxLens.open(output);
     expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
+  });
+
+  it("allows a supported note in an empty native story part with reserved separators", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source, "strict-native");
+    expect(opened.projection.nativeBinding.wordNotes ?? []).toEqual([]);
+    const paragraph = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.text.trim().length > 0 && block.attrs?.nativeReadOnly !== true,
+    )!;
+    const updated = await docxLens.mutate(opened.preservedCarry, {
+      kind: "insert-note",
+      noteType: "footnote",
+      noteId: "730",
+      anchor: { regionId: paragraph.id, start: 0, end: 0, expectedText: paragraph.text },
+      content: [[{ text: "A supported note in an existing empty story." }]],
+    });
+    const comparison = await comparePackages(source, updated);
+    expect(() => assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts })).not.toThrow();
+    const reopened = await docxLens.open(updated, "strict-native");
+    expect(reopened.projection.nativeBinding.wordNotes).toMatchObject([
+      { id: "730", type: "footnote", text: "A supported note in an existing empty story." },
+    ]);
   });
 
   it("retains omitted native blocks when materializing a partial live projection", async () => {

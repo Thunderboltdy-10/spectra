@@ -20,11 +20,13 @@
   "refusedRegions": [
     {
       "commandId": "document.review.trackChanges.accept",
-      "region": "trackedChanges"
+      "region": "trackedChanges",
+      "mode": "command-boundary"
     },
     {
       "commandId": "document.review.trackChanges.reject",
-      "region": "trackedChanges"
+      "region": "trackedChanges",
+      "mode": "command-boundary"
     },
     {
       "commandId": "document.review.updateFields",

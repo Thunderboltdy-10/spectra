@@ -56,8 +56,10 @@ export type DocxFixtureMutationRow = {
 
 export type DocxFixtureRefusalRow = {
   commandId: string;
-  /** The fidelity region the linked file preserves. */
+  /** The fidelity region the linked file preserves, unless refusal is a
+   * command-specific native boundary over a partially supported region. */
   region: string;
+  mode?: "preserved-region" | "command-boundary";
 };
 
 export type DocxFixtureSidecar = {
@@ -88,6 +90,7 @@ export type DocxRefusalAssertion = {
   fixture: string;
   commandId: string;
   region: string;
+  mode: "preserved-region" | "command-boundary";
   /** The lens declared this region PRESERVED for this file. */
   regionPreserved: boolean;
   /** The control is not enabled for the person. */
@@ -155,6 +158,8 @@ function fidelityByFeature(entries: readonly { feature: string; class: string }[
  * when the fixture has none.
  */
 function firstEditableParagraph(projection: DocxProjection) {
+  // Command fixture rows drive formatting bindings, which retain anchors in the
+  // paragraph. Text-replacement mutations use the safer selection in docx.ts.
   const editable = projection.blocks.filter(
     (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
   );
@@ -351,7 +356,13 @@ export async function runDocxCommandFixtures(fixtureDir: string) {
         permissions: { role: "edit", editable: true },
       });
       const humanRefused = humanState.state !== "enabled";
-      const operations = [...(command.manifestOps ?? [])];
+      // Prefer the precise registered capability when one exists. A broad
+      // manifest verb such as insert_blocks can cover unrelated constructs and
+      // make a supported note action look AI-refused because another block
+      // command is preserve-only.
+      const operations = command.capabilityId
+        ? [command.capabilityId]
+        : [...(command.manifestOps ?? [])];
       const gates = operations.map((operation) =>
         gateOperation({
           type: "document",
@@ -372,16 +383,19 @@ export async function runDocxCommandFixtures(fixtureDir: string) {
         fixture: stem,
         commandId: row.commandId,
         region: row.region,
+        mode: row.mode ?? "preserved-region",
         regionPreserved,
         humanRefused,
         assistantRefused,
         operations,
         ...(reason ? { reason } : {}),
       });
-      if (!regionPreserved || !humanRefused || !assistantRefused)
+      const regionRequirementMet = (row.mode ?? "preserved-region") === "command-boundary" || regionPreserved;
+      if (!regionRequirementMet || !humanRefused || !assistantRefused)
         failures.push(
           `${stem} · ${row.commandId}: ${JSON.stringify({
             region: row.region,
+            mode: row.mode ?? "preserved-region",
             regionPreserved,
             humanRefused,
             assistantRefused,

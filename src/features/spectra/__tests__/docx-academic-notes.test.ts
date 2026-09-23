@@ -2,11 +2,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Document } from "@ariadng/office/docx";
-import { unzipSync, strFromU8 } from "fflate";
+import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import { docxLens } from "../lenses/docx-lens";
 import { docxProjectionFromContent } from "../lenses/document-projection";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
 import { docxOperationSchema } from "../lenses/projection-contracts";
+import { MAX_WORD_NOTE_ID, existingWordNoteIdSchema, nextWordNoteId, wordNoteIdSchema } from "../lenses/docx-academic-schema";
 
 const fixture = () => readFile(join(process.cwd(), "fixtures/office/docx/footnotes-endnotes.docx"));
 const xml = (bytes: Uint8Array, part: string) => strFromU8(unzipSync(bytes)[part]!);
@@ -19,6 +20,47 @@ async function blank() {
 }
 
 describe("Academic Word note operations", () => {
+  it("allocates unused Word-compatible note IDs and rejects values Word cannot store", () => {
+    expect(wordNoteIdSchema.safeParse(String(MAX_WORD_NOTE_ID)).success).toBe(true);
+    expect(wordNoteIdSchema.safeParse(String(MAX_WORD_NOTE_ID + 1)).success).toBe(false);
+    expect(existingWordNoteIdSchema.safeParse(String(MAX_WORD_NOTE_ID + 1)).success).toBe(true);
+    expect(existingWordNoteIdSchema.safeParse("2147483648").success).toBe(false);
+    expect(nextWordNoteId([], 0)).toBe("1");
+    expect(nextWordNoteId(["1", "2"], 0)).toBe("3");
+    expect(nextWordNoteId(["32767"], 32_766)).toBe("1");
+  });
+
+  it("deletes a legacy out-of-range note without permitting another invalid note ID", async () => {
+    const base = await blank();
+    const paragraph = base.projection.blocks[0]!;
+    const valid = await docxLens.mutate(base.preservedCarry, docxOperationSchema.parse({
+      kind: "insert-note", noteType: "footnote", noteId: "41",
+      anchor: { regionId: paragraph.id, start: 9, end: 9, expectedText: paragraph.text },
+      content: [[{ text: "Legacy note" }]],
+    }));
+    const entries = unzipSync(valid);
+    for (const part of ["word/document.xml", "word/footnotes.xml"]) {
+      const xmlText = strFromU8(entries[part]!);
+      expect(xmlText).toContain('w:id="41"');
+      entries[part] = strToU8(xmlText.replaceAll('w:id="41"', 'w:id="40000"'));
+    }
+    const imported = await docxLens.open(zipSync(entries));
+    expect(imported.projection.nativeBinding.wordNotes).toMatchObject([{ id: "40000", type: "footnote", text: "Legacy note" }]);
+
+    const deleted = await docxLens.mutate(imported.preservedCarry, {
+      kind: "delete-note", noteType: "footnote", noteId: "40000", expectedText: "Legacy note",
+    });
+    const reopened = await docxLens.open(deleted);
+    expect(reopened.projection.nativeBinding.wordNotes ?? []).toEqual([]);
+    expect(strFromU8(unzipSync(deleted)["word/footnotes.xml"]!)).not.toContain('w:id="40000"');
+    expect(strFromU8(unzipSync(deleted)["word/document.xml"]!)).not.toContain('w:id="40000"');
+    expect(docxOperationSchema.safeParse({
+      kind: "insert-note", noteType: "footnote", noteId: "40000",
+      anchor: { regionId: paragraph.id, start: 9, end: 9, expectedText: paragraph.text },
+      content: [[{ text: "Must remain invalid" }]],
+    }).success).toBe(false);
+  });
+
   it.each(["footnote", "endnote"] as const)("inserts, edits rich content, moves and deletes a %s with reserved separators intact", async (noteType) => {
     const base = await blank();
     const paragraph = base.projection.blocks[0]!;

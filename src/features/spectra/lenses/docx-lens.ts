@@ -3414,6 +3414,11 @@ async function projectDocument(
   for (const partName of new Set([
     ...wordNotes.flatMap((note) => note.partName ? [note.partName] : []),
     ...wordComments.flatMap((comment) => comment.partName ? [comment.partName] : []),
+    // A Word story part can exist with only its reserved separators before the
+    // first supported note or comment is inserted. It is still a native
+    // academic part: the writer edits identified records in place and retains
+    // sibling story content, so a part-level carry marker must not freeze it.
+    ...partNames.filter((name) => /\/word\/(?:footnotes|endnotes|comments[^/]*)\.xml$/i.test(name)),
     ...(await wordSourceParts(document)).map((part) => part.partName),
     ...(document.office.package.getPart("/customXml/spectraAcademic.xml") ? ["/customXml/spectraAcademic.xml"] : []),
   ])) fidelityEntries.push({ regionId: `docx:academic:${partName}`, feature: "academic-content", class: "NATIVE", partName });

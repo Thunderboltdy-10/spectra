@@ -11,7 +11,7 @@
     "paragraphs": "NATIVE",
     "lists": "EQUIVALENT",
     "tables": "NATIVE or PRESERVED when nested",
-    "notes": "PRESERVED",
+    "notes": "Supported note operations are NATIVE; imported note bodies with unsupported content stay preserved",
     "footer": "PRESERVED"
   },
   "mutations": [
@@ -317,12 +317,6 @@
         "word/footer1.xml",
         "word/styles.xml"
       ]
-    }
-  ],
-  "refusedRegions": [
-    {
-      "commandId": "document.insert.footnote",
-      "region": "footnotes"
     }
   ]
 }

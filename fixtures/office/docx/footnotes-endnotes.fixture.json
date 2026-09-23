@@ -7,7 +7,7 @@
   ],
   "expected": {
     "body paragraphs": "NATIVE",
-    "notes": "PRESERVED",
+    "notes": "Supported note operations are NATIVE; imported note bodies with unsupported content stay preserved",
     "custom XML": "PRESERVED"
   },
   "mutations": [
@@ -46,16 +46,6 @@
         "word/endnotes.xml",
         "customXml/"
       ]
-    }
-  ],
-  "refusedRegions": [
-    {
-      "commandId": "document.insert.footnote",
-      "region": "footnotes"
-    },
-    {
-      "commandId": "document.insert.endnote",
-      "region": "footnotes"
     }
   ]
 }

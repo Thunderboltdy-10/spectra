@@ -95,7 +95,7 @@ import { Endnote, Footnote, SpectraNotes } from "../editor/document-notes";
 import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
 import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
 import { documentBlocksFromJson } from "../lenses/document-projection";
-import type { WordTextAnchor } from "../lenses/docx-academic-schema";
+import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { editNoteText } from "../editor/note-text-edit";
 import {
@@ -2178,7 +2178,11 @@ export function DocumentStudio({
   function addAcademicNote(noteType: "footnote" | "endnote") {
     if (!editor) return;
     try {
-      const noteId = String((crypto.getRandomValues(new Uint32Array(1))[0]! % 2_147_483_646) + 1);
+      const usedIds = [
+        ...academicNotes.filter((note) => note.noteType === noteType).map((note) => note.noteId),
+        ...wordNotes.filter((note) => note.type === noteType).map((note) => note.id),
+      ];
+      const noteId = nextWordNoteId(usedIds, crypto.getRandomValues(new Uint32Array(1))[0]!);
       if (runAcademic([{ kind: "insert-note", anchor: academicSelection(editor), noteType, noteId, content: [[{ text: "" }]] }])) editor.state.doc.descendants((node, pos) => { if (node.attrs.nativeNoteId === noteId) editor.commands.setNodeSelection(pos); });
     }
     catch (error) { toast.error(error instanceof Error ? error.message : "Select a paragraph first."); }
@@ -3088,6 +3092,36 @@ export function DocumentStudio({
     if (!entry) return;
     executeCommand(entry.command, documentCommandCtx, value);
   };
+  useEffect(() => spectraBus.handle("document.executeCommand", async ({ artifactId: targetId, commandId, params }) => {
+    if (targetId !== artifactId) return undefined;
+    const entry = documentCommandMap.get(commandId);
+    if (!entry) {
+      return {
+        commandId,
+        status: "unavailable",
+        effect: "mutate",
+        message: "This command is not registered for the active document.",
+      } satisfies import("../commands/types").CommandExecutionResult;
+    }
+    const availability = entry.command.availability(documentCommandCtx);
+    if (availability.state !== "enabled") {
+      return {
+        commandId,
+        status: "unavailable",
+        effect: "mutate",
+        message: availability.state === "disabled"
+          ? availability.reason
+          : "This command is not available for the active document.",
+      } satisfies import("../commands/types").CommandExecutionResult;
+    }
+    const outcome = await entry.command.execute(documentCommandCtx, params as CommandParam);
+    return outcome ?? {
+      commandId,
+      status: "completed",
+      effect: "mutate",
+      message: `${entry.binding.label} started.`,
+    } satisfies import("../commands/types").CommandExecutionResult;
+  }), [artifactId, documentCommandCtx, documentCommandMap]);
   const documentCommandAvailability = (id: string) => {
     const entry = documentCommandMap.get(id);
     if (!entry) return { enabled: false };

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { APP_COMMANDS, buildKBarEntries, rankKBarCommand, searchAuthorizedKBar, type KBarContext } from "../commands";
+import { APP_COMMANDS, buildKBarEntries, commandContextForKBar, rankKBarCommand, searchAuthorizedKBar, type KBarContext } from "../commands";
+import { spectraBus } from "../events";
 import * as spectraApi from "../data/api";
 
 const context = (overrides: Partial<KBarContext> = {}): KBarContext => ({
@@ -69,5 +70,57 @@ describe("contextual K-bar registry", () => {
     expect(entry?.command.parameters).toEqual([
       expect.objectContaining({ name: "body", kind: "textarea", required: true }),
     ]);
+  });
+
+  it("offers registered academic document actions only for a mounted document", () => {
+    const documentContext = context({
+      pathname: "/library/doc-1",
+      activeArtifactId: "doc-1",
+      activeArtifactType: "document",
+    });
+    const documentEntries = buildKBarEntries(APP_COMMANDS, documentContext, "footnote");
+    expect(documentEntries.find((entry) => entry.command.id === "document.insert.footnote")).toMatchObject({
+      label: "Footnote",
+      description: "A numbered note at the foot of the page",
+    });
+    expect(buildKBarEntries(APP_COMMANDS, context({
+      pathname: "/workspace",
+      activeArtifactId: "work-1",
+      activeArtifactType: "whiteboard",
+    }), "footnote").some((entry) => entry.command.id === "document.insert.footnote")).toBe(false);
+  });
+
+  it("routes a K-bar academic action to the registered editor command for its active artifact", async () => {
+    const documentContext = context({
+      pathname: "/library/doc-1",
+      activeArtifactId: "doc-1",
+      activeArtifactType: "document",
+    });
+    const entry = buildKBarEntries(APP_COMMANDS, documentContext, "footnote")
+      .find((item) => item.command.id === "document.insert.footnote");
+    expect(entry).toBeDefined();
+    const received: unknown[] = [];
+    const remove = spectraBus.handle("document.executeCommand", async (payload) => {
+      received.push(payload);
+      return {
+        commandId: payload.commandId,
+        status: "completed",
+        effect: "mutate",
+        message: "Footnote inserted.",
+      };
+    });
+    try {
+      await expect(entry!.command.execute(commandContextForKBar(documentContext, undefined), undefined)).resolves.toMatchObject({
+        commandId: "document.insert.footnote",
+        status: "completed",
+        message: "Footnote inserted.",
+      });
+      expect(received).toEqual([{
+        artifactId: "doc-1",
+        commandId: "document.insert.footnote",
+      }]);
+    } finally {
+      remove();
+    }
   });
 });

@@ -14,10 +14,33 @@ export const wordNoteContentSchema = z.array(z.array(z.object({
   underline: z.boolean().optional(),
 }).strict()).max(1_000)).min(1).max(1_000);
 
-export const wordNoteIdSchema = z.string().regex(/^[1-9][0-9]{0,9}$/).refine(
-  (value) => Number(value) <= 2_147_483_647,
-  "Word note identifiers must be positive 32-bit integers; separators are reserved.",
+export const MAX_WORD_NOTE_ID = 32_767;
+const MAX_LEGACY_WORD_NOTE_ID = 2_147_483_647;
+
+export const wordNoteIdSchema = z.string().regex(/^[1-9][0-9]{0,4}$/).refine(
+  (value) => Number(value) <= MAX_WORD_NOTE_ID,
+  "Word note identifiers must be positive Word-compatible IDs (1–32767); separators are reserved.",
 );
+
+/** Existing imported IDs may exceed Word's range; allow deleting them so a
+ * damaged legacy note can be cleaned up without creating or moving another. */
+export const existingWordNoteIdSchema = z.string().regex(/^[1-9][0-9]{0,9}$/).refine(
+  (value) => Number(value) <= MAX_LEGACY_WORD_NOTE_ID,
+  "An imported Word note identifier is outside the supported decimal range.",
+);
+
+/** Pick an unused positive ID within Word's ST_DecimalNumber bound. */
+export function nextWordNoteId(usedIds: readonly string[], entropy: number) {
+  const used = new Set(usedIds);
+  if (used.size >= MAX_WORD_NOTE_ID)
+    throw new Error("This document has no free Word footnote or endnote identifiers.");
+  const start = (Math.trunc(Number.isFinite(entropy) ? entropy : 0) >>> 0) % MAX_WORD_NOTE_ID;
+  for (let offset = 0; offset < MAX_WORD_NOTE_ID; offset += 1) {
+    const candidate = String(((start + offset) % MAX_WORD_NOTE_ID) + 1);
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error("This document has no free Word footnote or endnote identifiers.");
+}
 
 /** UTF-16 offsets, matching ProseMirror. expectedText fences anchor rebasing. */
 export const wordTextAnchorSchema = z.object({
@@ -31,7 +54,7 @@ export const wordNoteOperationSchemas = [
   z.object({ kind: z.literal("insert-note"), anchor: wordTextAnchorSchema, noteType: z.enum(["footnote", "endnote"]), noteId: wordNoteIdSchema, content: wordNoteContentSchema }).strict(),
   z.object({ kind: z.literal("edit-note"), noteType: z.enum(["footnote", "endnote"]), noteId: wordNoteIdSchema, expectedText: z.string().max(100_000), content: wordNoteContentSchema }).strict(),
   z.object({ kind: z.literal("move-note"), noteType: z.enum(["footnote", "endnote"]), noteId: wordNoteIdSchema, anchor: wordTextAnchorSchema }).strict(),
-  z.object({ kind: z.literal("delete-note"), noteType: z.enum(["footnote", "endnote"]), noteId: wordNoteIdSchema, expectedText: z.string().max(100_000) }).strict(),
+  z.object({ kind: z.literal("delete-note"), noteType: z.enum(["footnote", "endnote"]), noteId: existingWordNoteIdSchema, expectedText: z.string().max(100_000) }).strict(),
 ] as const;
 
 export type WordNoteContent = z.infer<typeof wordNoteContentSchema>;

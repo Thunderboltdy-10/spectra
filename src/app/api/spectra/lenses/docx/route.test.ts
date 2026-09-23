@@ -6,20 +6,23 @@ import { docxLens } from "@/features/spectra/lenses/docx-lens";
 
 const convexMutation = vi.fn();
 const convexQuery = vi.fn();
+const checkpointArtifactDurableContent = vi.fn();
 const fetchVerifiedNativePayload = vi.fn();
 const fetchStoredNativeBase = vi.fn();
 const uploadNativePayload = vi.fn();
+const ensureImportedNativePayload = vi.fn(async () => undefined);
 
 vi.mock("@/lib/convex-server", () => ({
   convexMutation,
   convexQuery,
+  checkpointArtifactDurableContent,
   hydrateContentForWrite: async (_artifactId:string,content:unknown)=>content,
 }));
 vi.mock("@/features/spectra/lenses/native-payload-server", () => ({
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
   uploadNativePayload,
-  ensureImportedNativePayload: async ()=>undefined,
+  ensureImportedNativePayload,
 }));
 
 const artifactId = "artifact-route-docx";
@@ -43,6 +46,14 @@ async function routePost(content: unknown) {
       body: JSON.stringify({ action: "materialize", artifactId, content }),
     }),
   );
+}
+
+async function routePostSaved() {
+  const { POST } = await import("./route");
+  return POST(new NextRequest("http://localhost/api/spectra/lenses/docx", {
+    method: "POST",
+    body: JSON.stringify({ action: "materialize", artifactId }),
+  }));
 }
 
 async function baseProjection() {
@@ -92,6 +103,7 @@ describe("DOCX materialization route", () => {
         };
       throw new Error(`Unexpected route query: ${name}`);
     });
+    checkpointArtifactDurableContent.mockResolvedValue(undefined);
     convexMutation.mockResolvedValue({ requestId: "route-request-1", state: "pending" });
     uploadNativePayload.mockImplementation(async (_workId: string, bytes: Uint8Array) => {
       storedPayload = bytes;
@@ -251,6 +263,16 @@ describe("DOCX materialization route", () => {
     expect(equation.ommlXml).toContain("oMathPara");
   });
 
+  it("flushes the acknowledged collaboration log before reading materialization content", async () => {
+    const response = await routePostSaved();
+    expect(response.status).toBe(200);
+    expect(checkpointArtifactDurableContent).toHaveBeenCalledWith(artifactId);
+    const artifactRead = convexQuery.mock.calls.findIndex(([name]) => name === "spectraArtifacts:get");
+    expect(checkpointArtifactDurableContent.mock.invocationCallOrder[0]).toBeLessThan(
+      convexQuery.mock.invocationCallOrder[artifactRead]!,
+    );
+  });
+
   it("materializes margins and section header/footer text with semantic readback", async () => {
     const { opened } = await baseProjection();
     const content = {
@@ -289,6 +311,23 @@ describe("DOCX materialization route", () => {
       state: "opened",
       deferredNative: true,
     });
+  });
+
+  it("adopts a retained Library original before opening its native projection", async () => {
+    const { POST } = await import("./route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/spectra/lenses/docx", {
+        method: "POST",
+        body: JSON.stringify({ action: "open", artifactId }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(ensureImportedNativePayload).toHaveBeenCalledWith(artifactId);
+    expect(fetchVerifiedNativePayload).toHaveBeenCalledWith(artifactId, "cloud");
+    expect(ensureImportedNativePayload.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchVerifiedNativePayload.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("defers materialize without toasting when native payload is unavailable", async () => {

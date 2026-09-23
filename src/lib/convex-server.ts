@@ -98,6 +98,13 @@ export async function storeArtifactContent(artifactId: string, content: unknown)
   return persistDurableContent(content, artifactId, await getConvexClient());
 }
 
+/** Flush the authenticated artifact's acknowledged Yjs log into its canonical
+ * projection before a native Office save reads the artifact record. */
+export async function checkpointArtifactDurableContent(artifactId: string) {
+  const { checkpointDurableContent } = await import("./durable-checkpoint-server");
+  return checkpointDurableContent(artifactId, await getConvexClient());
+}
+
 function getPublicConvexClient() {
   return new ConvexHttpClient(getConvexUrl(), { logger: false });
 }

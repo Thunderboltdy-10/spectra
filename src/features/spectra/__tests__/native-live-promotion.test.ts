@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  nativeMaterializationRequest,
   nativeLiveContentKey,
   nativeLiveNeedsPromotion,
 } from "../lenses/native-live-promotion";
 
 describe("native live promotion", () => {
+  it("references the already-saved artifact without attaching the full content body", () => {
+    const request = nativeMaterializationRequest("artifact-dense-workbook");
+    expect(request).toEqual({
+      action: "materialize",
+      artifactId: "artifact-dense-workbook",
+    });
+    expect(request).not.toHaveProperty("content");
+  });
+
   it("keys a document by authored block text, not checkpoint identity", () => {
     expect(
       nativeLiveContentKey({
@@ -171,6 +181,8 @@ describe("native live promotion", () => {
     );
     expect(studio).toContain("live.flushSnapshot?.()");
     expect(sync).toContain("nativeLiveNeedsPromotion");
+    expect(sync).toContain("nativeMaterializationRequest(artifactId)");
+    expect(sync).not.toContain("contentForDurableRequest");
     expect(sync).toContain("queueNativeMaterialization(liveValue)");
     expect(sync).toContain('result?.state === "deferred_native"');
     expect(sync).toContain('result?.state === "cloud_saved"');

@@ -1650,6 +1650,7 @@ describe("Spectra run route", () => {
               name: "propose_operation",
               arguments: JSON.stringify({
                 workSummary: "Refining the deck's recall purpose",
+                fulfillsRequest: true,
                 operation,
               }),
             },
@@ -1840,6 +1841,7 @@ describe("Spectra run route", () => {
               name: "propose_operation",
               arguments: JSON.stringify({
                 workSummary: "Clarifying the next verification step",
+                fulfillsRequest: true,
                 operation: {
                   type: "artifact.update",
                   input: {
@@ -1882,11 +1884,33 @@ describe("Spectra run route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const requestPayload = JSON.parse(
       String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body),
-    ) as { tool_choice?: unknown };
+    ) as {
+      tool_choice?: unknown;
+      tools?: Array<{
+        function?: {
+          name?: string;
+          parameters?: {
+            required?: string[];
+            properties?: {
+              fulfillsRequest?: { type?: string; const?: boolean };
+            };
+          };
+        };
+      }>;
+    };
     expect(requestPayload.tool_choice).toEqual({
       type: "function",
       function: { name: "propose_operation" },
     });
+    const propose = requestPayload.tools?.find(
+      (tool) => tool.function?.name === "propose_operation",
+    );
+    expect(propose?.function?.parameters?.required).toContain(
+      "fulfillsRequest",
+    );
+    expect(
+      propose?.function?.parameters?.properties?.fulfillsRequest,
+    ).toMatchObject({ type: "boolean", const: true });
     expect(getSavedArtifact().content).toEqual({
       ...content,
       progressNote:
@@ -2066,6 +2090,7 @@ describe("Spectra run route", () => {
                       name: "propose_operation",
                       arguments: JSON.stringify({
                         workSummary: "Adding a Km validation column",
+                        fulfillsRequest: true,
                         operation: updateOperation,
                       }),
                     },
@@ -2307,6 +2332,7 @@ describe("Spectra run route", () => {
                       name: "propose_operation",
                       arguments: JSON.stringify({
                         workSummary: "Making slide 3 more concise",
+                        fulfillsRequest: true,
                         operation: updateOperation,
                       }),
                     },

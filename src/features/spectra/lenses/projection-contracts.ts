@@ -420,6 +420,8 @@ export const xlsxSheetProjectionSchema = z
     frozenColumns: z.number().int().nonnegative().optional(),
     rowCount: z.number().int().positive().optional(),
     columnCount: z.number().int().positive().optional(),
+    /** Native default used when editor content adds a cell without an explicit format. */
+    defaultCellFormat: z.record(z.string(), z.unknown()).optional(),
     hiddenRows: z.array(z.number().int().nonnegative()).optional(),
     hiddenColumns: z.array(z.number().int().nonnegative()).optional(),
     columnWidths: z.record(z.string(), z.number()).optional(),

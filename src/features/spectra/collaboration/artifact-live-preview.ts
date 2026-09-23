@@ -1,5 +1,15 @@
 import type { ArtifactLiveValue } from "./artifact-yjs-model";
 
+/**
+ * Spreadsheet previews travel over the live collaboration document. Copying
+ * their complete canonical content into every durable preview frame repeats
+ * the whole workbook (and can exceed Convex's mutation body limit); the final
+ * artifact write remains responsible for canonical persistence.
+ */
+export function shouldStageAiPreviewContent(blueprintKey: string) {
+  return blueprintKey !== "sheets";
+}
+
 type StringChange = {
   path: Array<string | number>;
   before: string;

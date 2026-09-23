@@ -9,6 +9,7 @@ import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import type { ArtifactRegionController } from "./region-controller";
 import type { ArtifactCollaborationTransport } from "./types";
+import { planSheetsCellProjection } from "../work/models/yjs/structured-adapters";
 
 export const ARTIFACT_YJS_META_MAP = "spectra:artifact-meta";
 export const ARTIFACT_YJS_REGION_MAP = "spectra:artifact-regions";
@@ -402,6 +403,10 @@ export function changedArtifactRegionIds(
   before: unknown,
   after: unknown,
 ) {
+  if (typeKey === "sheets") {
+    const cellPlan = planSheetsCellProjection(before, after);
+    if (cellPlan) return cellPlan.changes.map((change) => change.regionId);
+  }
   const previous = decomposeArtifactContent(typeKey, before);
   const next = decomposeArtifactContent(typeKey, after);
   const previousStructure =

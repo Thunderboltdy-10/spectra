@@ -1022,8 +1022,23 @@ export function xlsxProjectionFromContent(
       const previousByRef = new Map(
         sheet.cells.map((cell) => [cell.ref, cell]),
       );
+      let rowCount = Math.max(
+        sheet.rowCount ?? 0,
+        typeof nextRecord.rowCount === "number" ? nextRecord.rowCount : 0,
+      );
+      let columnCount = Math.max(
+        sheet.columnCount ?? 0,
+        typeof nextRecord.columnCount === "number" ? nextRecord.columnCount : 0,
+      );
+      const cellCoordinates = new Map<string, { row: number; column: number }>();
       const cells = Object.entries(next.cells).map(([rawRef, value]) => {
         const ref = rawRef.toUpperCase();
+        const coordinate = parseAddress(ref);
+        if (coordinate) {
+          cellCoordinates.set(ref, coordinate);
+          rowCount = Math.max(rowCount, coordinate.row + 1);
+          columnCount = Math.max(columnCount, coordinate.column + 1);
+        }
         const previous = previousByRef.get(ref);
         const nextValue =
           value.value === undefined ? (previous?.value ?? null) : value.value;
@@ -1031,6 +1046,12 @@ export function xlsxProjectionFromContent(
           typeof value.formula === "string" && value.formula
             ? value.formula.replace(/^=/, "")
             : previous?.formula;
+        const format =
+          "format" in value
+            ? Object.keys(record(value.format)).length
+              ? value.format
+              : sheet.defaultCellFormat
+            : previous?.format ?? sheet.defaultCellFormat;
         if (
           previous?.formula &&
           !value.formula &&
@@ -1047,6 +1068,7 @@ export function xlsxProjectionFromContent(
             value: null,
           }),
           value: nextValue,
+          ...(format ? { format } : {}),
           ...(nextFormula
             ? {
                 formula: nextFormula,
@@ -1057,11 +1079,16 @@ export function xlsxProjectionFromContent(
                     : "absent" as const,
               }
             : {}),
-          ...("format" in value &&
-          !sheetFormatsEquivalent(value.format, previous?.format)
-            ? { format: value.format ?? {} }
-          : {}),
         };
+      });
+      // Yjs preserves insertion order, while native XLSX readback is ordered by
+      // worksheet coordinate. Canonicalize the projection so semantic digests
+      // do not depend on when a distant cell was inserted into the editor map.
+      cells.sort((left, right) => {
+        const leftCoordinate = cellCoordinates.get(left.ref);
+        const rightCoordinate = cellCoordinates.get(right.ref);
+        if (!leftCoordinate || !rightCoordinate) return left.ref.localeCompare(right.ref);
+        return leftCoordinate.row - rightCoordinate.row || leftCoordinate.column - rightCoordinate.column;
       });
       const tables = Array.isArray(nextRecord.tables)
         ? nextRecord.tables.flatMap((candidate) => {
@@ -1125,11 +1152,14 @@ export function xlsxProjectionFromContent(
         ...sheet,
         name: typeof nextRecord.name === "string" ? nextRecord.name : sheet.name,
         cells,
+        // Editors can add a valid cell beyond the imported worksheet's <dimension>.
+        // Keep the semantic extent in step with those cells so native readback
+        // verifies the same range that the user's edit created.
+        rowCount,
+        columnCount,
         merges: next.mergedRanges ?? sheet.merges,
         frozenRows: next.frozenRows ?? sheet.frozenRows,
         frozenColumns: next.frozenColumns ?? sheet.frozenColumns,
-        ...(typeof nextRecord.rowCount === "number" ? { rowCount: nextRecord.rowCount } : {}),
-        ...(typeof nextRecord.columnCount === "number" ? { columnCount: nextRecord.columnCount } : {}),
         ...(Array.isArray(nextRecord.hiddenRows) ? { hiddenRows: nextRecord.hiddenRows.filter((entry): entry is number => typeof entry === "number") } : {}),
         ...(Array.isArray(nextRecord.hiddenColumns) ? { hiddenColumns: nextRecord.hiddenColumns.filter((entry): entry is number => typeof entry === "number") } : {}),
         ...(nextRecord.columnWidths && typeof nextRecord.columnWidths === "object" ? { columnWidths: record(nextRecord.columnWidths) as Record<string, number> } : {}),
@@ -1227,10 +1257,17 @@ function axisEditPoint(
     if (next.row < 0 || next.column < 0) continue;
     const ref = `${columnName(next.column)}${next.row + 1}`;
     const moved = nextCells.get(ref);
-    if (moved && JSON.stringify({ value: moved.value, formula: moved.formula }) === JSON.stringify({ value: cell.value, formula: cell.formula }))
+    const unchanged = nextCells.get(cell.ref);
+    const sameValue = (candidate: typeof cell | undefined) =>
+      candidate &&
+      JSON.stringify({ value: candidate.value, formula: candidate.formula }) ===
+        JSON.stringify({ value: cell.value, formula: cell.formula });
+    // A larger used range can come from adding one new cell. Treat it as an
+    // axis edit only when an existing cell actually moved off its old address.
+    if (sameValue(moved) && !sameValue(unchanged))
       candidates.push(axis === "row" ? coordinate.row : coordinate.column);
   }
-  return candidates.length ? Math.min(...candidates) : 0;
+  return candidates.length ? Math.min(...candidates) : undefined;
 }
 
 export function xlsxOperationsBetween(
@@ -1275,10 +1312,16 @@ export function xlsxOperationsBetween(
     }
     const rowDelta = (sheet.rowCount ?? previous.rowCount ?? 100) - (previous.rowCount ?? 100);
     const columnDelta = (sheet.columnCount ?? previous.columnCount ?? 26) - (previous.columnCount ?? 26);
-    if (Math.abs(rowDelta) === 1)
-      operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "row", at: axisEditPoint(previous, sheet, "row", rowDelta as 1 | -1), delta: rowDelta as 1 | -1 });
-    if (Math.abs(columnDelta) === 1)
-      operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "column", at: axisEditPoint(previous, sheet, "column", columnDelta as 1 | -1), delta: columnDelta as 1 | -1 });
+    if (Math.abs(rowDelta) === 1) {
+      const at = axisEditPoint(previous, sheet, "row", rowDelta as 1 | -1);
+      if (at !== undefined)
+        operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "row", at, delta: rowDelta as 1 | -1 });
+    }
+    if (Math.abs(columnDelta) === 1) {
+      const at = axisEditPoint(previous, sheet, "column", columnDelta as 1 | -1);
+      if (at !== undefined)
+        operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "column", at, delta: columnDelta as 1 | -1 });
+    }
     const propertyKeys = ["rowCount", "columnCount", "hiddenRows", "hiddenColumns", "columnWidths", "rowHeights", "hidden", "showGridlines", "showHeadings", "tabColor"] as const;
     const properties: Record<string, unknown> = {};
     for (const key of propertyKeys) {

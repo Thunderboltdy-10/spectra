@@ -279,6 +279,9 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       id: `xlsx:sheet:${sheet.sheetId}`,
       name: sheet.name,
       cells,
+      defaultCellFormat: normalizedCellFormat(
+        sheet.getCellStyle("XFD1048576") as unknown as Record<string, unknown>,
+      ),
       merges: sheet.merges(),
       frozenRows: freeze.rows,
       frozenColumns: freeze.columns,

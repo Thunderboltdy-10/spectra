@@ -1,4 +1,5 @@
 import { storageHasOtherBinding } from "./durableStorageBindings";
+import { decodeBase64Url, encodeBase64Url } from "./artifactDeletionScheduling";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -9,18 +10,20 @@ import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity"
 
 const PAGE_SIZE = 40;
 const CURSOR_VERSION = "d01:v2";
-type IntakeCursor = { version: string; family: "assets" | "imports"; cursor: string | null };
+export type IntakeCursor = { version: string; family: "assets" | "imports"; cursor: string | null };
 
-function decodeCursor(cursor: string | null): IntakeCursor {
+export function decodeIntakeCursor(cursor: string | null): IntakeCursor {
   if (!cursor) return { version: CURSOR_VERSION, family: "assets", cursor: null };
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as IntakeCursor;
+    const parsed = JSON.parse(decodeBase64Url(cursor)) as IntakeCursor;
     if (parsed.version !== CURSOR_VERSION || !["assets", "imports"].includes(parsed.family) || (parsed.cursor !== null && typeof parsed.cursor !== "string")) throw new Error();
     return parsed;
   } catch { throw new Error("INTAKE_CURSOR_INVALID"); }
 }
 
-function encodeCursor(cursor: IntakeCursor) { return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url"); }
+export function encodeIntakeCursor(cursor: IntakeCursor) {
+  return encodeBase64Url(JSON.stringify(cursor));
+}
 
 type StorageExpectation = { bytes: number; sha256?: string; mediaType?: string };
 
@@ -80,13 +83,35 @@ async function retainedReferences(ctx: MutationCtx, artifactId: Id<"spectraArtif
   const pins = await ctx.db.query("artifactEmbeds").withIndex("by_source", (q) => q.eq("sourceArtifactId", artifactId)).collect();
   const pinnedVersionIds = new Set(pins.filter(isSurvivingPinnedEmbed).flatMap((pin) => pin.pinnedVersionId ? [String(pin.pinnedVersionId)] : []));
   if (!pinnedVersionIds.size) return retained;
-  const [versions, builds] = await Promise.all([
-    ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", artifactId)).collect(),
-    ctx.db.query("spectraRuntimeBuilds").withIndex("by_artifact_status", (q) => q.eq("artifactId", artifactId)).collect(),
-  ]);
+  // A source can have many large historical checkpoints. Loading every
+  // version/build just to find a handful of pinned owners turns deletion of a
+  // large workbook into an unbounded read (and can time out the cleanup page).
+  // The pin index is the ownership authority, so fetch only its exact versions
+  // and their native builds.
+  const pinnedVersionRows = await Promise.all(
+    [...pinnedVersionIds].map((value) => {
+      const versionId = ctx.db.normalizeId("spectraArtifactVersions", value);
+      return versionId ? ctx.db.get(versionId) : null;
+    }),
+  );
+  const versions = pinnedVersionRows.filter(
+    (version): version is NonNullable<typeof version> =>
+      version?.artifactId === artifactId,
+  );
+  const builds = (
+    await Promise.all(
+      versions.map((version) =>
+        ctx.db
+          .query("spectraRuntimeBuilds")
+          .withIndex("by_artifact_version", (q) =>
+            q.eq("artifactId", artifactId).eq("artifactVersionId", version._id),
+          )
+          .collect(),
+      ),
+    )
+  ).flat();
   const rowKeys = rows.map((row) => [row._id, referenceKeys(row)] as const);
   for (const version of versions) {
-    if (!pinnedVersionIds.has(String(version._id))) continue;
     const content = await loadVersionAfter(ctx, version).catch(() => undefined);
     const values = new Set<string>();
     collectReferenceValues(content, values);
@@ -104,7 +129,7 @@ type IntakePageResult = { cursor: string | null; done: boolean; deletedRows: num
 export async function releaseArtifactIntakePage(ctx: MutationCtx, args: { artifactId: Id<"spectraArtifacts">; ownerAccountId: Id<"accounts">; cursor: string | null }): Promise<IntakePageResult> {
   const artifact = await ctx.db.get(args.artifactId);
   if (!artifact || artifact.ownerAccountId !== args.ownerAccountId || artifact.status !== "deleted") throw new Error("INTAKE_RELEASE_OWNER_TOMBSTONE_REQUIRED");
-  const state = decodeCursor(args.cursor);
+  const state = decodeIntakeCursor(args.cursor);
   let deletedRows = 0;
   let retainedRows = 0;
   let releasedBytes = 0;
@@ -135,8 +160,8 @@ export async function releaseArtifactIntakePage(ctx: MutationCtx, args: { artifa
       if (candidateUnknown) retainedRows += 1;
     }
     return result.isDone
-      ? { cursor: encodeCursor({ version: CURSOR_VERSION, family: "imports", cursor: null }), done: false, deletedRows, retainedRows, releasedBytes }
-      : { cursor: encodeCursor({ version: CURSOR_VERSION, family: "assets", cursor: result.continueCursor }), done: false, deletedRows, retainedRows, releasedBytes };
+      ? { cursor: encodeIntakeCursor({ version: CURSOR_VERSION, family: "imports", cursor: null }), done: false, deletedRows, retainedRows, releasedBytes }
+      : { cursor: encodeIntakeCursor({ version: CURSOR_VERSION, family: "assets", cursor: result.continueCursor }), done: false, deletedRows, retainedRows, releasedBytes };
   }
   const result = await ctx.db.query("artifactImportJobs").withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId)).paginate({ numItems: PAGE_SIZE, cursor: state.cursor });
   const retained = await retainedReferences(ctx, args.artifactId, result.page);
@@ -164,7 +189,7 @@ export async function releaseArtifactIntakePage(ctx: MutationCtx, args: { artifa
     deletedRows += 1;
     if (candidateUnknown) retainedRows += 1;
   }
-  return { cursor: result.isDone ? null : encodeCursor({ version: CURSOR_VERSION, family: "imports", cursor: result.continueCursor }), done: result.isDone, deletedRows, retainedRows, releasedBytes };
+  return { cursor: result.isDone ? null : encodeIntakeCursor({ version: CURSOR_VERSION, family: "imports", cursor: result.continueCursor }), done: result.isDone, deletedRows, retainedRows, releasedBytes };
 }
 
 export const releasePageArgs = { artifactId: v.id("spectraArtifacts"), ownerAccountId: v.id("accounts"), cursor: v.union(v.string(), v.null()) };

@@ -5,7 +5,7 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
 import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
 import {
   fetchVerifiedNativePayload,
@@ -68,7 +68,7 @@ const schema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("materialize"),
     artifactId: z.string().min(1),
-    content: z.unknown(),
+    content: z.unknown().optional(),
   }),
   z.object({
     action: z.literal("reconcile"),
@@ -374,8 +374,9 @@ async function materializeOfficeArtifactAttempt(
     : await sha256Payload(new TextEncoder().encode(JSON.stringify(
         (projection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
       )));
-  if (readbackDigest !== requestedDigest)
+  if (readbackDigest !== requestedDigest) {
     throw new Error("OFFICE_READBACK_MISMATCH");
+  }
   /**
    * The preservation promise, checked against the bytes before anything is
    * queued. Every other preservation check in Spectra is a declaration — a
@@ -539,7 +540,19 @@ export async function POST(request: Request) {
     const workId = id(input.artifactId);
     if (input.action === "materialize") {
       await ensureImportedNativePayload(workId);
-      input.content = await hydrateContentForWrite(input.artifactId, input.content);
+      if (input.content === undefined) {
+        // Yjs appends are durable before the public artifact projection is
+        // checkpointed. Flush that authenticated durable head before reading
+        // the native-save input; never ship the full workbook from the browser.
+        await checkpointArtifactDurableContent(input.artifactId);
+        const artifact = await convexQuery<
+          { artifactId: Id<"spectraArtifacts"> },
+          ArtifactTruth
+        >("spectraArtifacts:get", { artifactId: workId });
+        input.content = artifact.content;
+      } else {
+        input.content = await hydrateContentForWrite(input.artifactId, input.content);
+      }
     }
     let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
     try {

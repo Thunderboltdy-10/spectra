@@ -331,6 +331,45 @@ function richContentWithoutImages(content: readonly DocxRichInline[]) {
   return content.filter((item) => item.kind !== "image");
 }
 
+/**
+ * The editor schema can expose only the editable text before a protected Word
+ * field or hyperlink. That storage projection is a strict prefix of the native
+ * read-only paragraph, not an authored deletion. Keep the native block when
+ * the incoming rich content is exactly that prefix; real edits still reach the
+ * DOCX read-only safety gate.
+ */
+function isReadOnlyProjectionPrefix(
+  previous: DocxProjection["blocks"][number],
+  incoming: DocxProjection["blocks"][number],
+) {
+  if (
+    previous.attrs?.nativeReadOnly !== true ||
+    incoming.attrs?.nativeReadOnly !== true ||
+    previous.type !== "paragraph" ||
+    incoming.type !== previous.type ||
+    incoming.text.length > previous.text.length ||
+    !previous.text.startsWith(incoming.text)
+  )
+    return false;
+
+  const originalContent = previous.inlineContent ?? [];
+  const projectedContent = incoming.inlineContent ?? [];
+  if (
+    projectedContent.length >= originalContent.length ||
+    !projectedContent.every((item, index) =>
+      authoredSemanticsEqual(item, originalContent[index]),
+    )
+  )
+    return false;
+
+  const originalAttrs = previous.attrs ?? {};
+  return Object.entries(incoming.attrs ?? {}).every(
+    ([key, value]) =>
+      key === "nativeReadOnly" ||
+      authoredSemanticsEqual(value, originalAttrs[key]),
+  );
+}
+
 function richContentWithoutImagesOrLayout(content: readonly DocxRichInline[]) {
   return richContentWithoutImages(content).map((item) =>
     item.kind === "equation" ? { ...item, display: "block" as const } : item,
@@ -713,6 +752,8 @@ export function docxProjectionFromContent(
   const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(incoming.id);
+    if (previous && isReadOnlyProjectionPrefix(previous, incoming))
+      return previous;
     const recovered = previous
       ? restoreDocxBlockCarryMetadata(previous, incoming)
       : incoming;

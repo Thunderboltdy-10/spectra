@@ -344,6 +344,33 @@ export type SheetsCellProjectionPlan = {
   changes: SheetsCellProjectionChange[];
 };
 
+function sheetIdentityMapsCompatible(
+  before: Record<string, string>,
+  after: Record<string, string>,
+  sheetId: string,
+  axis: "row" | "column",
+) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const previous = before[key];
+    const next = after[key];
+    if (previous === next) continue;
+    if (!/^\d+$/.test(key)) return false;
+    const generated = `${sheetId}:${axis}:${Number(key) + 1}`;
+    // Normalization materializes stable default row/column identities for
+    // axes that gain their first populated cell. Those implicit additions are
+    // part of a cell edit, while replacing an existing authored identity is
+    // still a structural change.
+    if (
+      (previous === undefined && next === generated) ||
+      (next === undefined && previous === generated)
+    )
+      continue;
+    return false;
+  }
+  return true;
+}
+
 /**
  * Returns a cell-only plan when workbook and sheet structure are unchanged.
  * Structural changes deliberately fall back to the adapter's complete
@@ -368,9 +395,34 @@ export function planSheetsCellProjection(
     const previousSheet = previous.sheets[index]!;
     const nextSheet = content.sheets[index]!;
     if (previousSheet.id !== nextSheet.id) return null;
-    const { cells: previousCells, ...previousStructure } = previousSheet;
-    const { cells: nextCells, ...nextStructure } = nextSheet;
-    if (!plainEqual(previousStructure, nextStructure)) return null;
+    const {
+      cells: previousCells,
+      rowIdentities: previousRows,
+      columnIdentities: previousColumns,
+      ...previousStructure
+    } = previousSheet;
+    const {
+      cells: nextCells,
+      rowIdentities: nextRows,
+      columnIdentities: nextColumns,
+      ...nextStructure
+    } = nextSheet;
+    if (
+      !plainEqual(previousStructure, nextStructure) ||
+      !sheetIdentityMapsCompatible(
+        previousRows ?? {},
+        nextRows ?? {},
+        nextSheet.id,
+        "row",
+      ) ||
+      !sheetIdentityMapsCompatible(
+        previousColumns ?? {},
+        nextColumns ?? {},
+        nextSheet.id,
+        "column",
+      )
+    )
+      return null;
     const hinted = changedSheetCellAddresses(previousCells, nextCells);
     const addresses = hinted
       ? hinted

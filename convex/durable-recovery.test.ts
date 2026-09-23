@@ -35,7 +35,7 @@ async function fixture() {
 
 import { canonicalIntakeAttestation, INTAKE_ATTESTATION_PURPOSE, type IntakeAttestation } from "../shared/intake-attestation";
 import { adopt } from "./artifactContent";
-import { releaseArtifactIntakePage } from "./artifactIntakeLifecycle";
+import { decodeIntakeCursor, encodeIntakeCursor, releaseArtifactIntakePage } from "./artifactIntakeLifecycle";
 
 afterEach(() => vi.unstubAllEnvs());
 function attest(input: Omit<IntakeAttestation, "version" | "purpose" | "signature" | "issuedAt" | "expiresAt" | "nonce">) {
@@ -152,6 +152,19 @@ it("retries a deduplicated upload after its redundant bytes were deleted", async
   expect(await owner.mutation(internal.artifactContent.adopt,args)).toEqual(original);
 });
 
+it("encodes intake cleanup cursors when the Convex runtime has no Node Buffer", () => {
+  const bufferDescriptor=Object.getOwnPropertyDescriptor(globalThis,"Buffer");
+  try {
+    Object.defineProperty(globalThis,"Buffer",{configurable:true,writable:true,value:undefined});
+    const cursor={version:"d01:v2",family:"imports" as const,cursor:null};
+    expect(decodeIntakeCursor(encodeIntakeCursor(cursor))).toEqual(cursor);
+    expect(()=>decodeIntakeCursor("not-base64!" )).toThrow("INTAKE_CURSOR_INVALID");
+  } finally {
+    if(bufferDescriptor) Object.defineProperty(globalThis,"Buffer",bufferDescriptor);
+    else Reflect.deleteProperty(globalThis,"Buffer");
+  }
+});
+
 
 it("keeps a legacy aliased durable blob through another artifact's intake GC", async () => {
   const {t,ids,facts,owner}=await fixture();
@@ -166,6 +179,65 @@ it("keeps a legacy aliased durable blob through another artifact's intake GC", a
   expect(page.releasedBytes).toBe(0);
   expect(await t.run(async ctx => (await ctx.storage.get(facts.storageId))?.text() ?? null)).not.toBeNull();
   await t.run(ctx=>validateDurablePayload(ctx,{artifactId:ids[0].artifactId,payloadRef:source.payloadRef,digest:facts.digest,kind:"projection"}));
+});
+
+it("checks only pinned version rows while releasing intake for a large source", async () => {
+  const {t,ids}=await fixture();
+  const facts=await t.run(async ctx=>{
+    const now=Date.now();
+    const source=await ctx.db.get(ids[1].artifactId);
+    const container=await ctx.db.get(ids[0].artifactId);
+    await ctx.db.patch(ids[1].artifactId,{status:"deleted"});
+    const assetId=await ctx.db.insert("artifactAssets",{
+      artifactId:ids[1].artifactId, schoolId:source!.schoolId,
+      uploadedByAccountId:ids[1].accountId, path:"native/image", name:"image.png",
+      mediaType:"image/png", bytes:512_000, sha256:"a".repeat(64), status:"active",
+      createdAt:now, updatedAt:now,
+    });
+    const pinnedVersionId=await ctx.db.insert("spectraArtifactVersions",{
+      artifactId:ids[1].artifactId, ownerAccountId:ids[1].accountId,
+      schoolId:source!.schoolId, source:"manual", schemaVersion:2,
+      after:{blocks:[{type:"image",attrs:{assetId:String(assetId)}}]}, createdAt:now,
+    });
+    await ctx.db.insert("artifactEmbeds",{
+      containerType:"artifact", containerId:String(ids[0].artifactId),
+      containerRegionId:"durable-retention:pinned", sourceArtifactId:ids[1].artifactId,
+      schoolId:container!.schoolId, mode:"compact", interaction:"read",
+      versionPolicy:"pinned", pinnedVersionId, contextPolicy:"summary",
+      createdByAccountId:ids[0].accountId, placementState:"confirmed",
+      createdAt:now, updatedAt:now,
+    });
+    // A large unrelated history row is intentionally present. Retention only
+    // needs the exact checkpoint referenced by a surviving pin.
+    await ctx.db.insert("spectraArtifactVersions",{
+      artifactId:ids[1].artifactId, ownerAccountId:ids[1].accountId,
+      schoolId:source!.schoolId, source:"manual", schemaVersion:2,
+      after:{legacyBody:"x".repeat(500_000)}, createdAt:now+1,
+    });
+    return {assetId};
+  });
+  const page=await t.run(async ctx=>{
+    const guardedDb=new Proxy(ctx.db,{get(target,key,receiver){
+      if(key==="query") return (table:string)=>{
+        if(table==="spectraArtifactVersions") throw new Error("UNBOUNDED_VERSION_SCAN");
+        return target.query(table as never);
+      };
+      const value=Reflect.get(target,key,receiver);
+      return typeof value==="function" ? value.bind(target) : value;
+    }});
+    const guardedCtx=new Proxy(ctx,{get(target,key,receiver){
+      if(key==="db") return guardedDb;
+      const value=Reflect.get(target,key,receiver);
+      return typeof value==="function" ? value.bind(target) : value;
+    }});
+    return releaseArtifactIntakePage(guardedCtx as typeof ctx,{
+      artifactId:ids[1].artifactId, ownerAccountId:ids[1].accountId, cursor:null,
+    });
+  });
+  expect(page.retainedRows).toBe(1);
+  expect(await t.run(ctx=>ctx.db.get(facts.assetId))).toMatchObject({
+    status:"active", retentionReason:expect.stringMatching(/^pinned-version:/),
+  });
 });
 
 it("does not let a direct asset revoke delete another artifact's legacy durable body", async () => {

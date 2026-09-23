@@ -215,6 +215,45 @@ describe("decomposeArtifactContent", () => {
     ).toBe(true);
   });
 
+  it("keeps a newly populated blank sheet cell under its cell-level lease", () => {
+    const before = {
+      workbook: { calculationMode: "automatic" as const, locale: "en-US" },
+      activeSheetId: "sheet-1",
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Data",
+          rowCount: 10_000,
+          columnCount: 26,
+          cells: { A1: { value: 1 } },
+          tables: [],
+          charts: [],
+        },
+      ],
+    };
+    const after = {
+      ...before,
+      sheets: [
+        {
+          ...before.sheets[0],
+          cells: { ...before.sheets[0].cells, W10000: { value: "AI edit" } },
+        },
+      ],
+    };
+
+    const regions = changedArtifactRegionIds("sheets", before, after);
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toContain("sheet-1:row:10000");
+    expect(regions[0]).toContain("sheet-1:column:23");
+    expect(regions).not.toContain("artifact:structure");
+    expect(
+      changedArtifactRegionIds("sheets", before, {
+        ...before,
+        sheets: [{ ...before.sheets[0], name: "Renamed" }],
+      }),
+    ).toEqual(["artifact:structure"]);
+  });
+
   it("round-trips sparse sheets through recompose + normalize without Zod string misses", () => {
     const content = {
       workbook: { calculationMode: "automatic" as const },

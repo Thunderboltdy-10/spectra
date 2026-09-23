@@ -5,7 +5,7 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { z } from "zod";
 import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
 import {
   DocxLensError,
   docxLens,
@@ -41,7 +41,7 @@ const requestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("materialize"),
     artifactId: z.string().min(1),
-    content: z.unknown(),
+    content: z.unknown().optional(),
   }),
   z.object({
     action: z.literal("reconcile"),
@@ -447,10 +447,25 @@ export async function POST(request: Request) {
     }
     if (input.action === "materialize") {
       await ensureImportedNativePayload(workId);
-      input.content = await hydrateContentForWrite(input.artifactId, input.content);
+      if (input.content === undefined) {
+        // Materialize from the same acknowledged collaboration log that saved
+        // versions use, then read its canonical current artifact projection.
+        await checkpointArtifactDurableContent(input.artifactId);
+        const artifact = await convexQuery<
+          { artifactId: Id<"spectraArtifacts"> },
+          ArtifactTruth & { currentVersionId?: string }
+        >("spectraArtifacts:get", { artifactId: workId });
+        input.content = artifact.content;
+      } else {
+        input.content = await hydrateContentForWrite(input.artifactId, input.content);
+      }
     }
 
     if (input.action === "open") {
+      // Legacy Library imports retain the exact original in import storage,
+      // but may not yet have a cloud native replica. Adopt that verified copy
+      // before the projection (and its image URLs) tries to read the payload.
+      await ensureImportedNativePayload(workId);
       let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
       try {
         cloud = await fetchVerifiedNativePayload(workId, "cloud");

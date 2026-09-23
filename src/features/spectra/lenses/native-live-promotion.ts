@@ -5,6 +5,10 @@ export type NativeLivePromotionOperation = {
   state?: string;
 };
 
+export function nativeMaterializationRequest(artifactId: string) {
+  return { action: "materialize" as const, artifactId };
+}
+
 /**
  * A live native body is identified by the authored region text, not by the
  * last Convex checkpoint. Checkpoint agreement is not byte promotion.

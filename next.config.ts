@@ -12,6 +12,12 @@ const yjsEsmRelative = "./node_modules/yjs/dist/yjs.mjs";
 const yjsEsmAbsolute = resolve(projectRoot, "node_modules/yjs/dist/yjs.mjs");
 
 const nextConfig: NextConfig = {
+  // Durable Office bodies are streamed through the Next proxy before the API
+  // route applies its own 256 MiB bound. Keep the proxy cap aligned with that
+  // route limit so large saved versions are not silently truncated at 10 MiB.
+  experimental: {
+    proxyClientMaxBodySize: 256 * 1024 * 1024,
+  },
   // Browser evidence is taken against the development server, but framework
   // diagnostics are not part of Spectra's product chrome.
   devIndicators: false,

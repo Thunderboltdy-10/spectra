@@ -23,6 +23,7 @@ import {
 import {
   artifactLivePreviewPatches,
   lineAnchorForRewrite,
+  shouldStageAiPreviewContent,
   valueAtPath,
 } from "@/features/spectra/collaboration/artifact-live-preview";
 import {
@@ -1450,10 +1451,16 @@ async function synchronizeMutation(params: {
             ...(streamValue.summary !== undefined
               ? { summary: streamValue.summary }
               : {}),
-            content: encodeArtifactContentForStorage(
+            ...(shouldStageAiPreviewContent(
               params.session.artifact.blueprintKey,
-              streamValue.content,
-            ),
+            )
+              ? {
+                  content: encodeArtifactContentForStorage(
+                    params.session.artifact.blueprintKey,
+                    streamValue.content,
+                  ),
+                }
+              : {}),
             tags: streamValue.tags,
             changedPaths: stagedPaths,
           }).catch(() => undefined);

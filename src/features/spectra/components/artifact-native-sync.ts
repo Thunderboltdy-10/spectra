@@ -1,6 +1,5 @@
 "use client";
 
-import { contentForDurableRequest } from "../data/durable-content";
 import {
   useCallback,
   useEffect,
@@ -19,6 +18,7 @@ import {
   nativeMaterializationVerified,
 } from "../bridge/native-materialization-exit";
 import {
+  nativeMaterializationRequest,
   nativeLiveContentKey,
   nativeLiveNeedsPromotion,
 } from "../lenses/native-live-promotion";
@@ -331,11 +331,9 @@ export function useArtifactNativeSync({
         const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "materialize",
-            artifactId,
-            content: await contentForDurableRequest(artifactId, snapshot.content),
-          }),
+          // The Yjs update is durably acknowledged. The route checkpoints that
+          // shared log and materializes its canonical projection server-side.
+          body: JSON.stringify(nativeMaterializationRequest(artifactId)),
         });
         const result = (await response.json().catch(() => null)) as {
           hash?: string;

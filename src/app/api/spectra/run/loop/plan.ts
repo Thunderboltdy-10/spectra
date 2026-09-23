@@ -4144,7 +4144,11 @@ export async function callModel(
                     parameters: {
                       type: "object",
                       additionalProperties: false,
-                      required: ["workSummary", "operation"],
+                      required: [
+                        "workSummary",
+                        "operation",
+                        "fulfillsRequest",
+                      ],
                       properties: {
                         workSummary: {
                           type: "string",
@@ -4154,6 +4158,12 @@ export async function callModel(
                             "A present-tense student-facing description of this exact change.",
                         },
                         operation: focusedOperationSchema,
+                        fulfillsRequest: {
+                          type: "boolean",
+                          const: true,
+                          description:
+                            "A direct focused action is one complete requested mutation. Set this to true so Spectra can finish after validating and staging it.",
+                        },
                       },
                     },
                   },

@@ -5,12 +5,14 @@ import { strFromU8, unzipSync } from "fflate";
 import { Workbook } from "@ariadng/office/xlsx";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import { comparePackages } from "@ariadng/office/preservation";
+import { columnName } from "../sheets/model";
 import { xlsxLens } from "../lenses/xlsx-lens";
 import {
   xlsxArtifactContent,
   xlsxOperationsBetween,
   xlsxProjectionFromContent,
 } from "../lenses/office-content";
+import { xlsxSemanticDigest } from "../lenses/xlsx-lens";
 
 const fixturePath = join(process.cwd(), "fixtures", "office", "xlsx", "complex-preservation.xlsx");
 
@@ -24,6 +26,46 @@ function packageText(bytes: Uint8Array, name: string) {
 }
 
 describe("W6-04 native XLSX structure and chart convergence", () => {
+  it("extends worksheet dimensions when an edit adds a cell beyond the imported range", async () => {
+    const workbook = Workbook.create();
+    workbook.sheet("Sheet1")!.setCell("A1", 1);
+    const source = await workbook.save();
+    const opened = await xlsxLens.open(source, "enhanced");
+    const content = xlsxArtifactContent(opened.projection);
+    const baseSheet = opened.projection.sheets[0]!;
+    const editorSheet = content.sheets[0]!;
+    const row = 1;
+    const distantCell = `${columnName(baseSheet.columnCount ?? 0)}${row}`;
+    editorSheet.cells[distantCell] = { value: "distant edit" };
+    editorSheet.cells.B1 = { value: "middle edit" };
+
+    const projection = xlsxProjectionFromContent(content, opened.projection);
+    expect(projection.sheets[0]).toMatchObject({
+      rowCount: baseSheet.rowCount ?? row,
+      columnCount: (baseSheet.columnCount ?? 0) + 1,
+    });
+    expect(projection.sheets[0]!.cells.map((cell) => cell.ref)).toEqual(["A1", "B1", distantCell]);
+    expect(
+      xlsxOperationsBetween(opened.projection, projection).some(
+        (operation) => operation.kind === "mutate-sheet-axis",
+      ),
+    ).toBe(false);
+    const saved = await xlsxLens.materialize({
+      projection,
+      carry: opened.preservedCarry,
+    });
+    const reopened = await xlsxLens.open(saved, "enhanced");
+    expect(reopened.projection.sheets[0]!.cells.find((cell) => cell.ref === distantCell)?.value).toBe("distant edit");
+    const expectedReadback = {
+      ...projection,
+      sheets: projection.sheets.map((sheet) => ({
+        ...sheet,
+        cells: sheet.cells.map((cell) => cell.formula ? { ...cell, value: null } : cell),
+      })),
+    };
+    expect(await xlsxSemanticDigest(reopened.projection)).toBe(await xlsxSemanticDigest(expectedReadback));
+  });
+
   it("edits real chart and table parts while preserving unrelated OOXML parts", async () => {
     const source = await complexFixture();
     const opened = await xlsxLens.open(source, "enhanced");

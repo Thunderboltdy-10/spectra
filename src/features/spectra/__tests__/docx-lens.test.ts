@@ -682,6 +682,57 @@ describe("DOCX preservation lens", () => {
     })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
   });
 
+  it("keeps omitted protected-field tails native while rejecting authored read-only edits", async () => {
+    const opened = await docxLens.open(await fixture("fields-toc.docx"), "strict-native");
+    const protectedParagraph = opened.projection.blocks.find(
+      (block) =>
+        block.attrs?.nativeReadOnly === true &&
+        block.type === "paragraph" &&
+        Boolean(block.inlineContent && block.inlineContent.length > 1),
+    )!;
+    const visiblePrefix = protectedParagraph.inlineContent!.slice(0, 1);
+    const visibleText = visiblePrefix
+      .filter((item) => item.kind === "text")
+      .map((item) => item.text)
+      .join("");
+    const compacted = compactDocxProjectionForStorage(opened.projection) as {
+      blocks: typeof opened.projection.blocks;
+      [key: string]: unknown;
+    };
+    const lossyContent = {
+      ...compacted,
+      nativeProjectionComplete: true as const,
+      blocks: compacted.blocks.map((block) =>
+        block.id === protectedParagraph.id
+          ? { ...block, text: visibleText, inlineContent: visiblePrefix }
+          : block,
+      ),
+    };
+    const unchanged = docxProjectionFromContent(lossyContent, opened.projection);
+    expect(unchanged.operations).toEqual([]);
+    expect(unchanged.projection.blocks.find((block) => block.id === protectedParagraph.id))
+      .toEqual(protectedParagraph);
+
+    const authoredEdit = {
+      ...lossyContent,
+      blocks: lossyContent.blocks.map((block) =>
+        block.id === protectedParagraph.id
+          ? {
+              ...block,
+              text: `${visibleText} authored edit`,
+              inlineContent: [{ kind: "text" as const, text: `${visibleText} authored edit` }],
+            }
+          : block,
+      ),
+    };
+    const unsafe = docxProjectionFromContent(authoredEdit, opened.projection);
+    expect(unsafe.operations).toHaveLength(1);
+    await expect(docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: unsafe.operations,
+    })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+  });
+
   it("keeps two tables paired when the first is wrapped in a content control", async () => {
     const source = await fixture("complex-structure.docx");
     const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");

@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   artifactLivePreviewPatches,
   buildArtifactLivePreviewFrames,
+  shouldStageAiPreviewContent,
 } from "../collaboration/artifact-live-preview";
+
+describe("durable AI preview transport", () => {
+  it("keeps sheet content on the live collaboration path instead of copying the full artifact", () => {
+    expect(shouldStageAiPreviewContent("sheets")).toBe(false);
+    expect(shouldStageAiPreviewContent("document")).toBe(true);
+    expect(shouldStageAiPreviewContent("presentation")).toBe(true);
+  });
+});
 
 describe("buildArtifactLivePreviewFrames", () => {
   it("streams changed strings without changing stable identity fields", () => {

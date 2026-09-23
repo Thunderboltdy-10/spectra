@@ -1,49 +1,85 @@
 # S9-DURABLE — large Office durable content
 
 Date: 2026-09-23 (Europe/Madrid)
-
 Branch: `main`
-Status: **implementation complete; live acceptance pending**. This report records local implementation and deterministic checks only. It does not claim launch acceptance.
+Implementation source: `2532be1eeaf9851fe95c99ebc6ed1dc04cb0c409`
+Status: live acceptance completed with the two bounded limitations in cases 4 and 6 below.
 
-## Integrated implementation
+## Source and runtime
 
-The capacity foundation was integrated on main in `9aa76b15`, `7d5ce3b0`, `64a4bfb9`, `12d3813c`, and `ae480a67`. This pass adds `0ff1f359` (durable recovery, storage ownership, authorization, and regressions). The current main also retains the independently integrated gateway, Calendar, Keep-class, and formula-cache fixes (`5250792d`, `52ff743f`, `d7713584`, `fa72dc4a`). The remaining local gateway launcher change was reconciled: its shebang is retained and `.gitattributes` pins LF so the launcher works on Windows. Uncommitted W9 recovery/handoff notes were left untouched.
+The local stack served the source now committed as `2532be1e`. It ran on existing local instance 1 at `http://localhost:3000` with Convex at `http://127.0.0.1:3002`, deployment `local-pablo_md-ai_school-2`, and the existing 7.27 GiB database. Startup guidance was checked; the saved-local-Convex launcher fix was retained. The same stack was stopped and recovered in place to sync the current local functions. No database reset, second stack, worktree, production/provider/billing change, Action, external message, or edit to the original IBDP1 files occurred.
 
-The root cause was a mismatch between accepted Office content and single-message/Convex bounds: a 200,000-cell workbook or formal paper could fit import parsing but exceed the 760 KiB durable append, projection, bootstrap, or snapshot envelope. Sheet arrays chunked inside one value did not make that value small. The integrated path keeps one logical artifact and the existing Yjs/ledger authority. Large updates and projections use immutable storage bodies referenced by bounded manifests, while small/legacy updates remain inline. Adopted bodies are complete and digest checked before a head or replay can use them. Oversized merged batches split or spill; checkpoints, saved versions, replay, AI writes, and native materialization resolve the same durable content references. Small Yjs edits remain deltas; an unchanged semantic projection no longer triggers a full-body durable acknowledgement.
+Profile A was the ordinary authenticated actor. The existing Bridge and live configured OpenRouter route were used. The disposable copies and detailed raw evidence are under `.spectra-local/launch-audit/fixtures/S9-DURABLE-20260923` and `.spectra-local/launch-audit/evidence/S9-DURABLE-20260923`. The uncommitted W9 recovery and handoff files were left outside this commit.
 
-This pass closes three recovery findings:
+## Repairs exercised by acceptance
 
-- **R1:** Both incoming reconciliation entry points distinguish provisional bootstrap from live/persisted remote changes. Legitimate shorter text, empty content, nontext changes, and local clears are accepted; stale/provisional hollow state still cannot overwrite a real head. The invalid Sheets head-heal and blanket Yjs hollow guard were removed.
-- **R3:** The public content endpoint streams a bounded body to server storage, then a signed, actor-bound content attestation authorizes adoption. The internal mutation rechecks current artifact authority and policy epoch. Indexed ownership checks block cross-artifact/native/intake aliases during adoption and deduplication. Durable, native, intake, asset, replica-sweep, and bridge-upload cleanup retain storage until its last binding releases. Lost-receipt retry is idempotent even after a redundant upload was deleted.
-- **R6:** Definite account, room, or artifact denial revokes a cached collaboration write grant. The quiet-connection sweep refreshes current actor authority even when artifact policy version has not changed. Transient transport failures keep their distinct retry behavior.
+- Large import bodies use the configured 256 MiB local Next request limit and bounded content adoption. The durable body stays immutable, digest checked, and behind the existing artifact, Yjs, and ledger authority; small cell changes remain deltas.
+- Large DOCX projection/materialization carries unchanged native parts. The no-op Word carry path, equations, media, relationships, and unmodeled parts remain intact.
+- AI preview staging omits the full sheet body for large workbooks. A cell-sized AI change then uses the same durable artifact update path.
+- Generated sheet row/column identities are treated as cell edits where appropriate, so distant AI changes do not claim the whole sheet structure.
+- The focused tool schema now requires `fulfillsRequest: true`; stale route-test responses were updated to match.
+- The live deletion retry exposed that Convex's scheduled runtime has no Node `Buffer`. Intake cursors now use the existing runtime-safe base64url codec, and pinned cleanup reads only the exact pinned versions/builds instead of scanning all large history.
 
-The append receipt is returned for already persisted sequence IDs before requiring a spilled body that may since have been compacted, but only after current authorization. Replay rejects missing, incomplete, wrong-digest, out-of-order, or wrong-generation data; manifest reads fall back to inline records only for legacy records without a manifest. Pinned versions and other owners retain referenced bytes through the existing ownership coordinator. No provider, retention policy, product control, or native identity changed.
+These repairs do not change retention policy or native identity. The saved local Convex launcher and gateway source were restored after fault injection; `scripts/collaboration-gateway.mjs` has no diff and `.convex-self-hosted.env` is absent.
 
-## Automated evidence
+## Live cases
 
-All checks used local fixtures/packages; no shared stack, browser, live AI, or native Office application was started.
+| Case | Result | Evidence |
+| --- | --- | --- |
+| Large workbook and paper copy: import, distant edits, save/reload/reconnect, saved-version and native readback | **PASS**, with formula-cache observation below | Artifacts `wx79w21ehqg5c215fp1gmbjpbn8ew8pw` and `wx71v7ca2ks7pmt59gxswwq0f58exg5f`; workbook version 17 `ws7cdfz1a14vne20vwvpy18fad8ey40k`; paper version 7 `ws74fvms13dp4deqddy6pq6jys8ey230` |
+| Two sessions, disjoint edits to one shared artifact, lost receipt and restart after durable commit | **PASS** | Sessions `s9-durable-a3` and `s9-durable-b2`; shared artifact above; B2 client `c2d4bf13-aaaf-435f-a494-3c7368bff34d` |
+| One actual AI edit of a large workbook through durable commit and separate native check | **PASS** | Runs `wh788ne8k2fsn04c7g1pgbrayx8ezhg3` and `wh7b86gwzkvshz8fdkr1v8x94x8ezqja`; canonical versions 13 and 14 |
+| Large pin, source deletion and ordered owner release | **PARTIAL** for elapsed-time physical GC; live pin retention and release sequence passed | Pins `m573f78ecn0vhz6r7deff4v9pn8ez0e3`, `m57farfpzdc6wcv5hc2kvsse9d8ey05b`; deletion generation 2 job `g57gy5efqw944qr74gzpgg0t318eze7c` completed |
+| Cold/warm latency and read/write/transport bytes; small edit transfer | **PASS** | Browser instrumentation and request-body captures in the evidence directory |
+| Shorter and empty live remote changes; deactivated-actor revocation | **PASS** for live shorter/empty changes; **NOT RUN** as a browser case for revocation | Live changes produced workbook versions 15–17. Deterministic revocation test passed; no safe disposable authenticated actor/deactivation control was available |
 
-| Check | Result |
-| --- | --- |
-| Durable/recovery/checkpoint focused Convex tests | 38/38 passed after the final ownership fix |
-| Replica truth/property tests | 47/47 passed |
-| Durable capacity/replay, remote clears, import route, and 200k-cell Yjs fixtures | Passed in the 28-file suite; exact multibyte bounds, incomplete adoption, small distant edits, replay, and first/middle/last values covered |
-| Broad relevant Vitest suite | 27/28 files, 430/431 tests passed. One unchanged Sheets microbenchmark asserted `<40 ms` and measured 58.6 ms under parallel suite load; its complete file passed 77/77 in isolation. The threshold was not weakened. |
-| TypeScript `tsc --noEmit` | Passed after the final change |
-| `npm run lint` | Passed; final touched files also passed focused ESLint |
-| `npm run check:capabilities` and `npm run check:architecture` | Passed |
-| `git diff --check` | Passed |
+### Workbook copy
 
-There is no known implementation blocker. The parallel-load microbenchmark result is a test-run limitation, not evidence of a functional failure or a verified latency target. No live latency, transfer-byte, or native fidelity claim is made here.
+The input was `S9-DURABLE-workbook.xlsx`, 1,126,377 bytes, SHA-256 `210d7c04ce517913f5099c2e717d8c90f425e6b192e8c14a65746699c6c1dbc7`. Its `Density` sheet contained 200,000 cells, 10,000 rows, and 20 columns at baseline. The final canonical durable payload was 43,680,686 bytes and the reopened native XLSX was 1,119,772 bytes.
 
-## Deferred live acceptance
+The edit pass wrote `T9999 = 1+2`, bolded `S5000`, wrote the last-row marker in `T10000`, and exercised other distant cells. After reload/reconnect, saved version 17 readback and Excel COM reopening agreed on `A1 = 1`, `J5000 = 50000`, `T10000 = S9_DURABLE_LAST_20260923`, and bold `S5000`. Excel 16.0 opened the native file read-only with 10,000 used rows, 23 used columns, 200,003 populated cells, and formula `=1+2` at `T9999`; Excel calculated its value as `3`.
 
-These finite tests remain from the original prompt and require a separately authorized live run:
+The original workbook had zero formula cells and zero styled cells, so there were no pre-existing formula results or styles to compare. The durable canonical readback retained the cell's prior scalar `199980` alongside the edited formula until Excel recalculated it on native open. The native materialized file clears formula caches and requests full calculation on load. This cache distinction is recorded rather than presenting `199980` as the result of `=1+2`. The native workbook kept two relationship files and removed no package parts; it added `xl/sharedStrings.xml` for edited text. Workbook media count was zero in the input and output.
 
-1. On copies of the actual 200k-cell workbook and 695-equation paper, open, edit a distant cell/formula/style and equation/text, save, reload, reconnect, and read a saved version. Check first/middle/last cells, cached-formula truth, unchanged OMML/styles/media/relationships, and native materialization/reopen.
-2. Use two ordinary sessions on separate disposable artifacts and two sessions on one deliberate shared artifact for disjoint edits/rebase. Force one lost receipt and one gateway restart after durable commit; verify single convergence, truthful unsynchronized errors, and small-edit transfer bytes.
-3. Apply one real AI edit to a large work item, then verify its exact durable version and native result separately.
-4. Pin a large version, delete its source, release owners in sequence, and verify retention followed by final-owner garbage collection.
-5. Record cold/warm open, save, and reload latency plus read/write/transport bytes for both fixtures; compare full import against small edits without an SLA or cost claim.
+### Paper copy
 
-Rollback is by reverting the integrated implementation commits together; existing small/legacy inline records remain readable through the no-manifest fallback. A manifest-bearing record requires the digest-verified resolver and must never be treated as an inline fallback when incomplete.
+The input was `S9-DURABLE-paper.docx`, 1,302,028 bytes, SHA-256 `fcc1d714d1e5049231ada7335a5ab7231757f2fc161891baab53791e2fba3df7`. In the disposable copy, equation block 957 became `\begin{pmatrix}a+b+0 \\ a\end{pmatrix}.` and the text marker `[S9-DURABLE-text-20260923]` was added. Saved version 7 returned HTTP 200 and 1,975,987 response bytes in 281 ms.
+
+Microsoft Word 16.0 reopened the materialized copy read-only: 45 pages, 1,117 paragraphs, 7 tables, 1 inline image, and 695 equations. The edited equation and text marker were present; first, middle, and last equations remained readable. The native DOCX was 1,291,674 bytes with 18 package parts and 3 relationships. Only `word/document.xml` changed; the other 17 parts and all relationship hashes matched. The original media image remained 1,186,444 bytes with SHA-256 `0dbc53914a87cfcf5d788fe935ec56095b2da2960bf3f1fb1d6f01ed9e0e0858`. Equation count remained 695; no package parts or relationships were added or removed.
+
+### Shared edits and live recovery faults
+
+The two headless Profile A sessions edited separate distant cells on the same artifact: A3 wrote `U10000 = S9_DURABLE_SHARED_A_20260923`; B2 wrote `V10000 = S9_DURABLE_SHARED_B_20260923`. One durable receipt was deliberately lost. For the second fault, the gateway was restarted after the durable commit and before receipt delivery. Reconnect/retry converged on both markers; each appeared once in the saved/native workbook. No duplicate effect or lost disjoint edit remained.
+
+Live remote content transitions exercised on `O10000` were `S9_DURABLE_SHORT_20260923`, empty via the ribbon's **More sheet tools → Clear contents**, and restore to `S9_DURABLE_DIGEST_HANDSHAKE_20260923`. Session A3 observed each shorter/empty/restored change without reload; version 17 retained the restored value. Typing an empty string into the formula bar did not durably clear the cell; the explicit Clear contents command did.
+
+### Actual AI edit
+
+The configured live model `openai/gpt-5.6-luna` (OpenAI provider) performed actual cell edits on the same 200k-cell workbook. Run `wh788ne8k2fsn04c7g1pgbrayx8ezhg3` wrote `N10000 = S9_DURABLE_AI_20260923` and persisted canonical version 13 (`ws78786556ek76jrs301ebbr018ez2p8`). Run `wh7b86gwzkvshz8fdkr1v8x94x8ezqja` wrote `W10000 = S9_DURABLE_AI_PREVIEW_FIX_20260923` and persisted canonical version 14. Excel's separate native reopen confirmed both markers. An earlier attempt exposed a full-workbook body being sent to AI preview staging; the corrected path omitted that full body and the live run completed through durable commit.
+
+### Retention and cleanup boundary
+
+Two authenticated pins referenced workbook version 17 from disposable paper container `wx71v7ca2ks7pmt59gxswwq0f58exg5f`. After deleting the source, the first pin still projected `ready` with `sourceUnavailable=true`; after releasing the final pin, the version/snapshot projection disappeared. The first deletion job `g57w3p3gf37m1kyjth0jgw7p4x8ey2mg` exhausted six attempts in intake. The local Convex runtime failure was `Buffer is not defined`; bounded pinned-version reads alone were not sufficient. After the cursor-codec fix, generation 2 job `g57gy5efqw944qr74gzpgg0t318eze7c` completed: 143 rows deleted, 0 retained rows, 1,126,377 original import bytes released. The source artifact and pinned version rows are now absent.
+
+The workbook body is still active at 43,680,686 bytes because valid journal/snapshot ownership remains: two `changeGroups` owners (`ns712yws6gs4xy3caqz4kj6ngs8eybda`, `ns7daxqhmwp67weab8get0tkdx8ez54q`) and one `artifactSnapshotObjects` owner (`md70r0s278vyptcyrnd4dxfhxd8ezypk`). The 1,119,756-byte native base is also retained. This is safe retention, not completed physical GC. The configured 24-hour `PAYLOAD_RELEASE_GRACE_MS` was not changed, and 24 hours were not allowed to elapse. Focused deterministic tests prove owner-by-owner retention and final release by simulating age (`createdAt = Date.now() - PAYLOAD_RELEASE_GRACE_MS - 1`); that is simulated expiry, not elapsed live time.
+
+### Latency and transfer measurements
+
+| Measurement | Cold | Warm/repeated |
+| --- | ---: | ---: |
+| Workbook open/reload to grid plus settle | 13,142 ms | 12,859 ms |
+| Instrumented HTTP | 143 requests; 30,417,602 response bytes | 15 `/api/spectra` GETs; 974,638 response bytes |
+| Collaboration WebSocket | 67 sent frames / 15,122 bytes; 28 received / 651,517 bytes | 26 sent / 6,186 bytes; 13 received / 34,867 bytes |
+| Realtime socket | — | 5 sent / 1,916 bytes; 1 received / 71 bytes |
+
+The initial workbook upload was 1,126,377 bytes. Before the preview/delta repairs, a small edit posted approximately 43,680,379–43,680,409 bytes. Afterward measured small cell-edit requests were 72–77 bytes and did not call `/api/spectra/content` with the full artifact. The full durable workbook body was read for saved-version/native materialization as expected; the measurements above do not claim an SLA or cost target.
+
+## Automated checks and remaining limits
+
+Final affected suite: 12 files, 161 tests passed, including durable recovery/ownership, retention, DOCX/XLSX, content upload, native promotion, and run routes. The first run exposed two stale `propose_operation` test responses missing the now-required `fulfillsRequest`; those fixtures were corrected and the complete `run-route.test.ts` file then passed 36/36. Final `npx tsc --noEmit`, `npm run lint`, `npm run check:capabilities`, `npm run check:architecture`, and `git diff --check` passed.
+
+An earlier broad parallel suite run was 27/28 files and 430/431 tests: the unchanged Sheets microbenchmark measured 58.6 ms against its `<40 ms` threshold under suite load; that file passed 77/77 in isolation. This live acceptance reran focused changed/direct-neighbor files, not that entire broad suite.
+
+Deactivated-actor revocation is covered deterministically by `convex/durable-recovery.test.ts` (“revokes a deactivated actor's cached grant even with an unchanged artifact policy”), including denial and the quiet-sweep 4403 close. It was not performed in a browser: Profile A must remain active, and no dedicated disposable authenticated actor plus supported live deactivation control was available. The live shorter/empty remote changes did pass.
+
+Moderate UI follow-ups for S9-OFFICE review: the **Export Excel copy** click was intercepted by a workbar overlay, while keyboard focus plus Enter succeeded; the blank formula-bar behavior above may also deserve clearer empty-cell clearing guidance. Impactful review targets are the large-body upload/preview boundary, canonical-vs-native formula cache behavior, structured Yjs cell-vs-structure classification, DOCX no-op package carry, AI durable staging, and Convex runtime-safe deletion cursors. No remaining live failure is hidden by a **PASS** label.

@@ -687,11 +687,12 @@ export function docxOperationsBetween(
       const textInlineContent = block.inlineContent
         ? inlineContentForTextOperation(previousInline, nextInline)
         : undefined;
+      const inlineContentChanged = JSON.stringify(previousInline) !== JSON.stringify(nextInline);
       operations.push(...deletedImages, {
         kind: "replace-paragraph",
         regionId: block.id,
         text: block.text,
-        ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
+        ...(inlineContentChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
       }, ...otherImageOperations, ...layoutOperations);
       // Apply retained text before adding/replacing drawings so the text rewrite
       // never clears a surviving picture operation that follows it.

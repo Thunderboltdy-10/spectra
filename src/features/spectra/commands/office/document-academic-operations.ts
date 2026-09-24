@@ -175,7 +175,7 @@ export function applyDocumentAcademicOperations(value: unknown, input: unknown) 
           if (candidate.kind !== "citation" || candidate.source.tag !== item.source.tag) return candidate;
           const pages = candidate === item ? operation.pages : candidate.pages;
           const instruction = candidate.instruction?.replace(/(CITATION\s+)(?:"[^"\\]+"|[^\s\\]+)/i, `$1"${operation.source.tag}"`).replace(/\s+\\p\s+(?:"[^"]*"|[^\s\\]+)/i, "");
-          return { kind: "citation", citationId: candidate.citationId, source: operation.source, text: wordCitationLabel(operation.source, pages), ...(pages ? { pages } : {}), ...(instruction ? { instruction: `${instruction.trimEnd()}${pages ? ` \\p "${pages.replace(/["\\]/g, "")}"` : ""} ` } : {}), ...(JSON.stringify(candidate.source) === JSON.stringify(operation.source) && candidate.sourceRef ? { sourceRef: candidate.sourceRef } : {}) };
+          return { kind: "citation", citationId: candidate.citationId, source: operation.source, text: wordCitationLabel(operation.source, pages), ...(pages ? { pages } : {}), ...(instruction ? { instruction: `${instruction.trimEnd()}${pages ? ` \\p "${pages.replace(/["\\]/g, "")}"` : ""} ` } : {}), ...(candidate.source.tag === operation.source.tag && candidate.sourceRef ? { sourceRef: candidate.sourceRef } : {}) };
         }));
       }
     } else if (operation.kind === "regenerate-word-bibliography") {

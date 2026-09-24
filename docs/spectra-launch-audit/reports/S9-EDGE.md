@@ -55,7 +55,70 @@ S9-AI owns P1-39, P1-40, P1-44–P1-47, P1-55–P1-57, P2-09–P2-11, P2-26, P2-
 - **P1-41/P1-54 retention:** visible reminder rows are filtered and exact invitations/grants are revoked immediately, but delivered reminder rows, class follows, and pins are retained. Decide rejoin semantics and use bounded deletion jobs only where retention policy requires it.
 - **P1-17 historical data:** code now withholds `completedAt` on `awaiting_commit` going forward and repairs it at terminal transition. Existing awaiting-commit rows with a previously written timestamp need a deliberate data correction if historical timestamps are relied upon.
 - **Runtime acceptance:** deploy Convex schema indexes; exercise fresh route identity after membership/role change; verify durable append denial after grant revoke, restore-error room gating, scheduler replacement, deferred import completion, and PPTX relationship preservation against a live backend/native package. This report makes no live acceptance claim.
-- P2 leads remain unclaimed; this pass did not declare the P2 census implemented.
+
+### P2 candidate dispositions
+
+These dispositions are source review only. No tests, typecheck, or runtime acceptance were run in this continuation.
+
+**Fixed in source, not test-verified:**
+
+- **P2-01:** citation edits keep the existing verified `sourceRef` when the citation retains its source tag; changing source identity drops the old handle.
+- **P2-15:** DOCX paragraph replacement includes `inlineContent` whenever the rich inline list changes, even when the authored-semantic comparison does not notice the change.
+- **P2-16:** `nativeLiveContentKey` now includes every serialized block field in addition to block id and text, so formatting, equations, tables, and other rich content can trigger native promotion.
+- **P2-19:** overlapping active regions now conflict even when they share a client id. Refreshing the same region is still allowed, but widening it into another active claim is rejected.
+- **P2-20:** a missing or unreadable embedded chart workbook now throws before `deck.save()`, so the chart edit is not reported as successful after the workbook update fails.
+- **P2-56:** owner fast paths in both loaded-resource evaluators require an exact school match; missing school identity must use a grant path. Thread placement now rejects a missing or cross-school workspace before changing the thread.
+
+**Already correct in source:**
+
+- **P2-43:** `artifactUserStates` is in `PURGE_SCHOOL_TABLES`; `purgeSchoolRows` directly filters every table in that list by `schoolId`. The handoff put this table in the dependent-table list, but the current implementation handles it through the school-scoped pass.
+
+**Open in this pass:**
+
+- **P2-02:** human note insertion updates editor/Yjs blocks through `executeAcademicEditorOperations`; that path does not persist top-level `nativeBinding`. A safe repair needs the binding to travel through the durable native projection/save path, not just a returned local object.
+- **P2-03:** editor readiness, late hydration, and close-with-pending-URL behavior remain open.
+- **P2-04:** code export can still read React workbook state that trails Yjs.
+- **P2-05:** cached-only sheet values can remain visible after being marked stale.
+- **P2-06:** rejected quiz resume can still consume an attempt.
+- **P2-07:** flashcard review still generates a new idempotency token per click.
+- **P2-08:** quiz submit flush still needs to reuse the first mutation id.
+- **P2-12:** `finalizeUpload` call sites and the missing `candidateStorageId` contract need a complete caller trace before removing or repairing the path.
+- **P2-13:** Library resource upload validation remains open.
+- **P2-14:** rehearsal membership restore semantics remain open.
+- **P2-18:** confirmed source issue: retention blockers can make the deletion job complete while the artifact row remains. The job needs a distinct retained state and an explicit retry/retention contract.
+- **P2-22:** trust presets that require a mounted folder remain available without a paired Bridge device.
+- **P2-23:** durable read URLs still lack a reader lease/grace-period guarantee at storage release.
+- **P2-24:** snapshot release/refcount safety needs a complete version-row deletion-site inventory before a global repair.
+- **P2-25:** preference writes remain last-write-wins, and sign-out still needs an account-state reset.
+- **P2-28:** a pinned embed can still offer “use live source” after the source is deleted.
+- **P2-29:** migration completion flags still need cursor-completion checks.
+- **P2-30:** memory privacy lists can show claims that current run context will not use.
+- **P2-32:** agent publish notice can still be shown after a release-list refetch fails.
+- **P2-33:** an already-existing Library reference can still be reported as newly filed.
+- **P2-34:** failed/cancelled run meters need an explicit product definition (tokens spent versus completed work) before changing accounting.
+- **P2-35:** analytics can still apply its row cap before filtering deleted rows.
+- **P2-36:** the workbench still needs the missing-comment error toast.
+- **P2-38:** Office materialize can still return success when its queue result is old `failed` or `verified` state.
+- **P2-39:** connector-secret use remains a product-role decision; no admin-only rule was inferred.
+- **P2-40:** omitted change-group snapshot behavior still needs an explicit result signal and no-op commit rule.
+- **P2-41:** superseded snapshot verification still needs to return the room to `active`.
+- **P2-42:** the workbench route still awaits the synchronous listener count rather than `commandAsync`.
+- **P2-44:** quiz/deck duplication still copies asset ids without copying asset ownership.
+- **P2-45:** the token route includes `policyVersion` as `permissionEpoch`, but the deployed Durable Object constructs `RealtimeRoomCore` without an epoch, and no authenticated server-side epoch update/read path was found. A stale token can therefore pass the room-core check; this remains an implementation and deployment gate.
+- **P2-46:** human follow does not clear when the leader leaves presence. The AI follow/terminal behavior belongs to S9-AI.
+- **P2-47:** the Cloudflare provider can still report synchronized with queued edits; its default-provider status does not close the explicit path.
+- **P2-49:** `/api/health` keeps the HTTP 200 contract; readiness consumers still need to honor the JSON `status` field.
+- **P2-50:** scoped regression coverage remains an acceptance gap. Tests were not added or run under the task constraints.
+- **P2-53:** artifact duplication still omits linked-artifact rows.
+- **P2-54:** presentation export still substitutes generic font names without naming the substitution in its success message.
+- **P2-55:** artifact deletion still leaves quiz/flashcard study rows; the unmounted study timer and missing route remain a separate cleanup decision.
+
+**Assigned outside this source pass:**
+
+- **P2-09, P2-10, P2-11, P2-26, P2-31, P2-37, P2-48, P2-57:** S9-AI-owned; not edited or staged here.
+- **P2-17, P2-21:** Bridge-owned receipt/lease behavior; not edited here.
+- **P2-27:** Release-owned prebuild/readiness policy; not edited here.
+- **P2-51, P2-52:** ManageBac-owned capability-run completion and `lastSuccessAt`; not edited here.
 
 ## Additive data and runtime effects
 

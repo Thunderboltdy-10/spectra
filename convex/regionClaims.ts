@@ -103,6 +103,10 @@ export const acquire = mutation({
       .find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.actorKind === args.actorKind && claim.runId === args.runId && claim.operationId === args.operationId && claim.regionId === regionId && claim.leaseExpiresAt > now);
     const leaseExpiresAt = now + (args.actorKind === "ai" ? AI_LEASE_MS : HUMAN_LEASE_MS);
     if (sameClient) {
+      const conflict = (await activeClaims(ctx, artifact._id, now)).find((claim) =>
+        claim._id !== sameClient._id && regionDomainsIntersect(claim.overlapDomains, overlapDomains),
+      );
+      if (conflict) throw new Error("REGION_CLAIM_CONFLICT: This client already holds an overlapping region.");
       await ctx.db.patch(sameClient._id, { overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
       return { claimId: sameClient._id, status: "active" as const, leaseExpiresAt, conflict: null };
     }
@@ -119,7 +123,7 @@ export const acquire = mutation({
     }
 
     const active = await activeClaims(ctx, artifact._id, now);
-    const conflict = active.find((claim) => claim.actorAccountId !== actor.accountId || claim.clientId !== clientId ? regionDomainsIntersect(claim.overlapDomains, overlapDomains) : false);
+    const conflict = active.find((claim) => regionDomainsIntersect(claim.overlapDomains, overlapDomains));
     const queued = (await queuedClaims(ctx, artifact._id)).filter((claim) => claim.leaseExpiresAt > now);
     const status = conflict ? "queued" as const : "active" as const;
     const claimId = await ctx.db.insert("regionClaims", {

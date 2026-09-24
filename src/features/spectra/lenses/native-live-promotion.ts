@@ -23,7 +23,10 @@ export function nativeLiveContentKey(content: unknown): string {
           block && typeof block === "object"
             ? (block as Record<string, unknown>)
             : {};
-        return `${String(row.id ?? "")}\t${String(row.text ?? "")}`;
+        const rich = Object.fromEntries(
+          Object.entries(row).filter(([key]) => key !== "id" && key !== "text"),
+        );
+        return `${String(row.id ?? "")}\t${String(row.text ?? "")}${Object.keys(rich).length ? `\t${JSON.stringify(rich)}` : ""}`;
       })
       .join("\n");
   }

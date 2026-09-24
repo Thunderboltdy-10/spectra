@@ -1513,9 +1513,9 @@ async function updateEmbeddedWorkbook(
   const packageRelationship = chartPart.relationships().byType("http://schemas.openxmlformats.org/officeDocument/2006/relationships/package")[0];
   if (!packageRelationship || packageRelationship.targetMode === "External") return;
   const workbookPart = deck.office.package.relatedPart(chartPart, packageRelationship.id);
-  if (!workbookPart) return;
+  if (!workbookPart) throw new Error("PPTX_EMBEDDED_WORKBOOK_MISSING");
   let workbook: Workbook;
-  try { workbook = await Workbook.open(await workbookPart.read()); } catch { return; }
+  try { workbook = await Workbook.open(await workbookPart.read()); } catch { throw new Error("PPTX_EMBEDDED_WORKBOOK_UNREADABLE"); }
   const serNodes = descendants(root).filter((node) => node.localName === "ser");
   let changed = false;
   series.forEach((item, index) => {

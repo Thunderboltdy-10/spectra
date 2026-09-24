@@ -811,6 +811,12 @@ export async function ensureThreadWorkspacePlacement(
   const thread = await ctx.db.get(params.threadId);
   if (!thread || thread.status === "deleted") return undefined;
   const workspaceId = params.workspaceId ?? thread.workspaceId;
+  if (workspaceId) {
+    const workspace = await ctx.db.get(workspaceId);
+    if (!workspace) throw new Error("THREAD_WORKSPACE_NOT_FOUND");
+    if (workspace.schoolId !== thread.schoolId)
+      throw new Error("THREAD_WORKSPACE_SCHOOL_MISMATCH");
+  }
   if (workspaceId && thread.workspaceId !== workspaceId)
     await ctx.db.patch(params.threadId, {
       workspaceId,

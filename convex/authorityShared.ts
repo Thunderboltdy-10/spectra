@@ -321,7 +321,7 @@ async function evaluateLoadedResourceAccess(
   // Same-school ownership needs no grant scan. Keep cross-school ownership
   // behind the explicit account-grant check below, and lifecycle/type checks
   // above this fast path.
-  if ((!loaded.schoolId || loaded.schoolId === actor.schoolId) && loaded.ownerAccountId === actor.accountId)
+  if (loaded.schoolId === actor.schoolId && loaded.ownerAccountId === actor.accountId)
     return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   const direct = await directAccess(ctx, actor, resourceType, resourceId);
   if (loaded.schoolId && loaded.schoolId !== actor.schoolId) {
@@ -349,7 +349,7 @@ async function evaluateLoadedResourceAccess(
       sources: direct.sources.filter((source) => source.kind === "direct"),
     };
   }
-  if (loaded.ownerAccountId === actor.accountId) return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
+  if (loaded.schoolId === actor.schoolId && loaded.ownerAccountId === actor.accountId) return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   const inherited = resourceType === "artifact" || resourceType === "agent"
     ? await inheritedArtifactAccess(
         ctx,
@@ -479,7 +479,7 @@ async function evaluateLoadedArtifactAuthority(
       sources: direct.sources.filter((source) => source.kind === "direct"),
     };
   }
-  if (loaded.ownerAccountId === actor.accountId)
+  if (loaded.schoolId === actor.schoolId && loaded.ownerAccountId === actor.accountId)
     return {
       allowed: true as const,
       level: "modify" as const,

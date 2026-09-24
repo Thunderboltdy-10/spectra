@@ -1621,6 +1621,7 @@ export default defineSchema({
         startedAt: v.number(),
       }),
     ),
+    permanentDeleteJobId: v.optional(v.id("workspaceDeletionJobs")),
     status: v.union(v.literal("active"), v.literal("archived")),
     defaultView: v.union(
       v.literal("cards"),
@@ -1648,6 +1649,35 @@ export default defineSchema({
     .index("by_school_status_activity", ["schoolId", "status", "lastActivityAt"])
     .index("by_account_activity", ["ownerAccountId", "lastActivityAt"])
     .index("by_ai_run", ["aiRunId"]),
+
+  workspaceDeletionJobs: defineTable({
+    workspaceId: v.id("spectraWorkspaces"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    requestedByAccountId: v.id("accounts"),
+    phase: v.union(
+      v.literal("detach_artifact_metadata"),
+      v.literal("move_children"),
+      v.literal("detach_threads"),
+      v.literal("detach_runs"),
+      v.literal("delete_memory_evidence"),
+      v.literal("expire_memory_claims"),
+      v.literal("finalize"),
+      v.literal("complete"),
+    ),
+    cursor: v.optional(v.string()),
+    movedChildCount: v.number(),
+    detachedArtifactCount: v.number(),
+    detachedThreadCount: v.number(),
+    detachedRunCount: v.number(),
+    deletedEvidenceCount: v.number(),
+    expiredClaimCount: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_workspace", ["workspaceId", "createdAt"])
+    .index("by_phase_updated", ["phase", "updatedAt"]),
 
   spectraArtifacts: defineTable({
     ownerAccountId: v.id("accounts"),

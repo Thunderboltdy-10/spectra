@@ -1,5 +1,6 @@
+import { internal } from "./_generated/api";
 import { query } from "./_generated/server";
-import { mutation } from "./orgNodeMutation";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import {
   requireWorkspaceCapability,
@@ -26,6 +27,7 @@ import {
   listChildNodes,
   moveNode,
   placeSourceNode,
+  purgeSourceNodes,
   relativeFolderPath,
   syncSourceNodes,
   workspaceContextNodes,
@@ -641,6 +643,7 @@ export const permanentlyDelete = mutation({
       ctx,
       args.workspaceId,
       "delete",
+      { allowPermanentDelete: true },
     );
     if (isGeneralWorkspace(workspace))
       throw new Error(
@@ -650,6 +653,42 @@ export const permanentlyDelete = mutation({
     if (args.confirmation !== expected)
       throw new Error(`Type “${expected}” to confirm`);
 
+    if (workspace.permanentDeleteJobId) {
+      const existingJob = await ctx.db.get(workspace.permanentDeleteJobId);
+      if (existingJob && existingJob.phase !== "complete") {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.spectraWorkspaces.continuePermanentDelete,
+          { workspaceId: workspace._id, jobId: existingJob._id },
+        );
+        return {
+          workspaceId: workspace._id,
+          jobId: existingJob._id,
+          status: "in_progress" as const,
+        };
+      }
+    }
+
+    const now = Date.now();
+    const jobId = await ctx.db.insert("workspaceDeletionJobs", {
+      workspaceId: workspace._id,
+      ownerAccountId: workspace.ownerAccountId,
+      schoolId: workspace.schoolId,
+      requestedByAccountId: actor.accountId,
+      phase: "detach_artifact_metadata",
+      movedChildCount: 0,
+      detachedArtifactCount: 0,
+      detachedThreadCount: 0,
+      detachedRunCount: 0,
+      deletedEvidenceCount: 0,
+      expiredClaimCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(workspace._id, {
+      permanentDeleteJobId: jobId,
+      updatedAt: now,
+    });
     await bumpPolicyVersion(
       ctx,
       "workspace",
@@ -657,94 +696,189 @@ export const permanentlyDelete = mutation({
       workspace.schoolId,
       actor.accountId,
     );
-
-    const workNodes = await workspaceContextNodes(
-      ctx,
-      args.workspaceId,
-      "work",
+    await ctx.scheduler.runAfter(
+      0,
+      internal.spectraWorkspaces.continuePermanentDelete,
+      { workspaceId: workspace._id, jobId },
     );
-    const artifactIds = Array.from(
-      new Set(workNodes.map((node) => node.sourceId).filter(Boolean)),
-    ) as string[];
+    return {
+      workspaceId: workspace._id,
+      jobId,
+      status: "in_progress" as const,
+    };
+  },
+});
 
-    // Workspaces organize artifacts; they never own their content. Removing a
-    // workspace therefore detaches provenance instead of cascading into
-    // artifacts, history, links, AI runs, or collaborators' work. Everything
-    // inside moves to General, which is where work with no other home lives.
-    for (const sourceId of artifactIds) {
-      const artifact = ctx.db.normalizeId("spectraArtifacts", sourceId);
-      if (artifact) {
-        const document = await ctx.db.get(artifact);
-        if (document?.createdFrom?.workspaceId === args.workspaceId) {
-          await ctx.db.patch(artifact, {
-            createdFrom: { ...document.createdFrom, workspaceId: undefined },
-          });
-        }
+const WORKSPACE_DELETE_PAGE = 20;
+
+export const continuePermanentDelete = internalMutation({
+  args: {
+    workspaceId: v.id("spectraWorkspaces"),
+    jobId: v.id("workspaceDeletionJobs"),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (
+      !job ||
+      job.workspaceId !== args.workspaceId ||
+      job.phase === "complete"
+    )
+      return;
+    const workspace = await ctx.db.get(args.workspaceId);
+    if (!workspace) {
+      await ctx.db.patch(job._id, {
+        phase: "complete",
+        cursor: undefined,
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+    if (workspace.permanentDeleteJobId !== job._id) return;
+
+    const now = Date.now();
+    let completed = false;
+    if (job.phase === "detach_artifact_metadata") {
+      const page = await ctx.db
+        .query("orgNodes")
+        .withIndex("by_workspace_context", (q) =>
+          q.eq("workspaceContextId", workspace._id),
+        )
+        .paginate({ numItems: WORKSPACE_DELETE_PAGE, cursor: job.cursor ?? null });
+      let detached = 0;
+      for (const node of page.page) {
+        if (node.kind !== "work" || !node.sourceId) continue;
+        const artifactId = ctx.db.normalizeId("spectraArtifacts", node.sourceId);
+        const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+        if (artifact?.createdFrom?.workspaceId !== workspace._id) continue;
+        await ctx.db.patch(artifact._id, {
+          createdFrom: { ...artifact.createdFrom, workspaceId: undefined },
+        });
+        detached += 1;
+      }
+      await ctx.db.patch(job._id, {
+        phase: page.isDone ? "move_children" : job.phase,
+        cursor: page.isDone ? undefined : page.continueCursor,
+        detachedArtifactCount: job.detachedArtifactCount + detached,
+        updatedAt: now,
+      });
+    } else if (job.phase === "move_children") {
+      const dissolved = await dissolveWorkspaceNode(ctx, workspace, {
+        limit: DISSOLVE_CHILD_BATCH,
+        preserveWorkspaceNode: true,
+        allowDeletingWorkspace: true,
+      });
+      await ctx.db.patch(job._id, {
+        phase: dissolved.remaining > 0 ? job.phase : "detach_threads",
+        cursor: undefined,
+        movedChildCount: job.movedChildCount + dissolved.moved,
+        updatedAt: now,
+      });
+    } else if (job.phase === "detach_threads") {
+      const rows = await ctx.db
+        .query("spectraThreads")
+        .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+        .take(WORKSPACE_DELETE_PAGE);
+      for (const thread of rows)
+        await ctx.db.patch(thread._id, {
+          workspaceId: undefined,
+          updatedAt: now,
+          readSchemaVersion: 1,
+        });
+      await ctx.db.patch(job._id, {
+        phase: rows.length < WORKSPACE_DELETE_PAGE ? "detach_runs" : job.phase,
+        detachedThreadCount: job.detachedThreadCount + rows.length,
+        updatedAt: now,
+      });
+    } else if (job.phase === "detach_runs") {
+      const rows = await ctx.db
+        .query("spectraAiRuns")
+        .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+        .take(WORKSPACE_DELETE_PAGE);
+      for (const run of rows)
+        await ctx.db.patch(run._id, { workspaceId: undefined, updatedAt: now });
+      await ctx.db.patch(job._id, {
+        phase:
+          rows.length < WORKSPACE_DELETE_PAGE
+            ? "delete_memory_evidence"
+            : job.phase,
+        detachedRunCount: job.detachedRunCount + rows.length,
+        updatedAt: now,
+      });
+    } else if (job.phase === "delete_memory_evidence") {
+      const page = await ctx.db
+        .query("memoryEvidence")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceType", "workspace").eq("sourceId", String(workspace._id)),
+        )
+        .paginate({ numItems: WORKSPACE_DELETE_PAGE, cursor: job.cursor ?? null });
+      for (const evidence of page.page)
+        await ctx.db.patch(evidence._id, {
+          accessStatus: "deleted",
+          excerptPreview: undefined,
+        });
+      await ctx.db.patch(job._id, {
+        phase: page.isDone ? "expire_memory_claims" : job.phase,
+        cursor: page.isDone ? undefined : page.continueCursor,
+        deletedEvidenceCount: job.deletedEvidenceCount + page.page.length,
+        updatedAt: now,
+      });
+    } else if (job.phase === "expire_memory_claims") {
+      const rows = await ctx.db
+        .query("memoryClaims")
+        .withIndex("by_workspace_status", (q) =>
+          q.eq("workspaceId", workspace._id).eq("status", "active"),
+        )
+        .take(WORKSPACE_DELETE_PAGE);
+      for (const claim of rows)
+        await ctx.db.patch(claim._id, {
+          status: "expired",
+          expiresAt: now,
+          updatedAt: now,
+        });
+      await ctx.db.patch(job._id, {
+        phase: rows.length < WORKSPACE_DELETE_PAGE ? "finalize" : job.phase,
+        expiredClaimCount: job.expiredClaimCount + rows.length,
+        updatedAt: now,
+      });
+    } else if (job.phase === "finalize") {
+      const workspaceNode = await findPrimaryNode(
+        ctx,
+        workspace.ownerAccountId,
+        "workspace",
+        workspace._id,
+      );
+      const remainingChildren = workspaceNode
+        ? await listChildNodes(ctx, workspaceNode.accountId, workspaceNode._id, {
+            includeTrashed: true,
+            limit: 1,
+          })
+        : [];
+      if (remainingChildren.length > 0) {
+        await ctx.db.patch(job._id, {
+          phase: "move_children",
+          cursor: undefined,
+          updatedAt: now,
+        });
+      } else {
+        await purgeSourceNodes(ctx, "workspace", workspace._id);
+        await ctx.db.delete(workspace._id);
+        await ctx.db.patch(job._id, {
+          phase: "complete",
+          cursor: undefined,
+          completedAt: now,
+          updatedAt: now,
+        });
+        completed = true;
       }
     }
 
-    await dissolveWorkspaceNode(ctx, workspace);
-
-    const [threads, runs] = await Promise.all([
-      ctx.db
-        .query("spectraThreads")
-        .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-        .collect(),
-      ctx.db
-        .query("spectraAiRuns")
-        .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-        .collect(),
-    ]);
-    await Promise.all([
-      ...threads.map((thread) =>
-        ctx.db.patch(thread._id, {
-          workspaceId: undefined,
-          updatedAt: Date.now(),
-          readSchemaVersion: 1,
-        }),
-      ),
-      ...runs.map((run) =>
-        ctx.db.patch(run._id, {
-          workspaceId: undefined,
-          updatedAt: Date.now(),
-        }),
-      ),
-    ]);
-
-    const [memoryEvidence, workspaceClaims] = await Promise.all([
-      ctx.db
-        .query("memoryEvidence")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "workspace").eq("sourceId", args.workspaceId),
-        )
-        .collect(),
-      ctx.db
-        .query("memoryClaims")
-        .withIndex("by_workspace_status", (q) =>
-          q.eq("workspaceId", args.workspaceId).eq("status", "active"),
-        )
-        .collect(),
-    ]);
-    const memoryChangedAt = Date.now();
-    for (const evidence of memoryEvidence)
-      await ctx.db.patch(evidence._id, {
-        accessStatus: "deleted",
-        excerptPreview: undefined,
-      });
-    for (const claim of workspaceClaims)
-      await ctx.db.patch(claim._id, {
-        status: "expired",
-        expiresAt: memoryChangedAt,
-        updatedAt: memoryChangedAt,
-      });
-
-    await ctx.db.delete(args.workspaceId);
-    return {
-      workspaceId: args.workspaceId,
-      detachedArtifactCount: artifactIds.length,
-      detachedThreadCount: threads.length,
-      preservedRunCount: runs.length,
-    };
+    if (!completed)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.spectraWorkspaces.continuePermanentDelete,
+        args,
+      );
   },
 });
 

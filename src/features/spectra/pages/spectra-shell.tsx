@@ -4146,7 +4146,9 @@ export function SpectraShell({
         workspaceId: selectedWorkspaceId,
         confirmation: workspaceDeleteConfirmation,
       });
-      toast.success("Workspace permanently removed.");
+      toast.message(
+        "Workspace deletion started. Its contents are moving to General.",
+      );
       setWorkspaceDeleteOpen(false);
       setWorkspaceDeleteConfirmation("");
       setSelection(null);

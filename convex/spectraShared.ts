@@ -63,6 +63,7 @@ export async function requireWorkspaceCapability(
   ctx: SpectraCtx,
   workspaceId: Id<"spectraWorkspaces">,
   capability: Capability = "read",
+  options?: { allowPermanentDelete?: boolean },
 ) {
   const decision = await requireCapability(
     ctx,
@@ -70,9 +71,18 @@ export async function requireWorkspaceCapability(
     workspaceId,
     capability,
   );
+  const workspace = decision.loaded.resource as Doc<"spectraWorkspaces">;
+  if (
+    workspace.permanentDeleteJobId &&
+    capability !== "read" &&
+    options?.allowPermanentDelete !== true
+  )
+    throw new Error(
+      "WORKSPACE_DELETE_IN_PROGRESS: This workspace is being removed.",
+    );
   return {
     actor: decision.actor,
-    workspace: decision.loaded.resource as Doc<"spectraWorkspaces">,
+    workspace,
     decision,
     capabilities: decision.capabilities,
   };

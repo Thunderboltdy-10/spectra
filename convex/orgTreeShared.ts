@@ -724,6 +724,33 @@ export function workspaceContextForParent(parent: OrgNode | null) {
   return parent.workspaceContextId;
 }
 
+async function assertWorkspaceWritable(
+  ctx: OrgWriteCtx,
+  workspaceId: Id<"spectraWorkspaces"> | undefined,
+) {
+  if (!workspaceId) return;
+  const workspace = await ctx.db.get(workspaceId);
+  if (workspace?.permanentDeleteJobId)
+    throw new Error(
+      "WORKSPACE_DELETE_IN_PROGRESS: This workspace is being removed.",
+    );
+}
+
+async function assertNodeWorkspaceWritable(ctx: OrgWriteCtx, node: OrgNode) {
+  const workspaceId =
+    node.kind === "workspace" && node.sourceId
+      ? ctx.db.normalizeId("spectraWorkspaces", node.sourceId) ?? undefined
+      : node.workspaceContextId;
+  await assertWorkspaceWritable(ctx, workspaceId);
+}
+
+async function assertParentWorkspaceWritable(
+  ctx: OrgWriteCtx,
+  parent: OrgNode | null,
+) {
+  await assertWorkspaceWritable(ctx, workspaceContextForParent(parent));
+}
+
 export function ownWorkspaceContext(node: OrgNode) {
   return node.kind === "workspace" && node.sourceId
     ? (node.sourceId as Id<"spectraWorkspaces">)
@@ -807,6 +834,10 @@ export async function ensureWorkspaceNode(
   ctx: OrgWriteCtx,
   workspace: Doc<"spectraWorkspaces">,
 ) {
+  if (workspace.permanentDeleteJobId)
+    throw new Error(
+      "WORKSPACE_DELETE_IN_PROGRESS: This workspace is being removed.",
+    );
   const accountId = workspace.ownerAccountId;
   const existing = await findPrimaryNode(
     ctx,
@@ -975,6 +1006,8 @@ export async function placeSourceNode(
                was in", and out of a workspace is General (D31), so it moves. */
             params.relocate !== true)));
 
+  if (existing) await assertNodeWorkspaceWritable(ctx, existing);
+
   if (existing && keepInPlace) {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (existing.name !== name) patch.name = name;
@@ -1000,6 +1033,7 @@ export async function placeSourceNode(
     target,
     params.schoolId,
   );
+  await assertParentWorkspaceWritable(ctx, parent);
   assertParentAcceptsChild(parent, params.kind);
   const context = workspaceContextForParent(parent);
   const typeKey =
@@ -1127,6 +1161,7 @@ export async function createFolderNode(
     params.parentId != null
       ? await requireOwnNode(ctx, params.parentId, params.accountId)
       : null;
+  await assertParentWorkspaceWritable(ctx, parent);
   assertParentAcceptsChild(parent, "folder");
   await assertDepthFits(ctx, parent?._id ?? null);
   const now = Date.now();
@@ -1172,6 +1207,7 @@ export async function createLinkNode(
     params.parentId != null
       ? await requireOwnNode(ctx, params.parentId, params.accountId)
       : null;
+  await assertParentWorkspaceWritable(ctx, parent);
   assertParentAcceptsChild(parent, "link");
   if (parent && parent._id === target._id)
     throw new Error("An item cannot reference itself.");
@@ -1206,6 +1242,7 @@ export async function renameNode(
   node: OrgNode,
   rawName: unknown,
 ) {
+  await assertNodeWorkspaceWritable(ctx, node);
   const name = assertUserNodeName(rawName);
   if (node.kind === "link")
     throw new Error("Rename the original item; references follow it.");
@@ -1256,6 +1293,8 @@ async function resolveInsertionKey(
   parentId: Id<"orgNodes"> | null,
   target: MoveTarget,
 ) {
+  if (!target.afterSiblingId && !target.beforeSiblingId)
+    return await appendOrderKey(ctx, node.accountId, parentId);
   const siblings = (
     await listChildNodes(ctx, node.accountId, parentId, {
       includeTrashed: true,
@@ -1299,11 +1338,15 @@ export async function moveNode(
   ctx: OrgWriteCtx,
   node: OrgNode,
   target: MoveTarget,
+  options?: { allowDeletingSourceWorkspace?: boolean },
 ) {
   const parent =
     target.parentId != null
       ? await requireOwnNode(ctx, target.parentId, node.accountId)
       : null;
+  if (!options?.allowDeletingSourceWorkspace)
+    await assertNodeWorkspaceWritable(ctx, node);
+  await assertParentWorkspaceWritable(ctx, parent);
   assertParentAcceptsChild(parent, node.kind);
   await assertNoCycle(ctx, node._id, parent?._id ?? null);
   if (isContainerKind(node.kind))
@@ -1338,6 +1381,7 @@ export async function moveNode(
 
 /** Soft delete with the whole subtree; one restore undoes it. */
 export async function trashNode(ctx: OrgWriteCtx, node: OrgNode) {
+  await assertNodeWorkspaceWritable(ctx, node);
   await assertNotGeneralWorkspaceNode(ctx, node, "delete");
   if (node.deletedAt !== undefined) return { trashed: 0, nodeId: node._id };
   const nodes = await subtreeNodes(ctx, node, { includeTrashed: false });
@@ -1376,6 +1420,7 @@ export async function trashNode(ctx: OrgWriteCtx, node: OrgNode) {
 }
 
 export async function restoreTrashedNode(ctx: OrgWriteCtx, node: OrgNode) {
+  await assertNodeWorkspaceWritable(ctx, node);
   const rows = await ctx.db
     .query("orgNodes")
     .withIndex("by_trashed_root", (q) => q.eq("trashedRootId", node._id))
@@ -1385,6 +1430,7 @@ export async function restoreTrashedNode(ctx: OrgWriteCtx, node: OrgNode) {
      the work is reachable rather than invisibly buried. */
   const parent = node.parentId ? await ctx.db.get(node.parentId) : null;
   const parentUsable = Boolean(parent && parent.deletedAt === undefined);
+  if (parentUsable) await assertParentWorkspaceWritable(ctx, parent);
   let restored = 0;
   for (const row of rows) {
     const patch: Record<string, unknown> = {
@@ -1431,8 +1477,14 @@ export const DISSOLVE_CHILD_BATCH = 20;
 export async function dissolveWorkspaceNode(
   ctx: OrgWriteCtx,
   workspace: Doc<"spectraWorkspaces">,
-  options?: { limit?: number },
+  options?: {
+    limit?: number;
+    preserveWorkspaceNode?: boolean;
+    allowDeletingWorkspace?: boolean;
+  },
 ) {
+  if (!options?.allowDeletingWorkspace)
+    await assertWorkspaceWritable(ctx, workspace._id);
   if (isGeneralWorkspace(workspace))
     throw new Error(
       "General cannot be deleted — it is where work with no other home lives.",
@@ -1451,6 +1503,11 @@ export async function dissolveWorkspaceNode(
   );
   const children = await listChildNodes(ctx, node.accountId, node._id, {
     includeTrashed: true,
+    limit:
+      Math.max(
+        1,
+        Math.min(options?.limit ?? DISSOLVE_CHILD_BATCH, DISSOLVE_CHILD_BATCH),
+      ) + 1,
   });
   const limit = Math.max(
     1,
@@ -1459,7 +1516,12 @@ export async function dissolveWorkspaceNode(
   const batch = children.slice(0, limit);
   for (const child of batch) {
     if (child.deletedAt === undefined) {
-      await moveNode(ctx, child, { parentId: general.node._id });
+      await moveNode(
+        ctx,
+        child,
+        { parentId: general.node._id },
+        { allowDeletingSourceWorkspace: options?.allowDeletingWorkspace === true },
+      );
       continue;
     }
     /* A trashed child keeps its own restore root, so re-parent it directly:
@@ -1475,9 +1537,11 @@ export async function dissolveWorkspaceNode(
       general.workspace._id,
     );
   }
-  const remaining = children.length - batch.length;
+  const remaining = children.length > batch.length ? 1 : 0;
   if (remaining > 0) return { moved: batch.length, purged: 0, remaining };
-  const purged = await purgeSourceNodes(ctx, "workspace", workspace._id);
+  const purged = options?.preserveWorkspaceNode
+    ? 0
+    : await purgeSourceNodes(ctx, "workspace", workspace._id);
   return { moved: children.length, purged, remaining: 0 };
 }
 
@@ -1779,6 +1843,7 @@ export async function purgeTrashedNodes(
     for (const row of subtree) expanded.set(row._id, row);
   }
   const items = [...expanded.values()];
+  for (const node of items) await assertNodeWorkspaceWritable(ctx, node);
   const requested = new Map(
     roots.map((root) => [
       root._id,

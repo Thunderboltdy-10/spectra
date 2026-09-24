@@ -322,14 +322,32 @@ function layerFor(item: CalendarItem): CalendarLayerKey {
   return "tasks";
 }
 
-function dayKey(value: number) {
+function localDayKey(value: number) {
   const date = new Date(value);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function minutesOnDay(value: number) {
-  const date = new Date(value);
-  return date.getHours() * 60 + date.getMinutes();
+function zonedParts(value: number, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function zonedDayKey(value: number, timezone: string) {
+  const parts = zonedParts(value, timezone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function minutesOnDay(value: number, timezone: string) {
+  const parts = zonedParts(value, timezone);
+  return Number(parts.hour) * 60 + Number(parts.minute);
 }
 
 function isDayItem(item: CalendarItem) {
@@ -1389,7 +1407,7 @@ function WeekGrid({
             : null}
         </div>
         {dayDates.map((day) => {
-          const today = dayKey(day.getTime()) === dayKey(now);
+          const today = localDayKey(day.getTime()) === zonedDayKey(now, timezone);
           return (
             <div
               key={day.toISOString()}
@@ -1403,7 +1421,7 @@ function WeekGrid({
         <div className="spectra-calendar-gutter spectra-calendar-allday-label" />
         {dayDates.map((day) => {
           const items = dayItems.filter(
-            (item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()),
+            (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
           return (
             <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell">
@@ -1442,14 +1460,14 @@ function WeekGrid({
         </div>
         {dayDates.map((day) => {
           const columnItems = timedItems.filter(
-            (item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()),
+            (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
           const preview =
-            gesturePreview && dayKey(gesturePreview.startAt) === dayKey(day.getTime())
+            gesturePreview && zonedDayKey(gesturePreview.startAt, timezone) === localDayKey(day.getTime())
               ? gesturePreview
               : null;
-          const today = dayKey(day.getTime()) === dayKey(now);
-          const nowTop = today ? (minutesOnDay(now) / 60) * HOUR_PX : null;
+          const today = localDayKey(day.getTime()) === zonedDayKey(now, timezone);
+          const nowTop = today ? (minutesOnDay(now, timezone) / 60) * HOUR_PX : null;
           return (
             <div
               key={`${day.toISOString()}-hours`}
@@ -1502,7 +1520,7 @@ function PreviewBlock({
   timezone: string;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === preview.layer)!;
-  const top = (minutesOnDay(preview.startAt) / 60) * HOUR_PX;
+  const top = (minutesOnDay(preview.startAt, timezone) / 60) * HOUR_PX;
   const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * HOUR_PX);
   return (
     <div
@@ -1550,7 +1568,7 @@ function TimedBlock({
   ) => void;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
-  const top = (minutesOnDay(item.startAt!) / 60) * HOUR_PX;
+  const top = (minutesOnDay(item.startAt!, timezone) / 60) * HOUR_PX;
   const duration = Math.max(30 * 60_000, item.endAt! - item.startAt!);
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
   return (

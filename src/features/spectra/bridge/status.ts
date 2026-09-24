@@ -142,8 +142,10 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
       tone: "warning",
     };
   }
+  const queuedChangeCount = input.queuedChangeCount ?? 0;
   if (
     pendingCount > 0 ||
+    queuedChangeCount > 0 ||
     replicas.some((replica) => replica.state === "pending")
   ) {
     const retryingReplica = replicas.find(
@@ -157,7 +159,9 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
       label: replicas.length > 1 ? "Syncing…" : "Saving…",
       detail: retryingReplica
         ? `${humanizePublicFailure(retryingReplica.errorCode!)}. Spectra will retry automatically.`
-        : "A verified operation is still in progress.",
+        : queuedChangeCount > 0 && pendingCount === 0
+          ? `${queuedChangeCount} change${queuedChangeCount === 1 ? " is" : "s are"} still queued for synchronization.`
+          : "A verified operation is still in progress.",
       tone: "neutral",
     };
   }

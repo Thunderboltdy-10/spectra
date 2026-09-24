@@ -729,6 +729,8 @@ export function GlobalSearch({
   const morphTransition = transitionFor("morph", motionLevel.level);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const [searchRetry, setSearchRetry] = useState(0);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const searchSequence = useRef(0);
@@ -768,10 +770,12 @@ export function GlobalSearch({
     if (!open || query.trim().length < 2) {
       setResults({ artifacts: [], workspaces: [] });
       setSearching(false);
+      setSearchError(false);
       return;
     }
     const sequence = ++searchSequence.current;
     setSearching(true);
+    setSearchError(false);
     const timer = window.setTimeout(
       () =>
         void searchSpectra(query)
@@ -779,8 +783,10 @@ export function GlobalSearch({
             if (searchSequence.current === sequence) setResults(value);
           })
           .catch(() => {
-            if (searchSequence.current === sequence)
+            if (searchSequence.current === sequence) {
               setResults({ artifacts: [], workspaces: [] });
+              setSearchError(true);
+            }
           })
           .finally(() => {
             if (searchSequence.current === sequence) setSearching(false);
@@ -788,7 +794,7 @@ export function GlobalSearch({
       180,
     );
     return () => window.clearTimeout(timer);
-  }, [open, query]);
+  }, [open, query, searchRetry]);
   return (
     <>
       <button
@@ -968,7 +974,20 @@ export function GlobalSearch({
                     })}
                   </section>
                 ) : null}
+                {!searching && query.trim().length >= 2 && searchError ? (
+                  <div className="px-3 py-8 text-center" role="alert">
+                    <p className="text-caption text-[var(--danger)]">Search failed.</p>
+                    <button
+                      type="button"
+                      className="mt-2 rounded-control px-3 py-1.5 text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                      onClick={() => setSearchRetry((current) => current + 1)}
+                    >
+                      Retry search
+                    </button>
+                  </div>
+                ) : null}
                 {!searching &&
+                !searchError &&
                 query.trim().length >= 2 &&
                 !results.workspaces.length &&
                 !results.artifacts.length ? (

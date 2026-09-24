@@ -35,7 +35,7 @@ export async function requireDurablePayloadAuthority(ctx: QueryCtx | MutationCtx
   const loaded = "loaded" in decision ? decision.loaded : null;
   const policy = await ctx.db.query("resourcePolicies").withIndex("by_resource", q =>
     q.eq("resourceType", room.typeKey === "agent" ? "agent" : "artifact").eq("resourceId", args.artifactId)).unique();
-  if (!decision.allowed || !loaded || !["active", "draft"].includes(loaded.lifecycle) ||
+  if (!decision.allowed || !loaded || loaded.schoolId !== actor.schoolId || !["active", "draft"].includes(loaded.lifecycle) ||
     room.policyVersion !== args.policyVersion || (policy?.version ?? 0) !== args.policyVersion ||
     (modify && loaded.ownerAccountId !== args.accountId && !decision.capabilities.includes("modify")))
     throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");

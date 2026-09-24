@@ -61,14 +61,19 @@ export function useArtifactCollaboration(
     useState<ArtifactCollaborationTransport | null>(null);
   const [localPersistence, setLocalPersistence] =
     useState<BoundedYjsLocalPersistence | null>(null);
+  const [initializationError, setInitializationError] = useState<string>();
   const recoveringRef = useRef(false);
   const recoveryAttemptRef = useRef(0);
   useEffect(() => {
     if (!artifactId) {
       setTransport(null);
       setLocalPersistence(null);
+      setInitializationError(undefined);
       return;
     }
+    setTransport(null);
+    setLocalPersistence(null);
+    setInitializationError(undefined);
     const next = createArtifactCollaborationTransport(
       artifactId,
       partitionKey,
@@ -91,16 +96,25 @@ export function useArtifactCollaboration(
     // replacing it or requiring React to replay a stale full snapshot.
     void persistence
       .initialize()
-      .catch(() => undefined)
       .then((durability) => {
         if (cancelled) return;
+        if (durability.state === "error")
+          throw new Error("LOCAL_COLLABORATION_RESTORE_FAILED");
         if (durability?.pendingRemoteSync)
           next.markLocalRecoveryPending?.();
         setTransport(next);
         setLocalPersistence(persistence);
-        return next.connect();
       })
-      .catch(() => undefined);
+      .then(() => {
+        if (!cancelled) void next.connect();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Joining before local recovery succeeds can make an empty document
+        // look like a valid room state and let later writes replace the saved
+        // offline branch. Keep the room closed and surface the failure.
+        setInitializationError("LOCAL_COLLABORATION_RESTORE_FAILED");
+      });
     return () => {
       cancelled = true;
       persistence.destroy();
@@ -225,6 +239,7 @@ export function useArtifactCollaboration(
   return {
     transport,
     ...snapshot,
+    initializationError,
     presence: EMPTY_PRESENCE,
     localDurability,
     recoverAuthoritative,

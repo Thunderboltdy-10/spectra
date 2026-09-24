@@ -213,15 +213,27 @@ export const reconcileArtifact = internalMutation({
       const pending = pendingByKey.get(idempotencyKey);
       if (pending) {
         pendingByKey.delete(idempotencyKey);
-        if (!pending.scheduledFunctionId) {
+        const scheduleChanged =
+          pending.scheduledFor !== target.scheduledFor ||
+          pending.dueAt !== target.dueAt ||
+          pending.taskTitle !== target.taskTitle;
+        if (scheduleChanged || !pending.scheduledFunctionId) {
+          if (scheduleChanged && pending.scheduledFunctionId)
+            await ctx.scheduler.cancel(pending.scheduledFunctionId);
           const scheduledFunctionId = await ctx.scheduler.runAt(
             Math.max(now, target.scheduledFor),
             internal.plannerReminders.deliver,
             { deliveryId: pending._id },
           );
           await ctx.db.patch(pending._id, {
+            taskTitle: target.taskTitle,
+            dueAt: target.dueAt,
+            scheduledFor: target.scheduledFor,
             nextReminderAt: target.scheduledFor,
+            status: "pending",
             scheduledFunctionId,
+            nextAttemptAt: undefined,
+            lastError: undefined,
             updatedAt: now,
           });
           scheduled += 1;
@@ -289,7 +301,7 @@ export const reconcileArtifact = internalMutation({
 });
 
 async function rowIsCurrent(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   row: Doc<"plannerReminderDeliveries">,
 ) {
   const artifact = await ctx.db.get(row.artifactId);
@@ -412,13 +424,18 @@ export async function loadPlannerReminderNotifications(
     )
     .order("desc")
     .take(limit * 3);
-  return rows
+  const candidates = rows
     .filter(
       (row) =>
         row.status === "delivered" &&
         (!args.unreadOnly || row.readAt === undefined),
     )
-    .slice(0, limit);
+  const visible: typeof candidates = [];
+  for (const row of candidates) {
+    if (await rowIsCurrent(ctx, row)) visible.push(row);
+    if (visible.length >= limit) break;
+  }
+  return visible;
 }
 
 export const listMine = query({

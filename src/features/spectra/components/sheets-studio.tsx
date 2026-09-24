@@ -3048,7 +3048,7 @@ export const SheetsStudio = memo(function SheetsStudio({
     });
   }
 
-  function applyCells(result: CellsResult, verb: string) {
+  function applyCells(result: CellsResult, verb: string): boolean {
     if (protectNativeFormulas) {
       const lost = formulaLiteralizationAddresses(
         activeSheet.cells,
@@ -3063,7 +3063,7 @@ export const SheetsStudio = memo(function SheetsStudio({
               : { ...sheet, cells: result.cells },
           ),
         });
-        return;
+        return false;
       }
     }
     if (result.blocked.length) {
@@ -3073,8 +3073,9 @@ export const SheetsStudio = memo(function SheetsStudio({
         "warning",
       );
     }
-    if (!result.written) return;
+    if (!result.written) return false;
     updateActiveSheet((sheet) => ({ ...sheet, cells: result.cells }));
+    return true;
   }
 
   function captureBlock(cut: boolean) {
@@ -3332,11 +3333,12 @@ export const SheetsStudio = memo(function SheetsStudio({
     setImportNotice("Put the cursor below the numbers you want totalled.");
   }
 
-  function replaceInSelection(scope: "sheet" | "selection") {
+  function replaceInSelection(scope: "sheet" | "selection"): boolean {
     const query = search.trim();
     if (!query) {
       setInspector("replace");
-      return;
+      setImportNotice("Enter a value to find before replacing.", "warning");
+      return false;
     }
     const addresses =
       scope === "selection"
@@ -3348,11 +3350,16 @@ export const SheetsStudio = memo(function SheetsStudio({
       query,
       replaceDraft,
     );
-    applyCells(result, "Replace");
-    if (result.written)
-      setImportNotice(
-        `Replaced ${result.written === 1 ? "one value" : `${result.written} values`} in ${scope === "selection" ? selectionLabel : activeSheet.name}.`,
-      );
+    if (!result.written) {
+      setImportNotice("No matching values were found to replace.", "warning");
+      return false;
+    }
+    const applied = applyCells(result, "Replace");
+    if (!applied) return false;
+    setImportNotice(
+      `Replaced ${result.written === 1 ? "one value" : `${result.written} values`} in ${scope === "selection" ? selectionLabel : activeSheet.name}.`,
+    );
+    return true;
   }
 
   function setNoteOnActiveCell(text: string) {
@@ -3427,6 +3434,7 @@ export const SheetsStudio = memo(function SheetsStudio({
       open: inspector === "find",
       toggleReplace: () => toggleInspector("replace"),
       replaceOpen: inspector === "replace",
+      replaceAll: () => replaceInSelection("sheet"),
       matchCount: search.trim() ? searchMatches.length : undefined,
       matchNoun: "cell",
     },

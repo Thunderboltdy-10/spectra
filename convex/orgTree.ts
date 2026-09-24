@@ -578,6 +578,18 @@ export const quickViewPage = query({
       if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
       const view = (await hydrateNodes(ctx, [row], { withChildCounts: true, withSource: true, accountId: actor.accountId }))[0];
       if (!view || (args.view === "shared" && view.source?.shared !== true)) continue;
+      if (row.kind === "work" && row.sourceId) {
+        const artifactId = normalizeArtifactId(ctx, row.sourceId);
+        const access = artifactId
+          ? await evaluateArtifactAccessForActor(ctx, actor, artifactId)
+          : null;
+        if (
+          !view.source?.available ||
+          !access?.allowed ||
+          !access.capabilities.includes("read")
+        )
+          continue;
+      }
       page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
     }
     return paging.result({ ...result, page });

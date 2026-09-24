@@ -42,12 +42,13 @@ export function readConsentState(): ConsentState | null {
 }
 
 export function writeConsentState(next: ConsentState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return false;
   try {
     window.localStorage.setItem(CONSENT_STORAGE_KEY, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent("ai-school:consent-updated", { detail: next }));
+    return true;
   } catch {
-    // Ignore storage failures.
+    return false;
   }
 }
 

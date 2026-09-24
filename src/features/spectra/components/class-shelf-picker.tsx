@@ -116,6 +116,7 @@ export function ClassShelfPicker({
   onSelectedIdsChange,
   submitting,
   submitError,
+  submitDisabled = false,
   primaryLabel,
   onSubmit,
   skipLabel,
@@ -132,6 +133,7 @@ export function ClassShelfPicker({
   onSelectedIdsChange: (ids: string[]) => void;
   submitting: boolean;
   submitError?: string;
+  submitDisabled?: boolean;
   primaryLabel: string;
   onSubmit: () => void;
   skipLabel?: string;
@@ -406,7 +408,7 @@ export function ClassShelfPicker({
         <Button
           type="button"
           variant="primary"
-          disabled={submitting || state.kind === "loading"}
+          disabled={submitting || state.kind === "loading" || submitDisabled}
           onClick={onSubmit}
         >
           {submitting ? "Saving" : primaryLabel}

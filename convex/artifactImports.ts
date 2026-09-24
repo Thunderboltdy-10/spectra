@@ -358,7 +358,7 @@ export const complete = mutation({
       importedContent,
       importedContentHash,
       updatedAt: now,
-      completedAt: now,
+      completedAt: nextStatus === "awaiting_commit" ? undefined : now,
     });
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,

@@ -57,6 +57,9 @@ export const registerSelf = mutation({
     const existing = await getAccountByClerkId(ctx, clerkId);
     const name = normalizeName(args.name ?? identity.name ?? identity.givenName ?? identity.preferredUsername ?? "Spectra user");
     const avatarUrl = args.avatarUrl ?? identity.pictureUrl;
+    const duplicates = await ctx.db.query("accounts").withIndex("by_email", (query) => query.eq("email", email)).collect();
+    if (duplicates.some((duplicate) => duplicate._id !== existing?._id))
+      throw new Error("IDENTITY_EMAIL_IN_USE: This verified email already belongs to another Spectra account.");
     if (existing) {
       await ctx.db.patch(existing._id, {
         email,
@@ -68,8 +71,6 @@ export const registerSelf = mutation({
       });
       return existing._id;
     }
-    const duplicate = await ctx.db.query("accounts").withIndex("by_email", (query) => query.eq("email", email)).unique();
-    if (duplicate) throw new Error("IDENTITY_EMAIL_IN_USE: This verified email already belongs to another Spectra account.");
     const accountId = await ctx.db.insert("accounts", {
       clerkId,
       email,

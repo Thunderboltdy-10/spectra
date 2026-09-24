@@ -206,7 +206,7 @@ export function useArtifactLiveModel(
     synchronizeMetadata,
     flushSnapshot,
     restoreRegions,
-    initializationError,
+    initializationError: collaboration.initializationError ?? initializationError,
     supported,
   };
 }

@@ -596,6 +596,10 @@ function LibraryOrganizerContent({
       const kind = target?.kind ?? node.kind;
       const sourceId = target?.sourceId ?? node.sourceId;
       const name = target?.name ?? node.name;
+      if (kind === "work" && node.source?.available === false) {
+        toast.error("That reference points at something that is gone.");
+        return;
+      }
       if (target && (kind === "folder" || kind === "workspace")) {
         navigate({ kind: "folder", nodeId: target.nodeId });
         return;

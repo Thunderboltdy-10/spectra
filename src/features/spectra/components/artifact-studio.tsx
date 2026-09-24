@@ -3023,7 +3023,7 @@ function ArtifactStudioEditor({
     body: string;
     regionId?: string;
     submit?: boolean;
-    resolve?: () => void;
+    resolve?: (outcome: SpectraCommandOutcome) => void;
     reject?: (error: unknown) => void;
   } | null>(null);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
@@ -3042,13 +3042,13 @@ function ArtifactStudioEditor({
     });
     const removeAdd = spectraBus.handle("comments.add", (input) => {
       if (input.artifactId !== artifact._id) return;
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<SpectraCommandOutcome>((resolve, reject) => {
         setRequestedComment({
           id: globalThis.crypto?.randomUUID?.() ?? `comment-${Date.now()}`,
           body: input.body,
           ...(input.regionId ? { regionId: input.regionId } : {}),
           submit: true,
-          resolve,
+        resolve,
           reject,
         });
         setCommentsOpen(true);
@@ -6154,6 +6154,7 @@ function ArtifactStudioEditor({
                   title={title}
                   content={editorContent}
                   onChange={editorChange}
+                  onBeforeNativeExport={async () => !dirty || save()}
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   nativeReadOnlyRegionIds={nativeReadOnlyRegionIds}
@@ -6347,7 +6348,12 @@ function ArtifactStudioEditor({
           const pending = requestedComment;
           setRequestedComment(null);
           if (error) pending?.reject?.(error);
-          else pending?.resolve?.();
+          else
+            pending?.resolve?.({
+              status: "completed",
+              message: "Comment added.",
+              data: { artifactId: artifact._id },
+            });
         }}
         onClose={() => {
           setCommentsOpen(false);

@@ -679,7 +679,7 @@ export const bootstrapNative = internalMutation({
         )
         .unique(),
     ]);
-    if (!actor || !artifact || !room || room.status !== "active")
+    if (!actor || !artifact || artifact.schoolId !== actor.schoolId || !room || room.status !== "active")
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"

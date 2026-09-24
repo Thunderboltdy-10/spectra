@@ -12,7 +12,7 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async (logger) => {
-    const actor = await requireActor();
+    const actor = await requireActor({ fresh: true });
     const body = (await request.json()) as Record<string, unknown>;
     const artifactId =
       typeof body.artifactId === "string" ? body.artifactId.trim() : "";

@@ -939,6 +939,7 @@ export function WhiteboardStudio({
           setSelectedNodeId(node.id);
           onActiveRegionChange?.(node.id);
           setTool("select");
+          return { status: "completed", message: "Reference inserted." };
         },
       ),
     [
@@ -964,6 +965,8 @@ export function WhiteboardStudio({
     () =>
       spectraBus.handle("reference.remove", async ({ hostWorkId, embedId }) => {
         if (hostWorkId !== artifactId) return;
+        if (readOnly)
+          throw new Error("This board is read-only, so the reference was not removed.");
         const removedIds = new Set(
           board.nodes
             .filter(
@@ -973,7 +976,8 @@ export function WhiteboardStudio({
             )
             .map((node) => node.id),
         );
-        if (!removedIds.size) return;
+        if (!removedIds.size)
+          throw new Error("The reference is no longer present on this board.");
         mutate((draft) => {
           draft.nodes = draft.nodes.filter((node) => !removedIds.has(node.id));
           draft.edges = draft.edges.filter(
@@ -989,8 +993,9 @@ export function WhiteboardStudio({
             ),
           ),
         );
+        return { status: "completed", message: "Reference removed." };
       }),
-    [artifactId, board.nodes, mutate],
+    [artifactId, board.nodes, mutate, readOnly],
   );
 
   async function linkSelectedEmbed(sourceArtifactId: string) {

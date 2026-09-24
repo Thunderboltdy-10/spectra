@@ -134,16 +134,22 @@ export function ClassShelfOnboarding({
 
   async function finish(status: "chosen" | "skipped", recordIds: string[]) {
     if (inFlight.current) return;
+    if (state.kind === "loading" || state.kind === "error") return;
+    if (
+      (state.kind === "ready" || state.kind === "empty") &&
+      (!Number.isSafeInteger(selectionRevision) || selectionRevision! < 0)
+    )
+      return;
     inFlight.current = true;
     setSubmitting(true);
     setSubmitError("");
     setSyncError("");
     try {
-      if (state.kind === "ready" && selectionRevision !== undefined) {
+      if (state.kind === "ready" || state.kind === "empty") {
         const result = await manageBacPost({
           action: "selectClasses",
           recordIds,
-          expectedRevision: selectionRevision,
+          expectedRevision: selectionRevision!,
           retention,
         });
         if (typeof result?.selectionRevision === "number")
@@ -173,7 +179,16 @@ export function ClassShelfOnboarding({
     }
   }
 
-  const canChoose = state.kind === "ready" && classes.length > 0;
+  const canChoose =
+    state.kind === "ready" &&
+    classes.length > 0 &&
+    Number.isSafeInteger(selectionRevision) &&
+    selectionRevision! >= 0;
+  const canContinue =
+    state.kind !== "loading" &&
+    state.kind !== "error" &&
+    ((state.kind !== "ready" && state.kind !== "empty") ||
+      (Number.isSafeInteger(selectionRevision) && selectionRevision! >= 0));
   const initialSelectedIds = classes
     .filter((item) => item.selected)
     .map((item) => item.recordId);
@@ -199,6 +214,7 @@ export function ClassShelfOnboarding({
             onSelectedIdsChange={setSelectedIds}
             submitting={submitting || syncing}
             submitError={submitError}
+            submitDisabled={!canContinue}
             primaryLabel={
               canChoose
                 ? selectedIds.length > 0

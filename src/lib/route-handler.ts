@@ -23,6 +23,12 @@ function normalizeErrorStatus(message: string) {
   if (message.startsWith("AUTH_MISCONFIGURED")) return 500;
   if (message.startsWith("AUTH_PROFILE_UNAVAILABLE")) return 500;
   if (message.startsWith("AUTH_BOOTSTRAP_FAILED")) return 500;
+  if (message.startsWith("INVITATION_EXPIRED")) return 410;
+  if (
+    message.startsWith("INVITATION_INVALID") ||
+    message.startsWith("INVITATION_SCHOOL_UNAVAILABLE")
+  )
+    return 404;
   if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
   if (
     message.startsWith("INTEGRATION_NOT_READY") ||

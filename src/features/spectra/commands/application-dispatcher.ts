@@ -76,7 +76,13 @@ function fromHandler(
   data?: unknown,
 ): CommandExecutionResult {
   if (!isCommandOutcome(value))
-    return completed(commandId, effect, fallbackMessage, undefined, data);
+    return {
+      commandId,
+      effect,
+      status: "failed",
+      message: "The command handler did not confirm that the action completed.",
+      ...(data === undefined ? {} : { data }),
+    };
   return {
     commandId,
     effect,

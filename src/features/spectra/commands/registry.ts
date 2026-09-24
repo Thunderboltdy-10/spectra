@@ -214,9 +214,7 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
     ...(binding.parameters ? { parameters: binding.parameters } : {}),
     ...(binding.effect ? { effect: binding.effect } : {}),
     ...(binding.visibility ? { visibility: binding.visibility } : {}),
-    execute: (_ctx, params) => {
-      binding.onSelect(params);
-    },
+    execute: (_ctx, params) => binding.onSelect(params),
     availability: (ctx) => {
       if (binding.requires && !ctx.can(binding.requires)) return { state: "hidden" };
       if (binding.disabled) return { state: "disabled", reason: binding.hint ?? "Unavailable in the current selection" };
@@ -310,7 +308,9 @@ export function executeCommand<P extends CommandParam>(
 ) {
   const availability = command.availability(ctx);
   if (availability.state !== "enabled") return false;
-  void command.execute(ctx, params as P);
+  const result = command.execute(ctx, params as P);
+  if (typeof result === "boolean") return result;
+  void result;
   return true;
 }
 
@@ -327,8 +327,8 @@ export async function executeCommandAsync<P extends CommandParam>(
 ): Promise<boolean> {
   const availability = command.availability(ctx);
   if (availability.state !== "enabled") return false;
-  await command.execute(ctx, params as P);
-  return true;
+  const result = await command.execute(ctx, params as P);
+  return result !== false;
 }
 
 export function swapWorkbarCommandOrders(

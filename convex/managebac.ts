@@ -141,8 +141,10 @@ function classFollowPolicy(ctx: Ctx, integrationId: Id<"schoolIntegrations">) {
     const matching = rows.filter(row =>
       row.providerClassId === source.providerClassId &&
       (!source.academicPeriodKey || !row.academicPeriodKey || row.academicPeriodKey === source.academicPeriodKey));
-    // Rows with no selection history retain the prior whole-account behavior.
-    return matching.length === 0 || matching.some(row => row.selected);
+    // A class-scoped record without a matching selection is not followed.
+    // Class/course rows themselves are admitted by the early return above so
+    // the selection UI can still discover available classes.
+    return matching.some(row => row.selected);
   };
 }
 
@@ -1933,6 +1935,11 @@ async function ensureClassWorkspace(
     );
   const normalized = record(source.normalized);
   const now = Date.now();
+  const projectedTitle = text(
+    normalized.name ?? normalized.title,
+    180,
+    "ManageBac class",
+  );
   const capabilities = await ctx.db
     .query("integrationCapabilities")
     .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
@@ -1961,6 +1968,7 @@ async function ensureClassWorkspace(
     academicPeriodKey: source.academicPeriodKey,
     sourceHash: source.sourceHash,
     freshAt: source.fetchedAt,
+    projectedTitle,
     capabilityState:
       now - source.fetchedAt > integration.freshnessSlaMinutes * 60_000
         ? ("stale" as const)
@@ -1979,8 +1987,13 @@ async function ensureClassWorkspace(
       ? await ctx.db.get(existingWorkspaceId)
       : null;
     if (existingWorkspace) {
+      const previouslyProjectedTitle =
+        existingWorkspace.sourceContext?.projectedTitle;
       await ctx.db.patch(existingWorkspace._id, {
-        title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+        ...(previouslyProjectedTitle &&
+        existingWorkspace.title === previouslyProjectedTitle
+          ? { title: projectedTitle }
+          : {}),
         description:
           text(normalized.description, 600) ||
           `${text(normalized.course ?? normalized.programme, 120)} - Source-linked from ManageBac`,
@@ -2004,7 +2017,7 @@ async function ensureClassWorkspace(
   const workspaceId = await ctx.db.insert("spectraWorkspaces", {
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
-    title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+    title: projectedTitle,
     description: text(
       normalized.description ??
         `${text(normalized.course ?? normalized.programme, 120)} · Source-linked from ManageBac`,
@@ -3782,6 +3795,17 @@ export const resolveConflict = mutation({
       (args.resolution === "rebase" || args.resolution === "keep_overlay")
     ) {
       for (const projection of projections) {
+        if (
+          args.resolution === "keep_overlay" &&
+          projection.projectionType === "planner_task"
+        ) {
+          await ctx.db.patch(projection._id, {
+            sourceHash: source.sourceHash,
+            state: "active",
+            updatedAt: now,
+          });
+          continue;
+        }
         const refreshed = await safelyRefreshProjection(
           ctx,
           projection,

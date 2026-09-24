@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({
             ok: true,
             ...result,
-            status: "imported",
+            status: "awaiting_commit",
             commitDeferred: true,
           });
         }

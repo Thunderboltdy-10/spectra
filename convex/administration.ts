@@ -11,6 +11,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { resolveActorContext } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
+import { bumpPolicyVersion } from "./authorityShared";
+import { releaseClaimsForAccount } from "./regionClaims";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -720,12 +722,52 @@ export const changeMember = mutation({
         "MEMBERSHIP_SELF_LOCKOUT: Another administrator must perform this action.",
       );
     const now = Date.now();
+    const nextStatus = args.status ?? membership.status;
     await ctx.db.patch(membership._id, {
       role: args.role ?? membership.role,
-      status: args.status ?? membership.status,
+      status: nextStatus,
       endedAt: args.status === "ended" ? now : membership.endedAt,
       updatedAt: now,
     });
+    if (nextStatus !== "active") {
+      const account = await ctx.db.get(membership.accountId);
+      if (account) {
+        const normalizedEmail = account.email.trim().toLowerCase();
+        const pendingInvitations = await ctx.db
+          .query("membershipInvitations")
+          .withIndex("by_school_email_status", (q) =>
+            q.eq("schoolId", school._id).eq("email", normalizedEmail).eq("status", "pending"),
+          )
+          .collect();
+        await Promise.all(pendingInvitations.map((invitation) =>
+          ctx.db.patch(invitation._id, { status: "revoked", revokedAt: now, updatedAt: now }),
+        ));
+      }
+
+      const liveDirectGrants = (await Promise.all([undefined, 0].map((revokedAt) =>
+        ctx.db.query("accessGrants")
+          .withIndex("by_school_principal_source_revoked", (q) =>
+            q.eq("schoolId", school._id)
+              .eq("principalType", "account")
+              .eq("principalId", membership.accountId)
+              .eq("source", "direct")
+              .eq("revokedAt", revokedAt),
+          )
+          .collect(),
+      ))).flat().filter((grant) => !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now));
+      const affectedResources = new Map<string, (typeof liveDirectGrants)[number]>();
+      for (const grant of liveDirectGrants) {
+        await ctx.db.patch(grant._id, { revokedAt: now, updatedAt: now });
+        affectedResources.set(`${grant.resourceType}:${grant.resourceId}`, grant);
+      }
+      for (const grant of affectedResources.values()) {
+        await bumpPolicyVersion(ctx, grant.resourceType, grant.resourceId, grant.schoolId ?? school._id, actor.accountId);
+        if (grant.resourceType === "artifact" || grant.resourceType === "agent") {
+          const artifactId = ctx.db.normalizeId("spectraArtifacts", grant.resourceId);
+          if (artifactId) await releaseClaimsForAccount(ctx, artifactId, membership.accountId, now);
+        }
+      }
+    }
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: school._id,

@@ -1092,6 +1092,18 @@ export async function getSpectraArtifact(artifactId: string, options?: { signal?
   );
 }
 
+export async function getSpectraArtifactForDeepLink(artifactId: string) {
+  const qs = new URLSearchParams({ action: "artifact", artifactId });
+  const response = await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" });
+  if (response.status === 404) return { artifact: null };
+  if (response.status === 403) {
+    const payload = await response.clone().json().catch(() => null);
+    if (payload?.error?.code === "AUTH_RESOURCE_FORBIDDEN")
+      return { artifact: null };
+  }
+  return readJson<{ artifact: SpectraArtifact | null }>(response);
+}
+
 export async function getSpectraArtifactUserState(artifactId: string) {
   const qs = new URLSearchParams({
     action: "artifactUserState",
@@ -2624,7 +2636,7 @@ export async function completeArtifactImport(input: {
   return readJson<{
     ok: true;
     jobId: string;
-    status: string;
+    status: "imported" | "awaiting_commit" | "quarantined" | "failed";
     versionId?: string;
     reused?: boolean;
     importJobId?: string;

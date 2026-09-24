@@ -48,7 +48,10 @@ export async function getAuthenticatedAccount(ctx: IdentityCtx) {
     throw new Error("AUTH_EMAIL_UNVERIFIED: A verified email claim is required.");
   }
   if (account.email !== tokenEmail || !account.emailVerified) {
-    throw new Error("AUTH_IDENTITY_MISMATCH: The authenticated identity no longer matches this account.");
+    // Let the authenticated-session repair path call registerSelf. That
+    // mutation checks that the verified address is not owned by another
+    // account before it updates this stable Clerk-subject mapping.
+    return null;
   }
   return account;
 }

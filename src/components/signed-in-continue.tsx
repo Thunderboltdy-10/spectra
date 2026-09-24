@@ -18,15 +18,21 @@ export function SignedInContinue({ to }: { to?: string }) {
   const { isLoaded, isSignedIn } = useAuth();
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
+    const explicitTarget =
+      to?.startsWith("/") && !to.startsWith("//") ? to : "";
     const joinToken = readJoinTokenCookie(document.cookie);
     const recoveredJoin = joinToken ? joinHrefForToken(joinToken) : "";
     const here = `${window.location.pathname}${window.location.search}`;
-    if (recoveredJoin) {
+    const target = explicitTarget || recoveredJoin || APP_HOME;
+    const joinTarget =
+      target === "/join" ||
+      target.startsWith("/join?") ||
+      target.startsWith("/join/");
+    if (joinTarget) {
       if (window.location.pathname.startsWith("/join")) return;
-      window.location.replace(recoveredJoin);
+      window.location.replace(target);
       return;
     }
-    const target = to?.startsWith("/") ? to : APP_HOME;
     if (here === target || window.location.pathname.startsWith(`${APP_HOME}/`)) {
       return;
     }

@@ -41,7 +41,10 @@ function routeTarget(href: string): { view: ViewportView; targetId: string } {
     return { view: "workspace", targetId: url.pathname.split("/")[2] ?? "workspace" };
   }
   if (url.pathname.startsWith("/library")) {
-    return { view: "library", targetId: url.pathname.split("/")[2] ?? "library" };
+    const artifactId = url.pathname.split("/")[2];
+    return artifactId
+      ? { view: "artifact", targetId: decodeURIComponent(artifactId) }
+      : { view: "library", targetId: "library" };
   }
   return { view: appSurfaceFromPathname(url.pathname) as ViewportView, targetId: url.pathname };
 }
@@ -119,6 +122,18 @@ export function UniversalKBar() {
     ),
     [activeRunIds, following, mountedArtifactId, mountedArtifactType, pathname, preferences.ai.continueCurrentConversation, searchParams],
   );
+  const readCurrentContext = useCallback(() => {
+    const currentStudio = document.querySelector<HTMLElement>("[data-spectra-studio]");
+    return initialContext(
+      window.location.pathname,
+      new URLSearchParams(window.location.search),
+      spectraBus.getQuery("run.active")?.runIds ?? activeRunIds,
+      following,
+      preferences.ai.continueCurrentConversation,
+      currentStudio?.dataset.spectraStudio,
+      currentStudio?.dataset.spectraType,
+    );
+  }, [activeRunIds, following, preferences.ai.continueCurrentConversation]);
 
   const openKBar = useCallback(() => {
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -261,8 +276,34 @@ export function UniversalKBar() {
     setRunning(true);
     setResultMessage(null);
     try {
-      const value = await entry.command.execute(commandContext, params);
-      if (value?.status === "unavailable") {
+      const currentContext = readCurrentContext();
+      let currentTarget: string | undefined;
+      let targetField: "artifactId" | "threadId" | "runId" | undefined;
+      if (entry.command.id === "app.comments.open" || entry.command.id === "app.comments.add") {
+        targetField = "artifactId";
+        currentTarget = currentContext.activeArtifactId;
+      } else if (entry.command.id === "app.chat.continue") {
+        targetField = "threadId";
+        currentTarget = currentContext.activeThreadId;
+      } else if (entry.command.id === "app.run.stop") {
+        targetField = "runId";
+        currentTarget = currentContext.activeRunIds[0];
+      }
+      if (targetField) {
+        const rankedTarget = params[targetField];
+        if (!currentTarget || rankedTarget !== currentTarget) {
+          setResultMessage("The active target changed. Close this command and open it again for the current work.");
+          return;
+        }
+        params = { ...params, [targetField]: currentTarget };
+      }
+      const currentCommandContext = commandContextForKBar(currentContext, dispatch);
+      const value = await entry.command.execute(currentCommandContext, params);
+      if (value === false) {
+        setResultMessage("No changes were made.");
+        return;
+      }
+      if (value && typeof value === "object" && value.status !== "completed") {
         setResultMessage(value.message);
         return;
       }
@@ -276,7 +317,7 @@ export function UniversalKBar() {
     } finally {
       setRunning(false);
     }
-  }, [closeKBar, commandContext]);
+  }, [closeKBar, dispatch, readCurrentContext]);
 
   const startEntry = useCallback((entry: KBarEntry) => {
     const availability = entry.command.availability(commandContext);

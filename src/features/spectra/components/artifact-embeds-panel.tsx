@@ -25,6 +25,7 @@ import { isArtifactTypeKey } from "../artifacts/registry";
 import { getWorkReferenceContract } from "../references";
 import { getWorkDefinition } from "../work/registry";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
 import { SelectField } from "@/components/ui/select";
@@ -274,18 +275,36 @@ export function ArtifactEmbedsPanel({
   async function removeEmbed(embed: SpectraArtifactEmbed) {
     setBusy(`remove:${embed.embedId}`);
     try {
-      await removeReference({
-        embedId: embed.embedId as Id<"artifactEmbeds">,
-      });
       if (
         containerType === "artifact" &&
         (containerWorkType === "document" || containerWorkType === "whiteboard")
       ) {
-        await spectraBus.commandAsync("reference.remove", {
+        const dispatched = await spectraBus.commandAsyncResults("reference.remove", {
           hostWorkId: containerId,
           embedId: embed.embedId,
         });
+        const outcome = [...dispatched.results].reverse().find(
+          (value): value is SpectraCommandOutcome =>
+            Boolean(value) &&
+            typeof value === "object" &&
+            "status" in value &&
+            ["completed", "pending", "needs-human", "failed"].includes(
+              String(value.status),
+            ) &&
+            "message" in value &&
+            typeof value.message === "string",
+        );
+        if (dispatched.listeners === 0)
+          throw new Error("The editor is not ready to remove this reference.");
+        if (outcome?.status !== "completed")
+          throw new Error(
+            outcome?.message ?? "The reference could not be removed from the editor.",
+          );
       }
+      await removeReference({
+        embedId: embed.embedId as Id<"artifactEmbeds">,
+      });
+      toast.success("Reference removed.");
     } catch (error) {
       toast.error(
         error instanceof Error

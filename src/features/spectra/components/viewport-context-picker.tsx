@@ -8,6 +8,7 @@ import {
   type ContextSourceRegistration,
 } from "../context";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ export function ViewportContextPicker() {
   >({ kind: "context" });
   const [entries, setEntries] = useState<ContextSourceRegistration[]>([]);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string>();
   const addExplicit = useSpectraContextStore((state) => state.addExplicit);
   const selected = useSpectraContextStore((state) => state.explicit);
 
@@ -35,6 +37,7 @@ export function ViewportContextPicker() {
   useEffect(
     () =>
       spectraBus.handle("context.beginPicking", () => {
+        setSelectionError(undefined);
         setIntent({ kind: "context" });
         setEntries(contextSourceRegistry.listEligible());
         setOpen(true);
@@ -44,6 +47,7 @@ export function ViewportContextPicker() {
   useEffect(
     () =>
       spectraBus.handle("reference.beginPicking", ({ hostWorkId }) => {
+        setSelectionError(undefined);
         setIntent({ kind: "reference", hostWorkId });
         setEntries(
           contextSourceRegistry
@@ -70,11 +74,41 @@ export function ViewportContextPicker() {
 
   async function selectEntry(entry: ContextSourceRegistration) {
     if (intent.kind === "reference") {
-      spectraBus.command("reference.insert", {
-        hostWorkId: intent.hostWorkId,
-        target: entry.anchor,
-      });
-      setOpen(false);
+      setSelectionError(undefined);
+      try {
+        const dispatched = await spectraBus.commandAsyncResults(
+          "reference.insert",
+          { hostWorkId: intent.hostWorkId, target: entry.anchor },
+        );
+        const outcome = [...dispatched.results].reverse().find(
+          (value): value is SpectraCommandOutcome =>
+            Boolean(value) &&
+            typeof value === "object" &&
+            "status" in value &&
+            ["completed", "pending", "needs-human", "failed"].includes(
+              String(value.status),
+            ) &&
+            "message" in value &&
+            typeof value.message === "string",
+        );
+        if (dispatched.listeners === 0) {
+          setSelectionError("Reference insertion is not available on this work.");
+          return;
+        }
+        if (outcome?.status !== "completed") {
+          setSelectionError(
+            outcome?.message ?? "The reference was not inserted. Try again.",
+          );
+          return;
+        }
+        setOpen(false);
+      } catch (error) {
+        setSelectionError(
+          error instanceof Error
+            ? error.message
+            : "The reference was not inserted. Try again.",
+        );
+      }
       return;
     }
     const summary = await entry
@@ -149,6 +183,11 @@ export function ViewportContextPicker() {
             ? "Choose a visible work region to reference."
             : "Choose visible work to add as AI context."}
         </DialogDescription>
+        {selectionError ? (
+          <p role="alert" className="mt-2 text-micro text-[var(--danger)]">
+            {selectionError}
+          </p>
+        ) : null}
         <div className="mt-2 max-h-[280px] space-y-1 overflow-y-auto">
           {entries.map((entry) => {
             const included =

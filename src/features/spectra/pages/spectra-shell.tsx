@@ -143,6 +143,7 @@ import {
   beginArtifactImportOriginal,
   completeArtifactImport,
   getSpectraArtifact,
+  getSpectraArtifactForDeepLink,
   exportSpectraWorkspaceManifest,
   getSpectraOverview,
   getSpectraRunDetail,
@@ -3079,11 +3080,42 @@ export function SpectraShell({
     }
     if (!overview) return;
     openedDeepLinkRef.current = routeArtifactId;
-    toast.error("That work is not available.", {
-      description:
-        "It may have been deleted, or it may not be shared with your account.",
-    });
-    replaceWorkspaceLocation(selectedWorkspaceId);
+    void getSpectraArtifactForDeepLink(routeArtifactId)
+      .then(({ artifact: resolvedArtifact }) => {
+        if (
+          artifactIdFromSpectraLocation(
+            window.location.pathname,
+            window.location.search,
+          ) !== routeArtifactId
+        )
+          return;
+        if (!resolvedArtifact) {
+          toast.error("That work is not available.", {
+            description:
+              "It may have been deleted, or it may not be shared with your account.",
+          });
+          replaceWorkspaceLocation(selectedWorkspaceId);
+          return;
+        }
+        setOverview((current) =>
+          current &&
+          !current.artifacts.some((item) => item._id === resolvedArtifact._id)
+            ? { ...current, artifacts: [resolvedArtifact, ...current.artifacts] }
+            : current,
+        );
+        openArtifactPanel(resolvedArtifact, "replace");
+      })
+      .catch(() => {
+        if (
+          artifactIdFromSpectraLocation(
+            window.location.pathname,
+            window.location.search,
+          ) !== routeArtifactId
+        )
+          return;
+        openedDeepLinkRef.current = null;
+        toast.error("That work could not be loaded. Try again.");
+      });
     // openArtifactPanel is a render-local function; the guard ref, not the dep
     // list, is what keeps this to one open per id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3203,6 +3235,12 @@ export function SpectraShell({
         typeof content.threadId === "string" ? content.threadId : "";
       if (threadId) {
         setLiveThread({ id: threadId, title: artifact.title });
+        requestAnimationFrame(() =>
+          acknowledgeViewportReady({
+            targetId: artifact._id,
+            view: "artifact",
+          }),
+        );
         return;
       }
     }
@@ -3221,6 +3259,13 @@ export function SpectraShell({
       },
       historyMode,
     );
+    if (artifact.blueprintKey === "thread_reference")
+      requestAnimationFrame(() =>
+        acknowledgeViewportReady({
+          targetId: artifact._id,
+          view: "artifact",
+        }),
+      );
   }
 
   useEffect(() => {
@@ -3799,11 +3844,17 @@ export function SpectraShell({
           historyMode: "push",
         });
       }
-      toast.success(
-        selectedWorkspaceId
-          ? `${title} imported into this workspace.`
-          : `${title} imported into your Library.`,
-      );
+      if (completedImport.status === "awaiting_commit") {
+        toast.warning(
+          `${title} is available in ${selectedWorkspaceId ? "this workspace" : "your Library"}; its import history is still being saved.`,
+        );
+      } else {
+        toast.success(
+          selectedWorkspaceId
+            ? `${title} imported into this workspace.`
+            : `${title} imported into your Library.`,
+        );
+      }
     } catch (error) {
       if (pendingOfficeArtifactId)
         await postSpectra({ action: "deleteArtifact", artifactId: pendingOfficeArtifactId }).catch(() => undefined);

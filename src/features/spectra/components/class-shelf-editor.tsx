@@ -72,9 +72,13 @@ export function ClassShelfEditor({
       classLoadError?: string;
       identityStatus?: ClassShelfIdentityStatus;
     }) => {
-      const resolved = next.classLoadError
-        ? { kind: "error" as const, message: next.classLoadError }
-        : classShelfLoadState(next);
+      if (next.classLoadError) {
+        setState({ kind: "error", message: next.classLoadError });
+        setSelectionRevision(undefined);
+        setIdentityStatus(next.identityStatus);
+        return;
+      }
+      const resolved = classShelfLoadState(next);
       setState(resolved);
       setLoadedClasses(next.classes);
       setSelectionRevision(next.selectionRevision);
@@ -157,6 +161,12 @@ export function ClassShelfEditor({
 
   async function save() {
     if (inFlight.current) return;
+    if (
+      (state.kind !== "ready" && state.kind !== "empty") ||
+      !Number.isSafeInteger(selectionRevision) ||
+      selectionRevision! < 0
+    )
+      return;
     inFlight.current = true;
     setSubmitting(true);
     setSubmitError("");
@@ -164,9 +174,7 @@ export function ClassShelfEditor({
       const selectionResult = await manageBacPost({
         action: "selectClasses",
         recordIds: selectedIds,
-        ...(selectionRevision !== undefined
-          ? { expectedRevision: selectionRevision }
-          : {}),
+        expectedRevision: selectionRevision,
         retention,
       });
       if (typeof selectionResult?.selectionRevision === "number")
@@ -210,6 +218,11 @@ export function ClassShelfEditor({
         onSelectedIdsChange={setSelectedIds}
         submitting={submitting}
         submitError={submitError}
+        submitDisabled={
+          (state.kind !== "ready" && state.kind !== "empty") ||
+          !Number.isSafeInteger(selectionRevision) ||
+          selectionRevision! < 0
+        }
         primaryLabel="Save classes"
         onSubmit={() => void save()}
         retention={retention}

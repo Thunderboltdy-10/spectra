@@ -55,7 +55,6 @@ import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
 import {
   commandContext,
   commandForBinding,
-  executeCommand,
   type CommandBinding,
   type CommandParam,
 } from "../commands";
@@ -663,6 +662,7 @@ export function DocumentStudio({
   title,
   content,
   onChange,
+  onBeforeNativeExport,
   aiChangedPaths = [],
   readOnly = false,
   nativeReadOnlyRegionIds = [],
@@ -675,6 +675,7 @@ export function DocumentStudio({
   title: string;
   content: unknown;
   onChange: (content: unknown) => void;
+  onBeforeNativeExport?: () => Promise<boolean>;
   aiChangedPaths?: string[];
   readOnly?: boolean;
   nativeReadOnlyRegionIds?: string[];
@@ -712,6 +713,8 @@ export function DocumentStudio({
   const nativeReadOnlyKey = nativeReadOnlyRegionIds.join("|");
   const onLocalCollaborativeChangeRef = useRef(onLocalCollaborativeChange);
   onLocalCollaborativeChangeRef.current = onLocalCollaborativeChange;
+  const contentRef = useRef(content);
+  contentRef.current = content;
   const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
     withEditorFormatting(
@@ -1179,7 +1182,7 @@ export function DocumentStudio({
         editorJsonKeyRef.current = JSON.stringify(nextJson);
         onChange(
           withDocumentFormatting(
-            documentContentFromJson(nextJson, content),
+            documentContentFromJson(nextJson, contentRef.current),
             nextJson,
           ),
         );
@@ -1251,7 +1254,9 @@ export function DocumentStudio({
     ],
   );
 
-  useStudioViewportReady(Boolean(editor));
+  useStudioViewportReady(
+    Boolean(editor && !editor.isDestroyed && editor.isInitialized && editor.view),
+  );
 
   useEffect(() => {
     if (!editor || readOnly) return;
@@ -1431,6 +1436,7 @@ export function DocumentStudio({
               "The live reference could not be placed in this document.",
             );
           }
+          return { status: "completed", message: "Reference inserted." };
         },
       ),
     [
@@ -1446,7 +1452,11 @@ export function DocumentStudio({
   useEffect(
     () =>
       spectraBus.handle("reference.remove", async ({ hostWorkId, embedId }) => {
-        if (hostWorkId !== artifactId || !editor) return;
+        if (hostWorkId !== artifactId) return;
+        if (!editor || !editor.isInitialized || editor.isDestroyed)
+          throw new Error("The document is not ready to remove this reference.");
+        if (readOnly || strictNative || docMode === "read")
+          throw new Error("This document cannot remove the reference in its current mode.");
         let range: { from: number; to: number } | undefined;
         editor.state.doc.descendants((node, position) => {
           if (
@@ -1458,9 +1468,13 @@ export function DocumentStudio({
           }
           return range === undefined;
         });
-        if (range) editor.chain().focus().deleteRange(range).run();
+        if (!range)
+          throw new Error("The reference is no longer present in this document.");
+        if (!editor.chain().focus().deleteRange(range).run())
+          throw new Error("The reference could not be removed from this document.");
+        return { status: "completed", message: "Reference removed." };
       }),
-    [artifactId, editor],
+    [artifactId, docMode, editor, readOnly, strictNative],
   );
 
   useEffect(() => {
@@ -1496,7 +1510,8 @@ export function DocumentStudio({
     [content, title],
   );
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed || !editor.isInitialized || !editor.view)
+      return;
     const incomingKey = JSON.stringify(incomingEditorJson);
     const contentChanged = incomingKey !== editorJsonKeyRef.current;
     if (contentChanged) editorJsonKeyRef.current = incomingKey;
@@ -1556,7 +1571,6 @@ export function DocumentStudio({
     // requestAnimationFrame is throttled in an unfocused collaborator window,
     // and cancelling the preceding callback for every 112 ms presence beat can
     // starve TipTap indefinitely, leaving a peer on a provisional prefix.
-    if (editor.isDestroyed || !editor.isInitialized) return;
     // Native Y.XmlFragment collaboration is already bound directly to the
     // editor. Reapplying a projected JSON snapshot here would reset selection,
     // corrupt IME composition, and turn a remote delta into a full replace.
@@ -1753,8 +1767,8 @@ export function DocumentStudio({
    * so earlier positions stay valid. A full `setContent` would rewrite the whole
    * document and clobber a collaborator mid-sentence (§11A).
    */
-  function replaceAllMatches() {
-    if (!editor || !findDraft || readOnly || !findMatches.length) return;
+  function replaceAllMatches(): boolean {
+    if (!editor || !findDraft || readOnly || !findMatches.length) return false;
     editorReadyForUserChanges.current = true;
     const transaction = editor.state.tr;
     for (const match of [...findMatches].reverse()) {
@@ -1768,6 +1782,7 @@ export function DocumentStudio({
     }
     editor.view.dispatch(transaction);
     setFindCursor(0);
+    return true;
   }
 
   /**
@@ -1869,6 +1884,10 @@ export function DocumentStudio({
       document.save(`${safeTitle}.pdf`);
     } else {
       if (nativeBinding.format === "docx") {
+        if (onBeforeNativeExport && !(await onBeforeNativeExport()))
+          throw new Error(
+            "The latest Word changes could not be saved. The download was cancelled.",
+          );
         const response = await fetch("/api/spectra/lenses/docx", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3077,10 +3096,37 @@ export function DocumentStudio({
       studioContract.role,
     ],
   );
-  const runDocumentCommand = (id: string, value?: CommandParam) => {
+  const runDocumentCommand = async (id: string, value?: CommandParam) => {
     const entry = documentCommandMap.get(id);
-    if (!entry) return;
-    executeCommand(entry.command, documentCommandCtx, value);
+    if (!entry) return false;
+    const availability = entry.command.availability(documentCommandCtx);
+    if (availability.state !== "enabled") return false;
+    try {
+      const outcome = await entry.command.execute(documentCommandCtx, value);
+      if (outcome === false) return false;
+      if (outcome === true) return true;
+      if (
+        !outcome ||
+        typeof outcome !== "object" ||
+        outcome.status !== "completed" ||
+        (outcome.data &&
+          typeof outcome.data === "object" &&
+          "changed" in outcome.data &&
+          outcome.data.changed === false)
+      ) {
+        if (outcome?.status === "failed" || outcome?.status === "unavailable")
+          toast.error(outcome.message);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "The document command could not be completed.",
+      );
+      return false;
+    }
   };
   useEffect(() => spectraBus.handle("document.executeCommand", async ({ artifactId: targetId, commandId, params }) => {
     if (targetId !== artifactId) return undefined;
@@ -3105,11 +3151,11 @@ export function DocumentStudio({
       } satisfies import("../commands/types").CommandExecutionResult;
     }
     const outcome = await entry.command.execute(documentCommandCtx, params as CommandParam);
-    return outcome ?? {
+    return outcome && typeof outcome === "object" ? outcome : {
       commandId,
-      status: "completed",
+      status: "failed",
       effect: "mutate",
-      message: `${entry.binding.label} started.`,
+      message: "This document command did not confirm a completed change.",
     } satisfies import("../commands/types").CommandExecutionResult;
   }), [artifactId, documentCommandCtx, documentCommandMap]);
   const documentCommandAvailability = (id: string) => {

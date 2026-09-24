@@ -6,6 +6,12 @@ import { contextSourceRegistry } from "../context";
 
 export function ContextSourceBoundary({ registration, children, className }: { registration: Omit<ContextSourceRegistration, "element">; children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => contextSourceRegistry.register({ ...registration, element: () => ref.current }), [registration]);
+  useEffect(() => {
+    const unregister = contextSourceRegistry.register({
+      ...registration,
+      element: () => ref.current,
+    });
+    return () => unregister();
+  }, [registration]);
   return <div ref={ref} data-context-source={registration.id} className={className}>{children}</div>;
 }

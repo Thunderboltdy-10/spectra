@@ -2380,10 +2380,22 @@ export function QuizStudio({
                     {practiceSyncing.length === 1 ? "" : "s"}
                   </span>
                 ) : practiceAttempt?.status === "in_progress" ? (
-                  <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Current answers synchronized
-                  </span>
+                  Object.entries(answers).some(([questionId, value]) => {
+                    const current = value.startsWith("[")
+                      ? answerValueArray(value)
+                      : value;
+                    const saved = practiceAttempt.responses[questionId] ?? "";
+                    return JSON.stringify(current) !== JSON.stringify(saved);
+                  }) ? (
+                    <span className="ml-auto text-micro text-[var(--warning)]">
+                      Not saved yet
+                    </span>
+                  ) : (
+                    <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Current answers synchronized
+                    </span>
+                  )
                 ) : (
                   <span className="ml-auto" />
                 )}

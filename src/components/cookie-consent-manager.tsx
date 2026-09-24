@@ -33,6 +33,7 @@ export function CookieConsentManager() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftPreferences, setDraftPreferences] = useState(false);
   const [draftAnalytics, setDraftAnalytics] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
 
   useEffect(() => {
     const initial = readConsentState();
@@ -51,12 +52,17 @@ export function CookieConsentManager() {
       ...next,
       updatedAt: new Date().toISOString(),
     };
-    writeConsentState(payload);
+    if (!writeConsentState(payload)) {
+      setSaveError("Your cookie choices could not be saved. Check browser storage and try again.");
+      return;
+    }
+    setSaveError(undefined);
     setConsent(payload);
     setSettingsOpen(false);
   }
 
   const openSettings = useCallback(() => {
+    setSaveError(undefined);
     const source = consent ?? createDefaultConsent();
     setDraftPreferences(source.preferences);
     setDraftAnalytics(source.analytics);
@@ -132,6 +138,11 @@ export function CookieConsentManager() {
               </Button>
             </DialogTrigger>
           </div>
+          {saveError ? (
+            <p role="alert" className="mt-3 text-xs text-[var(--danger)]">
+              {saveError}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -228,6 +239,12 @@ export function CookieConsentManager() {
             Reject all
           </Button>
         </div>
+
+        {saveError ? (
+          <p role="alert" className="mt-3 text-xs text-[var(--danger)]">
+            {saveError}
+          </p>
+        ) : null}
 
         <p className="mt-3 text-micro text-[var(--text-secondary)]">
           Stored locally under <code>{CONSENT_STORAGE_KEY}</code> with a timestamp.

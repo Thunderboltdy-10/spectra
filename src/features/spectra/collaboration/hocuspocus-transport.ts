@@ -491,7 +491,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // exception: a gateway restart can look like a revoke until the next
       // session proves the person still belongs in the room.
       const needsAccessRecheck =
-        this.level === "read" || this.state === "permission_lost";
+        this.level === "read" ||
+        this.level === null ||
+        this.state === "permission_lost";
       if (
         this.destroyed ||
         this.intentionallyDisconnected ||
@@ -507,7 +509,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         this.schemaVersion,
       )
         .then((refreshed) => {
-          if (this.destroyed || refreshed.level === this.level) return;
+          if (
+            this.destroyed ||
+            (refreshed.level === this.level && this.state !== "permission_lost")
+          )
+            return;
           this.update({
             state: "reconnecting",
             level: refreshed.level,
@@ -523,11 +529,14 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         .catch((error) => {
           const reason =
             error instanceof Error ? error.message : "Access was removed.";
-          if (!collaborationAccessRevoked(reason)) return;
+          if (this.destroyed) return;
+          const revoked = collaborationAccessRevoked(reason);
           this.update({
-            state: "permission_lost",
+            state: revoked ? "permission_lost" : "reconnecting",
             level: null,
-            error: reason,
+            error: revoked
+              ? reason
+              : "COLLABORATION_AUTHORIZATION_UNAVAILABLE",
           });
           this.websocketProvider?.disconnect();
         })
@@ -605,6 +614,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 : this.state === "connecting"
                   ? "connecting"
                   : "reconnecting",
+              level: null,
               error: reason,
             });
             throw error;
@@ -794,6 +804,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           const revoked = collaborationAccessRevoked(reason);
           this.update({
             state: revoked ? "permission_lost" : "reconnecting",
+            level: null,
             error: revoked ? reason || "Access was removed." : undefined,
           });
         },
@@ -842,11 +853,21 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   if (collaborationNeedsSignIn(reason)) {
                     this.update({
                       state: "unsynchronized",
+                      level: null,
                       error: reason,
                     });
                     return;
                   }
-                  if (!collaborationAccessRevoked(reason)) return;
+                  if (this.destroyed) return;
+                  if (!collaborationAccessRevoked(reason)) {
+                    this.update({
+                      state: "reconnecting",
+                      level: null,
+                      error: "COLLABORATION_AUTHORIZATION_UNAVAILABLE",
+                    });
+                    this.websocketProvider?.disconnect();
+                    return;
+                  }
                   this.update({
                     state: "permission_lost",
                     level: null,

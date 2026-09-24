@@ -66,7 +66,7 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-            <SignedInContinue to={redirectUrl || "/workspace"} />
+            <SignedInContinue to={redirectUrl} />
             <SignUp
               fallbackRedirectUrl={redirectUrl || "/workspace"}
               forceRedirectUrl={redirectUrl || "/workspace"}

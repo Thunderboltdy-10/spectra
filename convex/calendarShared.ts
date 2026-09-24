@@ -212,6 +212,55 @@ export async function upsertSourceCalendarItem(
     revision: (existing?.revision ?? 0) + 1,
     updatedAt: now,
   };
+  if (
+    existing?.status === "active" &&
+    existing.sourceLocked &&
+    existing.sourceHash === input.sourceHash
+  ) {
+    // An unchanged provider hash does not authorize rewriting the derived
+    // schedulable task: a person may have edited that unlocked copy locally.
+    // Refresh only provenance freshness on the source-owned calendar row.
+    if (
+      existing.sourceFreshAt !== input.fetchedAt ||
+      existing.sourceUrl !== input.sourceUrl ||
+      existing.sourceCapabilityState !==
+        (time.precision === "unknown" ? "partial" : "available")
+    )
+      await ctx.db.patch(existing._id, {
+        sourceFreshAt: input.fetchedAt,
+        sourceUrl: input.sourceUrl,
+        sourceCapabilityState:
+          time.precision === "unknown" ? "partial" : "available",
+      });
+    if (!isDeadline)
+      return { itemId: existing._id, created: false, precision: time.precision };
+    const taskSourceKey = `${input.sourceKey}:task`.slice(0, 500);
+    const unchangedTask = await ctx.db
+      .query("calendarItems")
+      .withIndex("by_source_key", (q) =>
+        q.eq("ownerAccountId", input.ownerAccountId).eq("sourceKey", taskSourceKey),
+      )
+      .unique();
+    if (
+      unchangedTask?.status === "active" &&
+      unchangedTask.sourceHash === input.sourceHash
+    ) {
+      if (
+        unchangedTask.sourceFreshAt !== input.fetchedAt ||
+        unchangedTask.sourceUrl !== input.sourceUrl
+      )
+        await ctx.db.patch(unchangedTask._id, {
+          sourceFreshAt: input.fetchedAt,
+          sourceUrl: input.sourceUrl,
+        });
+      return {
+        itemId: existing._id,
+        taskItemId: unchangedTask._id,
+        created: false,
+        precision: time.precision,
+      };
+    }
+  }
   let itemId: Id<"calendarItems">;
   let created = false;
   if (existing) {

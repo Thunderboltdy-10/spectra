@@ -802,6 +802,11 @@ async function reorderSlides(deck: Presentation, partNames: string[]) {
  * why masters stay preserved even when the deck grows.
  */
 function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, title: string | undefined, text: string[] | undefined, objects?: PresentationObject[]) {
+  if (objects?.some((object) => object.type !== "text"))
+    throw new PptxLensError(
+      "PPTX_ADD_SLIDE_OBJECT_UNSUPPORTED",
+      "This native slide writer can add text objects only. Remove unsupported objects from the request or add them with a supported slide operation.",
+    );
   const layouts = deck.layouts();
   const layoutIndex = layoutPartName ? layouts.indexOf(layoutPartName) : -1;
   const slide = deck.addSlide(layoutIndex >= 0 ? { layoutPartName } : layouts.length ? { layoutIndex: 0 } : {});
@@ -834,6 +839,47 @@ function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, 
     }
   }
   return slide;
+}
+
+async function removeHyperlinksToSlide(deck: Presentation, targetPartName: string) {
+  for (const slide of deck.slides()) {
+    if (slide.partName === targetPartName) continue;
+    const slidePart = deck.office.package.getPart(slide.partName);
+    if (!slidePart) continue;
+    const root = (await deck.office.xml(slide.partName)).root;
+    let changed = false;
+    for (const click of descendants(root).filter((node) =>
+      node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "hlinkClick",
+    )) {
+      const relationshipId = click.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id");
+      const relationship = relationshipId && slidePart.relationships().byId(relationshipId);
+      if (
+        !relationship ||
+        relationship.type !== SLIDE_RELATIONSHIP ||
+        relationship.targetMode === "External" ||
+        deck.office.package.relatedPart(slidePart, relationship.id)?.name !== targetPartName
+      )
+        continue;
+      click.parent?.removeChild(click);
+      changed = true;
+    }
+    if (!changed) continue;
+    const stillUsed = new Set(
+      descendants(root)
+        .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "hlinkClick")
+        .map((node) => node.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id"))
+        .filter((id): id is string => Boolean(id)),
+    );
+    for (const relationship of slidePart.relationships().all())
+      if (
+        relationship.type === SLIDE_RELATIONSHIP &&
+        relationship.targetMode !== "External" &&
+        deck.office.package.relatedPart(slidePart, relationship.id)?.name === targetPartName &&
+        !stillUsed.has(relationship.id)
+      )
+        slidePart.relationships().remove(relationship.id);
+    deck.office.markDirty(slide.partName);
+  }
 }
 
 function replaceNodeText(node: XmlElement, text: string) { node._children.slice().forEach((child) => node.removeChild(child)); node.appendChild(new XmlText(text)); }
@@ -1711,6 +1757,7 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       const ownedDependencies = doomedPart ? exclusiveDependencyRoots(deck, doomedPart) : [];
       const index = doomed.index;
       if (index < 0) throw new PptxLensError("PPTX_SLIDE_MISSING", "The slide being removed is no longer in this deck.");
+      await removeHyperlinksToSlide(deck, doomed.partName);
       // The library deletes the slide part, its .rels, its content-type
       // override and its own notes page, and leaves shared targets — layouts,
       // masters, media — exactly where they were.

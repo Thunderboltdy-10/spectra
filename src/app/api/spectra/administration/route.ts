@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
         membershipId: string;
       } | null = null;
       try {
-        const actor = await requireActor();
+        const actor = await requireActor({ fresh: true });
         membership = {
           schoolId: actor.schoolId,
           role: actor.schoolRole,

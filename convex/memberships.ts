@@ -105,22 +105,9 @@ export const acceptInvitation = mutation({
     }
     if (existing) {
       if (existing.schoolId === invitation.schoolId) {
-        await ctx.db.patch(invitation._id, {
-          status: "accepted",
-          acceptedAt: now,
-          updatedAt: now,
-        });
-        await completeOnboardingIfInitialAdmin(
-          ctx,
-          invitation,
-          actor.accountId,
-          now,
+        throw new Error(
+          "INVITATION_EXISTING_MEMBER_ROLE_CHANGE_REQUIRED: Ask a school administrator to change your role before accepting another invitation.",
         );
-        return {
-          membershipId: existing._id,
-          schoolId: existing.schoolId,
-          alreadyMember: true,
-        };
       }
       throw new Error(
         "MEMBERSHIP_SINGLE_SCHOOL: Leave your current school before joining another one.",

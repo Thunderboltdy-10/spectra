@@ -434,9 +434,16 @@ async function appendWithRetry(payload, entries) {
   let nextPayload = payload;
   for (;;) {
     try {
+      // The room applies updates before the persistence debounce. Recheck live
+      // authority immediately before the durable append instead of relying on
+      // the cached connection lease used by beforeHandleMessage.
+      await reauthorizePersistenceEntries(entries);
       const result = await bridge("append", nextPayload);
       lastPersistenceFailure = null;
       rememberDurableHead(entries[0].context, nextPayload.stateVectorHash);
+      // Revocation can land while Convex commits. Do not confirm durability to
+      // a peer until its actor still has write access after the append.
+      await reauthorizePersistenceEntries(entries);
       for (const entry of entries)
         sendGatewayState(entry.connection, {
           type: "spectra.durable_ack",
@@ -1063,6 +1070,35 @@ async function refreshAuthorization(context) {
 
 async function reauthorize(context) {
   return authorizationGuard.require(context);
+}
+
+async function reauthorizePersistenceEntries(entries) {
+  const contexts = new Map();
+  for (const entry of entries) {
+    const context = entry.context;
+    const key = JSON.stringify([
+      context.artifactId,
+      context.partitionKey,
+      context.accountId,
+      context.actorKind,
+      context.clientId,
+      context.policyVersion,
+    ]);
+    if (!contexts.has(key)) contexts.set(key, context);
+  }
+  for (const context of contexts.values()) {
+    const authorization = await bridge("authorize", {
+      accountId: context.accountId,
+      artifactId: context.artifactId,
+      partitionKey: context.partitionKey,
+      policyVersion: context.policyVersion,
+    }, { retryAttempts: 1 });
+    if (!authorization?.allowed)
+      throw new Error("COLLABORATION_ACCESS_REVOKED");
+    context.canModify = authorization.canModify === true;
+    context.authorizationCheckedAt = Date.now();
+    if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
+  }
 }
 
 const server = new Server({

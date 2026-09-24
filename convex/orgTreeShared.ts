@@ -1221,7 +1221,11 @@ export async function renameNode(
   if (node.kind === "work" && node.sourceId) {
     const artifactId = ctx.db.normalizeId("spectraArtifacts", node.sourceId);
     if (artifactId) {
-      await ctx.db.patch(artifactId, { title: name, updatedAt: now });
+      const artifact = await ctx.db.get(artifactId);
+      // A personal placement is its owner's name. Only the artifact owner
+      // controls the shared artifact title; a reader may rename their node.
+      if (artifact?.ownerAccountId === node.accountId)
+        await ctx.db.patch(artifactId, { title: name, updatedAt: now });
     }
   }
   if (node.kind === "thread" && node.sourceId) {

@@ -29,7 +29,7 @@ export type FindAdapter = {
   toggleReplace?: () => void;
   replaceOpen?: boolean;
   /** Replace every current match. Same command as toggleReplace, with `true`. */
-  replaceAll?: () => void;
+  replaceAll?: () => void | boolean;
   /** Live match count for the honest hint. */
   matchCount?: number;
   matchNoun?: string;
@@ -65,8 +65,7 @@ export function findBindings(adapter: FindAdapter): CommandBinding[] {
       hint: "Find and replace text",
       onSelect: (params) => {
         if (params === true) {
-          adapter.replaceAll?.();
-          return;
+          return adapter.replaceAll?.() ?? false;
         }
         adapter.toggleReplace?.();
       },

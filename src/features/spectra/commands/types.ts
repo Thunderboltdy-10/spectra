@@ -210,7 +210,10 @@ export type Command<P = unknown> = {
   icon: LucideIcon;
   description: string;
   params?: z.ZodType<P>;
-  execute: (ctx: CommandContext, params: P) => void | Promise<void | CommandExecutionResult>;
+  execute: (ctx: CommandContext, params: P) =>
+    | void
+    | boolean
+    | Promise<void | boolean | CommandExecutionResult>;
   /** Compact parameter UX for the universal palette and other app surfaces. */
   parameters?: readonly CommandParameterSpec[];
   /** Shared effect/result contract; workbar bindings derive a safe default. */
@@ -263,7 +266,7 @@ export type CommandBinding = {
    * parameterized controls receive their scalar here, so the bar, a shortcut,
    * a menu and the AI dispatcher all land on this same function.
    */
-  onSelect: (value?: CommandParam) => void;
+  onSelect: (value?: CommandParam) => void | boolean | Promise<void | boolean>;
   /** Capability-owned availability, shared by UI and non-UI consumers. */
   availability?: (ctx: CommandContext) => CommandAvailability;
   /** Renders the command as a real control instead of a button. */

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CookieSettingsButton } from "@/components/cookie-settings-button";
 
 export default function CookiePolicyPage() {
   return (
@@ -35,6 +36,7 @@ export default function CookiePolicyPage() {
         <p className="text-sm text-[var(--text-secondary)]">
           Use the persistent Cookie settings control in-app to update your choice at any time.
         </p>
+        <CookieSettingsButton />
       </section>
 
       <p className="mt-8 text-xs text-[var(--text-secondary)]">

@@ -189,6 +189,17 @@ export function useSpectraPreferences({
     spectraBus.emit("settings.changed", { preferences: next });
   }, []);
 
+  useEffect(
+    () =>
+      spectraBus.on("settings.changed", ({ preferences: next }) => {
+        if (preferencesRef.current === next) return;
+        preferencesRef.current = next;
+        setPreferences(next);
+        applyDocumentPreferences(next);
+      }),
+    [],
+  );
+
   useEffect(() => {
     const next = readDevicePreferences(window.localStorage);
     initialCache.current = next;

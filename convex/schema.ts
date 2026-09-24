@@ -120,6 +120,7 @@ export default defineSchema({
   })
     .index("by_token_hash", ["tokenHash"])
     .index("by_school_status", ["schoolId", "status"])
+    .index("by_school_email_status", ["schoolId", "email", "status"])
     .index("by_email_status", ["email", "status"]),
 
   schoolGroups: defineTable({
@@ -457,6 +458,9 @@ export default defineSchema({
       "source",
     ])
     .index("by_school", ["schoolId", "resourceType"])
+    .index("by_school_principal_source_revoked", [
+      "schoolId", "principalType", "principalId", "source", "revokedAt",
+    ])
     .index("by_inherited_workspace", ["inheritedFromWorkspaceId"]),
 
   shareInvitations: defineTable({
@@ -1586,6 +1590,7 @@ export default defineSchema({
         academicPeriodKey: v.optional(v.string()),
         sourceHash: v.string(),
         freshAt: v.number(),
+        projectedTitle: v.optional(v.string()),
         capabilityState: v.union(
           v.literal("available"),
           v.literal("stale"),

@@ -11,7 +11,7 @@ export type SlashCommandItem = {
   aliases?: string[];
   /** Set when the item is a disabled explanation rather than a verb. */
   disabledReason?: string;
-  action: (editor: Editor) => void;
+  action: (editor: Editor) => void | boolean | Promise<void | boolean>;
 };
 
 /**
@@ -74,7 +74,7 @@ export const DOCUMENT_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
  * decision, two surfaces (C2).
  */
 export type SlashCommandDispatcher = {
-  run: (commandId: string, param?: string | number | boolean) => void;
+  run: (commandId: string, param?: string | number | boolean) => void | boolean | Promise<void | boolean>;
   availability?: (commandId: string) => { enabled: boolean; reason?: string };
 };
 
@@ -179,8 +179,16 @@ export const SlashCommand = Extension.create({
           // A disabled entry explains itself and leaves the text alone; deleting
           // the "/word" a person typed and then doing nothing reads as a bug.
           if (props.disabledReason) return;
-          editor.chain().focus().deleteRange(range).run();
-          props.action(editor);
+          const query = editor.state.doc.textBetween(range.from, range.to);
+          const before = editor.state.doc;
+          void Promise.resolve(props.action(editor)).then((accepted) => {
+            if (editor.isDestroyed || accepted === false || editor.state.doc.eq(before))
+              return;
+            if (
+              editor.state.doc.textBetween(range.from, range.to) === query
+            )
+              editor.chain().focus().deleteRange(range).run();
+          }).catch(() => undefined);
         },
       } as Partial<SuggestionOptions<SlashCommandItem>>,
     };

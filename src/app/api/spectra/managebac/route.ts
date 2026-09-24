@@ -1901,7 +1901,7 @@ async function runScheduledSync(workerId: string) {
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    const actor = await requireActor();
+    const actor = await requireActor({ fresh: true });
     const action = request.nextUrl.searchParams.get("action") ?? "overview";
     if (action === "myClasses") {
       return ok({
@@ -1958,7 +1958,7 @@ export async function POST(request: NextRequest) {
         ...(await runScheduledSync(workerId)),
       });
     }
-    const actor = await requireActor();
+    const actor = await requireActor({ fresh: true });
 
     if (action === "upsertPeriodMap") {
       if (actor.schoolRole !== "school_admin")

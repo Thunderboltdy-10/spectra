@@ -186,14 +186,17 @@ export async function requireActor(
     identity = await readIdentity();
   }
   if (!identity) {
+    actorIdentityCache.delete(clerkId);
     throw new Error(
       "AUTH_NO_SCHOOL: This account does not have an active school membership.",
     );
   }
-  if (!identity.emailVerified)
+  if (!identity.emailVerified) {
+    actorIdentityCache.delete(clerkId);
     throw new Error(
       "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
     );
+  }
   const actor = {
     clerkId,
     accountId: identity.accountId,

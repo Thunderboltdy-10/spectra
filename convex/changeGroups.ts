@@ -116,8 +116,17 @@ async function commitImportJob(
   )
     throw new Error("ARTIFACT_IMPORT_VERSION_INVALID");
   if (job.artifactVersionId) {
-    if (job.importedContent !== undefined)
-      await ctx.db.patch(job._id, { importedContent: undefined });
+    if (
+      job.importedContent !== undefined ||
+      job.status !== "imported" ||
+      job.completedAt === undefined
+    )
+      await ctx.db.patch(job._id, {
+        importedContent: undefined,
+        status: "imported",
+        completedAt: job.completedAt ?? Date.now(),
+        updatedAt: Date.now(),
+      });
     return { versionId: job.artifactVersionId, reused: true as const };
   }
   if (job.importedContent === undefined)
@@ -191,6 +200,8 @@ async function commitImportJob(
         artifactVersionId: committed.versionId,
         importedContent: undefined,
         status: "imported",
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
         commitReceipt: job.commitReceipt ?? crypto.randomUUID(),
       });
       if (options.preserveLiveCurrent !== false)
@@ -280,6 +291,8 @@ async function commitImportJob(
     artifactVersionId: versionId,
     importedContent: undefined,
     status: "imported",
+    completedAt: now,
+    updatedAt: now,
     commitReceipt: job.commitReceipt ?? crypto.randomUUID(),
   });
   await confirmCanonicalPlacements(ctx, versionId);

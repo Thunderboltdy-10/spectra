@@ -69,6 +69,7 @@ These dispositions are source review only. No tests, typecheck, or runtime accep
 - **P2-19:** overlapping active regions now conflict even when they share a client id. Refreshing the same region is still allowed, but widening it into another active claim is rejected.
 - **P2-20:** a missing or unreadable embedded chart workbook now throws before `deck.save()`, so the chart edit is not reported as successful after the workbook update fails.
 - **P2-24:** legacy thread-reference cleanup now reconciles every affected snapshot after deleting its version rows, preventing a stale positive refcount from retaining orphan snapshot payloads.
+- **P2-38:** Office materialize now rejects any queue state other than `pending`, matching the reconcile path instead of returning “Waiting to save locally” for old failed or verified rows.
 - **P2-56:** owner fast paths in both loaded-resource evaluators require an exact school match; missing school identity must use a grant path. Thread placement now rejects a missing or cross-school workspace before changing the thread.
 
 **Already correct in source:**
@@ -98,7 +99,6 @@ These dispositions are source review only. No tests, typecheck, or runtime accep
 - **P2-34:** failed/cancelled run meters need an explicit product definition (tokens spent versus completed work) before changing accounting.
 - **P2-35:** analytics can still apply its row cap before filtering deleted rows.
 - **P2-36:** the workbench still needs the missing-comment error toast.
-- **P2-38:** Office materialize can still return success when its queue result is old `failed` or `verified` state.
 - **P2-39:** connector-secret use remains a product-role decision; no admin-only rule was inferred.
 - **P2-40:** omitted change-group snapshot behavior still needs an explicit result signal and no-op commit rule.
 - **P2-41:** superseded snapshot verification still needs to return the room to `active`.

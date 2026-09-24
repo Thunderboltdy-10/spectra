@@ -496,6 +496,8 @@ async function materializeOfficeArtifactAttempt(
     }
     throw error;
   }
+  if (queued.state !== "pending")
+    throw new Error(`MATERIALIZATION_NOT_PENDING:${queued.state}`);
   return {
     state: queued.state,
     requestId: queued.requestId,

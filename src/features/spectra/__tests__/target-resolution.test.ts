@@ -11,6 +11,7 @@ import {
   promptPlacesIntoWorkspace,
   promptRequestsCalendarAction,
   promptRequestsNewPlannerTask,
+  reconcileExplicitRequestContract,
   reconcileExplicitDocumentRegions,
   resolveArtifactTarget,
   resolvePlanArtifactTargets,
@@ -491,13 +492,27 @@ describe("P4.I2 artifact target resolution", () => {
       candidate("essay-b", "Physics Essay", "document", 1),
       candidate("essay-open", "Physics Notes", "document", 3),
     ];
+    const basePlan = updatePlan("essay-open");
     const result = resolvePlanArtifactTargets(
-      updatePlan("essay-open"),
+      parseSpectraPlan({
+        ...basePlan,
+        intent: {
+          ...basePlan.intent,
+          obligations: [
+            {
+              id: "revise-introduction",
+              description: "Revise the requested introduction.",
+              operationIndexes: [0],
+            },
+          ],
+        },
+      }),
       context(artifacts, "essay-open"),
       "Rewrite the introduction in Physics Essay.",
     );
     expect(result.plan.decision).toBe("clarify");
     expect(result.plan.operations).toEqual([]);
+    expect(result.plan.intent.obligations).toBeUndefined();
     const choices = result.plan.choices;
     if (!choices || !("options" in choices))
       throw new Error("Expected one bounded target-choice question.");
@@ -508,6 +523,74 @@ describe("P4.I2 artifact target resolution", () => {
         "Physics Essay (copy 2)",
       ]),
     );
+  });
+
+  it("remaps retained obligations when explicit request reconciliation filters an update", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "mixed",
+        requestedArtifactTypes: ["document"],
+        requestedVisibleArtifactCount: 1,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+        obligations: [
+          {
+            id: "forbidden-update",
+            description: "Edit the original document.",
+            operationIndexes: [0],
+          },
+          {
+            id: "new-document",
+            description: "Create the separate study draft.",
+            operationIndexes: [1],
+          },
+        ],
+      },
+      operations: [
+        {
+          type: "artifact.update",
+          input: {
+            artifactId: "original-doc",
+            blueprintKey: "document",
+            title: null,
+            summary: "Unrequested edit",
+            content: null,
+            contentPatch: null,
+            tags: null,
+          },
+        },
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "document",
+            title: "Study draft",
+            summary: null,
+            content: {
+              blocks: [{ id: "p1", type: "paragraph", text: "New draft" }],
+              outline: [],
+            },
+            tags: [],
+            workspaceId: null,
+            placement: "inbox",
+            pinned: false,
+            exclusivePin: false,
+          },
+        },
+      ],
+      finalResponse: "Created a study draft and updated the original.",
+    });
+
+    const reconciled = reconcileExplicitRequestContract(
+      plan,
+      'Create a separate document named "Study draft" and do not edit the original document.',
+    );
+    expect(reconciled.operations.map((operation) => operation.type)).toEqual([
+      "artifact.create",
+    ]);
+    expect(reconciled.intent.obligations?.map((entry) => [entry.id, entry.operationIndexes])).toEqual([
+      ["new-document", [0]],
+    ]);
   });
 
   it("uses visible focus only for an explicit deictic edit", () => {
@@ -526,6 +609,25 @@ describe("P4.I2 artifact target resolution", () => {
     expect(resolution).toMatchObject({
       status: "resolved",
       resolvedArtifactId: "open",
+    });
+  });
+
+  it("uses the explicitly open artifact to disambiguate duplicate titles", () => {
+    const duplicates = [
+      candidate("open-essay", "Physics Essay", "document", 2),
+      candidate("other-essay", "Physics Essay", "document", 1),
+    ];
+    const resolution = resolveArtifactTarget({
+      prompt: "Append one paragraph to the currently open Physics Essay.",
+      reference: "Physics Essay",
+      blueprintKey: "document",
+      role: "update",
+      candidates: duplicates,
+      focusedArtifactId: "open-essay",
+    });
+    expect(resolution).toMatchObject({
+      status: "resolved",
+      resolvedArtifactId: "open-essay",
     });
   });
 

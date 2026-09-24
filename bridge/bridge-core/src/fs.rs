@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -48,9 +48,21 @@ impl Grant {
 #[derive(Default)]
 pub struct GrantRegistry {
     grants: RwLock<HashMap<String, Grant>>,
+    write_locks: Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>,
 }
 
 impl GrantRegistry {
+    fn write_lock(&self, target: &Path) -> Arc<Mutex<()>> {
+        let mut locks = self.write_locks.lock().unwrap();
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(target).and_then(Weak::upgrade) {
+            return lock;
+        }
+        let lock = Arc::new(Mutex::new(()));
+        locks.insert(target.to_owned(), Arc::downgrade(&lock));
+        lock
+    }
+
     pub fn add_native_selection(
         &self,
         label: String,
@@ -150,11 +162,17 @@ impl GrantRegistry {
         let canonical = if candidate.exists() {
             candidate.canonicalize()?
         } else {
-            let parent = candidate
-                .parent()
-                .ok_or(FsError::GrantEscape)?
-                .canonicalize()?;
-            parent.join(candidate.file_name().ok_or(FsError::GrantEscape)?)
+            let mut ancestor = candidate.as_path();
+            let mut missing = Vec::new();
+            while !ancestor.exists() {
+                missing.push(ancestor.file_name().ok_or(FsError::GrantEscape)?.to_owned());
+                ancestor = ancestor.parent().ok_or(FsError::GrantEscape)?;
+            }
+            let mut canonical = ancestor.canonicalize()?;
+            for component in missing.into_iter().rev() {
+                canonical.push(component);
+            }
+            canonical
         };
         if !canonical.starts_with(&grant.root) {
             return Err(FsError::GrantEscape);
@@ -162,7 +180,6 @@ impl GrantRegistry {
         Ok(canonical)
     }
 }
-
 
 fn looks_like_windows_absolute(path: &Path) -> bool {
     let raw = path.as_os_str().to_string_lossy();
@@ -185,6 +202,25 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
         digest.update(&buffer[..read]);
     }
     Ok(hex::encode(digest.finalize()))
+}
+
+/// Resolve the same durable resource path for preflight and the actual write.
+pub fn resolve_write_target(
+    grants: &GrantRegistry,
+    journal: &Journal,
+    grant_id: &str,
+    resource_id: &str,
+    relative_path: &Path,
+) -> Result<PathBuf, FsError> {
+    let resource = journal.resource_by_id(resource_id)?;
+    if resource
+        .as_ref()
+        .is_some_and(|record| !record.grant_id.is_empty() && record.grant_id != grant_id)
+    {
+        return Err(FsError::GrantEscape);
+    }
+    let journal_path = resource.map(|record| PathBuf::from(record.path_key.replace('\\', "/")));
+    grants.resolve(grant_id, journal_path.as_deref().unwrap_or(relative_path))
 }
 
 #[derive(Debug, Clone)]
@@ -229,12 +265,17 @@ impl<P: Platform> SafeWriter<P> {
     pub fn write_with_readback(&self, request: WriteRequest<'_>) -> Result<VerifiedWrite, FsError> {
         // The durable file is the journal resource, not a cloud relativePath
         // that may still name a sibling copy of the same bytes.
-        let journal_path = self
-            .journal
-            .resource_by_id(request.resource_id)?
-            .map(|record| PathBuf::from(record.path_key.replace('\\', "/")));
-        let relative = journal_path.as_deref().unwrap_or(request.relative_path);
-        let target = self.grants.resolve(request.grant_id, relative)?;
+        let target = resolve_write_target(
+            &self.grants,
+            &self.journal,
+            request.grant_id,
+            request.resource_id,
+            request.relative_path,
+        )?;
+        // Distinct replica IDs or requests can still name the same local file.
+        // Serialize the check/replace/readback sequence across SafeWriter instances.
+        let write_lock = self.grants.write_lock(&target);
+        let _write_guard = write_lock.lock().unwrap();
         let pre_hash = target.exists().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
             request.idempotency_key,
@@ -302,6 +343,32 @@ impl<P: Platform> SafeWriter<P> {
             }
             self.journal
                 .transition(&op.op_id, OpState::Performed, Some(&temp_hash), None)?;
+            // Downloading and staging can outlive the caller's base check.
+            // Recheck both identity and bytes immediately before replacement.
+            if resolve_write_target(
+                &self.grants,
+                &self.journal,
+                request.grant_id,
+                request.resource_id,
+                request.relative_path,
+            )? != target
+            {
+                return Err(FsError::StaleRevision);
+            }
+            if target.exists() {
+                if office_lock_exists(&target) || self.platform.is_locked(&target)? {
+                    return Err(FsError::FileLocked);
+                }
+                if sha256_file(&target)? != request.base_revision {
+                    return Err(FsError::StaleRevision);
+                }
+            } else if !request
+                .base_revision
+                .strip_prefix("new:")
+                .is_some_and(|id| !id.is_empty())
+            {
+                return Err(FsError::StaleRevision);
+            }
             self.platform.atomic_replace(&temp, &target)?;
             sync_parent_directory(parent)?;
             let mut ready = false;
@@ -355,7 +422,20 @@ impl<P: Platform> SafeWriter<P> {
         resource_id: &str,
         idempotency_key: &str,
     ) -> Result<String, FsError> {
+        self.recycle_with_base(grant_id, relative_path, resource_id, idempotency_key, None)
+    }
+
+    pub fn recycle_with_base(
+        &self,
+        grant_id: &str,
+        relative_path: &Path,
+        resource_id: &str,
+        idempotency_key: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<String, FsError> {
         let target = self.grants.resolve(grant_id, relative_path)?;
+        let lock = self.grants.write_lock(&target);
+        let _guard = lock.lock().unwrap();
         let pre_hash = target.is_file().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
             idempotency_key,
@@ -378,6 +458,14 @@ impl<P: Platform> SafeWriter<P> {
             self.journal
                 .transition(&op.op_id, OpState::Verified, None, None)?;
             return Ok(op.op_id);
+        }
+        if office_lock_exists(&target) || self.platform.is_locked(&target)? {
+            return Err(FsError::FileLocked);
+        }
+        if let Some(expected) = expected_revision {
+            if sha256_file(&target)? != expected {
+                return Err(FsError::StaleRevision);
+            }
         }
         self.platform.recycle(&target)?;
         self.journal
@@ -404,17 +492,66 @@ impl<P: Platform> SafeWriter<P> {
         resource_id: &str,
         idempotency_key: &str,
     ) -> Result<String, FsError> {
-        if let Some(existing) = self.journal.by_key(idempotency_key)? {
-            if existing.state == OpState::Verified {
-                return Ok(existing.op_id);
-            }
-        }
+        self.relocate_with_base(
+            grant_id,
+            source_relative_path,
+            target_relative_path,
+            resource_id,
+            idempotency_key,
+            None,
+        )
+    }
+
+    pub fn relocate_with_base(
+        &self,
+        grant_id: &str,
+        source_relative_path: &Path,
+        target_relative_path: &Path,
+        resource_id: &str,
+        idempotency_key: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<String, FsError> {
+        // Reserve before touching the filesystem so receipt replay cannot
+        // silently select a second collision suffix after the first move.
+        let reserved = self.journal.reserve_structure_target(
+            idempotency_key,
+            &target_relative_path.to_string_lossy().replace('\\', "/"),
+        )?;
         let source = self.grants.resolve(grant_id, source_relative_path)?;
-        let target = self.grants.resolve(grant_id, target_relative_path)?;
+        let target = self.grants.resolve(grant_id, Path::new(&reserved))?;
         if source == target {
             return Err(FsError::Other(anyhow::anyhow!(
                 "source and target are identical"
             )));
+        }
+        let (first, second) = if source < target {
+            (&source, &target)
+        } else {
+            (&target, &source)
+        };
+        let first_lock = self.grants.write_lock(first);
+        let second_lock = self.grants.write_lock(second);
+        let _first_guard = first_lock.lock().unwrap();
+        let _second_guard = second_lock.lock().unwrap();
+        if let Some(existing) = self.journal.by_key(idempotency_key)? {
+            if existing.kind != "fs.move" || existing.resource_id.as_deref() != Some(resource_id) {
+                return Err(FsError::StaleRevision);
+            }
+            if !source.exists() && target.is_file() && existing.pre_hash.is_some() {
+                let actual = sha256_file(&target)?;
+                if existing.pre_hash.as_deref() == Some(actual.as_str()) {
+                    self.journal.transition(
+                        &existing.op_id,
+                        OpState::Verified,
+                        Some(&actual),
+                        None,
+                    )?;
+                    return Ok(existing.op_id);
+                }
+            }
+            if existing.state == OpState::Verified {
+                return Err(FsError::StaleRevision);
+            }
         }
         if !source.exists() {
             return Err(FsError::Io(std::io::Error::new(
@@ -428,6 +565,9 @@ impl<P: Platform> SafeWriter<P> {
             )));
         }
         let pre_hash = source.is_file().then(|| sha256_file(&source)).transpose()?;
+        if expected_revision.is_some() && pre_hash.as_deref() != expected_revision {
+            return Err(FsError::StaleRevision);
+        }
         let op = self.journal.begin_intent(
             idempotency_key,
             "fs.move",
@@ -440,7 +580,7 @@ impl<P: Platform> SafeWriter<P> {
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
         fs::create_dir_all(parent)?;
-        if self.platform.is_locked(&source)? {
+        if office_lock_exists(&source) || self.platform.is_locked(&source)? {
             return Err(FsError::FileLocked);
         }
         if target.exists() {
@@ -448,10 +588,18 @@ impl<P: Platform> SafeWriter<P> {
                 "destination already exists"
             )));
         }
+        if let Some(expected) = expected_revision {
+            if sha256_file(&source)? != expected {
+                return Err(FsError::StaleRevision);
+            }
+        }
         fs::rename(&source, &target)?;
         self.journal
             .transition(&op.op_id, OpState::Performed, pre_hash.as_deref(), None)?;
-        if source.exists() || !target.exists() {
+        if source.exists()
+            || !target.exists()
+            || (pre_hash.is_some() && sha256_file(&target).ok().as_deref() != pre_hash.as_deref())
+        {
             self.journal.transition(
                 &op.op_id,
                 OpState::Failed,
@@ -585,8 +733,8 @@ mod tests {
             grant_id: &grant.id,
             relative_path: Path::new("a.txt"),
             resource_id: "r",
-            base_revision: "1",
-            known_revision: "1",
+            base_revision: "new:r",
+            known_revision: "new:r",
             bytes,
             expected_hash: &hash,
             idempotency_key: "once",
@@ -723,13 +871,14 @@ mod tests {
         let writer = SafeWriter::new(grants, journal, Arc::new(TestPlatform::default()));
         let bytes = b"spectra-version";
         let hash = hex::encode(Sha256::digest(bytes));
+        let base_hash = hex::encode(Sha256::digest(b"original"));
         writer
             .write(WriteRequest {
                 grant_id: &grant.id,
                 relative_path: Path::new("copy.txt"),
                 resource_id: "lr_original",
-                base_revision: "1",
-                known_revision: "1",
+                base_revision: &base_hash,
+                known_revision: &base_hash,
                 bytes,
                 expected_hash: &hash,
                 idempotency_key: "path-authority",
@@ -776,6 +925,179 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn relocate_replay_keeps_the_reserved_collision_destination() {
+        let dir = tempdir().unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
+        fs::write(dir.path().join("before.txt"), b"move once").unwrap();
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        let writer = SafeWriter::new(grants, journal.clone(), Arc::new(TestPlatform::default()));
+        writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after.txt"),
+                "r",
+                "move-receipt",
+            )
+            .unwrap();
+        let reserved = journal
+            .reserve_structure_target("move-receipt", "after (2).txt")
+            .unwrap();
+        assert_eq!(reserved, "after.txt");
+        writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after (2).txt"),
+                "r",
+                "move-receipt",
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("after.txt")).unwrap(),
+            b"move once"
+        );
+        assert!(!dir.path().join("after (2).txt").exists());
+        fs::write(dir.path().join("after.txt"), b"new external bytes").unwrap();
+        assert!(matches!(
+            writer.relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after.txt"),
+                "r",
+                "move-receipt"
+            ),
+            Err(FsError::StaleRevision)
+        ));
+        assert_eq!(
+            fs::read(dir.path().join("after.txt")).unwrap(),
+            b"new external bytes"
+        );
+    }
+
+    #[test]
+    fn relocate_recovers_a_crash_after_rename_before_the_journal_receipt() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("mount");
+        fs::create_dir(&root).unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants.add_native_selection("Test".into(), &root).unwrap();
+        let journal_path = dir.path().join("journal.sqlite");
+        {
+            let journal = Journal::open(&journal_path).unwrap();
+            fs::write(root.join("before.txt"), b"recover me").unwrap();
+            let hash = sha256_file(&root.join("before.txt")).unwrap();
+            journal
+                .reserve_structure_target("move-crash", "after.txt")
+                .unwrap();
+            journal
+                .begin_intent("move-crash", "fs.move", Some("r"), None, Some(&hash))
+                .unwrap();
+            fs::rename(root.join("before.txt"), root.join("after.txt")).unwrap();
+        }
+        let journal = Arc::new(Journal::open(&journal_path).unwrap());
+        let writer = SafeWriter::new(grants, journal.clone(), Arc::new(TestPlatform::default()));
+        writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after (2).txt"),
+                "r",
+                "move-crash",
+            )
+            .unwrap();
+        assert_eq!(
+            journal.by_key("move-crash").unwrap().unwrap().state,
+            OpState::Verified
+        );
+        assert_eq!(fs::read(root.join("after.txt")).unwrap(), b"recover me");
+        assert!(!root.join("after (2).txt").exists());
+    }
+
+    #[test]
+    fn relocate_validates_nested_destination_before_creating_parents() {
+        let dir = tempdir().unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
+        fs::write(dir.path().join("before.txt"), b"nested").unwrap();
+        let writer = SafeWriter::new(
+            grants,
+            Arc::new(Journal::in_memory().unwrap()),
+            Arc::new(TestPlatform::default()),
+        );
+        assert!(matches!(
+            writer.relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("../escape/new/file.txt"),
+                "r",
+                "escape"
+            ),
+            Err(FsError::GrantEscape)
+        ));
+        writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("safe/nested/file.txt"),
+                "r",
+                "nested",
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("safe/nested/file.txt")).unwrap(),
+            b"nested"
+        );
+    }
+
+    #[test]
+    fn structure_actions_refuse_changed_source_bytes() {
+        let dir = tempdir().unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
+        fs::write(dir.path().join("source.txt"), b"new external bytes").unwrap();
+        let base = hex::encode(Sha256::digest(b"old bytes"));
+        let writer = SafeWriter::new(
+            grants,
+            Arc::new(Journal::in_memory().unwrap()),
+            Arc::new(TestPlatform::default()),
+        );
+        assert!(matches!(
+            writer.relocate_with_base(
+                &grant.id,
+                Path::new("source.txt"),
+                Path::new("target.txt"),
+                "r",
+                "stale-move",
+                Some(&base)
+            ),
+            Err(FsError::StaleRevision)
+        ));
+        assert!(matches!(
+            writer.recycle_with_base(
+                &grant.id,
+                Path::new("source.txt"),
+                "r",
+                "stale-delete",
+                Some(&base)
+            ),
+            Err(FsError::StaleRevision)
+        ));
+        assert_eq!(
+            fs::read(dir.path().join("source.txt")).unwrap(),
+            b"new external bytes"
+        );
+        assert!(!dir.path().join("target.txt").exists());
     }
 
     #[test]

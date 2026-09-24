@@ -24,6 +24,7 @@ export const whiteboardSkill = defineArtifactSkill({
     "viewport",
   ],
   operations: [
+    "For a node tint, use the supplied numeric node path such as /nodes/0/style/fill, with fill/stroke/color inside style. Preserve the rest of the board and its stable object identities.",
     "Create, rewrite, place, connect, group, align, distribute, cluster, label, embed, and validate nodes.",
     "Treat geometry as authored meaning: choose a spatial grammar (flow, hierarchy, comparison, timeline, matrix, cluster, or freeform map), calculate non-overlapping bounds, route connectors through clear channels, and keep labels readable at the default viewport.",
     "Convert selected text into a diagram or reorganize a bounded region through a ghost/bounding-box proposal.",

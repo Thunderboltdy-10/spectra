@@ -1,7 +1,8 @@
 import { isDurableContentRef } from "./durable-content";
+import { SYNC_RETRY_POLICY } from "./sync-retry-policy";
 
-export const BRIDGE_CLAIM_REDRIVE_MS = 2 * 60_000;
-export const BRIDGE_WRITE_EXPIRES_MS = 30 * 60_000;
+export const BRIDGE_CLAIM_REDRIVE_MS = SYNC_RETRY_POLICY.bridgeClaimLeaseMs;
+export const BRIDGE_WRITE_EXPIRES_MS = SYNC_RETRY_POLICY.bridgeWriteRetentionMs;
 export const STRATEGY_TRANSITION_EXPIRES_MS = 30 * 60_000;
 /** F6 without an in-flight write must not lock the radios for the 30-minute write window. */
 export const STRATEGY_TRANSITION_STALL_MS = 2 * 60_000;
@@ -23,6 +24,20 @@ export type SyncIntent = {
 
 function framed(value: string) {
   return `${value.length}:${value}`;
+}
+
+/**
+ * Names one concrete file destination on one granted mount. Device-only keys
+ * collide when an account writes two artifacts on the same Bridge device.
+ */
+export function localMaterializationTarget(mountId: string, relativePath: string) {
+  const normalizedPath = relativePath.replaceAll("\\", "/");
+  if (!mountId || normalizedPath.startsWith("/") || /^[A-Za-z]:/.test(normalizedPath))
+    throw new Error("LOCAL_MATERIALIZATION_TARGET_INVALID");
+  const parts = normalizedPath.split("/").filter((part) => part !== "" && part !== ".");
+  if (parts.length === 0 || parts.includes(".."))
+    throw new Error("LOCAL_MATERIALIZATION_TARGET_INVALID");
+  return `local-target-v1|${framed(mountId)}|${framed(parts.join("/"))}`;
 }
 
 async function deriveKey(prefix: string, parts: readonly string[]) {

@@ -275,6 +275,65 @@ describe("vague sheets create intent", () => {
     ).not.toThrow();
   });
 
+  it("preserves operation indexes when a modeled update is promoted in place", () => {
+    const promoted = promoteMatchingUpdateToCreate(
+      {
+        decision: "operate",
+        intent: {
+          mode: "mixed",
+          requestedArtifactTypes: ["sheets"],
+          requestedVisibleArtifactCount: 1,
+          targetArtifactId: null,
+          targetWorkspaceId: "workspace-launch",
+          obligations: [
+            {
+              id: "archive-source",
+              description: "Archive the old draft.",
+              operationIndexes: [0],
+            },
+            {
+              id: "new-sheet",
+              description: "Create the new sheet.",
+              operationIndexes: [1],
+            },
+          ],
+        },
+        finalResponse: "Created the sheet and archived the old draft.",
+        operations: [
+          {
+            type: "artifact.archive",
+            input: { artifactId: "old-draft" },
+          },
+          {
+            type: "artifact.update",
+            input: {
+              artifactId: "existing-sheet",
+              blueprintKey: "sheets",
+              title: "Enzyme Km and Vmax",
+              summary: "Comparison table.",
+              content: sheetsContent,
+              tags: [],
+            },
+          },
+        ],
+      },
+      {
+        requested: { blueprintKey: "sheets", label: "Sheets" },
+        workspaceId: "workspace-launch",
+      },
+    );
+
+    const plan = parseSpectraPlan(promoted);
+    expect(plan.operations.map((operation) => operation.type)).toEqual([
+      "artifact.archive",
+      "artifact.create",
+    ]);
+    expect(plan.intent.obligations?.map((entry) => entry.operationIndexes)).toEqual([
+      [0],
+      [1],
+    ]);
+  });
+
   it("alignIntentWithCreates fills missing create types without rejecting", () => {
     const aligned = alignIntentWithCreates({
       decision: "operate",

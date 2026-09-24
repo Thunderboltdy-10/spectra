@@ -9,6 +9,7 @@ import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@
 import {
   DocxLensError,
   docxLens,
+  docxProjectionReadbackDigest,
   docxProjectionSemanticDigest,
   sha256Payload,
   type DocxWriteOptions,
@@ -109,7 +110,7 @@ const nativeWriteOptions: DocxWriteOptions = {
 export async function materializeDocxArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
-  options?: { promotionMode?: "verified-first" },
+  options?: { promotionMode?: "verified-first" | "immediate-projection" },
 ) {
   return materializeDocxArtifactAttempt(workId, content, 0, options);
 }
@@ -118,7 +119,7 @@ async function materializeDocxArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
-  options?: { promotionMode?: "verified-first" },
+  options?: { promotionMode?: "verified-first" | "immediate-projection" },
 ) {
   let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
   let workTruth: WorkTruth;
@@ -187,10 +188,20 @@ async function materializeDocxArtifactAttempt(
     ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations }, nativeWriteOptions)
     : payload;
   const hash = await sha256Payload(output);
-  if (hash === truth.hash)
+  if (hash === truth.hash) {
+    const readbackDigest = await docxProjectionReadbackDigest(
+      opened.projection,
+      projection,
+    );
+    if (readbackDigest !== requestedDigest)
+      throw new DocxLensError(
+        "DOCX_READBACK_MISMATCH",
+        "Word readback did not match the requested text, image, page, or header/footer edit.",
+      );
     return {
       state: "unchanged" as const,
       hash,
+      projectionContent: compactDocxProjectionForStorage(opened.projection),
       receipt: {
         kind: "native-office-save" as const,
         format: "docx" as const,
@@ -201,11 +212,12 @@ async function materializeDocxArtifactAttempt(
         baseRevision: truth.revision,
         resultRevision: hash,
         targets: { regionIds: [], partNames: [] },
-        semantic: { resultDigest: requestedDigest, readbackDigest: requestedDigest },
+        semantic: { resultDigest: requestedDigest, readbackDigest },
         preservedPartNames: [],
         state: "unchanged" as const,
       } satisfies NativeSaveReceipt,
     };
+  }
   const [next, comparison] = await Promise.all([
     docxLens.open(output, "strict-native"),
     comparePackages(payload, output),
@@ -215,7 +227,11 @@ async function materializeDocxArtifactAttempt(
     String(workId),
     hash,
   );
-  if (nextProjection.nativeBinding.semanticDigest !== requestedDigest)
+  const readbackDigest = await docxProjectionReadbackDigest(
+    nextProjection,
+    projection,
+  );
+  if (readbackDigest !== requestedDigest)
     throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
   assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
   const local = workTruth.replicas.find(
@@ -232,7 +248,7 @@ async function materializeDocxArtifactAttempt(
     baseRevision: truth.revision,
     resultRevision: hash,
     targets: { regionIds, partNames: changedPartNames },
-    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest: nextProjection.nativeBinding.semanticDigest },
+    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest },
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };
@@ -247,6 +263,7 @@ async function materializeDocxArtifactAttempt(
     return {
       state: "cloud_saved" as const,
       hash,
+      projectionContent: compactDocxProjectionForStorage(nextProjection),
       receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
@@ -271,7 +288,7 @@ async function materializeDocxArtifactAttempt(
       projectionContentHash?: string;
       projectionTextIndex?: string;
       nativeReceipt?: NativeSaveReceipt;
-      promotionMode?: "verified-first";
+      promotionMode?: "verified-first" | "immediate-projection";
     },
     { requestId: string; state: string }
     >("replicas:queueMaterialization", {
@@ -310,6 +327,7 @@ async function materializeDocxArtifactAttempt(
       return {
         state: "cloud_saved" as const,
         hash,
+        projectionContent: compactDocxProjectionForStorage(nextProjection),
         receipt: nativeReceipt,
         status:
           "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
@@ -321,6 +339,7 @@ async function materializeDocxArtifactAttempt(
     state: queued.state,
     requestId: queued.requestId,
     hash,
+    projectionContent: compactDocxProjectionForStorage(nextProjection),
     receipt: nativeReceipt,
     status: "Waiting to save locally",
   };
@@ -432,7 +451,7 @@ export async function POST(request: Request) {
         docxLens.open(output, "strict-native"),
         comparePackages(cloud.payload, output),
       ]);
-      if (reopened.projection.nativeBinding.semanticDigest !== await docxProjectionSemanticDigest(projection))
+      if (await docxProjectionReadbackDigest(reopened.projection, projection) !== await docxProjectionSemanticDigest(projection))
         throw new DocxLensError("DOCX_READBACK_MISMATCH", "The downloaded Word copy did not match the saved document.");
       assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
       const fileName = `${(artifact.title || "Spectra document").replace(/\.docx$/i, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")}.docx`;
@@ -679,7 +698,11 @@ export async function POST(request: Request) {
         hash,
       );
       const requestedDigest = await docxProjectionSemanticDigest(resolved.projection);
-      if (nextProjection.nativeBinding.semanticDigest !== requestedDigest)
+      const readbackDigest = await docxProjectionReadbackDigest(
+        nextProjection,
+        resolved.projection,
+      );
+      if (readbackDigest !== requestedDigest)
         throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
       assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
       const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);

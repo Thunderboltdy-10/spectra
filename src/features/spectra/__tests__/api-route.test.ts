@@ -31,6 +31,59 @@ function mockAuth(
 }
 
 describe("Spectra API route", () => {
+  it("forwards the explicit owned picker scope without changing the default school contract", async () => {
+    const page = { scope: "owned", items: [{ _id: "owned-item" }], continueCursor: null, isDone: true };
+    const convexQuery = vi.fn().mockResolvedValue(page);
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactPage&scope=owned&limit=24"));
+    expect(await response.json()).toEqual(page);
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listPage", expect.objectContaining({ scope: "owned", limit: 24 }));
+  });
+
+  it("preserves an empty nonfinal catalog page and forwards its scoped filters", async () => {
+    const page = { items: [], continueCursor: "encrypted-next", isDone: false };
+    const convexQuery = vi.fn().mockResolvedValue(page);
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactPage&placement=shared&blueprintKey=document&status=active&search=essay&cursor=encrypted-current&limit=12"));
+    expect(await response.json()).toEqual(page);
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listPage", { scope: "school", placement: "shared", blueprintKey: "document", status: "active", search: "essay", cursor: "encrypted-current", limit: 12 });
+  });
+
+  it("rejects invalid catalog page sizes before a database query", async () => {
+    const convexQuery = vi.fn();
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=workspacePage&limit=NaN"));
+    expect(response.status).toBe(400);
+    expect(convexQuery).not.toHaveBeenCalled();
+  });
+
+  it("bootstraps identity without querying catalog dependencies", async () => {
+    const convexQuery = vi.fn().mockRejectedValue(new Error("catalog unavailable"));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=bootstrap"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ actor: mockActor(), needsSchool: false });
+    expect(convexQuery).not.toHaveBeenCalled();
+  });
+
+  it("reports missing school during bootstrap without an empty catalog success", async () => {
+    const convexQuery = vi.fn();
+    vi.doMock("@/lib/auth-server", () => mockAuth(vi.fn().mockRejectedValue(new Error("AUTH_NO_SCHOOL: no school"))));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=bootstrap"));
+    expect(await response.json()).toMatchObject({ actor: null, needsSchool: true });
+    expect(convexQuery).not.toHaveBeenCalled();
+  });
+
   it("loads overview data from new Spectra tables", async () => {
     const convexMutation = vi.fn();
     const convexQuery = vi

@@ -1,5 +1,6 @@
 import { query } from "./io";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import { latestNativeWritePerReplica } from "@/features/spectra/ai/native-write-status";
 import { documentAcademicOperationsLanded } from "@/features/spectra/commands/office/document-academic-operations";
 import {
   authoredValueLandedInContent,
@@ -79,6 +80,7 @@ async function assertNativeReplicaHonest(artifactId: string) {
     { workId: string },
     {
       replicas: Array<{
+        _id?: string;
         kind?: string;
         state?: string;
         nativeFormat?: string;
@@ -87,6 +89,9 @@ async function assertNativeReplicaHonest(artifactId: string) {
         direction?: string;
         state?: string;
         errorCode?: string;
+        replicaId?: string;
+        createdAt?: number;
+        updatedAt?: number;
       }>;
     }
   >("replicas:forWork", { workId: artifactId }).catch(() => null);
@@ -102,11 +107,13 @@ async function assertNativeReplicaHonest(artifactId: string) {
     throw new Error(
       "NATIVE_VERIFY_FAILED: Spectra saved the edit, but the Office file on this PC reported an error and was not updated.",
     );
-  const failedWrite = (truth.recentOperations ?? []).find(
-    (operation) =>
-      operation.direction === "cloud-to-local" &&
-      operation.state === "failed",
-  );
+  const localReplicaIds = locals
+    .map((replica) => replica._id)
+    .filter((replicaId): replicaId is string => Boolean(replicaId));
+  const failedWrite = latestNativeWritePerReplica(
+    truth.recentOperations ?? [],
+    localReplicaIds,
+  ).find((operation) => operation.state === "failed");
   if (failedWrite)
     throw new Error(
       "NATIVE_VERIFY_FAILED: Spectra saved the edit, but writing the Office file on this PC failed.",

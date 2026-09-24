@@ -20,6 +20,7 @@ export type ReplicaTruth = {
   kind: "cloud" | "local";
   state: ReplicaState;
   lastVerifiedAt?: number;
+  retryAt?: number;
   errorCode?: string;
   unavailableReason?: string;
 };
@@ -145,10 +146,18 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
     pendingCount > 0 ||
     replicas.some((replica) => replica.state === "pending")
   ) {
+    const retryingReplica = replicas.find(
+      (replica) =>
+        replica.state === "pending" &&
+        replica.retryAt !== undefined &&
+        replica.errorCode,
+    );
     return {
       key: replicas.length > 1 ? "syncing" : "saving",
       label: replicas.length > 1 ? "Syncing…" : "Saving…",
-      detail: "A verified operation is still in progress.",
+      detail: retryingReplica
+        ? `${humanizePublicFailure(retryingReplica.errorCode!)}. Spectra will retry automatically.`
+        : "A verified operation is still in progress.",
       tone: "neutral",
     };
   }
@@ -235,6 +244,8 @@ export function replicaDisclosure(
     }
     const state = humanizeReplicaState(replica.state);
     if (replica.state === "unavailable") return `${location} · ${state}`;
+    if (replica.state === "pending" && replica.retryAt !== undefined && replica.errorCode)
+      return `${location} · Retrying ${humanizePublicFailure(replica.errorCode)}`;
     if (replica.lastVerifiedAt === undefined)
       return `${location} · ${state} · Not yet verified`;
     return `${location} · ${state} · Last verified ${formatElapsedSince(replica.lastVerifiedAt, now)}`;
@@ -385,8 +396,8 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
         label: queued > 0 ? "Queued" : "Not running",
         detail:
           queued > 0
-            ? "This file lives on your PC. Spectra Bridge is not running. Changes remain queued safely."
-            : "This file lives on your PC. Open Spectra Bridge to use it here.",
+            ? "This file lives on your PC. Its background connection is unavailable. Changes remain queued safely."
+            : "This file lives on your PC. Connect this device from Files and devices in Spectra.",
         tone: "warning",
         ready: false,
       };

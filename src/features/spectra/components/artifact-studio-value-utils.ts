@@ -16,12 +16,26 @@ export function reconciliationSnapshotKey(snapshot: ReconciliationSnapshot) {
   return JSON.stringify(snapshot);
 }
 
+/** Scoped to one editor; only immutable React snapshots may be used as keys. */
+export function createReconciliationSnapshotKey() {
+  const keys = new WeakMap<ReconciliationSnapshot, string>();
+  return (snapshot: ReconciliationSnapshot) => {
+    let key = keys.get(snapshot);
+    if (key === undefined) {
+      key = reconciliationSnapshotKey(snapshot);
+      keys.set(snapshot, key);
+    }
+    return key;
+  };
+}
+
 export function incomingReconciliationKey(
   artifactId: string,
   snapshot: ReconciliationSnapshot,
   provenance?: { source: StudioIncomingSource; revision: number; localSync: boolean },
+  serializedSnapshot = reconciliationSnapshotKey(snapshot),
 ) {
-  return `${artifactId}\u0000${reconciliationSnapshotKey(snapshot)}${
+  return `${artifactId}\u0000${serializedSnapshot}${
     provenance ? `\u0000${JSON.stringify(provenance)}` : ""
   }`;
 }

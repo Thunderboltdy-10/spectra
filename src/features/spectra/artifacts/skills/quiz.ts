@@ -27,6 +27,7 @@ export const quizSkill = defineArtifactSkill({
     "practice publish state",
   ],
   operations: [
+    "Create one artifact with content.questions[]. Multiple-choice correctAnswer must exactly match a real option. Use plausible distractors tied to misconceptions and explanations that teach why the correct answer works; preserve the requested count and difficulty.",
     "Plan source coverage; add, rewrite, reorder, or change question types; configure one clear answer model; build matching, ordering, numeric, fill, and pooled interactions; add advisory long-response rubrics; explain answers; and validate correctness, ambiguity, bias, accessibility, and source coverage.",
     "Import and map supported QTI 2.x, Moodle XML, CSV, TSV, or Spectra JSON with explicit fidelity notes; export supported QTI 2.2, CSV, JSON, or print/PDF without claiming fidelity for adapted interactions.",
     "Publish only a valid formative version. Any later authored or AI content change returns the working copy to draft while version-pinned attempts remain immutable.",

@@ -26,13 +26,24 @@ import {
   deriveProjectionSnapshotHash,
   deriveStorageTransitionIdempotencyKey,
   deriveSyncIdempotencyKey,
+  localMaterializationTarget,
 } from "../shared/replica-truth";
 import {
   isActionablePendingOperation,
   retireSupersededExternalOperations,
+  verifyReconciledExternalOperations,
 } from "./syncOperationLifecycle";
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
+import { bridgeWriteForSyncOperation, bridgeWriteForTarget, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
+
+const RETRYABLE_MATERIALIZATION_FAILURES = new Set([
+  "write-expired",
+  "payload-download-failed",
+  "file-read-failed",
+  "write-failed",
+  "target-unavailable",
+]);
 import { validateContentAdoption } from "./collaborationDurablePayload";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
@@ -132,11 +143,7 @@ export const transitionStorageStrategy = mutation({
       let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
       if (!operation && requestId) {
         const request = await ctx.db.get(requestId);
-        operation = request
-          ? await ctx.db.query("syncOperations")
-              .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
-              .unique()
-          : null;
+        operation = request ? await syncOperationForBridgeWrite(ctx, request) : null;
       }
       return { state: replayed.state, transitionId: replayed._id, materializationRequestId: requestId, operationId: operation?._id ?? storedOperationId, transitionReceipt: transitionReceipt(replayed, requestId, operation?._id ?? storedOperationId) };
     }
@@ -160,11 +167,7 @@ export const transitionStorageStrategy = mutation({
       let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
       if (!operation && requestId) {
         const request = await ctx.db.get(requestId);
-        operation = request
-          ? await ctx.db.query("syncOperations")
-              .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
-              .unique()
-          : null;
+        operation = request ? await syncOperationForBridgeWrite(ctx, request) : null;
       }
       return { state: existingTransition.state, transitionId: existingTransition._id, materializationRequestId: requestId, operationId: operation?._id ?? storedOperationId, transitionReceipt: transitionReceipt(existingTransition, requestId, operation?._id ?? storedOperationId) };
     }
@@ -270,7 +273,7 @@ export const transitionStorageStrategy = mutation({
         const initialRevision = `new:${cloud.revision}`;
         const localId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, nativeFormat: cloud.nativeFormat, payloadRef: undefined, revision: initialRevision, baseRevision: cloud.revision, contentHash: undefined, state: "pending", fidelityMap: cloud.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: cloud.compatibilityProfile ?? "strict-native", updatedAt: now });
         activeLocal = (await ctx.db.get(localId)) ?? undefined;
-        const writeKey = await deriveSyncIdempotencyKey({ workId: String(args.workId), target: String(mount.deviceId), baseRevision: initialRevision, targetRevision: cloud.contentHash, direction: "cloud-to-local" });
+        const writeKey = await deriveSyncIdempotencyKey({ workId: String(args.workId), target: localMaterializationTarget(String(mount._id), relativePath), baseRevision: initialRevision, targetRevision: cloud.contentHash, direction: "cloud-to-local" });
         materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", retryAt: now, attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
         materializationOperationId = await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: initialRevision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
         createdLocal = true;
@@ -469,6 +472,7 @@ export const materializationStatus = query({
       state: request.state,
       errorCode: request.errorCode,
       errorMessage: request.errorMessage,
+      retryAt: request.retryAt,
       targetRevision: request.targetRevision,
     };
   },
@@ -498,9 +502,7 @@ export const cancelMaterialization = mutation({
       claimedAt: undefined,
       updatedAt: now,
     });
-    const operation = await ctx.db.query("syncOperations")
-      .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
-      .unique();
+    const operation = await syncOperationForBridgeWrite(ctx, request);
     if (operation && (operation.state === "pending" || operation.state === "applied"))
       await ctx.db.patch(operation._id, { state: "failed", errorCode: "cancelled-before-claim", updatedAt: now });
     const replica = await ctx.db.get(request.replicaId);
@@ -658,9 +660,7 @@ export const strategyTransitionForWork = query({
     const storedOperationId = ctx.db.normalizeId("syncOperations", typeof after.operationId === "string" ? after.operationId : "");
     let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
     if (!operation && request) {
-      operation = await ctx.db.query("syncOperations")
-        .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
-        .unique();
+      operation = await syncOperationForBridgeWrite(ctx, request);
     }
     return {
       ...transition,
@@ -977,18 +977,78 @@ export const queueMaterialization = mutation({
       mount: String(local.mountId),
       item: String(args.workId),
     });
-    const idempotencyKey = await deriveSyncIdempotencyKey({
+    const baseIdempotencyKey = await deriveSyncIdempotencyKey({
       workId: String(args.workId),
-      target: String(local.deviceId),
+      target: localMaterializationTarget(String(local.mountId), local.relativePath),
       baseRevision: input.baseRevision,
       targetRevision: input.contentHash,
       direction: "cloud-to-local",
     });
-    const existing = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
-      .unique();
-    if (existing) return { requestId: existing._id, state: existing.state };
     const now = Date.now();
+    const hasImmediateProjection =
+      input.promotionMode !== "verified-first" &&
+      args.projectionContent !== undefined &&
+      input.projectionContentHash !== undefined;
+    const projectRequestedContent = async () => {
+      if (!hasImmediateProjection) return;
+      await ctx.db.patch(args.workId, {
+        content: args.projectionContent,
+        contentHash: input.projectionContentHash,
+        ...(input.projectionTextIndex !== undefined
+          ? { textIndex: input.projectionTextIndex }
+          : {}),
+        updatedAt: now,
+      });
+    };
+    const existing = await bridgeWriteForTarget(ctx, {
+      accountId: actor.accountId,
+      idempotencyKey: baseIdempotencyKey,
+      replicaId: local._id,
+      workId: args.workId,
+      baseRevision: input.baseRevision,
+      targetRevision: input.contentHash,
+    });
+    let idempotencyKey = baseIdempotencyKey;
+    if (existing) {
+      if (existing.state === "pending" || existing.state === "claimed" ||
+        existing.state === "verified" || existing.state === "conflicted") {
+        // The first commit owns this request's projection. Retrying a lost
+        // response returns its receipt; it must not roll a newer canonical
+        // head back or replace the projection of an already-claimed payload.
+        return { requestId: existing._id, state: existing.state };
+      }
+      if (
+        existing.state !== "failed" ||
+        !RETRYABLE_MATERIALIZATION_FAILURES.has(existing.errorCode ?? "")
+      )
+        return { requestId: existing._id, state: existing.state };
+      const sameRevisionRequests = await ctx.db.query("bridgeWriteRequests")
+        .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
+        .order("desc")
+        .take(100);
+      const activeRetry = sameRevisionRequests.find(
+        (request) =>
+          request.replicaId === local._id &&
+          request.baseRevision === input.baseRevision &&
+          request.contentHash === input.contentHash &&
+          request.idempotencyKey.startsWith(`${baseIdempotencyKey}:retry:`) &&
+          (request.state === "pending" || request.state === "claimed"),
+      );
+      if (activeRetry)
+        return { requestId: activeRetry._id, state: activeRetry.state };
+      const retryNumber = sameRevisionRequests.filter(
+        (request) =>
+          request.replicaId === local._id &&
+          request.baseRevision === input.baseRevision &&
+          request.contentHash === input.contentHash &&
+          request.idempotencyKey.startsWith(`${baseIdempotencyKey}:retry:`),
+      ).length + 1;
+      idempotencyKey = `${baseIdempotencyKey}:retry:${retryNumber}`;
+      const priorRetry = await ctx.db.query("bridgeWriteRequests")
+        .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
+        .unique();
+      if (priorRetry) return { requestId: priorRetry._id, state: priorRetry.state };
+    }
     const activeWrite = latestActiveWriteForReplica(
       await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
@@ -997,13 +1057,27 @@ export const queueMaterialization = mutation({
       local._id,
     );
     if (activeWrite) {
-      // The queued write is still valid against the bytes it was based on.
-      // If Word saved underneath it, those bytes moved: retire the stale
-      // write so Keep Spectra / rebase can queue against the live file.
       if (local.revision === activeWrite.baseRevision) {
-        throw new Error("MATERIALIZATION_BASE_STALE");
+        if (activeWrite.state !== "pending") {
+          // A device has claimed this write. It may already be replacing the
+          // native package, so a concurrent AI edit cannot safely supersede it.
+          // Leave Yjs unchanged; the caller can retry after this receipt lands.
+          throw new Error("MATERIALIZATION_BASE_STALE");
+        }
+        // Office-locked requests stay unclaimed between bounded retry times.
+        // A newer collaborative revision contains the previous edit, so replace
+        // that queued payload instead of later writing stale bytes to disk.
+        await supersedeWriteRequest(
+          ctx,
+          activeWrite,
+          "superseded-by-newer-cloud-revision",
+          now,
+        );
+      } else {
+        // Word saved underneath the queued request. Retire it so the caller can
+        // rebase against the newly observed native revision.
+        await supersedeWriteRequest(ctx, activeWrite, "external-save-during-write", now);
       }
-      await supersedeWriteRequest(ctx, activeWrite, "external-save-during-write", now);
     }
     if (local.revision !== input.baseRevision) {
       throw new Error("MATERIALIZATION_BASE_STALE");
@@ -1082,19 +1156,15 @@ export const queueMaterialization = mutation({
     // Cloud bytes stay at the last verified revision until Bridge read-back
     // proves the write. Stamping the target hash here made every overlapping
     // Word save look like a blob conflict with no region previews.
-    await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
-    if (
-      input.promotionMode !== "verified-first" &&
-      args.projectionContent !== undefined &&
-      input.projectionContentHash
-    ) {
-      await ctx.db.patch(args.workId, {
-        content: args.projectionContent,
-        contentHash: input.projectionContentHash,
-        ...(input.projectionTextIndex !== undefined ? { textIndex: input.projectionTextIndex } : {}),
-        updatedAt: now,
-      });
-    }
+    await ctx.db.patch(local._id, {
+      state: "pending",
+      retryAt: undefined,
+      errorCode: undefined,
+      errorMessage: undefined,
+      errorAt: undefined,
+      updatedAt: now,
+    });
+    await projectRequestedContent();
     await ctx.db.insert("syncOperations", {
       accountId: actor.accountId,
       workId: args.workId,
@@ -1234,12 +1304,19 @@ export const applyProtectedPending = mutation({
       throw new Error("PROTECTED_BASE_SNAPSHOT_MISSING");
     const idempotencyKey = await deriveSyncIdempotencyKey({
       workId: String(args.workId),
-      target: String(local.deviceId),
+      target: localMaterializationTarget(String(local.mountId), local.relativePath),
       baseRevision: local.pendingBaseRevision,
       targetRevision: local.pendingContentHash,
       direction: "cloud-to-local",
     });
-    const existing = await ctx.db.query("bridgeWriteRequests").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique();
+    const existing = await bridgeWriteForTarget(ctx, {
+      accountId: actor.accountId,
+      idempotencyKey,
+      replicaId: local._id,
+      workId: args.workId,
+      baseRevision: local.pendingBaseRevision,
+      targetRevision: local.pendingContentHash,
+    });
     if (existing) return { requestId: existing._id, state: existing.state };
     const [mount, device] = await Promise.all([ctx.db.get(local.mountId), ctx.db.get(local.deviceId)]);
     if (!activeReplicaWriteTarget(local, mount, device)) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
@@ -1384,7 +1461,7 @@ export const createLocalReplica = mutation({
     const baseRevision = existing?.revision ?? `new:${args.workId}`;
     const idempotencyKey = await deriveSyncIdempotencyKey({
       workId: String(args.workId),
-      target: String(mount.deviceId),
+      target: localMaterializationTarget(String(mount._id), input.relativePath),
       baseRevision,
       targetRevision: input.contentHash,
       direction: "cloud-to-local",
@@ -1677,30 +1754,73 @@ export const resolveExternalConflict = mutation({
       .take(20);
     const now = Date.now();
     if (!conflicts.length) return { resolved: 0, workId: null };
-    const replicaPair = async () => {
-      const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
-      const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
+    const convergedReplicaPair = async () => {
+      const replicas = await ctx.db.query("workReplicas")
+        .withIndex("by_work", (q) => q.eq("workId", args.workId))
+        .take(50);
       const cloud = replicas.find((replica) => replica.kind === "cloud");
-      return Boolean(local?.contentHash && cloud?.contentHash && local.contentHash === cloud.contentHash);
+      const local = cloud?.contentHash
+        ? replicas.find((replica) =>
+            replica.kind === "local" &&
+            replica.state === "current" &&
+            replica.contentHash === cloud.contentHash,
+          )
+        : undefined;
+      const cloudPayload = cloud
+        ? await verifiedReplicaPayload(ctx, cloud)
+        : null;
+      const conflictsReferenceOnlyConvergedOrUnavailableLocals =
+        conflicts.every((conflict) => {
+          const localReplicaIds = conflict.replicaIds.filter((replicaId) => {
+            const replica = replicas.find((candidate) => candidate._id === replicaId);
+            return !replica || replica.kind === "local";
+          });
+          return localReplicaIds.length > 0 && localReplicaIds.every((replicaId) => {
+            const replica = replicas.find((candidate) => candidate._id === replicaId);
+            return Boolean(
+              replica &&
+              replica.kind === "local" &&
+              (replica.state === "unavailable" ||
+                (replica.state === "current" &&
+                  replica.contentHash === cloud?.contentHash)),
+            );
+          });
+        });
+      return {
+        cloud,
+        local,
+        replicas,
+        safe: Boolean(
+          cloud?.state === "current" &&
+          cloud.contentHash &&
+          cloudPayload &&
+          local &&
+          conflictsReferenceOnlyConvergedOrUnavailableLocals,
+        ),
+      };
     };
     if (args.resolution === "local") {
-      if (await replicaPair()) {
-        const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
-        const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
-        const cloud = replicas.find((replica) => replica.kind === "cloud");
+      const pair = await convergedReplicaPair();
+      if (pair.safe && pair.local && pair.cloud?.contentHash) {
         await Promise.all([
           ...conflicts.map((conflict) => ctx.db.patch(conflict._id, {
             state: "resolved-local",
             resolvedAt: now,
             updatedAt: now,
           })),
-          local && local.state !== "current"
-            ? ctx.db.patch(local._id, { state: "current", updatedAt: now })
+          pair.local.state !== "current"
+            ? ctx.db.patch(pair.local._id, { state: "current", updatedAt: now })
             : Promise.resolve(),
-          cloud && cloud.state !== "current"
-            ? ctx.db.patch(cloud._id, { state: "current", updatedAt: now })
+          pair.cloud.state !== "current"
+            ? ctx.db.patch(pair.cloud._id, { state: "current", updatedAt: now })
             : Promise.resolve(),
         ]);
+        await verifyReconciledExternalOperations(ctx, {
+          workId: args.workId,
+          replicaId: pair.local._id,
+          revision: pair.cloud.contentHash,
+          now,
+        });
         return { resolved: conflicts.length, workId: null };
       }
       throw new Error("CONFLICT_RECONCILIATION_REQUIRED");
@@ -1730,23 +1850,27 @@ export const resolveExternalConflict = mutation({
               ),
             );
       if (!request) {
-        const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
-        const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
-        const cloud = replicas.find((replica) => replica.kind === "cloud");
-        if (local?.contentHash && cloud?.contentHash && local.contentHash === cloud.contentHash) {
+        const pair = await convergedReplicaPair();
+        if (pair.safe && pair.local && pair.cloud?.contentHash) {
           await Promise.all([
             ...conflicts.map((conflict) => ctx.db.patch(conflict._id, {
-              state: "resolved-merged",
+              state: "resolved-spectra",
               resolvedAt: now,
               updatedAt: now,
             })),
-            local.state !== "current"
-              ? ctx.db.patch(local._id, { state: "current", updatedAt: now })
+            pair.local.state !== "current"
+              ? ctx.db.patch(pair.local._id, { state: "current", updatedAt: now })
               : Promise.resolve(),
-            cloud.state !== "current"
-              ? ctx.db.patch(cloud._id, { state: "current", updatedAt: now })
+            pair.cloud.state !== "current"
+              ? ctx.db.patch(pair.cloud._id, { state: "current", updatedAt: now })
               : Promise.resolve(),
           ]);
+          await verifyReconciledExternalOperations(ctx, {
+            workId: args.workId,
+            replicaId: pair.local._id,
+            revision: pair.cloud.contentHash,
+            now,
+          });
           return { resolved: conflicts.length, workId: null };
         }
         throw new Error("CONFLICT_RESOLUTION_WRITE_REQUIRED");
@@ -1874,9 +1998,7 @@ async function supersedeWriteRequest(
     claimedAt: undefined,
     updatedAt: now,
   });
-  const operation = await ctx.db.query("syncOperations")
-    .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
-    .unique();
+  const operation = await syncOperationForBridgeWrite(ctx, request);
   if (operation && (operation.state === "pending" || operation.state === "applied"))
     await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
   const resolving = await ctx.db.query("syncConflicts")
@@ -1905,9 +2027,7 @@ async function failWriteRequest(
     claimedAt: undefined,
     updatedAt: now,
   });
-  const operation = await ctx.db.query("syncOperations")
-    .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
-    .unique();
+  const operation = await syncOperationForBridgeWrite(ctx, request);
   if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
   const replica = await ctx.db.get(request.replicaId);
   if (replica?.state === "pending") await ctx.db.patch(replica._id, { state: "error", errorCode, errorAt: now, updatedAt: now });
@@ -2093,9 +2213,7 @@ export const sweepReplicaTruth = internalMutation({
     budget.note(pendingOperations.length);
     let orphanedOperations = 0;
     for (const operation of pendingOperations) {
-      const request = await ctx.db.query("bridgeWriteRequests")
-        .withIndex("by_account_key", (q) => q.eq("accountId", operation.accountId).eq("idempotencyKey", operation.idempotencyKey))
-        .unique();
+      const request = await bridgeWriteForSyncOperation(ctx, operation);
       if (request) budget.note(1);
       if (request && (request.state === "pending" || request.state === "claimed")) continue;
       await ctx.db.patch(operation._id, {

@@ -34,8 +34,19 @@ async (page) => {
       ),
       layoutShifts: state?.layoutShifts ?? [],
       websocket: state?.websocket ?? null,
+      socketLifecycle: state?.socketLifecycle ?? null,
+      convexQueries: state?.convexQueries ?? null,
+      observationCoverage: state ? { installedBeforeApp: state.installedBeforeApp, ...state.supported } : null,
+      editorReadiness: state?.editorReadiness.map((entry) => ({ ...entry, elapsedMs: entry.at - state.startedAt })) ?? null,
+      heap: performance.memory ? { usedJSHeapSize: performance.memory.usedJSHeapSize,
+        totalJSHeapSize: performance.memory.totalJSHeapSize, jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+        semantics: "Chromium process heap sample; GC and other pages affect it" } : null,
+      databaseIoReadBytes: null,
+      checkpointWrites: null,
       resources: {
         count: resources.length,
+        zeroTransferEntries: resources.filter((entry) => entry.transferSize === 0).length,
+        semantics: "Observed ResourceTiming only; zero transfer can mean cache reuse or missing cross-origin timing. Do not treat the sum as complete network or DB I/O.",
         transferBytes: resources.reduce(
           (sum, entry) => sum + entry.transferSize,
           0,
@@ -65,16 +76,18 @@ async (page) => {
     ...report,
     screenshot,
     network: {
+      transfers: network.transfers ?? [],
+      pendingSizes: network.pendingSizes ?? null,
       responses: network.responses,
       failures: network.failures,
       pageErrors: network.pageErrors,
       failingStatuses: network.responses.filter(
         (response) => response.status >= 400,
       ),
-      declaredTransferBytes: network.responses.reduce(
-        (sum, response) => sum + response.contentLength,
-        0,
-      ),
+      declaredTransferBytes: network.responses.some((response) => response.contentLength === null) ? null
+        : network.responses.reduce((sum, response) => sum + response.contentLength, 0),
+      declaredTransferCoverage: { known: network.responses.filter((response) => response.contentLength !== null).length, total: network.responses.length },
+      semantics: "HTTP body/header sizes, ResourceTiming and WebSocket frame payloads are separate; none measure database I/O. Late observer installation cannot count pre-existing sockets or subscriptions.",
     },
   };
 }

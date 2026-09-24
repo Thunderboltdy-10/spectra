@@ -16,7 +16,7 @@ type EditableCitationUse = Omit<DeckCitationUse, "slideNumbers"> & {
  * scattered notes into one honest References surface: citations are collected
  * in slide order, deduplicated, given slide provenance and rendered onto
  * generated slides that regenerate in place instead of stacking copies. An
- * entry without a URL is not hidden — it is marked as needing a source,
+ * entry without a URL or a portable evidence reference is not hidden — it is marked as needing a source,
  * because a silent gap would read as a finished bibliography (INV-09).
  */
 
@@ -60,7 +60,7 @@ export function collectDeckCitations(
           label,
           ...(citation.url?.trim() ? { url: citation.url.trim() } : {}),
           slideNumbers: [slideIndex + 1],
-          verified: Boolean(citation.url?.trim()),
+          verified: Boolean(citation.url?.trim() || citation.sourceRefs?.some((ref) => ref.startsWith("evidence:"))),
           order: entries.size,
         });
       }

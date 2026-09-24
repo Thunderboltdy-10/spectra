@@ -72,6 +72,7 @@ impl MountWatcher {
         let mut errors = Vec::new();
         for event in self.drain() {
             match event {
+                Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {}
                 Ok(event) => paths.extend(event.paths),
                 Err(error) => errors.push(ScanFailure {
                     relative_path: "<watcher>".into(),
@@ -129,6 +130,9 @@ pub fn classify_changed_paths(
         if path == root || !path.starts_with(root) {
             continue;
         }
+        if is_bridge_staging_file(&path) {
+            continue;
+        }
         if is_office_lock_file(&path) {
             if let Some(parent) = path.parent() {
                 match std::fs::read_dir(parent) {
@@ -137,7 +141,10 @@ pub fn classify_changed_paths(
                             match entry {
                                 Ok(entry) => {
                                     let candidate = entry.path();
-                                    if candidate.is_file() && !is_office_lock_file(&candidate) {
+                                    if candidate.is_file()
+                                        && !is_office_lock_file(&candidate)
+                                        && !is_bridge_staging_file(&candidate)
+                                    {
                                         existing.insert(candidate);
                                     }
                                 }
@@ -160,7 +167,9 @@ pub fn classify_changed_paths(
             for entry in WalkDir::new(&path).follow_links(false) {
                 match entry {
                     Ok(entry)
-                        if entry.file_type().is_file() && !is_office_lock_file(entry.path()) =>
+                        if entry.file_type().is_file()
+                            && !is_office_lock_file(entry.path())
+                            && !is_bridge_staging_file(entry.path()) =>
                     {
                         existing.insert(entry.into_path());
                     }
@@ -232,7 +241,11 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| match entry {
-            Ok(entry) if entry.path() != root && !is_office_lock_file(entry.path()) => {
+            Ok(entry)
+                if entry.path() != root
+                    && !is_office_lock_file(entry.path())
+                    && !is_bridge_staging_file(entry.path()) =>
+            {
                 Some((entry.path().to_owned(), Some(entry), None))
             }
             Ok(_) => None,
@@ -327,6 +340,14 @@ pub fn is_office_lock_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with("~$"))
+}
+
+fn is_bridge_staging_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix(".spectra-op_"))
+        .and_then(|name| name.strip_suffix(".tmp"))
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 /// Maps an Office `~$` owner file back to the open document in the same folder.
@@ -489,10 +510,29 @@ impl StabilityTracker {
         }
     }
 
+    /// An OS change event invalidates metadata shortcuts, even when a provider
+    /// preserves both size and mtime. Read/access notifications are excluded.
+    pub fn mark_changed(&mut self, path: &Path) {
+        self.candidates.remove(path);
+    }
+
     pub fn observe(&mut self, path: &Path, now: Instant) -> anyhow::Result<Option<String>> {
         if office_lock_exists(path) {
             self.candidates.remove(path);
             return Ok(None);
+        }
+        // Poll metadata while waiting for quiescence. A fresh writer-exclusive
+        // hash is still mandatory at the deadline, including when a writer
+        // preserved length and mtime, so this cannot authorize partial bytes.
+        if let Some(candidate) = self.candidates.get(path) {
+            if now.duration_since(candidate.first_stable_at) < self.window {
+                let metadata = path.metadata()?;
+                if metadata.len() == candidate.size
+                    && metadata.modified().ok() == candidate.modified
+                {
+                    return Ok(None);
+                }
+            }
         }
         let (snapshot, writer_complete) =
             match stable_file_snapshot_with(self.platform.as_ref(), path)? {
@@ -633,6 +673,79 @@ mod tests {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn staging_files_never_become_resources_or_missing_events() {
+        let dir = tempdir().unwrap();
+        let staged = dir
+            .path()
+            .join(format!(".spectra-op_{}.tmp", "a".repeat(32)));
+        std::fs::write(&staged, b"uncommitted native payload").unwrap();
+        std::fs::write(
+            dir.path().join(".spectra-not-a-staging-file.tmp"),
+            b"user file",
+        )
+        .unwrap();
+        let scan = scan_mount(&TestPlatform, dir.path()).unwrap();
+        assert_eq!(scan.entries.len(), 1);
+        assert_eq!(
+            scan.entries[0].relative_path,
+            ".spectra-not-a-staging-file.tmp"
+        );
+        assert!(
+            classify_changed_paths(dir.path(), [staged.clone()])
+                .existing_files
+                .is_empty()
+        );
+        std::fs::remove_file(&staged).unwrap();
+        assert!(
+            classify_changed_paths(dir.path(), [staged])
+                .missing_paths
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn quiescence_polls_defer_rehash_but_same_metadata_changes_are_checked_at_deadline() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("unchanged.txt");
+        std::fs::write(&path, b"original").unwrap();
+        let modified = path.metadata().unwrap().modified().unwrap();
+        let now = Instant::now();
+        let mut tracker = StabilityTracker::new(Duration::from_secs(1));
+        assert_eq!(tracker.observe(&path, now).unwrap(), None);
+        // Make a same-length edit and restore mtime: metadata cannot be proof
+        // that bytes are unchanged. The deadline must still perform a hash.
+        std::fs::write(&path, b"external").unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_eq!(
+            tracker
+                .observe(&path, now + Duration::from_millis(500))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            tracker.candidates[&path].fingerprint,
+            hex::encode(sha2::Sha256::digest(b"original"))
+        );
+        assert_eq!(
+            tracker
+                .observe(&path, now + Duration::from_secs(1))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            tracker
+                .observe(&path, now + Duration::from_secs(2))
+                .unwrap(),
+            Some(hex::encode(sha2::Sha256::digest(b"external")))
+        );
     }
 
     #[test]
@@ -814,6 +927,7 @@ mod tests {
         std::fs::write(&path, b"first provider pass").unwrap();
         assert_eq!(tracker.observe(&path, start).unwrap(), None);
         std::fs::write(&path, b"second provider pass").unwrap();
+        tracker.mark_changed(&path);
         assert_eq!(
             tracker
                 .observe(&path, start + Duration::from_millis(900))
@@ -821,6 +935,7 @@ mod tests {
             None
         );
         std::fs::write(&path, b"final provider bytes").unwrap();
+        tracker.mark_changed(&path);
         assert_eq!(
             tracker
                 .observe(&path, start + Duration::from_millis(1_800))

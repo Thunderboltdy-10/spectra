@@ -8,7 +8,7 @@ import { reconcileDurablePayloadOwners } from "./durablePayloadOwnership";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 import { PAYLOAD_RELEASE_GRACE_MS } from "../shared/replica-truth";
 import { readFileSync } from "node:fs";
-import { isTransientCollaborationFailure } from "../scripts/collaboration-persist.mjs";
+import { createCollaborationAuthorizationGuard } from "../scripts/collaboration-persist.mjs";
 
 const modules = import.meta.glob("./**/*.ts");
 async function fixture() {
@@ -121,11 +121,11 @@ it("revokes a deactivated actor's cached grant even with an unchanged artifact p
   expect(await t.query(internal.collaborationGatewayStore.policy,{artifactId:ids[0].artifactId,partitionKey:"root"})).toMatchObject({available:true,policyVersion:0});
   const source=readFileSync("scripts/collaboration-gateway.mjs","utf8");
   const code=source.slice(source.indexOf("async function refreshAuthorization("),source.indexOf("async function reauthorize("));
-  const build = (bridge: () => Promise<unknown>) => new Function("bridge","isTransientCollaborationFailure","process",`${code}; return refreshAuthorization;`)(bridge,isTransientCollaborationFailure,{stderr:{write:()=>undefined}});
+  const build = (bridge: () => Promise<unknown>) => new Function("authorizationGuard",`${code}; return refreshAuthorization;`)(createCollaborationAuthorizationGuard({authorize:bridge}));
   const context={...authArgs,canModify:true,authorizationCheckedAt:Date.now()-30_000,authorizationRevoked:false};
   await expect(build(()=>t.query(internal.collaborationGatewayStore.authorize,authArgs))(context)).rejects.toThrow("ACCESS_REVOKED");
   expect(context).toMatchObject({canModify:false,authorizationRevoked:true});
-  const cached = {...context,canModify:true,authorizationRevoked:false};
+  const cached = {...context,canModify:true,authorizationRevoked:false,authorizationCheckedAt:Date.now()-10_000};
   expect(await build(()=>Promise.reject(new Error("fetch failed")))(cached)).toBe(cached);
   expect(cached.canModify).toBe(true);
   // Exercise the actual quiet-connection sweep, without a real server/socket.

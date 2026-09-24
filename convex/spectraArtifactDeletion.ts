@@ -9,6 +9,8 @@ import { tombstoneArtifactEmbeds } from "./orgTreeShared";
 import { releaseSnapshotObject, releaseVersionIfUnpinned } from "./artifactSnapshots";
 import { releaseArtifactIntakePage } from "./artifactIntakeLifecycle";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
+import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
+import { reconcileDurablePayloadOwners } from "./durablePayloadOwnership";
 import { recordMeterEvent } from "./metering";
 import {
   DELETION_CURSOR_VERSION,
@@ -159,7 +161,13 @@ async function processVersionPage(ctx: MutationCtx, job: Job, state: State): Pro
   let changed = 0; let retained = 0;
   for (const row of rows.page) {
     const pinned = await ctx.db.query("artifactEmbeds").withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", row._id)).filter((q) => q.eq(q.field("removedAt"), undefined)).first();
-    if (pinned && isSurvivingPinnedEmbed(pinned)) { retained++; continue; }
+    if (pinned && isSurvivingPinnedEmbed(pinned)) {
+      // Repair older inline version ownership while its native replicas still
+      // establish the source binding, before the replica deletion phase.
+      await reconcileDurablePayloadOwners(ctx, "spectraArtifactVersions", String(row._id), row);
+      retained++;
+      continue;
+    }
     await ctx.db.delete(row._id);
     if (row.snapshotRef) await releaseSnapshotObject(ctx, job.schoolId, row.snapshotRef);
     if (row.beforeSnapshotRef) await releaseSnapshotObject(ctx, job.schoolId, row.beforeSnapshotRef);
@@ -178,10 +186,10 @@ async function processRuntimePage(ctx: MutationCtx, job: Job, state: State): Pro
       const metadata = await ctx.db.system.get("_storage", row.storageId);
       const safe = metadata !== null && row.payloadBytes !== undefined && row.payloadHash !== undefined && metadata.size === row.payloadBytes && normalizeSha256(metadata.sha256) === normalizeSha256(row.payloadHash);
       if (!safe) { retained++; continue; }
-      await ctx.storage.delete(row.storageId);
-      const bytes = metadata.size;
+      const deleted = await deleteStorageIfNoOtherBinding(ctx, row.storageId, { table: "spectraRuntimeBuilds", id: String(row._id) });
+      const bytes = deleted ? metadata.size : 0;
       released += bytes;
-      if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -bytes, sourceType: "runtime_build_release", sourceId: String(row._id), idempotencyKey: `runtime-release:${String(row._id)}`, dimensions: { runtime: row.runtime }, occurredAt: Date.now() });
+      if (job.schoolId && deleted) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -bytes, sourceType: "runtime_build_release", sourceId: String(row._id), idempotencyKey: `runtime-release:${String(row._id)}`, dimensions: { runtime: row.runtime }, occurredAt: Date.now() });
     }
     await ctx.db.delete(row._id);
     changed++;
@@ -325,7 +333,25 @@ async function processRunPage(ctx: MutationCtx, job: Job, state: State): Promise
   const child = state.runChild;
   if (child === "operations") { const rows = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "events" : "operations", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
   if (child === "events") { const rows = await ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "attachments" : "events", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
-  if (child === "attachments") { const rows = await ctx.db.query("spectraRunAttachments").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); let changed = 0; let retained = state.runRetained ? 1 : 0; let released = 0; for (const row of rows.page) { if (row.storageId) { const metadata = await ctx.db.system.get("_storage", row.storageId); const safe = metadata !== null && row.sha256 !== undefined && metadata.size === row.size && normalizeSha256(metadata.sha256) === normalizeSha256(row.sha256) && (!metadata.contentType || normalizeMediaType(metadata.contentType) === normalizeMediaType(row.mimeType)); if (!safe) { retained = 1; continue; } await ctx.storage.delete(row.storageId); released += metadata.size; if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -metadata.size, sourceType: "run_attachment_release", sourceId: String(row._id), idempotencyKey: `run-attachment-release:${String(row._id)}`, dimensions: { handling: row.handling }, occurredAt: Date.now() }); } await ctx.db.delete(row._id); changed++; } return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "jobs" : "attachments", runParentCursor: state.runParentCursor, runRetained: retained > 0 }), { done: false, scanned: rows.page.length, changed, retained, terminal: 0, released }); }
+  if (child === "attachments") {
+    const rows = await ctx.db.query("spectraRunAttachments").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null });
+    let changed = 0; let retained = state.runRetained ? 1 : 0; let released = 0;
+    for (const row of rows.page) {
+      if (row.storageId) {
+        const metadata = await ctx.db.system.get("_storage", row.storageId);
+        const safe = metadata !== null && row.sha256 !== undefined && metadata.size === row.size && normalizeSha256(metadata.sha256) === normalizeSha256(row.sha256) && (!metadata.contentType || normalizeMediaType(metadata.contentType) === normalizeMediaType(row.mimeType));
+        if (!safe) { retained = 1; continue; }
+        const deleted = await deleteStorageIfNoOtherBinding(ctx, row.storageId, { table: "spectraRunAttachments", id: String(row._id) });
+        if (deleted) {
+          released += metadata.size;
+          if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -metadata.size, sourceType: "run_attachment_release", sourceId: String(row._id), idempotencyKey: `run-attachment-release:${String(row._id)}`, dimensions: { handling: row.handling }, occurredAt: Date.now() });
+        }
+      }
+      await ctx.db.delete(row._id);
+      changed++;
+    }
+    return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "jobs" : "attachments", runParentCursor: state.runParentCursor, runRetained: retained > 0 }), { done: false, scanned: rows.page.length, changed, retained, terminal: 0, released });
+  }
   if (child === "jobs") { const rows = await ctx.db.query("spectraRunJobs").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "tabs" : "jobs", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
   const rows = await ctx.db.query("spectraRunTabs").withIndex("by_run", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id);
   if (!rows.isDone) return resultBase(stateFor(job, "runChildren", rows.continueCursor, { runId: state.runId, runChild: "tabs", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });

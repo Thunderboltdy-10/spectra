@@ -5,15 +5,22 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
 import { fetchVerifiedNativePayload, uploadNativePayload, ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { createSpectraPackage, SPECTRA_PACKAGE_TYPES } from "@/features/spectra/lenses/spectra-package";
+import { resolveRequestedMount } from "@/features/spectra/bridge/mount-selection";
 
 export const runtime = "nodejs";
 
 type ArtifactTruth = { _id: Id<"spectraArtifacts">; blueprintKey: string; title: string; content?: unknown };
-type ActiveMount = { _id: Id<"bridgeMounts"> };
+type ActiveMount = {
+  _id: Id<"bridgeMounts">;
+  deviceId: Id<"bridgeDevices">;
+  grantId: string;
+  rootLabel: string;
+};
 
 const materializeSchema = z.object({
   artifactId: z.string().min(1),
   mountId: z.string().optional(),
+  deviceId: z.string().optional(),
   fileName: z.string().trim().min(1).max(180).optional(),
 });
 
@@ -86,17 +93,38 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const input = materializeSchema.parse(await request.json());
+    if (!input.mountId || !input.deviceId) {
+      return NextResponse.json(
+        {
+          error: "BRIDGE_FOLDER_REQUIRED",
+          message: "Choose a folder in Spectra before keeping a local copy.",
+        },
+        { status: 409 },
+      );
+    }
     const workId = artifactId(input.artifactId);
     const artifactPromise = input.fileName
       ? undefined
       : convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId });
-    const [artifact, retained, mounts] = await Promise.all([
+    const [artifact, mounts] = await Promise.all([
       artifactPromise ?? Promise.resolve(null),
-      ensurePortablePayload(workId, artifactPromise),
       convexQuery<Record<string, never>, ActiveMount[]>("bridge:activeMounts", {}),
     ]);
-    const mount = input.mountId ? mounts.find((candidate) => String(candidate._id) === input.mountId) : mounts[0];
-    if (!mount) throw new Error("NO_ACTIVE_BRIDGE_FOLDER");
+    const mount = resolveRequestedMount(
+      mounts,
+      input.mountId,
+      input.deviceId,
+    );
+    if (!mount) {
+      return NextResponse.json(
+        {
+          error: "BRIDGE_FOLDER_UNAVAILABLE",
+          message: "That folder is no longer available. Choose an active folder in Spectra and try again.",
+        },
+        { status: 409 },
+      );
+    }
+    const retained = await ensurePortablePayload(workId, artifactPromise);
     const extension = retained.truth.nativeFormat;
     const requested = input.fileName
       ? safeBaseName(input.fileName.replace(/\.[^.]+$/, ""))

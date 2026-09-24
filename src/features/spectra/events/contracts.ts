@@ -35,6 +35,7 @@ export type SpectraCommands = {
   "follow.stopRequested": Record<string, never>;
   "navigation.show": {
     actorId?: string;
+    intent?: "explicit";
     route: "library" | "calendar" | "settings" | "workspace" | "artifact";
     target?: string;
   };

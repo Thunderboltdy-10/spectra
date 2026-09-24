@@ -5,6 +5,8 @@ export const BRIDGE_URL = "http://127.0.0.1:47615";
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
 /** Health/status must not block revoke, pairing UI, or Saved/Queued truth. */
 export const BRIDGE_REQUEST_TIMEOUT_MS = 2500;
+/** Folder selection waits for the user to choose or cancel in the native picker. */
+export const BRIDGE_FOLDER_PICKER_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function bridgeRequestSignal(
   signal?: AbortSignal | null,
@@ -128,7 +130,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Not running",
       detail:
-        "Spectra Bridge is not running on this PC. Open it to use files that live here.",
+        "The Spectra Bridge background helper is not running on this PC. Pairing and folder selection are managed here in Spectra.",
     };
   }
   if (kind === "port-taken") {
@@ -169,7 +171,7 @@ export function rememberedFolderDetail(kind: BridgeReachability): string {
   if (kind === "port-taken") {
     return "This folder is remembered. Spectra Bridge cannot use it until the connection is free.";
   }
-  return "This folder is remembered. Open Spectra Bridge to use it.";
+  return "This folder is remembered. The background file connection must be running to use it.";
 }
 
 /** Folder chips must not contradict the Bridge header. */
@@ -302,7 +304,11 @@ export function persistBridgeStatusCache(status: BridgeStatus) {
   window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify(status));
 }
 
-async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {
+async function authorizedBridgeRequest(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS,
+) {
   const token = loadBridgeSession();
   if (!token) return null;
   const headers = new Headers(init.headers);
@@ -310,7 +316,7 @@ async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {
   const response = await fetch(`${BRIDGE_URL}${path}`, {
     ...init,
     headers,
-    signal: bridgeRequestSignal(init.signal ?? undefined),
+    signal: bridgeRequestSignal(init.signal ?? undefined, timeoutMs),
     cache: "no-store",
   });
   if (response.status === 401) {
@@ -371,7 +377,7 @@ export async function bridgeStatus(
 export async function selectBridgeFolder() {
   const response = await authorizedBridgeRequest("/v1/mount/select", {
     method: "POST",
-  });
+  }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting a folder.");
 }
 

@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -7,6 +8,8 @@ import type { Id } from "./_generated/dataModel";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-property-test-credential-0001";
+
+afterEach(() => vi.useRealTimers());
 const identity = {
   subject: "clerk_replica_property",
   email: "replica-property@example.test",
@@ -17,8 +20,12 @@ type TestHarness = ReturnType<typeof convexTest>;
 type Fixture = Awaited<ReturnType<typeof seedTruthMachine>>;
 type ExternalCommit = { hash: string; payloadRef: string };
 
+const payloadBytes = new Map<string, string>();
 function hashFor(index: number) {
-  return index.toString(16).padStart(64, "0");
+  const bytes = index.toString(16).padStart(64, "0");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  payloadBytes.set(hash, bytes);
+  return hash;
 }
 
 async function credentialHash(value: string) {
@@ -28,7 +35,7 @@ async function credentialHash(value: string) {
 
 async function insertPayload(t: TestHarness, accountId: Id<"accounts">, hash: string) {
   return t.run(async (ctx) => {
-    const storageId = await ctx.storage.store(new Blob([hash]));
+    const storageId = await ctx.storage.store(new Blob([payloadBytes.get(hash)!]));
     const payloadId = await ctx.db.insert("payloadObjects", {
       accountId,
       hash,
@@ -114,7 +121,7 @@ async function seedTruthMachine(t: TestHarness) {
       createdAt: now,
       updatedAt: now,
     });
-    const baseStorageId = await ctx.storage.store(new Blob([baseHash]));
+    const baseStorageId = await ctx.storage.store(new Blob([payloadBytes.get(baseHash)!]));
     const basePayloadId = await ctx.db.insert("payloadObjects", {
       accountId,
       hash: baseHash,
@@ -166,7 +173,7 @@ async function externalSave(
   hash: string,
 ): Promise<ExternalCommit> {
   const stored = await t.run(async (ctx) => {
-    const storageId = await ctx.storage.store(new Blob([hash]));
+    const storageId = await ctx.storage.store(new Blob([payloadBytes.get(hash)!]));
     return { storageId };
   });
   const result = await t.mutation(api.bridgeSync.commitPayloadUpload, {
@@ -320,6 +327,7 @@ describe("replica truth model properties", () => {
   });
 
   it("preserves the truth invariants through generated real-function interleavings", async () => {
+    vi.useFakeTimers();
     const failures: Array<{ seed: number; step: number; action: string; problems: string[] }> = [];
     const actions = ["enqueue", "claim", "write", "complete", "lock", "fail", "external", "replay", "crash", "restart", "network", "revoke"] as const;
 
@@ -402,6 +410,7 @@ describe("replica truth model properties", () => {
       }
 
       await expireActorsAndSweep(t, fixture);
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
       const stranded = await t.run(async (ctx) => ({
         requests: (await ctx.db.query("bridgeWriteRequests").withIndex("by_work_created", (q) => q.eq("workId", fixture.workId)).collect())
           .filter((row) => row.state === "pending" || row.state === "claimed").length,

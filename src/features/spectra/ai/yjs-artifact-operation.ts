@@ -7,7 +7,7 @@ import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { AiDurableAckGate } from "@/features/spectra/ai/ai-durable-ack";
-import { commitAiYjsAfterNativePromotion } from "@/features/spectra/ai/native-ai-promotion";
+import { commitAiYjsAfterNativeQueue } from "@/features/spectra/ai/native-ai-promotion";
 import {
   collaborationDocumentName,
   collaborationProtocolVersion,
@@ -1468,7 +1468,7 @@ async function synchronizeMutation(params: {
       }
     }
     logPhase("choreography-complete", { beatCount: beats.length });
-    await commitAiYjsAfterNativePromotion({
+    await commitAiYjsAfterNativeQueue({
       document: params.document,
       apply: plan.apply,
       origin: {

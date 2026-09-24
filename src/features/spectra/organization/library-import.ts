@@ -284,9 +284,9 @@ async function documentContentFromPdf(file: File) {
     enableScripting: false,
   };
   const loadingTask = pdfjs.getDocument(pdfOptions);
-  const pdf = await loadingTask.promise;
   const pageTexts: string[] = [];
   try {
+    const pdf = await loadingTask.promise;
     for (let index = 1; index <= pdf.numPages; index += 1) {
       const page = await pdf.getPage(index);
       const textContent = await page.getTextContent();
@@ -302,7 +302,7 @@ async function documentContentFromPdf(file: File) {
       if (text) pageTexts.push(text);
     }
   } finally {
-    await pdf.cleanup();
+    await loadingTask.destroy();
   }
   if (pageTexts.length === 0) return documentContentFromImportedPlainText("");
   const html = pageTexts

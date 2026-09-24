@@ -25,6 +25,7 @@ import {
   writeSharedWorkbenchSession,
 } from "../workbench";
 import { LiveThreadPanel } from "./live-thread-panel";
+import { createLatestStudioLoad } from "./latest-studio-load";
 import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
@@ -60,17 +61,24 @@ export function RouteSidePanelHost() {
   const [thread, setThread] = useState<SpectraThread | null>(null);
   const [workWidth, setWorkWidth] = useState(620);
   const [threadWidth, setThreadWidth] = useState(480);
+  const [workLoad] = useState(() => createLatestStudioLoad(
+    (workId, signal) => getSpectraArtifact(workId, { signal }),
+  ));
+  const [threadLoad] = useState(() => createLatestStudioLoad(
+    (threadId) => getSpectraThread(threadId),
+  ));
   const artifacts = useMemo(() => (work ? [work] : []), [work]);
   const studio = useArtifactStudioState("spectra.route.studio", artifacts);
   const { openSplit, closeStudio, activateTab, setDirty } = studio;
 
   const openWork = useCallback(
     async (workId: string) => {
-      const result = await getSpectraArtifact(workId);
+      const result = await workLoad.load(workId);
+      if (!result) return;
       setWork(result.artifact);
       openSplit(result.artifact);
     },
-    [openSplit],
+    [openSplit, workLoad],
   );
   const loadWork = useCallback(
     async (workId: string) => {
@@ -92,9 +100,10 @@ export function RouteSidePanelHost() {
     [openWork],
   );
   const openThread = useCallback(async (threadId: string) => {
-    const result = await getSpectraThread(threadId);
+    const result = await threadLoad.load(threadId);
+    if (!result) return;
     setThread(result.thread);
-  }, []);
+  }, [threadLoad]);
   const loadThread = useCallback(
     async (threadId: string) => {
       try {
@@ -122,7 +131,11 @@ export function RouteSidePanelHost() {
     const restored = readRouteSideSession(window.localStorage, pathname);
     if (restored.workId) void loadWork(restored.workId);
     if (restored.threadId) void loadThread(restored.threadId);
-  }, [eligible, loadThread, loadWork, pathname]);
+    return () => {
+      workLoad.cancel();
+      threadLoad.cancel();
+    };
+  }, [eligible, loadThread, loadWork, pathname, threadLoad, workLoad]);
 
   useEffect(() => {
     if (!eligible) return;
@@ -148,6 +161,7 @@ export function RouteSidePanelHost() {
 
   const fullscreen = useCallback(
     (workId: string) => {
+      workLoad.cancel();
       const shared = readSharedWorkbenchSession(window.localStorage);
       writeSharedWorkbenchSession(
         window.localStorage,
@@ -155,7 +169,7 @@ export function RouteSidePanelHost() {
       );
       router.push(`/library/${encodeURIComponent(workId)}`);
     },
-    [router, sideSession],
+    [router, sideSession, workLoad],
   );
 
   const applicationCommandDispatcher = useMemo(
@@ -236,6 +250,7 @@ export function RouteSidePanelHost() {
   }, [eligible, fullscreen, loadWork, openThread]);
 
   function closeWork() {
+    workLoad.cancel();
     closeStudio();
     setWork(null);
   }
@@ -267,7 +282,7 @@ export function RouteSidePanelHost() {
           title={thread.title}
           width={threadWidth}
           onWidthChange={setThreadWidth}
-          onClose={() => setThread(null)}
+          onClose={() => { threadLoad.cancel(); setThread(null); }}
           onOpenArtifact={(workId) => void loadWork(workId)}
           onOpenWorkspace={(workspaceId) =>
             router.push(`/workspace/${encodeURIComponent(workspaceId)}`)

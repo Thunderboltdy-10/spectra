@@ -1085,10 +1085,10 @@ export async function getSpectraArtifacts(params?: {
   );
 }
 
-export async function getSpectraArtifact(artifactId: string) {
+export async function getSpectraArtifact(artifactId: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
   return readJson<{ artifact: SpectraArtifact }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
   );
 }
 

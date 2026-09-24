@@ -1,21 +1,26 @@
 use crate::journal::{Journal, QueueItem, ResourceRecord};
 use crate::platform::Platform;
 use crate::protocol::PairingOffer;
+use crate::retry::retry_delay_ms;
 use crate::watcher::office_lock_exists;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 const CLOUD_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const PAYLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-
-fn cloud_client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+fn cloud_client() -> anyhow::Result<reqwest::Client> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let client = reqwest::Client::builder()
         .connect_timeout(CLOUD_CONNECT_TIMEOUT)
-        .timeout(timeout)
-        .build()?)
+        .build()?;
+    let _ = CLIENT.set(client.clone());
+    Ok(CLIENT.get().cloned().unwrap_or(client))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +45,30 @@ pub fn inspect_claim_target<P: Platform>(
     path: &Path,
     base_revision: &str,
 ) -> ClaimPrecondition {
+    inspect_write_target(platform, path, base_revision, None)
+}
+
+/// An exact target hash may be a write whose acknowledgement was lost. Let it
+/// reach SafeWriter, which rechecks the durable bytes and never rewrites them.
+pub fn inspect_write_target<P: Platform>(
+    platform: &P,
+    path: &Path,
+    base_revision: &str,
+    target_revision: Option<&str>,
+) -> ClaimPrecondition {
     if !path.exists() {
+        // A `new:<work-id>` base is the explicit sentinel written when
+        // Spectra asks Bridge to create a second local copy. Absence is the
+        // expected starting state for that request; any existing target still
+        // hashes to a different revision and is refused below.
+        if base_revision
+            .strip_prefix("new:")
+            .is_some_and(|work_id| !work_id.is_empty())
+        {
+            return ClaimPrecondition::Ready {
+                revision: base_revision.to_owned(),
+            };
+        }
         return ClaimPrecondition::Missing;
     }
     if office_lock_exists(path) {
@@ -56,7 +84,9 @@ pub fn inspect_claim_target<P: Platform>(
         Ok(false) => {}
     }
     match crate::fs::sha256_file(path) {
-        Ok(revision) if revision == base_revision => ClaimPrecondition::Ready { revision },
+        Ok(revision) if revision == base_revision || target_revision == Some(revision.as_str()) => {
+            ClaimPrecondition::Ready { revision }
+        }
         Ok(revision) => ClaimPrecondition::Stale { revision },
         Err(error) => ClaimPrecondition::Unreadable {
             message: error.to_string(),
@@ -75,7 +105,7 @@ impl Default for Backoff {
     fn default() -> Self {
         Self {
             attempts: 0,
-            floor: Duration::from_millis(500),
+            floor: Duration::from_secs(1),
             ceiling: Duration::from_secs(60),
         }
     }
@@ -91,10 +121,8 @@ impl Backoff {
         self.floor.saturating_mul(1_u32 << shift).min(self.ceiling)
     }
 
-    pub fn delay_for_attempt(attempts: u32) -> Duration {
-        Duration::from_millis(500)
-            .saturating_mul(1_u32 << attempts.min(7))
-            .min(Duration::from_secs(60))
+    pub fn delay_for_attempt(attempts: u32, key: &str) -> Duration {
+        Duration::from_millis(retry_delay_ms(attempts, key))
     }
 }
 
@@ -133,16 +161,31 @@ async fn mutation<T: for<'de> Deserialize<'de>>(
     path: &str,
     args: serde_json::Value,
 ) -> anyhow::Result<T> {
-    let response = cloud_client(CLOUD_REQUEST_TIMEOUT)?
+    let response = cloud_client()?
         .post(format!(
             "{}/api/mutation",
             deployment_url.trim_end_matches('/')
         ))
+        .timeout(CLOUD_REQUEST_TIMEOUT)
         .json(&serde_json::json!({ "path": path, "format": "json", "args": args }))
         .send()
-        .await?
-        .error_for_status()?;
-    let body = response.text().await?;
+        .await
+        .map_err(|error| {
+            let phase = if error.is_timeout() {
+                "timed out"
+            } else if error.is_connect() {
+                "could not connect"
+            } else {
+                "failed"
+            };
+            anyhow::anyhow!("{path} request {phase}: {error}")
+        })?
+        .error_for_status()
+        .map_err(|error| anyhow::anyhow!("{path} returned an HTTP error: {error}"))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|error| anyhow::anyhow!("{path} response could not be read: {error}"))?;
     let response = serde_json::from_str::<ConvexResponse<T>>(&body).map_err(|error| {
         anyhow::anyhow!(
             "{path} returned an invalid response: {error}; body={}",
@@ -257,6 +300,34 @@ struct PayloadUploadIntent {
     payload_ref: Option<String>,
 }
 
+fn deserialize_claim_generation<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(number) = Option::<serde_json::Number>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    if let Some(integer) = number.as_u64() {
+        return Ok(Some(integer));
+    }
+    let Some(value) = number.as_f64() else {
+        return Err(serde::de::Error::custom(
+            "claimGeneration must be a nonnegative integer",
+        ));
+    };
+    if value.is_finite()
+        && value >= 0.0
+        && value.fract() == 0.0
+        && value < 18_446_744_073_709_551_616.0
+    {
+        Ok(Some(value as u64))
+    } else {
+        Err(serde::de::Error::custom(
+            "claimGeneration must be a nonnegative integer",
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaimedWrite {
@@ -271,7 +342,7 @@ pub struct ClaimedWrite {
     pub target_revision: String,
     pub content_hash: String,
     pub idempotency_key: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_claim_generation")]
     pub claim_generation: Option<u64>,
     #[serde(default)]
     pub claim_token: Option<String>,
@@ -300,6 +371,12 @@ pub struct ClaimedFsRequest {
     pub source_relative_path: String,
     pub target_relative_path: Option<String>,
     pub idempotency_key: String,
+    #[serde(default)]
+    pub base_revision: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_claim_generation")]
+    pub claim_generation: Option<u64>,
+    #[serde(default)]
+    pub claim_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -465,8 +542,9 @@ pub async fn upload_resource_payload(
         let upload_url = intent
             .upload_url
             .ok_or_else(|| anyhow::anyhow!("payload upload URL missing"))?;
-        let response = cloud_client(PAYLOAD_REQUEST_TIMEOUT)?
+        let response = cloud_client()?
             .post(upload_url)
+            .timeout(crate::retry::bridge_payload_timeout())
             .header(reqwest::header::CONTENT_TYPE, media_type)
             .body(bytes.to_vec())
             .send()
@@ -516,21 +594,24 @@ pub struct ClaimedPayloadUpload {
     pub native_format: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PayloadUploadPage {
+    pub request: Option<ClaimedPayloadUpload>,
+    #[serde(default)]
+    pub has_more: bool,
+}
+
 pub async fn claim_pending_payload_upload(
     deployment_url: &str,
     credential: &str,
-) -> anyhow::Result<Option<ClaimedPayloadUpload>> {
-    #[derive(Deserialize)]
-    struct ClaimPayloadUploadResponse {
-        request: Option<ClaimedPayloadUpload>,
-    }
-    let response: ClaimPayloadUploadResponse = mutation(
+) -> anyhow::Result<PayloadUploadPage> {
+    mutation(
         deployment_url,
         "bridgeSync:claimPendingPayloadUpload",
         serde_json::json!({ "credential": credential }),
     )
-    .await?;
-    Ok(response.request)
+    .await
 }
 
 pub async fn claim_write(
@@ -548,6 +629,26 @@ pub async fn claim_write(
     )
     .await?;
     Ok(response.request)
+}
+
+pub async fn refresh_write_claim(
+    deployment_url: &str,
+    credential: &str,
+    request: &ClaimedWrite,
+) -> anyhow::Result<bool> {
+    #[derive(Deserialize)]
+    struct Response {
+        valid: bool,
+    }
+    let mut args = serde_json::json!({ "credential": credential, "requestId": request.request_id });
+    if let Some(generation) = request.claim_generation {
+        args["claimGeneration"] = generation.into();
+    }
+    if let Some(token) = request.claim_token.as_deref() {
+        args["claimToken"] = token.into();
+    }
+    let result: Response = mutation(deployment_url, "bridgeSync:refreshWriteClaim", args).await?;
+    Ok(result.valid)
 }
 
 pub async fn complete_write(
@@ -623,7 +724,7 @@ pub async fn claim_fs_request(
     let response: Response = mutation(
         deployment_url,
         "bridgeStructure:claim",
-        serde_json::json!({ "credential": credential }),
+        serde_json::json!({ "credential": credential, "supportsFencing": true }),
     )
     .await?;
     Ok(response.request)
@@ -637,10 +738,40 @@ pub async fn complete_fs_request(
     actual_relative_path: Option<&str>,
     error: Option<(&str, &str)>,
 ) -> anyhow::Result<()> {
+    complete_fs_request_with_claim(
+        deployment_url,
+        credential,
+        request_id,
+        outcome,
+        actual_relative_path,
+        error,
+        None,
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn complete_fs_request_with_claim(
+    deployment_url: &str,
+    credential: &str,
+    request_id: &str,
+    outcome: &str,
+    actual_relative_path: Option<&str>,
+    error: Option<(&str, &str)>,
+    claim_generation: Option<u64>,
+    claim_token: Option<&str>,
+) -> anyhow::Result<WriteCompletion> {
     let mut args = serde_json::json!({ "credential": credential, "requestId": request_id, "outcome": outcome });
     let object = args.as_object_mut().unwrap();
     if let Some(path) = actual_relative_path {
         object.insert("actualRelativePath".into(), path.into());
+    }
+    if let Some(generation) = claim_generation {
+        object.insert("claimGeneration".into(), generation.into());
+    }
+    if let Some(token) = claim_token {
+        object.insert("claimToken".into(), token.into());
     }
     if let Some((code, message)) = error {
         object.insert("errorCode".into(), code.into());
@@ -649,8 +780,27 @@ pub async fn complete_fs_request(
             message.chars().take(500).collect::<String>().into(),
         );
     }
-    let _: serde_json::Value = mutation(deployment_url, "bridgeStructure:complete", args).await?;
-    Ok(())
+    mutation(deployment_url, "bridgeStructure:complete", args).await
+}
+
+pub async fn refresh_structure_claim(
+    deployment_url: &str,
+    credential: &str,
+    request: &ClaimedFsRequest,
+) -> anyhow::Result<bool> {
+    #[derive(Deserialize)]
+    struct Response {
+        valid: bool,
+    }
+    let mut args = serde_json::json!({ "credential": credential, "requestId": request.request_id });
+    if let Some(generation) = request.claim_generation {
+        args["claimGeneration"] = generation.into();
+    }
+    if let Some(token) = request.claim_token.as_deref() {
+        args["claimToken"] = token.into();
+    }
+    let result: Response = mutation(deployment_url, "bridgeStructure:refreshClaim", args).await?;
+    Ok(result.valid)
 }
 
 pub async fn detach_mount(
@@ -765,8 +915,7 @@ pub async fn drain_cloud_queue(
         match serde_json::from_str::<QueuedChangeEnvelope>(&item.payload) {
             Ok(envelope) => {
                 let current = journal.resource_by_id(&envelope.change.resource_id)?;
-                let still_current =
-                    queued_change_still_current(&envelope.change, current.as_ref());
+                let still_current = queued_change_still_current(&envelope.change, current.as_ref());
                 if !still_current {
                     journal.fail_queue(
                         &item,
@@ -798,7 +947,10 @@ pub async fn drain_cloud_queue(
             Err(error) => {
                 let message = error.to_string();
                 for (item, _) in &batch {
-                    journal.retry_queue(item.id, Backoff::delay_for_attempt(item.attempts))?;
+                    journal.retry_queue(
+                        item.id,
+                        Backoff::delay_for_attempt(item.attempts, &item.op_id),
+                    )?;
                 }
                 // Cloud mount revoked/detached while local grant still looks Ready.
                 // Surface so the app loop can re-run registerMount via sync_grant
@@ -825,7 +977,10 @@ pub async fn drain_cloud_queue(
                     result.error_code.as_deref().unwrap_or("change-rejected"),
                     "The cloud rejected this file change",
                 )?,
-                None => journal.retry_queue(item.id, Backoff::delay_for_attempt(item.attempts))?,
+                None => journal.retry_queue(
+                    item.id,
+                    Backoff::delay_for_attempt(item.attempts, &item.op_id),
+                )?,
             }
         }
     }
@@ -835,6 +990,48 @@ pub async fn drain_cloud_queue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claimed_write_accepts_convex_float_encoded_integral_lease_generation() {
+        let response = serde_json::json!({
+            "requestId": "request-a",
+            "replicaId": "replica-a",
+            "grantId": "grant-a",
+            "localResourceId": "resource-a",
+            "relativePath": "file.docx",
+            "baseRevision": "base",
+            "targetRevision": "target",
+            "contentHash": "target",
+            "idempotencyKey": "write-a",
+            "claimGeneration": 25.0,
+            "claimToken": "lease-token",
+            "nativeReceipt": null,
+            "payloadUrl": "http://127.0.0.1:3002/api/storage/test"
+        });
+        let claimed: ClaimedWrite = serde_json::from_value(response).unwrap();
+        assert_eq!(claimed.claim_generation, Some(25));
+        assert_eq!(claimed.claim_token.as_deref(), Some("lease-token"));
+
+        for generation in [25.5, -1.0] {
+            let invalid = serde_json::json!({
+                "requestId": "request-a",
+                "replicaId": "replica-a",
+                "grantId": "grant-a",
+                "localResourceId": "resource-a",
+                "relativePath": "file.docx",
+                "baseRevision": "base",
+                "targetRevision": "target",
+                "contentHash": "target",
+                "idempotencyKey": "write-a",
+                "claimGeneration": generation,
+                "claimToken": "lease-token",
+                "nativeReceipt": null,
+                "payloadUrl": "http://127.0.0.1:3002/api/storage/test"
+            });
+            assert!(serde_json::from_value::<ClaimedWrite>(invalid).is_err());
+        }
+    }
+
     #[test]
     fn stale_cloud_revision_is_a_conflict_not_last_write_wins() {
         assert!(accept_cloud_result(CloudResult::StaleRevision).is_err());
@@ -846,7 +1043,7 @@ mod tests {
             assert!(b.next_delay() <= Duration::from_secs(60));
         }
         b.success();
-        assert_eq!(b.next_delay(), Duration::from_millis(500));
+        assert_eq!(b.next_delay(), Duration::from_secs(1));
     }
 
     #[tokio::test]
@@ -986,7 +1183,12 @@ mod tests {
             crate::journal::OpState::Intent
         );
         assert_ne!(
-            journal.by_key("locked-hold").unwrap().unwrap().error_code.as_deref(),
+            journal
+                .by_key("locked-hold")
+                .unwrap()
+                .unwrap()
+                .error_code
+                .as_deref(),
             Some("change-superseded")
         );
     }

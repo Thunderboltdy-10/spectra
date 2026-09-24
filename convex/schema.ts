@@ -446,6 +446,16 @@ export default defineSchema({
   })
     .index("by_resource", ["resourceType", "resourceId"])
     .index("by_principal", ["principalType", "principalId"])
+    .index("by_resource_principal_live_expiry", [
+      "resourceType", "resourceId", "principalType", "principalId",
+      "source", "revokedAt", "expiresAt",
+    ])
+    .index("by_principal_resource_source", [
+      "principalType",
+      "principalId",
+      "resourceType",
+      "source",
+    ])
     .index("by_school", ["schoolId", "resourceType"])
     .index("by_inherited_workspace", ["inheritedFromWorkspaceId"]),
 
@@ -477,6 +487,12 @@ export default defineSchema({
   })
     .index("by_invitee_status", ["inviteeAccountId", "status", "createdAt"])
     .index("by_inviter_status", ["inviterAccountId", "status", "createdAt"])
+    .index("by_resource_inviter_status", [
+      "resourceType",
+      "resourceId",
+      "inviterAccountId",
+      "status",
+    ])
     .index("by_resource", ["resourceType", "resourceId", "createdAt"])
     .index("by_resource_invitee", [
       "resourceType",
@@ -1615,9 +1631,16 @@ export default defineSchema({
     lastActivityAt: v.number(),
   })
     .index("by_account_status", ["ownerAccountId", "status"])
+    .index("by_account_status_activity", [
+      "ownerAccountId",
+      "status",
+      "lastActivityAt",
+    ])
     .index("by_account_starter", ["ownerAccountId", "starterKey"])
     .index("by_school_status", ["schoolId", "status"])
     .index("by_school_starter_status", ["schoolId", "starterKey", "status"])
+    .index("by_school_activity", ["schoolId", "lastActivityAt"])
+    .index("by_school_status_activity", ["schoolId", "status", "lastActivityAt"])
     .index("by_account_activity", ["ownerAccountId", "lastActivityAt"])
     .index("by_ai_run", ["aiRunId"]),
 
@@ -1827,11 +1850,14 @@ export default defineSchema({
     projection: v.any(),
   })
     .index("by_artifact", ["artifactId"])
+    .index("by_account_created", ["ownerAccountId", "createdAt"])
     .index("by_account_status_updated", [
       "ownerAccountId",
       "status",
       "updatedAt",
     ])
+    .index("by_school_status_updated_id", ["schoolId", "status", "updatedAt", "artifactId"])
+    .index("by_account_status_updated_id", ["ownerAccountId", "status", "updatedAt", "artifactId"])
     .index("by_account_blueprint_status_updated", [
       "ownerAccountId",
       "blueprintKey",
@@ -1858,6 +1884,7 @@ export default defineSchema({
 
   bridgeDevices: defineTable({
     accountId: v.id("accounts"),
+    payloadUploadCursor: v.optional(v.string()),
     installationId: v.optional(v.string()),
     name: v.string(),
     platform: v.string(),
@@ -2025,6 +2052,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_account_state", ["accountId", "state"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
@@ -2116,6 +2144,7 @@ export default defineSchema({
       v.literal("unavailable"),
     ),
     lastVerifiedAt: v.optional(v.number()),
+    retryAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     errorAt: v.optional(v.number()),
@@ -2169,6 +2198,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
@@ -2243,6 +2273,10 @@ export default defineSchema({
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
+    // An Office unlock can race with the Bridge's "still locked" response.
+    // Preserve that signal until the active claim completes so it can retry
+    // on the shared first-delay window instead of the old exponential delay.
+    officeUnlockedAt: v.optional(v.number()),
     // A claim is a lease, not just a request state. These additive fields let
     // a late worker acknowledgement be rejected after a reclaim.
     claimGeneration: v.optional(v.number()),
@@ -2255,8 +2289,11 @@ export default defineSchema({
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_device_state_retry", ["deviceId", "state", "retryAt"])
+    .index("by_device_state_claimed", ["deviceId", "state", "claimedAt"])
+    .index("by_replica_state", ["replicaId", "state"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])
     .index("by_payload_state", ["payloadRef", "state"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
@@ -2287,6 +2324,11 @@ export default defineSchema({
     ),
     explanation: v.string(),
     claimedAt: v.optional(v.number()),
+    claimGeneration: v.optional(v.number()),
+    claimToken: v.optional(v.string()),
+    attemptCount: v.optional(v.number()),
+    retryAt: v.optional(v.number()),
+    baseRevision: v.optional(v.string()),
     actualRelativePath: v.optional(v.string()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
@@ -2294,7 +2336,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_device_state", ["deviceId", "state"])
+    .index("by_device_state_claimed", ["deviceId", "state", "claimedAt"])
     .index("by_account_state", ["accountId", "state"])
+    .index("by_device_state_retry", ["deviceId", "state", "retryAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_state_updated", ["state", "updatedAt"]),
@@ -2317,6 +2361,7 @@ export default defineSchema({
   })
     .index("by_account_hash", ["accountId", "hash"])
     .index("by_storage", ["storageId"])
+    .index("by_storage_state", ["storageId", "state"])
     .index("by_state_verified", ["state", "verifiedAt"]),
 
   replicaTruthMigrations: defineTable({
@@ -3054,6 +3099,7 @@ export default defineSchema({
     releasedAt: v.optional(v.number()),
   })
     .index("by_storage", ["storageId"])
+    .index("by_storage_status", ["storageId", "status"])
     .index("by_digest", ["digest"])
     .index("by_artifact_digest", ["artifactId", "digest"])
     .index("by_artifact_kind", ["artifactId", "kind"])
@@ -3719,6 +3765,7 @@ export default defineSchema({
       "activityAt",
     ])
     .index("by_kind_source", ["kind", "sourceId"])
+    .index("by_kind_source_live", ["kind", "sourceId", "deletedAt"])
     .index("by_account_workspace", ["accountId", "workspaceContextId"])
     .index("by_workspace_context", ["workspaceContextId"])
     .index("by_workspace_context_live_kind_activity", [
@@ -4313,6 +4360,23 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  // One tiny row per canonical run, independent of visible tabs or surfaces.
+  // Prompts, plans, context and heartbeat fields never enter analytics reads.
+  spectraAnalyticsRunSummaries: defineTable({
+    readModelVersion: v.number(),
+    runId: v.id("spectraAiRuns"),
+    ownerAccountId: v.id("accounts"),
+    status: v.union(
+      v.literal("queued"), v.literal("running"),
+      v.literal("awaiting_confirmation"), v.literal("awaiting_resolution"),
+      v.literal("completed"), v.literal("failed"), v.literal("cancelled"),
+    ),
+    createdAt: v.number(),
+    title: v.string(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_account_created", ["ownerAccountId", "createdAt"]),
 
   spectraRunEvents: defineTable({
     runId: v.id("spectraAiRuns"),

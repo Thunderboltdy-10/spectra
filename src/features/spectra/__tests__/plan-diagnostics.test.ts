@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import {
   coerceCommonPlanSchemaSlips,
+  dropPlanIntentFocusHint,
   formatPlanApplicationPublicError,
   formatZodPlanPublicError,
   isQuietRetryableApplyFailure,
@@ -68,6 +69,37 @@ describe("plan diagnostics and schema slip recovery", () => {
     expect(coerced.intent.targetArtifactId).toBe("quiz-42");
   });
 
+  it("drops the context-only focus hint without weakening target validation", () => {
+    const planWithHint = {
+      decision: "answer",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+        focus: "the selected document",
+      },
+      conversationTitle: null,
+      conversationSummary: null,
+      choices: null,
+      operations: [],
+      finalResponse: "No document change is needed.",
+    };
+
+    const normalized = dropPlanIntentFocusHint(structuredClone(planWithHint));
+    expect(parseSpectraPlan(normalized).intent.targetArtifactId).toBeNull();
+    expect(normalized.intent).not.toHaveProperty("focus");
+
+    const withOtherUnknownField = {
+      ...planWithHint,
+      intent: { ...planWithHint.intent, unverifiedTarget: "artifact-1" },
+    };
+    expect(() => parseSpectraPlan(dropPlanIntentFocusHint(withOtherUnknownField))).toThrow(
+      /unrecognized key/i,
+    );
+  });
+
   it("coerces common envelope slips so Zod does not dead-end", () => {
     const plan = parseSpectraPlan({
       decision: "answer",
@@ -132,6 +164,31 @@ describe("plan diagnostics and schema slip recovery", () => {
     });
     expect(plan.decision).toBe("clarify");
     expect(plan.operations).toEqual([]);
+  });
+
+  it("drops operation-index obligations when a plan becomes non-operational", () => {
+    const coerced = coerceCommonPlanSchemaSlips({
+      decision: "operate",
+      intent: {
+        mode: "update",
+        requestedArtifactTypes: ["document"],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: "artifact-1",
+        targetWorkspaceId: null,
+        obligations: [
+          {
+            id: "update",
+            description: "Update the selected document.",
+            operationIndexes: [0],
+          },
+        ],
+      },
+      operations: [],
+      finalResponse: "Which document should I update?",
+    }) as { decision: string; intent: Record<string, unknown> };
+
+    expect(coerced.decision).toBe("clarify");
+    expect(coerced.intent).not.toHaveProperty("obligations");
   });
 
   it("drops contradictory operations on answer plans", () => {

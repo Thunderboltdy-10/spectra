@@ -66,7 +66,7 @@ export async function probeConvexReadiness(convexUrl) {
 export async function probeGatewayReadiness(gatewayOrigin) {
   const base = String(gatewayOrigin ?? "").replace(/\/$/, "");
   const probed = await fetchJson(`${base}/_spectra/health`);
-  if (isGatewayHealthBody(probed.body)) {
+  if (probed.ok && isGatewayHealthBody(probed.body)) {
     return {
       service: probed.body.service,
       status: probed.body.status,
@@ -85,6 +85,7 @@ export async function probeWebReadiness(webOrigin) {
   const base = String(webOrigin ?? "").replace(/\/$/, "");
   const probed = await fetchJson(`${base}/api/health`, 4_000);
   if (
+    probed.ok &&
     probed.body?.service === "spectra-web" &&
     (probed.body.status === "ready" ||
       probed.body.status === "degraded" ||
@@ -108,12 +109,18 @@ export async function probeBridgeReadiness(bridgeUrl = BRIDGE_DEFAULT_URL) {
   const base = String(bridgeUrl ?? BRIDGE_DEFAULT_URL).replace(/\/$/, "");
   const probed = await fetchJson(`${base}/v1/health`);
   const body = probed.body;
+  // Rust HealthResponse uses serde(rename_all = "camelCase"). Retain legacy
+  // snake_case compatibility for older local Bridge builds.
+  const protocolVersion = body?.protocolVersion ?? body?.protocol_version;
+  const bindError = body?.bindError ?? body?.bind_error;
   if (
     probed.ok &&
     body &&
     typeof body === "object" &&
-    typeof body.protocol_version === "string" &&
-    !body.bind_error
+    typeof protocolVersion === "string" &&
+    protocolVersion.trim() &&
+    typeof body.paired === "boolean" &&
+    !bindError
   ) {
     return {
       service: "spectra-bridge",
@@ -122,11 +129,11 @@ export async function probeBridgeReadiness(bridgeUrl = BRIDGE_DEFAULT_URL) {
       body,
     };
   }
-  if (probed.ok && body?.bind_error) {
+  if (probed.ok && bindError) {
     return {
       service: "spectra-bridge",
       status: "not_ready",
-      detail: String(body.bind_error),
+      detail: String(bindError),
       body,
     };
   }

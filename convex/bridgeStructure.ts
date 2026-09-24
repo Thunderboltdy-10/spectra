@@ -9,8 +9,11 @@ import {
   initialStructureRequestState,
 } from "../shared/sync-policy";
 import { z } from "zod";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
+import { evaluateAccessForActor } from "./authorityShared";
+import { syncRetryAt } from "../shared/sync-retry-policy";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -124,6 +127,7 @@ export async function enqueueStructureRequest(
     sourceRelativePath: relativePath.parse(sourceRelativePath).replaceAll("\\", "/"),
     targetRelativePath: targetRelativePath ? relativePath.parse(targetRelativePath).replaceAll("\\", "/") : undefined,
     idempotencyKey,
+    baseRevision: replica.revision,
     state,
     explanation:
       state === "ignored"
@@ -156,7 +160,7 @@ export const request = mutation({
     const replica = args.replicaId
       ? await ctx.db.get(args.replicaId)
       : (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20)).find((candidate) => candidate.state !== "unavailable");
-    if (!replica || replica.kind !== "local" || replica.accountId !== actor.accountId || !replica.deviceId || !replica.mountId || !replica.localResourceId)
+    if (!replica || replica.workId !== args.workId || replica.kind !== "local" || replica.accountId !== actor.accountId || !replica.deviceId || !replica.mountId || !replica.localResourceId)
       throw new Error("LOCAL_REPLICA_REQUIRED");
     const mount = await ctx.db.get(replica.mountId);
     const device = await ctx.db.get(replica.deviceId);
@@ -182,14 +186,14 @@ export const request = mutation({
       const id = await ctx.db.insert("bridgeFsRequests", {
         accountId: actor.accountId, workId: args.workId, replicaId: replica._id, deviceId: device._id, mountId: mount._id, nodeId: args.nodeId,
         localResourceId: replica.localResourceId, direction: "spectra-to-disk", kind: args.kind, sourceRelativePath: source, targetRelativePath: target,
-        idempotencyKey: args.idempotencyKey, state: "ignored", explanation: "This policy keeps Spectra organization independent from the folder on disk.", createdAt: now, updatedAt: now,
+        idempotencyKey: args.idempotencyKey, baseRevision: replica.revision, state: "ignored", explanation: "This policy keeps Spectra organization independent from the folder on disk.", createdAt: now, updatedAt: now,
       });
       return await ctx.db.get(id);
     }
     const id = await ctx.db.insert("bridgeFsRequests", {
       accountId: actor.accountId, workId: args.workId, replicaId: replica._id, deviceId: device._id, mountId: mount._id, nodeId: args.nodeId,
       localResourceId: replica.localResourceId, direction: "spectra-to-disk", kind: args.kind, sourceRelativePath: source, targetRelativePath: target,
-      idempotencyKey: args.idempotencyKey, state,
+      idempotencyKey: args.idempotencyKey, baseRevision: replica.revision, state,
       explanation: args.kind === "delete"
         ? "Confirm moving 1 real file to the Recycle Bin. The Spectra item is already in Trash."
         : state === "approval-required"
@@ -222,49 +226,119 @@ export const approve = mutation({
   },
 });
 
+function matchesStructureClaim(request: Doc<"bridgeFsRequests">, args: { claimGeneration?: number; claimToken?: string }) {
+  return request.state === "claimed" && request.claimGeneration === args.claimGeneration && request.claimToken === args.claimToken;
+}
+
 export const claim = mutation({
-  args: { credential: v.string() },
+  args: { credential: v.string(), supportsFencing: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    if (!args.supportsFencing) return { request: null, upgradeRequired: true };
     const now = Date.now();
-    const pending = await ctx.db.query("bridgeFsRequests").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending")).take(20);
+    const pending = await ctx.db.query("bridgeFsRequests").withIndex("by_device_state_retry", (q) => q.eq("deviceId", device._id).eq("state", "pending").lte("retryAt", now)).take(20);
     const abandoned = await ctx.db.query("bridgeFsRequests")
-      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
-      .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
+      .withIndex("by_device_state_claimed", (q) => q.eq("deviceId", device._id).eq("state", "claimed").lt("claimedAt", now - BRIDGE_CLAIM_REDRIVE_MS))
       .take(20);
-    const request = [...pending, ...abandoned][0];
+    const request = [...pending, ...abandoned].sort((a, b) => a.createdAt - b.createdAt)[0];
     if (!request) return { request: null };
     const work = await ctx.db.get(request.workId);
     if (!work || work.status === "deleted") {
       await failDeletedStructureRequest(ctx, request, now);
       return { request: null };
     }
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    if (!access.allowed || !access.capabilities.includes("modify")) {
+      await ctx.db.patch(request._id, { state: "failed", errorCode: "permission-revoked", claimedAt: undefined, updatedAt: now });
+      return { request: null };
+    }
     const mount = await ctx.db.get(request.mountId);
-    if (!mount || mount.state !== "active") {
+    if (!mount || mount.state !== "active" || mount.deviceId !== device._id || mount.accountId !== actor.accountId) {
       await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-unavailable", errorMessage: "The selected folder is unavailable.", updatedAt: Date.now() });
       return { request: null };
     }
-    await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, updatedAt: now });
-    return { request: { requestId: request._id, grantId: mount.grantId, localResourceId: request.localResourceId, kind: request.kind, sourceRelativePath: request.sourceRelativePath, targetRelativePath: request.targetRelativePath, idempotencyKey: request.idempotencyKey } };
+    const replica = await ctx.db.get(request.replicaId);
+    if (!request.baseRevision || !replica || replica.kind !== "local" || replica.state === "unavailable" || replica.accountId !== actor.accountId ||
+        replica.workId !== request.workId || replica.deviceId !== device._id || replica.mountId !== request.mountId ||
+        replica.localResourceId !== request.localResourceId ||
+        replica.revision !== request.baseRevision) {
+      await ctx.db.patch(request._id, { state: "conflicted", errorCode: !request.baseRevision ? "structure-base-unavailable" : "stale-revision",
+        errorMessage: "The original file revision could not be confirmed. Request the organization change again.",
+        claimedAt: undefined, retryAt: undefined, updatedAt: now });
+      return { request: null };
+    }
+    const claimGeneration = (request.claimGeneration ?? 0) + 1;
+    const claimToken = crypto.randomUUID();
+    await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, claimGeneration, claimToken,
+      attemptCount: (request.attemptCount ?? 0) + 1, retryAt: undefined, errorCode: undefined, errorMessage: undefined, updatedAt: now });
+    return { request: { requestId: request._id, grantId: mount.grantId, localResourceId: request.localResourceId, kind: request.kind, sourceRelativePath: request.sourceRelativePath, targetRelativePath: request.targetRelativePath, idempotencyKey: request.idempotencyKey, baseRevision: request.baseRevision, claimGeneration, claimToken } };
+  },
+});
+
+export const refreshClaim = mutation({
+  args: { credential: v.string(), requestId: v.id("bridgeFsRequests"), claimGeneration: v.optional(v.number()), claimToken: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    const request = await ctx.db.get(args.requestId);
+    if (!request || request.accountId !== actor.accountId || request.deviceId !== device._id ||
+        !request.baseRevision || !matchesStructureClaim(request, args)) return { valid: false };
+    const [work, replica, mount] = await Promise.all([ctx.db.get(request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId)]);
+    if (!work || work.status === "deleted" || !replica || replica.kind !== "local" || replica.state === "unavailable" || replica.workId !== request.workId ||
+        replica.deviceId !== device._id || replica.mountId !== request.mountId || replica.accountId !== actor.accountId ||
+        replica.localResourceId !== request.localResourceId || replica.revision !== request.baseRevision ||
+        !mount || mount.state !== "active" || mount.deviceId !== device._id || mount.accountId !== actor.accountId) return { valid: false };
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    if (!access.allowed || !access.capabilities.includes("modify")) return { valid: false };
+    await ctx.db.patch(request._id, { claimedAt: Date.now(), updatedAt: Date.now() });
+    return { valid: true };
   },
 });
 
 export const complete = mutation({
-  args: { credential: v.string(), requestId: v.id("bridgeFsRequests"), outcome: v.union(v.literal("verified"), v.literal("failed"), v.literal("conflicted")), actualRelativePath: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()) },
+  args: { credential: v.string(), requestId: v.id("bridgeFsRequests"), outcome: v.union(v.literal("verified"), v.literal("waiting"), v.literal("failed"), v.literal("conflicted")), actualRelativePath: v.optional(v.string()), claimGeneration: v.optional(v.number()), claimToken: v.optional(v.string()), errorCode: v.optional(v.string()), errorMessage: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const request = await ctx.db.get(args.requestId);
-    if (!request || request.deviceId !== device._id || request.state !== "claimed") throw new Error("STRUCTURE_REQUEST_NOT_OWNED");
+    if (!request || request.deviceId !== device._id || request.accountId !== device.accountId) throw new Error("STRUCTURE_REQUEST_NOT_OWNED");
+    // Replaying a lost response must not alter a later replica move.
+    if (["verified", "failed", "conflicted", "ignored"].includes(request.state)) return { state: request.state };
+    if (!matchesStructureClaim(request, args)) return { state: request.state, ignored: true, reason: "stale-claim" };
     const now = Date.now();
     const work = await ctx.db.get(request.workId);
     if (!work || work.status === "deleted") {
       await failDeletedStructureRequest(ctx, request, now);
       return { state: "failed" as const };
     }
-    await ctx.db.patch(request._id, { state: args.outcome, actualRelativePath: args.actualRelativePath, errorCode: args.errorCode, errorMessage: args.errorMessage, updatedAt: now });
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    if (!access.allowed || !access.capabilities.includes("modify")) {
+      await ctx.db.patch(request._id, { state: "failed", errorCode: "permission-revoked", claimedAt: undefined, updatedAt: now });
+      return { state: "failed" as const };
+    }
+    if (args.outcome === "waiting") {
+      const retryAt = syncRetryAt(now, Math.max(1, request.attemptCount ?? 1), request.idempotencyKey);
+      await ctx.db.patch(request._id, { state: "pending", retryAt, claimedAt: undefined,
+        errorCode: args.errorCode ?? "structure-waiting", errorMessage: args.errorMessage, updatedAt: now });
+      return { state: "pending", retryAt };
+    }
+    const replica = await ctx.db.get(request.replicaId);
+    const mount = await ctx.db.get(request.mountId);
+    const actualRelativePath = args.actualRelativePath === undefined ? undefined : relativePath.parse(args.actualRelativePath).replaceAll("\\", "/");
+    const target = actualRelativePath ?? request.targetRelativePath;
+    // A different structural request may already have moved the same bytes
+    // while this worker's durable acknowledgement waited for the network.
+    const pathStillMatches = replica?.relativePath === request.sourceRelativePath ||
+      (request.kind !== "delete" && replica?.relativePath === target);
+    if (args.outcome === "verified" && (!replica || replica.kind !== "local" || replica.state === "unavailable" ||
+        replica.accountId !== actor.accountId || replica.workId !== request.workId || replica.localResourceId !== request.localResourceId ||
+        replica.deviceId !== device._id || replica.mountId !== request.mountId || !mount || mount.state !== "active" ||
+        mount.deviceId !== device._id || mount.accountId !== actor.accountId || !pathStillMatches ||
+        (request.baseRevision !== undefined && replica.revision !== request.baseRevision))) {
+      await ctx.db.patch(request._id, { state: "conflicted", errorCode: "stale-revision", retryAt: undefined, claimedAt: undefined, updatedAt: now });
+      return { state: "conflicted" };
+    }
+    await ctx.db.patch(request._id, { state: args.outcome, actualRelativePath, retryAt: undefined, claimedAt: undefined, errorCode: args.errorCode, errorMessage: args.errorMessage, updatedAt: now });
     if (args.outcome === "verified" && request.kind !== "delete") {
-      const target = args.actualRelativePath ?? request.targetRelativePath;
-      if (target) await ctx.db.patch(request.replicaId, { relativePath: target, state: "current", lastVerifiedAt: now, updatedAt: now });
+      if (target) await ctx.db.patch(request.replicaId, { relativePath: target, lastVerifiedAt: now, updatedAt: now });
     }
     if (args.outcome === "verified" && request.kind === "delete") await ctx.db.patch(request.replicaId, { state: "unavailable", unavailableReason: "deleted-by-policy", updatedAt: now });
     return { state: args.outcome };

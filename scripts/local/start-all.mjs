@@ -4,6 +4,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { probeBridgeReadiness } from "./readiness.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..", "..");
@@ -214,8 +215,9 @@ async function stackIsReady(ports) {
   return (await stackReadiness(ports)).ready;
 }
 
-async function bridgeStatus() {
-  return fetchJson(`http://127.0.0.1:${defaultBridgePort}/v1/health`);
+async function bridgeStatus(bridgeOrigin = `http://127.0.0.1:${defaultBridgePort}`) {
+  const probe = await probeBridgeReadiness(bridgeOrigin);
+  return { ok: probe.status === "ready", body: probe.body };
 }
 
 function startDetached(label, executable, args, cwd, environment, logDirectory) {
@@ -377,4 +379,4 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   });
 }
 
-export { defaultPorts, parseArguments, stackIsReady, stackReadiness };
+export { bridgeStatus, defaultPorts, parseArguments, stackIsReady, stackReadiness };

@@ -17,13 +17,21 @@ import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
 import {
+  BRIDGE_CLAIM_REDRIVE_MS,
   BRIDGE_WRITE_EXPIRES_MS,
   deriveSyncIdempotencyKey,
+  localMaterializationTarget,
 } from "../shared/replica-truth";
-import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
+import { syncRetryAt } from "../shared/sync-retry-policy";
+import {
+  retireSupersededExternalOperations,
+  verifyReconciledExternalOperations,
+} from "./syncOperationLifecycle";
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
-import { deleteUnboundDurableStorage, storageHasOtherBinding } from "./durableStorageBindings";
+import { storageHasOtherBinding } from "./durableStorageBindings";
+import { normalizeSha256 } from "../shared/intake-integrity";
+import { bridgeWriteForTarget, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 
 type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
 
@@ -128,9 +136,7 @@ async function failBridgeWriteForRevokedAccess(
     claimedAt: undefined,
     updatedAt: now,
   });
-  const operation = await ctx.db.query("syncOperations")
-    .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
-    .unique();
+  const operation = await syncOperationForBridgeWrite(ctx, request);
   if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
   const replica = await ctx.db.get(request.replicaId);
   if (replica) await ctx.db.patch(replica._id, { state: "error", errorCode, errorAt: now, updatedAt: now });
@@ -147,9 +153,7 @@ async function failWriteForMissingWork(
   now: number,
 ) {
   const [operation, replica] = await Promise.all([
-    ctx.db.query("syncOperations")
-      .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
-      .unique(),
+    syncOperationForBridgeWrite(ctx, request),
     ctx.db.get(request.replicaId),
   ]);
   await ctx.db.patch(request._id, {
@@ -280,14 +284,19 @@ export const reconcileMissingResources = mutation({
       if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
         const idempotencyKey = await deriveSyncIdempotencyKey({
           workId: String(replica.workId),
-          target: String(replica.deviceId),
+          target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
           baseRevision: replica.revision,
           targetRevision: cloud.contentHash,
           direction: "cloud-to-local",
         });
-        const existing = await ctx.db.query("bridgeWriteRequests")
-          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
-          .unique();
+        const existing = await bridgeWriteForTarget(ctx, {
+          accountId: actor.accountId,
+          idempotencyKey,
+          replicaId: replica._id,
+          workId: replica.workId,
+          baseRevision: replica.revision,
+          targetRevision: cloud.revision,
+        });
         if (!existing) {
           const now = Date.now();
           await ctx.db.insert("bridgeWriteRequests", {
@@ -360,6 +369,7 @@ export const sweepStaleBridgeWork = internalMutation({
     await Promise.all(abandonedFs.map((request) => ctx.db.patch(request._id, {
       state: "pending",
       claimedAt: undefined,
+      retryAt: undefined,
       updatedAt: now,
     })));
     return { redriven: abandonedFs.length };
@@ -401,9 +411,11 @@ async function discoverResourceForMount(
       }
       return { skipped: true as const, reason: "office-lock" as const };
     }
-    const mountPolicy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id) });
-    const byResource = await ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20);
-    const byPath = await ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20);
+    const [mountPolicy, byResource, byPath] = await Promise.all([
+      computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id) }),
+      ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20),
+      ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20),
+    ]);
     const pathContinuity = byPath.filter((candidate) =>
       candidate.state !== "unavailable" || candidate.contentHash === input.contentHash,
     );
@@ -480,6 +492,22 @@ async function discoverResourceForMount(
         lastSeenScanId: mount.lastScanId,
         updatedAt: verifiedAt,
       });
+      if (
+        nextState === "current" &&
+        input.contentHash &&
+        existingCloud?.state === "current" &&
+        existingCloud.contentHash === input.contentHash
+      ) {
+        // A full Bridge rescan can arrive after its write acknowledgement and
+        // after the file watcher has journaled the same bytes as an external
+        // edit. Reconcile that late event when both replicas already agree.
+        await verifyReconciledExternalOperations(ctx, {
+          workId: existingReplica.workId,
+          replicaId: existingReplica._id,
+          revision: input.contentHash,
+          now: verifiedAt,
+        });
+      }
       if (unexpectedDuringWrite && activeWrite) {
         await ctx.db.patch(activeWrite._id, {
           state: "conflicted",
@@ -487,9 +515,7 @@ async function discoverResourceForMount(
           claimedAt: undefined,
           updatedAt: verifiedAt,
         });
-        const operation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", activeWrite.idempotencyKey))
-          .unique();
+        const operation = await syncOperationForBridgeWrite(ctx, activeWrite);
         if (operation) await ctx.db.patch(operation._id, { state: "conflicted", errorCode: "external-save-during-write", updatedAt: verifiedAt });
       }
       if ((unexpectedDuringWrite || replicasDisagree) && input.contentHash && existingCloud?.contentHash) {
@@ -620,8 +646,10 @@ export const discoverResourcesPage = mutation({
     })),
   },
   handler: async (ctx, args) => {
-    const { device, actor } = await requireDevice(ctx, args.credential);
-    const mount = await ctx.db.get(args.mountId);
+    const [{ device, actor }, mount] = await Promise.all([
+      requireDevice(ctx, args.credential),
+      ctx.db.get(args.mountId),
+    ]);
     if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active")
       throw new Error("MOUNT_NOT_ACTIVE");
     if (!args.resources.length || args.resources.length > 100)
@@ -729,8 +757,13 @@ export const beginPayloadUpload = mutation({
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
     if (existing?.state === "quarantined") throw new Error("PAYLOAD_HASH_QUARANTINED");
-    if (existing?.state === "active")
+    if (existing?.state === "active") {
+      const metadata = await ctx.db.system.get(existing.storageId);
+      if (!metadata || metadata.size !== existing.bytes || existing.bytes !== input.bytes)
+        throw new Error("PAYLOAD_SIZE_MISMATCH");
+      if (normalizeSha256(metadata.sha256) !== input.hash) throw new Error("PAYLOAD_HASH_MISMATCH");
       return { deduplicated: true as const, payloadRef: String(existing._id) };
+    }
     return { deduplicated: false as const, uploadUrl: await ctx.storage.generateUploadUrl() };
   },
 });
@@ -756,24 +789,19 @@ export const commitPayloadUpload = mutation({
     const replica = await ctx.db.get(args.replicaId);
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
-    try {
-      await requireArtifactModify(ctx, actor, replica.workId);
-      await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
-    } catch (error) {
-      if (args.storageId) await deleteUnboundDurableStorage(ctx, args.storageId);
-      throw error;
+    await requireArtifactModify(ctx, actor, replica.workId);
+    await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
+    const uploadedMetadata = args.storageId ? await ctx.db.system.get(args.storageId) : null;
+    if (args.storageId) {
+      if (!uploadedMetadata || uploadedMetadata.size !== input.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
+      if (normalizeSha256(uploadedMetadata.sha256) !== input.hash) throw new Error("PAYLOAD_HASH_MISMATCH");
     }
     let payload = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
-    if (payload?.state === "quarantined") {
-      if (args.storageId && args.storageId !== payload.storageId) await deleteUnboundDurableStorage(ctx, args.storageId);
-      throw new Error("PAYLOAD_HASH_QUARANTINED");
-    }
+    if (payload?.state === "quarantined") throw new Error("PAYLOAD_HASH_QUARANTINED");
     if (!payload || payload.state === "released") {
       if (!args.storageId) throw new Error("PAYLOAD_STORAGE_REQUIRED");
-      const metadata = await ctx.db.system.get(args.storageId);
-      if (!metadata || metadata.size !== input.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
       if (await storageHasOtherBinding(ctx, args.storageId,
         { table: "payloadObjects", id: payload ? String(payload._id) : "" }))
         throw new Error("PAYLOAD_STORAGE_OWNERSHIP");
@@ -794,8 +822,17 @@ export const commitPayloadUpload = mutation({
         });
         payload = (await ctx.db.get(payloadId))!;
       }
-    } else if (args.storageId && args.storageId !== payload.storageId) {
-      await deleteUnboundDurableStorage(ctx, args.storageId);
+    } else {
+      // Legacy active rows can predate digest verification. A dedup hit must
+      // prove its stored bytes before advancing either replica or a receipt.
+      const metadata = payload.storageId === args.storageId
+        ? uploadedMetadata
+        : await ctx.db.system.get(payload.storageId);
+      if (!metadata || metadata.size !== payload.bytes || payload.bytes !== input.bytes)
+        throw new Error("PAYLOAD_SIZE_MISMATCH");
+      if (normalizeSha256(metadata.sha256) !== input.hash) throw new Error("PAYLOAD_HASH_MISMATCH");
+      // A caller-supplied unbound ID does not prove ownership of an in-flight
+      // upload. Leave redundant bytes for provenance-aware cleanup.
     }
     if (input.payloadRef && input.payloadRef !== String(payload._id))
       throw new Error("PAYLOAD_REFERENCE_MISMATCH");
@@ -908,9 +945,7 @@ export const commitPayloadUpload = mutation({
         .take(50);
       for (const request of activeWrites.filter((candidate) => candidate.replicaId === replica._id && (candidate.state === "pending" || candidate.state === "claimed"))) {
         await ctx.db.patch(request._id, { state: "conflicted", errorCode: "external-save-during-write", claimedAt: undefined, updatedAt: now });
-        const pendingOperation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-          .unique();
+        const pendingOperation = await syncOperationForBridgeWrite(ctx, request);
         if (pendingOperation) await ctx.db.patch(pendingOperation._id, { state: "conflicted", errorCode: "external-save-during-write", updatedAt: now });
       }
       await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
@@ -987,9 +1022,7 @@ export const commitPayloadUpload = mutation({
           claimedAt: undefined,
           updatedAt: now,
         });
-        const pendingOperation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", activeWrite.idempotencyKey))
-          .unique();
+        const pendingOperation = await syncOperationForBridgeWrite(ctx, activeWrite);
         if (pendingOperation)
           await ctx.db.patch(pendingOperation._id, {
             state: "failed",
@@ -1067,43 +1100,107 @@ export const commitPayloadUpload = mutation({
 
 /** Bridge polls this so Keep in Spectra can ingest disk bytes that were never
  * uploaded (metadata-only discovery). Waiting for a watcher change never fires. */
+const payloadUploadCursorSchema = z.object({
+  accountId: z.string(),
+  transitionCursor: z.string().nullable(),
+  transitionIds: z.array(z.string()).max(20),
+  source: z.object({
+    transitionId: z.string(),
+    offset: z.number().int().nonnegative(),
+    replicaCursor: z.string().nullable(),
+  }).optional(),
+});
+
 export const claimPendingPayloadUpload = mutation({
   args: { credential: v.string() },
   handler: async (ctx, args) => {
     const { device, actor } = await requireDevice(ctx, args.credential);
-    const replicaStates = ["current", "ahead", "pending"] as const;
-    const batches = await Promise.all(
-      replicaStates.map((state) =>
-        ctx.db.query("workReplicas")
-          .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", state))
-          .take(20),
-      ),
-    );
-    for (const replica of batches.flat()) {
-      if (replica.kind !== "local" || !replica.mountId || !replica.relativePath || !replica.localResourceId) continue;
-      if (!(await hasArtifactModify(ctx, actor, replica.workId))) continue;
-      const transitions = await ctx.db.query("storageStrategyTransitions")
-        .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
-        .order("desc")
-        .take(10);
-      const transition = transitions.find(
-        (candidate) =>
-          candidate.state === "pending" &&
-          (candidate.toPreset === "spectra" || candidate.toPreset === "both"),
-      );
-      if (!transition) continue;
-      const cloud = await ctx.db.query("workReplicas")
-        .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
-        .unique();
-      if (cloud?.payloadRef) {
-        const payloadId = ctx.db.normalizeId("payloadObjects", cloud.payloadRef);
-        const payload = payloadId ? await ctx.db.get(payloadId) : null;
-        if (payload?.state === "active" && payload.hash === replica.contentHash) continue;
+    let cursor: z.infer<typeof payloadUploadCursorSchema> = {
+      accountId: String(actor.accountId), transitionCursor: null, transitionIds: [],
+    };
+    try {
+      const parsed = payloadUploadCursorSchema.safeParse(JSON.parse(device.payloadUploadCursor ?? "null"));
+      if (parsed.success && parsed.data.accountId === String(actor.accountId)) cursor = parsed.data;
+    } catch { /* Older devices and invalid saved cursors start a fresh pass. */ }
+    const saveCursor = async () => {
+      const hasMore = Boolean(cursor.source || cursor.transitionIds.length || cursor.transitionCursor);
+      const next = hasMore ? JSON.stringify(cursor) : undefined;
+      if (device.payloadUploadCursor !== next)
+        await ctx.db.patch(device._id, { payloadUploadCursor: next });
+      return hasMore;
+    };
+    let paginated = false;
+    if (!cursor.source && !cursor.transitionIds.length) {
+      try {
+        const page = await ctx.db.query("storageStrategyTransitions")
+          .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "pending"))
+          .paginate({ cursor: cursor.transitionCursor, numItems: 20 });
+        cursor.transitionIds = page.page.map((transition) => String(transition._id));
+        cursor.transitionCursor = page.isDone ? null : page.continueCursor;
+        paginated = true;
+      } catch (error) {
+        if (!cursor.transitionCursor || !/cursor/i.test(String(error))) throw error;
+        await ctx.db.patch(device._id, { payloadUploadCursor: undefined });
+        return { request: null, hasMore: true };
       }
+    }
+    const transitionKey = cursor.source?.transitionId ?? cursor.transitionIds.shift();
+    const transitionId = transitionKey ? ctx.db.normalizeId("storageStrategyTransitions", transitionKey) : null;
+    const transition = transitionId ? await ctx.db.get(transitionId) : null;
+    if (!transition || transition.accountId !== actor.accountId || transition.state !== "pending" ||
+        (transition.toPreset !== "spectra" && transition.toPreset !== "both") ||
+        (transition.expiresAt !== undefined && transition.expiresAt <= Date.now()) ||
+        !(await hasArtifactModify(ctx, actor, transition.workId))) {
+      cursor.source = undefined;
+      return { request: null, hasMore: await saveCursor() };
+    }
+    const source = cursor.source ?? { transitionId: String(transition._id), offset: 0, replicaCursor: null };
+    const snapshotIds: unknown = (transition.before as { localReplicaIds?: unknown } | null)?.localReplicaIds;
+    let replicas: Array<Doc<"workReplicas"> | null>;
+    if (Array.isArray(snapshotIds) && snapshotIds.every((id) => typeof id === "string")) {
+      replicas = await Promise.all(snapshotIds.slice(source.offset, source.offset + 20).map((id) => {
+        const replicaId = ctx.db.normalizeId("workReplicas", id);
+        return replicaId ? ctx.db.get(replicaId) : null;
+      }));
+      cursor.source = source.offset + 20 < snapshotIds.length ? { ...source, offset: source.offset + 20 } : undefined;
+    } else {
+      // Legacy transitions have no source snapshot. Continue them by a real
+      // replica cursor, never a repeatedly truncated prefix. Only one database
+      // pagination is used per call; older cursorless clients resume via device.
+      if (paginated) {
+        cursor.source = source;
+        return { request: null, hasMore: await saveCursor() };
+      }
+      try {
+        const page = await ctx.db.query("workReplicas")
+          .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
+          .paginate({ cursor: source.replicaCursor, numItems: 20 });
+        replicas = page.page;
+        cursor.source = page.isDone ? undefined : { ...source, replicaCursor: page.continueCursor };
+      } catch (error) {
+        if (!source.replicaCursor || !/cursor/i.test(String(error))) throw error;
+        cursor.source = { ...source, replicaCursor: null };
+        return { request: null, hasMore: await saveCursor() };
+      }
+    }
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "cloud"))
+      .unique();
+    const payloadId = cloud?.payloadRef ? ctx.db.normalizeId("payloadObjects", cloud.payloadRef) : null;
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    const metadata = payload?.state === "active" ? await ctx.db.system.get(payload.storageId) : null;
+    for (const replica of replicas) {
+      if (!replica || replica.accountId !== actor.accountId || replica.workId !== transition.workId ||
+          replica.deviceId !== device._id || replica.kind !== "local" ||
+          !["current", "ahead", "pending"].includes(replica.state) ||
+          !replica.mountId || !replica.relativePath || !replica.localResourceId) continue;
+      if (payload?.state === "active" && payload.hash === replica.contentHash &&
+          metadata?.size === payload.bytes && normalizeSha256(metadata.sha256) === payload.hash) continue;
       const mount = await ctx.db.get(replica.mountId);
-      if (!mount || mount.deviceId !== device._id || mount.state !== "active") continue;
+      if (!mount || mount.accountId !== actor.accountId || mount.deviceId !== device._id || mount.state !== "active") continue;
       await ctx.db.patch(device._id, { lastSeenAt: Date.now() });
       return {
+        hasMore: await saveCursor(),
         request: {
           replicaId: replica._id,
           grantId: mount.grantId,
@@ -1113,7 +1210,7 @@ export const claimPendingPayloadUpload = mutation({
         },
       };
     }
-    return { request: null };
+    return { request: null, hasMore: await saveCursor() };
   },
 });
 
@@ -1124,19 +1221,17 @@ export const claimWrite = mutation({
     const now = Date.now();
     const readyPending = await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_device_state_retry", (q) =>
-        q.eq("deviceId", device._id).eq("state", "pending").lte("retryAt", now),
+        q.eq("deviceId", device._id).eq("state", "pending").gt("retryAt", undefined).lte("retryAt", now),
       )
       .take(20);
     const legacyPending = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
-      .filter((q) => q.eq(q.field("retryAt"), undefined))
+      .withIndex("by_device_state_retry", (q) => q.eq("deviceId", device._id).eq("state", "pending").eq("retryAt", undefined))
       .take(20);
     const pending = [...readyPending, ...legacyPending]
-      .filter((request, index, all) => all.findIndex((candidate) => candidate._id === request._id) === index)
+      .sort((a, b) => a.createdAt - b.createdAt)
       .slice(0, 20);
     const abandonedClaims = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
-      .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
+      .withIndex("by_device_state_claimed", (q) => q.eq("deviceId", device._id).eq("state", "claimed").lt("claimedAt", now - BRIDGE_CLAIM_REDRIVE_MS))
       .take(20);
     for (const request of [...pending, ...abandonedClaims]) {
       const work = await ctx.db.get(request.workId);
@@ -1149,13 +1244,11 @@ export const claimWrite = mutation({
         continue;
       }
       if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) <= now) {
-        await ctx.db.patch(request._id, { state: "failed", errorCode: "write-expired", errorMessage: "The save did not finish. Try again.", claimedAt: undefined, updatedAt: now });
-        const expiredOperation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-          .unique();
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "write-expired", errorMessage: "The save did not finish. Try again.", claimedAt: undefined, retryAt: undefined, updatedAt: now });
+        const expiredOperation = await syncOperationForBridgeWrite(ctx, request);
         if (expiredOperation) await ctx.db.patch(expiredOperation._id, { state: "failed", errorCode: "write-expired", updatedAt: now });
         const expiredReplica = await ctx.db.get(request.replicaId);
-        if (expiredReplica) await ctx.db.patch(expiredReplica._id, { state: "error", errorCode: "write-expired", errorAt: now, updatedAt: now });
+        if (expiredReplica) await ctx.db.patch(expiredReplica._id, { state: "error", errorCode: "write-expired", errorAt: now, retryAt: undefined, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "write-expired", now);
         continue;
       }
@@ -1180,9 +1273,7 @@ export const claimWrite = mutation({
           errorMessage: errorCode === "payload-unavailable" ? "The retained payload is unavailable." : "The target Bridge folder or device is unavailable.",
           updatedAt: now,
         });
-        const operation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-          .unique();
+        const operation = await syncOperationForBridgeWrite(ctx, request);
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
         if (replica) await ctx.db.patch(replica._id, errorCode === "target-unavailable"
           ? { state: "unavailable", unavailableReason: "write-target-unavailable", updatedAt: now }
@@ -1193,9 +1284,7 @@ export const claimWrite = mutation({
       const payloadUrl = await ctx.storage.getUrl(payload.storageId);
       if (!payloadUrl) {
         await ctx.db.patch(request._id, { state: "failed", errorCode: "payload-unavailable", errorMessage: "The retained payload has no download URL.", updatedAt: now });
-        const operation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-          .unique();
+        const operation = await syncOperationForBridgeWrite(ctx, request);
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "payload-unavailable", updatedAt: now });
         await ctx.db.patch(replica._id, { state: "error", errorCode: "payload-unavailable", errorAt: now, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "payload-unavailable", now);
@@ -1208,13 +1297,16 @@ export const claimWrite = mutation({
         claimedAt: now,
         claimGeneration,
         claimToken,
+        officeUnlockedAt: undefined,
         retryAt: undefined,
         attemptCount: (request.attemptCount ?? 0) + 1,
+        errorCode: undefined,
+        errorMessage: undefined,
         updatedAt: now,
       });
-      const operation = await ctx.db.query("syncOperations")
-        .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-        .unique();
+      if (replica.retryAt !== undefined)
+        await ctx.db.patch(replica._id, { retryAt: undefined, updatedAt: now });
+      const operation = await syncOperationForBridgeWrite(ctx, request);
       return { request: {
         requestId: request._id,
         operationId: operation?._id,
@@ -1236,6 +1328,31 @@ export const claimWrite = mutation({
   },
 });
 
+/** Recheck authority after download, before the device may replace any bytes. */
+export const refreshWriteClaim = mutation({
+  args: {
+    credential: v.string(), requestId: v.id("bridgeWriteRequests"),
+    claimGeneration: v.optional(v.number()), claimToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    const request = await ctx.db.get(args.requestId);
+    if (!request || request.deviceId !== device._id || request.accountId !== actor.accountId ||
+        request.state !== "claimed" || request.claimGeneration !== args.claimGeneration ||
+        request.claimToken !== args.claimToken) return { valid: false };
+    const now = Date.now();
+    if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) <= now) return { valid: false };
+    const [work, replica, mount] = await Promise.all([
+      ctx.db.get(request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId),
+    ]);
+    if (!work || work.status === "deleted" || !(await hasArtifactModify(ctx, actor, request.workId)) ||
+        !activeReplicaWriteTarget(replica, mount, device) || replica?.revision !== request.baseRevision ||
+        replica.mountId !== request.mountId || replica.deviceId !== request.deviceId) return { valid: false };
+    await ctx.db.patch(request._id, { claimedAt: now, updatedAt: now });
+    return { valid: true };
+  },
+});
+
 export const completeWrite = mutation({
   args: {
     credential: v.string(),
@@ -1253,9 +1370,7 @@ export const completeWrite = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request || request.deviceId !== device._id || request.accountId !== device.accountId)
       throw new Error("WRITE_REQUEST_NOT_OWNED_BY_DEVICE");
-    const operation = await ctx.db.query("syncOperations")
-      .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-      .unique();
+    const operation = await syncOperationForBridgeWrite(ctx, request);
     const completion = (state: WriteCompletionState, extra: Record<string, unknown> = {}) => ({ state, ...extra });
     // Terminal requests are immutable facts. In particular, a late waiting or
     // failed acknowledgement must not move the replica back from a verified
@@ -1307,25 +1422,56 @@ export const completeWrite = mutation({
         String((transition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? "") === String(request._id),
     );
     if (args.outcome === "waiting") {
+      const errorCode = args.errorCode ?? "office-locked";
+      const officeUnlockedDuringClaim =
+        request.officeUnlockedAt !== undefined &&
+        request.claimedAt !== undefined &&
+        request.officeUnlockedAt > request.claimedAt;
+      const retryAt = syncRetryAt(
+        now,
+        officeUnlockedDuringClaim ? 1 : (request.attemptCount ?? 1),
+        String(request.idempotencyKey),
+      );
       await ctx.db.patch(request._id, {
         state: "pending",
+        officeUnlockedAt: undefined,
         nativeReceipt: validatedReceipt
           ? { ...validatedReceipt, state: "pending" }
           : undefined,
-        retryAt: now + 5_000,
-        errorCode: args.errorCode ?? "office-locked",
-        errorMessage: args.errorMessage,
+        retryAt,
+        expiresAt: Math.max(
+          request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS,
+          now + BRIDGE_WRITE_EXPIRES_MS,
+        ),
+        errorCode: officeUnlockedDuringClaim ? undefined : errorCode,
+        errorMessage: officeUnlockedDuringClaim ? undefined : args.errorMessage,
         claimedAt: undefined,
         updatedAt: now,
       });
+      if (operation)
+        await ctx.db.patch(operation._id, {
+          state: "pending",
+          errorCode: officeUnlockedDuringClaim ? undefined : errorCode,
+          updatedAt: now,
+        });
+      const waitingReplica = await ctx.db.get(request.replicaId);
+      if (waitingReplica)
+        await ctx.db.patch(waitingReplica._id, {
+          state: "pending",
+          retryAt,
+          errorCode: officeUnlockedDuringClaim ? undefined : errorCode,
+          errorMessage: officeUnlockedDuringClaim ? undefined : args.errorMessage,
+          errorAt: officeUnlockedDuringClaim ? undefined : now,
+          updatedAt: now,
+        });
       return completion("pending");
     }
     if (args.outcome === "verified") {
       if (!args.actualRevision || args.actualRevision !== request.targetRevision) {
-        await ctx.db.patch(request._id, { state: "failed", errorCode: "readback-revision-mismatch", errorMessage: "The file changed before Spectra could verify the save.", updatedAt: now });
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "readback-revision-mismatch", errorMessage: "The file changed before Spectra could verify the save.", retryAt: undefined, updatedAt: now });
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "readback-revision-mismatch", updatedAt: now });
         const mismatchedReplica = await ctx.db.get(request.replicaId);
-        if (mismatchedReplica) await ctx.db.patch(mismatchedReplica._id, { state: "error", errorCode: "readback-revision-mismatch", errorAt: now, updatedAt: now });
+        if (mismatchedReplica) await ctx.db.patch(mismatchedReplica._id, { state: "error", errorCode: "readback-revision-mismatch", errorAt: now, retryAt: undefined, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "readback-revision-mismatch", now);
         return completion("failed", { errorCode: "readback-revision-mismatch" });
       }
@@ -1413,6 +1559,7 @@ export const completeWrite = mutation({
         errorCode: undefined,
         errorMessage: undefined,
         errorAt: undefined,
+        retryAt: undefined,
         ...(protectedApply
           ? {
               pendingPayloadRef: undefined,
@@ -1466,11 +1613,20 @@ export const completeWrite = mutation({
       });
       if (operation) await ctx.db.patch(operation._id, {
         state: "verified",
+        errorCode: undefined,
         nativeReceipt: appliedReceipt && typeof appliedReceipt === "object"
           ? { ...(appliedReceipt as Record<string, unknown>), state: "applied", acknowledgedAt: now }
           : appliedReceipt,
         updatedAt: now,
       });
+      if (!hasNewerWrite && cloud) {
+        await verifyReconciledExternalOperations(ctx, {
+          workId: request.workId,
+          replicaId: request.replicaId,
+          revision: request.targetRevision,
+          now,
+        });
+      }
       if (strategyTransition) {
         if (strategyTransition.toPreset === "device" || strategyTransition.toPreset === "linked") {
           const transitionCloud = await ctx.db.query("workReplicas")
@@ -1503,6 +1659,7 @@ export const completeWrite = mutation({
       errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
       errorMessage: args.errorMessage,
       claimedAt: undefined,
+      retryAt: undefined,
       updatedAt: now,
     });
     await ctx.db.patch(request.replicaId, {
@@ -1510,6 +1667,7 @@ export const completeWrite = mutation({
       errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
       errorMessage: args.errorMessage,
       errorAt: now,
+      retryAt: undefined,
       updatedAt: now,
     });
     if (operation) await ctx.db.patch(operation._id, { state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode, updatedAt: now });
@@ -1572,9 +1730,7 @@ export const detachGrant = mutation({
         await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "mount-detached", updatedAt: now });
       for (const request of [...pending, ...claimed]) {
         await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-detached", errorMessage: "The selected Bridge folder was removed.", claimedAt: undefined, updatedAt: now });
-        const operation = await ctx.db.query("syncOperations")
-          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
-          .unique();
+        const operation = await syncOperationForBridgeWrite(ctx, request);
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "mount-detached", updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "mount-detached", now);
       }
@@ -1694,6 +1850,8 @@ export const reportChanges = mutation({
           .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))
           .take(20);
         const replica = replicas.find((candidate) => candidate.mountId === mount._id && candidate.state !== "unavailable");
+        const now = Date.now();
+        let earliestRetryAt: number | undefined;
         if (replica && replica.errorCode === "office-locked") {
           await ctx.db.patch(replica._id, {
             errorCode: undefined,
@@ -1701,6 +1859,47 @@ export const reportChanges = mutation({
             errorAt: undefined,
             updatedAt: Date.now(),
           });
+        }
+        if (replica) {
+          const pendingWrites = await ctx.db.query("bridgeWriteRequests")
+            .withIndex("by_replica_state", (q) => q.eq("replicaId", replica._id).eq("state", "pending"))
+            .take(100);
+          for (const request of pendingWrites) {
+            if (
+              request.deviceId !== device._id ||
+              request.mountId !== mount._id ||
+              request.errorCode !== "office-locked"
+            ) continue;
+            const retryAt = syncRetryAt(now, 1, String(request.idempotencyKey));
+            earliestRetryAt = earliestRetryAt === undefined ? retryAt : Math.min(earliestRetryAt, retryAt);
+            await ctx.db.patch(request._id, {
+              errorCode: undefined,
+              errorMessage: undefined,
+              retryAt,
+              updatedAt: now,
+            });
+            const operation = await syncOperationForBridgeWrite(ctx, request);
+            if (operation && operation.state === "pending")
+              await ctx.db.patch(operation._id, { errorCode: undefined, updatedAt: now });
+          }
+          const claimedWrites = await ctx.db.query("bridgeWriteRequests")
+            .withIndex("by_replica_state", (q) => q.eq("replicaId", replica._id).eq("state", "claimed"))
+            .take(100);
+          for (const request of claimedWrites) {
+            if (request.deviceId !== device._id || request.mountId !== mount._id) continue;
+            if (
+              request.claimedAt === undefined ||
+              request.claimedAt >= now ||
+              request.officeUnlockedAt !== undefined
+            ) continue;
+            await ctx.db.patch(request._id, { officeUnlockedAt: now, updatedAt: now });
+          }
+          if (earliestRetryAt !== undefined) {
+            await ctx.db.patch(replica._id, {
+              retryAt: earliestRetryAt,
+              updatedAt: now,
+            });
+          }
         }
         results.push({ journalId, state: replica ? "unlocked" : "ignored" });
         continue;
@@ -1760,6 +1959,21 @@ export const reportChanges = mutation({
         const existingOperation = await ctx.db.query("syncOperations")
           .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", operationKey))
           .unique();
+        const [observedLocal, observedCloud] = await Promise.all([
+          ctx.db.get(registration.replicaId),
+          ctx.db.query("workReplicas")
+            .withIndex("by_work_kind", (q) => q.eq("workId", registration.workId!).eq("kind", "cloud"))
+            .unique(),
+        ]);
+        const replicasAgreeAtReportedRevision = Boolean(
+          change.hash &&
+          observedLocal?.state === "current" &&
+          observedLocal.contentHash === change.hash &&
+          observedLocal.revision === change.hash &&
+          observedCloud?.state === "current" &&
+          observedCloud.contentHash === change.hash &&
+          observedCloud.revision === change.hash,
+        );
         if (!existingOperation) {
           const now = Date.now();
           await ctx.db.insert("syncOperations", {
@@ -1770,10 +1984,19 @@ export const reportChanges = mutation({
             direction: "external",
             revisionBefore: change.revisionBefore,
             revisionAfter: change.hash,
-            state: "applied",
+            state: replicasAgreeAtReportedRevision ? "verified" : "applied",
             actorKind: "external-edit",
             createdAt: now,
             updatedAt: now,
+          });
+        } else if (
+          replicasAgreeAtReportedRevision &&
+          existingOperation.state === "applied"
+        ) {
+          await ctx.db.patch(existingOperation._id, {
+            state: "verified",
+            errorCode: undefined,
+            updatedAt: Date.now(),
           });
         }
       }

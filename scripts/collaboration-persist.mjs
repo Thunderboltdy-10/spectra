@@ -57,6 +57,135 @@ export function collaborationRetryDelayMs(
 }
 
 export const COLLABORATION_AUTHORIZE_CACHE_MS = 15_000;
+export const COLLABORATION_AUTHORIZE_TIMEOUT_MS = 5_000;
+
+/** A last-success lease bounds quiet subscribers as well as incoming writers. */
+export function createCollaborationAuthorizationGuard({
+  authorize,
+  closeConnection = (connection, code, reason) => connection.webSocket.close(code, reason),
+  now = Date.now,
+  maxAgeMs = COLLABORATION_AUTHORIZE_CACHE_MS,
+  timeoutMs = COLLABORATION_AUTHORIZE_TIMEOUT_MS,
+}) {
+  const states = new WeakMap();
+  const watched = new Map();
+  const stateFor = context => {
+    if (!states.has(context)) states.set(context, { closed: false, inFlight: null });
+    return states.get(context);
+  };
+  const fresh = context => Number.isFinite(context.authorizationCheckedAt) &&
+    context.authorizationCheckedAt > 0 && now() - context.authorizationCheckedAt < maxAgeMs;
+  const connected = context => [...watched.keys()].some(connection => connection.context === context);
+  const unavailable = () => Object.assign(new Error("COLLABORATION_AUTHORIZATION_UNAVAILABLE"), {
+    code: 1013, reason: "Authorization temporarily unavailable",
+  });
+  function close(context, revoked = false) {
+    stateFor(context).closed = true;
+    context.canModify = false;
+    if (revoked) context.authorizationRevoked = true;
+    for (const [connection, timer] of watched) {
+      if (connection.context !== context) continue;
+      clearTimeout(timer);
+      watched.delete(connection);
+      closeConnection(connection, revoked ? 4403 : 1013,
+        revoked ? "Access or permissions changed" : "Authorization temporarily unavailable");
+    }
+  }
+  function arm(connection) {
+    clearTimeout(watched.get(connection));
+    const context = connection.context;
+    const remaining = context.authorizationCheckedAt + maxAgeMs - now();
+    if (!fresh(context) || stateFor(context).closed) { close(context); return; }
+    const timer = setTimeout(() => {
+      if (!fresh(context)) close(context);
+      else arm(connection);
+    }, remaining);
+    timer.unref?.();
+    watched.set(connection, timer);
+  }
+  function assertOpen(context) {
+    if (context.authorizationRevoked) throw new Error("COLLABORATION_ACCESS_REVOKED");
+    if (stateFor(context).closed) throw unavailable();
+  }
+  function refresh(context) {
+    try { assertOpen(context); } catch (error) { return Promise.reject(error); }
+    if (connected(context) && !fresh(context)) {
+      close(context); return Promise.reject(unavailable());
+    }
+    const state = stateFor(context);
+    if (state.inFlight) return state.inFlight;
+    let timer;
+    const request = (async () => {
+      try {
+        const result = await Promise.race([
+          Promise.resolve().then(() => authorize(context)),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(unavailable()), timeoutMs); }),
+        ]);
+        assertOpen(context); // A late response cannot resurrect an expired/closed subscriber.
+        if (connected(context) && !fresh(context)) { close(context); throw unavailable(); }
+        if (!result?.allowed) {
+          close(context, true);
+          throw new Error("COLLABORATION_ACCESS_REVOKED");
+        }
+        context.canModify = result.canModify === true;
+        context.authorizationCheckedAt = now();
+        for (const connection of watched.keys()) if (connection.context === context) arm(connection);
+        return context;
+      } catch (error) {
+        if (/COLLABORATION_(?:ACCESS_REVOKED|GATEWAY_FORBIDDEN)/.test(String(error)))
+          close(context, true);
+        const transient = isTransientCollaborationFailure(error) ||
+          String(error).includes("COLLABORATION_AUTHORIZATION_UNAVAILABLE");
+        if (transient && !state.closed && fresh(context)) return context;
+        if (transient) close(context);
+        throw error;
+      } finally { clearTimeout(timer); }
+    })();
+    state.inFlight = request;
+    void request.finally(() => { if (state.inFlight === request) state.inFlight = null; }).catch(() => undefined);
+    return request;
+  }
+  return {
+    refresh,
+    require(context) {
+      try {
+        assertOpen(context);
+        if (fresh(context)) return Promise.resolve(context);
+        // Already-connected peers must stop at the deadline even if the event
+        // loop has not fired their timer yet. Initial authentication may wait.
+        if (connected(context)) {
+          close(context); throw unavailable();
+        }
+        return refresh(context);
+      } catch (error) { return Promise.reject(error); }
+    },
+    watch(connection) {
+      watched.set(connection, null);
+      arm(connection);
+      return () => {
+        clearTimeout(watched.get(connection)); watched.delete(connection);
+        stateFor(connection.context).closed = true;
+      };
+    },
+    dispose() {
+      for (const [connection, timer] of watched) {
+        clearTimeout(timer); stateFor(connection.context).closed = true;
+      }
+      watched.clear();
+    },
+  };
+}
+
+export const PERSISTENCE_IDLE_MS = 180;
+export const PERSISTENCE_MAX_WAIT_MS = 1_000;
+export const PERSISTENCE_MAX_BATCH_ENTRIES = 128;
+export const PERSISTENCE_MAX_BATCH_BYTES = 760 * 1024;
+
+export function persistenceFlushDelay({ firstAt, entries, bytes, now = Date.now() }) {
+  if (entries >= PERSISTENCE_MAX_BATCH_ENTRIES || bytes >= PERSISTENCE_MAX_BATCH_BYTES)
+    return 0;
+  return Math.max(0, Math.min(PERSISTENCE_IDLE_MS, PERSISTENCE_MAX_WAIT_MS - (now - firstAt)));
+}
 
 export function durableHeadKey(context) {
   if (!context?.artifactId || !context?.partitionKey) return null;

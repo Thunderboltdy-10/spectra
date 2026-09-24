@@ -330,9 +330,11 @@ export function promptExplicitlyTargetsFocusedArtifact(
     return false;
   const candidates = candidatesFromPacket(record);
   const promptKey = normalizedReference(prompt);
+  const focusedTitle = normalizedReference(focused.title);
   const namedOther = candidates.some(
     (candidate) =>
       candidate.id !== focused.id &&
+      normalizedReference(candidate.title) !== focusedTitle &&
       normalizedReference(candidate.title).length >= 3 &&
       containsNormalizedPhrase(promptKey, normalizedReference(candidate.title)),
   );
@@ -390,6 +392,30 @@ export function resolveArtifactTarget(input: {
     ),
     workspaceIndex: filtered,
   });
+  const focusedCandidate = filtered.find(
+    (candidate) => candidate.id === input.focusedArtifactId,
+  );
+  if (explicitFocus && focusedCandidate) {
+    // The selected/open artifact is the user's disambiguator when duplicate
+    // library items share a title. A model's fuzzy title reference must not
+    // turn that clear in-app context into a dead-end clarification.
+    return {
+      role: input.role,
+      requestedReference: input.reference ?? null,
+      blueprintKey: input.blueprintKey,
+      status: "resolved",
+      confidence: 1,
+      resolvedArtifactId: focusedCandidate.id,
+      resolvedTitle: focusedCandidate.title,
+      candidates: [
+        {
+          ...focusedCandidate,
+          confidence: 1,
+          reasons: ["request targets the visible work"],
+        },
+      ],
+    };
+  }
   const promptNamed = filtered.filter((candidate) => {
     const titleKey = normalizedReference(candidate.title);
     return (
@@ -727,7 +753,13 @@ function clarificationForTarget(
   return parseSpectraPlan({
     ...plan,
     decision: "clarify",
-    intent: { ...plan.intent, targetArtifactId: null },
+    intent: {
+      ...plan.intent,
+      targetArtifactId: null,
+      // The mutation is deferred until the target is chosen; discard indexes
+      // that referred to the operations removed from this clarification.
+      obligations: undefined,
+    },
     operations: [],
     choices:
       candidates.length >= 2
@@ -989,24 +1021,42 @@ export function reconcileExplicitRequestContract(
     code: "code|visuali[sz]ations?|web apps?",
     whiteboard: "whiteboards?|canvases?|mind maps?",
   };
-  const operations = plan.operations.filter((operation) => {
+  const retainedIndexes = new Map<number, number>();
+  const operations: typeof plan.operations = [];
+  plan.operations.forEach((operation, index) => {
+    let keep = true;
     if (operation.type === "artifact.create") {
       if (
         operation.input.blueprintKey !== requestedCreation.blueprintKey ||
         retainedCreate
       )
-        return false;
-      retainedCreate = true;
-      return true;
+        keep = false;
+      else retainedCreate = true;
     }
-    if (operation.type !== "artifact.update") return true;
-    const noun = forbiddenUpdateNoun[operation.input.blueprintKey];
-    return !new RegExp(
-      `\\b(?:do not|don't|dont|without)\\s+(?:change|edit|update|modify|rewrite|replace)[^.!?]{0,100}\\b(?:${noun})\\b`,
-      "i",
-    ).test(prompt);
+    if (keep && operation.type === "artifact.update") {
+      const noun = forbiddenUpdateNoun[operation.input.blueprintKey];
+      keep = !new RegExp(
+        `\\b(?:do not|don't|dont|without)\\s+(?:change|edit|update|modify|rewrite|replace)[^.!?]{0,100}\\b(?:${noun})\\b`,
+        "i",
+      ).test(prompt);
+    }
+    if (keep) {
+      retainedIndexes.set(index, operations.length);
+      operations.push(operation);
+    }
   });
   if (!retainedCreate) return plan;
+  const obligations = plan.intent.obligations?.flatMap((obligation) => {
+    const operationIndexes = [
+      ...new Set(
+        obligation.operationIndexes.flatMap((index) => {
+          const mapped = retainedIndexes.get(index);
+          return mapped === undefined ? [] : [mapped];
+        }),
+      ),
+    ];
+    return operationIndexes.length ? [{ ...obligation, operationIndexes }] : [];
+  });
   const retained = operations.find(
     (operation) => operation.type === "artifact.create",
   );
@@ -1044,6 +1094,7 @@ export function reconcileExplicitRequestContract(
         retained?.type === "artifact.create"
           ? retained.input.workspaceId
           : plan.intent.targetWorkspaceId,
+      obligations,
     },
     operations,
   });

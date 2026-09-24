@@ -140,11 +140,19 @@ start without `.next/BUILD_ID`.
 node scripts/local/preflight.mjs --instance 1 --unit P8.P1
 ```
 
-The shared evidence manifest lives at `.shots/reformation/<unit>/manifest.json`
-and is the format RC.V1 and P8.V1 continue. It records commit, environment,
-hashes, actors, steps, observations, budgets, repairs, and verdict. Do not copy
-secrets into it. Originals under `Documents\IBDP1` stay unmounted; P8.P1 smoke
-uses a disposable fixture, and RC.V1 hashes the sacrificial copy tree.
+This command writes `.shots/reformation/<unit>/preflight.json` (or `--out`) so
+it does not overwrite the journey's `manifest.json`. It records current service
+health only: no authenticated actors, browser steps, mount inventory, native
+writes, or release acceptance. An unhealthy web, Convex, or gateway probe returns
+exit code 1 and `blocked`; healthy dependencies leave the verdict `open`. Bridge
+health is a separate step and a failed Bridge check still blocks native work.
+The local `BUILD_ID` hash does not verify the running process or its source.
+
+Record actual smoke actions and their receipts in the separate journey manifest,
+using the shared evidence schema. Do not copy secrets into either file. Originals
+under `Documents\IBDP1` stay unmounted; P8.P1 smoke uses a disposable fixture,
+and RC.V1 hashes the sacrificial copy tree. The preflight does not inspect or
+attest to those mount policies.
 
 Check an instance without starting it:
 

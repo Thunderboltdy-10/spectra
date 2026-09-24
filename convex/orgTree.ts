@@ -44,6 +44,7 @@ import {
 } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
 import { enqueueStructureRequest } from "./bridgeStructure";
+import { treePagination } from "./orgTreePagination";
 
 /**
  * The tree's public surface. Reads are account-scoped; every write validates
@@ -58,6 +59,8 @@ const vNodeKind = v.union(
   v.literal("thread"),
   v.literal("link"),
 );
+
+const MAX_ORG_TREE_PAGE_SIZE = 50;
 
 async function resolveParentId(
   ctx: Parameters<typeof requireSpectraActor>[0],
@@ -96,13 +99,17 @@ export const listChildren = query({
     const direction = args.direction ?? "asc";
     const typeFilter =
       args.typeFilter && args.typeFilter !== "all" ? args.typeFilter : null;
+    const paginationOpts = {
+      ...args.paginationOpts,
+      numItems: Math.min(args.paginationOpts.numItems, MAX_ORG_TREE_PAGE_SIZE),
+    };
     const result = args.includeTrashed
       ? await ctx.db
           .query("orgNodes")
           .withIndex("by_account_parent_order", (q) =>
             q.eq("accountId", actor.accountId).eq("parentId", parentId),
           )
-          .paginate(args.paginationOpts)
+          .paginate(paginationOpts)
       : sortKey === "updated"
         ? typeFilter
           ? await ctx.db
@@ -111,14 +118,14 @@ export const listChildren = query({
                 q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
               )
               .order(direction)
-              .paginate(args.paginationOpts)
+              .paginate(paginationOpts)
           : await ctx.db
               .query("orgNodes")
               .withIndex("by_account_parent_live_activity", (q) =>
                 q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
               )
               .order(direction)
-              .paginate(args.paginationOpts)
+              .paginate(paginationOpts)
         : sortKey === "name" || sortKey === "type"
           ? typeFilter
             ? await ctx.db
@@ -127,7 +134,7 @@ export const listChildren = query({
                   q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
                 )
                 .order(direction)
-                .paginate(args.paginationOpts)
+                .paginate(paginationOpts)
             : sortKey === "type"
               ? await ctx.db
                   .query("orgNodes")
@@ -135,27 +142,27 @@ export const listChildren = query({
                     q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
                   )
                   .order(direction)
-                  .paginate(args.paginationOpts)
+                  .paginate(paginationOpts)
               : await ctx.db
                   .query("orgNodes")
                   .withIndex("by_account_parent_live_name", (q) =>
                     q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
                   )
                   .order(direction)
-                  .paginate(args.paginationOpts)
+              .paginate(paginationOpts)
           : typeFilter
             ? await ctx.db
                 .query("orgNodes")
                 .withIndex("by_account_parent_live_type_order", (q) =>
                   q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
                 )
-                .paginate(args.paginationOpts)
+              .paginate(paginationOpts)
             : await ctx.db
                 .query("orgNodes")
                 .withIndex("by_account_parent_live_order", (q) =>
                   q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
                 )
-                .paginate(args.paginationOpts);
+                .paginate(paginationOpts);
     return {
       ...result,
       page: await hydrateNodes(ctx, result.page, {
@@ -476,6 +483,104 @@ export const search = query({
       withPaths.push({ ...view, parentPath: ancestors.map((node) => node.name) });
     }
     return { results: withPaths, provider: "name" as const };
+  },
+});
+
+/** Validate a requested subtree before reading any candidates. */
+async function pageScope(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  accountId: Id<"accounts">,
+  raw?: string | null,
+) {
+  if (!raw || raw === "root") return null;
+  const id = ctx.db.normalizeId("orgNodes", raw);
+  const node = id ? await ctx.db.get(id) : null;
+  if (!node || node.accountId !== accountId || node.deletedAt !== undefined || !isContainerKind(node.kind))
+    throw new Error("This folder is no longer available.");
+  return node._id;
+}
+
+/** Visible rail branches paginate raw siblings, including empty filtered pages. */
+export const containersPage = query({
+  args: {
+    parentId: v.optional(v.union(v.string(), v.null())),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const parentId = await pageScope(ctx, actor.accountId, args.parentId);
+    const paging = treePagination(args.paginationOpts, ["containers", actor.accountId, parentId]);
+    const result = await ctx.db.query("orgNodes")
+      .withIndex("by_account_parent_live_order", (q) => q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined))
+      .paginate(paging.options);
+    return paging.result({ ...result, page: await hydrateNodes(ctx, result.page.filter((row) => isContainerKind(row.kind)), {
+      withChildCounts: true, withSource: true, accountId: actor.accountId,
+    }) });
+  },
+});
+
+/** Ranked name search with a resumable, bounded candidate scan. */
+export const searchPage = query({
+  args: {
+    term: v.string(),
+    kinds: v.optional(v.array(vNodeKind)),
+    scopeNodeId: v.optional(v.union(v.string(), v.null())),
+    typeFilter: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const scopeId = await pageScope(ctx, actor.accountId, args.scopeNodeId);
+    const term = args.term.trim();
+    if (!term) return { page: [], isDone: true, continueCursor: "" };
+    const paging = treePagination(args.paginationOpts, ["search", actor.accountId, scopeId, term, args.kinds ?? null, args.typeFilter ?? "all"]);
+    const result = await ctx.db.query("orgNodes")
+      .withSearchIndex("search_name", (q) => q.search("name", term).eq("accountId", actor.accountId))
+      .paginate(paging.options);
+    const page: Array<OrgNodeView & { parentPath: string[] }> = [];
+    for (const row of result.page) {
+      if (row.deletedAt !== undefined || (args.kinds && !args.kinds.includes(row.kind))) continue;
+      if (args.typeFilter && args.typeFilter !== "all" && row.typeKey !== args.typeFilter) continue;
+      const ancestors = await breadcrumbNodes(ctx, row);
+      if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
+      const view = (await hydrateNodes(ctx, [row], { withChildCounts: true, withSource: true, accountId: actor.accountId }))[0];
+      if (view) page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
+    }
+    return paging.result({ ...result, page });
+  },
+});
+
+/** Quick views share the same continuation semantics as folders and search. */
+export const quickViewPage = query({
+  args: {
+    view: v.union(v.literal("recent"), v.literal("favorites"), v.literal("shared")),
+    kinds: v.optional(v.array(vNodeKind)),
+    scopeNodeId: v.optional(v.union(v.string(), v.null())),
+    typeFilter: v.optional(v.string()),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const scopeId = await pageScope(ctx, actor.accountId, args.scopeNodeId);
+    const paging = treePagination(args.paginationOpts, ["quick", actor.accountId, scopeId, args.view, args.kinds ?? null, args.typeFilter ?? "all"]);
+    const result = args.view === "favorites"
+      ? await ctx.db.query("orgNodes")
+        .withIndex("by_account_live_pinned_name", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("pinned", true))
+        .paginate(paging.options)
+      : await ctx.db.query("orgNodes")
+        .withIndex("by_account_live_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined))
+        .order("desc").paginate(paging.options);
+    const page: Array<OrgNodeView & { parentPath: string[] }> = [];
+    for (const row of result.page) {
+      if (row.kind === "link" || (args.kinds && !args.kinds.includes(row.kind))) continue;
+      if (args.typeFilter && args.typeFilter !== "all" && row.typeKey !== args.typeFilter) continue;
+      const ancestors = await breadcrumbNodes(ctx, row);
+      if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
+      const view = (await hydrateNodes(ctx, [row], { withChildCounts: true, withSource: true, accountId: actor.accountId }))[0];
+      if (!view || (args.view === "shared" && view.source?.shared !== true)) continue;
+      page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
+    }
+    return paging.result({ ...result, page });
   },
 });
 

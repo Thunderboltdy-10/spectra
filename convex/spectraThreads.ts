@@ -492,6 +492,46 @@ async function requireOwnedThread(
   return { actor, thread };
 }
 
+async function selectedActiveExecution(
+  ctx: Parameters<typeof getAuthenticatedActor>[0],
+  { actor, thread }: Awaited<ReturnType<typeof requireOwnedThread>>,
+) {
+  const runId = thread.lastRunId;
+  if (!runId) return null;
+  const tab = await ctx.db
+    .query("spectraRunTabs")
+    .withIndex("by_account_run", (q) =>
+      q.eq("ownerAccountId", actor._id).eq("runId", runId),
+    )
+    .first();
+  let run: NonNullable<Doc<"spectraRunTabs">["runSummary"]>;
+  if (
+    tab?.ownerAccountId === actor._id &&
+    tab.schoolId === actor.schoolId &&
+    tab.threadId === thread._id &&
+    tab.runId === runId &&
+    tab.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
+    tab.runSummary?._id === runId &&
+    tab.runSummary.threadId === thread._id
+  ) {
+    run = tab.runSummary;
+  } else {
+    // Legacy or inconsistent projections need only the selected canonical row.
+    const canonicalRun = await ctx.db.get(runId);
+    if (
+      !canonicalRun ||
+      canonicalRun._id !== runId ||
+      canonicalRun.ownerAccountId !== actor._id ||
+      canonicalRun.schoolId !== actor.schoolId ||
+      canonicalRun.threadId !== thread._id
+    ) return null;
+    run = canonicalRun;
+  }
+  return ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status)
+    ? { run: compactActiveExecution(run) }
+    : null;
+}
+
 export const create = mutation({
   args: {
     title: v.optional(v.string()),
@@ -1053,20 +1093,7 @@ export const get = query({
       .order("desc")
       .paginate({ cursor: null, numItems: INITIAL_MESSAGE_LIMIT });
     const messages = [...messagePage.page].reverse();
-    const activeTab = thread.lastRunId
-      ? (
-          await ctx.db
-            .query("spectraRunTabs")
-            .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
-            .collect()
-        ).find((tab) =>
-          tab.runId === thread.lastRunId &&
-          tab.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
-          tab.runSummary?._id === thread.lastRunId,
-        )
-      : null;
-    const activeRun = activeTab?.runSummary ??
-      (thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null);
+    const activeExecution = await selectedActiveExecution(ctx, { actor, thread });
     const derivedArtifactId = derivedArtifact
       ? "artifactId" in derivedArtifact
         ? derivedArtifact.artifactId
@@ -1093,16 +1120,7 @@ export const get = query({
             } satisfies MessageCursor),
       },
       tracePage: { limit: TRACE_CHILD_LIMIT },
-      activeExecution:
-        activeRun &&
-        (("ownerAccountId" in activeRun
-          ? activeRun.ownerAccountId
-          : activeTab?.ownerAccountId) === actor._id &&
-          (("schoolId" in activeRun ? activeRun.schoolId : activeTab?.schoolId) ===
-            actor.schoolId)) &&
-        ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(activeRun.status)
-          ? { run: compactActiveExecution(activeRun) }
-          : null,
+      activeExecution,
       viewerName: actor.name,
     };
   },
@@ -1120,30 +1138,7 @@ export const getActiveExecution = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
     const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
-    if (!thread.lastRunId) return null;
-    const tab = (
-      await ctx.db
-        .query("spectraRunTabs")
-        .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
-        .collect()
-    ).find(
-      (row) =>
-        row.runId === thread.lastRunId &&
-        row.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
-        row.runSummary?._id === thread.lastRunId,
-    );
-    const run = tab?.runSummary ?? await ctx.db.get(thread.lastRunId);
-    if (
-      !run ||
-      ("ownerAccountId" in run
-        ? run.threadId !== thread._id ||
-          run.ownerAccountId !== actor._id ||
-          ("schoolId" in run ? run.schoolId : tab?.schoolId) !== actor.schoolId
-        : tab?.ownerAccountId !== actor._id || tab.schoolId !== actor.schoolId) ||
-      !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status)
-    )
-      return null;
-    return { run: compactActiveExecution(run) };
+    return selectedActiveExecution(ctx, { actor, thread });
   },
 });
 

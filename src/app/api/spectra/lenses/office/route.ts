@@ -197,7 +197,7 @@ export function projectionFor(
 export async function materializeOfficeArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
-  options?: { promotionMode?: "verified-first" },
+  options?: { promotionMode?: "verified-first" | "immediate-projection" },
 ) {
   return materializeOfficeArtifactAttempt(workId, content, 0, options);
 }
@@ -206,7 +206,7 @@ async function materializeOfficeArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
-  options?: { promotionMode?: "verified-first" },
+  options?: { promotionMode?: "verified-first" | "immediate-projection" },
 ) {
   let cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"];
   let cloudPayload: Uint8Array;
@@ -334,33 +334,6 @@ async function materializeOfficeArtifactAttempt(
         )
     : materializationPayload;
   const hash = await sha256Payload(output);
-  if (hash === materializationTruth.hash)
-    return {
-      state: "unchanged" as const,
-      hash,
-      receipt: {
-        kind: "native-office-save" as const,
-        format: isSheet ? "xlsx" as const : "pptx" as const,
-        operationId: nativeOperationId(String(workId), materializationTruth.revision, hash),
-        artifactId: String(workId),
-        basePayloadHash: materializationTruth.hash,
-        resultPayloadHash: hash,
-        baseRevision: materializationTruth.revision,
-        resultRevision: hash,
-        targets: { regionIds: [], partNames: [] },
-        semantic: { resultDigest: baseProjection.nativeBinding.semanticDigest, readbackDigest: baseProjection.nativeBinding.semanticDigest },
-        preservedPartNames: [],
-        state: "unchanged" as const,
-      } satisfies NativeSaveReceipt,
-    };
-  const [next, comparison] = await Promise.all([
-    isSheet ? xlsxLens.open(output) : pptxLens.open(output),
-    comparePackages(materializationPayload, output),
-  ]);
-  const readbackDigest = (next.projection as OfficeProjection).nativeBinding.semanticDigest;
-  // Editor projections retain the imported binding. Its digest is the base,
-  // never an attestation of the requested edit. Input edits deliberately clear
-  // all native formula caches; Excel will calculate them on reopen.
   const invalidatesFormulaCaches = update.operations.some(operation =>
     ["set-cell", "set-formula", "clear-cell", "rename-sheet", "reorder-sheets", "set-defined-names", "mutate-sheet-axis"].includes(operation.kind));
   const requestedDigest = isSheet
@@ -374,6 +347,45 @@ async function materializeOfficeArtifactAttempt(
     : await sha256Payload(new TextEncoder().encode(JSON.stringify(
         (projection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
       )));
+  if (hash === materializationTruth.hash) {
+    const readbackDigest = isSheet
+      ? await xlsxSemanticDigest(baseProjection as XlsxProjection)
+      : await sha256Payload(new TextEncoder().encode(JSON.stringify(
+          (baseProjection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
+        )));
+    if (readbackDigest !== requestedDigest)
+      throw new Error("OFFICE_READBACK_MISMATCH");
+    return {
+      state: "unchanged" as const,
+      hash,
+      projectionContent: contentForStorage(baseProjection, isSheet, {
+        artifactId: String(workId),
+        payloadHash: materializationTruth.hash,
+      }),
+      receipt: {
+        kind: "native-office-save" as const,
+        format: isSheet ? "xlsx" as const : "pptx" as const,
+        operationId: nativeOperationId(String(workId), materializationTruth.revision, hash),
+        artifactId: String(workId),
+        basePayloadHash: materializationTruth.hash,
+        resultPayloadHash: hash,
+        baseRevision: materializationTruth.revision,
+        resultRevision: hash,
+        targets: { regionIds: [], partNames: [] },
+        semantic: { resultDigest: requestedDigest, readbackDigest },
+        preservedPartNames: [],
+        state: "unchanged" as const,
+      } satisfies NativeSaveReceipt,
+    };
+  }
+  const [next, comparison] = await Promise.all([
+    isSheet ? xlsxLens.open(output) : pptxLens.open(output),
+    comparePackages(materializationPayload, output),
+  ]);
+  const readbackDigest = (next.projection as OfficeProjection).nativeBinding.semanticDigest;
+  // Editor projections retain the imported binding. Its digest is the base,
+  // never an attestation of the requested edit. Input edits deliberately clear
+  // all native formula caches; Excel will calculate them on reopen.
   if (readbackDigest !== requestedDigest) {
     throw new Error("OFFICE_READBACK_MISMATCH");
   }
@@ -425,6 +437,7 @@ async function materializeOfficeArtifactAttempt(
     return {
       state: "cloud_saved" as const,
       hash,
+      projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
       receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
@@ -475,6 +488,7 @@ async function materializeOfficeArtifactAttempt(
       return {
         state: "cloud_saved" as const,
         hash,
+        projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
         receipt: nativeReceipt,
         status:
           "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
@@ -486,6 +500,7 @@ async function materializeOfficeArtifactAttempt(
     state: queued.state,
     requestId: queued.requestId,
     hash,
+    projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
     receipt: nativeReceipt,
     status: "Waiting to save locally",
   };

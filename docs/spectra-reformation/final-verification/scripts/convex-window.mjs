@@ -26,6 +26,20 @@ const usageAliases = Object.freeze({
   databaseIoWriteBytes: "databaseWriteBytes",
 });
 
+// Absent telemetry is not evidence of zero cost. In particular, local backend
+// versions differ in the usage fields included in successful function logs.
+function observedNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+function sumObserved(values) {
+  return values.some((value) => value === null)
+    ? null
+    : values.reduce((sum, value) => sum + value, 0);
+}
+
 export const profileBudgets = Object.freeze({
   idle: {
     perMinuteNonCronExecutions: 5,
@@ -60,8 +74,7 @@ export function parseCompletionLine(line) {
   const usage = {};
   for (const field of numericUsageFields) {
     const alias = usageAliases[field];
-    usage[field] =
-      Number(usageStats[field] ?? (alias ? usageStats[alias] : 0) ?? 0) || 0;
+    usage[field] = observedNumber(usageStats[field] ?? (alias ? usageStats[alias] : undefined));
   }
   return {
     identifier: value.identifier,
@@ -69,9 +82,9 @@ export function parseCompletionLine(line) {
     udfType: String(value.udfType ?? "unknown"),
     timestamp: Number(value.timestamp ?? value.executionTimestamp ?? 0),
     cachedResult: Boolean(value.cachedResult),
-    executionTime: Number(value.executionTime ?? 0) || 0,
-    returnBytes: Number(value.returnBytes ?? 0) || 0,
-    memoryUsedMb: Number(usageStats.memoryUsedMb ?? 0) || 0,
+    executionTime: observedNumber(value.executionTime),
+    returnBytes: observedNumber(value.returnBytes),
+    memoryUsedMb: observedNumber(usageStats.memoryUsedMb),
     usage,
   };
 }
@@ -95,7 +108,8 @@ function blankAggregate(identifier, caller) {
   };
 }
 
-export function aggregateCompletions(events, { seconds, profile }) {
+export function aggregateCompletions(events, { seconds, profile, capture = null }) {
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("A positive observation duration is required.");
   const groups = new Map();
   for (const event of events) {
     const key = `${event.caller}\u0000${event.identifier}`;
@@ -103,32 +117,21 @@ export function aggregateCompletions(events, { seconds, profile }) {
       groups.get(key) ?? blankAggregate(event.identifier, event.caller);
     aggregate.executions += 1;
     aggregate.cachedExecutions += event.cachedResult ? 1 : 0;
-    aggregate.executionTime += event.executionTime;
-    aggregate.returnBytes += event.returnBytes;
-    aggregate.peakMemoryUsedMb = Math.max(
-      aggregate.peakMemoryUsedMb,
-      event.memoryUsedMb,
-    );
+    aggregate.executionTime = sumObserved([aggregate.executionTime, event.executionTime]);
+    aggregate.returnBytes = sumObserved([aggregate.returnBytes, event.returnBytes]);
+    aggregate.peakMemoryUsedMb = aggregate.peakMemoryUsedMb === null || event.memoryUsedMb === null
+      ? null : Math.max(aggregate.peakMemoryUsedMb, event.memoryUsedMb);
     for (const field of numericUsageFields)
-      aggregate.usage[field] += event.usage[field];
-    const ioBytes =
-      event.usage.databaseIoReadBytes + event.usage.databaseIoWriteBytes;
-    aggregate.maxima.databaseIoBytes = Math.max(
-      aggregate.maxima.databaseIoBytes,
-      ioBytes,
-    );
-    aggregate.maxima.databaseReadDocuments = Math.max(
-      aggregate.maxima.databaseReadDocuments,
-      event.usage.databaseReadDocuments,
-    );
-    aggregate.maxima.networkEgressBytes = Math.max(
-      aggregate.maxima.networkEgressBytes,
-      event.usage.networkEgressBytes,
-    );
-    aggregate.maxima.returnBytes = Math.max(
-      aggregate.maxima.returnBytes,
-      event.returnBytes,
-    );
+      aggregate.usage[field] = sumObserved([aggregate.usage[field], event.usage[field]]);
+    const maxima = {
+      databaseIoBytes: sumObserved([event.usage.databaseIoReadBytes, event.usage.databaseIoWriteBytes]),
+      databaseReadDocuments: event.usage.databaseReadDocuments,
+      networkEgressBytes: event.usage.networkEgressBytes,
+      returnBytes: event.returnBytes,
+    };
+    for (const [field, value] of Object.entries(maxima))
+      aggregate.maxima[field] = aggregate.maxima[field] === null || value === null
+        ? null : Math.max(aggregate.maxima[field], value);
     groups.set(key, aggregate);
   }
   const byFunction = [...groups.values()].sort(
@@ -145,38 +148,40 @@ export function aggregateCompletions(events, { seconds, profile }) {
   const totals = {
     executions: events.length,
     nonCronExecutions: nonCron.length,
-    nonCronDatabaseIoBytes: nonCron.reduce(
-      (sum, event) =>
-        sum +
-        event.usage.databaseIoReadBytes +
-        event.usage.databaseIoWriteBytes,
-      0,
-    ),
-    nonCronEgressBytes: nonCron.reduce(
-      (sum, event) => sum + event.usage.networkEgressBytes,
-      0,
-    ),
+    nonCronDatabaseIoBytes: sumObserved(nonCron.flatMap((event) => [event.usage.databaseIoReadBytes, event.usage.databaseIoWriteBytes])),
+    nonCronEgressBytes: sumObserved(nonCron.map((event) => event.usage.networkEgressBytes)),
     bridgeExchanges: nonCron.filter(
       (event) => event.identifier === "collaborationGatewayBridge:exchange",
     ).length,
   };
   const rates = {
     nonCronExecutionsPerMinute: totals.nonCronExecutions / minutes,
-    nonCronDatabaseIoBytesPerMinute: totals.nonCronDatabaseIoBytes / minutes,
-    nonCronEgressBytesPerMinute: totals.nonCronEgressBytes / minutes,
+    nonCronDatabaseIoBytesPerMinute: totals.nonCronDatabaseIoBytes === null ? null : totals.nonCronDatabaseIoBytes / minutes,
+    nonCronEgressBytesPerMinute: totals.nonCronEgressBytes === null ? null : totals.nonCronEgressBytes / minutes,
     bridgeExchangesPerMinute: totals.bridgeExchanges / minutes,
   };
-  return { profile, seconds, totals, rates, byFunction };
+  return { profile, seconds, totals, rates, byFunction, capture,
+    coverage: Object.fromEntries(numericUsageFields.map((field) => [field, {
+      observedEvents: events.filter((event) => event.usage[field] !== null).length,
+      totalEvents: events.length,
+    }])) };
 }
 
 export function evaluateBudget(report) {
   const budget = profileBudgets[report.profile];
   if (!budget) throw new Error(`Unknown profile ${report.profile}.`);
   const failures = [];
+  const unobserved = [];
   const check = (actual, limit, label) => {
+    if (limit !== undefined && (actual === null || !Number.isFinite(actual))) {
+      unobserved.push(label);
+      return;
+    }
     if (limit !== undefined && actual > limit)
       failures.push({ label, actual, limit });
   };
+  if (!report.totals.executions) unobserved.push("no completion events observed");
+  if (report.capture && !report.capture.complete) unobserved.push("capture ended before requested duration");
   check(
     report.rates.nonCronExecutionsPerMinute,
     budget.perMinuteNonCronExecutions,
@@ -203,6 +208,8 @@ export function evaluateBudget(report) {
     "action non-cron database I/O bytes",
   );
   if (report.profile === "scheduled") {
+    if (!report.byFunction.some((item) => item.caller.toLowerCase() === "cron"))
+      unobserved.push("no scheduled executions observed");
     for (const row of report.byFunction.filter(
       (item) => item.caller.toLowerCase() === "cron",
     )) {
@@ -218,7 +225,8 @@ export function evaluateBudget(report) {
       );
     }
   }
-  return { passed: failures.length === 0, failures };
+  return { passed: failures.length === 0 && unobserved.length === 0,
+    status: failures.length ? "failed" : unobserved.length ? "unobserved" : "passed", failures, unobserved };
 }
 
 function parseArguments(argv) {
@@ -287,25 +295,37 @@ async function capture({ instance, profile, seconds, label }) {
   };
   child.stdout.on("data", consume);
   child.stderr.on("data", () => {});
+  let durationReached = false;
+  let exitCode = null;
   await new Promise((resolveWait, rejectWait) => {
     const timer = setTimeout(() => {
+      durationReached = true;
       child.kill("SIGINT");
-      resolveWait();
     }, seconds * 1000);
+    const killTimer = setTimeout(() => child.kill("SIGKILL"), seconds * 1000 + 5000);
     child.once("error", (error) => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
       rejectWait(error);
     });
-    child.once("exit", () => {
+    child.once("close", (code) => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
+      exitCode = code;
       resolveWait();
     });
   });
   if (buffer) consume("\n");
-  const report = aggregateCompletions(events, { seconds, profile });
+  const endedAtSeconds = Date.now() / 1000;
+  const observedSeconds = Math.min(seconds, endedAtSeconds - startedAtSeconds);
+  const report = aggregateCompletions(events.filter((event) => event.timestamp <= startedAtSeconds + observedSeconds), {
+    seconds: Math.max(observedSeconds, 0.001), profile,
+    capture: { complete: durationReached, requestedSeconds: seconds, observedSeconds, exitCode,
+      startedAt: new Date(startedAtSeconds * 1000).toISOString(), endedAt: new Date(endedAtSeconds * 1000).toISOString() },
+  });
   const budget = evaluateBudget(report);
   const output = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     unit: "P8.V1",
     instance,
     label,

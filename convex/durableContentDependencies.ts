@@ -13,7 +13,9 @@ export async function resolveContentDependencies(ctx: MutationCtx, artifactId: I
     const asset = id ? await ctx.db.get(id) : null;
     if (!asset || asset.artifactId !== artifactId || asset.status !== "active") throw new Error("COLLABORATION_CONTENT_DEPENDENCY_INVALID");
   }
-  const replicas = await ctx.db.query("workReplicas").withIndex("by_work", q => q.eq("workId", artifactId)).take(50);
+  const replicas = await ctx.db.query("workReplicas").withIndex("by_work", q => q.eq("workId", artifactId)).take(51);
+  // A bounded read must not silently omit an owner's native base.
+  if (replicas.length > 50) throw new Error("COLLABORATION_CONTENT_DEPENDENCIES_SIZE");
   const nativePayloadRefs: string[] = [];
   for (const value of new Set(replicas.flatMap(row => [row.payloadRef, row.projectionBasePayloadRef]).filter(Boolean))) {
     const id = ctx.db.normalizeId("payloadObjects", value!);

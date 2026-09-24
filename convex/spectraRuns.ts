@@ -7,6 +7,7 @@ import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity"
 import { MAX_ATTACHMENT_BYTES } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
+import { applicationOperationScope } from "./spectraApplicationWriteScope";
 import {
   ensureThreadWorkspacePlacement,
   requireArtifactCapability,
@@ -2268,6 +2269,17 @@ export const claimConfirmation = mutation({
       throw new Error("This approval was already handled in another view.");
     }
     const now = Date.now();
+    // Bind this approval to the exact application inputs shown in the plan.
+    // A new operation or an edited target cannot borrow an earlier approval.
+    for (const operation of currentOperations) {
+      if (operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+      await ctx.db.patch(operation._id, {
+        output: {
+          ...(operation.output && typeof operation.output === "object" ? operation.output : {}),
+          approvedApplicationScope: applicationOperationScope(operation),
+        },
+      });
+    }
     await ctx.db.patch(args.runId, {
       status: "queued",
       outcome: "proposed",

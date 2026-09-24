@@ -149,7 +149,7 @@ export function BridgeSettings() {
       );
       return {
         status: "needs-human",
-        message: "Pairing is ready. Finish the Bridge pairing step on this device.",
+        message: "Pairing is ready. Spectra is connecting this device in the background.",
         data: { challenge: result.challenge },
       };
     } catch (reason) {
@@ -422,8 +422,9 @@ export function BridgeSettings() {
               className="mt-4 rounded-control bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-secondary)]"
               role="status"
             >
-              Connecting this device. Keep Spectra Bridge open. This attempt
-              stays active until it finishes or times out.
+              Connecting this device. Keep this Spectra settings page open
+              until pairing finishes. Folder selection and pairing stay here;
+              the Bridge helper runs in the background.
             </div>
           ) : null}
           {pairingExpired ? (

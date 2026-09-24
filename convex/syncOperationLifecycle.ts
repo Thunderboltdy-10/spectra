@@ -87,3 +87,39 @@ export async function retireSupersededExternalOperations(
   );
   return superseded.length;
 }
+
+/** A verified Bridge write also reconciles an observed external save when
+ * both replicas now name the same exact revision. Keep this bounded to recent
+ * operations for the same artifact and local replica. */
+export async function verifyReconciledExternalOperations(
+  ctx: Pick<MutationCtx, "db">,
+  input: {
+    workId: Id<"spectraArtifacts">;
+    replicaId: Id<"workReplicas">;
+    revision: string;
+    now: number;
+  },
+) {
+  const recent = await ctx.db
+    .query("syncOperations")
+    .withIndex("by_work_created", (q) => q.eq("workId", input.workId))
+    .order("desc")
+    .take(50);
+  const reconciled = recent.filter((operation) =>
+    operation.direction === "external" &&
+    operation.actorKind === "external-edit" &&
+    operation.state === "applied" &&
+    operation.replicaId === input.replicaId &&
+    operation.revisionAfter === input.revision,
+  );
+  await Promise.all(
+    reconciled.map((operation) =>
+      ctx.db.patch(operation._id, {
+        state: "verified",
+        errorCode: undefined,
+        updatedAt: input.now,
+      }),
+    ),
+  );
+  return reconciled.length;
+}

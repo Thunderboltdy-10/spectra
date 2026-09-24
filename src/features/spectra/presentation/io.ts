@@ -946,7 +946,32 @@ export async function buildPresentationPptx(
         );
       }
     }
-    if (slide.speakerNotes) page.addNotes(slide.speakerNotes);
+    const citationRows = (slide.citations ?? []).flatMap((citation) => {
+      const label = citation.label.trim();
+      if (!label) return [];
+      let url: string | undefined;
+      try {
+        const candidate = new URL(citation.url ?? "");
+        if (["https:", "http:"].includes(candidate.protocol) && !candidate.username && !candidate.password)
+          url = candidate.toString();
+      } catch { /* Uploaded evidence need not have a public URL. */ }
+      return [{ label, url }];
+    });
+    if (citationRows.length) {
+      // Keep the original canvas editable and the source labels visible in
+      // the copy. Full attributions also travel in notes without truncation.
+      const fullLabel = citationRows.map((citation) => citation.label.replace(/\s+/g, " ")).join(" · ");
+      const footer = fullLabel.length > 180 ? `${fullLabel.slice(0, 177)}…` : fullLabel;
+      page.addText(footer, {
+        x: 0.3, y: heightInches - 0.2, w: widthInches - 0.6, h: 0.15,
+        fontSize: 8, fontFace: presentationNativeFontFamily(undefined, content.theme.fonts, 8),
+        color: hex(content.theme.tokens?.body, "23322D"), margin: 0, fit: "shrink",
+        ...(citationRows.length === 1 && citationRows[0]!.url ? { hyperlink: { url: citationRows[0]!.url } } : {}),
+      });
+    }
+    const sourceNotes = citationRows.map((citation) => `${citation.label}${citation.url ? ` — ${citation.url}` : ""}`).join("\n");
+    const notes = sourceNotes ? `${slide.speakerNotes ?? ""}${slide.speakerNotes ? "\n\n" : ""}Sources:\n${sourceNotes}` : slide.speakerNotes;
+    if (notes) page.addNotes(notes);
   }
   const bytes = (await pptx.write({
     outputType: "arraybuffer",

@@ -489,7 +489,7 @@ describe("S7-COST compact authoritative read model", () => {
       cards: 2,
       cardSummaries: 2,
       revisionFacts: 2,
-      readModelMigrations: 1,
+      readModelMigrations: 2,
     });
     expect(measured.artifactBytes.large).toBeGreaterThan(100_000);
     expect(measured.artifactBytes.large).toBeGreaterThan(measured.artifactBytes.small * 20);

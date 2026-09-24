@@ -195,8 +195,9 @@ export function applyDocumentAcademicOperations(value: unknown, input: unknown) 
       else {
         const after = operation.afterRegionId ? blocks.findIndex((block) => block.id === operation.afterRegionId) : blocks.length - 1;
         if (operation.afterRegionId && after < 0) throw new Error("The bibliography insertion anchor no longer exists.");
-        let seed = "bibliography"; while (blocks.some((block) => block.id === nativeNewParagraphId(seed))) seed += "-new";
-        const id = source.nativeBinding ? nativeNewParagraphId(seed) : seed;
+        const paragraphId = (seed: string) => source.nativeBinding ? nativeNewParagraphId(seed) : seed;
+        let seed = "bibliography"; while (blocks.some((block) => block.id === paragraphId(seed))) seed += "-new";
+        const id = paragraphId(seed);
         blocks.splice(after + 1, 0, { id, type: "paragraph", text: item.text, inlineContent: [item], attrs: { paragraphFormat: { alignment: "left", lineSpacing: 1, spacingAfterPoints: 0, indentLevel: 0, border: null, shading: null } } });
       }
     }

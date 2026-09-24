@@ -107,16 +107,21 @@ export async function computeEffectivePolicy(
 ): Promise<EffectiveSyncPolicy> {
   const requested = { ...scopes, account: scopes.account ?? String(accountId) };
   const policies: ScopedSyncPolicy[] = [];
-  for (const [kind, scopeId] of Object.entries(requested) as Array<
-    [SyncPolicyScopeKind, string | undefined]
-  >) {
-    if (!scopeId) continue;
-    const policy = await ctx.db
-      .query("syncPolicies")
-      .withIndex("by_account_scope", (q) =>
-        q.eq("accountId", accountId).eq("scopeKind", kind).eq("scopeId", scopeId),
-      )
-      .unique();
+  const policyRows = await Promise.all(
+    (Object.entries(requested) as Array<
+      [SyncPolicyScopeKind, string | undefined]
+    >)
+      .filter((entry): entry is [SyncPolicyScopeKind, string] => Boolean(entry[1]))
+      .map(([kind, scopeId]) =>
+        ctx.db
+          .query("syncPolicies")
+          .withIndex("by_account_scope", (q) =>
+            q.eq("accountId", accountId).eq("scopeKind", kind).eq("scopeId", scopeId),
+          )
+          .unique(),
+      ),
+  );
+  for (const policy of policyRows) {
     if (!policy) continue;
     const {
       _id: _id,

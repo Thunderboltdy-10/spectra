@@ -4,8 +4,9 @@ import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import type { Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
-import { canReadPinnedContent, snapshotReferencesNative } from "./retainedContentAccess";
+import { canReadPinnedContent, nativeReferencesForPinnedVersion, snapshotReferencesNative } from "./retainedContentAccess";
 import { storageHasOtherBinding } from "./durableStorageBindings";
+import { normalizeSha256 } from "../shared/intake-integrity";
 
 function assertHash(hash: string) {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("PAYLOAD_HASH_INVALID");
@@ -21,7 +22,12 @@ async function payloadForWork(
   const pinnedRefs = new Set<string>();
   try { await requireActorArtifactCapability(ctx, actor, workId, "read"); }
   catch (error) {
-    retained = await canReadPinnedContent(ctx, actor, workId, snapshot => snapshotReferencesNative(snapshot, hash, pinnedRefs));
+    retained = await canReadPinnedContent(ctx, actor, workId, async (snapshot, version) => {
+      if (!snapshotReferencesNative(snapshot, hash)) return false;
+      const refs = await nativeReferencesForPinnedVersion(ctx, workId, version._id, snapshot);
+      for (const ref of refs) pinnedRefs.add(ref);
+      return true;
+    });
     if (!retained) throw error;
   }
   const work = await ctx.db.get(workId);
@@ -76,6 +82,7 @@ export const put = mutation({
     if (!Number.isSafeInteger(args.bytes) || args.bytes < 0) throw new Error("PAYLOAD_BYTES_INVALID");
     const metadata = await ctx.db.system.get(args.storageId);
     if (!metadata || metadata.size !== args.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
+    if (normalizeSha256(metadata.sha256) !== args.hash) throw new Error("PAYLOAD_HASH_MISMATCH");
     const existing = await ctx.db.query("payloadObjects").withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("hash", args.hash)).unique();
     if (await storageHasOtherBinding(ctx, args.storageId,
       { table: "payloadObjects", id: existing ? String(existing._id) : "" }))
@@ -86,6 +93,14 @@ export const put = mutation({
         throw new Error("PAYLOAD_HASH_QUARANTINED");
       }
       if (existing.state === "active") {
+        // Legacy rows may predate storage digest verification. Never return a
+        // corrupt hash slot as a successful retry of newly verified bytes.
+        const stored = existing.storageId === args.storageId
+          ? metadata
+          : await ctx.db.system.get(existing.storageId);
+        if (!stored || stored.size !== existing.bytes || existing.bytes !== args.bytes)
+          throw new Error("PAYLOAD_SIZE_MISMATCH");
+        if (normalizeSha256(stored.sha256) !== args.hash) throw new Error("PAYLOAD_HASH_MISMATCH");
         // A caller-supplied redundant storage ID is not proof of upload ownership.
         return { payloadRef: String(existing._id), deduplicated: true };
       }

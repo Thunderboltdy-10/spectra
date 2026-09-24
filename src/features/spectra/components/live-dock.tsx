@@ -59,6 +59,10 @@ import {
 import { CrossfadeText, transitionFor, useSpectraMotion } from "../motion";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
+import {
+  SYNC_RETRY_POLICY,
+  syncRetryDelayMs,
+} from "../../../../shared/sync-retry-policy";
 
 const activeStatuses = new Set([
   "queued",
@@ -66,8 +70,6 @@ const activeStatuses = new Set([
   "awaiting_confirmation",
   "awaiting_resolution",
 ]);
-const LIVE_DOCK_ACTIVE_POLL_MS = 1_000;
-
 function displayChoiceTitle(value: string) {
   const limit = 160;
   if (value.length <= limit) return value;
@@ -82,7 +84,51 @@ let refreshGeneration = 0;
 let appliedRefreshGeneration = 0;
 let pollTimer: number | null = null;
 let pollConsumers = 0;
+let activePollAttempt = 0;
+let activePollSignature = "";
+const optimisticPollDemands = new Map<string, number>();
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
+
+function getActivePollSignature() {
+  const activeRuns = sharedTabs
+    .filter((tab) => activeStatuses.has(tab.run.status))
+    .map((tab) => `${tab.runId}:${tab.run.status}`)
+  return [...activeRuns, ...optimisticPollDemands.keys()].sort().join("|");
+}
+
+function clearRunTabsPoll() {
+  if (pollTimer !== null) window.clearTimeout(pollTimer);
+  pollTimer = null;
+}
+
+function scheduleRunTabsPoll() {
+  const shouldPoll =
+    pollConsumers > 0 && document.visibilityState === "visible";
+  const signature = getActivePollSignature();
+  if (!shouldPoll || !signature) {
+    clearRunTabsPoll();
+    activePollAttempt = 0;
+    activePollSignature = signature;
+    return;
+  }
+  if (signature !== activePollSignature) {
+    clearRunTabsPoll();
+    activePollAttempt = 0;
+    activePollSignature = signature;
+  }
+  if (pollTimer !== null) return;
+
+  activePollAttempt += 1;
+  const delay = syncRetryDelayMs(
+    activePollAttempt,
+    `live-dock:${signature}`,
+    SYNC_RETRY_POLICY.activeRunPollMaxDelayMs,
+  );
+  pollTimer = window.setTimeout(() => {
+    pollTimer = null;
+    void refreshRunTabs();
+  }, delay);
+}
 
 /** The dock already knows which run belongs to an open thread. Follow AI in
  * the thread panel must lock that actor, not a leftover location from another
@@ -96,16 +142,11 @@ export function runIdForLiveThread(threadId: string): string | null {
 function syncPollingVisibility() {
   const shouldPoll =
     pollConsumers > 0 && document.visibilityState === "visible";
-  if (shouldPoll && pollTimer === null) {
-    pollTimer = window.setInterval(
-      () => void refreshRunTabs(),
-      LIVE_DOCK_ACTIVE_POLL_MS,
-    );
-  } else if (!shouldPoll && pollTimer !== null) {
-    window.clearInterval(pollTimer);
-    pollTimer = null;
+  if (!shouldPoll) {
+    clearRunTabsPoll();
+    return;
   }
-  if (shouldPoll) void refreshRunTabs();
+  void refreshRunTabs();
 }
 
 function refreshRunTabs(force = false) {
@@ -125,18 +166,26 @@ function refreshRunTabs(force = false) {
     .catch(() => undefined)
     .finally(() => {
       if (sharedRefresh === pending) sharedRefresh = null;
+      scheduleRunTabsPoll();
     });
   sharedRefresh = pending;
   return pending;
 }
 
-function beginPolling() {
+function beginPolling(demand?: string) {
   pollConsumers += 1;
+  if (demand)
+    optimisticPollDemands.set(demand, (optimisticPollDemands.get(demand) ?? 0) + 1);
   if (pollConsumers === 1)
     document.addEventListener("visibilitychange", syncPollingVisibility);
   syncPollingVisibility();
   return () => {
     pollConsumers = Math.max(0, pollConsumers - 1);
+    if (demand) {
+      const remaining = (optimisticPollDemands.get(demand) ?? 1) - 1;
+      if (remaining > 0) optimisticPollDemands.set(demand, remaining);
+      else optimisticPollDemands.delete(demand);
+    }
     if (pollConsumers === 0) {
       document.removeEventListener("visibilitychange", syncPollingVisibility);
       syncPollingVisibility();
@@ -508,19 +557,13 @@ export function LiveDock({
     };
   }, [refresh, story]);
 
+  const optimisticPollingKey = !story && optimistic && ["starting", "streaming"].includes(optimistic.status)
+    ? `optimistic:${optimistic.runId ?? optimistic.threadId ?? "pending"}:${optimistic.status}`
+    : null;
   useEffect(() => {
-    if (
-      story ||
-      !optimistic ||
-      !["starting", "streaming"].includes(optimistic.status)
-    )
-      return;
-    void refresh(true);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh(true);
-    }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [optimistic, optimistic?.runId, optimistic?.status, refresh, story]);
+    if (!optimisticPollingKey) return;
+    return beginPolling(optimisticPollingKey);
+  }, [optimisticPollingKey]);
 
   useEffect(() => {
     if (!optimistic?.runId || !(optimistic.steps?.length ?? 0)) return;

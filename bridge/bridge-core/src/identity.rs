@@ -120,14 +120,16 @@ mod tests {
             volume: 7,
             file_index: 99,
         };
-        assert!(adopt(
-            &candidates,
-            Some(&copy),
-            "Spectra/P8V1-D3-collab.docx",
-            "same",
-            10
-        )
-        .is_none());
+        assert!(
+            adopt(
+                &candidates,
+                Some(&copy),
+                "Spectra/P8V1-D3-collab.docx",
+                "same",
+                10
+            )
+            .is_none()
+        );
     }
 
     #[test]

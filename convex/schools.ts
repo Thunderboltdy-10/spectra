@@ -199,11 +199,13 @@ export const cancelOnboarding = mutation({
       throw new Error(
         "SCHOOL_ONBOARDING_NOT_REVERSIBLE: This onboarding has already completed.",
       );
-    const memberships = await ctx.db
+    const activeMembership = await ctx.db
       .query("schoolMemberships")
-      .withIndex("by_school", (q) => q.eq("schoolId", saga.schoolId))
-      .collect();
-    if (memberships.some((membership) => membership.status === "active"))
+      .withIndex("by_school_status", (q) =>
+        q.eq("schoolId", saga.schoolId).eq("status", "active"),
+      )
+      .first();
+    if (activeMembership)
       throw new Error(
         "SCHOOL_ONBOARDING_NOT_REVERSIBLE: An administrator has already joined.",
       );

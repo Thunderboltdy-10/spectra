@@ -150,6 +150,16 @@ export function formatPlanApplicationPublicError(error: unknown) {
   return humanizePublicFailure(message);
 }
 
+/** `focus` is prompt context only; canonical targets use owned object ids. */
+export function dropPlanIntentFocusHint<T>(value: T): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const plan = value as Record<string, unknown>;
+  const intent = plan.intent;
+  if (!intent || typeof intent !== "object" || Array.isArray(intent)) return value;
+  delete (intent as Record<string, unknown>).focus;
+  return value;
+}
+
 /** Harmless envelope slips models emit that Zod would otherwise reject. */
 export function coerceCommonPlanSchemaSlips(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -255,6 +265,17 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
     /\?|which|what|clarify|choose|pick|select/i.test(plan.finalResponse)
   ) {
     plan.decision = "clarify";
+  }
+  if (
+    plan.decision !== "operate" &&
+    plan.intent &&
+    typeof plan.intent === "object" &&
+    !Array.isArray(plan.intent)
+  ) {
+    // Operation indexes have no meaning once this plan becomes a reply,
+    // clarification, or refusal. Target resolution can discard an edit plan
+    // when it needs the user to choose between otherwise valid targets.
+    delete (plan.intent as Record<string, unknown>).obligations;
   }
   if (
     (plan.decision === "answer" ||

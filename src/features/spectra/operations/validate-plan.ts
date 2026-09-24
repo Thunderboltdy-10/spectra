@@ -43,21 +43,24 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     && intent.requestedArtifactTypes.length > 0
     ? 1
     : intent.requestedVisibleArtifactCount;
-  const createdTypes = new Set(creates.map((operation) => operation.input.blueprintKey));
-  const oneRepeatedRequestedType = creates.length === requestedVisibleArtifactCount + 1
-    && requestedVisibleArtifactCount === createdTypes.size
-    && creates.every((operation) => intent.requestedArtifactTypes.includes(operation.input.blueprintKey));
-  if (creates.length > requestedVisibleArtifactCount && !oneRepeatedRequestedType) {
+  const createdTypes = new Set<string>(creates.map((operation) => operation.input.blueprintKey));
+  if (creates.length > requestedVisibleArtifactCount) {
     throw new Error("The plan creates more visible artifacts than the interpreted request.");
   }
   if ((intent.mode === "create" || intent.mode === "mixed") && creates.length < requestedVisibleArtifactCount)
     throw new Error("The plan does not create every artifact in the interpreted request. Complete the remaining outcomes before submitting.");
+  if (creates.length > 0) {
+    for (const requestedType of intent.requestedArtifactTypes) {
+      if (!createdTypes.has(requestedType))
+        throw new Error(`The plan does not create the requested ${requestedType} artifact. Complete the remaining outcomes before submitting.`);
+    }
+  }
   for (const operation of creates) {
     if (!intent.requestedArtifactTypes.includes(operation.input.blueprintKey)) {
       throw new Error(`The proposed ${operation.input.blueprintKey} artifact is unrelated to the interpreted request.`);
     }
     if (operation.input.workspaceId) requireOwnedReference("workspace", operation.input.workspaceId, references.workspaceIds);
-    if (intent.targetWorkspaceId && operation.input.workspaceId && operation.input.workspaceId !== intent.targetWorkspaceId) {
+    if (intent.targetWorkspaceId && (operation.input.workspaceId !== intent.targetWorkspaceId || operation.input.placement !== "context")) {
       throw new Error("The artifact destination does not match the interpreted request.");
     }
     if (operation.input.blueprintKey === "planner_task") {

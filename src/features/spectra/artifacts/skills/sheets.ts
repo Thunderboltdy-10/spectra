@@ -32,6 +32,8 @@ export const sheetsSkill = defineArtifactSkill({
     "named range",
   ],
   operations: [
+    "Put labels and units beside the data, distinguish inputs from calculated results, freeze useful headers, and use readable number formats and widths. Provide a concise interpretation of the verified values, including meaningful limitations.",
+    "For a cell edit, use /sheets/0/cells/D1 or a partial cells map containing only changed addresses, with the actual supplied sheet index. Preserve every unrelated cell and formula; never replace the whole workbook for a new column.",
     "Inspect workbook outline, range values and formulas, dependencies, errors, tables, charts, names, and provenance.",
     "Create, rename, reorder, or remove sheets while preserving stable identities and repairing dependent references.",
     "Set typed cells and formulas, fill or transform ranges, format, validate, merge, insert or remove rows and columns, freeze panes, and create named ranges.",

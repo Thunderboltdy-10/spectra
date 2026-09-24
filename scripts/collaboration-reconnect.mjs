@@ -1,8 +1,13 @@
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const SYNC_RETRY_POLICY = require("../shared/sync-retry-policy.json");
+
 export const COLLAB_RECONNECT = {
-  delay: 400,
+  delay: SYNC_RETRY_POLICY.collaborationMinDelayMs,
   factor: 2,
-  minDelay: 200,
-  maxDelay: 12_000,
+  minDelay: SYNC_RETRY_POLICY.collaborationMinDelayMs,
+  maxDelay: SYNC_RETRY_POLICY.maxDelayMs,
   jitter: true,
   maxAttempts: 0,
   initialDelay: 0,
@@ -22,6 +27,7 @@ export function reconnectDelayMs(
   const boundedAttempt = Math.max(0, Math.floor(attempt));
   const raw = Math.min(maxDelay, delay * factor ** boundedAttempt);
   if (!jitter) return Math.max(minDelay, Math.floor(raw));
-  const span = Math.max(0, raw - minDelay);
-  return Math.floor(minDelay + random() * span);
+  const spread = Math.floor((raw * SYNC_RETRY_POLICY.jitterPercent) / 100);
+  const offset = Math.floor(random() * (spread * 2 + 1));
+  return Math.min(maxDelay, Math.max(minDelay, Math.floor(raw) - spread + offset));
 }

@@ -22,6 +22,7 @@ import {
   EMPTY_PRESENCE,
   EMPTY_SYNC_SNAPSHOT,
 } from "./scoped-snapshots";
+import { syncRetryDelayMs } from "../../../../shared/sync-retry-policy";
 
 const CLOSED_SNAPSHOT: CollaborationSyncSnapshot = EMPTY_SYNC_SNAPSHOT;
 
@@ -84,18 +85,24 @@ export function useArtifactCollaboration(
       document: next.document,
       modelVersion: schemaVersion,
     });
-    setTransport(next);
-    setLocalPersistence(persistence);
+    let cancelled = false;
     // Restore the bounded local Yjs state before joining the room. The room's
     // state-vector handshake then merges the offline branch rather than
     // replacing it or requiring React to replay a stale full snapshot.
     void persistence
       .initialize()
-      .then(() => next.connect())
-      .catch(() => next.connect())
+      .catch(() => undefined)
+      .then((durability) => {
+        if (cancelled) return;
+        if (durability?.pendingRemoteSync)
+          next.markLocalRecoveryPending?.();
+        setTransport(next);
+        setLocalPersistence(persistence);
+        return next.connect();
+      })
       .catch(() => undefined);
     return () => {
-      void persistence.persistNow();
+      cancelled = true;
       persistence.destroy();
       next.destroy();
       setTransport(null);
@@ -145,6 +152,32 @@ export function useArtifactCollaboration(
     }
   }, [snapshot.state, snapshot.unsynchronizedChanges]);
   useEffect(() => {
+    if (!localPersistence) return;
+    const flush = () => void localPersistence.persistNow();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (snapshot.unsynchronizedChanges <= 0) return;
+      const durability = localPersistence.getSnapshot();
+      const locallyCommitted =
+        (durability.state === "local_only" && durability.pendingRemoteSync) ||
+        (durability.state === "ready" && !durability.pendingRemoteSync);
+      if (locallyCommitted) return;
+      flush();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [localPersistence, snapshot.unsynchronizedChanges]);
+  useEffect(() => {
     if (
       !transport ||
       recoveringRef.current ||
@@ -160,8 +193,11 @@ export function useArtifactCollaboration(
     // reapply that draft under a fresh region claim.
     recoveringRef.current = true;
     const attempt = recoveryAttemptRef.current;
-    const recoveryDelay = Math.min(10_000, 750 * 2 ** attempt);
-    recoveryAttemptRef.current = Math.min(attempt + 1, 5);
+    const recoveryDelay = syncRetryDelayMs(
+      attempt + 1,
+      `collaboration-recovery:${artifactId}`,
+    );
+    recoveryAttemptRef.current = Math.min(attempt + 1, 32);
     const timer = window.setTimeout(() => {
       transport.destroy();
       setGeneration((value) => value + 1);
@@ -176,11 +212,16 @@ export function useArtifactCollaboration(
     snapshot.state,
     snapshot.unsynchronizedChanges,
     transport,
+    artifactId,
   ]);
   const recoverAuthoritative = useCallback(() => {
     transport?.destroy();
     setGeneration((value) => value + 1);
   }, [transport]);
+  const canRecoverOffline =
+    localDurability.state === "ready" ||
+    localDurability.state === "local_only" ||
+    localDurability.state === "persisting";
   return {
     transport,
     ...snapshot,
@@ -192,6 +233,8 @@ export function useArtifactCollaboration(
     // private artifacts still need to be editable when the live socket is
     // slow or unavailable, and shared sessions should keep local drafts.
     canEdit:
-      snapshot.state !== "permission_lost" && snapshot.level !== "read",
+      snapshot.state !== "permission_lost" &&
+      snapshot.level !== "read" &&
+      (snapshot.state === "synchronized" || canRecoverOffline),
   };
 }

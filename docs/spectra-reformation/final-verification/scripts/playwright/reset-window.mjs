@@ -1,6 +1,8 @@
 async (page) => {
   if (page.__spectraP8Network) {
+    page.__spectraP8Network.generation += 1;
     page.__spectraP8Network.responses.length = 0;
+    page.__spectraP8Network.transfers.length = 0;
     page.__spectraP8Network.failures.length = 0;
     page.__spectraP8Network.pageErrors.length = 0;
   }

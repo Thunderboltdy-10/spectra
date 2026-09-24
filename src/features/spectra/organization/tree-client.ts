@@ -138,7 +138,7 @@ export function useTreeChildren(
           }
         : "skip",
     ),
-    { initialNumItems: options?.pageSize ?? 150 },
+    { initialNumItems: options?.pageSize ?? 50 },
   );
   return {
     nodes: result.results as unknown as TreeNode[],
@@ -150,11 +150,16 @@ export function useTreeChildren(
 
 /** Containers under a parent, for the navigation rail. */
 export function useTreeContainers(parentId: string | null, enabled = true) {
-  const result = useQuery(
-    api.orgTree.listContainers,
+  const result = usePaginatedQuery(
+    api.orgTree.containersPage,
     useAuthedArgs(enabled ? { parentId: nodeArg(parentId) } : "skip"),
+    { initialNumItems: 50 },
   );
-  return (result?.nodes ?? null) as TreeNode[] | null;
+  return {
+    nodes: result.results as unknown as TreeNode[],
+    status: result.status,
+    loadMore: result.loadMore,
+  };
 }
 
 export function useTreePath(nodeId: string | null) {
@@ -175,24 +180,28 @@ export function useTreeSearch(
   term: string,
   kinds?: TreeNode["kind"][],
   scopeNodeId?: string | null,
+  typeFilter?: string,
 ) {
   const trimmed = term.trim();
-  const result = useQuery(
-    api.orgTree.search,
+  const result = usePaginatedQuery(
+    api.orgTree.searchPage,
     useAuthedArgs(
       trimmed.length >= 2
         ? {
             term: trimmed,
             kinds,
-            limit: 60,
+            typeFilter,
             scopeNodeId: scopeNodeId ?? undefined,
           }
         : "skip",
     ),
+    { initialNumItems: 50 },
   );
   return {
     active: trimmed.length >= 2,
-    results: (result?.results ?? null) as TreeNode[] | null,
+    results: result.results as unknown as TreeNode[],
+    status: result.status,
+    loadMore: result.loadMore,
   };
 }
 
@@ -200,18 +209,21 @@ export function useTreeQuickView(
   view: QuickViewKey | null,
   kinds?: TreeNode["kind"][],
   scopeNodeId?: string | null,
+  typeFilter?: string,
 ) {
-  const result = useQuery(
-    api.orgTree.quickView,
+  const result = usePaginatedQuery(
+    api.orgTree.quickViewPage,
     useAuthedArgs(
       view
-        ? { view, kinds, limit: 300, scopeNodeId: scopeNodeId ?? undefined }
+        ? { view, kinds, typeFilter, scopeNodeId: scopeNodeId ?? undefined }
         : "skip",
     ),
+    { initialNumItems: 50 },
   );
   return {
-    nodes: (result?.nodes ?? null) as TreeNode[] | null,
-    total: result?.total ?? 0,
+    nodes: result.results as unknown as TreeNode[],
+    status: result.status,
+    loadMore: result.loadMore,
   };
 }
 

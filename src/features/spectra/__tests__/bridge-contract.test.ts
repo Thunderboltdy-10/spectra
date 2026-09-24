@@ -6,6 +6,24 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("N3 Bridge contract", () => {
+  it("keeps Spectra folder selection alive without blocking Bridge health", async () => {
+    const app = fs.readFileSync(
+      path.join(process.cwd(), "bridge/bridge-app/src/main.rs"),
+      "utf8",
+    );
+    const client = fs.readFileSync(
+      path.join(process.cwd(), "src/features/spectra/bridge/client.ts"),
+      "utf8",
+    );
+    const selectFolder = client.slice(
+      client.indexOf("export async function selectBridgeFolder()"),
+      client.indexOf("export async function retryBridgeFolder"),
+    );
+    expect(app).toContain("app.dialog().file().pick_folder(move |selection|");
+    expect(app).not.toContain("blocking_pick_folder()");
+    expect(selectFolder).toContain("BRIDGE_FOLDER_PICKER_TIMEOUT_MS");
+  });
+
   it("shows an update-required state on a protocol-major mismatch", () => {
     expect(protocolMajor("1.4")).toBe(1);
     expect(bridgeConnectionState({ version: "0.1", paired: true, protocolVersion: "2.0", port: 47615 })).toBe("update-required");
@@ -106,9 +124,11 @@ describe("N3 Bridge contract", () => {
     const writes = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
     const structure = fs.readFileSync(path.join(process.cwd(), "convex/bridgeStructure.ts"), "utf8");
     expect(writes).toContain("const abandonedClaims = await ctx.db.query(\"bridgeWriteRequests\")");
-    expect(writes).toContain("q.lt(q.field(\"claimedAt\"), now - 60_000)");
+    expect(writes).toContain(".withIndex(\"by_device_state_claimed\"");
+    expect(writes).toContain(".lt(\"claimedAt\", now - BRIDGE_CLAIM_REDRIVE_MS)");
     expect(structure).toContain("const abandoned = await ctx.db.query(\"bridgeFsRequests\")");
-    expect(structure).toContain("q.lt(q.field(\"claimedAt\"), now - 60_000)");
+    expect(structure).toContain(".withIndex(\"by_device_state_claimed\"");
+    expect(structure).toContain(".lt(\"claimedAt\", now - BRIDGE_CLAIM_REDRIVE_MS)");
   });
 
   it("turns a concurrent device revision into a conflict, never last-write-wins", () => {

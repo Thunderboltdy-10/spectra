@@ -169,6 +169,19 @@ function rememberEvent(event: SpectraAiUiEvent): void {
  * and the app choreography coordinator. Non-followed actors update remembered
  * location without moving the user. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
+  // This is a requested application action. Follow controls incidental AI
+  // movement; it must not suppress an explicit request to open a view.
+  if (event.key === "navigate_spectra") {
+    const destination = event.payload?.destination;
+    const target = typeof event.payload?.targetId === "string" ? event.payload.targetId : undefined;
+    if (destination === "artifact" && target) {
+      void spectraBus.command("work.open", { workId: target, surface: "panel" });
+    } else if (destination === "library" || destination === "calendar" || destination === "settings" || destination === "workspace") {
+      void spectraBus.command("navigation.show", { route: destination, intent: "explicit", ...(target ? { target } : {}) });
+    }
+    if (event.runId) performAppUiEvent(event);
+    return;
+  }
   rememberEvent(event);
   if (event.runId) performAppUiEvent(event);
 }

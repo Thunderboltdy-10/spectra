@@ -1,8 +1,13 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import {
+  CALENDAR_RANGE_BUCKET_LIMIT,
+  createCalendarReadMetrics,
+  upsertCalendarItemReadModel,
+} from "./calendarReadModels";
 
 const modules = import.meta.glob("./**/*.ts");
 const DAY = 24 * 60 * 60 * 1_000;
@@ -164,12 +169,14 @@ async function backfillItems(t: ReturnType<typeof setupTest>) {
     const page: {
       cursor: string | null;
       done: boolean;
+      processed: number;
       readMetrics: { writes: number };
     } = await t.mutation(internal.calendar.backfillItemReadModels, {
       cursor,
       limit: 25,
     });
     cursor = page.cursor;
+    expect(page.processed).toBeLessThanOrEqual(10);
     writes += page.readMetrics.writes;
     pages += 1;
     expect(pages).toBeLessThan(20);
@@ -478,5 +485,87 @@ describe("bounded Calendar discovery", () => {
     expect(projections.tab?.projectionVersion).toBeUndefined();
     expect(projections.tab?.runSummary).toBeUndefined();
     expect(projections.summary?.runSummary).toBeUndefined();
+  });
+});
+
+describe("Calendar bucket write fanout", () => {
+  it("updates long-item metadata without reading buckets and explicitly repairs a missing bucket", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendar(t);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.outsideId, { endAt: 600 * DAY });
+      const item = (await ctx.db.get(seeded.outsideId))!;
+      await upsertCalendarItemReadModel(ctx, item);
+      const buckets = await ctx.db.query("calendarItemRangeBuckets")
+        .withIndex("by_item_bucket", q => q.eq("itemId", item._id)).collect();
+      expect(buckets).toHaveLength(CALENDAR_RANGE_BUCKET_LIMIT);
+      const initialIds = buckets.map(row => row._id);
+
+      await ctx.db.patch(item._id, { title: "Renamed long event", notes: "Updated note", updatedAt: item.updatedAt + 1 });
+      const updated = (await ctx.db.get(item._id))!;
+      const metrics = createCalendarReadMetrics();
+      const queries = vi.spyOn(ctx.db, "query");
+      await upsertCalendarItemReadModel(ctx, updated, metrics);
+      expect(queries.mock.calls.map(([table]) => table)).toEqual(["calendarItemReadModels"]);
+      queries.mockRestore();
+      expect(metrics).toMatchObject({ compactQueries: 1, writes: 1, deletes: 0 });
+      const model = await ctx.db.query("calendarItemReadModels")
+        .withIndex("by_item", q => q.eq("itemId", item._id)).unique();
+      expect(model).toMatchObject({ title: "Renamed long event", notes: "Updated note" });
+      expect((await ctx.db.query("calendarItemRangeBuckets")
+        .withIndex("by_item_bucket", q => q.eq("itemId", item._id)).collect()).map(row => row._id)).toEqual(initialIds);
+
+      await ctx.db.delete(buckets[0]!._id);
+      const repair = createCalendarReadMetrics();
+      await upsertCalendarItemReadModel(ctx, updated, repair, { repairRangeBuckets: true });
+      expect(repair).toMatchObject({ compactQueries: 2, writes: 1, deletes: 0 });
+      expect(await ctx.db.query("calendarItemRangeBuckets")
+        .withIndex("by_item_bucket", q => q.eq("itemId", item._id)).collect()).toHaveLength(CALENDAR_RANGE_BUCKET_LIMIT);
+    });
+  });
+
+  it("repairs bucket ownership and membership when ownership, dates or status change", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendar(t);
+    await t.run(async (ctx) => {
+      const item = (await ctx.db.get(seeded.outsideId))!;
+      await upsertCalendarItemReadModel(ctx, item);
+      const otherAccount = await ctx.db.insert("accounts", {
+        clerkId: "calendar-new-owner", email: "calendar-new-owner@example.test",
+        name: "New owner", emailVerified: true, status: "active",
+        createdAt: item.createdAt, updatedAt: item.updatedAt,
+      });
+      for (const patch of [
+        { ownerAccountId: otherAccount },
+        { startAt: 40 * DAY, endAt: 41 * DAY },
+        { status: "removed" as const },
+        { status: "active" as const },
+      ]) {
+        await ctx.db.patch(item._id, patch);
+        const next = (await ctx.db.get(item._id))!;
+        await upsertCalendarItemReadModel(ctx, next);
+        const buckets = await ctx.db.query("calendarItemRangeBuckets")
+          .withIndex("by_item_bucket", q => q.eq("itemId", item._id)).collect();
+        if (next.status === "removed") expect(buckets).toHaveLength(0);
+        else {
+          expect(buckets.length).toBeGreaterThan(0);
+          for (const bucket of buckets) expect(bucket).toMatchObject({
+            ownerAccountId: otherAccount, startAt: next.startAt, endAt: next.endAt, status: next.status,
+          });
+        }
+      }
+    });
+  });
+
+  it("caps repair pages for worst-case day-bucket fanout and keeps an advancing continuation", async () => {
+    const t = setupTest();
+    await seedCalendar(t);
+    const first = await t.mutation(internal.calendar.backfillItemReadModels, { cursor: null, limit: 100 });
+    expect(first.processed).toBe(10);
+    expect(first.done).toBe(false);
+    expect(first.cursor).toEqual(expect.any(String));
+    const next = await t.mutation(internal.calendar.backfillItemReadModels, { cursor: first.cursor, limit: 100 });
+    expect(next.processed).toBe(10);
+    expect(next.cursor).not.toBe(first.cursor);
   });
 });

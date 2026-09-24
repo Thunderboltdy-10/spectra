@@ -20,7 +20,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /NATIVE_PROMOTION_CLOUD_ONLY/i,
     message: () =>
-      "This file lives on your PC. Open Spectra Bridge on that computer to apply the change to the original.",
+      "This file lives on your PC. Spectra will apply the change when its background connection returns.",
   },
   {
     test: /NATIVE_PROMOTION_UNCHANGED|NATIVE_PROMOTION_REFUSED|NATIVE_PROMOTION_FAILED/i,
@@ -83,7 +83,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "This draft contains an unfinished control that cannot synchronize yet. Your local work is preserved.",
   },
   {
-    test: /COLLABORATION_SYNC_TIMEOUT|COLLABORATION_NOT_SYNCHRONIZED|COLLABORATION_NOT_AVAILABLE|ARTIFACT_LIVE_MODEL_UNAVAILABLE|ARTIFACT_LIVE_MODEL_UNINITIALIZED/i,
+    test: /COLLABORATION_CONNECT_TIMEOUT|COLLABORATION_SYNC_TIMEOUT|COLLABORATION_NOT_SYNCHRONIZED|COLLABORATION_NOT_AVAILABLE|ARTIFACT_LIVE_MODEL_UNAVAILABLE|ARTIFACT_LIVE_MODEL_UNINITIALIZED/i,
     message: () =>
       "This edit is still safely held on this device. Spectra will synchronize it when the live connection catches up.",
   },
@@ -125,7 +125,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /failed to fetch|networkerror|load failed|econnrefused/i,
     message: () =>
-      "Spectra Bridge is not running on this PC. Open it, then try again.",
+      "The background file connection for this PC is unavailable. Changes remain queued safely.",
   },
   {
     test: /port .+ unavailable|address already in use|os error 10048/i,

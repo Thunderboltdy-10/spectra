@@ -155,14 +155,14 @@ function RailBranch({
 }) {
   /* This component only exists while its parent is open, so the subscription
      lives exactly as long as the branch the reader can see. */
-  const nodes = useTreeContainers(parentId, true);
+  const { nodes, status, loadMore } = useTreeContainers(parentId, true);
   const seen = handlers.onNodesSeen;
   useEffect(() => {
     if (nodes) seen(nodes);
   }, [nodes, seen]);
 
-  if (!nodes) return depth === 0 ? <RailSkeleton /> : null;
-  if (nodes.length === 0)
+  if (status === "LoadingFirstPage") return <RailSkeleton />;
+  if (nodes.length === 0 && status === "Exhausted")
     return depth === 0 ? null : (
       <p
         className="py-1 text-caption text-[var(--text-tertiary)]"
@@ -263,6 +263,16 @@ function RailBranch({
           </div>
         );
       })}
+      {status === "CanLoadMore" || status === "LoadingMore" ? (
+        <button
+          type="button"
+          disabled={status === "LoadingMore"}
+          onClick={() => loadMore(50)}
+          className="mx-2 my-1 rounded-control px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring-color)] disabled:opacity-50"
+        >
+          {status === "LoadingMore" ? "Loading folders…" : "Load more folders"}
+        </button>
+      ) : null}
     </div>
   );
 }

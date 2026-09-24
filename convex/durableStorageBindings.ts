@@ -30,9 +30,12 @@ export async function assertExclusiveDurableStorage(ctx: Context, storageId: Id<
  * own row. The caller's row is ignored, but every other binding is retained. */
 export async function storageHasOtherBinding(ctx: Context, storageId: Id<"_storage">,
   current: {table: "artifactAssets" | "artifactImportJobs" | "payloadObjects" | "collaborationDurablePayloads" | "spectraRuntimeBuilds" | "spectraRunAttachments"; id: string}) {
-  const [durable, native, asset, candidateAsset, original, candidateOriginal, build, attachment] = await Promise.all([
-    ctx.db.query("collaborationDurablePayloads").withIndex("by_storage", q => q.eq("storageId", storageId)).take(2),
-    ctx.db.query("payloadObjects").withIndex("by_storage", q => q.eq("storageId", storageId)).take(2),
+  // Apply live-state constraints in the index before taking a bounded prefix.
+  // Older released aliases must never hide a later binding that owns the bytes.
+  const [durable, native, quarantined, asset, candidateAsset, original, candidateOriginal, build, attachment] = await Promise.all([
+    ctx.db.query("collaborationDurablePayloads").withIndex("by_storage_status", q => q.eq("storageId", storageId).eq("status", "active")).take(2),
+    ctx.db.query("payloadObjects").withIndex("by_storage_state", q => q.eq("storageId", storageId).eq("state", "active")).take(2),
+    ctx.db.query("payloadObjects").withIndex("by_storage_state", q => q.eq("storageId", storageId).eq("state", "quarantined")).take(2),
     ctx.db.query("artifactAssets").withIndex("by_storage", q => q.eq("storageId", storageId)).take(2),
     ctx.db.query("artifactAssets").withIndex("by_candidate_storage", q => q.eq("candidateStorageId", storageId)).take(2),
     ctx.db.query("artifactImportJobs").withIndex("by_storage", q => q.eq("originalStorageId", storageId)).take(2),
@@ -41,8 +44,8 @@ export async function storageHasOtherBinding(ctx: Context, storageId: Id<"_stora
     ctx.db.query("spectraRunAttachments").withIndex("by_storage", q => q.eq("storageId", storageId)).take(2),
   ]);
   const groups = [
-    ["collaborationDurablePayloads", durable.filter(row => row.status === "active")],
-    ["payloadObjects", native.filter(row => row.state !== "released")],
+    ["collaborationDurablePayloads", durable],
+    ["payloadObjects", [...native, ...quarantined]],
     ["artifactAssets", [...asset, ...candidateAsset]],
     ["artifactImportJobs", [...original, ...candidateOriginal]],
     ["spectraRuntimeBuilds", build], ["spectraRunAttachments", attachment],
@@ -61,11 +64,12 @@ export async function deleteStorageIfNoOtherBinding(ctx: MutationCtx, storageId:
 /** Called after releasing the current row, or before deleting a proven fresh
  * redundant upload. Indexed probes also protect legacy aliases across owners. */
 export async function deleteUnboundDurableStorage(ctx: MutationCtx, storageId: Id<"_storage">) {
-  const durable = await ctx.db.query("collaborationDurablePayloads").withIndex("by_storage", q => q.eq("storageId", storageId))
-    .filter(q => q.eq(q.field("status"), "active")).first();
-  const native = await ctx.db.query("payloadObjects").withIndex("by_storage", q => q.eq("storageId", storageId))
-    .filter(q => q.neq(q.field("state"), "released")).first();
-  if (durable || native || await intakeBinding(ctx, storageId) ||
+  const [durable, native, quarantined] = await Promise.all([
+    ctx.db.query("collaborationDurablePayloads").withIndex("by_storage_status", q => q.eq("storageId", storageId).eq("status", "active")).first(),
+    ctx.db.query("payloadObjects").withIndex("by_storage_state", q => q.eq("storageId", storageId).eq("state", "active")).first(),
+    ctx.db.query("payloadObjects").withIndex("by_storage_state", q => q.eq("storageId", storageId).eq("state", "quarantined")).first(),
+  ]);
+  if (durable || native || quarantined || await intakeBinding(ctx, storageId) ||
     await ctx.db.query("spectraRuntimeBuilds").withIndex("by_storage", q => q.eq("storageId", storageId)).first() ||
     await ctx.db.query("spectraRunAttachments").withIndex("by_storage", q => q.eq("storageId", storageId)).first()) return false;
   if (!await ctx.db.system.get(storageId)) return false;

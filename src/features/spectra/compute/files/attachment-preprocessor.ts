@@ -94,13 +94,17 @@ async function extractPdfText(buffer: Uint8Array, characterLimit: number) {
   const pdfOptions = { data: buffer, enableScripting: false };
   const document = await pdfjs.getDocument(pdfOptions).promise;
   const pages: string[] = [];
+  const sourceMap: NonNullable<PreparedAttachment["sourceMap"]> = [];
   let characters = 0;
+  let processedPages = 0;
+  let truncated = false;
   for (
     let pageNumber = 1;
     pageNumber <= document.numPages && characters < characterLimit;
     pageNumber += 1
   ) {
     const page = await document.getPage(pageNumber);
+    processedPages = pageNumber;
     const text = await page.getTextContent();
     const pageText = text.items
       .flatMap((item) =>
@@ -111,13 +115,19 @@ async function extractPdfText(buffer: Uint8Array, characterLimit: number) {
       .trim();
     if (!pageText) continue;
     const labelled = `Page ${pageNumber}\n${pageText}`;
-    const remaining = Math.max(0, characterLimit - characters);
-    pages.push(labelled.slice(0, remaining));
-    characters += Math.min(labelled.length, remaining);
+    const separatorLength = pages.length ? 2 : 0;
+    const remaining = Math.max(0, characterLimit - characters - separatorLength);
+    const retained = labelled.slice(0, remaining);
+    truncated ||= retained.length < labelled.length;
+    if (!retained) break;
+    const startOffset = characters + separatorLength;
+    pages.push(retained);
+    characters = startOffset + retained.length;
+    sourceMap.push({ kind: "page", label: `Page ${pageNumber}`, startOffset, endOffset: characters });
   }
   const pageCount = document.numPages;
   await document.cleanup();
-  return { text: pages.join("\n\n"), pageCount };
+  return { text: pages.join("\n\n"), pageCount, sourceMap, truncated: truncated || processedPages < pageCount };
 }
 
 async function extractXlsxText(buffer: Uint8Array, characterLimit: number) {
@@ -217,7 +227,9 @@ export async function prepareAttachments(
         throw new Error(`Invalid PDF attachment: ${name}`);
       const local = await extractPdfText(attachmentBuffer(row.data, name, 10 * 1024 * 1024), Math.min(60_000, remaining));
       extractedCharacters += local.text.length;
-      prepared.push({ name, mimeType: "application/pdf", size, handling: "pdf", data: row.data, extractedText: local.text, pageCount: local.pageCount });
+      prepared.push({ name, mimeType: "application/pdf", size, handling: "pdf", data: row.data, extractedText: local.text, pageCount: local.pageCount, sourceMap: local.sourceMap,
+        ...(local.truncated ? { warnings: [{ code: "extraction_truncated", message: "The PDF exceeds the text extraction budget. The original is retained; extracted citations cover only the supplied passages." }] } : {}),
+      });
       continue;
     }
     if (row.handling === "text") {
@@ -273,10 +285,10 @@ export async function prepareAttachments(
           ? { kind: attachment.handling, value: { text: attachment.extractedText } }
           : undefined),
       sourceMap,
-      warnings:
+      warnings: attachment.warnings ?? (
         attachment.handling === "pdf" && !attachment.extractedText
           ? [{ code: "ocr_not_performed", message: "No extractable PDF text was found. Spectra retains the original for native visual understanding and does not claim OCR." }]
-          : [],
+          : []),
       provenance: {
         source: "user_upload" as const,
         originalFileId,

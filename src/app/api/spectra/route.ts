@@ -135,6 +135,9 @@ function requireFlashcardDirection(value: unknown) {
 }
 
 function emptySchoolRead(action: string) {
+  if (action === "bootstrap") return ok({ actor: null, needsSchool: true });
+  if (action === "artifactPage" || action === "workspacePage")
+    return ok({ items: [], continueCursor: null, isDone: true, needsSchool: true });
   if (action === "overview") {
     return ok({
       actor: null,
@@ -182,6 +185,29 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       if (isAuthNoSchool(error)) return emptySchoolRead(action);
       throw error;
+    }
+
+    // Shell identity is independent of catalog, workspace contents and runs.
+    // An unavailable collection must not prevent navigation or opening a file.
+    if (action === "bootstrap") return ok({ actor, needsSchool: false });
+
+    if (action === "artifactPage" || action === "workspacePage") {
+      const scope = params.get("scope") ?? "school";
+      if (action === "artifactPage" && scope !== "school" && scope !== "owned")
+        return badRequest("Choose Your work or the school catalog.");
+      const limit = params.has("limit") ? Number(params.get("limit")) : undefined;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1))
+        return badRequest("Choose a positive whole-number page size.");
+      const common = { limit, cursor: params.get("cursor") ?? undefined, search: params.get("search") ?? undefined };
+      const page = action === "artifactPage"
+        ? await spectraQuery("spectraArtifacts:listPage", { ...common,
+            scope,
+            status: params.get("status") ?? undefined,
+            blueprintKey: params.get("blueprintKey") ?? undefined,
+            placement: params.get("placement") ?? "all",
+          })
+        : await spectraQuery("spectraWorkspaces:listPage", { ...common, includeArchived: params.get("includeArchived") === "true" });
+      return ok(page);
     }
 
     if (action === "workspaces") {

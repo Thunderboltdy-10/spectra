@@ -558,9 +558,8 @@
 /* ---------------------------------------------------------------------------
    Tracked changes.
 
-   Read-only by design: accepting or rejecting a Word revision would rewrite
-   parts Spectra does not model. The rail says that in words rather than
-   offering buttons that cannot keep their promise.
+   Supported revisions, comments, citations and notes share this review rail.
+   Unmodeled native constructs retain their individual read-only explanation.
    --------------------------------------------------------------------------- */
 
 .spectra-document-revisions {
@@ -570,12 +569,19 @@
   flex-direction: column;
   gap: 6px;
   margin-right: 14px;
-  padding-bottom: 10px;
+  /* This rail scrolls independently in continuous layout. Give its final
+     action the same measured composer clearance as the main scrollport. */
+  padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
+  scroll-padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
   overflow-y: auto;
   border: 1px solid #e3e6e0;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 9px 28px rgba(40, 50, 44, 0.045);
+}
+
+.spectra-document-revisions > * {
+  flex-shrink: 0;
 }
 
 .spectra-document-revisions > header {

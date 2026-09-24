@@ -1,13 +1,374 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
+import { syncRetryAt } from "../shared/sync-retry-policy";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
+
+async function seedUploadCandidates(
+  t: ReturnType<typeof convexTest>, fixture: Awaited<ReturnType<typeof seedBridge>>, count: number,
+) {
+  return t.run(async (ctx) => {
+    const workId = await ctx.db.insert("spectraArtifacts", {
+      ownerAccountId: fixture.accountId, blueprintKey: "resource", title: "Upload candidate",
+      content: {}, tags: [], status: "active", createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    const replicaIds = [];
+    for (let i = 0; i < count; i++) replicaIds.push(await ctx.db.insert("workReplicas", {
+      accountId: fixture.accountId, workId, kind: "local", deviceId: fixture.deviceId,
+      mountId: fixture.mountId, localResourceId: `lr_${i.toString(16).padStart(16, "0")}`,
+      relativePath: `candidate-${i}.docx`, nativeFormat: "docx", revision: "a".repeat(64),
+      contentHash: "a".repeat(64), state: "current", updatedAt: Date.now(),
+    }));
+    return { workId, replicaIds };
+  });
+}
+
+describe("Bridge pending upload discovery pages", () => {
+  it("keeps an idle device unchanged even with a large current replica set", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    await seedUploadCandidates(t, fixture, 75);
+    const before = await t.run(ctx => ctx.db.get(fixture.deviceId));
+    expect(await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential }))
+      .toEqual({ request: null, hasMore: false });
+    expect(await t.run(ctx => ctx.db.get(fixture.deviceId))).toEqual(before);
+  });
+
+  it("finds a requested source beyond the old first twenty current replicas", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 75);
+    await t.run(ctx => ctx.db.insert("storageStrategyTransitions", {
+      accountId: fixture.accountId, workId, idempotencyKey: "upload-last", fromPreset: "device",
+      toPreset: "spectra", state: "pending", before: { localReplicaIds: [replicaIds[74]] },
+      createdAt: Date.now(), updatedAt: Date.now(),
+    }));
+    const result = await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential });
+    expect(result.request).toMatchObject({ replicaId: replicaIds[74], relativePath: "candidate-74.docx" });
+  });
+
+  it("resumes cursorless clients past more than one page of irrelevant transitions", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 1);
+    await t.run(async ctx => {
+      for (let i = 0; i < 26; i++) await ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId, workId, idempotencyKey: `transition-${i}`, fromPreset: "device",
+        toPreset: i === 25 ? "spectra" : "device", state: "pending", before: { localReplicaIds: replicaIds },
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    for (let i = 0; i < 25; i++) {
+      const page = await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential });
+      expect(page).toEqual({ request: null, hasMore: true });
+    }
+    expect((await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).request)
+      .toMatchObject({ replicaId: replicaIds[0] });
+    expect((await t.run(ctx => ctx.db.get(fixture.deviceId)))?.payloadUploadCursor).toBeUndefined();
+  });
+
+  it("pages legacy transitions without a source snapshot and rechecks replica state", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 26);
+    await t.run(async ctx => {
+      for (const replicaId of replicaIds.slice(0, 25)) await ctx.db.patch(replicaId, { state: "unavailable" });
+      await ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId, workId, idempotencyKey: "legacy-upload", fromPreset: "device",
+        toPreset: "spectra", state: "pending", before: {}, createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    expect(await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).toEqual({ request: null, hasMore: true });
+    expect(await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).toEqual({ request: null, hasMore: true });
+    expect((await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).request)
+      .toMatchObject({ replicaId: replicaIds[25] });
+  });
+
+  it("does not treat a cached transition ID as current authorization or pending work", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 1);
+    const transitionId = await t.run(async ctx => {
+      await ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId, workId, idempotencyKey: "skip-first", fromPreset: "device",
+        toPreset: "device", state: "pending", before: {}, createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      return ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId, workId, idempotencyKey: "cached-target", fromPreset: "device",
+        toPreset: "spectra", state: "pending", before: { localReplicaIds: replicaIds },
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    expect((await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).hasMore).toBe(true);
+    await t.run(ctx => ctx.db.patch(transitionId, { state: "cancelled" }));
+    expect(await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).toEqual({ request: null, hasMore: false });
+  });
+
+  it("resets a malformed saved cursor without blocking a valid pending upload", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 1);
+    await t.run(async ctx => {
+      await ctx.db.patch(fixture.deviceId, { payloadUploadCursor: "old-unsupported-cursor" });
+      await ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId, workId, idempotencyKey: "new-upload", fromPreset: "device",
+        toPreset: "spectra", state: "pending", before: { localReplicaIds: replicaIds },
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    expect((await t.mutation(api.bridgeSync.claimPendingPayloadUpload, { credential })).request)
+      .toMatchObject({ replicaId: replicaIds[0] });
+  });
+});
+
+describe("Bridge structure receipts", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  async function seedStructure(t: ReturnType<typeof convexTest>) {
+    const fixture = await seedBridge(t);
+    const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 1);
+    const requestId = await t.run(ctx => ctx.db.insert("bridgeFsRequests", {
+      ...fixture, workId, replicaId: replicaIds[0], localResourceId: "lr_0000000000000000",
+      direction: "spectra-to-disk", kind: "rename", sourceRelativePath: "candidate-0.docx",
+      targetRelativePath: "renamed.docx", idempotencyKey: "rename-receipt", state: "pending", baseRevision: "a".repeat(64),
+      explanation: "Disposable rename", createdAt: Date.now(), updatedAt: Date.now(),
+    }));
+    return { ...fixture, workId, replicaId: replicaIds[0], requestId };
+  }
+
+  async function claimStructure(t: ReturnType<typeof convexTest>) {
+    const { request } = await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true });
+    if (!request) throw new Error("Expected a fenced structure claim");
+    return { credential, requestId: request.requestId, claimGeneration: request.claimGeneration, claimToken: request.claimToken };
+  }
+
+  it("withholds structural mutations from workers without fencing support", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const before = await t.run(ctx => ctx.db.get(fixture.requestId));
+    expect(await t.mutation(api.bridgeStructure.claim, { credential })).toEqual({ request: null, upgradeRequired: true });
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toEqual(before);
+    expect((await claimStructure(t)).claimGeneration).toBe(1);
+  });
+
+  it("parks Office locks until retry time and rotates the lease on retry", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const first = await claimStructure(t);
+    const waiting = await t.mutation(api.bridgeStructure.complete, {
+      ...first, outcome: "waiting", errorCode: "office-locked", errorMessage: "Close the file to retry.",
+    });
+    const retryAt = syncRetryAt(Date.now(), 1, "rename-receipt");
+    expect(waiting).toEqual({ state: "pending", retryAt });
+    expect(retryAt).toBeGreaterThan(Date.now());
+    const parked = await t.run(ctx => ctx.db.get(fixture.requestId));
+    expect(parked).toMatchObject({ state: "pending", retryAt, attemptCount: 1, errorCode: "office-locked" });
+    expect(parked?.claimedAt).toBeUndefined();
+    expect(await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true })).toEqual({ request: null });
+    // A delayed duplicate cannot clear backoff or change the queued outcome.
+    expect(await t.mutation(api.bridgeStructure.complete, { ...first, outcome: "verified" }))
+      .toMatchObject({ state: "pending", ignored: true });
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toEqual(parked);
+    clock.mockReturnValue(retryAt);
+    const next = await claimStructure(t);
+    expect(next.claimGeneration).toBe(first.claimGeneration + 1);
+    expect(next.claimToken).not.toBe(first.claimToken);
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toMatchObject({ state: "claimed", attemptCount: 2 });
+  });
+
+  it.each(["claim", "sweeper"] as const)("ignores every old receipt and refresh after %s redrive", async (redrive) => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const first = await claimStructure(t);
+    clock.mockReturnValue(Date.now() + BRIDGE_CLAIM_REDRIVE_MS + 1);
+    if (redrive === "sweeper") {
+      expect(await t.mutation(internal.bridgeSync.sweepStaleBridgeWork, {})).toEqual({ redriven: 1 });
+      expect(await t.mutation(api.bridgeStructure.refreshClaim, first)).toEqual({ valid: false });
+    }
+    const current = await claimStructure(t);
+    expect(current.claimGeneration).toBe(first.claimGeneration + 1);
+    expect(current.claimToken).not.toBe(first.claimToken);
+    const before = await t.run(ctx => ctx.db.get(fixture.requestId));
+    for (const outcome of ["waiting", "failed", "conflicted", "verified"] as const) {
+      expect(await t.mutation(api.bridgeStructure.complete, { ...first, outcome, actualRelativePath: "stale.docx" }))
+        .toEqual({ state: "claimed", ignored: true, reason: "stale-claim" });
+    }
+    expect(await t.mutation(api.bridgeStructure.refreshClaim, first)).toEqual({ valid: false });
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toEqual(before);
+    expect(await t.mutation(api.bridgeStructure.refreshClaim, current)).toEqual({ valid: true });
+    expect(await t.mutation(api.bridgeStructure.complete, { ...current, outcome: "verified", actualRelativePath: "renamed.docx" }))
+      .toEqual({ state: "verified" });
+    expect((await t.run(ctx => ctx.db.get(fixture.replicaId)))?.relativePath).toBe("renamed.docx");
+  });
+
+  it("refreshes the active lease so the sweeper leaves a delayed worker alone", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const t = setupTest();
+    await seedStructure(t);
+    const claim = await claimStructure(t);
+    clock.mockReturnValue(Date.now() + BRIDGE_CLAIM_REDRIVE_MS - 1);
+    expect(await t.mutation(api.bridgeStructure.refreshClaim, claim)).toEqual({ valid: true });
+    clock.mockReturnValue(Date.now() + 2);
+    expect(await t.mutation(internal.bridgeSync.sweepStaleBridgeWork, {})).toEqual({ redriven: 0 });
+    expect(await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true })).toEqual({ request: null });
+  });
+
+  it.each(["missing base", "changed base", "reassigned resource", "unavailable replica"])("rejects a queued structure request with %s", async (change) => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    await t.run(async ctx => {
+      if (change === "missing base") await ctx.db.patch(fixture.requestId, { baseRevision: undefined });
+      if (change === "changed base") await ctx.db.patch(fixture.replicaId, { revision: "b".repeat(64) });
+      if (change === "reassigned resource") await ctx.db.patch(fixture.replicaId, { localResourceId: "lr_1111111111111111" });
+      if (change === "unavailable replica") await ctx.db.patch(fixture.replicaId, { state: "unavailable" });
+    });
+    expect(await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true })).toEqual({ request: null });
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toMatchObject({
+      state: "conflicted", errorCode: change === "missing base" ? "structure-base-unavailable" : "stale-revision",
+    });
+  });
+
+  it.each(["deleted work", "revoked permission", "detached mount", "changed base", "reassigned resource"])("rejects refresh and completion after %s", async (change) => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const claim = await claimStructure(t);
+    await t.run(async ctx => {
+      if (change === "deleted work") await ctx.db.patch(fixture.workId, { status: "deleted" });
+      if (change === "revoked permission") {
+        const ownerAccountId = await ctx.db.insert("accounts", {
+          clerkId: "new-structure-owner", email: "other@example.test", emailVerified: true,
+          name: "Other", status: "active", createdAt: Date.now(), updatedAt: Date.now(),
+        });
+        await ctx.db.patch(fixture.workId, { ownerAccountId });
+      }
+      if (change === "detached mount") await ctx.db.patch(fixture.mountId, { state: "detached" });
+      if (change === "changed base") await ctx.db.patch(fixture.replicaId, { revision: "b".repeat(64) });
+      if (change === "reassigned resource") await ctx.db.patch(fixture.replicaId, { localResourceId: "lr_1111111111111111" });
+    });
+    const before = await t.run(ctx => ctx.db.get(fixture.requestId));
+    expect(await t.mutation(api.bridgeStructure.refreshClaim, claim)).toEqual({ valid: false });
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toEqual(before);
+    expect(await t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "renamed.docx" }))
+      .toEqual({ state: ["deleted work", "revoked permission"].includes(change) ? "failed" : "conflicted" });
+    expect((await t.run(ctx => ctx.db.get(fixture.replicaId)))?.relativePath).toBe("candidate-0.docx");
+  });
+
+  it("allows an already claimed legacy operation to report its terminal result", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    await t.run(ctx => ctx.db.patch(fixture.requestId, { state: "claimed", baseRevision: undefined, claimedAt: Date.now() }));
+    expect(await t.mutation(api.bridgeStructure.complete, { credential, requestId: fixture.requestId, outcome: "verified", actualRelativePath: "renamed.docx" }))
+      .toEqual({ state: "verified" });
+  });
+
+  it.each(["pending", "ahead", "diverged"] as const)("preserves %s content state when a rename is verified", async (state) => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    await t.run(ctx => ctx.db.patch(fixture.replicaId, { state, pendingContentHash: "b".repeat(64), pendingPayloadRef: "newer-payload" }));
+    const claim = await claimStructure(t);
+    await t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "renamed.docx" });
+    expect(await t.run(ctx => ctx.db.get(fixture.replicaId))).toMatchObject({
+      relativePath: "renamed.docx", state, revision: "a".repeat(64), pendingContentHash: "b".repeat(64), pendingPayloadRef: "newer-payload",
+    });
+  });
+
+  it("rejects an escaping actual path without consuming the current claim", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const claim = await claimStructure(t);
+    await expect(t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "../outside.docx" })).rejects.toThrow();
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toMatchObject({ state: "claimed" });
+    expect((await t.run(ctx => ctx.db.get(fixture.replicaId)))?.relativePath).toBe("candidate-0.docx");
+  });
+
+  it("keeps a terminal receipt immutable after a newer replica move", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const { request: claim } = await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true });
+    expect(claim?.requestId).toBe(fixture.requestId);
+    await t.mutation(api.bridgeStructure.complete, {
+      credential, requestId: fixture.requestId, outcome: "verified", actualRelativePath: "renamed.docx",
+      claimGeneration: claim!.claimGeneration, claimToken: claim!.claimToken,
+    });
+    await t.run(ctx => ctx.db.patch(fixture.replicaId, { relativePath: "newer-move.docx" }));
+    const before = await t.run(ctx => ctx.db.get(fixture.replicaId));
+    expect(await t.mutation(api.bridgeStructure.complete, {
+      credential, requestId: fixture.requestId, outcome: "failed", errorCode: "old-failure",
+    })).toEqual({ state: "verified" });
+    expect(await t.run(ctx => ctx.db.get(fixture.replicaId))).toEqual(before);
+  });
+
+  it("does not let a delayed first receipt roll back a newer move of the same bytes", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const claim = await claimStructure(t);
+    await t.run(ctx => ctx.db.patch(fixture.replicaId, { relativePath: "newer-move.docx" }));
+    const before = await t.run(ctx => ctx.db.get(fixture.replicaId));
+    expect(await t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "renamed.docx" }))
+      .toEqual({ state: "conflicted" });
+    expect(await t.run(ctx => ctx.db.get(fixture.replicaId))).toEqual(before);
+  });
+
+  it("accepts a lost move receipt after discovery already observed its collision destination", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const claim = await claimStructure(t);
+    await t.run(ctx => ctx.db.patch(fixture.replicaId, { relativePath: "renamed (2).docx" }));
+    expect(await t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "renamed (2).docx" }))
+      .toEqual({ state: "verified" });
+  });
+
+  it("captures the queued base and rejects a replica belonging to another work", async () => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const account = await t.run(ctx => ctx.db.get(fixture.accountId));
+    const asUser = t.withIdentity({ subject: account!.clerkId, email: account!.email, emailVerified: true });
+    const request = await asUser.mutation(api.bridgeStructure.request, {
+      workId: fixture.workId, replicaId: fixture.replicaId, kind: "rename",
+      sourceRelativePath: "candidate-0.docx", targetRelativePath: "new.docx", idempotencyKey: "new-intent",
+    });
+    expect(request?.baseRevision).toBe("a".repeat(64));
+    const other = await seedUploadCandidates(t, fixture, 1);
+    await expect(asUser.mutation(api.bridgeStructure.request, {
+      workId: fixture.workId, replicaId: other.replicaIds[0], kind: "rename",
+      sourceRelativePath: "candidate-0.docx", targetRelativePath: "new.docx", idempotencyKey: "wrong-replica",
+    })).rejects.toThrow("LOCAL_REPLICA_REQUIRED");
+  });
+
+  it.each(["before claim", "before completion"])("rechecks artifact permission %s", async (phase) => {
+    const t = setupTest();
+    const fixture = await seedStructure(t);
+    const claim = phase === "before completion"
+      ? (await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true })).request
+      : null;
+    await t.run(async ctx => {
+      const ownerAccountId = await ctx.db.insert("accounts", {
+        clerkId: "other-structure-owner", email: "other@example.test", emailVerified: true,
+        name: "Other", status: "active", createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await ctx.db.patch(fixture.workId, { ownerAccountId });
+    });
+    if (phase === "before claim") {
+      expect((await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true })).request).toBeNull();
+    } else {
+      expect(await t.mutation(api.bridgeStructure.complete, {
+        credential, requestId: fixture.requestId, outcome: "verified", actualRelativePath: "renamed.docx",
+        claimGeneration: claim!.claimGeneration, claimToken: claim!.claimToken,
+      })).toEqual({ state: "failed" });
+    }
+    expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toMatchObject({ state: "failed", errorCode: "permission-revoked" });
+    expect((await t.run(ctx => ctx.db.get(fixture.replicaId)))?.relativePath).toBe("candidate-0.docx");
+  });
+});
 
 function setupTest() {
   const t = convexTest(schema, modules);
@@ -158,6 +519,68 @@ async function seedDeletedWrite(t: ReturnType<typeof convexTest>, state: "pendin
   return { fixture, ...seeded };
 }
 
+async function seedOfficeLockedWrite(
+  t: ReturnType<typeof convexTest>,
+  fixture: Awaited<ReturnType<typeof seedBridge>>,
+  workId: Id<"spectraArtifacts">,
+  replicaId: Id<"workReplicas">,
+  state: "pending" | "claimed" = "pending",
+) {
+  return t.run(async (ctx) => {
+    const now = Date.now();
+    const retryAt = now + 60_000;
+    const idempotencyKey = `office-locked-${state}-${crypto.randomUUID()}`;
+    const baseRevision = "a".repeat(64);
+    const targetRevision = "b".repeat(64);
+    await ctx.db.patch(replicaId, {
+      state: "pending",
+      retryAt: state === "pending" ? retryAt : undefined,
+      errorCode: "office-locked",
+      errorMessage: "Waiting for Office to finish saving",
+      errorAt: now,
+      updatedAt: now,
+    });
+    const operationId = await ctx.db.insert("syncOperations", {
+      accountId: fixture.accountId,
+      workId,
+      replicaId,
+      idempotencyKey,
+      direction: "cloud-to-local",
+      revisionBefore: baseRevision,
+      revisionAfter: targetRevision,
+      state: "pending",
+      actorKind: "user",
+      errorCode: "office-locked",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+      accountId: fixture.accountId,
+      workId,
+      replicaId,
+      deviceId: fixture.deviceId,
+      mountId: fixture.mountId,
+      localResourceId: "lr_eeeeeeeeeeeeeeee",
+      relativePath: "Essay.docx",
+      payloadRef: "office-locked-payload",
+      baseRevision,
+      targetRevision,
+      contentHash: targetRevision,
+      idempotencyKey,
+      regionIds: [],
+      partNames: [],
+      state,
+      ...(state === "pending"
+        ? { retryAt, attemptCount: 7, errorCode: "office-locked" }
+        : { claimedAt: now - 1_000, attemptCount: 7, claimGeneration: 1, claimToken: "office-locked-claim" }),
+      expiresAt: now + 60_000,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { requestId, operationId, claimedAt: state === "claimed" ? now - 1_000 : undefined };
+  });
+}
+
 describe("Bridge incremental cloud seam", () => {
   it("fails pending native writes after the work is deleted and releases replica payload refs", async () => {
     const t = setupTest();
@@ -246,7 +669,7 @@ describe("Bridge incremental cloud seam", () => {
       return { requestId, replicaId: replica._id };
     });
 
-    const result = await t.mutation(api.bridgeStructure.claim, { credential });
+    const result = await t.mutation(api.bridgeStructure.claim, { credential, supportsFencing: true });
     expect(result).toEqual({ request: null });
     const state = await t.run(async (ctx) => ({
       request: await ctx.db.get(seeded.requestId),
@@ -457,10 +880,11 @@ describe("Bridge incremental cloud seam", () => {
       }],
     });
     const registration = discovered.registrations[0];
-    if (!("replicaId" in registration) || !registration.replicaId) {
+    if (!("replicaId" in registration) || !registration.replicaId || !registration.workId) {
       throw new Error(`Expected resource registration, got ${"reason" in registration ? registration.reason : "unknown"}`);
     }
     const replicaId = registration.replicaId;
+    const write = await seedOfficeLockedWrite(t, fixture, registration.workId, replicaId);
     await t.mutation(api.bridgeSync.reportChanges, {
       credential,
       mountId: fixture.mountId,
@@ -470,6 +894,7 @@ describe("Bridge incremental cloud seam", () => {
         op: "locked",
       }],
     });
+    const unlockObservedAt = Date.now();
     await t.mutation(api.bridgeSync.reportChanges, {
       credential,
       mountId: fixture.mountId,
@@ -482,5 +907,227 @@ describe("Bridge incremental cloud seam", () => {
     const released = await t.run(async (ctx) => ctx.db.get(replicaId));
     expect(released?.errorCode).toBeUndefined();
     expect(released?.state).not.toBe("error");
+    const requeued = await t.run(async (ctx) => ({
+      request: await ctx.db.get(write.requestId),
+      operation: await ctx.db.get(write.operationId),
+    }));
+    const measuredAt = Date.now();
+    expect(requeued.request?.state).toBe("pending");
+    expect(requeued.request?.errorCode).toBeUndefined();
+    expect(requeued.request?.errorMessage).toBeUndefined();
+    expect(requeued.request?.retryAt).toBeGreaterThanOrEqual(unlockObservedAt + 800);
+    expect(requeued.request?.retryAt).toBeLessThanOrEqual(measuredAt + 1_200);
+    expect(requeued.operation?.state).toBe("pending");
+    expect(requeued.operation?.errorCode).toBeUndefined();
+    const firstRetryAt = requeued.request?.retryAt;
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"8".repeat(32)}`,
+        resourceId: "lr_eeeeeeeeeeeeeeee",
+        op: "unlocked",
+      }],
+    });
+    const duplicateUnlock = await t.run(async (ctx) => ctx.db.get(write.requestId));
+    expect(duplicateUnlock?.retryAt).toBe(firstRetryAt);
+  });
+
+  it("uses the short retry window when Office unlock races with a claimed write acknowledgement", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_ffffffffffffffff",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: "a".repeat(64),
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovered.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId || !registration.workId)
+      throw new Error("Expected a discovered replica");
+    const write = await seedOfficeLockedWrite(t, fixture, registration.workId, registration.replicaId, "claimed");
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"9".repeat(32)}`,
+        resourceId: "lr_ffffffffffffffff",
+        op: "unlocked",
+      }],
+    });
+    const unlockedClaim = await t.run(async (ctx) => ctx.db.get(write.requestId));
+    expect(unlockedClaim?.officeUnlockedAt).toBeGreaterThan(write.claimedAt ?? 0);
+
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential,
+      requestId: write.requestId,
+      outcome: "waiting",
+      claimGeneration: 1,
+      claimToken: "office-locked-claim",
+      errorCode: "office-locked",
+    });
+    const state = await t.run(async (ctx) => ({
+      request: await ctx.db.get(write.requestId),
+      operation: await ctx.db.get(write.operationId),
+      replica: await ctx.db.get(registration.replicaId!),
+    }));
+    const measuredAt = Date.now();
+    expect(state.request?.state).toBe("pending");
+    expect(state.request?.errorCode).toBeUndefined();
+    expect(state.request?.officeUnlockedAt).toBeUndefined();
+    expect(state.request?.retryAt).toBeGreaterThanOrEqual(measuredAt - 100);
+    expect(state.request?.retryAt).toBeLessThanOrEqual(measuredAt + 1_200);
+    expect(state.operation?.state).toBe("pending");
+    expect(state.operation?.errorCode).toBeUndefined();
+    expect(state.replica?.state).toBe("pending");
+    expect(state.replica?.errorCode).toBeUndefined();
+    expect(state.replica?.errorMessage).toBeUndefined();
+  });
+
+  it("clears a stale Office lock from the operation when the native write verifies", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_aaaaaaaaaaaaaaaa",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: "a".repeat(64),
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovered.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId || !registration.workId)
+      throw new Error("Expected a discovered replica");
+    const write = await seedOfficeLockedWrite(t, fixture, registration.workId, registration.replicaId, "claimed");
+
+    const result = await t.mutation(api.bridgeSync.completeWrite, {
+      credential,
+      requestId: write.requestId,
+      outcome: "verified",
+      actualRevision: "b".repeat(64),
+      claimGeneration: 1,
+      claimToken: "office-locked-claim",
+    });
+
+    expect(result).toEqual({ state: "verified" });
+    const operation = await t.run(async (ctx) => ctx.db.get(write.operationId));
+    expect(operation?.state).toBe("verified");
+    expect(operation?.errorCode).toBeUndefined();
+  });
+
+  it("verifies a watcher echo when the native write already converged cloud and disk", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const hash = "a".repeat(64);
+    const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_eeeeeeeeeeeeeeee",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: hash,
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovered.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId || !registration.workId)
+      throw new Error("Expected a discovered replica");
+
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const local = await ctx.db.get(registration.replicaId!);
+      if (!local) throw new Error("Expected local replica");
+      await ctx.db.patch(local._id, {
+        payloadRef: "local-payload",
+        state: "current",
+        revision: hash,
+        contentHash: hash,
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId,
+        workId: registration.workId!,
+        kind: "cloud",
+        nativeFormat: "docx",
+        payloadRef: "cloud-payload",
+        revision: hash,
+        baseRevision: hash,
+        contentHash: hash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const result = await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"8".repeat(32)}`,
+        resourceId: "lr_eeeeeeeeeeeeeeee",
+        op: "upsert",
+        relativePath: "Essay.docx",
+        hash,
+        revisionBefore: "b".repeat(64),
+        size: 42,
+        nativeFormat: "docx",
+      }],
+    });
+    expect(result.results[0]).toMatchObject({ state: "applied", needsPayload: false });
+
+    const operations = await t.run(async (ctx) =>
+      ctx.db.query("syncOperations").collect(),
+    );
+    expect(operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        direction: "external",
+        revisionBefore: "b".repeat(64),
+        revisionAfter: hash,
+        actorKind: "external-edit",
+        state: "verified",
+      }),
+    ]));
+
+    const lateOperationId = await t.run(async (ctx) => {
+      const now = Date.now();
+      return ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: registration.workId!,
+        replicaId: registration.replicaId!,
+        idempotencyKey: `late-watcher-echo-${crypto.randomUUID()}`,
+        direction: "external",
+        revisionBefore: "c".repeat(64),
+        revisionAfter: hash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_eeeeeeeeeeeeeeee",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: hash,
+        nativeFormat: "docx",
+      }],
+    });
+    expect(await t.run(async (ctx) => ctx.db.get(lateOperationId))).toMatchObject({
+      state: "verified",
+    });
   });
 });

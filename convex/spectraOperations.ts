@@ -6,6 +6,7 @@ import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { regionDomainsIntersect } from "./regionClaims";
 import { projectTimetableSnapshot } from "./quizPrivacy";
+import { applicationWriteReceipt } from "./spectraApplicationWriteScope";
 
 function artifactSnapshot(artifact: {
   blueprintKey: string;
@@ -277,7 +278,9 @@ export const markExecuted = mutation({
       throw new Error("Operation was not claimed for execution");
     await ctx.db.patch(args.operationId, {
       status: "executed",
-      output: args.output,
+      output: applicationWriteReceipt(operation.output)
+        ? { ...(args.output && typeof args.output === "object" ? args.output : {}), applicationWriteReceipt: applicationWriteReceipt(operation.output) }
+        : args.output,
       affected: args.affected,
       executedAt: Date.now(),
     });
@@ -302,7 +305,13 @@ export const markFailed = mutation({
       throw new Error("Operation belongs to an older run attempt");
     await ctx.db.patch(args.operationId, {
       status: "failed",
-      output: { error: args.error },
+      // Reporting or transport failure cannot erase an already committed effect.
+      // Keep both its receipt and the approved scope for same-attempt recovery.
+      output: {
+        ...(operation.output && typeof operation.output === "object" && !Array.isArray(operation.output)
+          ? operation.output : {}),
+        error: args.error,
+      },
       executedAt: Date.now(),
     });
     return { operationId: args.operationId };

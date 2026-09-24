@@ -173,18 +173,30 @@ export function promoteMatchingUpdateToCreate(
       exclusivePin: false,
     },
   };
-  const remaining = operations.filter(
-    (operation) => operation !== update,
+  const hasOtherMutations = operations.some(
+    (operation) => operation !== update && operation.type !== "artifact.create",
   );
-  plan.operations = [createOperation, ...remaining];
+  const priorIntent =
+    plan.intent &&
+    typeof plan.intent === "object" &&
+    !Array.isArray(plan.intent)
+      ? (plan.intent as Record<string, unknown>)
+      : null;
+  const obligations = Array.isArray(priorIntent?.obligations)
+    ? priorIntent.obligations
+    : undefined;
+  // Replace in place so obligation.operationIndexes and any existing
+  // @created:N references keep their original operation identity.
+  plan.operations = operations.map((operation) =>
+    operation === update ? createOperation : operation,
+  );
   plan.intent = {
-    mode: remaining.some((operation) => operation.type !== "artifact.create")
-      ? "mixed"
-      : "create",
+    mode: hasOtherMutations ? "mixed" : "create",
     requestedArtifactTypes: [options.requested.blueprintKey],
     requestedVisibleArtifactCount: 1,
     targetArtifactId: null,
     targetWorkspaceId: options.workspaceId,
+    ...(obligations ? { obligations } : {}),
   };
   return plan;
 }

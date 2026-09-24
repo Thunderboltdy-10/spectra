@@ -7,11 +7,6 @@ import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
-import TiptapLink from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import Underline from "@tiptap/extension-underline";
-import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
 import {
   documentBlocksFromJson,
   docxRichBlockToJson,
@@ -71,8 +66,18 @@ import { headerSyncMessage } from "../bridge/status";
 import { CrossfadeText } from "../motion";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
+import { mountsForConnectedDevice } from "../bridge/mount-selection";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
 import { BRIDGE_SETTINGS_HREF } from "../bridge/client";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SelectField } from "@/components/ui/select";
 import {
   isProtectedOriginalWork,
   PROTECTED_ORIGINAL_TOGGLE,
@@ -148,11 +153,10 @@ import {
   type SpectraArtifactLink,
   type SpectraArtifactVersion,
 } from "../data/api";
-import { Equation, InlineEquation } from "../editor/equation-node";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
-import { acknowledgeViewportReady } from "../viewport-readiness";
+import { StudioViewportContext, withStudioViewportReady } from "./studio-viewport-ready";
 import {
   normalizePresentationContent,
   presentationObjectText,
@@ -215,10 +219,9 @@ import { fidelityRegionMap } from "../commands/office/fidelity-regions";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import {
   decideRemoteStudioIncoming,
+  createReconciliationSnapshotKey,
   incomingReconciliationKey,
   rebaseCollaborativeSnapshot,
-  reconciliationSnapshotKey,
-  shouldEmitRichTextChange,
   studioIncomingSource,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
@@ -246,7 +249,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 function StudioTypePlaceholder() {
-  return <div className="min-h-0 min-w-0 flex-1" aria-hidden />;
+  return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
 
 const DocumentStudio = dynamic(
@@ -254,40 +257,40 @@ const DocumentStudio = dynamic(
   { loading: StudioTypePlaceholder },
 );
 const FlashcardStudio = dynamic(
-  () => import("./flashcard-studio").then((module) => module.FlashcardStudio),
+  () => import("./flashcard-studio").then((module) => withStudioViewportReady(module.FlashcardStudio)),
   { loading: StudioTypePlaceholder },
 );
 const QuizStudio = dynamic(
-  () => import("./quiz-studio").then((module) => module.QuizStudio),
+  () => import("./quiz-studio").then((module) => withStudioViewportReady(module.QuizStudio)),
   { loading: StudioTypePlaceholder },
 );
 const PlanStudio = dynamic(
-  () => import("./plan-studio").then((module) => module.PlanStudio),
+  () => import("./plan-studio").then((module) => withStudioViewportReady(module.PlanStudio)),
   { loading: StudioTypePlaceholder },
 );
 const SheetsStudio = dynamic(
-  () => import("./sheets-studio").then((module) => module.SheetsStudio),
+  () => import("./sheets-studio").then((module) => withStudioViewportReady(module.SheetsStudio)),
   { loading: StudioTypePlaceholder },
 );
 const CodeStudio = dynamic(
-  () => import("./code-studio").then((module) => module.CodeStudio),
+  () => import("./code-studio").then((module) => withStudioViewportReady(module.CodeStudio)),
   { loading: StudioTypePlaceholder },
 );
 const PresentationStudio = dynamic(
   () =>
-    import("./presentation-studio").then((module) => module.PresentationStudio),
+    import("./presentation-studio").then((module) => withStudioViewportReady(module.PresentationStudio)),
   { loading: StudioTypePlaceholder },
 );
 const WhiteboardStudio = dynamic(
-  () => import("./whiteboard-studio").then((module) => module.WhiteboardStudio),
+  () => import("./whiteboard-studio").then((module) => withStudioViewportReady(module.WhiteboardStudio)),
   { loading: StudioTypePlaceholder },
 );
 const TimetableStudio = dynamic(
-  () => import("./timetable-studio").then((module) => module.TimetableStudio),
+  () => import("./timetable-studio").then((module) => withStudioViewportReady(module.TimetableStudio)),
   { loading: StudioTypePlaceholder },
 );
 const AgentFoundry = dynamic(
-  () => import("./agent-foundry").then((module) => module.AgentFoundry),
+  () => import("./agent-foundry").then((module) => withStudioViewportReady(module.AgentFoundry)),
   { loading: StudioTypePlaceholder },
 );
 
@@ -2533,15 +2536,6 @@ function artifactEditorSnapshot(artifact: SpectraArtifact) {
   };
 }
 
-function snapshotKey(snapshot: {
-  title: string;
-  summary: string;
-  tagDraft: string;
-  content: unknown;
-}) {
-  return reconciliationSnapshotKey(snapshot);
-}
-
 
 function collaborationFailureMessage(error: unknown) {
   return humanizePublicFailure(error);
@@ -2695,7 +2689,7 @@ export function ArtifactStudio({
       : "";
   const body =
     artifact.blueprintKey === "resource" ? (
-      <ResourceSurface artifact={artifact} onClose={handleClose} />
+      <ResourceSurface key={artifact._id} artifact={artifact} onClose={handleClose} />
     ) : artifact.blueprintKey === "thread_reference" ? (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex min-h-[78px] shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-3">
@@ -2863,6 +2857,12 @@ function ArtifactStudioEditor({
   compact: boolean;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
+  const [editorReady, setEditorReady] = useState(false);
+  const [snapshotKey] = useState(createReconciliationSnapshotKey);
+  const viewportContext = useMemo(
+    () => ({ artifactId: artifact._id, onReady: setEditorReady }),
+    [artifact._id],
+  );
   const replicaTruth = useQuery(
     api.replicas.forWork,
     useAuthedArgs({
@@ -2876,6 +2876,19 @@ function ArtifactStudioEditor({
     }),
   );
   const bridge = useBridgeHealth();
+  const activeBridgeMounts = useQuery(
+    api.bridge.activeMounts,
+    useAuthedArgs({}),
+  );
+  const currentDeviceMounts = useMemo(
+    () =>
+      mountsForConnectedDevice(
+        activeBridgeMounts,
+        bridge.status,
+        bridge.state === "connected",
+      ),
+    [activeBridgeMounts, bridge.state, bridge.status],
+  );
   const workType = isArtifactTypeKey(artifact.blueprintKey)
     ? artifact.blueprintKey
     : null;
@@ -2903,42 +2916,7 @@ function ArtifactStudioEditor({
     }),
     [artifact.content, artifact.summary, artifact.tags, artifact.title],
   );
-  useEffect(() => {
-    switch (artifact.blueprintKey) {
-      case "document":
-        void import("./document-studio");
-        break;
-      case "flashcard_deck":
-        void import("./flashcard-studio");
-        break;
-      case "quiz":
-        void import("./quiz-studio");
-        break;
-      case "planner_task":
-        void import("./plan-studio");
-        break;
-      case "sheets":
-        void import("./sheets-studio");
-        break;
-      case "code":
-        void import("./code-studio");
-        break;
-      case "presentation":
-        void import("./presentation-studio");
-        break;
-      case "whiteboard":
-        void import("./whiteboard-studio");
-        break;
-      case "timetable":
-        void import("./timetable-studio");
-        break;
-      case "agent":
-        void import("./agent-foundry");
-        break;
-      default:
-        break;
-    }
-  }, [artifact.blueprintKey]);
+
   const live = useArtifactLiveModel(
     artifact._id,
     artifact.blueprintKey,
@@ -3081,16 +3059,6 @@ function ArtifactStudioEditor({
       removeAdd();
     };
   }, [artifact._id]);
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => acknowledgeViewportReady({
-      targetId: artifact._id,
-      view: "artifact",
-    }));
-    return () => cancelAnimationFrame(frame);
-  }, [artifact._id]);
-  useEffect(() => {
-    if (commentsOpen) acknowledgeViewportReady({ targetId: artifact._id, view: "artifact" });
-  }, [artifact._id, commentsOpen]);
   const [embedsOpen, setEmbedsOpen] = useState(false);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
@@ -3123,6 +3091,9 @@ function ArtifactStudioEditor({
     "download" | "materialize" | null
   >(null);
   const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
+  const [nativeFolderDialogOpen, setNativeFolderDialogOpen] = useState(false);
+  const [nativeFolderSelection, setNativeFolderSelection] = useState("");
+  const [nativeCopyName, setNativeCopyName] = useState("");
   const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false);
   const [closeActionBusy, setCloseActionBusy] = useState(false);
   const closeActionRef = useRef(false);
@@ -3366,15 +3337,20 @@ function ArtifactStudioEditor({
       setNativeRecoveryBusy(null);
     }
   }, [artifact._id, artifact.title, nativePortableArtifact, setNativeAttribution]);
-  const materializeNativeCopy = useCallback(async () => {
-    if (!nativePortableArtifact) return;
+  const materializeNativeCopy = useCallback(async (
+    deviceId: string,
+    mountId: string,
+    fileName: string,
+  ) => {
+    if (!nativePortableArtifact || !deviceId || !mountId || !fileName.trim())
+      return;
     setNativeRecoveryBusy("materialize");
     setNativeRecoveryError(undefined);
     try {
       const response = await fetch("/api/spectra/native", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artifactId: artifact._id }),
+        body: JSON.stringify({ artifactId: artifact._id, deviceId, mountId, fileName }),
       });
       const result = (await response.json().catch(() => null)) as {
         message?: string;
@@ -3401,6 +3377,75 @@ function ArtifactStudioEditor({
       setNativeRecoveryBusy(null);
     }
   }, [artifact._id, nativePortableArtifact, setNativeAttribution]);
+  const requestNativeCopy = useCallback(() => {
+    if (!nativePortableArtifact) return;
+    setNativeRecoveryError(undefined);
+    if (currentDeviceMounts.length > 0) {
+      const extension = inferredNativeFormat ?? "spectra-pkg";
+      const stem = artifact.title.replace(/\.[^.]+$/, "");
+      const defaultFileName = `${stem}.${extension}`;
+      const existing = replicaTruth?.replicas.find(
+        (replica) =>
+          replica.kind === "local" &&
+          replica.deviceId === bridge.status?.deviceId &&
+          replica.relativePath?.toLocaleLowerCase() ===
+            defaultFileName.toLocaleLowerCase(),
+      );
+      if (
+        existing?.state === "current" &&
+        replicaTruth?.replicas.some(
+          (replica) =>
+            replica.kind === "cloud" &&
+            replica.contentHash === existing.contentHash,
+        )
+      ) {
+        setNativeAttribution("This work already has a current copy on this computer");
+        return;
+      }
+      if (existing?.state === "pending" || existing?.state === "ahead") {
+        setNativeAttribution("This work is already syncing to this computer");
+        return;
+      }
+      let fileName = stem;
+      if (existing && ["diverged", "error", "unavailable"].includes(existing.state)) {
+        const usedPaths = new Set(
+          replicaTruth?.replicas
+            .filter(
+              (replica) =>
+                replica.kind === "local" &&
+                replica.deviceId === bridge.status?.deviceId,
+            )
+            .map((replica) => replica.relativePath?.toLocaleLowerCase())
+            .filter((path): path is string => Boolean(path)) ?? [],
+        );
+        let copyNumber = 2;
+        while (
+          usedPaths.has(
+            `${stem} - copy ${copyNumber}.${extension}`.toLocaleLowerCase(),
+          )
+        )
+          copyNumber += 1;
+        fileName = `${stem} - copy ${copyNumber}`;
+      }
+      setNativeFolderSelection(
+        currentDeviceMounts.length === 1 ? currentDeviceMounts[0]!._id : "",
+      );
+      setNativeCopyName(fileName);
+      setNativeFolderDialogOpen(true);
+      return;
+    }
+    setNativeRecoveryError(
+      "Connect Spectra Bridge and add a folder in Spectra Settings before keeping a local copy.",
+    );
+  }, [
+    artifact.title,
+    bridge.status?.deviceId,
+    currentDeviceMounts,
+    inferredNativeFormat,
+    nativePortableArtifact,
+    replicaTruth?.replicas,
+    setNativeAttribution,
+  ]);
   const synchronizeDraft = useCallback(
     async (snapshot = currentSnapshotRef.current) => {
       if (
@@ -3543,6 +3588,7 @@ function ArtifactStudioEditor({
       nativeBodyBinding,
       permissionReadOnly,
       queueNativeMaterialization,
+      snapshotKey,
     ],
   );
   const previewDiff = useMemo(() => {
@@ -4698,7 +4744,7 @@ function ArtifactStudioEditor({
     }
     if (!snapshotsDiffer && !nextDirty) userHasEditedRef.current = false;
     writeStudioDirty(dirtyRef, setDirty, nextDirty);
-  }, [baseline, currentSnapshot, nativeOfficeDocument]);
+  }, [baseline, currentSnapshot, nativeOfficeDocument, snapshotKey]);
 
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
@@ -4723,6 +4769,7 @@ function ArtifactStudioEditor({
       artifact._id,
       incomingSnapshot,
       { source: incomingSource, revision: artifact.updatedAt, localSync: isLocalSyncKey },
+      incomingKey,
     );
     if (lastReconciledIncomingKeyRef.current === reconciliationKey) {
       return;
@@ -4854,6 +4901,7 @@ function ArtifactStudioEditor({
     isCollaborativeArtifact,
     live.liveValueSource,
     nativeOfficeDocument,
+    snapshotKey,
   ]);
 
   useEffect(
@@ -5312,6 +5360,7 @@ function ArtifactStudioEditor({
             kind: replica.kind,
             state: replica.state,
             lastVerifiedAt: replica.lastVerifiedAt,
+            retryAt: replica.retryAt,
             errorCode: replica.errorCode,
             unavailableReason: replica.unavailableReason,
           })),
@@ -5675,6 +5724,16 @@ function ArtifactStudioEditor({
                 {presentation.action.label}
               </a>
             ) : null}
+            {presentation.action?.kind === "retry" ? (
+              <button
+                type="button"
+                className="text-micro font-semibold text-[var(--text-primary)]"
+                disabled={syncBusy || readOnly}
+                onClick={() => void save()}
+              >
+                {presentation.action.label}
+              </button>
+            ) : null}
             {presentation.action?.kind === "sign-in" ? (
               <NextLink
                 href="/sign-in"
@@ -5771,7 +5830,7 @@ function ArtifactStudioEditor({
                   </WorkbarMenuAction>
                   <WorkbarMenuAction
                     disabled={nativeRecoveryBusy !== null}
-                    onSelect={() => void materializeNativeCopy()}
+                    onSelect={requestNativeCopy}
                   >
                     <Download className="h-4 w-4" />{" "}
                     {nativeRecoveryBusy === "materialize"
@@ -5982,6 +6041,14 @@ function ArtifactStudioEditor({
           <span className="min-w-0 flex-1">
             {humanizeNativeError(nativeWriteError, nativeOfficeApplication)}
           </span>
+          <button
+            type="button"
+            className="shrink-0 font-semibold text-[var(--text-primary)]"
+            disabled={syncBusy || readOnly}
+            onClick={() => void save()}
+          >
+            Try again
+          </button>
         </div>
       ) : nativeRecoveryError ? (
         <div
@@ -5992,6 +6059,14 @@ function ArtifactStudioEditor({
           <span>
             {humanizeNativeError(nativeRecoveryError, nativeOfficeApplication)}
           </span>
+          {currentDeviceMounts.length === 0 ? (
+            <NextLink
+              href={BRIDGE_SETTINGS_HREF}
+              className="shrink-0 font-semibold text-[var(--text-primary)] underline underline-offset-2"
+            >
+              Open Spectra Settings
+            </NextLink>
+          ) : null}
         </div>
       ) : null}
       {isCollaborativeArtifact &&
@@ -6042,6 +6117,7 @@ function ArtifactStudioEditor({
         ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
         data-spectra-studio={artifact._id}
+        data-spectra-editor-ready={editorReady ? "true" : "false"}
         data-spectra-type={artifact.blueprintKey}
         data-spectra-surface="artifact"
         data-ai-preview={visibleAiWorking || undefined}
@@ -6069,6 +6145,7 @@ function ArtifactStudioEditor({
         />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
+            <StudioViewportContext.Provider value={viewportContext}>
             <StudioContractProvider value={studioContract}>
               {artifact.blueprintKey === "document" ? (
                 <DocumentStudio
@@ -6224,6 +6301,7 @@ function ArtifactStudioEditor({
                 <ThreadReferenceStudio content={content} />
               ) : null}
             </StudioContractProvider>
+            </StudioViewportContext.Provider>
           </section>
           {showDetails ? (
             <div className="spectra-studio-inspector-overlay">
@@ -6291,6 +6369,92 @@ function ArtifactStudioEditor({
         onOpenSource={onOpenArtifact}
         onClose={() => setEmbedsOpen(false)}
       />
+      <Dialog
+        open={nativeFolderDialogOpen}
+        onOpenChange={setNativeFolderDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Choose a save folder</DialogTitle>
+            <DialogDescription>
+              Spectra will save this copy to a folder selected for the connected
+              Bridge on this computer.
+            </DialogDescription>
+          </DialogHeader>
+          <SelectField
+            label="Folder on this computer"
+            value={nativeFolderSelection}
+            onChange={setNativeFolderSelection}
+            options={currentDeviceMounts.map((mount) => ({
+              value: mount._id,
+              label: mount.rootLabel,
+            }))}
+            placeholder="Choose a folder"
+            layer="modal"
+          />
+          <div className="space-y-1.5">
+            <label
+              htmlFor="native-copy-name"
+              className="text-micro font-semibold text-[var(--text-secondary)]"
+            >
+              File name
+            </label>
+            <input
+              id="native-copy-name"
+              type="text"
+              value={nativeCopyName}
+              onChange={(event) => setNativeCopyName(event.target.value)}
+              className="h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-caption text-[var(--text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-micro text-[var(--text-secondary)]">
+              Spectra will save it as {inferredNativeFormat ?? "a Spectra file"}.
+            </p>
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              className="rounded-control px-3 py-2 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              onClick={() => setNativeFolderDialogOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-control bg-[var(--text-primary)] px-3 py-2 text-caption font-medium text-[var(--bg-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={
+                !currentDeviceMounts.some(
+                  (mount) => mount._id === nativeFolderSelection,
+                ) ||
+                !nativeCopyName.trim() ||
+                nativeRecoveryBusy !== null
+              }
+              onClick={() => {
+                setNativeFolderDialogOpen(false);
+                void materializeNativeCopy(
+                  bridge.status?.deviceId ?? "",
+                  nativeFolderSelection,
+                  nativeCopyName.trim(),
+                );
+              }}
+            >
+              Keep a copy
+            </button>
+          </DialogFooter>
+          {currentDeviceMounts.length === 0 ? (
+            <div role="status" className="space-y-2 text-micro text-[var(--text-secondary)]">
+              <p>No active folder is available. Add one in Spectra Settings.</p>
+              <NextLink
+                href={BRIDGE_SETTINGS_HREF}
+                className="font-medium text-[var(--text-primary)] underline underline-offset-2"
+              >
+                Open Spectra Settings
+              </NextLink>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       {historyOpen ? (
         <HistoryComparisonOverlay
           artifact={artifact}
@@ -6340,139 +6504,10 @@ export function plannerDescriptionText(value: string) {
     .trim();
 }
 
-export function ArtifactRichTextEditor({
-  value,
-  disabled,
-  onChange,
-  onFocus,
-  path,
-  placeholder = "Write something…",
-  variant = "compact",
-  collapsible = false,
-}: {
-  value: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-  onFocus?: () => void;
-  path?: string;
-  placeholder?: string;
-  variant?: "planner" | "compact" | "card";
-  collapsible?: boolean;
-}) {
-  const onChangeRef = useRef(onChange);
-  const valueRef = useRef(value);
-  const contentKeyRef = useRef(plannerDescriptionHtml(value));
-  const focusedRef = useRef(false);
-  const typedWhileFocusedRef = useRef(false);
-  const debounceRef = useRef<number | null>(null);
-  const [initialContent] = useState(() => plannerDescriptionHtml(value));
-  useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
-  useEffect(() => {
-    valueRef.current = value;
-  }, [value]);
-  const emitRichTextChange = (html: string) => {
-    const next = html === "<p></p>" ? "" : html;
-    if (
-      !shouldEmitRichTextChange({
-        committedValue: valueRef.current,
-        nextHtml: next,
-        typedWhileFocused: typedWhileFocusedRef.current,
-      })
-    ) {
-      return;
-    }
-    onChangeRef.current(next);
-  };
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ link: false, underline: false }),
-      Underline,
-      TiptapLink.configure({ openOnClick: false, autolink: true }),
-      Equation,
-      InlineEquation,
-      Placeholder.configure({ placeholder }),
-    ] as never[],
-    content: initialContent,
-    editable: !disabled,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        class:
-          variant === "card"
-            ? // 180px left a single-line answer floating in an almost empty
-              // box; two of them pushed the note, tags and settings off screen.
-              "min-h-[112px] px-6 py-6 text-center font-serif text-metric leading-snug text-[var(--text-primary)] outline-none"
-            : variant === "planner"
-              ? "min-h-[136px] px-4 py-3 text-ui leading-6 text-[var(--text-primary)] outline-none"
-              : "min-h-[62px] px-3 py-2 text-ui leading-5 text-[var(--text-primary)] outline-none",
-      },
-    },
-    onFocus: () => {
-      focusedRef.current = true;
-      onFocus?.();
-    },
-    onBlur: ({ editor: current }) => {
-      focusedRef.current = false;
-      if (debounceRef.current) {
-        window.clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-      const html = current.getHTML();
-      contentKeyRef.current = html;
-      emitRichTextChange(html);
-      typedWhileFocusedRef.current = false;
-    },
-    onUpdate: ({ editor: current }) => {
-      // TipTap can emit hydrate updates before focus. Only human typing while
-      // focused may dirty the parent studio.
-      if (!focusedRef.current) return;
-      typedWhileFocusedRef.current = true;
-      const html = current.getHTML();
-      contentKeyRef.current = html;
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      debounceRef.current = window.setTimeout(() => {
-        debounceRef.current = null;
-        emitRichTextChange(html);
-      }, 280);
-    },
-  });
-
-  useEffect(() => {
-    editor?.setEditable(!disabled);
-  }, [disabled, editor]);
-
-  useEffect(() => {
-    if (!editor) return;
-    if (focusedRef.current) return;
-    const incoming = plannerDescriptionHtml(value);
-    if (incoming === contentKeyRef.current) return;
-    contentKeyRef.current = incoming;
-    editor.commands.setContent(incoming, { emitUpdate: false });
-  }, [editor, value]);
-
-  useEffect(
-    () => () => {
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    },
-    [],
-  );
-
-  return (
-    <div
-      className="spectra-planner-description spectra-rich-text-editor"
-      data-disabled={disabled || undefined}
-      data-rich-text-variant={variant}
-      data-rich-text-collapsible={collapsible || undefined}
-      data-spectra-hidden-target={collapsible ? "true" : undefined}
-      {...(path ? targetAttrs(path) : {})}
-    >
-      <RichTextFormatBar editor={editor} disabled={disabled} />
-      <EditorContent editor={editor} />
-    </div>
-  );
-}
+export const ArtifactRichTextEditor = dynamic(
+  () => import("./artifact-rich-text-editor").then((module) => module.ArtifactRichTextEditor),
+  { loading: StudioTypePlaceholder },
+);
 
 /**
  * Spectra's one rich-text format bar.

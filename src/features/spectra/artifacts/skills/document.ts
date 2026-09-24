@@ -29,6 +29,10 @@ export const documentSkill = defineArtifactSkill({
     "artifact embed",
   ],
   operations: [
+    "For claims based on supplied evidence, put the exact supporting evidence handles in the block's sourceRefs. Spectra creates readable native citation fields and source metadata; do not invent verified sources or duplicate those citations in prose.",
+    "For study material, teach the idea before testing it: explain mechanisms, connect concepts, include a worked example and likely misconception, then add a few retrieval questions with answers. Match depth to the learner and supplied evidence; do not pad with generic introductions.",
+    "Choose a clear reading hierarchy with a specific title, useful headings, short focused paragraphs, and a table or diagram only where it explains a relationship. Keep prose substantive and the result easy to revise or print.",
+    "For a narrow text edit, use the actual stable block path /blocks/id:<blockId>/text or its supplied index. Rewrite the section body without overwriting its heading or unrelated blocks.",
     "Inspect outline, selected blocks, sources, comments, embeds, and constraints.",
     "Insert, rewrite, move, split, merge, format, summarize, expand, translate, or partially restore the smallest stable blocks that satisfy the request.",
     "Create headings, lists, tasks, tables, callouts, code, equations, media captions, citations, footnotes, and live or pinned artifact embeds.",
@@ -63,6 +67,7 @@ export const documentSkill = defineArtifactSkill({
         "The request adds, checks, reformats, or relies on citations, footnotes, quotations, or source-linked claims.",
       instructions: [
         "Inspect source permissions and citation metadata before writing.",
+        "Use each supplied sourceId/evidenceId with its actual supporting passage or page. Cite the claim it supports, not just the whole artifact. Distinguish a source's observation from your inference; qualify gaps and contradictions instead of inventing attribution.",
         "Keep claim-to-source relationships explicit and never invent missing bibliographic details.",
         "Verify every changed citation target and preserve the user's citation style unless asked to change it.",
       ],

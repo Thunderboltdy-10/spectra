@@ -1,6 +1,8 @@
 # S9-AI — complete intent and durable quality
 
-Date: 2026-09-23 (Europe/Madrid). Branch: `main`. Status: **implementation complete; live quality and end-to-end acceptance pending**.
+Date: 2026-09-23 (Europe/Madrid). Branch: `main`. Status: **historical implementation checkpoint; live quality and end-to-end acceptance pending**.
+
+2026-09-24 correction: independent S10 review reproduced gaps in the execution claims below. Focused-tool completion could omit remaining work, explicit navigation remained gated by Follow, application effects were not atomically bound to exact stored operation/approval scope, and failure reporting erased an already committed application receipt. S10 repairs and current deterministic evidence are recorded in [S10-AI.md](S10-AI.md). The S9 checks did not establish those guarantees or configured live acceptance. The earlier implementation descriptions below are historical, not current acceptance evidence.
 
 ## Integration and contracts
 

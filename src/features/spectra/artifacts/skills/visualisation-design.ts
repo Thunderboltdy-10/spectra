@@ -3,6 +3,7 @@ export const visualisationDesignGuide = Object.freeze({
   trigger:
     "Load when creating or materially styling a rendered interactive visualisation, chart, simulation, or educational tool.",
   instructions: [
+    "Start from the learner's question and choose one clear visual idea. Make the defining interaction demonstrate that idea immediately, with an informative default state, a useful reset, and a short explanation of what changed.",
     "Design the rendered experience as a focused Spectra learning tool, not a generic dashboard or miniature developer project.",
     "Use SpectraEmbed.tokens or CSS variables derived from them for ink, paper, rules, mint, cyan, violet, and orange; never invent a disconnected theme or purple-gradient AI aesthetic.",
     "Use a clear editorial hierarchy, restrained control density, generous plotting space, concise labels, and progressive disclosure for secondary configuration.",

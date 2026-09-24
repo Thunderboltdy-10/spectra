@@ -33,6 +33,7 @@ export const plannerTaskSkill = defineArtifactSkill({
     "private overlay",
   ],
   operations: [
+    "Encode every requested date, status, priority, estimate, reminder, and subtask in content, not just the title or summary. A request for N subtasks needs exactly N titled items. Calendar scheduling is a separate typed application action and never changes an official source deadline.",
     "Create a focused task, triage priority, decompose work into ordered subtasks, estimate effort, and schedule against the timetable.",
     "Update status and progress, add reminders, configure recurrence, link permissioned artifacts, and explain source/overlay conflicts.",
     "Reconcile safe ManageBac source changes while preserving user overlays, or propose a detach/rebase when authority is ambiguous.",

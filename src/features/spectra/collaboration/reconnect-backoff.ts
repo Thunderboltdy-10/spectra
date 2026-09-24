@@ -1,8 +1,10 @@
+import { SYNC_RETRY_POLICY } from "../../../../shared/sync-retry-policy";
+
 export const COLLAB_RECONNECT = {
-  delay: 400,
+  delay: SYNC_RETRY_POLICY.collaborationMinDelayMs,
   factor: 2,
-  minDelay: 200,
-  maxDelay: 12_000,
+  minDelay: SYNC_RETRY_POLICY.collaborationMinDelayMs,
+  maxDelay: SYNC_RETRY_POLICY.maxDelayMs,
   jitter: true,
   maxAttempts: 0,
   initialDelay: 0,

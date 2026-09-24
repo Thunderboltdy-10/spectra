@@ -32,7 +32,10 @@ export function summarizeArtifact(
       workspaceTitle: placement.workspaceTitle,
       nodeId: placement.nodeId,
     })),
-    ...(includeContent ? { content: artifact.content } : {}),
+    ...(includeContent ? { content: artifact.content,
+      ...(artifact.createdFrom && typeof artifact.createdFrom === "object" && (artifact.createdFrom as Record<string, unknown>).sourceBundle
+        ? { sourceBundle: (artifact.createdFrom as Record<string, unknown>).sourceBundle } : {}),
+    } : {}),
   };
 }
 

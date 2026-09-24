@@ -218,6 +218,7 @@ export async function upsertCalendarItemReadModel(
   ctx: CalendarWriteCtx,
   item: Doc<"calendarItems">,
   metrics?: CalendarReadMetrics,
+  options: { repairRangeBuckets?: boolean } = {},
 ) {
   compactQuery(metrics);
   const existing = await ctx.db
@@ -239,6 +240,18 @@ export async function upsertCalendarItemReadModel(
     compactWrite(metrics);
   }
 
+  // The row and its buckets are maintained in the same transaction. Changes
+  // to title, notes, source freshness, etc. cannot change range discovery.
+  // Explicit repair still visits the buckets even when the row is current.
+  if (
+    !options.repairRangeBuckets &&
+    existing?.readModelVersion === CALENDAR_READ_MODEL_VERSION &&
+    existing.ownerAccountId === item.ownerAccountId &&
+    existing.status === item.status &&
+    existing.startAt === item.startAt &&
+    existing.endAt === item.endAt
+  ) return;
+
   compactQuery(metrics);
   const oldBuckets = await ctx.db
     .query("calendarItemRangeBuckets")
@@ -255,6 +268,7 @@ export async function upsertCalendarItemReadModel(
       compactDelete(metrics);
     } else if (
       oldBucket.readModelVersion !== next.readModelVersion ||
+      oldBucket.ownerAccountId !== next.ownerAccountId ||
       oldBucket.status !== next.status ||
       oldBucket.startAt !== next.startAt ||
       oldBucket.endAt !== next.endAt

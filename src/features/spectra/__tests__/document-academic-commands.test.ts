@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Document } from "@ariadng/office/docx";
-import { docxLens, docxProjectionSemanticDigest } from "../lenses/docx-lens";
+import { docxLens, docxProjectionReadbackDigest, docxProjectionSemanticDigest } from "../lenses/docx-lens";
 import { applyDocumentAcademicOperations, documentAcademicEffectsLanded, documentAcademicOperationsLanded, type DocumentAcademicOperation } from "../commands/office/document-academic-operations";
 import { documentYjsAdapter, workTransactionOrigin, type WorkActorIdentity } from "../work/models/yjs";
 import { docxProjectionFromContent } from "../lenses/document-projection";
@@ -14,6 +14,17 @@ import { documentContentToProseMirrorJson } from "../lenses/document-projection"
 const actor: WorkActorIdentity = { clientId: "academic-human", kind: "human", accountId: "fixture", name: "Fixture" };
 
 describe("Academic canonical commands", () => {
+  it("creates a bibliography without reusing an ordinary cloud paragraph identity", () => {
+    const original = { id: "bibliography", type: "paragraph", text: "A paragraph whose identity must survive." };
+    const desired = applyDocumentAcademicOperations({ blocks: [original] }, [{ kind: "regenerate-word-bibliography" }]);
+    expect(desired.blocks[0]).toEqual(original);
+    expect(desired.blocks).toHaveLength(2);
+    expect(new Set(desired.blocks.map((block) => block.id)).size).toBe(2);
+    const ydoc = documentYjsAdapter.createDocument(desired);
+    expect(documentYjsAdapter.project(ydoc).blocks).toHaveLength(2);
+    ydoc.destroy();
+  });
+
   it("commits a combined edit plus bibliography, preserves its neighbor, and undoes the complete operation", async () => {
     const document = Document.create(); document.addParagraph("A supported claim."); document.addParagraph("Untouched neighbor.");
     const base = await docxLens.open(await document.save());
@@ -38,8 +49,17 @@ describe("Academic canonical commands", () => {
     expect(fragment.get(1)).toBe(neighbor);
     const projected = docxProjectionFromContent(canonical, base.projection).projection;
     const native = await docxLens.open(await docxLens.materialize({ carry: base.preservedCarry, projection: projected }));
-    expect(authoredSemanticValue(projected.blocks)).toEqual(authoredSemanticValue(native.projection.blocks));
-    expect(await docxProjectionSemanticDigest(projected)).toBe(await docxProjectionSemanticDigest(native.projection));
+    // Existing paragraphs keep their exact authored semantics. Newly inserted
+    // paragraphs may expose inherited Word defaults absent from canonical data.
+    expect(authoredSemanticValue(projected.blocks.slice(0, 2))).toEqual(authoredSemanticValue(native.projection.blocks.slice(0, 2)));
+    expect(await docxProjectionSemanticDigest(projected)).toBe(await docxProjectionReadbackDigest(native.projection, projected));
+    const lostNote = structuredClone(native.projection);
+    lostNote.blocks[0]!.inlineContent = lostNote.blocks[0]!.inlineContent!.filter((item) => item.kind !== "noteRef");
+    expect(await docxProjectionReadbackDigest(lostNote, projected)).not.toBe(await docxProjectionSemanticDigest(projected));
+    const lostFormatting = structuredClone(native.projection);
+    const note = lostFormatting.blocks[0]!.inlineContent!.find((item) => item.kind === "noteRef");
+    if (note?.kind === "noteRef") note.content = [[{ text: "Rich source" }]];
+    expect(await docxProjectionReadbackDigest(lostFormatting, projected)).not.toBe(await docxProjectionSemanticDigest(projected));
     undo.undo();
     expect(docxProjectionFromContent(documentYjsAdapter.project(ydoc), base.projection).operations).toEqual([]);
     undo.redo();

@@ -25,11 +25,13 @@ export const presentationSkill = defineArtifactSkill({
     "presenter setting",
   ],
   operations: [
+    "Choose one coherent visual direction appropriate to the subject and audience: a restrained palette, deliberate type scale, consistent alignment, and one memorable explanatory visual. Let the content drive variation rather than decorating every slide alike.",
+    "A source's numeric comparison needs a real editable chart or table with checked values, units, categories, and series. Prefer a permissioned Sheets chart binding when available; never substitute a labelled shape or stock image for data. State the comparison's conclusion without implying causation the source does not establish.",
     "Plan narrative and outline, add or reorder slides, compose layouts, create/rewrite/move/resize objects, apply themes, and write speaker notes.",
     "Use the native layout vocabulary intentionally: title-content for a conventional explanation, title-visual-text for an evidence-led slide, visual-story for a dominant visual with supporting copy, three-ideas for three parallel points, statement for one memorable claim, two-column for comparison, and full-bleed only when the media can carry the slide.",
     "A layout is a starting constraint, not a finished design. After choosing it, adjust object geometry, type scale, crop, whitespace, alignment, and emphasis to fit the actual content; never leave generic placeholders or default cascaded coordinates.",
     "Generate charts from stable Sheets ranges and check overflow, contrast, hierarchy, alignment, reading order, sources, and presenter output.",
-    "Attach citations (label plus source URL from context) to each slide that draws on a source. Spectra rebuilds the References slides from slide citations after every write, so never hand-author a references slide and never copy one into outlines.",
+    "Attach citations and exact sourceRefs/evidence handles from context to each supported claim or slide. Use the actual supporting passage/page; a general source footer alone does not establish support. Spectra rebuilds the References slides from slide citations after every write, so never hand-author a references slide or copy one into outlines.",
   ],
   preservationRules: [
     "Preserve unaffected slide/object identity, constraints, reading order, animations, notes, citations, source bindings, and live-versus-pinned source policy. Preserve generated References slides untouched; Spectra owns their content.",

@@ -55,7 +55,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     const result = await executeApplicationCommand("actor", "run", "attempt", command, operation.input.args, undefined,
       (emitted) => events.push(emitted.key), undefined, "operation") as Record<string, unknown>;
     expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command }));
-    if (mutation) expect(seams.mutate).toHaveBeenCalledWith(mutation, expect.any(Object));
+    if (mutation) expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({ runId: "run", executionId: "attempt", operationId: "operation", expectedCommand: command, expectedArgs: operation.input.args }));
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);

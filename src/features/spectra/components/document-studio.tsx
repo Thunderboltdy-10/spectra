@@ -144,6 +144,8 @@ import {
 import { ArtifactWorkbar, workbarMenuItemClass } from "./artifact-workbar";
 import { WorkbarCommandControl, isRenderedControl } from "./workbar-controls";
 import { useStudioContract } from "./artifact-studio-shell";
+import { useStudioViewportReady } from "./studio-viewport-ready";
+import { readPdfTextPages } from "../editor/pdf-text-pages";
 import {
   imageEmuAttributes,
   materializeJsonImages,
@@ -1249,6 +1251,8 @@ export function DocumentStudio({
     ],
   );
 
+  useStudioViewportReady(Boolean(editor));
+
   useEffect(() => {
     if (!editor || readOnly) return;
     const legacy: Array<{
@@ -2008,21 +2012,7 @@ export function DocumentStudio({
           data: bytes,
           enableScripting: false,
         };
-        const document = await pdfjs.getDocument(pdfOptions).promise;
-        const pages: string[] = [];
-        for (
-          let pageNumber = 1;
-          pageNumber <= document.numPages;
-          pageNumber += 1
-        ) {
-          const page = await document.getPage(pageNumber);
-          const textContent = await page.getTextContent();
-          pages.push(
-            textContent.items
-              .flatMap((item) => ("str" in item ? [item.str] : []))
-              .join(" "),
-          );
-        }
+        const pages = await readPdfTextPages(pdfjs.getDocument(pdfOptions));
         editor.commands.setContent(
           pages
             .map(
@@ -3724,11 +3714,11 @@ export function DocumentStudio({
             </aside>
           ) : null}
           {revisionsOpen ? (
-            <aside className="spectra-document-revisions spectra-panel-enter">
+            <aside className="spectra-document-revisions spectra-panel-enter" aria-label="Word review">
               <header>
                 <History className="h-3.5 w-3.5" />
                 <strong>Tracked changes</strong>
-                <button type="button" onClick={() => setRevisionsOpen(false)}>
+                <button type="button" aria-label="Close Word review" onClick={() => setRevisionsOpen(false)}>
                   <X className="h-4 w-4" />
                 </button>
               </header>

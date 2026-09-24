@@ -197,7 +197,7 @@ export function AnalyticsShell() {
               <section className="p-2">
                 <SectionHeading title="Work created by type" detail="New work in this account and date range" />
                 <div className="mt-5 space-y-3">
-                  {byType.length ? byType.map((row) => {
+                  {payload.metrics.workCreated.value === null ? <CapabilityTruthState state={payload.metrics.workCreated.state} title="Work history" /> : byType.length ? byType.map((row) => {
                     const maximum = byType[0]?.value ?? 1;
                     return (
                       <div key={row.key} className="grid grid-cols-[112px_1fr_32px] items-center gap-3">
@@ -214,7 +214,7 @@ export function AnalyticsShell() {
 
               <section className="p-2">
                 <SectionHeading title="AI run outcomes" detail="Settled and still-active runs remain distinct" />
-                <div className="mt-4 grid grid-cols-2 gap-1">
+                {payload.metrics.aiRuns.value === null ? <div className="mt-4"><CapabilityTruthState state={payload.metrics.aiRuns.state} title="AI run history" /></div> : <div className="mt-4 grid grid-cols-2 gap-1">
                   {([
                     ["Completed", payload.runOutcomes.completed, "#14795c"],
                     ["Active", payload.runOutcomes.active, "#2563eb"],
@@ -226,13 +226,13 @@ export function AnalyticsShell() {
                       <p className="mt-2 font-display text-metric font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
                   ))}
-                </div>
+                </div>}
               </section>
             </div>
 
             <div className="mt-7 grid gap-7 xl:grid-cols-2">
-              <RecentList title="Recent work" detail="Created in this range" empty="No recent work." rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} · ${item.status}`, timestamp: item.createdAt }))} />
-              <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty="No recent AI runs." rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
+              <RecentList title="Recent work" detail="Created in this range" empty={payload.metrics.workCreated.value === null ? "Work history is still being prepared." : "No recent work."} rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} · ${item.status}`, timestamp: item.createdAt }))} />
+              <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty={payload.metrics.aiRuns.value === null ? "AI run history is still being prepared." : "No recent AI runs."} rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
             </div>
 
             <section className="mt-8 p-2">

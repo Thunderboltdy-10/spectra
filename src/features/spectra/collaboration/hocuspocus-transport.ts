@@ -3,6 +3,7 @@
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
+import { encodeDurableFrontier } from "../../../../shared/collaboration-durable-frontier.mjs";
 import type {
   ArtifactCollaborationTransport,
   CollaborationPresence,
@@ -14,6 +15,10 @@ import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-po
 import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
 import { COLLAB_RECONNECT } from "./reconnect-backoff";
 import { coalesceInFlight } from "@/lib/coalesce-inflight";
+import {
+  SYNC_RETRY_POLICY,
+  syncRetryDelayMs,
+} from "../../../../shared/sync-retry-policy";
 import {
   collaborationAccessRevoked,
   collaborationNeedsSignIn,
@@ -193,30 +198,45 @@ async function fetchCollaborationSession(
   clientId: string,
   schemaVersion: number,
 ) {
-  const response = await fetch("/api/spectra/collaboration/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      artifactId,
-      partitionKey,
-      clientId,
-      schemaVersion,
-      realtimeProvider: "hocuspocus",
-    }),
-    cache: "no-store",
-  });
-  const payload = (await response.json()) as
-    SessionResponse | { error?: string | { message?: string } };
-  if (!response.ok || !("token" in payload)) {
-    const error =
-      "error" in payload
-        ? typeof payload.error === "string"
-          ? payload.error
-          : payload.error?.message
-        : undefined;
-    throw new Error(error || "Could not start collaboration.");
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, SYNC_RETRY_POLICY.collaborationConnectTimeoutMs);
+  try {
+    const response = await fetch("/api/spectra/collaboration/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artifactId,
+        partitionKey,
+        clientId,
+        schemaVersion,
+        realtimeProvider: "hocuspocus",
+      }),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const payload = (await response.json()) as
+      | SessionResponse
+      | { error?: string | { message?: string } };
+    if (!response.ok || !("token" in payload)) {
+      const error =
+        "error" in payload
+          ? typeof payload.error === "string"
+            ? payload.error
+            : payload.error?.message
+          : undefined;
+      throw new Error(error || "Could not start collaboration.");
+    }
+    return payload;
+  } catch (error) {
+    if (timedOut) throw new Error("COLLABORATION_CONNECT_TIMEOUT");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return payload;
 }
 
 async function session(
@@ -257,6 +277,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private providerUnsynchronizedChanges = 0;
   private durablePendingUpdateIds = new Set<string>();
   private localDurabilityPending = false;
+  private localRecoveryPending = false;
+  private localRecoveryDeliveryPending = false;
+  private recoveryConfirmation: { id: string; changeVersion: number } | null = null;
+  private recoveryConfirmationSequence = 0;
+  private localChangeVersion = 0;
+  private documentChangeVersion = 0;
+  private durabilityEpoch = 0;
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
   private presenceSignature = "[]";
@@ -267,20 +294,27 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private intentionallyDisconnected = false;
   private authorizationTimer?: number;
   private authorizationRefreshRunning = false;
+  private connectionRetryTimer?: number;
+  private connectionRetryAttempt = 0;
   private readonly onLocalDocumentUpdate = (
     _update: Uint8Array,
     origin: unknown,
   ) => {
+    this.documentChangeVersion += 1;
+    this.localDurabilityPending = true;
     if (
       !origin ||
       typeof origin !== "object" ||
       (origin as { clientId?: unknown }).clientId !== this.clientId
-    )
+    ) {
+      this.updateSynchronizationState();
       return;
+    }
     // Provider sync means the gateway accepted a Yjs frame, not that Convex
     // appended it. Mark locally-authored work pending before Hocuspocus can
     // report a transient clean state; the durable ack is the only exit.
     this.localDurabilityPending = true;
+    this.localChangeVersion += 1;
     this.updateSynchronizationState();
   };
 
@@ -303,6 +337,74 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   subscribePresence = this.snapshots.subscribePresence;
   subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
+  markLocalRecoveryPending() {
+    if (this.destroyed || this.localRecoveryPending) return;
+    // Restored IndexedDB work is authored state even though its Yjs update
+    // origin is LOCAL_PERSISTENCE_ORIGIN. Keep it pending until the gateway
+    // confirms the complete merged document hash, never just socket sync.
+    this.localRecoveryPending = true;
+    this.localDurabilityPending = true;
+    this.updateSynchronizationState();
+    this.sendLocalRecoveryUpdate();
+  }
+
+  private sendLocalRecoveryUpdate() {
+    const provider = this.provider;
+    if (
+      !this.localRecoveryPending ||
+      this.localRecoveryDeliveryPending ||
+      !provider?.synced ||
+      this.level === "read" ||
+      this.state === "permission_lost" ||
+      this.state === "closed"
+    )
+      return;
+    this.localRecoveryDeliveryPending = true;
+    try {
+      // The initial Hocuspocus handshake asks the room for state based on the
+      // local vector, but does not reliably transmit a preloaded local branch.
+      // After the server baseline has merged, send the full Yjs state; the
+      // gateway persists only its missing delta and treats repeats as no-ops.
+      provider.documentUpdateHandler(Y.encodeStateAsUpdate(this.document), {
+        clientId: this.clientId,
+        kind: "spectra-local-recovery",
+      });
+      provider.flushPendingUpdates();
+      this.requestDurableConfirmation();
+    } catch {
+      this.recoveryConfirmation = null;
+      this.localRecoveryDeliveryPending = false;
+      this.updateSynchronizationState(
+        "Spectra could not resend the locally saved draft yet. It will retry when the connection is available.",
+      );
+    }
+  }
+
+  private requestDurableConfirmation() {
+    if (!this.provider?.synced || this.recoveryConfirmation || !this.localDurabilityPending || this.destroyed) return;
+    const confirmation = { id: `recovery:${++this.recoveryConfirmationSequence}`, changeVersion: this.localChangeVersion };
+    this.recoveryConfirmation = confirmation;
+    this.provider.sendStateless(JSON.stringify({ type: "spectra.durable_confirm", confirmationId: confirmation.id }));
+  }
+
+  private confirmDurableFrontier(confirmedHash: string) {
+    if (!/^[a-f0-9]{64}$/.test(confirmedHash)) return;
+    const frontier = encodeDurableFrontier(Y, this.document);
+    if (!frontier) return;
+    const version = this.documentChangeVersion;
+    const epoch = this.durabilityEpoch;
+    void crypto.subtle.digest("SHA-256", new Uint8Array(frontier)).then(digest => {
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      if (this.destroyed || epoch !== this.durabilityEpoch || version !== this.documentChangeVersion || hash !== confirmedHash) return;
+      this.durablePendingUpdateIds.clear();
+      this.localDurabilityPending = false;
+      this.localRecoveryPending = false;
+      this.localRecoveryDeliveryPending = false;
+      this.recoveryConfirmation = null;
+      this.updateSynchronizationState();
+    }).catch(() => undefined);
+  }
+
   private update(next: Partial<CollaborationTransportSnapshot>) {
     if (next.state) this.state = next.state;
     if (next.level !== undefined) this.level = next.level;
@@ -311,7 +413,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (next.unsynchronizedChanges !== undefined)
       this.unsynchronizedChanges = next.unsynchronizedChanges;
     if (next.presence) this.presence = next.presence;
-    if (next.error !== undefined) this.error = next.error;
+    if ("error" in next) this.error = next.error;
     this.snapshots.apply({
       state: this.state,
       level: this.level,
@@ -330,11 +432,18 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       (this.localDurabilityPending ? 1 : 0);
     const terminal =
       this.state === "permission_lost" || this.state === "closed";
+    const recoveryNeedsModifyAccess =
+      this.localRecoveryPending && this.level === "read";
     this.update({
       unsynchronizedChanges: yjsPending,
       ...(error !== undefined ? { error } : {}),
       ...(terminal
         ? {}
+        : recoveryNeedsModifyAccess
+          ? {
+              state: "unsynchronized",
+              error: "Your locally saved edit needs modify access before it can sync.",
+            }
         : {
             state:
               error !== undefined
@@ -430,6 +539,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
 
   async connect() {
     if (this.destroyed || this.provider) return;
+    if (this.connectionRetryTimer !== undefined) {
+      window.clearTimeout(this.connectionRetryTimer);
+      this.connectionRetryTimer = undefined;
+    }
     this.update({ state: "connecting", error: undefined });
     this.intentionallyDisconnected = false;
     try {
@@ -442,7 +555,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // A route transition or HMR teardown can happen while the server session
       // is still being issued. Never resurrect a provider after its transport
       // has been destroyed; doing so creates an invisible reconnect/token loop.
-      if (this.destroyed) return;
+      if (this.destroyed || this.intentionallyDisconnected) return;
       this.update({
         level: initial.level,
         accountId: initial.accountId,
@@ -499,6 +612,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         },
         onStatus: ({ status }) => {
           if (status === "connected") {
+            this.connectionRetryAttempt = 0;
+            if (this.connectionRetryTimer !== undefined) {
+              window.clearTimeout(this.connectionRetryTimer);
+              this.connectionRetryTimer = undefined;
+            }
             if (this.localPresence)
               this.provider?.setAwarenessField("user", this.localPresence);
             this.update({
@@ -521,6 +639,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             this.update({ state: "synchronizing" });
             return;
           }
+          this.sendLocalRecoveryUpdate();
+          this.requestDurableConfirmation();
           this.updateSynchronizationState();
         },
         onUnsyncedChanges: ({ number }) => {
@@ -682,7 +802,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             const message = JSON.parse(payload) as {
               type?: string;
               updateIds?: unknown;
-            documentHash?: unknown;
+              documentHash?: unknown;
+              confirmationId?: unknown;
+              frontierHash?: unknown;
               message?: unknown;
             };
             if (message?.type === "spectra.permission_changed") {
@@ -698,8 +820,18 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                     level: refreshed.level,
                     accountId: refreshed.accountId,
                     displayName: refreshed.displayName,
+                    ...(this.localRecoveryPending &&
+                    refreshed.level === "modify"
+                      ? {
+                          state: this.provider?.synced
+                            ? "synchronizing"
+                            : "reconnecting",
+                        }
+                      : {}),
                     error: undefined,
                   });
+                  if (refreshed.level === "modify")
+                    this.sendLocalRecoveryUpdate();
                 })
                 .catch((error) => {
                   const reason =
@@ -729,6 +861,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                     typeof value === "string" && value.length <= 400,
                 )
               : [];
+            if (message.type === "spectra.durable_frontier") {
+              if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash);
+              return;
+            }
             if (message.type === "spectra.durable_pending") {
               for (const updateId of updateIds)
                 this.durablePendingUpdateIds.add(updateId);
@@ -736,26 +872,35 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               return;
             }
             if (message.type === "spectra.durable_ack") {
+              if (typeof message.confirmationId === "string") {
+                const confirmation = this.recoveryConfirmation;
+                if (!confirmation || confirmation.id !== message.confirmationId || this.destroyed) return;
+                this.recoveryConfirmation = null;
+                if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash);
+                this.updateSynchronizationState();
+                return;
+              }
               if (typeof message.documentHash === "string" && /^[a-f0-9]{64}$/.test(message.documentHash)) {
                 const confirmedHash = message.documentHash;
                 const captured = Y.encodeStateAsUpdate(this.document);
                 void crypto.subtle.digest("SHA-256", new Uint8Array(captured)).then((digest) => {
                   const hash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
                   const current = Y.encodeStateAsUpdate(this.document);
-                  if (hash !== confirmedHash || captured.length !== current.length || !captured.every((byte, index) => byte === current[index])) return;
+                  if (this.destroyed || hash !== confirmedHash || captured.length !== current.length || !captured.every((byte, index) => byte === current[index])) return;
                   this.durablePendingUpdateIds.clear();
                   this.localDurabilityPending = false;
+                  this.localRecoveryPending = false;
+                  this.localRecoveryDeliveryPending = false;
+                  this.recoveryConfirmation = null;
                   this.updateSynchronizationState();
                 });
                 return;
               }
               for (const updateId of updateIds)
                 this.durablePendingUpdateIds.delete(updateId);
-              if (
-                this.providerUnsynchronizedChanges === 0 &&
-                this.durablePendingUpdateIds.size === 0
-              )
-                this.localDurabilityPending = false;
+              // IDs prove the sender's updates only. A remote update may have
+              // arrived meanwhile; only a matching complete frontier can make
+              // the current document/cache remotely durable.
               this.updateSynchronizationState();
               return;
             }
@@ -770,10 +915,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           }
         },
         onDisconnect: ({ event }) => {
+          this.durabilityEpoch += 1;
           // A gateway restart discards only its in-memory acknowledgement set.
           // Yjs keeps the local document and re-sends its state-vector delta on
           // reconnect, where it receives a fresh durable pending/ack lifecycle.
           this.durablePendingUpdateIds.clear();
+          this.localRecoveryDeliveryPending = false;
+          this.recoveryConfirmation = null;
           const revoked =
             event.code === 4403 && collaborationAccessRevoked(event.reason);
           // 4409 is Spectra's durable-reject close. Keep unsynchronized + error
@@ -833,11 +981,35 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             ? error.message
             : "Could not start collaboration.",
       });
+      this.scheduleConnectionRetry();
     }
+  }
+
+  private scheduleConnectionRetry() {
+    if (
+      this.destroyed ||
+      this.intentionallyDisconnected ||
+      this.connectionRetryTimer !== undefined
+    )
+      return;
+    const attempt = this.connectionRetryAttempt + 1;
+    this.connectionRetryAttempt = attempt;
+    const delay = syncRetryDelayMs(
+      attempt,
+      `collaboration-connect:${this.artifactId}:${this.partitionKey}`,
+    );
+    this.connectionRetryTimer = window.setTimeout(() => {
+      this.connectionRetryTimer = undefined;
+      void this.connect();
+    }, delay);
   }
 
   disconnect() {
     this.intentionallyDisconnected = true;
+    if (this.connectionRetryTimer !== undefined) {
+      window.clearTimeout(this.connectionRetryTimer);
+      this.connectionRetryTimer = undefined;
+    }
     if (this.authorizationTimer !== undefined) {
       window.clearInterval(this.authorizationTimer);
       this.authorizationTimer = undefined;
@@ -851,7 +1023,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.durabilityEpoch += 1;
     this.intentionallyDisconnected = true;
+    if (this.connectionRetryTimer !== undefined) {
+      window.clearTimeout(this.connectionRetryTimer);
+      this.connectionRetryTimer = undefined;
+    }
     if (this.authorizationTimer !== undefined) {
       window.clearInterval(this.authorizationTimer);
       this.authorizationTimer = undefined;
@@ -871,6 +1048,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (this.state === "permission_lost")
       throw new Error("COLLABORATION_ACCESS_LOST");
     if (!this.provider) {
+      this.intentionallyDisconnected = false;
+      this.connectionRetryAttempt = 0;
       await this.connect();
       return;
     }

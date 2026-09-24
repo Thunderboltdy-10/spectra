@@ -1,13 +1,30 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
 import { createFolderNode } from "./orgTreeShared";
 import type { SyncPolicyValues } from "../shared/sync-policy";
+import { syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 
-const REVOCATION_PAGE_SIZE = 100;
+const REVOCATION_BATCH_DELAY_MS = 100;
+const REVOCATION_STEPS = [
+  { kind: "replica", state: "current", limit: 100 },
+  { kind: "replica", state: "ahead", limit: 100 },
+  { kind: "replica", state: "behind", limit: 100 },
+  { kind: "replica", state: "diverged", limit: 100 },
+  { kind: "replica", state: "pending", limit: 100 },
+  { kind: "replica", state: "error", limit: 100 },
+  { kind: "mount", state: "active", limit: 100 },
+  { kind: "mount", state: "detached", limit: 100 },
+  { kind: "write", state: "pending", limit: 10 },
+  { kind: "write", state: "claimed", limit: 10 },
+  { kind: "structure", state: "approval-required", limit: 25 },
+  { kind: "structure", state: "pending", limit: 25 },
+  { kind: "structure", state: "claimed", limit: 25 },
+] as const;
 
 const originSchema = z.string().url().refine((value) => {
   const url = new URL(value); return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname));
@@ -22,7 +39,6 @@ function randomSecret() { return `${crypto.randomUUID()}${crypto.randomUUID()}`.
 
 async function failRevokedWrite(
   ctx: MutationCtx,
-  accountId: Id<"accounts">,
   request: Doc<"bridgeWriteRequests">,
   now: number,
 ) {
@@ -34,9 +50,7 @@ async function failRevokedWrite(
     retryAt: undefined,
     updatedAt: now,
   });
-  const operation = await ctx.db.query("syncOperations")
-    .withIndex("by_account_key", (q) => q.eq("accountId", accountId).eq("idempotencyKey", request.idempotencyKey))
-    .unique();
+  const operation = await syncOperationForBridgeWrite(ctx, request);
   if (operation) {
     await ctx.db.patch(operation._id, {
       state: "failed",
@@ -130,7 +144,12 @@ export const resumePairing = mutation({
   },
 });
 
-export const devices = query({ args: {}, handler: async (ctx) => { const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); return ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50); } });
+export const devices = query({ args: {}, handler: async (ctx) => {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+  const devices = await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50);
+  return devices.map(({ credentialHash: _credentialHash, ...device }) => device);
+} });
 
 export const overview = query({ args: {}, handler: async (ctx) => {
   const actor = await getOptionalAuthenticatedActor(ctx);
@@ -172,6 +191,94 @@ export const registerMount = mutation({
   },
 });
 
+export const sweepRevokedDevice = internalMutation({
+  args: {
+    deviceId: v.id("bridgeDevices"),
+    step: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const device = await ctx.db.get(args.deviceId);
+    if (!device || device.state !== "revoked") return { done: true, processed: 0 };
+    if (!Number.isInteger(args.step) || args.step < 0)
+      throw new Error("BRIDGE_REVOCATION_STEP_INVALID");
+
+    const step = REVOCATION_STEPS[args.step];
+    if (!step) return { done: true, processed: 0 };
+    const now = Date.now();
+    let processed = 0;
+
+    if (step.kind === "replica") {
+      const replicas = await ctx.db
+        .query("workReplicas")
+        .withIndex("by_device_state", (q) =>
+          q.eq("deviceId", args.deviceId).eq("state", step.state),
+        )
+        .take(step.limit);
+      for (const replica of replicas) {
+        await ctx.db.patch(replica._id, {
+          state: "unavailable",
+          unavailableReason: "device-revoked",
+          updatedAt: now,
+        });
+      }
+      processed = replicas.length;
+    } else if (step.kind === "mount") {
+      const mounts = await ctx.db
+        .query("bridgeMounts")
+        .withIndex("by_device_state", (q) =>
+          q.eq("deviceId", args.deviceId).eq("state", step.state),
+        )
+        .take(step.limit);
+      for (const mount of mounts) {
+        await ctx.db.patch(mount._id, { state: "revoked", updatedAt: now });
+      }
+      processed = mounts.length;
+    } else if (step.kind === "write") {
+      const requests = await ctx.db
+        .query("bridgeWriteRequests")
+        .withIndex("by_device_state", (q) =>
+          q.eq("deviceId", args.deviceId).eq("state", step.state),
+        )
+        .take(step.limit);
+      for (const request of requests) {
+        await failRevokedWrite(ctx, request, now);
+      }
+      processed = requests.length;
+    } else {
+      const requests = await ctx.db
+        .query("bridgeFsRequests")
+        .withIndex("by_device_state", (q) =>
+          q.eq("deviceId", args.deviceId).eq("state", step.state),
+        )
+        .take(step.limit);
+      for (const request of requests) {
+        await ctx.db.patch(request._id, {
+          state: "failed",
+          errorCode: "device-revoked",
+          errorMessage: "The target Bridge device was revoked.",
+          claimedAt: undefined,
+          updatedAt: now,
+        });
+      }
+      processed = requests.length;
+    }
+
+    const nextStep = processed === step.limit ? args.step : args.step + 1;
+    if (nextStep < REVOCATION_STEPS.length) {
+      await ctx.scheduler.runAfter(
+        REVOCATION_BATCH_DELAY_MS,
+        internal.bridge.sweepRevokedDevice,
+        { deviceId: args.deviceId, step: nextStep },
+      );
+    }
+    return {
+      done: nextStep >= REVOCATION_STEPS.length,
+      nextStep,
+      processed,
+    };
+  },
+});
+
 export const revokeDevice = mutation({
   args: { deviceId: v.id("bridgeDevices") },
   handler: async (ctx, { deviceId }) => {
@@ -180,84 +287,21 @@ export const revokeDevice = mutation({
     const device = await ctx.db.get(deviceId);
     if (!device || device.accountId !== actor.accountId)
       throw new Error("BRIDGE_DEVICE_INVALID");
+    if (device.state === "revoked")
+      return { deviceId, cleanupQueued: false, alreadyRevoked: true };
+
     const now = Date.now();
     await ctx.db.patch(deviceId, {
       state: "revoked",
       credentialHash: `revoked:${crypto.randomUUID()}`,
+      payloadUploadCursor: undefined,
       lastSeenAt: now,
     });
-
-    let replicasRevoked = 0;
-    for (const state of ["current", "ahead", "behind", "diverged", "pending", "error"] as const) {
-      while (true) {
-        const replicas = await ctx.db.query("workReplicas")
-          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
-          .take(REVOCATION_PAGE_SIZE);
-        if (!replicas.length) break;
-        for (const replica of replicas) {
-          await ctx.db.patch(replica._id, {
-            state: "unavailable",
-            unavailableReason: "device-revoked",
-            updatedAt: now,
-          });
-          replicasRevoked += 1;
-        }
-      }
-    }
-
-    let mountsRevoked = 0;
-    for (const state of ["active", "detached"] as const) {
-      while (true) {
-        const mounts = await ctx.db.query("bridgeMounts")
-          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
-          .take(REVOCATION_PAGE_SIZE);
-        if (!mounts.length) break;
-        for (const mount of mounts) {
-          await ctx.db.patch(mount._id, { state: "revoked", updatedAt: now });
-          mountsRevoked += 1;
-        }
-      }
-    }
-
-    let writesFailed = 0;
-    for (const state of ["pending", "claimed"] as const) {
-      while (true) {
-        const requests = await ctx.db.query("bridgeWriteRequests")
-          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
-          .take(REVOCATION_PAGE_SIZE);
-        if (!requests.length) break;
-        for (const request of requests) {
-          await failRevokedWrite(ctx, actor.accountId, request, now);
-          writesFailed += 1;
-        }
-      }
-    }
-
-    let structureRequestsFailed = 0;
-    for (const state of ["approval-required", "pending", "claimed"] as const) {
-      while (true) {
-        const requests = await ctx.db.query("bridgeFsRequests")
-          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
-          .take(REVOCATION_PAGE_SIZE);
-        if (!requests.length) break;
-        for (const request of requests) {
-          await ctx.db.patch(request._id, {
-            state: "failed",
-            errorCode: "device-revoked",
-            errorMessage: "The target Bridge device was revoked.",
-            claimedAt: undefined,
-            updatedAt: now,
-          });
-          structureRequestsFailed += 1;
-        }
-      }
-    }
-
-    return {
-      replicasRevoked,
-      mountsRevoked,
-      writesFailed,
-      structureRequestsFailed,
-    };
+    await ctx.scheduler.runAfter(
+      REVOCATION_BATCH_DELAY_MS,
+      internal.bridge.sweepRevokedDevice,
+      { deviceId, step: 0 },
+    );
+    return { deviceId, cleanupQueued: true, alreadyRevoked: false };
   },
 });

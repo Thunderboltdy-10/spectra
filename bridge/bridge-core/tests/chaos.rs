@@ -12,6 +12,7 @@ use spectra_bridge_core::journal::{Journal, OpState};
 use spectra_bridge_core::platform::{OsFileIdentity, Platform};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, CloudResult, accept_cloud_result, inspect_claim_target,
+    inspect_write_target,
 };
 use spectra_bridge_core::watcher::{MountWatcher, StabilityTracker, WatcherConfig, scan_mount};
 use tempfile::tempdir;
@@ -21,6 +22,9 @@ struct ChaosPlatform {
     fail_before_write: Option<io::ErrorKind>,
     vanish_parent: bool,
     readback_failures: AtomicUsize,
+    external_write: Option<&'static [u8]>,
+    delete_before_write: bool,
+    lock_before_write: bool,
 }
 
 struct PlaceholderPlatform;
@@ -74,6 +78,15 @@ impl Platform for ChaosPlatform {
         Ok(())
     }
     fn before_write(&self, target: &Path) -> io::Result<()> {
+        if let Some(bytes) = self.external_write {
+            fs::write(target, bytes)?;
+        }
+        if self.delete_before_write {
+            fs::remove_file(target)?;
+        }
+        if self.lock_before_write {
+            fs::write(target.with_file_name("~$rk.txt"), b"owner")?;
+        }
         if self.vanish_parent {
             let _ = fs::remove_dir_all(target.parent().unwrap());
         }
@@ -119,8 +132,8 @@ fn request<'a>(grant: &'a str, hash: &'a str, key: &'a str) -> WriteRequest<'a> 
         grant_id: grant,
         relative_path: Path::new("work.txt"),
         resource_id: "resource",
-        base_revision: "base",
-        known_revision: "base",
+        base_revision: "new:resource",
+        known_revision: "new:resource",
         bytes: b"verified bytes",
         expected_hash: hash,
         idempotency_key: key,
@@ -181,6 +194,179 @@ fn lost_ack_finds_target_hash_and_double_replay_is_harmless() {
         journal.by_key("lost-ack").unwrap().unwrap().state,
         OpState::Verified
     );
+}
+
+#[test]
+fn claimed_replay_reaches_readback_after_replace_before_receipt() {
+    let (dir, _, grant, journal, writer) = harness(ChaosPlatform::default());
+    let path = dir.path().join("work.txt");
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    fs::write(&path, b"verified bytes").unwrap();
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    let op = journal
+        .begin_intent(
+            "receipt-crash",
+            "file.write",
+            Some("resource"),
+            Some("base"),
+            None,
+        )
+        .unwrap();
+    journal
+        .transition(&op.op_id, OpState::Performed, Some(&hash), None)
+        .unwrap();
+    assert_eq!(
+        inspect_write_target(&ChaosPlatform::default(), &path, "base", Some(&hash)),
+        ClaimPrecondition::Ready {
+            revision: hash.clone()
+        },
+    );
+    let mut replay = request(&grant, &hash, "receipt-crash");
+    replay.base_revision = "base";
+    replay.known_revision = &hash;
+    assert_eq!(
+        writer
+            .write_with_readback(replay)
+            .unwrap()
+            .verified_revision,
+        hash
+    );
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+
+    fs::write(&path, b"subsequent external edit").unwrap();
+    assert!(matches!(
+        inspect_write_target(&ChaosPlatform::default(), &path, "base", Some(&hash)),
+        ClaimPrecondition::Stale { .. },
+    ));
+    assert!(matches!(
+        writer.write(request(&grant, &hash, "receipt-crash")),
+        Err(FsError::StaleRevision)
+    ));
+    assert_eq!(fs::read(path).unwrap(), b"subsequent external edit");
+}
+
+#[test]
+fn external_save_during_download_is_not_overwritten_by_a_cached_base() {
+    let (dir, _, grant, _, writer) = harness(ChaosPlatform::default());
+    let path = dir.path().join("work.txt");
+    let base = hex::encode(Sha256::digest(b"original"));
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    fs::write(&path, b"external save during download").unwrap();
+    let mut write = request(&grant, &hash, "download-race");
+    write.base_revision = &base;
+    write.known_revision = &base;
+    assert!(matches!(writer.write(write), Err(FsError::StaleRevision)));
+    assert_eq!(fs::read(path).unwrap(), b"external save during download");
+}
+
+#[test]
+fn external_save_during_staging_is_not_overwritten() {
+    let (dir, _, grant, _, writer) = harness(ChaosPlatform {
+        external_write: Some(b"external staged edit"),
+        ..Default::default()
+    });
+    let path = dir.path().join("work.txt");
+    fs::write(&path, b"original").unwrap();
+    let base = hex::encode(Sha256::digest(b"original"));
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    let mut write = request(&grant, &hash, "stage-race");
+    write.base_revision = &base;
+    write.known_revision = &base;
+    assert!(matches!(writer.write(write), Err(FsError::StaleRevision)));
+    assert_eq!(fs::read(path).unwrap(), b"external staged edit");
+    assert_eq!(
+        fs::read_dir(dir.path()).unwrap().count(),
+        1,
+        "temporary file is removed"
+    );
+}
+
+#[test]
+fn external_delete_during_staging_does_not_recreate_the_file() {
+    let (dir, _, grant, _, writer) = harness(ChaosPlatform {
+        delete_before_write: true,
+        ..Default::default()
+    });
+    let path = dir.path().join("work.txt");
+    fs::write(&path, b"original").unwrap();
+    let base = hex::encode(Sha256::digest(b"original"));
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    let mut write = request(&grant, &hash, "delete-race");
+    write.base_revision = &base;
+    write.known_revision = &base;
+    assert!(matches!(writer.write(write), Err(FsError::StaleRevision)));
+    assert!(!path.exists());
+}
+
+#[test]
+fn new_copy_refuses_a_target_created_during_staging() {
+    let (dir, _, grant, _, writer) = harness(ChaosPlatform {
+        external_write: Some(b"new external file"),
+        ..Default::default()
+    });
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    assert!(matches!(
+        writer.write(request(&grant, &hash, "create-race")),
+        Err(FsError::StaleRevision)
+    ));
+    assert_eq!(
+        fs::read(dir.path().join("work.txt")).unwrap(),
+        b"new external file"
+    );
+}
+
+#[test]
+fn office_lock_appearing_during_staging_parks_the_write() {
+    let (dir, _, grant, _, writer) = harness(ChaosPlatform {
+        lock_before_write: true,
+        ..Default::default()
+    });
+    fs::write(dir.path().join("work.txt"), b"original").unwrap();
+    let base = hex::encode(Sha256::digest(b"original"));
+    let hash = hex::encode(Sha256::digest(b"verified bytes"));
+    let mut write = request(&grant, &hash, "lock-race");
+    write.base_revision = &base;
+    write.known_revision = &base;
+    assert!(matches!(writer.write(write), Err(FsError::FileLocked)));
+    assert_eq!(fs::read(dir.path().join("work.txt")).unwrap(), b"original");
+}
+
+#[test]
+fn concurrent_bridge_writers_cannot_both_replace_the_same_base() {
+    let (dir, grants, grant, journal, _) = harness(ChaosPlatform::default());
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let handles = [b"first".as_slice(), b"second".as_slice()]
+        .into_iter()
+        .enumerate()
+        .map(|(index, bytes)| {
+            let grants = grants.clone();
+            let grant = grant.clone();
+            let journal = journal.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let writer = SafeWriter::new(grants, journal, Arc::new(ChaosPlatform::default()));
+                let hash = hex::encode(Sha256::digest(bytes));
+                barrier.wait();
+                let mut write = request(&grant, &hash, if index == 0 { "first" } else { "second" });
+                write.bytes = bytes;
+                writer.write(write)
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(FsError::StaleRevision)))
+            .count(),
+        1
+    );
+    let bytes = fs::read(dir.path().join("work.txt")).unwrap();
+    assert!(bytes == b"first" || bytes == b"second");
 }
 
 #[test]
@@ -266,6 +452,25 @@ fn externally_deleted_claim_is_refused_before_safe_writer_can_recreate_it() {
 }
 
 #[test]
+fn new_local_copy_can_start_only_when_the_requested_target_is_absent() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("new-copy.docx");
+    let sentinel = "new:work_123";
+    assert_eq!(
+        inspect_claim_target(&ChaosPlatform::default(), &missing, sentinel),
+        ClaimPrecondition::Ready {
+            revision: sentinel.to_owned()
+        }
+    );
+    fs::write(&missing, b"unrelated existing file").unwrap();
+    assert!(matches!(
+        inspect_claim_target(&ChaosPlatform::default(), &missing, sentinel),
+        ClaimPrecondition::Stale { .. }
+    ));
+    assert_eq!(fs::read(missing).unwrap(), b"unrelated existing file");
+}
+
+#[test]
 fn stale_claim_is_detected_before_payload_download_or_write() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("changed.docx");
@@ -307,7 +512,7 @@ fn retrying_one_outbound_change_does_not_block_the_next() {
         .unwrap();
     let due = journal.due_queue(10).unwrap();
     journal
-        .retry_queue(due[0].id, Backoff::delay_for_attempt(7))
+        .retry_queue(due[0].id, Backoff::delay_for_attempt(7, &due[0].op_id))
         .unwrap();
     let still_due = journal.due_queue(10).unwrap();
     assert_eq!(still_due.len(), 1);

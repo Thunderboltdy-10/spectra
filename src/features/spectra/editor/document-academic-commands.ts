@@ -3,11 +3,11 @@ import { applyDocumentAcademicOperations, type DocumentAcademicOperation } from 
 import { documentBlocksFromJson, documentContentToProseMirrorJson, documentNodeText } from "../lenses/document-projection";
 import type { WordTextAnchor } from "../lenses/docx-academic-schema";
 
-export function academicSelection(editor: Editor): WordTextAnchor {
+export function academicSelection(editor: Pick<Editor, "state">): WordTextAnchor {
   const { $from, $to, from, to } = editor.state.selection;
   if (!$from.sameParent($to) || !$from.parent.isTextblock || typeof $from.parent.attrs.blockId !== "string") throw new Error("Select a caret or text range inside one paragraph.");
   const paragraph = $from.parent;
-  const start = $from.start();
+  const paragraphStart = $from.start();
   const prefix = (end: number) => {
     let text = "";
     paragraph.forEach((node, offset) => {
@@ -17,7 +17,17 @@ export function academicSelection(editor: Editor): WordTextAnchor {
     });
     return text;
   };
-  return { regionId: paragraph.attrs.blockId, start: prefix(from - start).length, end: prefix(to - start).length, expectedText: documentNodeText(paragraph.toJSON()) };
+  // documentNodeText is a block serializer and inserts paragraph separators
+  // between children. Anchors need the inline-visible text used by the native
+  // operation fence, with comment markers omitted and native inline nodes
+  // represented by their visible text.
+  const expectedText = prefix(paragraph.content.size);
+  return {
+    regionId: paragraph.attrs.blockId,
+    start: prefix(from - paragraphStart).length,
+    end: prefix(to - paragraphStart).length,
+    expectedText,
+  };
 }
 
 /** Replace only changed stable blocks in a single undoable ProseMirror transaction. */

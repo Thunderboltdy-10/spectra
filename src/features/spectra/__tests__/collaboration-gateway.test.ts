@@ -95,14 +95,14 @@ describe("P5.I2 gateway production helpers", () => {
     const delays = [0, 1, 2, 3, 8].map((attempt) =>
       reconnectDelayMs(attempt, { jitter: false }),
     );
-    expect(delays[0]).toBe(400);
-    expect(delays[1]).toBe(800);
-    expect(delays[2]).toBe(1_600);
-    expect(delays[3]).toBe(3_200);
-    expect(delays[4]).toBe(12_000);
+    expect(delays[0]).toBe(1_000);
+    expect(delays[1]).toBe(2_000);
+    expect(delays[2]).toBe(4_000);
+    expect(delays[3]).toBe(8_000);
+    expect(delays[4]).toBe(60_000);
     const jittered = reconnectDelayMs(3, { random: () => 0.5 });
-    expect(jittered).toBeGreaterThanOrEqual(200);
-    expect(jittered).toBeLessThanOrEqual(3_200);
+    expect(jittered).toBeGreaterThanOrEqual(6_400);
+    expect(jittered).toBeLessThanOrEqual(9_600);
   });
 
   it("flushes a checkpoint after idle and not on every note", async () => {

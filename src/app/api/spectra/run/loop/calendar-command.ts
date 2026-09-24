@@ -108,7 +108,12 @@ export async function executeRegisteredCalendarMutation(input: {
         ? parsed.idempotencyKey
         : undefined,
   });
-  const itemWire = await mutate<
+  const itemWire = input.runId && input.executionId && input.operationId
+    ? await mutate<Record<string, unknown>, Record<string, unknown>>("spectraApplicationWrites:execute", {
+      runId: input.runId, executionId: input.executionId, operationId: input.operationId,
+      expectedCommand: toolId, expectedArgs: input.args,
+    })
+    : await mutate<
     Record<string, unknown>,
     Record<string, unknown>
   >(calendarConvexMutation(toolId), calendarMutationPayload(action, idempotencyKey));

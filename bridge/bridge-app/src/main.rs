@@ -7,20 +7,24 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use polling::{PollResult, PollScheduler, PollWake, WaitResult};
-use spectra_bridge_core::fs::{FsError, Grant, GrantRegistry, SafeWriter, WriteRequest};
+use spectra_bridge_core::fs::{
+    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, resolve_write_target,
+};
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
-use spectra_bridge_core::journal::{Journal, OpState, ResourceRecord};
+use spectra_bridge_core::journal::{Journal, NativeAckItem, OpState, ResourceRecord};
 use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
 use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
+use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
-    Backoff, ClaimPrecondition, ClaimedPayloadUpload, ClaimedWrite, DeliveredChange,
-    DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope, ReplicaMigrationPage,
-    ReportedChange, claim_fs_request, claim_pending_payload_upload, claim_write,
-    complete_fs_request, complete_write_with_claim, detach_mount, discover_resources_page,
-    drain_cloud_queue, exchange_pairing, inspect_claim_target, migrate_cloud_replica_page,
-    reconcile_missing_resources, register_mount, resume_pairing, set_mount_availability,
-    upload_resource_payload,
+    Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite,
+    DeliveredChange, DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope,
+    ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
+    claim_pending_payload_upload, claim_write, complete_fs_request_with_claim,
+    complete_write_with_claim, detach_mount, discover_resources_page, drain_cloud_queue,
+    exchange_pairing, inspect_write_target, migrate_cloud_replica_page,
+    reconcile_missing_resources, refresh_structure_claim, refresh_write_claim, register_mount,
+    resume_pairing, set_mount_availability, upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
@@ -42,6 +46,73 @@ struct BridgeRuntime {
 }
 
 type ActiveMountSyncs = Arc<Mutex<HashSet<String>>>;
+
+/// A timed-out page is safely replayable because resource discovery resolves
+/// by stable device/resource identity. Split it once to let each half commit
+/// independently; never recursively fan a failing backend into a retry storm.
+async fn discover_resources_page_with_timeout_split(
+    deployment: &str,
+    credential: &str,
+    mount_id: &str,
+    resources: &[DiscoveredResource],
+) -> anyhow::Result<Vec<DiscoveredRegistration>> {
+    match discover_resources_page(deployment, credential, mount_id, resources).await {
+        Ok(registrations) => Ok(registrations),
+        Err(error)
+            if resources.len() > 1
+                && error
+                    .to_string()
+                    .to_ascii_lowercase()
+                    .contains("request timed out") =>
+        {
+            let middle = resources.len() / 2;
+            let mut registrations =
+                discover_resources_page(deployment, credential, mount_id, &resources[..middle])
+                    .await?;
+            registrations.extend(
+                discover_resources_page(deployment, credential, mount_id, &resources[middle..])
+                    .await?,
+            );
+            Ok(registrations)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn record_write_progress(
+    journal: &Journal,
+    stage: &str,
+    request: Option<&ClaimedWrite>,
+    detail: Option<&str>,
+) {
+    let recorded_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let value = serde_json::json!({
+        "stage": stage,
+        "requestId": request.map(|value| value.request_id.as_str()),
+        "claimGeneration": request.and_then(|value| value.claim_generation),
+        "detail": detail,
+        "recordedAt": recorded_at,
+    });
+    let _ = journal.set_config("write_worker_progress", &value.to_string());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MountSyncOutcome {
+    Completed,
+    RetryScheduled,
+    AlreadyRunning,
+}
+
+fn retain_current_mounts(
+    reconciled: &mut HashSet<String>,
+    current_mount_ids: impl IntoIterator<Item = String>,
+) {
+    let current_mount_ids = current_mount_ids.into_iter().collect::<HashSet<_>>();
+    reconciled.retain(|mount_id| current_mount_ids.contains(mount_id));
+}
 
 struct ActiveMountSyncGuard {
     active_mount_syncs: ActiveMountSyncs,
@@ -150,8 +221,8 @@ impl LocalBridgeControl for SpectraLocalControl {
             &self.wake,
             &self.active_mount_syncs,
         )
-            .await
-            .map(|_| ())
+        .await
+        .map(|_| ())
     }
 
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
@@ -174,7 +245,7 @@ impl LocalBridgeControl for SpectraLocalControl {
 const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[cfg(windows)]
-const WINDOWS_AUTOSTART_SCRIPT: &str = r#"$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra Bridge immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra Bridge',$definition,6,$null,$null,3,$null)"#;
+const WINDOWS_AUTOSTART_SCRIPT: &str = r#"$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra Bridge immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra Bridge',$definition,6,$null,$null,3,$null)"#;
 
 #[cfg(windows)]
 fn repair_windows_autostart_command() -> anyhow::Result<()> {
@@ -224,6 +295,7 @@ fn windows_autostart_launcher_is_hidden_and_starts_the_gui_binary_directly() {
         WINDOWS_AUTOSTART_SCRIPT.contains("-autostart")
             || WINDOWS_AUTOSTART_SCRIPT.contains("--autostart")
     );
+    assert!(WINDOWS_AUTOSTART_SCRIPT.contains("$service.GetFolder('\\');"));
     assert!(WINDOWS_AUTOSTART_SCRIPT.contains("$action.Path=$env:SPECTRA_BRIDGE_EXE"));
     assert_eq!(WINDOWS_CREATE_NO_WINDOW, 0x08000000);
 }
@@ -374,6 +446,109 @@ fn set_mount_status(
     total: usize,
 ) -> Result<(), String> {
     journal.set_config(&format!("mount_status:{grant_id}"), &serde_json::json!({ "state": state, "detail": detail, "synced": synced, "total": total }).to_string()).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MountRepairRetry {
+    attempts: u32,
+    retry_at_ms: u64,
+}
+
+fn mount_repair_retry_key(grant_id: &str) -> String {
+    format!("mount_repair_retry:{grant_id}")
+}
+
+fn mount_auto_sync_allowed(journal: &Journal, grant_id: &str) -> bool {
+    match journal.config(&format!("mount_double_sync:{grant_id}")) {
+        Ok(Some(value)) => value != "true",
+        Ok(None) => true,
+        Err(error) => {
+            record_runtime_error(
+                journal,
+                "Could not verify mount sync safety",
+                &error.to_string(),
+            );
+            false
+        }
+    }
+}
+
+fn pause_provider_managed_mount(journal: &Journal, grant_id: &str) {
+    let _ = set_mount_status(
+        journal,
+        grant_id,
+        "waiting",
+        "Automatic sync is paused for this provider-managed folder.",
+        0,
+        0,
+    );
+}
+
+fn current_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn clear_mount_repair_retry(journal: &Journal, grant_id: &str) -> Result<(), String> {
+    journal
+        .delete_config(&mount_repair_retry_key(grant_id))
+        .map_err(|error| error.to_string())
+}
+
+fn mount_repair_retry_due(journal: &Journal, grant_id: &str) -> bool {
+    journal
+        .config(&mount_repair_retry_key(grant_id))
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str::<MountRepairRetry>(&value).ok())
+        .is_some_and(|retry| retry.retry_at_ms <= current_time_ms())
+}
+
+fn display_retry_delay(delay_ms: u64) -> String {
+    if delay_ms < 60_000 {
+        let seconds = delay_ms.saturating_add(999) / 1_000;
+        format!("{seconds} seconds")
+    } else {
+        let minutes = delay_ms.saturating_add(59_999) / 60_000;
+        format!("{minutes} minutes")
+    }
+}
+
+fn schedule_mount_repair_retry(
+    journal: &Journal,
+    grant_id: &str,
+    detail: &str,
+    synced: usize,
+    total: usize,
+) -> Result<u64, String> {
+    let key = mount_repair_retry_key(grant_id);
+    let previous = journal
+        .config(&key)
+        .map_err(|error| error.to_string())?
+        .and_then(|value| serde_json::from_str::<MountRepairRetry>(&value).ok());
+    let attempts = previous
+        .map(|retry| retry.attempts)
+        .unwrap_or_default()
+        .saturating_add(1);
+    let delay_ms = bridge_mount_repair_delay_ms(attempts, grant_id);
+    let retry = MountRepairRetry {
+        attempts,
+        retry_at_ms: current_time_ms().saturating_add(delay_ms),
+    };
+    let value = serde_json::to_string(&retry).map_err(|error| error.to_string())?;
+    journal
+        .set_config(&key, &value)
+        .map_err(|error| error.to_string())?;
+    let base_detail = detail.chars().take(500).collect::<String>();
+    let status_detail = format!(
+        "{base_detail} Automatic repair is scheduled in {}.",
+        display_retry_delay(delay_ms),
+    );
+    set_mount_status(journal, grant_id, "waiting", &status_detail, synced, total)?;
+    Ok(delay_ms)
 }
 
 fn mount_root_key(grant: &Grant) -> String {
@@ -987,7 +1162,7 @@ async fn finish_delivered_change(
     if office_lock_exists(&target) {
         return journal.retry_queue(
             delivery.item.id,
-            Backoff::delay_for_attempt(delivery.item.attempts),
+            Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
         );
     }
     let mut snapshot = match stable_file_snapshot(&target) {
@@ -995,13 +1170,13 @@ async fn finish_delivered_change(
         Ok(None) => {
             return journal.retry_queue(
                 delivery.item.id,
-                Backoff::delay_for_attempt(delivery.item.attempts),
+                Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
             );
         }
         Err(_) => {
             return journal.retry_queue(
                 delivery.item.id,
-                Backoff::delay_for_attempt(delivery.item.attempts),
+                Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
             );
         }
     };
@@ -1010,7 +1185,7 @@ async fn finish_delivered_change(
         Err(_) => {
             return journal.retry_queue(
                 delivery.item.id,
-                Backoff::delay_for_attempt(delivery.item.attempts),
+                Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
             );
         }
     };
@@ -1046,7 +1221,7 @@ async fn finish_delivered_change(
         ),
         Err(_) => journal.retry_queue(
             delivery.item.id,
-            Backoff::delay_for_attempt(delivery.item.attempts),
+            Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
         ),
     }
 }
@@ -1176,9 +1351,10 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let mut processed = 0usize;
     for page in files.chunks(100) {
-        let registrations = discover_resources_page(&deployment, &credential, &mount_id, page)
-            .await
-            .map_err(|error| error.to_string())?;
+        let registrations =
+            discover_resources_page_with_timeout_split(&deployment, &credential, &mount_id, page)
+                .await
+                .map_err(|error| error.to_string())?;
         for (resource, registration) in page.iter().zip(registrations.iter()) {
             processed += 1;
             if registration.skipped {
@@ -1218,23 +1394,24 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
     if locked_files > 0 || isolated_failures > 0 {
-        set_mount_status(
+        schedule_mount_repair_retry(
             journal,
             &grant.id,
-            "waiting",
             &format!(
-                "{} file{} will retry after the next change or repair scan",
+                "{} file{} did not sync.",
                 locked_files + isolated_failures,
                 if locked_files + isolated_failures == 1 {
                     ""
                 } else {
                     "s"
-                }
+                },
             ),
             files.len().saturating_sub(isolated_failures),
             files.len() + locked_files,
         )
+        .map(|_| ())
     } else {
+        clear_mount_repair_retry(journal, &grant.id)?;
         set_mount_status(
             journal,
             &grant.id,
@@ -1253,10 +1430,18 @@ async fn process_write_request(
     credential: &str,
     request: ClaimedWrite,
 ) -> anyhow::Result<bool> {
+    record_write_progress(journal, "resolving-target", Some(&request), None);
     let relative = std::path::Path::new(&request.relative_path);
-    let target = match grants.resolve(&request.grant_id, relative) {
+    let target = match resolve_write_target(
+        grants,
+        journal,
+        &request.grant_id,
+        &request.local_resource_id,
+        relative,
+    ) {
         Ok(target) => target,
         Err(error) => {
+            record_write_progress(journal, "target-unavailable", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1270,10 +1455,19 @@ async fn process_write_request(
             return Ok(true);
         }
     };
-    let actual_revision = match inspect_claim_target(&HostPlatform, &target, &request.base_revision)
-    {
-        ClaimPrecondition::Ready { revision } => revision,
+    record_write_progress(journal, "checking-source", Some(&request), None);
+    let actual_revision = match inspect_write_target(
+        &HostPlatform,
+        &target,
+        &request.base_revision,
+        Some(&request.content_hash),
+    ) {
+        ClaimPrecondition::Ready { revision } => {
+            record_write_progress(journal, "source-ready", Some(&request), None);
+            revision
+        }
         ClaimPrecondition::Missing => {
+            record_write_progress(journal, "source-missing", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1290,6 +1484,7 @@ async fn process_write_request(
             return Ok(true);
         }
         ClaimPrecondition::Locked => {
+            record_write_progress(journal, "source-locked", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1303,6 +1498,7 @@ async fn process_write_request(
             return Ok(false);
         }
         ClaimPrecondition::Stale { revision } => {
+            record_write_progress(journal, "source-changed", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1319,6 +1515,7 @@ async fn process_write_request(
             return Ok(true);
         }
         ClaimPrecondition::Unreadable { message } => {
+            record_write_progress(journal, "source-unreadable", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1332,9 +1529,10 @@ async fn process_write_request(
             return Ok(false);
         }
     };
+    record_write_progress(journal, "downloading-payload", Some(&request), None);
     let response = match reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(spectra_bridge_core::retry::bridge_payload_timeout())
         .build()?
         .get(&request.payload_url)
         .send()
@@ -1345,8 +1543,21 @@ async fn process_write_request(
     };
     let payload = match response {
         Ok(response) => match response.bytes().await {
-            Ok(bytes) => bytes.to_vec(),
+            Ok(bytes) => {
+                record_write_progress(journal, "payload-downloaded", Some(&request), None);
+                bytes.to_vec()
+            }
             Err(error) => {
+                record_write_progress(
+                    journal,
+                    "payload-download-failed",
+                    Some(&request),
+                    Some(if error.is_timeout() {
+                        "timeout"
+                    } else {
+                        "body-read"
+                    }),
+                );
                 complete_claimed_write(
                     deployment,
                     credential,
@@ -1361,6 +1572,16 @@ async fn process_write_request(
             }
         },
         Err(error) => {
+            record_write_progress(
+                journal,
+                "payload-download-failed",
+                Some(&request),
+                Some(if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "request"
+                }),
+            );
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1376,6 +1597,7 @@ async fn process_write_request(
     };
     let payload_hash = hex::encode(sha2::Sha256::digest(&payload));
     if payload_hash != request.content_hash {
+        record_write_progress(journal, "payload-hash-mismatch", Some(&request), None);
         complete_claimed_write(
             deployment,
             credential,
@@ -1391,7 +1613,12 @@ async fn process_write_request(
         .await?;
         return Ok(true);
     }
+    if !refresh_write_claim(deployment, credential, &request).await? {
+        record_write_progress(journal, "claim-no-longer-current", Some(&request), None);
+        return Ok(true);
+    }
     let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
+    record_write_progress(journal, "safe-writer-started", Some(&request), None);
     let result = writer.write_with_readback(WriteRequest {
         grant_id: &request.grant_id,
         relative_path: relative,
@@ -1404,6 +1631,7 @@ async fn process_write_request(
     });
     match result {
         Ok(write_result) => {
+            record_write_progress(journal, "safe-writer-verified", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1417,6 +1645,7 @@ async fn process_write_request(
             Ok(true)
         }
         Err(FsError::FileLocked) => {
+            record_write_progress(journal, "safe-writer-locked", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1430,6 +1659,7 @@ async fn process_write_request(
             Ok(false)
         }
         Err(FsError::StaleRevision) => {
+            record_write_progress(journal, "safe-writer-stale", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1446,6 +1676,7 @@ async fn process_write_request(
             Ok(true)
         }
         Err(error) => {
+            record_write_progress(journal, "safe-writer-failed", Some(&request), None);
             complete_claimed_write(
                 deployment,
                 credential,
@@ -1469,7 +1700,11 @@ async fn drain_pending_payload_uploads(
 ) -> anyhow::Result<usize> {
     let mut uploaded = 0usize;
     for _ in 0..10 {
-        let Some(request) = claim_pending_payload_upload(deployment, credential).await? else {
+        let page = claim_pending_payload_upload(deployment, credential).await?;
+        let Some(request) = page.request else {
+            if page.has_more {
+                continue;
+            }
             break;
         };
         if !finish_pending_payload_upload(grants, journal, deployment, credential, request).await? {
@@ -1543,10 +1778,19 @@ async fn drain_write_requests(
     credential: &str,
 ) -> anyhow::Result<usize> {
     let mut by_replica = BTreeMap::<String, Vec<ClaimedWrite>>::new();
-    for _ in 0..20 {
-        let Some(request) = claim_write(deployment, credential).await? else {
-            break;
+    // Bound simultaneous payload memory and time spent prefetching leases.
+    for _ in 0..4 {
+        let request = match claim_write(deployment, credential).await {
+            Ok(Some(request)) => request,
+            Ok(None) => break,
+            Err(error) => {
+                let error_text = error.to_string();
+                let error_hint = error_text.split("; body=").next().unwrap_or(&error_text);
+                record_write_progress(journal, "claim-failed", None, Some(error_hint));
+                return Err(error);
+            }
         };
+        record_write_progress(journal, "claimed", Some(&request), None);
         by_replica
             .entry(request.replica_id.clone())
             .or_default()
@@ -1643,10 +1887,11 @@ async fn drain_structure_requests(
             .into_iter()
             .find(|grant| grant.id == request.grant_id);
         let Some(grant) = grant else {
-            complete_fs_request(
+            complete_claimed_structure(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "failed",
                 None,
                 Some((
@@ -1658,36 +1903,40 @@ async fn drain_structure_requests(
             handled += 1;
             continue;
         };
+        if !refresh_structure_claim(deployment, credential, &request).await? {
+            continue;
+        }
         let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
         let result = match request.kind.as_str() {
             "delete" => writer
-                .recycle(
+                .recycle_with_base(
                     &request.grant_id,
                     relative_source,
                     &request.local_resource_id,
                     &request.idempotency_key,
+                    request.base_revision.as_deref(),
                 )
                 .map(|_| None),
             "move" | "rename" => match target_candidate {
-                Some(target) => {
-                    let parent = grant
-                        .device_root()
-                        .join(target.parent().unwrap_or_else(|| std::path::Path::new("")));
-                    if let Err(error) = std::fs::create_dir_all(&parent) {
-                        Err(FsError::Other(anyhow::anyhow!(error)))
-                    } else {
-                        let actual = collision_path(grant.device_root(), target);
-                        writer
-                            .relocate(
-                                &request.grant_id,
-                                relative_source,
-                                &actual,
-                                &request.local_resource_id,
-                                &request.idempotency_key,
-                            )
-                            .map(|_| Some(actual.to_string_lossy().replace('\\', "/")))
-                    }
-                }
+                Some(target) => (|| -> Result<Option<String>, FsError> {
+                    // Validate before creating parents; a symlink in the
+                    // selected folder must not authorize directories outside it.
+                    grants.resolve(&request.grant_id, target)?;
+                    let candidate = collision_path(grant.device_root(), target);
+                    let actual = journal.reserve_structure_target(
+                        &request.idempotency_key,
+                        &candidate.to_string_lossy().replace('\\', "/"),
+                    )?;
+                    writer.relocate_with_base(
+                        &request.grant_id,
+                        relative_source,
+                        std::path::Path::new(&actual),
+                        &request.local_resource_id,
+                        &request.idempotency_key,
+                        request.base_revision.as_deref(),
+                    )?;
+                    Ok(Some(actual))
+                })(),
                 None => Err(FsError::Other(anyhow::anyhow!("structure target missing"))),
             },
             _ => Err(FsError::Other(anyhow::anyhow!(
@@ -1696,10 +1945,11 @@ async fn drain_structure_requests(
         };
         match result {
             Ok(actual) => {
-                complete_fs_request(
+                complete_claimed_structure(
                     deployment,
                     credential,
-                    &request.request_id,
+                    journal,
+                    &request,
                     "verified",
                     actual.as_deref(),
                     None,
@@ -1707,24 +1957,39 @@ async fn drain_structure_requests(
                 .await?
             }
             Err(FsError::FileLocked) => {
-                complete_fs_request(
+                complete_claimed_structure(
                     deployment,
                     credential,
-                    &request.request_id,
-                    "failed",
+                    journal,
+                    &request,
+                    "waiting",
                     None,
                     Some(("office-locked", "The file is open in another application.")),
                 )
                 .await?
             }
             Err(error) => {
-                complete_fs_request(
+                complete_claimed_structure(
                     deployment,
                     credential,
-                    &request.request_id,
-                    "failed",
+                    journal,
+                    &request,
+                    if matches!(error, FsError::StaleRevision) {
+                        "conflicted"
+                    } else if matches!(error, FsError::Io(_)) {
+                        "waiting"
+                    } else {
+                        "failed"
+                    },
                     None,
-                    Some(("structure-operation-failed", &error.to_string())),
+                    Some((
+                        if matches!(error, FsError::StaleRevision) {
+                            "stale-revision"
+                        } else {
+                            "structure-operation-failed"
+                        },
+                        &error.to_string(),
+                    )),
                 )
                 .await?
             }
@@ -1743,6 +2008,7 @@ async fn complete_claimed_write(
     actual_revision: Option<&str>,
     error: Option<(&str, &str)>,
 ) -> anyhow::Result<bool> {
+    record_write_progress(journal, "ack-enqueue", Some(request), Some(outcome));
     journal.enqueue_native_ack(
         &request.request_id,
         request.claim_generation,
@@ -1752,12 +2018,14 @@ async fn complete_claimed_write(
         error,
     )?;
     let ack = journal.due_native_acks(500)?.into_iter().find(|item| {
-        item.request_id == request.request_id
+        item.kind == "write"
+            && item.request_id == request.request_id
             && item.outcome == outcome
             && item.claim_generation == request.claim_generation
             && item.claim_token.as_deref() == request.claim_token.as_deref()
     });
     let Some(ack) = ack else {
+        record_write_progress(journal, "ack-not-due", Some(request), None);
         return Ok(false);
     };
     let result = complete_write_with_claim(
@@ -1775,12 +2043,37 @@ async fn complete_claimed_write(
     )
     .await;
     match result {
-        Ok(_) => {
+        Ok(completion) => {
+            record_write_progress(
+                journal,
+                if completion.ignored {
+                    "ack-ignored"
+                } else {
+                    "acknowledged"
+                },
+                Some(request),
+                completion
+                    .reason
+                    .as_deref()
+                    .or(Some(completion.state.as_str())),
+            );
             journal.acknowledge_native_ack(ack.id)?;
             Ok(true)
         }
         Err(error) => {
-            journal.retry_native_ack(ack.id, Backoff::delay_for_attempt(ack.attempts))?;
+            record_write_progress(
+                journal,
+                "ack-retry",
+                Some(request),
+                Some(if error.to_string().contains("BRIDGE_CREDENTIAL_INVALID") {
+                    "credential-invalid"
+                } else {
+                    "request-failed"
+                }),
+            );
+            let retry_key = ack.id.to_string();
+            journal
+                .retry_native_ack(ack.id, Backoff::delay_for_attempt(ack.attempts, &retry_key))?;
             // The file operation has already reached its local durable state;
             // only the cloud acknowledgement remains to be retried.
             let _ = error;
@@ -1796,31 +2089,98 @@ async fn drain_native_ack_queue(
 ) -> anyhow::Result<usize> {
     let mut handled = 0;
     for ack in journal.due_native_acks(100)? {
-        let result = complete_write_with_claim(
-            deployment,
-            credential,
-            &ack.request_id,
-            &ack.outcome,
-            ack.actual_revision.as_deref(),
-            match (ack.error_code.as_deref(), ack.error_message.as_deref()) {
-                (Some(code), Some(message)) => Some((code, message)),
-                _ => None,
-            },
-            ack.claim_generation,
-            ack.claim_token.as_deref(),
-        )
-        .await;
+        let result = send_native_ack(deployment, credential, &ack).await;
         match result {
             Ok(_) => {
                 journal.acknowledge_native_ack(ack.id)?;
                 handled += 1;
             }
             Err(_) => {
-                journal.retry_native_ack(ack.id, Backoff::delay_for_attempt(ack.attempts))?;
+                let retry_key = ack.id.to_string();
+                journal.retry_native_ack(
+                    ack.id,
+                    Backoff::delay_for_attempt(ack.attempts, &retry_key),
+                )?;
             }
         }
     }
     Ok(handled)
+}
+
+async fn send_native_ack(
+    deployment: &str,
+    credential: &str,
+    ack: &NativeAckItem,
+) -> anyhow::Result<WriteCompletion> {
+    let error = match (ack.error_code.as_deref(), ack.error_message.as_deref()) {
+        (Some(code), Some(message)) => Some((code, message)),
+        _ => None,
+    };
+    match ack.kind.as_str() {
+        "structure" => {
+            complete_fs_request_with_claim(
+                deployment,
+                credential,
+                &ack.request_id,
+                &ack.outcome,
+                ack.actual_relative_path.as_deref(),
+                error,
+                ack.claim_generation,
+                ack.claim_token.as_deref(),
+            )
+            .await
+        }
+        "write" => {
+            complete_write_with_claim(
+                deployment,
+                credential,
+                &ack.request_id,
+                &ack.outcome,
+                ack.actual_revision.as_deref(),
+                error,
+                ack.claim_generation,
+                ack.claim_token.as_deref(),
+            )
+            .await
+        }
+        _ => anyhow::bail!("unsupported native acknowledgement kind"),
+    }
+}
+
+async fn complete_claimed_structure(
+    deployment: &str,
+    credential: &str,
+    journal: &Journal,
+    request: &ClaimedFsRequest,
+    outcome: &str,
+    actual_path: Option<&str>,
+    error: Option<(&str, &str)>,
+) -> anyhow::Result<()> {
+    journal.enqueue_structure_ack(
+        &request.request_id,
+        request.claim_generation,
+        request.claim_token.as_deref(),
+        outcome,
+        actual_path,
+        error,
+    )?;
+    let ack = journal.due_native_acks(500)?.into_iter().find(|ack| {
+        ack.kind == "structure"
+            && ack.request_id == request.request_id
+            && ack.claim_generation == request.claim_generation
+            && ack.claim_token == request.claim_token
+    });
+    if let Some(ack) = ack {
+        if send_native_ack(deployment, credential, &ack).await.is_ok() {
+            journal.acknowledge_native_ack(ack.id)?;
+        } else {
+            journal.retry_native_ack(
+                ack.id,
+                Backoff::delay_for_attempt(ack.attempts, &ack.id.to_string()),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn spawn_grant_watcher(
@@ -1845,6 +2205,9 @@ fn spawn_grant_watcher(
         let mut pending_missing = HashMap::<std::path::PathBuf, std::time::Instant>::new();
         let mut last_reconciliation = std::time::Instant::now();
         let mut last_hold_scan = std::time::Instant::now();
+        let mut hold_scan_cursor: Option<String> = None;
+        let mut watcher_start_attempts = 0u32;
+        let mut next_watcher_start = std::time::Instant::now();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if wake.is_shutdown() {
@@ -1886,42 +2249,69 @@ fn spawn_grant_watcher(
                 );
                 continue;
             }
-            if watcher.is_none() {
+            if watcher.is_none() && std::time::Instant::now() >= next_watcher_start {
                 watcher =
                     MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone())
                         .ok();
                 if watcher.is_none() {
+                    watcher_start_attempts = watcher_start_attempts.saturating_add(1);
+                    let delay_ms = bridge_mount_repair_delay_ms(
+                        watcher_start_attempts,
+                        &format!("watcher:{}", grant.id),
+                    );
+                    next_watcher_start =
+                        std::time::Instant::now() + std::time::Duration::from_millis(delay_ms);
                     let _ = set_mount_status(
                         &journal,
                         &grant.id,
-                        "error",
-                        "The folder could not be watched yet.",
+                        "waiting",
+                        &format!(
+                            "Folder change monitoring could not start. Retrying in {}.",
+                            display_retry_delay(delay_ms),
+                        ),
                         0,
                         0,
                     );
-                    continue;
-                }
-                let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
-                let marker_key = format!("mount_availability:{}", grant.id);
-                let was_unavailable =
-                    journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
-                if was_unavailable {
-                    if let (Ok(url), Ok(Some(device_id))) =
-                        (deployment_url(&journal), journal.config("device_id"))
-                    {
-                        if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                            if set_mount_availability(&url, &credential, &grant.id, true)
-                                .await
-                                .is_ok()
-                            {
-                                let _ = journal.delete_config(&marker_key);
+                } else {
+                    watcher_start_attempts = 0;
+                    next_watcher_start = std::time::Instant::now();
+                    let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
+                    let marker_key = format!("mount_availability:{}", grant.id);
+                    let was_unavailable = journal.config(&marker_key).ok().flatten().as_deref()
+                        == Some("unavailable");
+                    if was_unavailable {
+                        if let (Ok(url), Ok(Some(device_id))) =
+                            (deployment_url(&journal), journal.config("device_id"))
+                        {
+                            if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
+                                if set_mount_availability(&url, &credential, &grant.id, true)
+                                    .await
+                                    .is_ok()
+                                {
+                                    let _ = journal.delete_config(&marker_key);
+                                }
                             }
                         }
                     }
+                    stability = StabilityTracker::new(config.stability_window);
+                    pending_files.clear();
+                    pending_missing.clear();
+                    last_reconciliation = std::time::Instant::now();
                 }
-                stability = StabilityTracker::new(config.stability_window);
-                pending_files.clear();
-                pending_missing.clear();
+            }
+            if watcher.is_none() {
+                if mount_repair_retry_due(&journal, &grant.id) {
+                    let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
+                    last_reconciliation = std::time::Instant::now();
+                }
+                if last_reconciliation.elapsed() >= config.reconciliation_interval {
+                    let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
+                    last_reconciliation = std::time::Instant::now();
+                }
+                continue;
+            }
+            if mount_repair_retry_due(&journal, &grant.id) {
+                let _ = sync_grant(&grant, &journal, &active_mount_syncs).await;
                 last_reconciliation = std::time::Instant::now();
             }
             let batch = watcher
@@ -1931,6 +2321,7 @@ fn spawn_grant_watcher(
             let mut local_work_queued = false;
             let observed_at = std::time::Instant::now();
             for path in batch.existing_files {
+                stability.mark_changed(&path);
                 pending_missing.remove(&path);
                 if is_office_lock_file(&path) {
                     if let Some(target) = office_lock_target(&path) {
@@ -2076,8 +2467,17 @@ fn spawn_grant_watcher(
             }
             if last_hold_scan.elapsed() >= std::time::Duration::from_secs(2) {
                 last_hold_scan = std::time::Instant::now();
-                if let Ok(resources) = journal.resources_for_grant(&grant.id) {
-                    for resource in resources.into_iter().take(500) {
+                if let Ok(resources) =
+                    journal.resource_probe_page(&grant.id, hold_scan_cursor.as_deref(), 100)
+                {
+                    hold_scan_cursor = if resources.len() == 100 {
+                        resources
+                            .last()
+                            .map(|resource| resource.local_resource_id.clone())
+                    } else {
+                        None
+                    };
+                    for resource in resources {
                         if !resource.available {
                             continue;
                         }
@@ -2120,12 +2520,16 @@ async fn sync_grant(
     grant: &Grant,
     journal: &Journal,
     active_mount_syncs: &ActiveMountSyncs,
-) -> Result<(), String> {
+) -> Result<MountSyncOutcome, String> {
+    if !mount_auto_sync_allowed(journal, &grant.id) {
+        pause_provider_managed_mount(journal, &grant.id);
+        return Ok(MountSyncOutcome::Completed);
+    }
     let Some(_active_mount_sync) = ActiveMountSyncGuard::acquire(active_mount_syncs, &grant.id)
     else {
-        return Ok(());
+        return Ok(MountSyncOutcome::AlreadyRunning);
     };
-    let result = if !grant.is_available() {
+    if !grant.is_available() {
         set_mount_status(
             journal,
             &grant.id,
@@ -2133,17 +2537,24 @@ async fn sync_grant(
             "Folder is unavailable on this device; reconnect the drive to resume.",
             0,
             0,
-        )
-    } else {
-        match run_sync(grant, journal).await {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let _ = set_mount_status(journal, &grant.id, "error", &error, 0, 0);
-                Err(error)
+        )?;
+        return Ok(MountSyncOutcome::Completed);
+    }
+    match run_sync(grant, journal).await {
+        Ok(()) => Ok(MountSyncOutcome::Completed),
+        Err(error) => {
+            record_runtime_error(journal, "Mount repair scan failed", &error);
+            match schedule_mount_repair_retry(journal, &grant.id, &error, 0, 0) {
+                Ok(_) => Ok(MountSyncOutcome::RetryScheduled),
+                Err(schedule_error) => {
+                    let detail =
+                        format!("{error}. Automatic retry could not be saved: {schedule_error}");
+                    let _ = set_mount_status(journal, &grant.id, "error", &detail, 0, 0);
+                    Err(detail)
+                }
             }
         }
-    };
-    result
+    }
 }
 
 #[tauri::command]
@@ -2293,7 +2704,14 @@ async fn select_mount_impl(
     wake: &PollWake,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<Option<(String, String)>, String> {
-    let Some(selection) = app.dialog().file().blocking_pick_folder() else {
+    let (selection_tx, selection_rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |selection| {
+        let _ = selection_tx.send(selection);
+    });
+    let selection = selection_rx
+        .await
+        .map_err(|_| "Folder picker closed before returning a selection".to_string())?;
+    let Some(selection) = selection else {
         return Ok(None);
     };
     let path = selection.into_path().map_err(|error| error.to_string())?;
@@ -2367,6 +2785,7 @@ async fn retry_mount_impl(
     if already_running {
         return Ok(());
     }
+    clear_mount_repair_retry(journal, &grant.id)?;
     set_mount_status(
         journal,
         &grant.id,
@@ -2380,14 +2799,14 @@ async fn retry_mount_impl(
     let active_mount_syncs_for_scan = active_mount_syncs.clone();
     let wake_for_scan = wake.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(error) =
-            sync_grant(&grant_for_scan, &journal_for_scan, &active_mount_syncs_for_scan).await
+        if let Err(error) = sync_grant(
+            &grant_for_scan,
+            &journal_for_scan,
+            &active_mount_syncs_for_scan,
+        )
+        .await
         {
-            record_runtime_error(
-                &journal_for_scan,
-                "Repair scan failed",
-                &error,
-            );
+            record_runtime_error(&journal_for_scan, "Repair scan failed", &error);
         }
         wake_for_scan.wake();
     });
@@ -2509,7 +2928,7 @@ async fn run_sync_iteration(
     journal: &Arc<Journal>,
     state: &Arc<ServerState>,
     active_mount_syncs: &ActiveMountSyncs,
-    restored_grants_reconciled: &mut bool,
+    restored_grants_reconciled: &mut HashSet<String>,
     last_compaction: &mut std::time::Instant,
     deployment: &mut Option<String>,
     configuration_dirty: &mut bool,
@@ -2553,20 +2972,28 @@ async fn run_sync_iteration(
     let _ = journal.delete_config("replica_migration_error");
 
     let mut failed = false;
-    if !*restored_grants_reconciled {
-        let mut reconciliation_succeeded = true;
-        for grant in grants.device_grants() {
-            if sync_grant(&grant, journal, active_mount_syncs)
-                .await
-                .is_err()
-            {
-                reconciliation_succeeded = false;
-            }
+    let device_grants = grants.device_grants();
+    retain_current_mounts(
+        restored_grants_reconciled,
+        device_grants.iter().map(|grant| grant.id.clone()),
+    );
+    for grant in device_grants {
+        if restored_grants_reconciled.contains(&grant.id) {
+            continue;
         }
-        if reconciliation_succeeded {
-            *restored_grants_reconciled = true;
-        } else {
-            failed = true;
+        if !mount_auto_sync_allowed(journal, &grant.id) {
+            pause_provider_managed_mount(journal, &grant.id);
+            restored_grants_reconciled.insert(grant.id);
+            continue;
+        }
+        match sync_grant(&grant, journal, active_mount_syncs).await {
+            Ok(MountSyncOutcome::Completed | MountSyncOutcome::RetryScheduled) => {
+                restored_grants_reconciled.insert(grant.id);
+            }
+            Ok(MountSyncOutcome::AlreadyRunning) => {
+                restored_grants_reconciled.insert(grant.id);
+            }
+            Err(_) => failed = true,
         }
     }
 
@@ -2626,9 +3053,21 @@ async fn run_sync_iteration(
             if message.contains("MOUNT_NOT_ACTIVE") {
                 // Re-register cloud mounts for local grants so
                 // LibreOffice/Office disk edits can upload again.
-                *restored_grants_reconciled = false;
+                restored_grants_reconciled.clear();
                 for grant in grants.device_grants() {
-                    let _ = sync_grant(&grant, journal, active_mount_syncs).await;
+                    if !mount_auto_sync_allowed(journal, &grant.id) {
+                        pause_provider_managed_mount(journal, &grant.id);
+                        restored_grants_reconciled.insert(grant.id);
+                        continue;
+                    }
+                    if matches!(
+                        sync_grant(&grant, journal, active_mount_syncs).await,
+                        Ok(MountSyncOutcome::Completed
+                            | MountSyncOutcome::RetryScheduled
+                            | MountSyncOutcome::AlreadyRunning)
+                    ) {
+                        restored_grants_reconciled.insert(grant.id);
+                    }
                 }
             }
         }
@@ -2716,7 +3155,7 @@ async fn run_sync_worker(
     let process_seed = uuid::Uuid::new_v4().as_u128() as u64;
     let mut scheduler = PollScheduler::new(process_seed);
     let mut device_id = None;
-    let mut restored_grants_reconciled = false;
+    let mut restored_grants_reconciled = HashSet::new();
     let mut last_compaction = std::time::Instant::now();
     let mut deployment = None;
     let mut configuration_dirty = true;
@@ -2743,7 +3182,7 @@ async fn run_sync_worker(
         )
         .await;
         if result == PollResult::Disconnected || result == PollResult::Unauthenticated {
-            restored_grants_reconciled = false;
+            restored_grants_reconciled.clear();
         }
         scheduler.record(result);
         match wake.wait(scheduler.next_delay()).await {
@@ -2879,6 +3318,10 @@ fn main() {
                 active_mount_syncs: active_mount_syncs.clone(),
             }));
             for grant in restored_grants {
+                if !mount_auto_sync_allowed(&journal, &grant.id) {
+                    pause_provider_managed_mount(&journal, &grant.id);
+                    continue;
+                }
                 spawn_grant_watcher(
                     grant,
                     grants.clone(),
@@ -2960,8 +3403,12 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveMountSyncGuard, configured_deployment_url, resolve_bridge_data_dir,
+        ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
+        configured_deployment_url, mount_auto_sync_allowed, mount_repair_retry_due,
+        mount_repair_retry_key, pause_provider_managed_mount, resolve_bridge_data_dir,
+        retain_current_mounts, schedule_mount_repair_retry,
     };
+    use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
@@ -3031,5 +3478,104 @@ mod tests {
         });
         assert!(task.await.is_err());
         assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
+    }
+
+    #[test]
+    fn successful_mounts_are_not_rescanned_when_another_mount_needs_retry() {
+        let mut reconciled = HashSet::new();
+        reconciled.insert("healthy".to_owned());
+
+        let current_mounts = ["healthy", "offline"];
+        retain_current_mounts(
+            &mut reconciled,
+            current_mounts.into_iter().map(str::to_owned),
+        );
+        let retry_mounts = current_mounts
+            .into_iter()
+            .filter(|mount_id| !reconciled.contains(*mount_id))
+            .collect::<Vec<_>>();
+
+        assert_eq!(retry_mounts, ["offline"]);
+        reconciled.insert("offline".to_owned());
+        retain_current_mounts(
+            &mut reconciled,
+            ["healthy", "offline"].into_iter().map(str::to_owned),
+        );
+        assert_eq!(reconciled.len(), 2);
+    }
+
+    #[test]
+    fn removed_mounts_are_dropped_from_reconciliation_state() {
+        let mut reconciled = HashSet::from(["removed".to_owned(), "current".to_owned()]);
+        retain_current_mounts(&mut reconciled, ["current".to_owned()]);
+        assert_eq!(reconciled, HashSet::from(["current".to_owned()]));
+    }
+
+    #[test]
+    fn mount_repair_retry_is_durable_backed_off_and_cleared_on_success() {
+        let journal = Journal::in_memory().unwrap();
+        let first_delay =
+            schedule_mount_repair_retry(&journal, "grant-safe", "Cloud unavailable.", 0, 2)
+                .unwrap();
+        let retry_key = mount_repair_retry_key("grant-safe");
+        let first =
+            serde_json::from_str::<MountRepairRetry>(&journal.config(&retry_key).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(first.attempts, 1);
+        assert!(!mount_repair_retry_due(&journal, "grant-safe"));
+        let status: serde_json::Value =
+            serde_json::from_str(&journal.config("mount_status:grant-safe").unwrap().unwrap())
+                .unwrap();
+        assert_eq!(status["state"], "waiting");
+        assert!(
+            status["detail"]
+                .as_str()
+                .unwrap()
+                .contains("Automatic repair")
+        );
+
+        let due = MountRepairRetry {
+            attempts: first.attempts,
+            retry_at_ms: 0,
+        };
+        journal
+            .set_config(&retry_key, &serde_json::to_string(&due).unwrap())
+            .unwrap();
+        assert!(mount_repair_retry_due(&journal, "grant-safe"));
+
+        let second_delay =
+            schedule_mount_repair_retry(&journal, "grant-safe", "Still offline.", 0, 2).unwrap();
+        assert!(second_delay > first_delay);
+        let second =
+            serde_json::from_str::<MountRepairRetry>(&journal.config(&retry_key).unwrap().unwrap())
+                .unwrap();
+        assert_eq!(second.attempts, 2);
+        clear_mount_repair_retry(&journal, "grant-safe").unwrap();
+        assert!(!mount_repair_retry_due(&journal, "grant-safe"));
+        assert_eq!(journal.config(&retry_key).unwrap(), None);
+    }
+
+    #[test]
+    fn provider_managed_mounts_are_not_automatically_resumed() {
+        let journal = Journal::in_memory().unwrap();
+        assert!(mount_auto_sync_allowed(&journal, "grant-safe"));
+        journal
+            .set_config("mount_double_sync:grant-provider", "true")
+            .unwrap();
+        assert!(!mount_auto_sync_allowed(&journal, "grant-provider"));
+        pause_provider_managed_mount(&journal, "grant-provider");
+        let status: serde_json::Value = serde_json::from_str(
+            &journal
+                .config("mount_status:grant-provider")
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(status["state"], "waiting");
+        assert!(status["detail"].as_str().unwrap().contains("paused"));
+        journal
+            .set_config("mount_double_sync:grant-provider", "false")
+            .unwrap();
+        assert!(mount_auto_sync_allowed(&journal, "grant-provider"));
     }
 }

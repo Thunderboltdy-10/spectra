@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { humanizePublicFailure } from "./humanize";
+import { mountsForConnectedDevice } from "./mount-selection";
+import { useBridgeHealth } from "./use-bridge";
 import { StorageToggleGroup } from "./storage-toggle-group";
+import { SelectField } from "@/components/ui/select";
 import {
   isProtectedOriginalPreset,
   policyPresetFromToggles,
@@ -46,12 +49,19 @@ export function FileStorageControls({
     }),
   );
   const activeMounts = useQuery(api.bridge.activeMounts, useAuthedArgs({}));
+  const bridge = useBridgeHealth();
+  const currentDeviceMounts = mountsForConnectedDevice(
+    activeMounts,
+    bridge.status,
+    bridge.state === "connected",
+  );
   const transitionStorageStrategy = useMutation(
     api.replicas.transitionStorageStrategy,
   );
   const revertPolicy = useMutation(api.syncPolicy.revert);
   const [strategyBusy, setStrategyBusy] = useState(false);
   const [openError, setOpenError] = useState<string>();
+  const [selectedMountId, setSelectedMountId] = useState("");
   const hasLocalCopy = Boolean(
     truth?.replicas.some((replica) => replica.kind === "local"),
   );
@@ -59,6 +69,14 @@ export function FileStorageControls({
     effectivePolicy?.preset ?? (hasLocalCopy ? "both" : "spectra");
   const strategyPending =
     strategyBusy || strategyTransition?.state === "pending";
+
+  useEffect(() => {
+    if (currentDeviceMounts.some((mount) => mount._id === selectedMountId))
+      return;
+    setSelectedMountId(
+      currentDeviceMounts.length === 1 ? currentDeviceMounts[0]!._id : "",
+    );
+  }, [currentDeviceMounts, selectedMountId]);
 
   if (!truth || truth.replicas.length === 0) return null;
 
@@ -91,6 +109,17 @@ export function FileStorageControls({
   ) {
     const toPreset = policyPresetFromToggles(choice, protectedOriginal);
     if (toPreset === currentPreset) return;
+    const targetMount =
+      currentDeviceMounts.find((mount) => mount._id === selectedMountId) ??
+      (currentDeviceMounts.length === 1 ? currentDeviceMounts[0] : undefined);
+    if (toPreset !== "spectra" && !hasLocalCopy && !targetMount) {
+      setOpenError(
+        currentDeviceMounts.length > 1
+          ? "Choose the folder for this computer below before keeping a local copy."
+          : "Connect Spectra Bridge and add a folder in Spectra Settings before keeping a local copy.",
+      );
+      return;
+    }
     setStrategyBusy(true);
     setOpenError(undefined);
     try {
@@ -99,8 +128,8 @@ export function FileStorageControls({
         toPreset,
         ...(toPreset !== "spectra" &&
         !truth?.replicas.some((replica) => replica.kind === "local") &&
-        activeMounts?.[0]
-          ? { mountId: activeMounts[0]._id, relativePath: artifactTitle }
+        targetMount
+          ? { mountId: targetMount._id, relativePath: artifactTitle }
           : {}),
       });
     } catch (error) {
@@ -153,6 +182,20 @@ export function FileStorageControls({
           }
         />
       </div>
+      {!hasLocalCopy && currentDeviceMounts.length > 1 ? (
+        <div className="mt-3">
+          <SelectField
+            label="Folder on this computer"
+            value={selectedMountId}
+            onChange={setSelectedMountId}
+            options={currentDeviceMounts.map((mount) => ({
+              value: mount._id,
+              label: mount.rootLabel,
+            }))}
+            placeholder="Choose a folder"
+          />
+        </div>
+      ) : null}
       {effectivePolicy?.source.kind &&
       effectivePolicy.source.kind !== "default" ? (
         <button

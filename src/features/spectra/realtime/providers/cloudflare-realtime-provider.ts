@@ -13,6 +13,10 @@ import { SPECTRA_PROTOCOL_VERSIONS } from "../../migrations/protocol";
 import { isEmptyYjsUpdate } from "../../work/models/yjs/shared";
 import { resolveDocumentRelativeSelection } from "../../work/models/yjs/relative-position";
 import { ScopedCollaborationSnapshots } from "../../collaboration/scoped-snapshots";
+import {
+  SYNC_RETRY_POLICY,
+  syncRetryDelayMs,
+} from "../../../../../shared/sync-retry-policy";
 
 type ProviderOptions = {
   workId: string;
@@ -55,6 +59,11 @@ export class CloudflareRealtimeProvider
   readonly clientId: string;
   private readonly remoteOrigin = Symbol("cloudflare-remote");
   private socket: WebSocket | null = null;
+  private connecting: Promise<void> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private intentionallyDisconnected = false;
+  private destroyed = false;
   private readonly snapshots = new ScopedCollaborationSnapshots({
     state: "closed",
   });
@@ -108,32 +117,79 @@ export class CloudflareRealtimeProvider
   subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
   async connect() {
+    if (this.destroyed) return;
     if (this.socket && this.socket.readyState <= 1) return;
+    if (this.connecting) return this.connecting;
+    this.intentionallyDisconnected = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connecting = this.connectOnce()
+      .catch((error: unknown) => {
+        if (!this.destroyed && !this.intentionallyDisconnected) {
+          this.patch({
+            state: "unsynchronized",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Realtime connection unavailable.",
+          });
+          this.scheduleReconnect();
+        }
+        throw error;
+      })
+      .finally(() => {
+        this.connecting = null;
+      });
+    return this.connecting;
+  }
+
+  private async connectOnce() {
     this.patch({ state: "connecting", error: undefined });
     const request = this.options.fetch ?? fetch;
-    const response = await request(
-      this.options.tokenEndpoint ?? "/api/spectra/collaboration/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          artifactId: this.options.workId,
-          partitionKey: this.options.partitionKey ?? "root",
-          clientId: this.clientId,
-          schemaVersion: this.options.schemaVersion,
-          realtimeProvider: "cloudflare",
-        }),
-      },
-    );
-    if (!response.ok) throw new Error(`COLLABORATION_TOKEN_FAILED: ${response.status}`);
-    const token = (await response.json()) as { data?: TokenResponse } & TokenResponse;
-    const payload = token.data ?? token;
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, SYNC_RETRY_POLICY.collaborationConnectTimeoutMs);
+    let payload: TokenResponse;
+    try {
+      const response = await request(
+        this.options.tokenEndpoint ?? "/api/spectra/collaboration/token",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            artifactId: this.options.workId,
+            partitionKey: this.options.partitionKey ?? "root",
+            clientId: this.clientId,
+            schemaVersion: this.options.schemaVersion,
+            realtimeProvider: "cloudflare",
+          }),
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok)
+        throw new Error(`COLLABORATION_TOKEN_FAILED: ${response.status}`);
+      const token = (await response.json()) as {
+        data?: TokenResponse;
+      } & TokenResponse;
+      payload = token.data ?? token;
+    } catch (error) {
+      if (timedOut) throw new Error("COLLABORATION_CONNECT_TIMEOUT");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     const base = payload.url.replace(/\/$/, "");
     const roomUrl = `${base}/rooms/${encodeURIComponent(this.options.workId)}${
       this.options.partitionKey && this.options.partitionKey !== "root"
         ? `/${encodeURIComponent(this.options.partitionKey)}`
         : ""
     }?token=${encodeURIComponent(payload.token)}`;
+    if (this.destroyed || this.intentionallyDisconnected) return;
     const socket = (this.options.createSocket ?? ((url) => new WebSocket(url)))(roomUrl);
     this.socket = socket;
     this.patch({
@@ -142,30 +198,73 @@ export class CloudflareRealtimeProvider
       accountId: payload.accountId,
       displayName: payload.displayName,
     });
-    socket.addEventListener("open", () => this.patch({ state: "synchronizing" }));
+    socket.addEventListener("open", () => {
+      this.reconnectAttempt = 0;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.patch({ state: "synchronizing", error: undefined });
+    });
     socket.addEventListener("message", (event) => this.receive(String(event.data)));
     socket.addEventListener("close", () => {
       this.rejectPendingCoordination("COLLABORATION_RECONNECTING");
-      if (this.snapshot.state !== "closed") this.patch({ state: "reconnecting" });
+      if (this.socket === socket) this.socket = null;
+      if (!this.intentionallyDisconnected && this.snapshot.state !== "closed") {
+        this.patch({ state: "reconnecting" });
+        this.scheduleReconnect();
+      }
     });
-    socket.addEventListener("error", () =>
-      this.patch({ state: "unsynchronized", error: "Realtime connection unavailable." }),
+    socket.addEventListener("error", () => {
+      this.patch({ state: "unsynchronized", error: "Realtime connection unavailable." });
+      socket.close();
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.intentionallyDisconnected || this.reconnectTimer) return;
+    const attempt = this.reconnectAttempt + 1;
+    this.reconnectAttempt = attempt;
+    const delay = syncRetryDelayMs(
+      attempt,
+      `cloudflare-collaboration:${this.options.workId}:${this.options.partitionKey ?? "root"}`,
     );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect().catch(() => undefined);
+    }, delay);
   }
 
   retry() {
+    if (this.destroyed) return Promise.reject(new Error("COLLABORATION_CLOSED"));
+    // Closing an old socket during a manual retry must not also schedule the
+    // automatic reconnect path from its close event.
+    this.intentionallyDisconnected = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket?.close();
     this.socket = null;
+    this.reconnectAttempt = 0;
+    this.intentionallyDisconnected = false;
     return this.connect();
   }
 
   disconnect() {
+    this.intentionallyDisconnected = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket?.close();
     this.socket = null;
     this.patch({ state: "closed" });
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.disconnect();
     this.rejectPendingCoordination("COLLABORATION_CLOSED");
     this.snapshots.clear();

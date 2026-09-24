@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { probeGatewayReadiness, probeWebReadiness } from "./readiness.mjs";
 import {
   INSTANCE_SCHEMA_VERSION,
   LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
@@ -953,21 +954,14 @@ async function statusInstance(instanceId, environment) {
   const launcherRunning = Boolean(
     state?.launcherPid && processExists(state.launcherPid),
   );
-  const [convexName, webHealthText, gatewayHealthText] = await Promise.all([
+  const [convexName, web, gateway] = await Promise.all([
     fetchText(`http://127.0.0.1:${manifest.ports.convexCloud}/instance_name`),
-    fetchText(`http://localhost:${manifest.ports.web}/api/health`),
-    fetchText(`http://127.0.0.1:${manifest.ports.collaboration}/_spectra/health`),
+    probeWebReadiness(`http://localhost:${manifest.ports.web}`),
+    probeGatewayReadiness(`http://127.0.0.1:${manifest.ports.collaboration}`),
   ]);
-  const reportsReady = (value) => {
-    try {
-      return JSON.parse(value ?? "null")?.status === "ready";
-    } catch {
-      return false;
-    }
-  };
   const backendReady = Boolean(convexName && convexName === state?.deploymentName);
   const running = launcherRunning && backendReady &&
-    reportsReady(webHealthText) && reportsReady(gatewayHealthText);
+    web.status === "ready" && gateway.status === "ready";
   const status = running ? "ready" : launcherRunning ? "not_ready" : "stopped";
   process.stdout.write(
     `Local instance ${instanceId}: ${status}\n` +

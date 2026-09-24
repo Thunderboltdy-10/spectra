@@ -8,11 +8,14 @@ import {
 import {
   bumpPolicyVersion,
   evaluateAccess,
+  evaluateAccessForActor,
+  evaluateAccessForActorWithLoadedResource,
   listDirectlyGrantedResourceIds,
 } from "./authorityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { normalizeWorkspaceView } from "../shared/workspace-view";
+import { workspacePage } from "./catalogPages";
 import {
   createFolderNode,
   createLinkNode,
@@ -91,6 +94,16 @@ function liveWorkspace<
     : currentWorkspace;
 }
 
+export const listPage = query({
+  args: {
+    includeArchived: v.optional(v.boolean()),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: workspacePage,
+});
+
 export const list = query({
   args: {
     includeArchived: v.optional(v.boolean()),
@@ -99,18 +112,24 @@ export const list = query({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
-    // Active workspaces can be buried under a large recently-archived set
-    // (e.g. ManageBac cleanup). Scan far enough to surface live ones.
-    const ownedScan = args.includeArchived
-      ? Math.max(limit * 2, 60)
-      : Math.max(limit * 8, 2_000);
-    const owned = await ctx.db
-      .query("spectraWorkspaces")
-      .withIndex("by_account_activity", (q) =>
-        q.eq("ownerAccountId", actor._id),
-      )
-      .order("desc")
-      .take(ownedScan);
+    // Keep archived workspaces out of the active read path at the index
+    // level; accounts with a large ManageBac archive should not make Library
+    // scan thousands of full workspace records just to find current ones.
+    const owned = args.includeArchived
+      ? await ctx.db
+          .query("spectraWorkspaces")
+          .withIndex("by_account_activity", (q) =>
+            q.eq("ownerAccountId", actor._id),
+          )
+          .order("desc")
+          .take(Math.max(limit * 2, 60))
+      : await ctx.db
+          .query("spectraWorkspaces")
+          .withIndex("by_account_status_activity", (q) =>
+            q.eq("ownerAccountId", actor._id).eq("status", "active"),
+          )
+          .order("desc")
+          .take(Math.max(limit * 8, 240));
     const grantedIds = await listDirectlyGrantedResourceIds(
       ctx,
       actor,
@@ -121,7 +140,7 @@ export const list = query({
         grantedIds.map(async (resourceId) => {
           const id = ctx.db.normalizeId("spectraWorkspaces", resourceId);
           if (!id) return null;
-          const decision = await evaluateAccess(ctx, "workspace", id);
+          const decision = await evaluateAccessForActor(ctx, actor, "workspace", id);
           return decision.allowed
             ? (decision.loaded.resource as Doc<"spectraWorkspaces">)
             : null;
@@ -145,7 +164,12 @@ export const list = query({
     return Promise.all(
       visible.map(async (workspace) => {
         const [decision, invitations] = await Promise.all([
-          evaluateAccess(ctx, "workspace", workspace._id),
+          evaluateAccessForActorWithLoadedResource(ctx, actor, "workspace", workspace._id, {
+            resource: workspace,
+            ownerAccountId: workspace.ownerAccountId,
+            schoolId: workspace.schoolId,
+            lifecycle: workspace.status,
+          }),
           ctx.db
             .query("shareInvitations")
             .withIndex("by_resource", (q) =>

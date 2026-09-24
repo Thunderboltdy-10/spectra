@@ -1,0 +1,13 @@
+{
+  "initialDelayMs": 1000,
+  "maxDelayMs": 60000,
+  "activeRunPollMaxDelayMs": 15000,
+  "jitterPercent": 20,
+  "bridgeMountRepairInitialDelayMs": 5000,
+  "bridgeMountRepairMaxDelayMs": 900000,
+  "bridgeClaimLeaseMs": 120000,
+  "bridgePayloadTimeoutMs": 15000,
+  "bridgeWriteRetentionMs": 604800000,
+  "collaborationMinDelayMs": 1000,
+  "collaborationConnectTimeoutMs": 15000
+}

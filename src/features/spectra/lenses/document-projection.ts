@@ -300,7 +300,11 @@ const documentContentSchema = docxProjectionSchema
   .passthrough();
 
 function nativeTrailingWhitespaceEquivalent(left: string, right: string) {
-  return left.trimEnd() === right.trimEnd();
+  // The editor omits terminal native run whitespace and paragraph separators
+  // from its text mirror. Keep the exact native projection when only these
+  // ASCII whitespace characters differ; inlineContent still carries authored
+  // hard breaks and other meaningful runs.
+  return left.replace(/[ \t\r\n]+$/u, "") === right.replace(/[ \t\r\n]+$/u, "");
 }
 
 function rowsFor(block: DocxProjection["blocks"][number]) {
@@ -810,9 +814,7 @@ export function docxProjectionFromContent(
         : normalizedRichRows
           ? { richRows: normalizedRichRows }
           : {}),
-      ...(!previous && inlineContent?.some((item) => item.kind === "bibliography") && !incoming.attrs
-        ? { attrs: { paragraphFormat: { alignment: "left", lineSpacing: 1, spacingAfterPoints: 0, indentLevel: 0, border: null, shading: null } } }
-        : previous?.attrs || incoming.attrs
+      ...(previous?.attrs || incoming.attrs
         ? {
             attrs: {
               ...(previous?.attrs ?? {}),

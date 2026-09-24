@@ -40,9 +40,9 @@ export function mapOperationArtifactReferences(
       content: visitArguments(operation.input.content) as typeof operation.input.content,
       ...(operation.input.contentPatch ? { contentPatch: { changes: operation.input.contentPatch.changes.map((change) => ({
         ...change,
-        value: change.path === "/linkedArtifactIds"
+        value: /^\/(?:content\/)?linkedArtifactIds$/.test(change.path)
           ? visitArguments(change.value, "linkedArtifactIds")
-          : /^\/linkedArtifactIds\/\d+$/.test(change.path) && typeof change.value === "string"
+          : /^\/(?:content\/)?linkedArtifactIds\/(?:\d+|-)$/.test(change.path) && typeof change.value === "string"
             ? map(change.value) : change.value,
       })) } } : {}),
     } } as ModelOperation;

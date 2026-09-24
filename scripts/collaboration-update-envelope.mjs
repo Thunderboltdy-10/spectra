@@ -25,13 +25,6 @@ export function projectionExceedsDurableBound(projectionJson) {
   return utf8ByteLength(projectionJson) > MAX_PROJECTION_JSON_UTF8_BYTES;
 }
 
-function bytesEqual(left, right) {
-  if (left.byteLength !== right.byteLength) return false;
-  for (let index = 0; index < left.byteLength; index += 1)
-    if (left[index] !== right[index]) return false;
-  return true;
-}
-
 /**
  * Sync step 2 may contain a peer's complete Yjs state. The gateway has to
  * accept that bounded realtime frame for rich documents, but the durable log
@@ -39,29 +32,30 @@ function bytesEqual(left, right) {
  * new edit remains large and is refused by the existing durable-update gate.
  */
 export function canonicalDurableUpdate(Y, canonicalDocument, incomingUpdate) {
-  const beforeVector = Y.encodeStateVector(canonicalDocument);
-  const beforeUpdate = Y.encodeStateAsUpdate(canonicalDocument);
-  const probe = new Y.Doc();
-  try {
-    Y.applyUpdate(probe, beforeUpdate);
-    Y.applyUpdate(probe, incomingUpdate);
-    // A Yjs deletion advances the delete set without advancing the state
-    // vector. Comparing vectors alone therefore classified a real deletion as
-    // a no-op and let it disappear on restart. The full update encoding is
-    // deterministic for the cloned state and includes both structs and deletes.
-    if (bytesEqual(beforeUpdate, Y.encodeStateAsUpdate(probe))) return null;
-    const canonicalDelta = Y.encodeStateAsUpdate(probe, beforeVector);
-    // Re-encoding against a state vector can expand a compact, fragmented
-    // native edit dramatically (especially a rich-tree replacement with many
-    // deletes). The original frame is already a valid idempotent Yjs update
-    // that produces this exact probe state, so keep the smaller equivalent
-    // envelope. Full sync frames still collapse to the much smaller canonical
-    // delta, while compact delete-heavy edits no longer fail a size gate only
-    // because re-encoding inflated them.
-    return incomingUpdate.byteLength <= canonicalDelta.byteLength
-      ? incomingUpdate.slice()
-      : canonicalDelta;
-  } finally {
-    probe.destroy();
+  // Work on the incoming update, not a clone/serialization of the entire room.
+  // diffUpdate retains unresolved causal structs and the incoming delete set;
+  // both must remain durable even when they have no visible effect yet.
+  const delta = Y.diffUpdate(incomingUpdate, Y.encodeStateVector(canonicalDocument));
+  const decoded = Y.decodeUpdate(delta);
+  if (decoded.structs.length > 0) return delta;
+
+  // A delete does not advance the state vector. Check only its referenced
+  // ranges, including gaps of live structs; matching range endpoints alone
+  // would incorrectly discard a partially applied clear.
+  for (const [client, ranges] of decoded.ds.clients) {
+    const structs = canonicalDocument.store.clients.get(client);
+    const knownClock = structs?.length
+      ? structs[structs.length - 1].id.clock + structs[structs.length - 1].length
+      : 0;
+    for (const range of ranges) {
+      const end = range.clock + range.len;
+      if (!structs?.length || end > knownClock) return delta;
+      let index = Y.findIndexSS(structs, range.clock);
+      while (index < structs.length && structs[index].id.clock < end) {
+        if (!structs[index].deleted) return delta;
+        index += 1;
+      }
+    }
   }
+  return null;
 }

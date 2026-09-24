@@ -5,6 +5,8 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
 import { requireArtifactCapability } from "./spectraShared";
 import { recordMeterEvent } from "./metering";
+import { normalizeSha256 } from "../shared/intake-integrity";
+import { storageHasOtherBinding } from "./durableStorageBindings";
 
 const runtime = v.union(
   v.literal("browser"),
@@ -244,9 +246,8 @@ export const finalize = mutation({
     if (
       !metadata ||
       metadata.size !== payloadBytes ||
-      metadata.sha256.toLowerCase() !== payloadHash
+      normalizeSha256(metadata.sha256) !== payloadHash
     ) {
-      if (metadata) await ctx.storage.delete(args.storageId);
       await ctx.db.patch(build._id, {
         status: "failed",
         failureReason: "Uploaded build failed its integrity check.",
@@ -254,6 +255,8 @@ export const finalize = mutation({
       });
       throw new Error("RUNTIME_UPLOAD_INTEGRITY_FAILED");
     }
+    if (await storageHasOtherBinding(ctx, args.storageId, { table: "spectraRuntimeBuilds", id: String(build._id) }))
+      throw new Error("RUNTIME_STORAGE_OWNERSHIP");
     const now = Date.now();
     const published = await ctx.db
       .query("spectraRuntimeBuilds")
@@ -342,10 +345,9 @@ export const fail = mutation({
     ) {
       return { failed: false };
     }
-    if (args.storageId) {
-      const metadata = await ctx.db.system.get("_storage", args.storageId);
-      if (metadata) await ctx.storage.delete(args.storageId);
-    }
+    // Upload URLs do not bind the supplied storage ID to this build. A caller
+    // can name another artifact's retained bytes or another in-flight upload.
+    // Cleanup requires upload provenance, not just an ID or an absent binding.
     await ctx.db.patch(build._id, {
       status: "failed",
       failureReason: args.reason.trim().slice(0, 500) || "Publish failed.",

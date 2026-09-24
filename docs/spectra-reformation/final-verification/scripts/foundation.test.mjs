@@ -113,4 +113,71 @@ describe("P8.V1 final-verification foundation", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("does not certify missing, invalid, partial, or empty usage as zero cost", () => {
+    const missing = parseCompletionLine(JSON.stringify({ kind: "Completion", identifier: "test:query", usageStats: { databaseReadBytes: -1 } }));
+    expect(missing.usage.databaseIoReadBytes).toBeNull();
+    expect(missing.usage.databaseIoWriteBytes).toBeNull();
+    expect(missing.returnBytes).toBeNull();
+    expect(evaluateBudget(aggregateCompletions([missing], { seconds: 60, profile: "action" })))
+      .toMatchObject({ passed: false, status: "unobserved" });
+    expect(evaluateBudget(aggregateCompletions([], { seconds: 60, profile: "idle" })))
+      .toMatchObject({ passed: false, status: "unobserved" });
+    const measured = parseCompletionLine(JSON.stringify({ kind: "Completion", identifier: "test:query", caller: "WebSocket", returnBytes: 4,
+      usageStats: { databaseReadBytes: 200, databaseIoWriteBytes: 0, networkEgressBytes: 4 } }));
+    const mixed = aggregateCompletions([measured, missing], { seconds: 60, profile: "action" });
+    expect(mixed.totals.nonCronDatabaseIoBytes).toBeNull();
+    expect(mixed.coverage.databaseIoReadBytes).toEqual({ observedEvents: 1, totalEvents: 2 });
+    expect(evaluateBudget(aggregateCompletions([measured], { seconds: 60, profile: "action", capture: { complete: false } })))
+      .toMatchObject({ passed: false, status: "unobserved" });
+    expect(evaluateBudget(aggregateCompletions([measured], { seconds: 60, profile: "action" })))
+      .toMatchObject({ passed: true, status: "passed" });
+    expect(evaluateBudget(aggregateCompletions([measured], { seconds: 60, profile: "scheduled" })))
+      .toMatchObject({ passed: false, status: "unobserved" });
+  });
+
+  it("counts socket/query lifecycle across windows and observes ready transitions without retaining args", async () => {
+    const { JSDOM } = await import("jsdom");
+    const dom = new JSDOM("<main></main>", { runScripts: "outside-only", pretendToBeVisual: true });
+    const observers = [];
+    const NativeObserver = dom.window.MutationObserver;
+    dom.window.MutationObserver = class extends NativeObserver {
+      constructor(callback) { super(callback); observers.push(this); }
+    };
+    try {
+      dom.window.TextEncoder = TextEncoder;
+      dom.window.performance.clearResourceTimings = () => {};
+      dom.window.eval(`window.WebSocket = class extends EventTarget {
+        send() {} open() { this.dispatchEvent(new Event('open')); }
+        close() { this.dispatchEvent(new Event('close')); }
+      };`);
+      const install = Function(`return (${await readFile(resolve(root, "install-observers.mjs"), "utf8")});`)();
+      let initArgument;
+      const page = { on() {}, async addInitScript(_fn, arg) { initArgument = arg; },
+        async evaluate(fn, arg) { return dom.window.eval(`(${fn})(${JSON.stringify(arg)})`); }, url: () => "about:blank" };
+      await install(page);
+      dom.window.eval(`window.socket = new WebSocket(); socket.open(); socket.send(JSON.stringify({ type: 'ModifyQuerySet', modifications: [{ type: 'Add', queryId: 1, udfPath: 'orgTree:listChildren', args: { private: 'NEVER_RETAIN' } }] }));`);
+      const state = dom.window.__spectraP8;
+      expect(initArgument).toBe(true);
+      expect(state.installedBeforeApp).toBe(false);
+      expect(state.socketLifecycle.active).toBe(1);
+      expect(state.convexQueries.active).toBe(1);
+      expect(state.convexQueries.byFunction["orgTree:listChildren"]).toEqual({ added: 1, removed: 0, active: 1, peak: 1 });
+      state.reset();
+      expect(state.convexQueries).toMatchObject({ added: 0, active: 1, peak: 1 });
+      expect(state.convexQueries.byFunction["orgTree:listChildren"]).toEqual({ added: 0, removed: 0, active: 1, peak: 1 });
+      dom.window.eval(`socket.send(JSON.stringify({ type: 'ModifyQuerySet', modifications: [{ type: 'Remove', queryId: 1 }] })); socket.close();`);
+      expect(state.convexQueries).toMatchObject({ removed: 1, active: 0 });
+      expect(state.convexQueries.byFunction["orgTree:listChildren"]).toEqual({ added: 0, removed: 1, active: 0, peak: 1 });
+      expect(state.socketLifecycle.active).toBe(0);
+      const node = dom.window.document.querySelector("main");
+      node.setAttribute("data-spectra-studio", "fixture-a");
+      node.setAttribute("data-spectra-editor-ready", "true");
+      await new Promise((done) => setTimeout(done, 0));
+      node.setAttribute("data-spectra-studio", "fixture-b");
+      await new Promise((done) => setTimeout(done, 0));
+      expect(state.editorReadiness.map((event) => event.artifactId)).toEqual(["fixture-a", "fixture-b"]);
+      expect(JSON.stringify(state)).not.toContain("NEVER_RETAIN");
+    } finally { for (const observer of observers) observer.disconnect(); dom.window.close(); }
+  });
 });

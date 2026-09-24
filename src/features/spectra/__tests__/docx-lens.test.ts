@@ -6,6 +6,8 @@ import { XmlElement, XmlText } from "@ariadng/office/xml";
 import {
   DocxLensError,
   docxLens,
+  docxProjectionReadbackDigest,
+  docxProjectionSemanticDigest,
   type DocxAssetResolver,
   type DocxRichInline,
   type DocxRunFormat,
@@ -214,6 +216,20 @@ describe("DOCX preservation lens", () => {
     });
     const updatedReadback = await docxLens.open(updated);
     expect(updatedReadback.projection.blocks.at(-1)?.text).toBe(added.text);
+    expect(await docxProjectionReadbackDigest(updatedReadback.projection, update.projection)).toBe(
+      await docxProjectionSemanticDigest(update.projection),
+    );
+    const mismatchedReadback = {
+      ...updatedReadback.projection,
+      blocks: updatedReadback.projection.blocks.map((block, index) =>
+        index === updatedReadback.projection.blocks.length - 1
+          ? { ...block, text: "A different paragraph." }
+          : block,
+      ),
+    };
+    expect(await docxProjectionReadbackDigest(mismatchedReadback, update.projection)).not.toBe(
+      await docxProjectionSemanticDigest(update.projection),
+    );
 
     const output = await docxLens.materialize({
       projection: {
@@ -224,6 +240,48 @@ describe("DOCX preservation lens", () => {
     });
     const reopened = await docxLens.open(output);
     expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
+  });
+
+  it("ignores Word padding spaces in paragraph readback while preserving other whitespace", async () => {
+    const opened = await docxLens.open(await fixture("complex-structure.docx"));
+    const targetIndex = opened.projection.blocks.findIndex(
+      (block) => block.type === "paragraph" && block.text.length > 0,
+    );
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+    const requested = structuredClone(opened.projection);
+    const padded = structuredClone(opened.projection);
+    padded.blocks[targetIndex]!.text += " ";
+    expect(await docxProjectionReadbackDigest(padded, requested)).toBe(
+      await docxProjectionSemanticDigest(requested),
+    );
+
+    const tabbed = structuredClone(opened.projection);
+    tabbed.blocks[targetIndex]!.text += "\t";
+    expect(await docxProjectionReadbackDigest(tabbed, requested)).not.toBe(
+      await docxProjectionSemanticDigest(requested),
+    );
+  });
+
+  it("does not infer paragraph formatting for a newly inserted bibliography", async () => {
+    const opened = await docxLens.open(await fixture("complex-structure.docx"));
+    const bibliography = {
+      id: "s9-new-bibliography-projection",
+      type: "paragraph" as const,
+      text: "References",
+      inlineContent: [{ kind: "bibliography" as const, sources: [], text: "References" }],
+    };
+    const update = docxProjectionFromContent({
+      ...opened.projection,
+      nativeProjectionComplete: true,
+      blocks: [...opened.projection.blocks, bibliography],
+    }, opened.projection);
+
+    expect(update.projection.blocks.at(-1)?.attrs?.paragraphFormat).toBeUndefined();
+    expect(update.operations).toContainEqual(expect.objectContaining({
+      kind: "insert-paragraph",
+      regionId: bibliography.id,
+      text: bibliography.text,
+    }));
   });
 
   it("allows a supported note in an empty native story part with reserved separators", async () => {
@@ -879,6 +937,53 @@ describe("DOCX preservation lens", () => {
     await expect(docxLens.open(zipSync(files))).rejects.toMatchObject({
       code: "DOCX_IDENTITY_AMBIGUOUS",
     });
+  });
+
+  it("avoids a generated paraId collision while replacing a native placeholder", async () => {
+    const source = await fixture("complex-structure.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const documentName = Object.keys(files).find((name) => name.endsWith("word/document.xml"))!;
+    const xml = strFromU8(files[documentName]!);
+    const withNamespace = xml.includes("xmlns:w14=")
+      ? xml
+      : xml.replace(
+          /<w:document\b/,
+          '<w:document xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"',
+        );
+    let assigned = false;
+    const withCollision = withNamespace.replace(/<w:p(?=[ >])[^>]*>/, (tag) => {
+      assigned = true;
+      return /w14:paraId="[^"]+"/.test(tag)
+        ? tag.replace(/w14:paraId="[^"]+"/, 'w14:paraId="45EBFBD5"')
+        : tag.replace(/>$/, ' w14:paraId="45EBFBD5">');
+    });
+    expect(assigned).toBe(true);
+    const opened = await docxLens.open(
+      zipSync({ ...files, [documentName]: strToU8(withCollision) }),
+    );
+    const oldRegionId = "docx:paragraph:45ebfbd5";
+    expect(opened.projection.blocks.some((block) => block.id === oldRegionId)).toBe(true);
+    const marker = "S9-OFFICE native write acceptance marker 2026-09-23-1";
+    const customRegionId = "docx:paragraph:s9-office-acceptance-marker-2026-09-23-1";
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        {
+          kind: "insert-paragraph",
+          regionId: customRegionId,
+          afterRegionId: oldRegionId,
+          text: marker,
+        },
+        { kind: "delete-region", regionId: oldRegionId },
+      ],
+    });
+    const reopened = await docxLens.open(output);
+    const inserted = reopened.projection.blocks.find((block) => block.text === marker);
+    expect(inserted).toBeTruthy();
+    expect(inserted?.id).not.toBe(oldRegionId);
+    const ids = reopened.projection.blocks.map((block) => block.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("refuses a concurrent merge whose stored base never persisted native anchors", async () => {

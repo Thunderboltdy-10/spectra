@@ -1101,9 +1101,23 @@ function movableCarrier(document: Document, region: NativeRegion) {
   return region.carrier;
 }
 
-function insertedParagraphId(regionId: string | undefined) {
+function insertedParagraphId(document: Document, regionId: string | undefined) {
+  const seed = regionId ?? crypto.randomUUID();
   const native = regionId?.match(/^docx:paragraph:([a-f0-9]{8})$/i)?.[1];
-  return (native ?? stableHex(`spectra-docx-insert:${regionId ?? crypto.randomUUID()}`)).toUpperCase();
+  const usedIds = new Set(
+    nativeRegions(document).flatMap((region) => {
+      const anchor = region.paragraph?.element ?? (region.table ? tableAnchor(region.table) : undefined);
+      const id = anchor?.getAttributeNs(W14_NAMESPACE, "paraId");
+      return id ? [id.toUpperCase()] : [];
+    }),
+  );
+  let id = (native ?? stableHex(`spectra-docx-insert:${seed}`)).toUpperCase();
+  let salt = 1;
+  while (usedIds.has(id)) {
+    id = stableHex(`spectra-docx-insert:${seed}:${salt}`).toUpperCase();
+    salt += 1;
+  }
+  return id;
 }
 
 async function insertParagraph(
@@ -1118,7 +1132,12 @@ async function insertParagraph(
       : {}),
   });
   if (operation.inlineContent) await replaceParagraphRich(document, paragraph, operation.inlineContent, options);
-  const paraId = insertedParagraphId(operation.regionId);
+  // AI/cloud projections can give an inserted block an identity whose stable
+  // Word paraId is already present on the native placeholder it replaces.
+  // Pick a deterministic unused ID before the later delete/reorder operations
+  // resolve that old region, so the temporary package never has ambiguous
+  // native anchors.
+  const paraId = insertedParagraphId(document, operation.regionId);
   paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
   const afterRegionId = operation.afterRegionId;
   if (afterRegionId === undefined) return `docx:paragraph:${paraId.toLowerCase()}`;
@@ -3518,14 +3537,72 @@ async function projectDocument(
 
 /** Digest of the requested semantic state, independent of package locators. */
 export async function docxProjectionSemanticDigest(projection: Pick<DocxProjection, "blocks" | "pageSetup">) {
+  // Block ids are region locators, not document meaning. A paragraph appended
+  // by Spectra receives its stable Word paraId only when serialized; compare
+  // its text and formatting without treating that locator assignment as data
+  // loss on readback. Word can also preserve terminal ASCII padding spaces on
+  // a run even though the editor projection exposes the visible paragraph
+  // text without them; ignore those spaces in paragraph meaning only.
+  const semanticBlocks = projection.blocks.map(({ id: _regionId, ...block }) => ({
+    ...block,
+    ...((block.type === "paragraph" || block.type === "heading")
+      ? { text: block.text.replace(/ +$/u, "") }
+      : {}),
+  }));
   return sha256Payload(
     new TextEncoder().encode(
       JSON.stringify({
-        blocks: authoredSemanticValue(projection.blocks.map((block) => docxProjectionBlockSchema.parse(block))),
+        blocks: authoredSemanticValue(semanticBlocks.map((block) => docxProjectionBlockSchema.parse({ id: "semantic-block", ...block }))),
         pageSetup: authoredSemanticValue(projection.pageSetup ?? null),
       }),
     ),
   );
+}
+
+/**
+ * Compare a reopened Word projection to the semantic intent that produced it.
+ * Word assigns stable region ids and exposes inherited style defaults when it
+ * reopens new paragraphs. Those values are not authored edits when the intent
+ * omitted them, while explicit text, rich content, and formatting remain part
+ * of the digest.
+ */
+export async function docxProjectionReadbackDigest(
+  readback: DocxProjection,
+  requested: DocxProjection,
+) {
+  const blocks = readback.blocks.map((block, index) => {
+    const intent = requested.blocks[index];
+    if (!intent) return block;
+    const attrs = intent.attrs ? { ...(block.attrs ?? {}) } : undefined;
+    if (!intent.attrs?.paragraphFormat && attrs?.paragraphFormat)
+      delete attrs.paragraphFormat;
+    const inlineContent = block.inlineContent;
+    const semanticInline = inlineContent?.map(
+      (item) => authoredSemanticValue(item) as Record<string, unknown>,
+    );
+    const mirroredPlainText =
+      !intent.inlineContent &&
+      semanticInline?.every(
+        (item) =>
+          item.kind === "text" &&
+          Object.keys(item).every((key) => key === "kind" || key === "text"),
+      ) &&
+      semanticInline
+        .map((item) => (typeof item.text === "string" ? item.text : ""))
+        .join("")
+        .replace(/ +$/u, "") === block.text.replace(/ +$/u, "");
+    const {
+      attrs: _readbackAttrs,
+      inlineContent: _readbackInlineContent,
+      ...semanticBlock
+    } = block;
+    return {
+      ...semanticBlock,
+      ...(attrs && Object.keys(attrs).length ? { attrs } : {}),
+      ...(!mirroredPlainText && inlineContent ? { inlineContent } : {}),
+    };
+  });
+  return docxProjectionSemanticDigest({ ...readback, blocks });
 }
 
 function findEntry(map: LensFidelityMap, regionId: string) {

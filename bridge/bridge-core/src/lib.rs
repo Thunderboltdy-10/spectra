@@ -3,6 +3,7 @@ pub mod identity;
 pub mod journal;
 pub mod platform;
 pub mod protocol;
+pub mod retry;
 pub mod server;
 pub mod sync;
 pub mod watcher;

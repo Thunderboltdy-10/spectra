@@ -9,6 +9,8 @@ import {
 } from "@tiptap/react";
 import { editNoteText } from "./note-text-edit";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
+import { nextWordNoteId } from "../lenses/docx-academic-schema";
+import { academicSelection } from "./document-academic-commands";
 
 /**
  * Footnotes and endnotes.
@@ -122,8 +124,25 @@ export const SpectraNotes = Extension.create({
     const insert =
       (type: "footnote" | "endnote") =>
       (attrs?: { text?: string }) =>
-      ({ commands }: CommandProps) =>
-        commands.insertContent({ type, attrs: { text: attrs?.text ?? "", nativeNoteId: String((crypto.getRandomValues(new Uint32Array(1))[0]! % 2_147_483_646) + 1) } });
+      ({ state, tr, dispatch }: CommandProps) => {
+        const usedIds: string[] = [];
+        state.doc.descendants((node) => {
+          if (node.type.name === type && node.attrs.nativeNoteId != null) usedIds.push(String(node.attrs.nativeNoteId));
+        });
+        const nativeNoteId = nextWordNoteId(usedIds, crypto.getRandomValues(new Uint32Array(1))[0]!);
+        const text = attrs?.text ?? "";
+        const noteContent = text.split("\n").map((line) => [{ text: line }]);
+        // Match References: validate the paragraph and preserve selected prose,
+        // placing the reference at the range end. Use the command transaction
+        // so chained commands and can() checks keep their normal semantics.
+        applyDocumentAcademicOperations({ tiptap: state.doc.toJSON() }, [{ kind: "insert-note", noteType: type, noteId: nativeNoteId, anchor: academicSelection({ state }), content: noteContent }]);
+        if (dispatch) {
+          const position = state.selection.to;
+          tr.insert(position, state.schema.nodes[type]!.create({ text, nativeNoteId, noteContent }));
+          tr.setSelection(NodeSelection.create(tr.doc, position));
+        }
+        return true;
+      };
     return {
       insertFootnote: insert("footnote"),
       insertEndnote: insert("endnote"),

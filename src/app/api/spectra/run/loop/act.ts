@@ -6,7 +6,7 @@ import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/com
 import { normalizeApplicationCommand } from "@/features/spectra/operations/application-command";
 import { executeReferenceInsertion } from "./reference-command";
 import { rows } from "./gather";
-import { mutate, query } from "./io";
+import { act, mutate, query } from "./io";
 import { normalizeCreationSummary, operationLabel } from "./plan";
 import {
   authorityPublicMessage,
@@ -113,6 +113,13 @@ export async function executeApplicationCommand(
         }
       : args;
   const parsed = definition.inputSchema.parse(inputArgs) as Record<string, unknown>;
+  const applyMutation: typeof mutate = async <TArgs extends object, TResult>(_name: string, _args: TArgs) => {
+    throwIfAborted(signal);
+    if (!operationId) throw new Error("APPLICATION_OPERATION_ID_REQUIRED");
+    return mutate<object, TResult>("spectraApplicationWrites:execute", {
+      runId, executionId, operationId, expectedCommand: command, expectedArgs: parsed,
+    });
+  };
   if (definition.aiAvailability === "prohibited")
     throw new Error(
       `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
@@ -124,6 +131,7 @@ export async function executeApplicationCommand(
       args: parsed,
       authorityTarget: definition.authorityTarget,
     });
+    throwIfAborted(signal);
     await recordAuthorityDecision({
       actorClerkId,
       runId,
@@ -155,7 +163,7 @@ export async function executeApplicationCommand(
   // adding a command requires adding its schema and one handler here.
   if (command === "change_spectra_settings") {
     const patch = normalizeAiPreferencePatch(parsed.patch);
-    const settings = await mutate("accountPreferences:writeLayer", {
+    const settings = await applyMutation("accountPreferences:writeLayer", {
       actorClerkId,
       scope: "account",
       scopeKey: "account",
@@ -239,7 +247,7 @@ export async function executeApplicationCommand(
             reused: true,
           },
         };
-      const result = await mutate("orgTree:createFolder", {
+      const result = await applyMutation("orgTree:createFolder", {
         actorClerkId,
         name,
         parentId: destinationId,
@@ -287,7 +295,7 @@ export async function executeApplicationCommand(
       };
     }
     if (action === "rename") {
-      const result = await mutate("orgTree:rename", {
+      const result = await applyMutation("orgTree:rename", {
         actorClerkId,
         nodeId: targetIds[0],
         name: String(parsed.name ?? ""),
@@ -303,7 +311,7 @@ export async function executeApplicationCommand(
       return result;
     }
     if (action === "move") {
-      const result = await mutate("orgTree:move", {
+      const result = await applyMutation("orgTree:move", {
         actorClerkId,
         nodeIds: targetIds,
         parentId: destinationId,
@@ -319,7 +327,7 @@ export async function executeApplicationCommand(
       return result;
     }
     if (action === "link") {
-      const result = await mutate("orgTree:createReference", {
+      const result = await applyMutation("orgTree:createReference", {
         actorClerkId,
         targetNodeId: targetIds[0],
         parentId: destinationId,
@@ -340,7 +348,7 @@ export async function executeApplicationCommand(
     const targetIds = Array.isArray(parsed.targetIds)
       ? parsed.targetIds.filter((id): id is string => typeof id === "string")
       : [];
-    return await mutate("orgTree:trash", { actorClerkId, nodeIds: targetIds });
+    return await applyMutation("orgTree:trash", { actorClerkId, nodeIds: targetIds });
   }
   if (command === "change_sync_policy") {
     const targetIds = Array.isArray(parsed.targetIds)
@@ -353,7 +361,7 @@ export async function executeApplicationCommand(
         ? parsed.patch
         : {};
     if (!targetIds.length) throw new Error("SYNC_TARGETS_REQUIRED");
-    const changed = await mutate("syncPolicy:patchItems", {
+    const changed = await applyMutation("syncPolicy:patchItems", {
       itemIds: targetIds,
       patch,
       actorKind: "ai",
@@ -381,14 +389,14 @@ export async function executeApplicationCommand(
         note: `Opening ${destination}`,
       },
     });
-    return { ok: true, destination, ...(targetId ? { targetId } : {}) };
+    return { ok: true, status: "requested", destination, ...(targetId ? { targetId } : {}), message: "Navigation requested. The destination view reports its own readiness." };
   }
   if (command === "write_memory") {
     const content = String(parsed.content ?? "").trim();
     if (!content) throw new Error("MEMORY_CONTENT_REQUIRED");
     const action = String(parsed.action ?? "create");
     if (action === "create") {
-      const memory = await mutate("memory:remember", {
+      const memory = await applyMutation("memory:remember", {
         actorClerkId,
         proposition: content,
         scope: "private_global",
@@ -404,7 +412,7 @@ export async function executeApplicationCommand(
     }
     const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
     if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-    const memory = await mutate("memory:correct", {
+    const memory = await applyMutation("memory:correct", {
       actorClerkId,
       claimId: memoryId,
       proposition: content,
@@ -421,7 +429,7 @@ export async function executeApplicationCommand(
     const action = String(parsed.action ?? "");
     if (!resourceId) throw new Error("SHARING_RESOURCE_REQUIRED");
     if (action === "invite") {
-      const result = await mutate("authority:invite", {
+      const result = await applyMutation("authority:invite", {
         actorClerkId,
         resourceType,
         resourceId,
@@ -435,7 +443,7 @@ export async function executeApplicationCommand(
       return result;
     }
     if (action === "change_level") {
-      const result = await mutate("authority:changeAcceptedLevel", {
+      const result = await applyMutation("authority:changeAcceptedLevel", {
         actorClerkId,
         invitationId: String(parsed.invitationId ?? ""),
         level: parsed.level === "modify" ? "modify" : "read",
@@ -447,7 +455,7 @@ export async function executeApplicationCommand(
       return result;
     }
     if (action === "revoke") {
-      const result = await mutate("authority:revoke", {
+      const result = await applyMutation("authority:revoke", {
         actorClerkId,
         resourceType,
         resourceId,
@@ -463,7 +471,7 @@ export async function executeApplicationCommand(
   }
   if (command === "trigger_managebac_sync") {
     const purpose = String(parsed.purpose ?? "upcoming_deadlines");
-    const result = await mutate("managebac:requestAiRefresh", {
+    const result = await applyMutation("managebac:requestAiRefresh", {
       reason: `ai_${purpose}`,
       force: parsed.force !== false,
     });
@@ -477,7 +485,7 @@ export async function executeApplicationCommand(
     const recordIds = Array.isArray(parsed.recordIds)
       ? parsed.recordIds.filter((id): id is string => typeof id === "string")
       : [];
-    const result = await mutate("managebac:setSelectedClasses", {
+    const result = await applyMutation("managebac:setSelectedClasses", {
       recordIds,
       ...(typeof parsed.expectedRevision === "number"
         ? { expectedRevision: parsed.expectedRevision }
@@ -915,7 +923,7 @@ export async function executeOperation(
       if (finalizeError) throw finalizeError;
     }
     if (context.researchEvidence && typeof output.artifactId === "string")
-      await mutate("spectraArtifacts:attachResearchEvidence", {
+      await act("spectraArtifacts:attachResearchEvidence", {
         actorClerkId,
         artifactId: output.artifactId,
         runId,
@@ -998,13 +1006,14 @@ export async function executeOperation(
       beforeCommit: officeKind
         ? async ({ desired, changedRegionIds }) => {
             if (!changedRegionIds.some(isNativeContentRegion)) return;
-            await promoteNativeAiContent({
+            const promotion = await promoteNativeAiContent({
               workId: input.artifactId,
               blueprintKey: artifact.blueprintKey,
               nativeFormat: nativeFormat!,
               content: desired.content,
-              signal: context.signal,
             });
+            if (promotion.projectionContent !== undefined)
+              desired.content = promotion.projectionContent;
           }
         : undefined,
       resolveDesired: (current) => ({
@@ -1054,7 +1063,7 @@ export async function executeOperation(
       }
     }
     if (context.researchEvidence)
-      await mutate("spectraArtifacts:attachResearchEvidence", {
+      await act("spectraArtifacts:attachResearchEvidence", {
         actorClerkId,
         artifactId: input.artifactId,
         runId,

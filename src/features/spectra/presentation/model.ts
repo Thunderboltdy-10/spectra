@@ -120,7 +120,8 @@ export type PresentationSlide = {
     kind: "none" | "fade" | "push" | "dissolve";
     durationMs?: number;
   };
-  citations?: Array<{ id: string; label: string; url?: string }>;
+  sourceRefs?: string[];
+  citations?: Array<{ id: string; label: string; url?: string; sourceRefs?: string[] }>;
   accessibility?: { label?: string; readingOrder?: string[] };
   nativeCompatibility?: {
     transition?: "preserved";
@@ -262,6 +263,7 @@ export function producePresentationContent(
       previous.background === nextSlide.background &&
       previous.transition === nextSlide.transition &&
       previous.citations === nextSlide.citations &&
+      previous.sourceRefs === nextSlide.sourceRefs &&
       previous.accessibility === nextSlide.accessibility &&
       previous.nativeCompatibility === nextSlide.nativeCompatibility &&
       previous.objects.length === objects.length &&
@@ -733,6 +735,7 @@ export function normalizePresentationContent(
                 {
                   id: text(row.id, `citation-${citationIndex + 1}`),
                   label: row.label.slice(0, 500),
+                  ...(Array.isArray(row.sourceRefs) ? { sourceRefs: row.sourceRefs.filter((ref): ref is string => typeof ref === "string" && ref.length <= 300).slice(0, 100) } : {}),
                   ...(typeof row.url === "string"
                     ? { url: row.url.slice(0, 2_000) }
                     : {}),
@@ -784,6 +787,7 @@ export function normalizePresentationContent(
             }
           : {}),
         ...(citations ? { citations } : {}),
+        ...(Array.isArray(slide.sourceRefs) ? { sourceRefs: slide.sourceRefs.filter((ref): ref is string => typeof ref === "string" && ref.length <= 300).slice(0, 100) } : {}),
         ...(typeof accessibility.label === "string" ||
         Array.isArray(accessibility.readingOrder)
           ? {

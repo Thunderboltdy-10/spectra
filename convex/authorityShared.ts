@@ -68,8 +68,18 @@ export async function listDirectlyGrantedResourceIds(
 ) {
   const now = Date.now();
   const [accountGrants, schoolGrants] = await Promise.all([
-    ctx.db.query("accessGrants").withIndex("by_principal", (q) => q.eq("principalType", "account").eq("principalId", actor.accountId)).collect(),
-    ctx.db.query("accessGrants").withIndex("by_principal", (q) => q.eq("principalType", "school").eq("principalId", actor.schoolId)).collect(),
+    ctx.db.query("accessGrants").withIndex("by_principal_resource_source", (q) =>
+      q.eq("principalType", "account")
+        .eq("principalId", actor.accountId)
+        .eq("resourceType", resourceType)
+        .eq("source", "direct"),
+    ).collect(),
+    ctx.db.query("accessGrants").withIndex("by_principal_resource_source", (q) =>
+      q.eq("principalType", "school")
+        .eq("principalId", actor.schoolId)
+        .eq("resourceType", resourceType)
+        .eq("source", "direct"),
+    ).collect(),
   ]);
   return [...new Set([...accountGrants, ...schoolGrants]
     .filter((grant) => grant.resourceType === resourceType && grant.source === "direct" && activeGrant(grant, now))
@@ -176,6 +186,50 @@ function activeGrant(grant: Doc<"accessGrants">, now: number) {
   return !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now);
 }
 
+/** A read proof needs one active grant, not every member of the audience.
+ * Used by bounded metadata discovery; full capability/source inspection keeps
+ * using evaluateAccess. The index ranges preserve activeGrant's legacy zero
+ * timestamp semantics and never scan expired/revoked history.
+ */
+export async function hasDirectReadGrant(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: ResourceType,
+  resourceId: string,
+  accountOnly = false,
+) {
+  const now = Date.now();
+  const principals = accountOnly ? ["account"] as const : ["account", "school"] as const;
+  for (const principalType of principals) {
+    // Most negative checks have no grant at all. One bounded prefix probe
+    // avoids six empty expiry ranges while still handling historical grants.
+    const first = await ctx.db.query("accessGrants")
+      .withIndex("by_resource_principal_live_expiry", q => q
+        .eq("resourceType", resourceType).eq("resourceId", resourceId)
+        .eq("principalType", principalType)
+        .eq("principalId", principalType === "account" ? actor.accountId : actor.schoolId)
+        .eq("source", "direct"))
+      .first();
+    if (!first) continue;
+    if (activeGrant(first, now)) return true;
+    for (const revokedAt of [undefined, 0]) {
+      for (const expiry of ["future", "absent", "zero"] as const) {
+        const grant = await ctx.db.query("accessGrants")
+          .withIndex("by_resource_principal_live_expiry", (q) => {
+            const prefix = q.eq("resourceType", resourceType).eq("resourceId", resourceId)
+              .eq("principalType", principalType)
+              .eq("principalId", principalType === "account" ? actor.accountId : actor.schoolId)
+              .eq("source", "direct").eq("revokedAt", revokedAt);
+            return expiry === "future" ? prefix.gt("expiresAt", now)
+              : prefix.eq("expiresAt", expiry === "zero" ? 0 : undefined);
+          }).first();
+        if (grant && activeGrant(grant, now)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function combineLevel(current: AccessLevel | null, candidate: AccessLevel): AccessLevel {
   return current === "modify" || candidate === "modify" ? "modify" : "read";
 }
@@ -264,6 +318,11 @@ async function evaluateLoadedResourceAccess(
     return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
 
+  // Same-school ownership needs no grant scan. Keep cross-school ownership
+  // behind the explicit account-grant check below, and lifecycle/type checks
+  // above this fast path.
+  if ((!loaded.schoolId || loaded.schoolId === actor.schoolId) && loaded.ownerAccountId === actor.accountId)
+    return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   const direct = await directAccess(ctx, actor, resourceType, resourceId);
   if (loaded.schoolId && loaded.schoolId !== actor.schoolId) {
     // Cross-school access is never inherited and never projected from a

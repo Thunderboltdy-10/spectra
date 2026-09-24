@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -8,6 +9,7 @@ import {
   encodeArtifactContentForStorage,
   sheetCellEntries,
 } from "../shared/sheet-cells";
+import { BRIDGE_CLAIM_REDRIVE_MS, BRIDGE_WRITE_EXPIRES_MS } from "../shared/replica-truth";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -15,9 +17,92 @@ const identity = {
   email: "replica-truth@example.test",
   emailVerified: true,
 };
-const baseHash = "a".repeat(64);
-const nextHash = "b".repeat(64);
+const payloadHash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
+const baseHash = payloadHash("base");
+const nextHash = payloadHash("next");
 const bridgeCredential = "bridge-test-credential-000000000001";
+
+describe("Bridge materialization receipt replay", () => {
+  it("refreshes only the current authorized claim before the native write", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const queued = await t.withIdentity(identity).mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash,
+      baseRevision: baseHash, fidelityMap: {}, regionIds: [], partNames: [],
+    });
+    const requestId = requireWriteRequestId(queued.requestId);
+    const first = (await t.mutation(api.bridgeSync.claimWrite, { credential: bridgeCredential })).request!;
+    await t.run(ctx => ctx.db.patch(requestId, { claimedAt: Date.now() - BRIDGE_CLAIM_REDRIVE_MS - 1 }));
+    const current = (await t.mutation(api.bridgeSync.claimWrite, { credential: bridgeCredential })).request!;
+    const before = await t.run(ctx => ctx.db.get(requestId));
+    expect(await t.mutation(api.bridgeSync.refreshWriteClaim, {
+      credential: bridgeCredential, requestId, claimGeneration: first.claimGeneration, claimToken: first.claimToken,
+    })).toEqual({ valid: false });
+    expect(await t.run(ctx => ctx.db.get(requestId))).toEqual(before);
+    const refresh = { credential: bridgeCredential, requestId, claimGeneration: current.claimGeneration, claimToken: current.claimToken };
+    expect(await t.mutation(api.bridgeSync.refreshWriteClaim, refresh)).toEqual({ valid: true });
+    await t.run(ctx => ctx.db.patch(fixture.mountId, { state: "detached" }));
+    expect(await t.mutation(api.bridgeSync.refreshWriteClaim, refresh)).toEqual({ valid: false });
+    await t.run(ctx => ctx.db.patch(fixture.mountId, { state: "active" }));
+    await t.run(ctx => ctx.db.patch(fixture.workId, { status: "deleted" }));
+    expect(await t.mutation(api.bridgeSync.refreshWriteClaim, refresh)).toEqual({ valid: false });
+  });
+
+  it.each(["pending", "claimed", "verified"] as const)(
+    "keeps the newer canonical head and immutable request when replaying %s A",
+    async (state) => {
+      const t = convexTest(schema, modules);
+      const fixture = await seedWork(t);
+      const asUser = t.withIdentity(identity);
+      const input = {
+        workId: fixture.workId, localReplicaId: fixture.localId,
+        payloadRef: String(fixture.nextPayloadId), contentHash: nextHash, baseRevision: baseHash,
+        fidelityMap: { entries: [] }, regionIds: ["body"], partNames: ["word/document.xml"],
+        projectionContent: { blocks: [{ id: "body", text: "older A" }] },
+        projectionContentHash: nextHash, promotionMode: "immediate-projection" as const,
+      };
+      const a = await asUser.mutation(api.replicas.queueMaterialization, input);
+      if (state !== "pending") {
+        const claimed = (await t.mutation(api.bridgeSync.claimWrite, { credential: bridgeCredential })).request;
+        expect(claimed?.requestId).toBe(a.requestId);
+        if (state === "verified") await t.mutation(api.bridgeSync.completeWrite, {
+          credential: bridgeCredential, requestId: requireWriteRequestId(a.requestId),
+          outcome: "verified", actualRevision: nextHash,
+          claimGeneration: claimed!.claimGeneration, claimToken: claimed!.claimToken,
+        });
+      }
+      const newer = { blocks: [{ id: "body", text: "newer B" }] };
+      if (state === "verified") {
+        const b = await asUser.mutation(api.replicas.queueMaterialization, {
+          ...input, payloadRef: String(fixture.basePayloadId), contentHash: baseHash, baseRevision: nextHash,
+          projectionContent: newer, projectionContentHash: "c".repeat(64),
+        });
+        const claimed = (await t.mutation(api.bridgeSync.claimWrite, { credential: bridgeCredential })).request;
+        expect(claimed?.requestId).toBe(b.requestId);
+        await t.mutation(api.bridgeSync.completeWrite, {
+          credential: bridgeCredential, requestId: requireWriteRequestId(b.requestId),
+          outcome: "verified", actualRevision: baseHash,
+          claimGeneration: claimed!.claimGeneration, claimToken: claimed!.claimToken,
+        });
+      } else {
+        // A later collaborative canonical save need not wait for native A.
+        await t.run(async (ctx) => ctx.db.patch(fixture.workId, {
+          content: newer, contentHash: "c".repeat(64), textIndex: "newer B",
+        }));
+      }
+      const snapshot = () => t.run(async (ctx) => ({
+        work: await ctx.db.get(fixture.workId), local: await ctx.db.get(fixture.localId),
+        cloud: await ctx.db.get(fixture.cloudId),
+        request: await ctx.db.get(requireWriteRequestId(a.requestId)),
+      }));
+      const before = await snapshot();
+      const replay = await asUser.mutation(api.replicas.queueMaterialization, input);
+      expect(replay).toMatchObject({ requestId: a.requestId, state });
+      expect(await snapshot()).toEqual(before);
+      expect(before.work?.content).toEqual(newer);
+    },
+  );
+});
 
 function requireWriteRequestId(
   requestId: Id<"bridgeWriteRequests"> | "protected-original",
@@ -553,7 +638,7 @@ describe("replica truth machine", () => {
   it("retains the verified common base across successive external saves", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
-    const thirdHash = "c".repeat(64);
+    const thirdHash = payloadHash("third");
     const thirdPayloadId = await t.run(async (ctx) => {
       const storageId = await ctx.storage.store(new Blob(["third"]));
       return ctx.db.insert("payloadObjects", {
@@ -1222,7 +1307,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const operationId = await t.run(async (ctx) => {
-      const stalledAt = Date.now() - 31 * 60_000;
+      const stalledAt = Date.now() - BRIDGE_WRITE_EXPIRES_MS - 1;
       return ctx.db.insert("syncOperations", {
         accountId: fixture.accountId,
         workId: fixture.workId,
@@ -2080,7 +2165,7 @@ describe("replica truth machine", () => {
       regionIds: ["body"],
       partNames: ["word/document.xml"],
     });
-    const wordHash = "d".repeat(64);
+    const wordHash = payloadHash("word");
     const wordPayloadId = await t.run(async (ctx) => {
       const storageId = await ctx.storage.store(new Blob(["word"]));
       return ctx.db.insert("payloadObjects", {
@@ -2346,25 +2431,77 @@ describe("replica truth machine", () => {
     ).rejects.toThrow(/CONFLICT_RESOLUTION_WRITE_REQUIRED/);
   });
 
-  it("dismisses Keep Spectra conflicts when local and cloud bytes already agree", async () => {
+  it("resolves Keep Spectra when the active local copy and cloud agree", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
-    await t.run(async (ctx) => {
+    const seeded = await t.run(async (ctx) => {
       const now = Date.now();
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: undefined,
+        contentHash: undefined,
+        state: "current",
+        updatedAt: now,
+      });
+      const missingReplicaId = await ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        kind: "local",
+        deviceId: fixture.deviceId,
+        mountId: fixture.mountId,
+        localResourceId: "missing-copy",
+        relativePath: "missing.docx",
+        nativeFormat: "docx",
+        revision: nextHash,
+        state: "unavailable",
+        unavailableReason: "missing-on-disk",
+        errorCode: "externally-deleted",
+        updatedAt: now,
+      });
+      const matchingReplicaId = await ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        kind: "local",
+        deviceId: fixture.deviceId,
+        mountId: fixture.mountId,
+        localResourceId: "verified-copy",
+        relativePath: "verified-copy.docx",
+        nativeFormat: "docx",
+        payloadRef: String(fixture.basePayloadId),
+        revision: baseHash,
+        baseRevision: baseHash,
+        contentHash: baseHash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+      const externalOperationId = await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: matchingReplicaId,
+        idempotencyKey: "external-save-reconciled-with-cloud",
+        direction: "external",
+        revisionBefore: baseHash,
+        revisionAfter: baseHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
       await ctx.db.insert("syncConflicts", {
         accountId: fixture.accountId,
         workId: fixture.workId,
-        replicaIds: [fixture.localId, fixture.cloudId],
+        replicaIds: [missingReplicaId, fixture.cloudId],
         regionIds: ["body", "heading-quality"],
         partNames: ["word/document.xml"],
-        localRevision: baseHash,
+        localRevision: nextHash,
         spectraRevision: baseHash,
-        localPayloadRef: String(fixture.basePayloadId),
+        localPayloadRef: undefined,
         spectraPayloadRef: String(fixture.basePayloadId),
         state: "open",
         createdAt: now,
         updatedAt: now,
       });
+      return { externalOperationId };
     });
     const resolved = await t
       .withIdentity(identity)
@@ -2373,10 +2510,12 @@ describe("replica truth machine", () => {
         resolution: "spectra",
       });
     expect(resolved.resolved).toBe(1);
-    const conflict = await t.run(
-      async (ctx) => (await ctx.db.query("syncConflicts").collect())[0],
-    );
-    expect(conflict).toMatchObject({ state: "resolved-merged" });
+    const truth = await t.run(async (ctx) => ({
+      conflict: (await ctx.db.query("syncConflicts").collect())[0],
+      externalOperation: await ctx.db.get(seeded.externalOperationId),
+    }));
+    expect(truth.conflict).toMatchObject({ state: "resolved-spectra" });
+    expect(truth.externalOperation).toMatchObject({ state: "verified" });
   });
 
   it("leaves work content unchanged while a verified-first materialization is pending", async () => {
@@ -2409,9 +2548,148 @@ describe("replica truth machine", () => {
     expect(truth.local?.state).toBe("pending");
   });
 
+  it("projects an immediately accepted native edit while Bridge sync is pending", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const projection = {
+      blocks: [{ id: "body", text: "Spectra owns the accepted revision" }],
+    };
+    const queued = await t.withIdentity(identity).mutation(
+      api.replicas.queueMaterialization,
+      {
+        workId: fixture.workId,
+        payloadRef: String(fixture.nextPayloadId),
+        contentHash: nextHash,
+        baseRevision: baseHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+        projectionContent: projection,
+        projectionContentHash: nextHash,
+        promotionMode: "immediate-projection",
+      },
+    );
+    const truth = await t.run(async (ctx) => ({
+      work: await ctx.db.get(fixture.workId),
+      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      local: await ctx.db.get(fixture.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+
+    expect(queued.state).toBe("pending");
+    expect(truth.work?.content).toEqual(projection);
+    expect(truth.request).toMatchObject({
+      state: "pending",
+      projectionBaseContent: projection,
+      projectionBaseContentHash: nextHash,
+    });
+    expect(truth.local?.state).toBe("pending");
+    expect(truth.cloud?.revision).toBe(baseHash);
+  });
+
+  it("coalesces a newer Spectra edit over an unclaimed Office-locked write", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const thirdHash = "c".repeat(64);
+    const thirdPayloadId = await t.run(async (ctx) => {
+      const now = Date.now();
+      const storageId = await ctx.storage.store(new Blob(["third"]));
+      return ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: thirdHash,
+        storageId,
+        bytes: 5,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: now,
+        verifiedAt: now,
+      });
+    });
+    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: { blocks: [{ id: "body", text: "first edit" }] },
+      projectionContentHash: nextHash,
+      promotionMode: "immediate-projection",
+    });
+    const firstRequestId = requireWriteRequestId(first.requestId);
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId: firstRequestId,
+      outcome: "waiting",
+      errorCode: "office-locked",
+    });
+
+    const latestProjection = {
+      blocks: [{ id: "body", text: "first edit plus second edit" }],
+    };
+    const second = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(thirdPayloadId),
+      contentHash: thirdHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: latestProjection,
+      projectionContentHash: thirdHash,
+      promotionMode: "immediate-projection",
+    });
+    const truth = await t.run(async (ctx) => ({
+      work: await ctx.db.get(fixture.workId),
+      first: await ctx.db.get(firstRequestId),
+      firstOperation: (await ctx.db.query("syncOperations").collect()).find(
+        (operation) => operation.revisionAfter === nextHash,
+      ),
+      second: await ctx.db.get(requireWriteRequestId(second.requestId)),
+      local: await ctx.db.get(fixture.localId),
+    }));
+
+    expect(second.requestId).not.toBe(first.requestId);
+    expect(truth.work?.content).toEqual(latestProjection);
+    expect(truth.first).toMatchObject({
+      state: "failed",
+      errorCode: "superseded-by-newer-cloud-revision",
+    });
+    expect(truth.firstOperation).toMatchObject({
+      state: "failed",
+      errorCode: "superseded-by-newer-cloud-revision",
+    });
+    expect(truth.second).toMatchObject({
+      state: "pending",
+      baseRevision: baseHash,
+      targetRevision: thirdHash,
+      projectionBaseContent: latestProjection,
+    });
+    expect(truth.local?.state).toBe("pending");
+  });
+
   it("advances replica byte and projection bases on verified-first without rewriting work content", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
+    const externalOperationId = await t.run(async (ctx) => {
+      const now = Date.now();
+      return ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "external-save-awaiting-convergence",
+        direction: "external",
+        revisionBefore: baseHash,
+        revisionAfter: nextHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
     const asUser = t.withIdentity(identity);
     const projection = { blocks: [{ id: "body", text: "P5V1-NATIVE-AI-2301" }] };
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2437,6 +2715,7 @@ describe("replica truth machine", () => {
       cloud: await ctx.db.get(fixture.cloudId),
       local: await ctx.db.get(fixture.localId),
       request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      externalOperation: await ctx.db.get(externalOperationId),
     }));
     expect(truth.work?.content).toEqual({ blocks: [] });
     expect(truth.request?.state).toBe("verified");
@@ -2449,6 +2728,7 @@ describe("replica truth machine", () => {
       projectionBaseContent: projection,
       projectionBaseRevision: nextHash,
     });
+    expect(truth.externalOperation).toMatchObject({ state: "verified" });
   });
 
   it("reports authorized materialization status and hides requests from strangers", async () => {
@@ -2469,7 +2749,11 @@ describe("replica truth machine", () => {
     const status = await asUser.query(api.replicas.materializationStatus, {
       requestId,
     });
-    expect(status).toMatchObject({ requestId, state: "pending" });
+    expect(status).toMatchObject({
+      requestId,
+      state: "pending",
+      retryAt: expect.any(Number),
+    });
     const strangerIdentity = {
       subject: "clerk_materialization_stranger",
       email: "materialization-stranger@example.test",
@@ -2668,7 +2952,10 @@ describe("replica truth machine", () => {
     });
     if (!firstClaim.request) throw new Error("expected first claim");
     await t.run(async (ctx) => {
-      await ctx.db.patch(requestId, { claimedAt: Date.now() - 61_000, updatedAt: Date.now() - 61_000 });
+      await ctx.db.patch(requestId, {
+        claimedAt: Date.now() - BRIDGE_CLAIM_REDRIVE_MS - 1,
+        updatedAt: Date.now() - BRIDGE_CLAIM_REDRIVE_MS - 1,
+      });
     });
     const secondClaim = await t.mutation(api.bridgeSync.claimWrite, {
       credential: bridgeCredential,

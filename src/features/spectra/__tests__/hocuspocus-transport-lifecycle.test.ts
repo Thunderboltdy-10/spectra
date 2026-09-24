@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import * as Y from "yjs";
 
 const hocuspocus = vi.hoisted(() => ({
   callbacks: null as null | {
@@ -14,6 +16,8 @@ const hocuspocus = vi.hoisted(() => ({
     attach: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
     forceSync: ReturnType<typeof vi.fn>;
+    documentUpdateHandler: ReturnType<typeof vi.fn>;
+    sendStateless: ReturnType<typeof vi.fn>;
     flushPendingUpdates: ReturnType<typeof vi.fn>;
     hasUnsyncedChanges: boolean;
     synced: boolean;
@@ -41,6 +45,8 @@ vi.mock("@hocuspocus/provider", () => ({
     attach = vi.fn();
     destroy = vi.fn();
     forceSync = vi.fn();
+    documentUpdateHandler = vi.fn();
+    sendStateless = vi.fn();
     flushPendingUpdates = vi.fn();
     setAwarenessField = vi.fn();
 
@@ -157,6 +163,156 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
       state: "synchronized",
       unsynchronizedChanges: 0,
     });
+    transport.destroy();
+  });
+
+  it("replays a restored offline branch after room sync and keeps it pending until the full document is durable", async () => {
+    const hashBytes = (value: Uint8Array) =>
+      createHash("sha256").update(value).digest();
+    vi.stubGlobal("crypto", {
+      randomUUID: () => "recovery-client",
+      subtle: {
+        digest: async (_algorithm: string, value: BufferSource) => {
+          const bytes =
+            value instanceof ArrayBuffer
+              ? new Uint8Array(value)
+              : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+          const digest = hashBytes(bytes);
+          return new Uint8Array(digest).buffer as ArrayBuffer;
+        },
+      },
+    });
+    const transport = new HocuspocusArtifactTransport("artifact-local-recovery");
+    transport.document.getMap("recovery").set("offline-edit", "must-survive-close");
+    transport.markLocalRecoveryPending();
+    expect(transport.getSyncSnapshot()).toMatchObject({
+      state: "synchronizing",
+      unsynchronizedChanges: 1,
+    });
+
+    await transport.connect();
+    if (!hocuspocus.provider || !hocuspocus.callbacks)
+      throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    expect(hocuspocus.provider.documentUpdateHandler).not.toHaveBeenCalled();
+    hocuspocus.provider.synced = true;
+    hocuspocus.callbacks.onSynced({ state: true });
+    expect(hocuspocus.provider.documentUpdateHandler).toHaveBeenCalledOnce();
+    expect(hocuspocus.provider.flushPendingUpdates).toHaveBeenCalled();
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+
+    hocuspocus.callbacks.onStateless({
+      payload: JSON.stringify({
+        type: "spectra.durable_ack",
+        documentHash: "0".repeat(64),
+      }),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+
+    const confirmedHash = createHash("sha256")
+      .update(Y.encodeStateAsUpdate(transport.document))
+      .digest("hex");
+    hocuspocus.callbacks.onStateless({
+      payload: JSON.stringify({
+        type: "spectra.durable_ack",
+        documentHash: confirmedHash,
+      }),
+    });
+    await vi.waitFor(() => {
+      expect(transport.getSyncSnapshot()).toMatchObject({
+        state: "synchronized",
+        unsynchronizedChanges: 0,
+      });
+    });
+    transport.destroy();
+  });
+
+  it("holds recovered edits while access is read-only and resumes after modify access returns", async () => {
+    vi.mocked(fetch).mockImplementationOnce(
+      async () =>
+        new Response(
+          JSON.stringify({
+            token: "read-session",
+            documentName: "artifact:root",
+            provider: "self_hosted_yjs",
+            url: "ws://localhost:3000/_spectra/realtime",
+            expiresInMs: 60_000,
+            level: "read",
+            accountId: "account-a",
+            displayName: "Account A",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const transport = new HocuspocusArtifactTransport("artifact-read-recovery");
+    transport.document.getMap("recovery").set("offline-edit", "preserve-me");
+    transport.markLocalRecoveryPending();
+    await transport.connect();
+    if (!hocuspocus.provider || !hocuspocus.callbacks)
+      throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    hocuspocus.provider.synced = true;
+    hocuspocus.callbacks.onSynced({ state: true });
+    expect(hocuspocus.provider.documentUpdateHandler).not.toHaveBeenCalled();
+    expect(transport.getSyncSnapshot()).toMatchObject({
+      state: "unsynchronized",
+      level: "read",
+      unsynchronizedChanges: 1,
+      error: "Your locally saved edit needs modify access before it can sync.",
+    });
+
+    hocuspocus.callbacks.onStateless({
+      payload: JSON.stringify({ type: "spectra.permission_changed" }),
+    });
+    await vi.waitFor(() => {
+      expect(hocuspocus.provider?.documentUpdateHandler).toHaveBeenCalledOnce();
+    });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+    transport.destroy();
+  });
+
+  it("confirms recovered updates without another full snapshot and keeps a later edit pending", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-confirm-recovery");
+    transport.document.getMap("recovery").set("draft", "offline");
+    transport.markLocalRecoveryPending();
+    await transport.connect();
+    const provider = hocuspocus.provider!;
+    const callbacks = hocuspocus.callbacks!;
+    provider.synced = true;
+    callbacks.onSynced({ state: true });
+    const request = JSON.parse(provider.sendStateless.mock.calls[0][0]);
+    expect(request).toMatchObject({ type: "spectra.durable_confirm" });
+    expect(JSON.stringify(request).length).toBeLessThan(120);
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", updateIds: [] }) });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+
+    transport.transact("later", () => transport.document.getMap("recovery").set("later", "new edit"));
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: request.confirmationId }) });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_pending", updateIds: ["later"] }) });
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", updateIds: ["later"] }) });
+    expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 });
+    expect(provider.documentUpdateHandler).toHaveBeenCalledOnce();
+    transport.destroy();
+  });
+
+  it("ignores a recovery confirmation from before reconnect", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-confirm-reconnect");
+    transport.document.getMap("recovery").set("draft", "offline");
+    transport.markLocalRecoveryPending();
+    await transport.connect();
+    const provider = hocuspocus.provider!;
+    const callbacks = hocuspocus.callbacks!;
+    provider.synced = true;
+    callbacks.onSynced({ state: true });
+    const first = JSON.parse(provider.sendStateless.mock.calls[0][0]);
+    callbacks.onDisconnect({ event: { code: 1006, reason: "restart" } });
+    callbacks.onSynced({ state: true });
+    const second = JSON.parse(provider.sendStateless.mock.calls[1][0]);
+    expect(second.confirmationId).not.toBe(first.confirmationId);
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: first.confirmationId }) });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: second.confirmationId }) });
+    expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 });
     transport.destroy();
   });
 

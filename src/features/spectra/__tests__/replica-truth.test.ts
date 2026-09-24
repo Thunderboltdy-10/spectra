@@ -6,6 +6,7 @@ import {
   canonicalSyncIntent,
   deriveStorageTransitionIdempotencyKey,
   deriveSyncIdempotencyKey,
+  localMaterializationTarget,
 } from "../../../../shared/replica-truth";
 
 describe("replica truth contracts", () => {
@@ -38,6 +39,23 @@ describe("replica truth contracts", () => {
     );
     expect(await deriveStorageTransitionIdempotencyKey({ ...intent, toPreset: "spectra" }))
       .not.toBe(await deriveStorageTransitionIdempotencyKey(intent));
+  });
+
+  it("keys local writes by mount and normalized destination path", async () => {
+    const intent = {
+      workId: "work:1",
+      baseRevision: "new:work:1",
+      targetRevision: "same-content-hash",
+      direction: "cloud-to-local" as const,
+    };
+    const target = localMaterializationTarget("mount:1", "folder\\.\\paper.docx");
+    expect(target).toBe(localMaterializationTarget("mount:1", "folder/paper.docx"));
+    expect(await deriveSyncIdempotencyKey({ ...intent, target }))
+      .not.toBe(await deriveSyncIdempotencyKey({ ...intent, target: localMaterializationTarget("mount:2", "folder/paper.docx") }));
+    expect(await deriveSyncIdempotencyKey({ ...intent, target }))
+      .not.toBe(await deriveSyncIdempotencyKey({ ...intent, target: localMaterializationTarget("mount:1", "folder/other.docx") }));
+    expect(() => localMaterializationTarget("mount:1", "folder/../paper.docx"))
+      .toThrow("LOCAL_MATERIALIZATION_TARGET_INVALID");
   });
 
   it("gives every nonterminal state verified, failed, and swept exits", () => {

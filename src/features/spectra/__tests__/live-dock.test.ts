@@ -269,8 +269,11 @@ describe("Live Dock V2", () => {
 
   it("polls active run tabs promptly without making idle surfaces noisy", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
-    expect(dock).toContain("const LIVE_DOCK_ACTIVE_POLL_MS = 1_000;");
-    expect(dock).toContain("LIVE_DOCK_ACTIVE_POLL_MS");
+    expect(dock).toContain("SYNC_RETRY_POLICY.activeRunPollMaxDelayMs");
+    expect(dock).toContain("syncRetryDelayMs(");
+    expect(dock).toContain("window.setTimeout(");
+    expect(dock).not.toContain("window.setInterval(");
+    expect(dock).toContain("activePollSignature");
     expect(dock).toContain("const runChanged = () => void refresh();");
     expect(dock).toContain('spectraBus.on("run.changed", runChanged)');
     expect(dock).toContain("let refreshGeneration = 0;");

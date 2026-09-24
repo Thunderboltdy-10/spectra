@@ -359,6 +359,7 @@ export const presentationContentSchema = z
             id,
             title: z.string().max(300),
             speakerNotes: text.optional(),
+            sourceRefs: z.array(z.string().max(300)).max(100).optional(),
             objects: z.array(slideObjectSchema).max(500),
             layoutId: id.optional(),
             masterId: id.optional(),
@@ -378,6 +379,7 @@ export const presentationContentSchema = z
                     id,
                     label: z.string().min(1).max(500),
                     url: z.string().max(2_000).optional(),
+                    sourceRefs: z.array(z.string().max(300)).max(100).optional(),
                   })
                   .strict(),
               )

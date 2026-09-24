@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
+import { encodeDurableFrontier } from "../shared/collaboration-durable-frontier.mjs";
 import * as decoding from "lib0/decoding";
 import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
 import {
@@ -40,7 +41,6 @@ import {
   appendBaseStateVectorHash,
   durableHeadKey,
   isRebaseablePersistenceFailure,
-  isTransientCollaborationFailure,
   permanentPersistenceFailure,
   rebaseAppendPayload,
   resolveRebaseHead,
@@ -48,7 +48,8 @@ import {
   chainPersistThenCompact,
   collaborationFailureMessage,
   collaborationRetryDelayMs,
-  COLLABORATION_AUTHORIZE_CACHE_MS,
+  createCollaborationAuthorizationGuard,
+  persistenceFlushDelay,
 } from "./collaboration-persist.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
@@ -96,11 +97,23 @@ const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 // Must match shared/collaboration-bridge.ts — recover/repair projections that
 // exceed this cannot ride the signed exchange envelope.
-const PERSISTENCE_DEBOUNCE_MS = 180;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
 const activeConnections = new Set();
+const authorizationGuard = createCollaborationAuthorizationGuard({
+  authorize: context => bridge("authorize", {
+    accountId: context.accountId,
+    artifactId: context.artifactId,
+    partitionKey: context.partitionKey,
+    policyVersion: context.policyVersion,
+  }, { retryAttempts: 1 }),
+  closeConnection: (connection, code, reason) => {
+    activeConnections.delete(connection);
+    if (code === 4403) sendGatewayState(connection, { type: "spectra.permission_changed" });
+    try { connection.webSocket.close(code, reason); } catch { /* Already closed. */ }
+  },
+});
 const authenticatedRequests = new WeakSet();
 const documentMessageTails = new WeakMap();
 const pendingMessageReleases = new Map();
@@ -171,6 +184,11 @@ function documentStateVectorHash(document) {
     .digest("base64url");
 }
 
+function documentFrontierHash(document) {
+  const frontier = encodeDurableFrontier(Y, document);
+  return frontier ? createHash("sha256").update(frontier).digest("hex") : null;
+}
+
 function sendGatewayState(connection, payload) {
   try {
     connection.sendStateless(JSON.stringify(payload));
@@ -227,6 +245,9 @@ function persistenceQueue(document) {
   const created = {
     pending: [],
     snapshotAfterFirst: null,
+    firstPendingAt: null,
+    pendingBytes: 0,
+    flushing: null,
     timer: null,
     chain: chainPersistThenCompact({
       persist: (batch) =>
@@ -650,7 +671,13 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
         throughSequence: appendResult?.sequence ?? null,
       };
     }
-    if (lastCheckpoint) checkpointScheduler(document).note(lastCheckpoint);
+    if (lastCheckpoint) {
+      checkpointScheduler(document).note(lastCheckpoint);
+      const frontierHash = documentFrontierHash(scratch);
+      if (frontierHash) document.broadcastStateless(JSON.stringify({
+        type: "spectra.durable_frontier", frontierHash,
+      }));
+    }
   } finally {
     scratch.destroy();
   }
@@ -658,36 +685,58 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
 
 function schedulePersistence(document, entry) {
   const queue = persistenceQueue(document);
-  if (queue.pending.length === 0)
+  if (queue.pending.length === 0) {
     queue.snapshotAfterFirst = Y.encodeStateAsUpdate(document);
+    queue.firstPendingAt = Date.now();
+  }
   queue.pending.push(entry);
+  queue.pendingBytes += entry.documentUpdate.byteLength;
   sendGatewayState(entry.connection, {
     type: "spectra.durable_pending",
     updateIds: [entry.messageId],
   });
   if (queue.timer) clearTimeout(queue.timer);
+  const delay = persistenceFlushDelay({
+    firstAt: queue.firstPendingAt,
+    entries: queue.pending.length,
+    bytes: queue.pendingBytes,
+  });
+  if (delay === 0) {
+    // A full pending batch applies backpressure until it is durable. Keep at
+    // most one active snapshot plus one pending snapshot during a slow append.
+    return flushPersistence(document);
+  }
   queue.timer = setTimeout(() => {
     queue.timer = null;
     void flushPersistence(document).catch(() => undefined);
-  }, PERSISTENCE_DEBOUNCE_MS);
+  }, delay);
   queue.timer.unref?.();
 }
 
 async function flushPersistence(document) {
   const queue = documentPersistenceQueues.get(document);
   if (!queue) return;
+  if (queue.flushing) {
+    await queue.flushing;
+    return flushPersistence(document);
+  }
   clearTimeout(queue.timer);
   queue.timer = null;
   const entries = queue.pending.splice(0);
+  queue.firstPendingAt = null;
+  queue.pendingBytes = 0;
   if (!entries.length) return queue.chain.persistTail;
   const snapshotAfterFirst = queue.snapshotAfterFirst;
   queue.snapshotAfterFirst = null;
-  try { return await queue.chain.enqueue({ entries, snapshotAfterFirst }); }
-  catch (error) {
-    lastPersistenceFailure = { code: "COLLABORATION_APPEND_FAILED", at: Date.now(), attempt: 1 };
-    forceCanonicalReconnect(entries[0].context, collaborationFailureMessage(error));
-    throw error;
-  }
+  const flushing = queue.chain.enqueue({ entries, snapshotAfterFirst }).catch(error => {
+      lastPersistenceFailure = { code: "COLLABORATION_APPEND_FAILED", at: Date.now(), attempt: 1 };
+      forceCanonicalReconnect(entries[0].context, collaborationFailureMessage(error));
+      throw error;
+    }).finally(() => {
+      if (queue.flushing === flushing) queue.flushing = null;
+    });
+  queue.flushing = flushing;
+  return flushing;
 }
 
 function sessionClaims(payload, documentName) {
@@ -1009,76 +1058,11 @@ function extractYjsUpdate(frame) {
 }
 
 async function refreshAuthorization(context) {
-  // Handshake JWT expiry is enforced by jwtVerify on connect. Closing an
-  // already-authenticated socket at `exp` turns every 10-minute classroom into
-  // a reconnect storm (4205 / unauthenticated queue overflow). Revocation is
-  // Convex authorize + ACCESS_REVOKED, not wall-clock token expiry.
-  try {
-    const result = await bridge(
-      "authorize",
-      {
-        accountId: context.accountId,
-        artifactId: context.artifactId,
-        partitionKey: context.partitionKey,
-        policyVersion: context.policyVersion,
-      },
-      { retryAttempts: 1 },
-    );
-    if (!result?.allowed) {
-      context.canModify = false;
-      context.authorizationRevoked = true;
-      throw new Error("COLLABORATION_ACCESS_REVOKED");
-    }
-    context.canModify = result.canModify === true;
-    context.authorizationCheckedAt = Date.now();
-    return context;
-  } catch (error) {
-    if (
-      isTransientCollaborationFailure(error) &&
-      context.authorizationCheckedAt
-    ) {
-      process.stderr.write(
-        `[reauthorize] transient Convex failure; keeping last authorization\n`,
-      );
-      return context;
-    }
-    throw error;
-  }
+  return authorizationGuard.refresh(context);
 }
 
-async function reauthorize(context, { allowStale = false } = {}) {
-  if (context.authorizationRevoked) throw new Error("COLLABORATION_ACCESS_REVOKED");
-  const now = Date.now();
-  if (
-    context.authorizationCheckedAt &&
-    now - context.authorizationCheckedAt < COLLABORATION_AUTHORIZE_CACHE_MS
-  )
-    return context;
-  // Sync beforeHandleMessage must not await Convex. A 1s authorize timeout on a
-  // large sheet previously closed the socket (Aw Snap / reconnect). Keep the
-  // last good grant and refresh in the background; connect/load still block.
-  if (allowStale && context.authorizationCheckedAt) {
-    if (!context.authorizationRefreshInFlight) {
-      context.authorizationRefreshInFlight = refreshAuthorization(context)
-        .catch((error) => {
-          const reason =
-            error instanceof Error ? error.message : String(error);
-          if (
-            reason.includes("COLLABORATION_ACCESS_REVOKED") ||
-            reason.includes("COLLABORATION_READ_ONLY")
-          ) {
-            forceCanonicalReconnect(context, reason);
-          } else {
-            process.stderr.write(`[reauthorize:bg] ${reason}\n`);
-          }
-        })
-        .finally(() => {
-          context.authorizationRefreshInFlight = null;
-        });
-    }
-    return context;
-  }
-  return refreshAuthorization(context);
+async function reauthorize(context) {
+  return authorizationGuard.require(context);
 }
 
 const server = new Server({
@@ -1163,8 +1147,18 @@ const server = new Server({
   },
 
   async connected({ connection }) {
+    try { await reauthorize(connection.context); }
+    catch {
+      connection.webSocket.close(connection.context.authorizationRevoked ? 4403 : 1013,
+        connection.context.authorizationRevoked ? "Access or permissions changed" : "Authorization temporarily unavailable");
+      return;
+    }
     activeConnections.add(connection);
-    connection.onClose(() => activeConnections.delete(connection));
+    const unwatch = authorizationGuard.watch(connection);
+    connection.onClose(() => {
+      activeConnections.delete(connection);
+      unwatch();
+    });
   },
 
   async beforeHandleMessage({
@@ -1174,7 +1168,7 @@ const server = new Server({
     socketId,
     connection,
   }) {
-    await reauthorize(context, { allowStale: true });
+    await reauthorize(context);
     const incomingUpdate = extractYjsUpdate(frame);
     if (!incomingUpdate || incomingUpdate.byteLength === 0) return;
     // Hocuspocus can run hooks from different sockets concurrently. Hold a
@@ -1184,13 +1178,8 @@ const server = new Server({
     // even when the collaborators changed independent regions.
     await acquireDocumentMessage(document, socketId);
     try {
-      const before = artifactModelState(document);
+      await reauthorize(context);
       const nativeBefore = isNativeArtifactDocument(document);
-      if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
-      const baseStateVectorHash = documentStateVectorHash(document);
-      const nativeProjectionBefore = nativeBefore
-        ? nativeArtifactProjection(document, context.schemaVersion)
-        : null;
       // Sync step 2 often contains the complete client state on room join.
       // Accept the bounded realtime frame, but persist only the canonical
       // room delta so a rich document does not inflate one small edit past the
@@ -1206,12 +1195,21 @@ const server = new Server({
         messageQueue(socketId).push({ context: { ...context }, connection, noop: true });
         return;
       }
+      if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
       if (documentUpdate.byteLength > MAX_ASSEMBLED_BYTES) {
         process.stderr.write(
           `[beforeHandleMessage] oversized canonical delta incoming=${incomingUpdate.byteLength} durable=${documentUpdate.byteLength} canonical=${Y.encodeStateAsUpdate(document).byteLength} native=${nativeBefore}\n`,
         );
         throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
       }
+      const before = artifactModelState(document);
+      const baseStateVectorHash = documentStateVectorHash(document);
+      const previousPending = documentPersistenceQueues.get(document)?.pending.at(-1);
+      const continuesNativeBatch = nativeBefore && previousPending?.nativeBefore &&
+        samePersistenceBatch(previousPending, { context, nativeInitialization: false });
+      const nativeProjectionBefore = nativeBefore && !continuesNativeBatch
+        ? nativeArtifactProjection(document, context.schemaVersion)
+        : null;
       const updateHash = createHash("sha256")
         .update(documentUpdate)
         .digest("base64url");
@@ -1264,7 +1262,7 @@ const server = new Server({
         : changedArtifactRegions(accepted.before, artifactModelState(document));
       if (regionIds.length > 128)
         throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
-      schedulePersistence(document, {
+      await schedulePersistence(document, {
         ...accepted,
         stateVectorHash,
         regionIds,
@@ -1279,8 +1277,8 @@ const server = new Server({
       forceCanonicalReconnect(accepted?.context ?? {}, reason);
       throw error;
     } finally {
-      // The per-document gate protects only apply ordering. Durable I/O happens
-      // behind the queue and must never hold the next collaborator's message.
+      // Ordinary updates release after apply. A full pending batch also waits
+      // for storage, bounding memory when durable I/O falls behind incoming edits.
       releaseDocumentMessage(socketId);
     }
   },
@@ -1290,7 +1288,7 @@ const server = new Server({
       states.clear();
       return;
     }
-    await reauthorize(context, { allowStale: true });
+    await reauthorize(context);
     for (const [clientId, state] of states) {
       const supplied =
         state?.user && typeof state.user === "object" ? state.user : {};
@@ -1366,6 +1364,40 @@ const server = new Server({
             : {}),
         },
       });
+    }
+  },
+
+  async onStateless({ connection, document, payload }) {
+    // A recovery confirmation follows the restored update on the same ordered
+    // socket. Capture its durable barrier under the apply gate, then release
+    // that gate before I/O so other collaborators can continue editing.
+    if (payload.length > 256) return;
+    let request;
+    try { request = JSON.parse(payload); } catch { return; }
+    if (request?.type !== "spectra.durable_confirm" ||
+        typeof request.confirmationId !== "string" ||
+        !/^[a-zA-Z0-9:-]{1,120}$/.test(request.confirmationId)) return;
+    await reauthorize(connection.context);
+    await acquireDocumentMessage(document, connection.socketId);
+    let barrier;
+    let frontierHash;
+    try {
+      await reauthorize(connection.context);
+      frontierHash = documentFrontierHash(document);
+      barrier = flushPersistence(document);
+    }
+    finally { releaseDocumentMessage(connection.socketId); }
+    try {
+      await barrier;
+      sendGatewayState(connection, {
+        type: "spectra.durable_ack",
+        confirmationId: request.confirmationId,
+        frontierHash,
+        updateIds: [],
+      });
+    } catch (error) {
+      rejectPeerUpdate(connection, collaborationFailureMessage(error));
+      throw error;
     }
   },
 
@@ -1489,6 +1521,7 @@ const server = new Server({
     if (isNativeArtifactDocument(storedDocument)) {
       const encoded = Y.encodeStateAsUpdate(storedDocument);
       storedDocument.destroy();
+      await reauthorize(context);
       return encoded;
     }
     storedDocument.destroy();
@@ -1563,6 +1596,7 @@ const server = new Server({
       await bridge("bootstrap", bootstrapPayload);
       rememberDurableHead(context, stateVectorHash);
     }
+    await reauthorize(context);
     return document;
   },
 
@@ -1617,6 +1651,7 @@ async function enforceActivePolicyVersions() {
             catch (error) {
               if (String(error).includes("COLLABORATION_ACCESS_REVOKED")) actorRevoked = true;
             }
+            if (!activeConnections.has(connection)) continue;
             const stale =
               actorRevoked ||
               !current?.available ||
@@ -1632,8 +1667,8 @@ async function enforceActivePolicyVersions() {
             connection.webSocket.close(4403, "Access or permissions changed");
           }
         } catch {
-          // A transient Convex failure must not evict authorized collaborators.
-          // Message authorization remains fail-closed and the next sweep retries.
+          // Independent connection deadlines still expire stale grants while
+          // policy I/O fails or hangs; a failed sweep cannot extend authority.
         }
       }),
     );
@@ -1655,6 +1690,7 @@ process.stdout.write(
 
 async function shutdown() {
   clearInterval(policySweep);
+  authorizationGuard.dispose();
   await Promise.all(
     [...checkpointSchedulers].map((scheduler) => scheduler.flush()),
   );

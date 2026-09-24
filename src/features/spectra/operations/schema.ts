@@ -868,6 +868,7 @@ const documentContentJsonSchema = {
           },
           text: { type: "string" },
           latex: { type: "string" },
+          sourceRefs: { type: "array", items: { type: "string" }, description: "Exact supporting server-issued evidence handles. Spectra supplies portable citation fields and source metadata." },
           attrs: { type: "object", additionalProperties: true },
         },
       },

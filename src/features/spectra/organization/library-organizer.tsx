@@ -231,7 +231,26 @@ const VIEW_OPTIONS = [
   { key: "board" as const, label: "Board", icon: LayoutGrid },
 ];
 
-export function LibraryOrganizer({
+export function LibraryOrganizer(props: LibraryOrganizerProps) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <IsolatedErrorBoundary
+      key={`${props.scope?.nodeId ?? "root"}:${attempt}`}
+      fallback={
+        <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
+          <p>The Library could not load. Check your connection and try again.</p>
+          <button type="button" className="mt-3 rounded-control border border-[var(--border-default)] px-3 py-2 hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring-color)]" onClick={() => setAttempt((value) => value + 1)}>
+            Try again
+          </button>
+        </div>
+      }
+    >
+      <LibraryOrganizerContent {...props} />
+    </IsolatedErrorBoundary>
+  );
+}
+
+function LibraryOrganizerContent({
   onOpenWork,
   onOpenThread,
   onShareWork,
@@ -335,8 +354,6 @@ export function LibraryOrganizer({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const frameRef = useRef(0);
-  const loadingMoreRef = useRef(false);
-  const lastLoadRequestLengthRef = useRef<number | null>(null);
   /* Every node the surface has seen, so a drop target's ancestry can be checked
      without another query. Cheap: it is only ever read during a drag. */
   const seenRef = useRef(new Map<string, TreeNode>());
@@ -348,16 +365,17 @@ export function LibraryOrganizer({
   currentParentRef.current = currentParentId;
 
   const children = useTreeChildren(currentParentId, {
-    enabled: inFolder && !searching,
+    enabled: inFolder && !searching && !board,
     sortKey,
     direction: sortDirection,
     typeFilter: filter,
   });
-  const search = useTreeSearch(term, undefined, floorId);
+  const search = useTreeSearch(term, undefined, floorId, filter);
   const quick = useTreeQuickView(
     !searching && location.kind === "quick" ? location.view : null,
     undefined,
     floorId,
+    filter,
   );
   const trash = useTreeTrash(!searching && location.kind === "trash");
   const path = useTreePath(inFolder ? location.nodeId : null);
@@ -374,8 +392,10 @@ export function LibraryOrganizer({
       : location.kind === "trash"
         ? trash
         : children.nodes;
-  const loading =
-    source === null || (inFolder && !searching && children.isLoading);
+  const page = searching ? search : location.kind === "quick" ? quick : children;
+  const paginated = location.kind !== "trash" || searching;
+  const loading = source === null || (paginated && page.status === "LoadingFirstPage");
+  const hasMore = paginated && (page.status === "CanLoadMore" || page.status === "LoadingMore");
 
   const rows = useMemo(() => {
     const base = filterRows(source ?? [], filter);
@@ -396,30 +416,22 @@ export function LibraryOrganizer({
     for (const node of nodes) seenRef.current.set(node.nodeId, node);
   }, []);
 
-  const settling = false;
-
   /* Ordinary scrolling loads the next page as the reader approaches the end. */
   useEffect(() => {
-    if (sortKey !== "manual" || !inFolder || searching) return;
-    if (children.status !== "CanLoadMore" || loadingMoreRef.current) return;
+    if ((board && inFolder && !searching) || !paginated || rows.length === 0) return;
+    if (page.status !== "CanLoadMore") return;
     const remaining = rows.length * ROW_HEIGHT - scrollTop - viewportHeight;
     if (remaining >= ROW_HEIGHT * 12) return;
-    /* Convex may keep the status at CanLoadMore while a request is settling.
-       Do not issue the same page request again on every render. A new request
-       is permitted only after the result length changes. */
-    if (lastLoadRequestLengthRef.current === rows.length) return;
-    lastLoadRequestLengthRef.current = rows.length;
-    loadingMoreRef.current = true;
-    void Promise.resolve(children.loadMore(300)).finally(() => {
-      loadingMoreRef.current = false;
-    });
+    // Convex guards loadMore once per cursor. Row count is not a cursor:
+    // filtered pages can legitimately return zero additional visible rows.
+    page.loadMore(50);
   }, [
-    sortKey,
+    board,
     inFolder,
     searching,
-    children.status,
-    children.loadMore,
-    children,
+    paginated,
+    page.status,
+    page.loadMore,
     rows.length,
     scrollTop,
     viewportHeight,
@@ -435,12 +447,12 @@ export function LibraryOrganizer({
   useEffect(() => {
     if (rootsEnsured.current || scope) return;
     if (!inFolder || currentParentId !== null || searching) return;
-    if (children.status === "LoadingFirstPage") return;
+    if (!board && children.status === "LoadingFirstPage") return;
     rootsEnsured.current = true;
     void actionsRef.current.ensureRoots().catch(() => {
       rootsEnsured.current = false;
     });
-  }, [inFolder, currentParentId, searching, children.status, scope]);
+  }, [board, inFolder, currentParentId, searching, children.status, scope]);
 
   /* Keep the path to the current folder visible, but do not force the current
      folder's own children open. A selected tree item and an expanded tree item
@@ -1125,7 +1137,7 @@ export function LibraryOrganizer({
               direction={sortDirection}
               onKeyChange={setSortKey}
               onDirectionChange={setSortDirection}
-              settling={settling}
+              settling={false}
             />
           )}
           <SurfaceNewMenu
@@ -1332,6 +1344,10 @@ export function LibraryOrganizer({
             >
               {loading ? (
                 <RowSkeleton />
+              ) : rows.length === 0 && hasMore ? (
+                <p role="status" className="px-2 py-6 text-body text-[var(--text-secondary)]">
+                  No matching items on this page. Load more to continue looking.
+                </p>
               ) : rows.length === 0 ? (
                 <EmptyState
                   location={location}
@@ -1396,18 +1412,17 @@ export function LibraryOrganizer({
             <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-micro text-[var(--text-tertiary)]">
               <span>
                 {rows.length} {rows.length === 1 ? "item" : "items"}
-                {children.status === "CanLoadMore" && !flat ? "+" : ""}
+                {hasMore ? "+" : ""}
               </span>
               {selection.ids.size > 0 ? (
                 <span className="text-[var(--text-secondary)]">
                   {selection.ids.size} selected
                 </span>
               ) : null}
-              {settling ? (
-                <span className="flex items-center gap-1.5">
-                  <Loader2 className="size-3 animate-spin" />
-                  Loading the whole folder to sort it
-                </span>
+              {hasMore ? (
+                <button type="button" disabled={page.status === "LoadingMore"} onClick={() => page.loadMore(50)} className="rounded-control px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring-color)] disabled:opacity-50">
+                  {page.status === "LoadingMore" ? "Loading…" : "Load more"}
+                </button>
               ) : null}
               {location.kind === "trash" && rows.length > 0 ? (
                 <span>

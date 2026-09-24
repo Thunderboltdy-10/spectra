@@ -1,4 +1,5 @@
-import { query } from "./_generated/server";
+import { action, query } from "./_generated/server";
+import { makeFunctionReference } from "convex/server";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -59,7 +60,8 @@ import { validateArtifactContent } from "../src/features/spectra/artifacts/regis
 import { normalizeSheetsContent } from "../src/features/spectra/sheets/model";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 import { isDurableContentRef } from "../shared/durable-content";
-import { validateContentAdoption } from "./collaborationDurablePayload";
+import { validateContentAdoption, validateDurablePayload } from "./collaborationDurablePayload";
+import { artifactPage, CATALOG_MIGRATION_KEY } from "./catalogPages";
 
 async function contentForArtifactStorage(
   ctx: MutationCtx,
@@ -295,6 +297,19 @@ type ArtifactListSummary = Omit<
   "_id" | "_creationTime"
 >;
 
+export const listPage = query({
+  args: {
+    scope: v.optional(v.union(v.literal("school"), v.literal("owned"))),
+    status: v.optional(vArtifactStatus),
+    blueprintKey: v.optional(vBlueprintKey),
+    placement: v.optional(v.union(v.literal("all"), v.literal("inbox"), v.literal("shared"), v.literal("workspace"))),
+    search: v.optional(v.string()),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
+  handler: artifactPage,
+});
+
 export const list = query({
   args: {
     status: v.optional(vArtifactStatus),
@@ -333,21 +348,30 @@ export const list = query({
           )
           .order("desc")
           .take(limit * 3);
+    const ownedSummaryByArtifact = new Map(
+      owned.map((summary) => [String(summary.artifactId), summary]),
+    );
+    // Historical workspace-inheritance grants can dwarf the direct grants.
+    // Exclude them at the index, before the candidate budget is applied.
+    const directGrantsFor = async (
+      principalType: "account" | "school",
+      principalId: string,
+    ) => (await Promise.all(
+      (["workspace", "artifact", "agent"] as const).map((resourceType) =>
+        ctx.db.query("accessGrants")
+          .withIndex("by_principal_resource_source", (q) => q
+            .eq("principalType", principalType)
+            .eq("principalId", principalId)
+            .eq("resourceType", resourceType)
+            .eq("source", "direct"))
+          .take(LIBRARY_METADATA_READ_LIMIT),
+      ),
+    )).flat();
     const now = Date.now();
     const [accountGrants, schoolGrants, ownPlacementNodes, pendingInvites, acceptedInvites] =
       await Promise.all([
-        ctx.db
-          .query("accessGrants")
-          .withIndex("by_principal", (q) =>
-            q.eq("principalType", "account").eq("principalId", actor.accountId),
-          )
-          .take(LIBRARY_METADATA_READ_LIMIT),
-        ctx.db
-          .query("accessGrants")
-          .withIndex("by_principal", (q) =>
-            q.eq("principalType", "school").eq("principalId", actor.schoolId),
-          )
-          .take(LIBRARY_METADATA_READ_LIMIT),
+        directGrantsFor("account", actor.accountId),
+        directGrantsFor("school", actor.schoolId),
         ctx.db
           .query("orgNodes")
           .withIndex("by_account_live_kind_activity", (q) =>
@@ -442,10 +466,11 @@ export const list = query({
         [...candidateIds].map(async (resourceId) => {
           const artifactId = ctx.db.normalizeId("spectraArtifacts", resourceId);
           if (!artifactId) return null;
-          const summary = await ctx.db
-            .query("spectraArtifactSummaries")
-            .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
-            .unique();
+          const summary = ownedSummaryByArtifact.get(String(artifactId)) ??
+            await ctx.db
+              .query("spectraArtifactSummaries")
+              .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+              .unique();
           if (
             summary &&
             summary.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION
@@ -558,7 +583,9 @@ export const list = query({
     const overrideByArtifact = new Map(
       (
         await Promise.all(
-          rows.map(async (row) => {
+          rows
+            .filter((row) => row.ownerAccountId !== actor._id)
+            .map(async (row) => {
             const override = await ctx.db
               .query("artifactAccessOverrides")
               .withIndex("by_artifact_account", (q) =>
@@ -568,7 +595,7 @@ export const list = query({
               )
               .unique();
             return override ? ([row.artifactId, override] as const) : null;
-          }),
+            }),
         )
       ).filter(
         (
@@ -707,14 +734,32 @@ export const list = query({
 
 /** One-time, cursor-shaped projection fill for artifacts created before P9.I3. */
 export const backfillSummaries = internalMutation({
-  args: { cursor: v.union(v.string(), v.null()) },
+  args: { cursor: v.union(v.string(), v.null()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const migration = await ctx.db.query("spectraReadModelMigrations")
+      .withIndex("by_key", q => q.eq("key", CATALOG_MIGRATION_KEY)).unique();
+    const tracked = args.cursor === null || (migration?.version === ARTIFACT_SUMMARY_READ_MODEL_VERSION &&
+      migration.state === "running" && migration.cursor === args.cursor);
     const page = await ctx.db.query("spectraArtifacts").paginate({
       cursor: args.cursor,
-      numItems: 100,
+      numItems: Math.max(1, Math.min(Math.floor(args.limit ?? 10), 25)),
+      maximumBytesRead: 2_000_000,
     });
     for (const artifact of page.page)
       await upsertArtifactSummary(ctx, artifact);
+    if (tracked) {
+      const continuing = args.cursor !== null;
+      const value = {
+        key: CATALOG_MIGRATION_KEY, version: ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+        state: page.isDone ? "complete" as const : "running" as const,
+        cursor: page.isDone ? undefined : page.continueCursor,
+        scanned: (continuing ? migration?.scanned ?? 0 : 0) + page.page.length,
+        repaired: (continuing ? migration?.repaired ?? 0 : 0) + page.page.length,
+        createdAt: continuing ? migration?.createdAt ?? Date.now() : Date.now(), updatedAt: Date.now(),
+      };
+      if (migration) await ctx.db.patch(migration._id, value);
+      else await ctx.db.insert("spectraReadModelMigrations", value);
+    }
     return {
       processed: page.page.length,
       cursor: page.isDone ? null : page.continueCursor,
@@ -2741,6 +2786,9 @@ function researchRefsInContent(value: unknown, output = new Set<string>(), depth
       if (typeof ref === "string" && /^(?:source|evidence):/.test(ref))
         output.add(ref);
   }
+  const native = record.sourceRef && typeof record.sourceRef === "object" ? record.sourceRef as Record<string, unknown> : undefined;
+  if (native && typeof native.sourceId === "string") output.add(native.sourceId);
+  if (native && Array.isArray(native.evidenceIds)) for (const ref of native.evidenceIds) if (typeof ref === "string") output.add(ref);
   for (const child of Object.values(record))
     researchRefsInContent(child, output, depth + 1);
   return output;
@@ -2758,7 +2806,6 @@ function citationsForResearchContent(bundle: unknown, content: unknown) {
         : [],
     ),
   );
-  const evidenceBySource = new Map<string, string[]>();
   const evidenceIds = new Set<string>();
   for (const span of evidence) {
     if (!span || typeof span !== "object") continue;
@@ -2766,26 +2813,13 @@ function citationsForResearchContent(bundle: unknown, content: unknown) {
     if (typeof row.id !== "string" || typeof row.sourceId !== "string") continue;
     if (!sourceIds.has(row.sourceId)) continue;
     evidenceIds.add(row.id);
-    evidenceBySource.set(row.sourceId, [
-      ...(evidenceBySource.get(row.sourceId) ?? []),
-      row.id,
-    ]);
   }
   const citations = new Map<string, { sourceId: string; evidenceIds: string[] }>();
   for (const ref of researchRefsInContent(content)) {
     if (ref.startsWith("source:")) {
       if (!sourceIds.has(ref)) throw new Error("RESEARCH_SOURCE_REF_NOT_ISSUED");
-      const ids = evidenceBySource.get(ref) ?? [];
-      const source = sources.find(
-        (candidate) =>
-          candidate &&
-          typeof candidate === "object" &&
-          (candidate as Record<string, unknown>).id === ref,
-      ) as Record<string, unknown> | undefined;
-      // Partial/unverified search results remain visible as sourceRefs, but
-      // cannot be upgraded into a portable citation.
-      if (source?.verified === true && ids.length)
-        citations.set(ref, { sourceId: ref, evidenceIds: [ids[0]!] });
+      // Naming a source does not identify a supporting passage. Only exact
+      // evidence references below create portable citations.
     } else {
       if (!evidenceIds.has(ref)) throw new Error("RESEARCH_EVIDENCE_REF_NOT_ISSUED");
       const span = evidence.find(
@@ -2810,11 +2844,18 @@ function citationsForResearchContent(bundle: unknown, content: unknown) {
   return { ...record, citations: [...citations.values()] };
 }
 
-export const attachResearchEvidence = mutation({
+const researchAttachmentArgs = {
+  artifactId: v.id("spectraArtifacts"),
+  runId: v.id("spectraAiRuns"),
+  executionId: v.string(),
+};
+
+// Only the action below supplies refs extracted from verified storage bytes.
+// The internal mutation rechecks authority and the exact current content ref.
+export const attachResearchEvidenceForContent = internalMutation({
   args: {
-    artifactId: v.id("spectraArtifacts"),
-    runId: v.id("spectraAiRuns"),
-    executionId: v.string(),
+    ...researchAttachmentArgs,
+    resolved: v.optional(v.object({ contentRef: v.any(), refs: v.array(v.string()) })),
   },
   handler: async (ctx, args) => {
     const { actor, artifact } = await requireArtifactCapability(
@@ -2826,6 +2867,7 @@ export const attachResearchEvidence = mutation({
     if (
       !run ||
       run.ownerAccountId !== actor.accountId ||
+      run.schoolId !== artifact.schoolId ||
       run.executionId !== args.executionId
     )
       throw new Error("This research evidence belongs to another run.");
@@ -2837,13 +2879,53 @@ export const attachResearchEvidence = mutation({
         : {};
     const bundle = snapshot.researchEvidence;
     if (!bundle) return { artifactId: artifact._id, attached: false };
+    let citationContent = artifact.content;
+    if (isDurableContentRef(artifact.content)) {
+      const ref = artifact.content.spectraContentRef;
+      if (ref.artifactId !== artifact._id) throw new Error("RESEARCH_CONTENT_CHANGED");
+      const payload = await validateDurablePayload(ctx, {
+        artifactId: artifact._id, payloadRef: ref.payloadRef, digest: ref.digest,
+        byteLength: ref.byteLength, kind: "projection",
+      });
+      if (!args.resolved) return { artifactId: artifact._id, attached: false, hydrate: { contentRef: artifact.content, storageId: payload.storageId } };
+      if (JSON.stringify(args.resolved.contentRef) !== JSON.stringify(artifact.content))
+        throw new Error("RESEARCH_CONTENT_CHANGED");
+      citationContent = { sourceRefs: args.resolved.refs };
+    } else if (args.resolved) throw new Error("RESEARCH_CONTENT_CHANGED");
     const createdFrom = artifact.createdFrom ?? { source: "ai" as const };
-    const persistedBundle = citationsForResearchContent(bundle, artifact.content);
+    const prior = createdFrom.sourceBundle && typeof createdFrom.sourceBundle === "object" ? createdFrom.sourceBundle as Record<string, unknown> : {};
+    const current = bundle as Record<string, unknown>;
+    const mergeRows = (key: "sources" | "evidence") => [...new Map([
+      ...(Array.isArray(prior[key]) ? prior[key] : []),
+      ...(Array.isArray(current[key]) ? current[key] : []),
+    ].flatMap((row) => row && typeof row === "object" && typeof (row as Record<string, unknown>).id === "string" ? [[(row as Record<string, unknown>).id, row] as const] : [])).values()];
+    const persistedBundle = citationsForResearchContent({ ...current, sources: mergeRows("sources"), evidence: mergeRows("evidence"), partial: Boolean(prior.partial || current.partial) }, citationContent);
     await ctx.db.patch(artifact._id, {
       createdFrom: { ...createdFrom, sourceBundle: persistedBundle },
       updatedAt: Date.now(),
     });
     return { artifactId: artifact._id, attached: true };
+  },
+});
+
+export const attachResearchEvidence = action({
+  args: researchAttachmentArgs,
+  handler: async (ctx, args): Promise<{ artifactId: Id<"spectraArtifacts">; attached: boolean }> => {
+    const attach = makeFunctionReference<"mutation">("spectraArtifacts:attachResearchEvidenceForContent");
+    const result = await ctx.runMutation(attach, args);
+    if (!result.hydrate) return result;
+    const { contentRef, storageId } = result.hydrate;
+    if (!isDurableContentRef(contentRef)) throw new Error("RESEARCH_CONTENT_INVALID");
+    const blob = await ctx.storage.get(storageId);
+    if (!blob) throw new Error("RESEARCH_CONTENT_UNAVAILABLE");
+    const bytes = await blob.arrayBuffer();
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+      .map(byte => byte.toString(16).padStart(2, "0")).join("");
+    if (bytes.byteLength !== contentRef.spectraContentRef.byteLength || digest !== contentRef.spectraContentRef.digest)
+      throw new Error("RESEARCH_CONTENT_INTEGRITY_FAILED");
+    const body = JSON.parse(new TextDecoder().decode(bytes));
+    const content = contentRef.spectraContentRef.path === "content" ? body.content : body;
+    return ctx.runMutation(attach, { ...args, resolved: { contentRef, refs: [...researchRefsInContent(content)] } });
   },
 });
 

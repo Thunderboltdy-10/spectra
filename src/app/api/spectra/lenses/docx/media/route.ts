@@ -2,7 +2,10 @@ import { Document } from "@ariadng/office/docx";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
-import { fetchVerifiedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import {
+  fetchVerifiedNativePayload,
+  fetchVerifiedNativePayloadByHash,
+} from "@/features/spectra/lenses/native-payload-server";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../../../../shared/parser-limits";
 
 export const runtime = "nodejs";
@@ -37,15 +40,36 @@ export async function GET(request: NextRequest) {
       payloadHash: request.nextUrl.searchParams.get("payloadHash"),
       partName: request.nextUrl.searchParams.get("partName"),
     });
-    const retained = await fetchVerifiedNativePayload(
-      input.artifactId as Id<"spectraArtifacts">,
-      "cloud",
-    );
-    if (retained.truth.hash !== input.payloadHash)
-      throw new Error("NATIVE_MEDIA_REVISION_STALE");
+    let payload: Uint8Array;
+    let servedFromCurrentRevision = false;
+    try {
+      payload = (
+        await fetchVerifiedNativePayloadByHash(
+          input.payloadHash,
+          input.artifactId as Id<"spectraArtifacts">,
+        )
+      ).payload;
+    } catch (error) {
+      // Projections can outlive their native source package. If the package
+      // payload has been released, use the current linked DOCX and resolve
+      // the same media part there; never turn a stale media URL into a
+      // permanently cached image from a different revision.
+      if (
+        !(error instanceof Error) ||
+        error.message !== "NATIVE_PAYLOAD_UNAVAILABLE"
+      )
+        throw error;
+      payload = (
+        await fetchVerifiedNativePayload(
+          input.artifactId as Id<"spectraArtifacts">,
+          "cloud",
+        )
+      ).payload;
+      servedFromCurrentRevision = true;
+    }
 
     const document = await Document.open(
-      await prepareBoundedArchiveBytes(retained.payload, OFFICE_ARCHIVE_LIMITS),
+      await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS),
     );
     const relationship = document.office.mainPart
       .relationships()
@@ -75,7 +99,9 @@ export async function GET(request: NextRequest) {
         "Content-Type": mediaType,
         "Content-Length": String(bytes.byteLength),
         "Content-Disposition": "inline",
-        "Cache-Control": "private, max-age=31536000, immutable",
+        "Cache-Control": servedFromCurrentRevision
+          ? "private, no-store"
+          : "private, max-age=31536000, immutable",
         "X-Content-Type-Options": "nosniff",
       },
     });

@@ -72,30 +72,45 @@ export type OrgNodeView = {
 };
 
 type ViewCtx = Parameters<typeof requireSpectraActor>[0];
-const SHARED_RESOURCE_BATCH_LIMIT = 1_000;
 
 /**
- * Every resource this account has shared out, in two indexed queries rather than
- * one per row: a "Shared" quick view over a thousand rows must not cost a
- * thousand reads.
+ * Check only the work resources in this page. Scanning the account's first
+ * thousand pending and accepted invitations on every tree page made a normal
+ * Library read scale with unrelated shares elsewhere in the account.
  */
 export async function sharedByActor(
   ctx: ViewCtx,
   accountId: Id<"accounts">,
+  resourceIds: string[],
 ) {
-  const shared = new Set<string>();
+  const uniqueResourceIds = [...new Set(resourceIds)];
   const now = Date.now();
-  for (const status of ["pending", "accepted"] as const) {
-    const rows = await ctx.db
-      .query("shareInvitations")
-      .withIndex("by_inviter_status", (q) =>
-        q.eq("inviterAccountId", accountId).eq("status", status),
-      )
-      .take(SHARED_RESOURCE_BATCH_LIMIT);
-    for (const row of rows)
-      if (!row.expiresAt || row.expiresAt > now) shared.add(row.resourceId);
-  }
-  return shared;
+  const rows = await Promise.all(
+    uniqueResourceIds.map(async (resourceId) => {
+      const activeInvitations = await Promise.all(
+        (["pending", "accepted"] as const).map((status) =>
+          ctx.db
+            .query("shareInvitations")
+            .withIndex("by_resource_inviter_status", (q) =>
+              q
+                .eq("resourceType", "artifact")
+                .eq("resourceId", resourceId)
+                .eq("inviterAccountId", accountId)
+                .eq("status", status),
+            )
+            .filter((q) =>
+              q.or(
+                q.eq(q.field("expiresAt"), undefined),
+                q.gt(q.field("expiresAt"), now),
+              ),
+            )
+            .first(),
+        ),
+      );
+      return activeInvitations.some(Boolean) ? resourceId : null;
+    }),
+  );
+  return new Set(rows.filter((resourceId): resourceId is string => Boolean(resourceId)));
 }
 
 export function baseView(node: OrgNode): OrgNodeView {
@@ -128,12 +143,15 @@ export async function hydrateNodes(
     accountId?: Id<"accounts">;
   },
 ) {
-  const views: OrgNodeView[] = [];
-  const sharedOut =
-    options?.withSource && options.accountId
-      ? await sharedByActor(ctx, options.accountId)
-      : null;
-  for (const node of nodes) {
+  const workSourceIds = nodes
+    .filter((node) => node.kind === "work" && Boolean(node.sourceId))
+    .map((node) => node.sourceId!);
+  const sharedOutPromise =
+    options?.withSource && options.accountId && workSourceIds.length > 0
+      ? sharedByActor(ctx, options.accountId, workSourceIds)
+      : Promise.resolve<Set<string> | null>(null);
+
+  return Promise.all(nodes.map(async (node) => {
     const view = baseView(node);
     if (node.kind === "workspace" && node.sourceId) {
       const workspaceId = ctx.db.normalizeId(
@@ -214,6 +232,7 @@ export async function hydrateNodes(
               aiState?: string;
             }
           | undefined;
+        const sharedOut = await sharedOutPromise;
         view.source = {
           blueprintKey:
             (summaryIsCurrent ? summary?.blueprintKey : undefined) ??
@@ -245,7 +264,6 @@ export async function hydrateNodes(
         };
       }
     }
-    views.push(view);
-  }
-  return views;
+    return view;
+  }));
 }

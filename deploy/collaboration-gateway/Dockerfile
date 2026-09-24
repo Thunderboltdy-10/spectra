@@ -27,9 +27,11 @@ COPY scripts/collaboration-gateway.mjs \
      scripts/collaboration-room-state.mjs \
      ./scripts/
 COPY shared/collaboration-framing.mjs \
+     shared/collaboration-durable-frontier.mjs \
      shared/sheet-regions.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \
+     shared/sync-retry-policy.json \
      ./shared/
 EXPOSE 1234
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \

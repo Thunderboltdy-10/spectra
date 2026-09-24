@@ -23,6 +23,7 @@ import {
   upsertResultCardSummary,
 } from "./spectraRunProjection";
 import { deleteArtifactSummary, upsertArtifactSummary } from "./orgTreeShared";
+import { syncAnalyticsRun } from "./analyticsReadModels";
 import {
   plannerReminderSourceChanged,
   plannerReminderSourceGeneration,
@@ -102,6 +103,7 @@ export const runProjectionTriggerIo = {
 };
 
 triggers.register("spectraAiRuns", async (ctx, change) => {
+  await syncAnalyticsRun({ db: ctx.innerDb }, change.id, change.oldDoc, change.newDoc);
   if (!change.newDoc) return;
   const updateTabs = projectedRunChanged(change.oldDoc, change.newDoc, false);
   const updateCards = projectedRunChanged(change.oldDoc, change.newDoc, true) ||
@@ -167,14 +169,16 @@ triggers.register("spectraAiRuns", async (ctx, change) => {
 
 triggers.register("spectraThreads", async (ctx, change) => {
   if (!change.newDoc) return;
+  const threadTitle = change.newDoc.title.slice(0, 120);
+  if (change.oldDoc?.title.slice(0, 120) === threadTitle) return;
   const tabs = await ctx.innerDb
     .query("spectraRunTabs")
     .withIndex("by_thread", (q) => q.eq("threadId", change.id))
     .collect();
   await Promise.all(
-    tabs.map((tab) =>
+    tabs.filter(tab => tab.threadTitle !== threadTitle).map((tab) =>
       ctx.innerDb.patch(tab._id, {
-        threadTitle: change.newDoc.title.slice(0, 120),
+        threadTitle,
       }),
     ),
   );

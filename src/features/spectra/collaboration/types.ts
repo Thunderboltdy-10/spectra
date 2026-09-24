@@ -229,6 +229,12 @@ export type ArtifactCollaborationTransport = {
   getPresencePreviewSnapshot(): PresencePreviewSnapshot;
   subscribePresencePreview(listener: () => void): () => void;
   connect(): Promise<void>;
+  /**
+   * Tell providers that IndexedDB restored a branch that never received a
+   * remote durable acknowledgement. Providers that already queue the restored
+   * update during document hydration may implement this as a no-op.
+   */
+  markLocalRecoveryPending?(): void;
   retry(): Promise<void>;
   disconnect(): void;
   destroy(): void;

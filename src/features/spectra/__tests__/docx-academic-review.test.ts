@@ -6,6 +6,7 @@ import { docxProjectionFromContent } from "../lenses/document-projection";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
 import { parseXml } from "@ariadng/office/xml";
 import { WML_NAMESPACE } from "@ariadng/office/docx";
+import { relatedWordPart, wordElements } from "../lenses/docx-academic";
 
 async function blank() {
   const document = Document.create();
@@ -22,6 +23,36 @@ async function shared(base: Awaited<ReturnType<typeof blank>>, operations: unkno
 }
 
 describe("Shared academic review operations", () => {
+  it("cleans up owned paragraph comments, retains orphans, and refuses deletion of protected table anchors", async () => {
+    const base = await blank(); const block = base.projection.blocks[0]!;
+    const commented = await shared(base, [{ kind: "add-word-comment", commentId: "51", anchor: { regionId: block.id, expectedText: block.text, start: 0, end: 8 }, comment: { author: "Fixture", text: "Owned by the table" } }]);
+    const document = await Document.open(commented.preservedCarry.payload);
+    const comments = (await relatedWordPart(document, "comments"))!;
+    const orphan = comments.root.elements()[0]!.clone();
+    comments.root.appendChild(orphan);
+    orphan.setAttributeNs(WML_NAMESPACE, "id", "52");
+    document.office.markDirty(comments.partName);
+    const paragraphImport = await docxLens.open(await document.save());
+    const removed = await docxLens.open(await docxLens.mutate(paragraphImport.preservedCarry, { kind: "delete-region", regionId: paragraphImport.projection.blocks[0]!.id }));
+    expect(removed.projection.nativeBinding.wordComments?.map((comment) => comment.id)).toEqual(["52"]);
+    expect(removed.projection.blocks.map((item) => item.text)).toEqual(["The neighbor remains editable."]);
+    const paragraph = document.body().elements().find((node) => node.localName === "p")!;
+    const table = parseXml(`<w:tbl xmlns:w="${WML_NAMESPACE}"><w:tblPr/><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:tcPr/></w:tc></w:tr></w:tbl>`).root;
+    const cell = wordElements(table).find((node) => node.localName === "tc")!;
+    document.body().insertBefore(table, paragraph);
+    document.body().removeChild(paragraph);
+    cell.appendChild(paragraph);
+    document.office.markDirty(document.office.mainPart.name);
+    const imported = await docxLens.open(await document.save());
+    const tableBlock = imported.projection.blocks.find((item) => item.type === "table")!;
+    expect(tableBlock.richRows?.flat(2)).toContainEqual(expect.objectContaining({ kind: "commentBoundary", commentId: "51" }));
+    await expect(docxLens.mutate(imported.preservedCarry, { kind: "delete-region", regionId: tableBlock.id })).rejects.toThrow(/preserved read-only/);
+    const neighbor = imported.projection.blocks.find((item) => item.type === "paragraph")!;
+    const changed = await shared(imported, [{ kind: "insert-note", noteType: "endnote", noteId: "7", content: [[{ text: "Disjoint note" }]], anchor: { regionId: neighbor.id, expectedText: neighbor.text, start: 0, end: 0 } }]);
+    expect(changed.projection.blocks.find((item) => item.type === "table")).toEqual(tableBlock);
+    expect(changed.projection.nativeBinding.wordComments).toEqual(imported.projection.nativeBinding.wordComments);
+  });
+
   it("recognizes modern comment extensions by relationship and keeps disjoint text editable", async () => {
     const base = await blank(); const block = base.projection.blocks[0]!;
     const classic = await shared(base, [{ kind: "add-word-comment", commentId: "91", anchor: { regionId: block.id, expectedText: block.text, start: 0, end: 8 }, comment: { author: "Fixture", text: "Modern thread" } }]);

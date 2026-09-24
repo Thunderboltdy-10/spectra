@@ -207,20 +207,22 @@ function scheduleSync(
 }
 
 export const scheduleExisting = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const integrations = (
-      await Promise.all(
-        (["connected", "degraded"] as const).map((status) =>
-          ctx.db
-            .query("schoolIntegrations")
-            .withIndex("by_status_next_sync", (q) => q.eq("status", status))
-            .collect(),
-        ),
-      )
-    ).flat();
+  args: {
+    status: v.optional(v.union(v.literal("connected"), v.literal("degraded"))),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const status = args.status ?? "connected";
+    const limit = Math.min(100, Math.max(1, Math.floor(args.limit ?? 100)));
+    // A repair can cover many schools. Resume one indexed stream at a time
+    // rather than loading every integration and queuing every job at once.
+    const page = await ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_status_next_sync", (q) => q.eq("status", status))
+      .paginate({ cursor: args.cursor ?? null, numItems: limit, maximumBytesRead: 1_000_000 });
     let scheduled = 0;
-    for (const integration of integrations) {
+    for (const integration of page.page) {
       if (
         typeof integration.nextSyncAt !== "number" ||
         integration.blockedReason
@@ -229,7 +231,14 @@ export const scheduleExisting = internalMutation({
       await scheduleSync(ctx, integration._id, integration.nextSyncAt);
       scheduled += 1;
     }
-    return { scheduled };
+    const next = !page.isDone
+      ? { status, cursor: page.continueCursor, limit }
+      : status === "connected"
+        ? { status: "degraded" as const, cursor: null, limit }
+        : null;
+    if (next)
+      await ctx.scheduler.runAfter(0, internal.managebac.scheduleExisting, next);
+    return { scheduled, scanned: page.page.length, done: next === null };
   },
 });
 

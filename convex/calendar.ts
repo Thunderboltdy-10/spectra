@@ -1146,10 +1146,15 @@ export const backfillItemReadModels = internalMutation({
     const metrics = createCalendarReadMetrics();
     const page = await ctx.db.query("calendarItems").paginate({
       cursor: args.cursor,
-      numItems: Math.min(100, Math.max(1, Math.floor(args.limit ?? 50))),
+      // Each repair can delete and recreate 370 day buckets. Ten items keep
+      // worst-case read/write fanout below a single transaction's limits.
+      numItems: Math.min(10, Math.max(1, Math.floor(args.limit ?? 10))),
+      maximumBytesRead: 2_000_000,
     });
     for (const item of page.page)
-      await upsertCalendarItemReadModel(ctx, item, metrics);
+      await upsertCalendarItemReadModel(ctx, item, metrics, {
+        repairRangeBuckets: true,
+      });
     return {
       processed: page.page.length,
       cursor: page.isDone ? null : page.continueCursor,

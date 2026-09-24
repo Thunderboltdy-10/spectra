@@ -123,7 +123,7 @@ export function assertPrimarySpectraRouting(
     routing.allow_fallbacks !== false
   )
     throw new Error(
-      "Spectra primary requests must use the configured GPT-5.6 Luna OpenRouter route without provider substitution.",
+      "Spectra primary requests must use the configured OpenRouter model through OpenAI without provider substitution.",
     );
 }
 

@@ -87,6 +87,21 @@ function quizPlan() {
   };
 }
 
+function submitFocusedUpdate(blueprintKey: string) {
+  return new Response(JSON.stringify({
+    model: "openai/gpt-6-luna", provider: "OpenAI",
+    choices: [{ finish_reason: "tool_calls", message: { content: "", tool_calls: [{
+      id: "submit-focused-update", type: "function", function: {
+        name: "submit_plan", arguments: JSON.stringify({ plan: {
+          decision: "operate",
+          intent: { mode: "update", requestedArtifactTypes: [blueprintKey], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
+          operations: [], finalResponse: "Updated the requested content.",
+        } }),
+      },
+    }] } }],
+  }), { status: 200 });
+}
+
 function setup(
   plan: unknown,
   initialStatus: "queued" | "failed" = "queued",
@@ -288,7 +303,11 @@ function setup(
       card.status = "running";
       return { resultCardId: "card-real" };
     }
-    if (name.includes("accountPreferences:writeLayer")) return { scope: "account", values: args.values };
+    if (name.includes("spectraApplicationWrites:execute")) {
+      expect(args).toMatchObject({ runId: "run-real", executionId: run.executionId, operationId: "operation-1" });
+      expect(args.expectedCommand).toBe("change_spectra_settings");
+      return { scope: "account", values: (args.expectedArgs as { patch: unknown }).patch };
+    }
     if (name.includes("syncPolicy:override")) return { changed: true };
     if (name.includes("replicas:localEffectCount")) return { count: 3 };
     if (name.includes("orgTree:createFolder") || name.includes("orgTree:rename") || name.includes("orgTree:move") || name.includes("orgTree:createReference") || name.includes("orgTree:trash")) return { ok: true, nodeId: "node-app" };
@@ -1560,7 +1579,7 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.type === "final")).toBe(true);
   });
 
-  it("commits a validated direct focused mutation without a redundant terminal turn", async () => {
+  it("commits a staged focused mutation only after the whole-request terminal plan", async () => {
     const { convexMutation, fetchMock } = setup({});
     const operation = {
       type: "artifact.update",
@@ -1609,14 +1628,7 @@ describe("Spectra run route", () => {
       const hasObservation = payload.messages?.some(
         (message) => message.role === "tool",
       );
-      expect(payload.tool_choice).toEqual(
-        hasObservation
-          ? "auto"
-          : {
-              type: "function",
-              function: { name: "propose_operation" },
-            },
-      );
+      expect(payload.tool_choice).toBe("auto");
       const call = hasObservation
         ? {
             id: "submit-final",
@@ -1688,10 +1700,10 @@ describe("Spectra run route", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as { type: string; message?: string });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     const recordPlan = convexMutation.mock.calls.find(([name]) =>
       String(name).includes("spectraOperations:recordPlan"),
     );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(recordPlan?.[1]).toMatchObject({ operations: [operation] });
     expect(
       events.some((event) => {
@@ -1827,7 +1839,7 @@ describe("Spectra run route", () => {
       title: "Launch Agent Reliability Review",
       content,
     });
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       model: "deepseek/deepseek-v4-pro-20260423",
       provider: "DeepSeek",
       choices: [{
@@ -1864,7 +1876,7 @@ describe("Spectra run route", () => {
           }],
         },
       }],
-    }), { status: 200 }));
+    }), { status: 200 })).mockImplementation(async () => submitFocusedUpdate("planner_task"));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
@@ -1878,10 +1890,9 @@ describe("Spectra run route", () => {
     }));
     await response.text();
 
-    // "Preserve everything else" narrows the mutation; it must not be
-    // mistaken for a request to change everything and trigger a long
-    // discovery/submit loop after the first valid focused operation.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Contextual mentions do not widen this edit; the terminal plan still
+    // validates the complete request after the single staged operation.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const requestPayload = JSON.parse(
       String((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.body),
     ) as {
@@ -1898,19 +1909,15 @@ describe("Spectra run route", () => {
         };
       }>;
     };
-    expect(requestPayload.tool_choice).toEqual({
-      type: "function",
-      function: { name: "propose_operation" },
-    });
+    expect(requestPayload.tool_choice).toBe("auto");
     const propose = requestPayload.tools?.find(
       (tool) => tool.function?.name === "propose_operation",
     );
-    expect(propose?.function?.parameters?.required).toContain(
-      "fulfillsRequest",
-    );
+    expect(propose?.function?.parameters?.required).not.toContain("fulfillsRequest");
     expect(
       propose?.function?.parameters?.properties?.fulfillsRequest,
-    ).toMatchObject({ type: "boolean", const: true });
+    ).toMatchObject({ type: "boolean" });
+    expect(propose?.function?.parameters?.properties?.fulfillsRequest?.const).toBeUndefined();
     expect(getSavedArtifact().content).toEqual({
       ...content,
       progressNote:
@@ -1969,7 +1976,7 @@ describe("Spectra run route", () => {
     }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; reasons?: string[] });
     expect(events.some((event) => event.type === "confirmation_required")).toBe(true);
-    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("accountPreferences:writeLayer"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraApplicationWrites:execute"))).toBe(false);
     const recorded = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraOperations:recordPlan"));
     expect(recorded?.[1]).toMatchObject({ operations: [{ type: "app.command", requiresConfirmation: true }] });
 
@@ -1978,7 +1985,9 @@ describe("Spectra run route", () => {
       body: JSON.stringify({ action: "confirm", runId: "run-real", executionId: "execution-1" }),
     }));
     await confirmResponse.text();
-    expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("accountPreferences:writeLayer"))).toHaveLength(1);
+    const writes = convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraApplicationWrites:execute"));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.[1]).toMatchObject({ expectedCommand: "change_spectra_settings", expectedArgs: plan.operations[0].input.args });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -2064,15 +2073,14 @@ describe("Spectra run route", () => {
       expect(
         propose?.function?.parameters?.properties?.operation?.properties?.type
           ?.const,
-      ).toBe("artifact.update");
+      ).toBeUndefined();
       expect(
         propose?.function?.parameters?.properties?.operation?.properties?.input
           ?.properties?.blueprintKey?.const,
-      ).toBe("sheets");
-      expect(payload.tool_choice).toEqual({
-        type: "function",
-        function: { name: "propose_operation" },
-      });
+      ).toBeUndefined();
+      expect(payload.tool_choice).toBe("auto");
+      const messages = (payload as { messages?: Array<{ role?: string }> }).messages;
+      if (messages?.some((message) => message.role === "tool")) return submitFocusedUpdate("sheets");
       return new Response(
         JSON.stringify({
           model: "deepseek/deepseek-v4-pro-20260423",
@@ -2290,15 +2298,14 @@ describe("Spectra run route", () => {
       expect(
         propose?.function?.parameters?.properties?.operation?.properties?.type
           ?.const,
-      ).toBe("artifact.update");
+      ).toBeUndefined();
       expect(
         propose?.function?.parameters?.properties?.operation?.properties?.input
           ?.properties?.blueprintKey?.const,
-      ).toBe("presentation");
-      expect(payload.tool_choice).toEqual({
-        type: "function",
-        function: { name: "propose_operation" },
-      });
+      ).toBeUndefined();
+      expect(payload.tool_choice).toBe("auto");
+      const messages = (payload as { messages?: Array<{ role?: string }> }).messages;
+      if (messages?.some((message) => message.role === "tool")) return submitFocusedUpdate("presentation");
       if (callCount === 1) {
         // First agent pass returns an empty draft so quiet encouragement fires.
         return new Response(
@@ -2370,7 +2377,7 @@ describe("Spectra run route", () => {
           },
       );
 
-    expect(callCount).toBe(2);
+    expect(callCount).toBe(3);
     expect(
       convexMutation.mock.calls.some(([name]) =>
         String(name).includes("spectraArtifacts:createPending"),

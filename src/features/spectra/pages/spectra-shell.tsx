@@ -2880,13 +2880,14 @@ export function SpectraShell({
     }
     function onAiNavigate(detail: {
       actorId?: string;
+      intent?: "explicit";
       route: "library" | "calendar" | "settings" | "workspace" | "artifact";
       target?: string;
     }) {
-      if (!isFollowingAi()) return;
+      if (detail.intent !== "explicit" && !isFollowingAi()) return;
       const followed = getFollowedAiActorId();
-      if (followed && detail?.actorId && detail.actorId !== followed) return;
-      if (followed && !detail?.actorId) return;
+      if (detail.intent !== "explicit" && followed && detail?.actorId && detail.actorId !== followed) return;
+      if (detail.intent !== "explicit" && followed && !detail?.actorId) return;
       if (!detail?.route) return;
       if (detail.route === "library" || detail.route === "workspace") {
         if (detail.target) goToWorkspaceHub(detail.target);

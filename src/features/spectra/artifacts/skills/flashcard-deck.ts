@@ -28,6 +28,7 @@ export const flashcardDeckSkill = defineArtifactSkill({
     "learning objective",
   ],
   operations: [
+    "Create one artifact with content.cards[]. Mix useful concept, application, comparison, and misconception questions where the topic warrants it. Each answer should explain just enough to correct an error; put optional memory cues in hint and preserve the requested count.",
     "Add, rewrite, split, merge, reorder, tag, validate, and connect cards to sources.",
     "Create valid {{cN::answer::optional hint}} cloze deletions without leaking the answer in the prompt.",
     "Propose image-occlusion regions only against an existing permitted image asset; never invent an asset id.",

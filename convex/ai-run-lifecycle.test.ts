@@ -421,7 +421,7 @@ describe("AI run create and recovery lifecycle", () => {
       });
     });
 
-    await t.withIdentity(identity).mutation(
+    await t.withIdentity(identity).action(
       api.spectraArtifacts.attachResearchEvidence,
       { artifactId: artifact, runId: fixture.runId, executionId: "execution-1" },
     );

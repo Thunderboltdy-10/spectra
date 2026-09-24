@@ -62,11 +62,13 @@ pub struct QueueItem {
 #[serde(rename_all = "camelCase")]
 pub struct NativeAckItem {
     pub id: i64,
+    pub kind: String,
     pub request_id: String,
     pub claim_generation: Option<u64>,
     pub claim_token: Option<String>,
     pub outcome: String,
     pub actual_revision: Option<String>,
+    pub actual_relative_path: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub attempts: u32,
@@ -142,6 +144,8 @@ impl Journal {
                claim_token TEXT,
                outcome TEXT NOT NULL,
                actual_revision TEXT,
+               kind TEXT NOT NULL DEFAULT 'write',
+               actual_relative_path TEXT,
                error_code TEXT,
                error_message TEXT,
                attempts INTEGER NOT NULL DEFAULT 0,
@@ -151,6 +155,9 @@ impl Journal {
              CREATE TABLE IF NOT EXISTS checkpoints (
                resource_id TEXT PRIMARY KEY, last_op_id TEXT NOT NULL,
                post_hash TEXT, compacted_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS structure_targets (
+               idempotency_key TEXT PRIMARY KEY, relative_path TEXT NOT NULL
              );",
         )?;
         let has_grant_id = {
@@ -168,11 +175,35 @@ impl Journal {
                 [],
             )?;
         }
+        {
+            let connection = self.connection.lock().unwrap();
+            let mut statement = connection.prepare("PRAGMA table_info(native_ack_queue)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            if !columns.iter().any(|column| column == "kind") {
+                connection.execute(
+                    "ALTER TABLE native_ack_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'write'",
+                    [],
+                )?;
+            }
+            if !columns
+                .iter()
+                .any(|column| column == "actual_relative_path")
+            {
+                connection.execute(
+                    "ALTER TABLE native_ack_queue ADD COLUMN actual_relative_path TEXT",
+                    [],
+                )?;
+            }
+        }
         self.connection.lock().unwrap().execute_batch(
             "CREATE INDEX IF NOT EXISTS resources_by_grant_path
                ON resources(grant_id, path_key);
              CREATE INDEX IF NOT EXISTS resources_by_grant_generation
                ON resources(grant_id, last_seen_generation);
+             CREATE INDEX IF NOT EXISTS resources_by_grant_id
+               ON resources(grant_id, local_resource_id);
              CREATE INDEX IF NOT EXISTS queue_by_due
                ON queue(available_at, id);
              CREATE INDEX IF NOT EXISTS native_ack_queue_by_due
@@ -289,6 +320,32 @@ impl Journal {
              FROM resources WHERE grant_id=? ORDER BY path_key",
         )?;
         let rows = statement.query_map([grant_id], Self::resource_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Keyset page for periodic lock probes. Never load the whole mount just
+    /// to inspect a prefix, and keep the cursor stable across file renames.
+    pub fn resource_probe_page(
+        &self,
+        grant_id: &str,
+        after_resource_id: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ResourceRecord>> {
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+                    revision,available,unavailable_reason,last_seen_generation
+             FROM resources WHERE grant_id=? AND local_resource_id>?
+             ORDER BY local_resource_id LIMIT ?",
+        )?;
+        let rows = statement.query_map(
+            params![
+                grant_id,
+                after_resource_id.unwrap_or(""),
+                limit.clamp(1, 500) as i64
+            ],
+            Self::resource_from_row,
+        )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -452,6 +509,24 @@ impl Journal {
         )?;
         Ok(())
     }
+
+    /// The collision-resolved destination is part of a move's durable intent.
+    pub fn reserve_structure_target(
+        &self,
+        key: &str,
+        relative_path: &str,
+    ) -> anyhow::Result<String> {
+        let connection = self.connection.lock().unwrap();
+        connection.execute(
+            "INSERT OR IGNORE INTO structure_targets(idempotency_key,relative_path) VALUES(?,?)",
+            params![key, relative_path],
+        )?;
+        Ok(connection.query_row(
+            "SELECT relative_path FROM structure_targets WHERE idempotency_key=?",
+            [key],
+            |row| row.get(0),
+        )?)
+    }
     pub fn config(&self, key: &str) -> anyhow::Result<Option<String>> {
         Ok(self
             .connection
@@ -553,13 +628,14 @@ impl Journal {
         let connection = self.connection.lock().unwrap();
         let mut statement = connection.prepare(
             "SELECT id,request_id,claim_generation,claim_token,outcome,
-                    actual_revision,error_code,error_message,attempts,available_at
+                    actual_revision,error_code,error_message,attempts,available_at,kind,actual_relative_path
              FROM native_ack_queue WHERE available_at <= ?
              ORDER BY id LIMIT ?",
         )?;
         let rows = statement.query_map(params![unix_ms(), limit.clamp(1, 500) as i64], |row| {
             Ok(NativeAckItem {
                 id: row.get(0)?,
+                kind: row.get(10)?,
                 request_id: row.get(1)?,
                 claim_generation: row
                     .get::<_, Option<i64>>(2)?
@@ -567,6 +643,7 @@ impl Journal {
                 claim_token: row.get(3)?,
                 outcome: row.get(4)?,
                 actual_revision: row.get(5)?,
+                actual_relative_path: row.get(11)?,
                 error_code: row.get(6)?,
                 error_message: row.get(7)?,
                 attempts: row.get::<_, i64>(8)?.max(0) as u32,
@@ -574,6 +651,40 @@ impl Journal {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn enqueue_structure_ack(
+        &self,
+        request_id: &str,
+        claim_generation: Option<u64>,
+        claim_token: Option<&str>,
+        outcome: &str,
+        actual_relative_path: Option<&str>,
+        error: Option<(&str, &str)>,
+    ) -> anyhow::Result<()> {
+        let key = format!(
+            "structure:{request_id}:{}:{}",
+            claim_generation.unwrap_or(0),
+            claim_token.unwrap_or("legacy")
+        );
+        self.connection.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO native_ack_queue(
+               ack_key,request_id,claim_generation,claim_token,outcome,
+               actual_relative_path,error_code,error_message,available_at,kind
+             ) VALUES(?,?,?,?,?,?,?,?,?,'structure')",
+            params![
+                key,
+                request_id,
+                claim_generation.map(|value| value as i64),
+                claim_token,
+                outcome,
+                actual_relative_path,
+                error.map(|value| value.0),
+                error.map(|value| value.1),
+                unix_ms()
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn acknowledge_native_ack(&self, id: i64) -> anyhow::Result<()> {
@@ -675,6 +786,137 @@ mod tests {
         let found = journal.by_key("k").unwrap().unwrap();
         assert_eq!(found.state, OpState::Verified);
         assert_eq!(found.post_hash.as_deref(), Some("hash"));
+    }
+
+    #[test]
+    fn structure_receipts_survive_restart_and_keep_the_first_result_for_each_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("journal.sqlite");
+        {
+            let journal = Journal::open(&path).unwrap();
+            journal
+                .enqueue_structure_ack(
+                    "move-1",
+                    Some(1),
+                    Some("first"),
+                    "verified",
+                    Some("renamed.docx"),
+                    None,
+                )
+                .unwrap();
+            journal
+                .enqueue_structure_ack(
+                    "move-1",
+                    Some(1),
+                    Some("first"),
+                    "failed",
+                    None,
+                    Some(("late", "late error")),
+                )
+                .unwrap();
+            journal
+                .enqueue_structure_ack(
+                    "move-1",
+                    Some(2),
+                    Some("second"),
+                    "waiting",
+                    None,
+                    Some(("office-locked", "locked")),
+                )
+                .unwrap();
+            journal
+                .enqueue_native_ack(
+                    "write-1",
+                    Some(1),
+                    Some("write"),
+                    "verified",
+                    Some("hash"),
+                    None,
+                )
+                .unwrap();
+        }
+        let journal = Journal::open(&path).unwrap();
+        let acks = journal.due_native_acks(10).unwrap();
+        assert_eq!(acks.len(), 3);
+        assert_eq!(acks[0].kind, "structure");
+        assert_eq!(acks[0].outcome, "verified");
+        assert_eq!(
+            acks[0].actual_relative_path.as_deref(),
+            Some("renamed.docx")
+        );
+        assert_eq!(acks[1].claim_generation, Some(2));
+        assert_eq!(acks[2].kind, "write");
+        assert_eq!(acks[2].actual_revision.as_deref(), Some("hash"));
+        journal
+            .retry_native_ack(acks[0].id, Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(journal.due_native_acks(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn upgrading_a_legacy_ack_queue_preserves_pending_byte_receipts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.sqlite");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection.execute_batch("CREATE TABLE native_ack_queue (
+                id INTEGER PRIMARY KEY, ack_key TEXT UNIQUE, request_id TEXT, claim_generation INTEGER,
+                claim_token TEXT, outcome TEXT, actual_revision TEXT, error_code TEXT, error_message TEXT,
+                attempts INTEGER DEFAULT 0, available_at INTEGER);
+                INSERT INTO native_ack_queue(id,ack_key,request_id,outcome,actual_revision,available_at)
+                VALUES(1,'legacy','write-legacy','verified','old-hash',0);").unwrap();
+        }
+        let journal = Journal::open(&path).unwrap();
+        let acks = journal.due_native_acks(10).unwrap();
+        assert_eq!(acks.len(), 1);
+        assert_eq!(acks[0].kind, "write");
+        assert_eq!(acks[0].actual_revision.as_deref(), Some("old-hash"));
+        assert!(acks[0].actual_relative_path.is_none());
+    }
+
+    #[test]
+    fn lock_probe_pages_cover_later_resources_without_loading_the_mount() {
+        let journal = Journal::in_memory().unwrap();
+        for index in 0..751 {
+            journal
+                .upsert_resource(&ResourceRecord {
+                    local_resource_id: format!("lr_{index:04}"),
+                    grant_id: if index == 750 { "other" } else { "mount" }.into(),
+                    path_key: format!("{index}.docx"),
+                    volume: None,
+                    file_index: None,
+                    content_hash: None,
+                    revision: None,
+                    available: true,
+                    unavailable_reason: None,
+                    last_seen_generation: 1,
+                })
+                .unwrap();
+        }
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = journal
+                .resource_probe_page("mount", cursor.as_deref(), 100)
+                .unwrap();
+            assert!(page.len() <= 100);
+            cursor = page
+                .last()
+                .map(|resource| resource.local_resource_id.clone());
+            let done = page.len() < 100;
+            seen.extend(page.into_iter().map(|resource| resource.local_resource_id));
+            if done {
+                break;
+            }
+        }
+        assert_eq!(seen.len(), 750);
+        assert_eq!(seen.last().map(String::as_str), Some("lr_0749"));
+        assert_eq!(
+            seen.iter().collect::<std::collections::HashSet<_>>().len(),
+            750
+        );
+        let first = journal.resource_probe_page("mount", None, 100).unwrap();
+        assert_eq!(first[0].local_resource_id, "lr_0000");
     }
 
     #[test]

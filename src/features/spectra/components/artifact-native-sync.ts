@@ -24,10 +24,17 @@ import {
 } from "../lenses/native-live-promotion";
 import type { RecentNativeOperation } from "../lenses/native-reconciliation";
 import type { NativeSaveReceipt } from "../../../../shared/native-office-contract";
+import { syncRetryDelayMs } from "../../../../shared/sync-retry-policy";
 
 export type NativeMaterialization =
-  | { state: "queueing" }
-  | { state: "pending"; hash: string; receipt?: NativeSaveReceipt };
+  | { state: "queueing"; artifactId: string }
+  | { state: "pending"; artifactId: string; hash: string; receipt?: NativeSaveReceipt };
+
+type NativeMaterializationRetry = {
+  artifactId: string;
+  contentKey: string;
+  attempt: number;
+};
 
 export type NativeConflict = {
   regionIds: string[];
@@ -57,6 +64,15 @@ function syncRejected(result: unknown): boolean {
     typeof result === "object" &&
     "applied" in result &&
     (result as { applied?: boolean }).applied === false,
+  );
+}
+
+function isRetryableMaterializationError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      (error as { retryable?: unknown }).retryable === true,
   );
 }
 
@@ -126,6 +142,8 @@ export function useArtifactNativeSync({
   const [nativeWriteError, setNativeWriteError] = useState<string>();
   const [nativeMaterialization, setNativeMaterialization] =
     useState<NativeMaterialization>();
+  const [nativeMaterializationRetry, setNativeMaterializationRetry] =
+    useState<NativeMaterializationRetry>();
   const [nativeAttribution, setNativeAttribution] = useState<string>();
   const [nativeLensProjection, setNativeLensProjection] = useState<unknown>();
   const [nativeProjectionReady, setNativeProjectionReady] = useState(false);
@@ -140,11 +158,24 @@ export function useArtifactNativeSync({
   const nativeProjectionOverrideRef = useRef<unknown>(undefined);
   const lastPromotedLiveKeyRef = useRef<string | undefined>(undefined);
   const lastFailedPromotionKeyRef = useRef<string | undefined>(undefined);
+  const nativeMaterializationInFlightRef = useRef(new Set<string>());
+  const nativeMaterializationRetryAttemptsRef = useRef(new Map<string, number>());
+  const activeArtifactIdRef = useRef(artifactId);
+  activeArtifactIdRef.current = artifactId;
+  const currentNativeMaterialization =
+    nativeMaterialization?.artifactId === artifactId
+      ? nativeMaterialization
+      : undefined;
   const bridgeWasAvailableRef = useRef(bridgeAvailable !== false);
 
   useEffect(() => {
     lastPromotedLiveKeyRef.current = undefined;
     lastFailedPromotionKeyRef.current = undefined;
+    setNativeWriteError(undefined);
+    setNativeMaterialization(undefined);
+    setNativeMaterializationRetry(undefined);
+    setNativeConflict(null);
+    nativeMaterializationRetryAttemptsRef.current.clear();
   }, [artifactId]);
 
   useEffect(() => {
@@ -322,7 +353,11 @@ export function useArtifactNativeSync({
   const queueNativeMaterialization = useCallback(
     async (snapshot: { content?: unknown }) => {
       if (!nativeOfficeDocument) return;
-      setNativeMaterialization({ state: "queueing" });
+      if (nativeMaterializationInFlightRef.current.has(artifactId)) return;
+      nativeMaterializationInFlightRef.current.add(artifactId);
+      const contentKey = nativeLiveContentKey(snapshot.content);
+      setNativeMaterialization({ state: "queueing", artifactId });
+      setNativeMaterializationRetry(undefined);
       setNativeWriteError(undefined);
       try {
         const endpoint = nativeWordDocument
@@ -342,11 +377,20 @@ export function useArtifactNativeSync({
           receipt?: NativeSaveReceipt;
           conflict?: NativeConflict;
         } | null;
-        if (!response.ok)
-          throw new Error(
+        if (!response.ok) {
+          const error = new Error(
             result?.message ??
               `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
           );
+          Object.assign(error, {
+            retryable:
+              response.status === 408 ||
+              response.status === 425 ||
+              response.status === 429 ||
+              response.status >= 500,
+          });
+          throw error;
+        }
         // cloud_saved / deferred_native: Spectra kept the edit; there is no
         // local Bridge replica (or no retained native payload URL yet). Do not
         // toast NATIVE_PAYLOAD_UNAVAILABLE as a false Word/Office writeback.
@@ -355,6 +399,8 @@ export function useArtifactNativeSync({
           result?.state === "cloud_saved" ||
           result?.state === "deferred_native"
         ) {
+          nativeMaterializationRetryAttemptsRef.current.delete(contentKey);
+          if (activeArtifactIdRef.current !== artifactId) return;
           lastPromotedLiveKeyRef.current = nativeLiveContentKey(
             snapshot.content,
           );
@@ -363,6 +409,8 @@ export function useArtifactNativeSync({
           return;
         }
         if (result?.state === "conflicted") {
+          nativeMaterializationRetryAttemptsRef.current.delete(contentKey);
+          if (activeArtifactIdRef.current !== artifactId) return;
           lastPromotedLiveKeyRef.current = nativeLiveContentKey(
             snapshot.content,
           );
@@ -381,19 +429,35 @@ export function useArtifactNativeSync({
           throw new Error(
             `The ${nativeOfficeApplication} write was queued without a verifiable hash.`,
           );
+        nativeMaterializationRetryAttemptsRef.current.delete(contentKey);
+        if (activeArtifactIdRef.current !== artifactId) return;
         lastPromotedLiveKeyRef.current = nativeLiveContentKey(snapshot.content);
         lastFailedPromotionKeyRef.current = undefined;
-        setNativeMaterialization({ state: "pending", hash: result.hash, receipt: result.receipt });
+        setNativeMaterialization({
+          state: "pending",
+          artifactId,
+          hash: result.hash,
+          receipt: result.receipt,
+        });
       } catch (error) {
-        lastFailedPromotionKeyRef.current = nativeLiveContentKey(
-          snapshot.content,
-        );
-        setNativeMaterialization(undefined);
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
-        );
+        if (activeArtifactIdRef.current === artifactId) {
+          lastFailedPromotionKeyRef.current = contentKey;
+          setNativeMaterialization(undefined);
+          setNativeWriteError(
+            error instanceof Error
+              ? error.message
+              : `This edit could not be written safely to the ${nativeOfficeApplication} file.`,
+          );
+          if (isRetryableMaterializationError(error)) {
+            const attempt =
+              (nativeMaterializationRetryAttemptsRef.current.get(contentKey) ?? 0) + 1;
+            nativeMaterializationRetryAttemptsRef.current.set(contentKey, attempt);
+            if (attempt <= 8)
+              setNativeMaterializationRetry({ artifactId, contentKey, attempt });
+          }
+        }
+      } finally {
+        nativeMaterializationInFlightRef.current.delete(artifactId);
       }
     },
     [
@@ -610,8 +674,50 @@ export function useArtifactNativeSync({
     : undefined;
 
   useEffect(() => {
+    if (!nativeMaterializationRetry) return;
+    if (nativeMaterializationRetry.artifactId !== artifactId) return;
+    const liveValue = live.modelSnapshot.value;
+    const contentKey = nativeLiveContentKey(liveValue?.content);
+    if (contentKey !== nativeMaterializationRetry.contentKey) {
+      nativeMaterializationRetryAttemptsRef.current.delete(
+        nativeMaterializationRetry.contentKey,
+      );
+      setNativeMaterializationRetry(undefined);
+      return;
+    }
+    if (
+      dirty ||
+      live.unsynchronizedChanges > 0 ||
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid" ||
+      nativeLocalReplica?.state === "pending"
+    )
+      return;
+    const timer = window.setTimeout(() => {
+      setNativeMaterializationRetry(undefined);
+      lastFailedPromotionKeyRef.current = undefined;
+      if (liveValue) void queueNativeMaterialization(liveValue);
+    },
+    syncRetryDelayMs(
+      nativeMaterializationRetry.attempt,
+      `native-materialization:${artifactId}:${nativeMaterializationRetry.contentKey}`,
+    ));
+    return () => window.clearTimeout(timer);
+  }, [
+    artifactId,
+    dirty,
+    live.modelSnapshot.initialized,
+    live.modelSnapshot.validity,
+    live.modelSnapshot.value,
+    live.unsynchronizedChanges,
+    nativeLocalReplica?.state,
+    nativeMaterializationRetry,
+    queueNativeMaterialization,
+  ]);
+
+  useEffect(() => {
     if (!nativeOfficeDocument || !nativeLocalReplica) return;
-    if (nativeMaterialization || dirty || live.unsynchronizedChanges > 0)
+    if (currentNativeMaterialization || dirty || live.unsynchronizedChanges > 0)
       return;
     if (
       !live.modelSnapshot.initialized ||
@@ -647,7 +753,7 @@ export function useArtifactNativeSync({
     live.modelSnapshot.value,
     live.unsynchronizedChanges,
     nativeLocalReplica,
-    nativeMaterialization,
+    currentNativeMaterialization,
     nativeOfficeDocument,
     queueNativeMaterialization,
     recentOperations,
@@ -666,7 +772,7 @@ export function useArtifactNativeSync({
       (!previousRevision && !localChangedSinceCloud) ||
       previousRevision === nativeLocalReplica.revision ||
       nativeLocalReplica.state !== "current" ||
-      nativeMaterialization ||
+      currentNativeMaterialization ||
       dirty ||
       live.unsynchronizedChanges > 0
     )
@@ -686,7 +792,7 @@ export function useArtifactNativeSync({
     dirty,
     live.unsynchronizedChanges,
     nativeLocalReplica,
-    nativeMaterialization,
+    currentNativeMaterialization,
     nativeOfficeApplication,
     nativeOfficeDocument,
     nativeCloudReplica,
@@ -694,18 +800,18 @@ export function useArtifactNativeSync({
   ]);
 
   useEffect(() => {
-    if (!nativeMaterialization || !nativeLocalReplica) return;
+    if (!currentNativeMaterialization || !nativeLocalReplica) return;
     if (
-      nativeMaterializationVerified(nativeMaterialization, nativeLocalReplica)
+      nativeMaterializationVerified(currentNativeMaterialization, nativeLocalReplica)
     ) {
       setNativeMaterialization(undefined);
       setNativeAttribution("Saved locally");
     } else if (
-      nativeMaterializationStale(nativeMaterialization, nativeLocalReplica)
+      nativeMaterializationStale(currentNativeMaterialization, nativeLocalReplica)
     ) {
       setNativeMaterialization(undefined);
     }
-  }, [nativeLocalReplica, nativeMaterialization]);
+  }, [nativeLocalReplica, currentNativeMaterialization]);
 
   const reconcilableLocalRevision =
     nativeLocalReplica?.state === "ahead" ||
@@ -782,7 +888,7 @@ export function useArtifactNativeSync({
   return {
     nativeWriteError,
     setNativeWriteError,
-    nativeMaterialization,
+    nativeMaterialization: currentNativeMaterialization,
     nativeAttribution,
     setNativeAttribution,
     nativeProjectionReady,

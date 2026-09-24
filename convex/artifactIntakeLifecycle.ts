@@ -65,16 +65,22 @@ function referenceKeys(row: IntakeRow) {
   return new Set(values.flatMap((value) => [value, `asset:${value}`, `storage:${value}`]));
 }
 
-function collectReferenceValues(value: unknown, result: Set<string>, depth = 0, budget = { remaining: 12_000 }) {
-  if (depth > 10 || budget.remaining <= 0 || value === null || value === undefined) return;
+/** False means ownership could not be fully inspected, never "unreferenced". */
+function collectReferenceValues(value: unknown, result: Set<string>, depth = 0, budget = { remaining: 12_000 }): boolean {
+  if (value === null || value === undefined) return true;
+  if (depth > 10 || budget.remaining <= 0) return false;
   budget.remaining -= 1;
-  if (typeof value === "string") { result.add(value); return; }
-  if (Array.isArray(value)) { for (const entry of value) collectReferenceValues(entry, result, depth + 1, budget); return; }
-  if (typeof value !== "object") return;
+  if (typeof value === "string") { result.add(value); return true; }
+  if (Array.isArray(value)) {
+    for (const entry of value) if (!collectReferenceValues(entry, result, depth + 1, budget)) return false;
+    return true;
+  }
+  if (typeof value !== "object") return true;
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     result.add(key);
-    collectReferenceValues(entry, result, depth + 1, budget);
+    if (!collectReferenceValues(entry, result, depth + 1, budget)) return false;
   }
+  return true;
 }
 
 /** Build one bounded retention index for the whole intake page. */
@@ -112,10 +118,19 @@ async function retainedReferences(ctx: MutationCtx, artifactId: Id<"spectraArtif
   ).flat();
   const rowKeys = rows.map((row) => [row._id, referenceKeys(row)] as const);
   for (const version of versions) {
-    const content = await loadVersionAfter(ctx, version).catch(() => undefined);
     const values = new Set<string>();
-    collectReferenceValues(content, values);
-    for (const [rowId, keys] of rowKeys) if ([...keys].some((key) => values.has(key))) retained.set(rowId, `pinned-version:${String(version._id)}`);
+    let complete = false;
+    try {
+      complete = collectReferenceValues(await loadVersionAfter(ctx, version), values);
+    } catch {
+      // An unreadable pinned snapshot is unresolved ownership. Preserve the
+      // page's intake bytes until its snapshot is repaired or its pin removed.
+    }
+    for (const [rowId, keys] of rowKeys) {
+      if (!complete || [...keys].some((key) => values.has(key))) {
+        retained.set(rowId, `${complete ? "pinned-version" : "pinned-version-unresolved"}:${String(version._id)}`);
+      }
+    }
   }
   for (const build of builds) {
     if (!build.artifactVersionId || !pinnedVersionIds.has(String(build.artifactVersionId))) continue;

@@ -30,6 +30,7 @@ import {
   shouldRefuseCollapsedLocalPersist,
   type LocalYjsRecord,
   type LocalYjsStore,
+  type LocalYjsLimits,
 } from "@/features/spectra/realtime/persistence";
 import {
   collaborationPolicyRegistry,
@@ -1277,11 +1278,18 @@ describe("native fine-grained Yjs models", () => {
         return this.base.get(key);
       }
       async put(record: LocalYjsRecord) {
-        await new Promise<void>((resolve) => {
-          this.release = resolve;
-        });
-        await this.base.put(record);
+        return this.base.put(record);
       }
+      async commit(record: LocalYjsRecord, limits: LocalYjsLimits) {
+        await new Promise<void>((resolve) => {
+          this.release = () => {
+            this.release = null;
+            resolve();
+          };
+        });
+        return this.base.commit(record, limits);
+      }
+      deleteIfDurable(key: string) { return this.base.deleteIfDurable(key); }
       delete(key: string) {
         return this.base.delete(key);
       }
@@ -1316,6 +1324,13 @@ describe("native fine-grained Yjs models", () => {
     });
     store.release?.();
     await pending;
+    text.insert(text.length, " while-the-first-write-was-running");
+    const latestWrite = persistence.persistNow();
+    await vi.waitFor(() => {
+      expect(store.release).toEqual(expect.any(Function));
+    });
+    store.release?.();
+    await latestWrite;
     persistence.destroy();
 
     const restored = new Y.Doc();
@@ -1329,6 +1344,9 @@ describe("native fine-grained Yjs models", () => {
     await second.initialize();
     expect(codeFileText(restored, "file-main")?.toString()).toContain(
       "offline",
+    );
+    expect(codeFileText(restored, "file-main")?.toString()).toContain(
+      "while-the-first-write-was-running",
     );
     expect(second.getSnapshot()).toMatchObject({
       restored: true,
@@ -1360,6 +1378,89 @@ describe("native fine-grained Yjs models", () => {
       ),
     ).toBe(false);
     expect(shouldRefuseCollapsedLocalPersist(null, 1000, true)).toBe(false);
+  });
+
+  it("writes the final local recovery snapshot before teardown", async () => {
+    const document = codeYjsAdapter.createDocument(
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.createDocument
+      >[0],
+    );
+    const store = new MemoryYjsStore();
+    const persistence = new BoundedYjsLocalPersistence({
+      key: "work:close-before-debounce:root",
+      document,
+      modelVersion: 2,
+      store,
+      debounceMs: 60_000,
+    });
+    await persistence.initialize();
+    codeFileText(document, "file-main")!.insert(
+      codeFileText(document, "file-main")!.length,
+      " saved-during-close",
+    );
+
+    await persistence.destroy();
+    const restored = new Y.Doc();
+    const reopening = new BoundedYjsLocalPersistence({
+      key: "work:close-before-debounce:root",
+      document: restored,
+      modelVersion: 2,
+      store,
+      debounceMs: 60_000,
+    });
+    await reopening.initialize();
+    expect(codeFileText(restored, "file-main")?.toString()).toContain(
+      "saved-during-close",
+    );
+    await reopening.destroy();
+  });
+
+  it("merges a smaller pending snapshot with the previous durable Yjs branch", async () => {
+    const durableDocument = codeYjsAdapter.createDocument(
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.createDocument
+      >[0],
+    );
+    codeFileText(durableDocument, "file-main")!.insert(
+      codeFileText(durableDocument, "file-main")!.length,
+      " durable-branch",
+    );
+    const store = new MemoryYjsStore();
+    await store.put({
+      key: "work:code-collapse:root",
+      update: Y.encodeStateAsUpdate(durableDocument),
+      // Model metadata from a large prior snapshot while keeping the fixture
+      // small. The guard is about preserving CRDT branches, not byte size.
+      bytes: 8000,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      pendingRemoteSync: false,
+      modelVersion: 2,
+    });
+
+    const document = new Y.Doc();
+    const persistence = new BoundedYjsLocalPersistence({
+      key: "work:code-collapse:root",
+      document,
+      modelVersion: 2,
+      store,
+      debounceMs: 60_000,
+    });
+    await persistence.initialize();
+    const text = codeFileText(document, "file-main")!;
+    text.insert(text.length, " pending-branch");
+    await persistence.persistNow();
+
+    const restored = new Y.Doc();
+    const record = await store.get("work:code-collapse:root");
+    expect(record).not.toBeNull();
+    Y.applyUpdate(restored, record!.update);
+    const restoredText = codeFileText(restored, "file-main")!.toString();
+    expect(restoredText).toContain("durable-branch");
+    expect(restoredText).toContain("pending-branch");
+    expect(record?.pendingRemoteSync).toBe(true);
+    await persistence.destroy();
   });
 
   it("keeps native serialization bounded and statically guards focused document resets", async () => {

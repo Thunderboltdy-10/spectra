@@ -90,7 +90,12 @@ export const request = mutation({
 export async function scheduleDeletion(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">, artifact: Doc<"spectraArtifacts">, ownerAccountId: Id<"accounts">) {
   const now = Date.now();
   const existing = await ctx.db.query("artifactDeletionJobs").withIndex("by_artifact_generation", (q) => q.eq("artifactId", artifactId)).order("desc").first();
-  if (existing && !["complete", "failed"].includes(existing.phase)) {
+  if (existing?.phase === "retained") {
+    await ctx.db.patch(existing._id, { phase: "artifact", completedAt: undefined, nextAttemptAt: undefined, updatedAt: now });
+    await schedule(ctx, existing._id, existing.generation, 0, { phase: "artifact", cursor: existing.cursor });
+    return { artifactId, jobId: existing._id, scheduled: true, complete: false };
+  }
+  if (existing && !["complete", "failed", "retained"].includes(existing.phase)) {
     await schedule(ctx, existing._id, existing.generation, 0, { phase: existing.phase, cursor: existing.cursor });
     return { artifactId, jobId: existing._id, scheduled: true, complete: false };
   }
@@ -401,7 +406,7 @@ export const dispatch = internalMutation({
   args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.phase === "complete" || job.phase === "failed") return { started: false, terminal: true };
+    if (!job || job.phase === "complete" || job.phase === "failed" || job.phase === "retained") return { started: false, terminal: true };
     if (args.generation !== undefined && args.generation !== job.generation) return { started: false, stale: true };
     if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { started: false, stale: true };
     if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { started: false, stale: true };
@@ -426,7 +431,7 @@ export const process = internalMutation({
   args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()), attemptId: v.optional(v.string()), testFailAfter: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.phase === "complete" || job.phase === "failed") return { complete: job?.phase === "complete", phase: job?.phase, terminal: true };
+    if (!job || job.phase === "complete" || job.phase === "failed" || job.phase === "retained") return { complete: job?.phase === "complete", phase: job?.phase, terminal: true };
     if (args.generation !== undefined && args.generation !== job.generation) return { complete: false, stale: true };
     if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { complete: false, stale: true };
     if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { complete: false, stale: true };
@@ -438,10 +443,11 @@ export const process = internalMutation({
     // This mutation deliberately has no catch block. Convex rolls back every
     // page write when a child operation fails; recover owns retry accounting.
     const result = await page(ctx, job, { testFailAfter: args.testFailAfter });
-    const complete = result.done || result.state.family === "complete";
+    const retained = result.done && result.retained > 0;
+    const complete = !retained && (result.done || result.state.family === "complete");
     const now = Date.now();
     const nextCursor = complete ? undefined : encode(result.state);
-    const nextPhase = complete ? "complete" : result.state.family === "placements" ? "placements" : result.state.family === "artifact" ? "artifact" : "children";
+    const nextPhase = retained ? "retained" : complete ? "complete" : result.state.family === "placements" ? "placements" : result.state.family === "artifact" ? "artifact" : "children";
     await ctx.db.patch(job._id, {
       phase: nextPhase,
       cursor: nextCursor,
@@ -457,8 +463,8 @@ export const process = internalMutation({
       lastError: undefined,
       ...(args.attemptId !== undefined && job.activeAttemptId === args.attemptId ? { activeAttemptId: undefined, activeAttemptAt: undefined } : {}),
     });
-    if (!complete) await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
-    return { complete, deletedRows: job.deletedRows + result.changed };
+    if (!complete && !retained) await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
+    return { complete, retained, phase: nextPhase, deletedRows: job.deletedRows + result.changed };
   },
 });
 
@@ -466,7 +472,7 @@ export const recover = internalMutation({
   args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), attemptId: v.string(), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.phase === "complete" || job.phase === "failed") return { recovered: false, terminal: true };
+    if (!job || job.phase === "complete" || job.phase === "failed" || job.phase === "retained") return { recovered: false, terminal: true };
     if (args.generation !== undefined && args.generation !== job.generation) return { recovered: false, stale: true };
     if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { recovered: false, stale: true };
     if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { recovered: false, stale: true };
@@ -487,7 +493,17 @@ export const recover = internalMutation({
 
 export const retry = mutation({
   args: { jobId: v.id("artifactDeletionJobs") },
-  handler: async (ctx, args) => { const current = await actor(ctx); const job = await ctx.db.get(args.jobId); if (!job || job.ownerAccountId !== current.accountId || job.schoolId !== current.schoolId) throw new Error("DELETION_NOT_FOUND"); if (job.phase !== "failed") return { scheduled: false, jobId: job._id }; const phase = job.cursor ? decode(job.cursor, job).family === "placements" ? "placements" : decode(job.cursor, job).family === "artifact" ? "artifact" : "children" : job.phase; await ctx.db.patch(job._id, { phase, nextAttemptAt: undefined, attemptCount: 0, activeAttemptId: undefined, activeAttemptAt: undefined, updatedAt: Date.now() }); await schedule(ctx, job._id, job.generation, 0, { phase, cursor: job.cursor }); return { scheduled: true, jobId: job._id }; },
+  handler: async (ctx, args) => {
+    const current = await actor(ctx);
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.ownerAccountId !== current.accountId || job.schoolId !== current.schoolId) throw new Error("DELETION_NOT_FOUND");
+    if (job.phase !== "failed" && job.phase !== "retained") return { scheduled: false, jobId: job._id };
+    const family = job.cursor ? decode(job.cursor, job).family : undefined;
+    const phase = family === "placements" ? "placements" : family === "artifact" ? "artifact" : job.phase;
+    await ctx.db.patch(job._id, { phase, completedAt: undefined, nextAttemptAt: undefined, attemptCount: 0, activeAttemptId: undefined, activeAttemptAt: undefined, updatedAt: Date.now() });
+    await schedule(ctx, job._id, job.generation, 0, { phase, cursor: job.cursor });
+    return { scheduled: true, jobId: job._id };
+  },
 });
 
 export const status = query({

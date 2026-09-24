@@ -127,7 +127,8 @@ export async function queueDeletionRecovery(
 
 /**
  * Start a bounded reconciliation after the last pinned version is released.
- * An active job is merely nudged; a completed/failed job gets a new generation
+ * An active job is merely nudged; a retained job resumes its final check, and
+ * a completed/failed job gets a new generation
  * whose cursor starts at the indexed embed family, so this never launches a
  * global unbounded sweep.
  */
@@ -142,7 +143,16 @@ export async function ensureArtifactDeletionReconciliation(
     .withIndex("by_artifact_generation", (q) => q.eq("artifactId", artifactId))
     .order("desc")
     .first();
-  if (existing && !["complete", "failed"].includes(existing.phase)) {
+  if (existing?.phase === "retained") {
+    const now = Date.now();
+    await ctx.db.patch(existing._id, { phase: "artifact", completedAt: undefined, nextAttemptAt: undefined, updatedAt: now });
+    await queueDeletionDispatch(ctx, existing._id, existing.generation, 0, {
+      phase: "artifact",
+      cursor: existing.cursor,
+    });
+    return existing._id;
+  }
+  if (existing && !["complete", "failed", "retained"].includes(existing.phase)) {
     await queueDeletionDispatch(
       ctx,
       existing._id,

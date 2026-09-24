@@ -65,8 +65,10 @@ These dispositions are source review only. No tests, typecheck, or runtime accep
 - **P2-01:** citation edits keep the existing verified `sourceRef` when the citation retains its source tag; changing source identity drops the old handle.
 - **P2-15:** DOCX paragraph replacement includes `inlineContent` whenever the rich inline list changes, even when the authored-semantic comparison does not notice the change.
 - **P2-16:** `nativeLiveContentKey` now includes every serialized block field in addition to block id and text, so formatting, equations, tables, and other rich content can trigger native promotion.
+- **P2-18:** retention blockers now leave the deletion job in `retained`, not `complete`; owner retry and last-pin release resume the final bounded check.
 - **P2-19:** overlapping active regions now conflict even when they share a client id. Refreshing the same region is still allowed, but widening it into another active claim is rejected.
 - **P2-20:** a missing or unreadable embedded chart workbook now throws before `deck.save()`, so the chart edit is not reported as successful after the workbook update fails.
+- **P2-24:** legacy thread-reference cleanup now reconciles every affected snapshot after deleting its version rows, preventing a stale positive refcount from retaining orphan snapshot payloads.
 - **P2-56:** owner fast paths in both loaded-resource evaluators require an exact school match; missing school identity must use a grant path. Thread placement now rejects a missing or cross-school workspace before changing the thread.
 
 **Already correct in source:**
@@ -85,10 +87,8 @@ These dispositions are source review only. No tests, typecheck, or runtime accep
 - **P2-12:** `finalizeUpload` call sites and the missing `candidateStorageId` contract need a complete caller trace before removing or repairing the path.
 - **P2-13:** Library resource upload validation remains open.
 - **P2-14:** rehearsal membership restore semantics remain open.
-- **P2-18:** confirmed source issue: retention blockers can make the deletion job complete while the artifact row remains. The job needs a distinct retained state and an explicit retry/retention contract.
 - **P2-22:** trust presets that require a mounted folder remain available without a paired Bridge device.
 - **P2-23:** durable read URLs still lack a reader lease/grace-period guarantee at storage release.
-- **P2-24:** snapshot release/refcount safety needs a complete version-row deletion-site inventory before a global repair.
 - **P2-25:** preference writes remain last-write-wins, and sign-out still needs an account-state reset.
 - **P2-28:** a pinned embed can still offer “use live source” after the source is deleted.
 - **P2-29:** migration completion flags still need cursor-completion checks.
@@ -122,7 +122,7 @@ These dispositions are source review only. No tests, typecheck, or runtime accep
 
 ## Additive data and runtime effects
 
-`convex/schema.ts` adds `workspaceDeletionJobs` with a `by_workspace` and phase index, optional `spectraWorkspaces.permanentDeleteJobId`, the membership-invitation and direct-grant indexes, and optional `sourceContext.projectedTitle`. These are additive schema changes with no row rewrite. Existing workspaces have no delete job until a user starts deletion. Existing ManageBac workspaces lacking `projectedTitle` are treated conservatively: a sync will not overwrite the current title until source ownership can be established. Convex deployment/index readiness is a runtime gate. Import `completedAt` meaning changes to terminal `imported`; legacy rows are not backfilled by this source patch.
+`convex/schema.ts` adds `workspaceDeletionJobs` with a `by_workspace` and phase index, optional `spectraWorkspaces.permanentDeleteJobId`, the membership-invitation and direct-grant indexes, optional `sourceContext.projectedTitle`, and an additive `artifactDeletionJobs.phase = retained` state. These are additive schema changes with no row rewrite. Existing workspaces have no delete job until a user starts deletion. Existing ManageBac workspaces lacking `projectedTitle` are treated conservatively: a sync will not overwrite the current title until source ownership can be established. A retained artifact-deletion job keeps its cursor and can resume after a retained pin is released or an owner retries; existing completed jobs are not backfilled. Convex deployment/index readiness is a runtime gate. Import `completedAt` meaning changes to terminal `imported`; legacy rows are not backfilled by this source patch.
 
 ## Focused later regression scenarios
 

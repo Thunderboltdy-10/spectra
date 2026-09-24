@@ -3611,6 +3611,7 @@ export default defineSchema({
       v.literal("placements"),
       v.literal("children"),
       v.literal("artifact"),
+      v.literal("retained"),
       v.literal("complete"),
       v.literal("failed"),
     ),

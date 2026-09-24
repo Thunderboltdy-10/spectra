@@ -20,6 +20,7 @@ import {
   evaluateAccessForActorWithLoadedResource,
   evaluateArtifactAccessForActorWithSummary,
 } from "./authorityShared";
+import { releaseSnapshotObject } from "./artifactSnapshots";
 import { RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
 
 const vOrigin = v.union(
@@ -1653,11 +1654,26 @@ export const migrateLegacyThreadReferences = internalMutation({
           [...outgoing, ...incoming].map((link) => [link._id, link]),
         ).values(),
       ];
+      const snapshotRefs = new Map<
+        string,
+        { schoolId: Id<"schools"> | undefined; snapshotRef: string }
+      >();
+      for (const version of versions) {
+        for (const snapshotRef of [version.snapshotRef, version.beforeSnapshotRef]) {
+          if (snapshotRef)
+            snapshotRefs.set(`${version.schoolId ?? ""}:${snapshotRef}`, {
+              schoolId: version.schoolId,
+              snapshotRef,
+            });
+        }
+      }
       await purgeSourceNodes(ctx, "work", artifact._id);
       await Promise.all([
         ...versions.map((version) => ctx.db.delete(version._id)),
         ...links.map((link) => ctx.db.delete(link._id)),
       ]);
+      for (const { schoolId, snapshotRef } of snapshotRefs.values())
+        await releaseSnapshotObject(ctx, schoolId, snapshotRef);
       await ctx.db.delete(artifact._id);
       removed += 1;
     }

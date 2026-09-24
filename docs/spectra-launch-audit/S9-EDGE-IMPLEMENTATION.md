@@ -6,7 +6,7 @@ Date: 2026-09-24. Primary baseline: `eac1567b`, plus newer S9-AI edits on `main`
 
 The E01–E80 explorer assignments were reported done, with concrete source paths and many plausible defects. That is broad **source coverage**, not proof of every failure or of live behavior. In the copied coverage snapshot E81–E97 were still marked running and E98–E130 queued. Their findings must be incorporated only when returned and independently checked; do not describe that second wave as complete. The ledger's `proven-defect` label means source-traced in the audit, not independently reproduced against the latest primary checkout. The new owner must verify each claim against current source before changing it.
 
-Most high-priority findings concern real correctness boundaries: false completed/saved/readiness messages; capped lists mistaken for absence; stale authority; partial edits that drop unrelated content; retention/replay; and state changing after revocation. Implement the smallest coherent repair with a direct regression and a neighbor case. Do not sweep all tickets into one patch or treat a passing source test as live acceptance.
+Most high-priority findings concern real correctness boundaries: false completed/saved/readiness messages; capped lists mistaken for absence; stale authority; partial edits that drop unrelated content; retention/replay; and state changing after revocation. Implement the smallest coherent repair, document the failure scenario and its direct neighbor, and identify the regression that should later be run. This S9-EDGE request authorizes implementation and source review; it does not request adding or running tests. Do not sweep all tickets into one patch or treat historical source tests as live acceptance.
 
 ## Ownership and decisions
 
@@ -20,7 +20,7 @@ These non-AI P1 tickets have concrete failure paths and a defensible outcome. Wo
 - **Editor, Office and native correctness:** P1-18, P1-23, P1-30, P1-31, P1-33, P1-38, P1-42. Preserve neighboring deck/document content and native package parts. A user-triggered export must include the intended saved or explicitly dirty snapshot; if save fails, show failure before download.
 - **Durability and collaboration:** P1-25, P1-26, P1-28, P1-36. The permission check at append/persist must be fresh, and a failed local restore must not silently become an empty durable room. If these paths are being changed by a resumed S10 lane, coordinate ownership before editing.
 
-These are authorizations to investigate and implement, not an instruction to assume every suggested patch is correct. Record the exact code revision and initial failing behavior. Prefer a bounded repair over a general refactor.
+These are authorizations to investigate and implement, not an instruction to assume every suggested patch is correct. Record the exact code revision and source-level failure path. Prefer a bounded repair over a general refactor.
 
 ### Reframe or decide a product rule first
 
@@ -59,4 +59,4 @@ Conditional or lower-value proposals:
 2. Repair source-owned/academic/native content loss: planner resync, bibliography and slide add/remove, Word/sheet neighbors, reminder updates, embed removal and readable saved status.
 3. Work through remaining confirmed P1 and connected P2, document unresolved product choices and live validation needs. Avoid performance sweeps, provider changes, broad Office parity, or a second action/sync engine.
 
-The implementation task uses the current shared `main` checkout, no worktree or branch, with S9-AI active. Coordinate touched files before edits and never stage/commit the other task's work. S9-EDGE owns non-AI fixes only. Update `reports/S9-EDGE.md` with ticket disposition, exact files, source reproduction, deterministic regressions, direct neighbors, any runtime effect that still needs live acceptance, and changes to tell the paused S10 owners when they resume. The latest report must distinguish fixed, rejected/reframed, AI-owned, and still open. A large ledger is not itself completion.
+The implementation task uses the current shared `main` checkout, no worktree or branch, with S9-AI active. Coordinate touched files before edits and never stage/commit the other task's work. S9-EDGE owns non-AI fixes only. Update `reports/S9-EDGE.md` with ticket disposition, exact files, source-level failure path, proposed deterministic regressions, direct neighbors, any runtime effect that still needs live acceptance, and changes to tell the paused S10 owners when they resume. The latest report must distinguish fixed, rejected/reframed, AI-owned, and still open. A large ledger is not itself completion.

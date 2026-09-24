@@ -1,6 +1,6 @@
 # S9-EDGE — reviewed source findings and implementation boundary
 
-Date: 2026-09-24. Primary baseline: `eac1567b`, plus newer S9-AI edits on `main` as they arrive. This is a **reviewed implementation plan**, not acceptance evidence. The original source-only census is in `reports/S10-EDGE-COVERAGE.md`, the short leads in `reports/S10-EDGE-LEDGER.md`, and detailed proposals in `reports/S10-EDGE-IMPLEMENTATION-HANDOFF.md`. Those files came from the separate Cursor checkout and are preserved as evidence; this document governs implementation on primary. Their instructions to use an isolated checkout or avoid implementation applied to that earlier audit, not this user-authorized S9 task.
+Date: 2026-09-24. Primary baseline: `eac1567b`, plus newer S9-AI edits on `main` as they arrive. Implementer: GPT-6 Luna Max task `01a0d3fe-5f87-7ad3-9be3-2d3c2305c450`. S9-AI owner: GPT-6 Luna Max task `01a0d3b1-e48a-7292-b2eb-051452e961ae`. This is a **reviewed implementation plan**, not acceptance evidence. The original source-only census is in `reports/S10-EDGE-COVERAGE.md`, the short leads in `reports/S10-EDGE-LEDGER.md`, and detailed proposals in `reports/S10-EDGE-IMPLEMENTATION-HANDOFF.md`. Those files came from the separate Cursor checkout and are preserved as evidence; this document governs implementation on primary. Their instructions to use an isolated checkout or avoid implementation applied to that earlier audit, not this user-authorized S9 task.
 
 ## Assessment of the audit
 

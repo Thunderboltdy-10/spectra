@@ -65,6 +65,7 @@ import {
   readOpenRouterResponse,
 } from "@/features/spectra/ai/openrouter-stream";
 import type { OpenRouterUsage } from "@/features/spectra/ai/openrouter-stream";
+import { normalizeContentPatchShape } from "@/features/spectra/ai/content-patch-verify";
 import { canonicalizeSheetsPatchChange } from "@/features/spectra/ai/sheets-content-patch";
 import {
   WORKSPACE_ASSISTANT_PROMPT,
@@ -873,6 +874,8 @@ export function parseStreamedPlanText(
             input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
             input.content,
           );
+        if ("contentPatch" in input)
+          input.contentPatch = normalizeContentPatchShape(input.contentPatch);
         if (
           input.contentPatch &&
           typeof input.contentPatch === "object" &&
@@ -1519,19 +1522,69 @@ export function coerceProposedOperation(
     }
     return { ...row, input };
   }
-  if (
-    row.type === "artifact.update" &&
-    row.input &&
-    typeof row.input === "object" &&
-    !Array.isArray(row.input)
-  ) {
-    const input = { ...(row.input as Record<string, unknown>) };
+  if (row.type === "artifact.update") {
+    // Models sometimes put target/blueprint/patch on the operation root instead
+    // of inside `input`, which Zod rejects as unrecognized_keys + invalid_union.
+    const input =
+      row.input && typeof row.input === "object" && !Array.isArray(row.input)
+        ? { ...(row.input as Record<string, unknown>) }
+        : {};
+    if (typeof input.artifactId !== "string") {
+      if (typeof row.targetArtifactId === "string")
+        input.artifactId = row.targetArtifactId;
+      else if (typeof row.artifactId === "string")
+        input.artifactId = row.artifactId;
+    }
+    if (
+      typeof input.blueprintKey !== "string" &&
+      typeof row.blueprintKey === "string"
+    )
+      input.blueprintKey = row.blueprintKey;
+    if (typeof input.blueprintKey !== "string") {
+      const focused =
+        contextRecord.focusedArtifact &&
+        typeof contextRecord.focusedArtifact === "object" &&
+        !Array.isArray(contextRecord.focusedArtifact)
+          ? (contextRecord.focusedArtifact as Record<string, unknown>)
+          : null;
+      const focusedBlueprint =
+        typeof focused?.blueprintKey === "string"
+          ? focused.blueprintKey
+          : typeof focused?.type === "string"
+            ? focused.type
+            : null;
+      if (
+        focusedBlueprint &&
+        SPECTRA_BLUEPRINT_KEYS.includes(
+          focusedBlueprint as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+        )
+      )
+        input.blueprintKey = focusedBlueprint;
+    }
+    if (typeof input.artifactId !== "string") {
+      const focused =
+        contextRecord.focusedArtifact &&
+        typeof contextRecord.focusedArtifact === "object" &&
+        !Array.isArray(contextRecord.focusedArtifact)
+          ? (contextRecord.focusedArtifact as Record<string, unknown>)
+          : null;
+      if (typeof focused?.id === "string") input.artifactId = focused.id;
+    }
+    if (!("contentPatch" in input) && row.contentPatch != null)
+      input.contentPatch = row.contentPatch;
+    delete row.targetArtifactId;
+    delete row.blueprintKey;
+    delete row.contentPatch;
+    delete row.artifactId;
     // json_object / tool callers often omit unchanged nullable fields or echo
     // JSON Patch's `op`. Both fail the strict update union as invalid_union.
+    // Bare contentPatch arrays (or a single {path,value}) must be wrapped too —
+    // otherwise Ask Spectra Document edits auto-cancel after repair exhaustion.
     for (const field of ["title", "summary", "content", "tags"] as const) {
       if (!(field in input)) input[field] = null;
     }
     if (!("contentPatch" in input)) input.contentPatch = null;
+    else input.contentPatch = normalizeContentPatchShape(input.contentPatch);
     if (
       input.contentPatch &&
       typeof input.contentPatch === "object" &&

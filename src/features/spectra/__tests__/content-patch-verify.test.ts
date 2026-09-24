@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { contentPatchChangeMatchesSaved } from "../ai/content-patch-verify";
+import {
+  contentPatchChangeMatchesSaved,
+  normalizeContentPatchShape,
+} from "../ai/content-patch-verify";
+import { coerceProposedOperation } from "@/app/api/spectra/run/loop/plan";
+import { parseModelOperation } from "@/features/spectra/operations/schema";
 
 describe("content patch verification", () => {
   it("accepts unicode dash and whitespace soft matches for document text", () => {
@@ -156,5 +161,92 @@ describe("content patch verification", () => {
         },
       ),
     ).toBe(true);
+  });
+});
+
+describe("normalizeContentPatchShape (v5-ai-dock)", () => {
+  it("wraps a bare changes array into { changes }", () => {
+    expect(
+      normalizeContentPatchShape([
+        {
+          path: "/blocks/0",
+          value: {
+            id: "intro",
+            type: "paragraph",
+            text: "A short one-sentence intro.",
+          },
+        },
+      ]),
+    ).toEqual({
+      changes: [
+        {
+          path: "/blocks/0",
+          value: {
+            id: "intro",
+            type: "paragraph",
+            text: "A short one-sentence intro.",
+          },
+        },
+      ],
+    });
+  });
+
+  it("wraps a single {path,value} object and strips JSON Patch op", () => {
+    expect(
+      normalizeContentPatchShape({
+        op: "replace",
+        path: "/blocks/0/text",
+        value: "Intro line",
+      }),
+    ).toEqual({
+      changes: [{ path: "/blocks/0/text", value: "Intro line" }],
+    });
+  });
+
+  it("lets coerceProposedOperation + parse accept array contentPatch document edits", () => {
+    const coerced = coerceProposedOperation(
+      {
+        type: "artifact.update",
+        targetArtifactId: "doc-1",
+        blueprintKey: "document",
+        contentPatch: [
+          {
+            path: "/blocks/0",
+            value: {
+              id: "intro",
+              type: "paragraph",
+              text: "A short one-sentence intro at the top.",
+            },
+          },
+        ],
+      },
+      "context",
+      {
+        focusedArtifact: {
+          id: "doc-1",
+          blueprintKey: "document",
+          content: { blocks: [{ id: "title", type: "heading", text: "Title" }] },
+        },
+      },
+      "Add a short one-sentence intro at the top of this document.",
+    );
+    const operation = parseModelOperation(coerced);
+    expect(operation.type).toBe("artifact.update");
+    if (operation.type === "artifact.update") {
+      expect(operation.input.artifactId).toBe("doc-1");
+      expect(operation.input.blueprintKey).toBe("document");
+      expect(operation.input.contentPatch).toEqual({
+        changes: [
+          {
+            path: "/blocks/0",
+            value: {
+              id: "intro",
+              type: "paragraph",
+              text: "A short one-sentence intro at the top.",
+            },
+          },
+        ],
+      });
+    }
   });
 });

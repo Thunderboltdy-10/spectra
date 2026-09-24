@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeArtifactContent } from "../ai/content-normalization";
+import { normalizeContentPatchShape } from "../ai/content-patch-verify";
 import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
 import { documentContentSchema } from "../artifacts/schema/document";
 import { flashcardDeckContentSchema } from "../artifacts/schema/flashcard-deck";
@@ -591,6 +592,8 @@ function preprocessModelOperationContent(value: unknown) {
       input.content,
     );
   }
+  if ("contentPatch" in input)
+    input.contentPatch = normalizeContentPatchShape(input.contentPatch);
   return { ...row, input };
 }
 

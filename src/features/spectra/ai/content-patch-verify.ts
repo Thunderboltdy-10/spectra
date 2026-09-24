@@ -39,6 +39,28 @@ function stringishMatch(authored: string, saved: string) {
 }
 
 /** Authored object fields must appear on saved (normalize may add ids/defaults). */
+/**
+ * Models often emit contentPatch as a bare changes array (JSON Patch style)
+ * or as a single {path,value} object instead of `{ changes: [...] }`. Wrap
+ * those shapes before strict Zod parse so a valid document edit is not
+ * rejected as operations.0.input invalid_union / "expected object, received array".
+ */
+export function normalizeContentPatchShape(contentPatch: unknown): unknown {
+  if (contentPatch == null) return contentPatch;
+  if (Array.isArray(contentPatch)) return { changes: contentPatch };
+  if (typeof contentPatch === "object") {
+    const row = contentPatch as Record<string, unknown>;
+    if (Array.isArray(row.changes)) return contentPatch;
+    // Single change mistaken for the patch envelope.
+    if (typeof row.path === "string" && "value" in row) {
+      const change = { ...row };
+      delete change.op;
+      return { changes: [change] };
+    }
+  }
+  return contentPatch;
+}
+
 export function authoredObjectFieldsMatch(
   authored: Record<string, unknown>,
   saved: Record<string, unknown>,

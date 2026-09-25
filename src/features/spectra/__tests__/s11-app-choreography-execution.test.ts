@@ -12,6 +12,7 @@ import {
 import { __resetFollowAi, followAiActor } from "../collaboration/follow-ai";
 import { handleSpectraAiUiEvent } from "../collaboration/ai-ui-events";
 import { spectraBus } from "../events";
+import { __resetRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 
 function deferred() {
   let resolve!: () => void;
@@ -37,6 +38,7 @@ describe("S11 local choreography execution lifecycle", () => {
     vi.useFakeTimers();
     __resetAppChoreographyHost();
     __resetFollowAi();
+    __resetRunLedger();
     window.history.replaceState(null, "", "/library");
     stopMaintenance = startAppChoreographyMaintenance();
   });
@@ -44,9 +46,84 @@ describe("S11 local choreography execution lifecycle", () => {
     stopMaintenance();
     __resetAppChoreographyHost();
     __resetFollowAi();
+    __resetRunLedger();
     document.body.replaceChildren();
     window.history.replaceState(null, "", "/");
     vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it.each(["final", "stopped", "error", "interrupted"])("releases only the actor whose run ends with %s", async (type) => {
+    const a = artifactPerformerFor("a");
+    const b = artifactPerformerFor("b");
+    const envelope = { operationId: "1", artifactId: "artifact", typeKey: "planner_task", path: "/description", action: "set", before: "Old", after: "New" };
+    a.start({ ...envelope, runId: "a" });
+    b.start({ ...envelope, runId: "b" });
+    const gate = deferred();
+    let context!: AppPerformanceContext;
+    performAppChoreography(request("active"), (value) => { context = value; return gate.promise; });
+    await vi.advanceTimersByTimeAsync(0);
+    recordRunEvent({ runId: "a", type });
+    spectraBus.emit("run.changed", { runId: "a" });
+    expect(context.signal.aborted).toBe(true);
+    expect(a.getSnapshot().operations).toHaveLength(0);
+    expect(b.getSnapshot().operations).toHaveLength(1);
+    expect(artifactPerformerFor("b")).toBe(b);
+    gate.resolve();
+  });
+
+  it("retains an actor while waiting for approval or continuing the run", () => {
+    const a = artifactPerformerFor("a");
+    a.start({ runId: "a", operationId: "1", artifactId: "artifact", typeKey: "planner_task", path: "/description", action: "set", before: "Old", after: "New" });
+    recordRunEvent({ runId: "a", type: "confirmation_required" });
+    spectraBus.emit("run.changed", { runId: "a" });
+    expect(a.getSnapshot().operations).toHaveLength(1);
+    recordRunEvent({ runId: "a", type: "run_created" });
+    recordRunEvent({ runId: "a", type: "status", message: "Taking another careful pass" });
+    spectraBus.emit("run.changed", { runId: "a" });
+    expect(artifactPerformerFor("a")).toBe(a);
+    expect(a.getSnapshot().operations).toHaveLength(1);
+  });
+
+  it("bounds idle artifact bodies without evicting an active actor", () => {
+    const active = artifactPerformerFor("active");
+    active.start({ runId: "active", operationId: "1", artifactId: "artifact", typeKey: "planner_task", path: "/description", action: "set", before: "Old", after: "New" });
+    const idle = artifactPerformerFor("old-idle");
+    for (let index = 0; index < 50; index++) artifactPerformerFor(`idle-${index}`);
+    expect(artifactPerformerFor("active")).toBe(active);
+    expect(active.getSnapshot().operations).toHaveLength(1);
+    expect(artifactPerformerFor("old-idle")).not.toBe(idle);
+  });
+
+  it("reuses target identity across typing steps but remeasures movement and discovers a replacement control", async () => {
+    const target = document.createElement("div");
+    target.dataset.spectraAiTarget = 'name"[special]';
+    const text = document.createTextNode("Initial");
+    target.append(text);
+    box(target, 120);
+    document.body.append(target);
+    const scans = vi.spyOn(document, "querySelectorAll");
+    const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+    const gate = deferred();
+    let context!: AppPerformanceContext;
+    performAppChoreography(request("scan", "a", 'name"[special]'), (value) => { context = value; return gate.promise; });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let index = 0; index < 100; index++) {
+      text.data = `Typing ${index}`;
+      expect(context.decision().animate).toBe(true);
+    }
+    expect(scans).toHaveBeenCalledTimes(1);
+    box(target, window.innerHeight + 100);
+    expect(context.decision().animate).toBe(false);
+    expect(scans).toHaveBeenCalledTimes(1);
+    const replacement = target.cloneNode() as HTMLElement;
+    box(replacement, 120);
+    target.replaceWith(replacement);
+    expect(context.decision().animate).toBe(true);
+    expect(scans).toHaveBeenCalledTimes(2);
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 
   it("waits for the actual action, then starts its queued successor once", async () => {

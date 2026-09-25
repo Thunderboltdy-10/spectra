@@ -24,9 +24,11 @@ import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
+import { getRunLedger } from "./run-ledger";
 
 let coordinator = new AppChoreographyCoordinator();
 const artifactPerformers = new Map<string, AiPerformer>();
+const MAX_IDLE_ARTIFACT_PERFORMERS = 24;
 let claimTicker: number | null = null;
 
 export type AppPerformanceContext = {
@@ -42,6 +44,7 @@ type PendingPerformance = {
   execute: (context: AppPerformanceContext) => void | Promise<void>;
   abort: AbortController;
   started: boolean;
+  targets?: ReturnType<typeof observeAppTargets>;
 };
 const pendingPerformances = new Map<string, PendingPerformance>();
 let stopObservingCoordinator = coordinator.subscribe(reconcilePerformances);
@@ -55,18 +58,20 @@ function reconcilePerformances(): void {
     const { entry, abort } = pending;
     if (entry.status === "cancelled" || entry.status === "failed" || entry.status === "completed") {
       pendingPerformances.delete(key);
+      pending.targets?.dispose();
       abort.abort();
       continue;
     }
     if (pending.started || entry.status !== "performing") continue;
     pending.started = true;
+    pending.targets = observeAppTargets(entry.targetKey);
     // Defer until enqueue has returned; synchronous callbacks cannot reorder the queue.
     void Promise.resolve().then(async () => {
       if (abort.signal.aborted) return;
       try {
         await pending.execute({
           signal: abort.signal,
-          decision: () => arbitrateAppSurface(entry.target, currentViewportSnapshot(entry.actorId, entry)),
+          decision: () => arbitrateAppSurface(entry.target, currentViewportSnapshot(entry.actorId, entry, pending.targets?.read())),
           checkpoint: () => !abort.signal.aborted && coordinator.renewClaim(entry.actorId, entry.operationId),
         });
         if (!abort.signal.aborted && pendingPerformances.get(key) === pending)
@@ -94,6 +99,14 @@ function idleActor(actorId: string): ActorIdentity {
 export function artifactPerformerFor(actorId: string): AiPerformer {
   let performer = artifactPerformers.get(actorId);
   if (!performer) {
+    // Completed/abandoned idle bodies must not accumulate in a long session.
+    // Active bodies are released by their run lifecycle, never evicted mid-edit.
+    for (const [id, candidate] of artifactPerformers) {
+      if (artifactPerformers.size < MAX_IDLE_ARTIFACT_PERFORMERS) break;
+      if (candidate.getSnapshot().operations.length) continue;
+      candidate.dispose();
+      artifactPerformers.delete(id);
+    }
     performer = new AiPerformer(idleActor(actorId), () => {
       // Artifact beats already publish through collaboration awareness.
       // The performer exists to serialize client envelopes without a second
@@ -111,15 +124,17 @@ export function getAppChoreographyCoordinator(): AppChoreographyCoordinator {
 export function currentViewportSnapshot(
   actorId?: string,
   target?: Pick<AppChoreographyRequest, "target" | "targetKey">,
+  candidates?: readonly HTMLElement[],
 ): AppViewportSnapshot {
   const pathname =
     typeof window === "undefined" ? "/workspace" : window.location.pathname;
   const surface = appSurfaceFromPathname(pathname);
   const visible: AppSurface[] = [surface];
-  if (typeof document !== "undefined") {
-    const studioOpen = document.querySelector(
-      "[data-spectra-artifact-studio], [data-spectra-studio]",
-    );
+  if ((!target || target.target === "artifact") && typeof document !== "undefined") {
+    const studioSelector = "[data-spectra-artifact-studio], [data-spectra-studio]";
+    const studioOpen = candidates
+      ? candidates.some((candidate) => candidate.closest(studioSelector))
+      : document.querySelector(studioSelector);
     if (studioOpen && !visible.includes("artifact")) visible.push("artifact");
   }
   return {
@@ -128,18 +143,73 @@ export function currentViewportSnapshot(
     followingActor: isFollowingAi(),
     followedActorId: getFollowedAiActorId(),
     ...(actorId ? { actorId } : {}),
-    ...(target ? { targetVisible: visible.includes(target.target) && isAppTargetVisible(target.targetKey) } : {}),
+    ...(target ? { targetVisible: visible.includes(target.target) && isAppTargetVisible(target.targetKey, candidates) } : {}),
   };
 }
 
-function isAppTargetVisible(targetKey?: string): boolean {
+const APP_TARGET_ATTRIBUTES = [
+  "data-spectra-ai-target", "data-spectra-target", "data-ai-region", "data-node-id", "data-calendar-item-id",
+];
+
+function appTargetSelector(targetKey: string): string {
+  // Attribute values are quoted; escape control characters, quotes and slashes
+  // without allowing a target key to become selector syntax.
+  const escaped = targetKey.replace(/[\x00-\x1f\x7f"\\]/g, (character) => `\\${character.charCodeAt(0).toString(16)} `);
+  return APP_TARGET_ATTRIBUTES.map((attribute) => `[${attribute}="${escaped}"]`).join(", ");
+}
+
+function findAppTargets(targetKey?: string): HTMLElement[] {
+  if (!targetKey || typeof document === "undefined") return [];
+  return Array.from(document.querySelectorAll<HTMLElement>(appTargetSelector(targetKey)));
+}
+
+/** Cache target identity for one active performance, not its visibility. Text,
+ * scroll and style changes need fresh geometry but not another document scan. */
+function observeAppTargets(targetKey?: string) {
+  let candidates: HTMLElement[] = [];
+  let dirty = true;
+  let disposed = false;
+  const selector = targetKey ? appTargetSelector(targetKey) : null;
+  const invalidate = (records: MutationRecord[]) => {
+    if (dirty) return;
+    if (candidates.some((candidate) => !candidate.isConnected)) { dirty = true; return; }
+    for (const record of records) {
+      if (record.type === "attributes" && record.target instanceof HTMLElement &&
+        (candidates.includes(record.target) || (selector && record.target.matches(selector)))) {
+        dirty = true;
+        return;
+      }
+      for (const node of record.addedNodes) {
+        if (selector && node instanceof Element && (node.matches(selector) || node.querySelector(selector))) {
+          dirty = true;
+          return;
+        }
+      }
+    }
+  };
+  const observer = selector && typeof MutationObserver !== "undefined" && typeof document !== "undefined"
+    ? new MutationObserver(invalidate) : null;
+  observer?.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: APP_TARGET_ATTRIBUTES });
+  return {
+    read(): readonly HTMLElement[] {
+      if (disposed) return [];
+      if (observer) invalidate(observer.takeRecords());
+      if (dirty) { candidates = findAppTargets(targetKey); dirty = false; }
+      return candidates;
+    },
+    dispose() {
+      disposed = true;
+      observer?.disconnect();
+      candidates = [];
+    },
+  };
+}
+
+function isAppTargetVisible(targetKey?: string, resolved?: readonly HTMLElement[]): boolean {
   if (!targetKey || typeof document === "undefined") return false;
-  const candidates = document.querySelectorAll<HTMLElement>(
-    "[data-spectra-ai-target], [data-spectra-target], [data-ai-region], [data-node-id], [data-calendar-item-id]",
-  );
+  const candidates = resolved ?? findAppTargets(targetKey);
   for (const element of candidates) {
-    if (![element.dataset.spectraAiTarget, element.dataset.spectraTarget, element.dataset.aiRegion,
-      element.dataset.nodeId, element.dataset.calendarItemId].includes(targetKey)) continue;
+    if (!element.isConnected) continue;
     const rect = element.getBoundingClientRect();
     let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
     let right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
@@ -151,11 +221,14 @@ function isAppTargetVisible(targetKey?: string): boolean {
         break;
       }
       if (parent === element) continue;
+      const clipsX = /(hidden|clip|auto|scroll)/.test(style.overflowX || style.overflow);
+      const clipsY = /(hidden|clip|auto|scroll)/.test(style.overflowY || style.overflow);
+      if (!clipsX && !clipsY) continue;
       const clip = parent.getBoundingClientRect();
-      if (/(hidden|clip|auto|scroll)/.test(style.overflowX || style.overflow)) {
+      if (clipsX) {
         left = Math.max(left, clip.left); right = Math.min(right, clip.right);
       }
-      if (/(hidden|clip|auto|scroll)/.test(style.overflowY || style.overflow)) {
+      if (clipsY) {
         top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
       }
     }
@@ -224,6 +297,11 @@ export function startAppChoreographyMaintenance(): () => void {
       message: "Follow mode stopped. Durable work continues.",
     } satisfies SpectraCommandOutcome;
   });
+  const removeRunChanged = spectraBus.on("run.changed", ({ runId }) => {
+    const phase = getRunLedger(runId)?.phase;
+    if (phase === "completed" || phase === "partial" || phase === "failed" || phase === "cancelled")
+      releaseChoreographyActor(runId);
+  });
   window.addEventListener("pointerdown", onInput, true);
   window.addEventListener("keydown", onInput, true);
   window.addEventListener("wheel", onInput, {
@@ -241,6 +319,7 @@ export function startAppChoreographyMaintenance(): () => void {
     window.removeEventListener("keydown", onInput, true);
     window.removeEventListener("wheel", onInput, true);
     removeStopFollowing();
+    removeRunChanged();
     cancelLocalPerformances();
   };
 }
@@ -256,11 +335,27 @@ export function __resetAppChoreographyHost(): void {
 function cancelLocalPerformances(): void {
   // Abort all callbacks first, so cancelling one actor cannot start another
   // queued callback during teardown. This never stops durable server work.
-  for (const pending of pendingPerformances.values()) pending.abort.abort();
+  for (const pending of pendingPerformances.values()) {
+    pending.abort.abort();
+    pending.targets?.dispose();
+  }
   pendingPerformances.clear();
   for (const actorId of new Set(coordinator.snapshot().map((entry) => entry.actorId))) coordinator.cancel(actorId);
   for (const performer of artifactPerformers.values()) performer.dispose();
   artifactPerformers.clear();
+}
+
+/** Release one terminal run without cancelling another actor or durable work. */
+export function releaseChoreographyActor(actorId: string): void {
+  for (const [key, pending] of pendingPerformances) {
+    if (pending.entry.actorId !== actorId) continue;
+    pending.abort.abort();
+    pending.targets?.dispose();
+    pendingPerformances.delete(key);
+  }
+  coordinator.cancel(actorId);
+  artifactPerformers.get(actorId)?.dispose();
+  artifactPerformers.delete(actorId);
 }
 
 export function AppChoreographyMount() {

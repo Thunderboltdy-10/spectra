@@ -243,7 +243,7 @@ export function activateSkills(
         }
       }
 
-      if (skill.status === "verified") score += 10;
+      if (score > 0 && skill.status === "verified") score += 10;
 
       const missing: string[] = [];
       if (context.availableEvidenceIds) {

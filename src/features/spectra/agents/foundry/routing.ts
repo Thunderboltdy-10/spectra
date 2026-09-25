@@ -12,6 +12,11 @@ import { activateSkills, type SkillActivation, type SpectraSkill } from "./skill
 import type { EvidenceSummary } from "./evidence";
 import type { EvaluationReport } from "./evaluation";
 
+export type RoutingEvaluation = Pick<
+  EvaluationReport,
+  "status" | "verificationStrength" | "passedCount" | "caseCount"
+>;
+
 export type RoutingSignal = {
   weight: number;
   reason: string;
@@ -62,15 +67,16 @@ export function decideRouting(input: {
     negativeExamples: readonly string[];
   };
   evidence: EvidenceSummary;
-  latestEvaluation?: EvaluationReport;
+  latestEvaluation?: RoutingEvaluation;
   context: RoutingContext;
 }): RoutingDecision | null {
   const { agent, evidence, latestEvaluation, context } = input;
   const signals: RoutingSignal[] = [];
   const exclusions: string[] = [];
+  let requestFit = false;
 
   // Explicit negative examples block routing immediately.
-  const negativeHit = agent.negativeExamples.find((example) =>
+  const negativeHit = [...agent.negativeExamples, ...agent.mission.exclusions].find((example) =>
     intentMatch(context.request, example, 0.7),
   );
   if (negativeHit) {
@@ -94,8 +100,10 @@ export function decideRouting(input: {
       context.request,
       agent.routingDescription,
       0.5,
+      2,
     );
     if (descriptionMatch) {
+      requestFit = true;
       signals.push({
         weight: Math.round(descriptionMatch * 40),
         reason: "Request matches routing description",
@@ -103,15 +111,18 @@ export function decideRouting(input: {
     }
   }
 
+  let strongestExample: RoutingSignal | undefined;
   for (const example of agent.routingExamples) {
-    const exampleMatch = intentMatch(context.request, example, 0.6);
-    if (exampleMatch) {
-      signals.push({
+    const exampleMatch = intentMatch(context.request, example, 0.6, 2);
+    if (exampleMatch && exampleMatch * 35 > (strongestExample?.weight ?? 0)) {
+      requestFit = true;
+      strongestExample = {
         weight: Math.round(exampleMatch * 35),
         reason: `Similar to example: ${example.slice(0, 60)}`,
-      });
+      };
     }
   }
+  if (strongestExample) signals.push(strongestExample);
 
   // Expected input/output types
   if (context.inputTypes) {
@@ -153,7 +164,20 @@ export function decideRouting(input: {
     ...(context.availableTools
       ? { availableToolIds: context.availableTools }
       : {}),
-  });
+  }).filter((activation) => activation.reasons.length > 0);
+
+  // Type/always triggers can support a matching mission but cannot establish
+  // suitability by themselves. Use the creator's task-specific trigger text.
+  requestFit ||= activeSkills.some(({ skill }) => skill.triggers.some((trigger) => {
+    if (trigger.kind === "keyword") return trigger.terms.some((term) => {
+      const phrase = tokenize(term).join(" ");
+      return phrase.length > 0 && ` ${tokenize(context.request).join(" ")} `.includes(` ${phrase} `);
+    });
+    if (trigger.kind === "intent") return [trigger.description, ...trigger.examples]
+      .some((example) => intentMatch(context.request, example, 0.6, 2) > 0);
+    return false;
+  }));
+  if (!requestFit) return null;
 
   if (activeSkills.length > 0) {
     const skillWeight = activeSkills.reduce(
@@ -161,7 +185,7 @@ export function decideRouting(input: {
       0,
     );
     signals.push({
-      weight: skillWeight,
+      weight: Math.min(skillWeight, 30),
       reason: `${activeSkills.length} skill(s) activate`,
     });
   }
@@ -181,7 +205,7 @@ export function decideRouting(input: {
 
   // Recent evaluation strength
   if (latestEvaluation) {
-    if (latestEvaluation.status === "passed") {
+    if (latestEvaluation.status === "passed" && latestEvaluation.caseCount > 0) {
       const evalWeight =
         latestEvaluation.verificationStrength === "strong"
           ? 20
@@ -196,6 +220,8 @@ export function decideRouting(input: {
       exclusions.push(
         `Latest evaluation failed (${latestEvaluation.passedCount}/${latestEvaluation.caseCount} passed)`,
       );
+    } else {
+      exclusions.push("Evaluation has not completed successfully");
     }
   } else {
     exclusions.push("No evaluation has run");
@@ -247,16 +273,16 @@ export function decideRouting(input: {
   };
 }
 
-function intentMatch(request: string, target: string, threshold: number): number {
-  const requestTokens = tokenize(request);
-  const targetTokens = tokenize(target);
+function intentMatch(request: string, target: string, threshold: number, minimumHits = 1): number {
+  const requestTokens = [...new Set(tokenize(request))];
+  const targetTokens = [...new Set(tokenize(target))];
   if (requestTokens.length === 0 || targetTokens.length === 0) return 0;
   let hits = 0;
   for (const token of targetTokens) {
     if (requestTokens.includes(token)) hits += 1;
   }
   const overlap = hits / targetTokens.length;
-  return overlap >= threshold ? overlap : 0;
+  return hits >= minimumHits && overlap >= threshold ? overlap : 0;
 }
 
 const STOP_WORDS = new Set([

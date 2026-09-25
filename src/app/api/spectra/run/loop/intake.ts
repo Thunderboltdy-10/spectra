@@ -14,6 +14,8 @@ import {
   resolveForRequest,
   routingReason,
   summarizeEvidence,
+  type EvidenceBinding,
+  type RoutingEvaluation,
 } from "@/features/spectra/agents/foundry";
 import { artifactContextSnapshot } from "@/features/spectra/ai/context-builder";
 import {
@@ -150,6 +152,8 @@ export type AgentRoutingDescriptor = {
   negativeExamples?: string[];
   /** Compiled Foundry competence from the published release, when present. */
   foundry?: unknown;
+  evaluation?: (RoutingEvaluation & { versionId: string; contentHash: string }) | null;
+  availableToolKeys?: string[];
   updatedAt: number;
 };
 
@@ -167,6 +171,7 @@ export type SelectedAgentRuntime = {
   routing?: Record<string, unknown>;
   /** Compiled Foundry release, absent for pre-Foundry agents. */
   foundry?: unknown;
+  evaluation?: AgentRoutingDescriptor["evaluation"];
 };
 
 export type AgentToolKey =
@@ -368,6 +373,7 @@ export function foundryRoutingConfidence(
   }
   const { mission, skills, evidenceBindings } = content.foundry;
   if (!mission.objective.trim() || skills.length === 0) return null;
+  const availableEvidence = usableReleaseEvidence(evidenceBindings);
 
   const decision = decideRouting({
     agent: {
@@ -378,17 +384,18 @@ export function foundryRoutingConfidence(
       routingExamples: descriptor.examples,
       negativeExamples: descriptor.negativeExamples ?? [],
     },
-    evidence: summarizeEvidence(evidenceBindings),
+    evidence: summarizeEvidence(availableEvidence),
+    latestEvaluation: descriptor.evaluation?.versionId === descriptor.versionId
+      ? descriptor.evaluation : undefined,
     context: {
       request: prompt,
       ...(context.workTypes ? { workTypes: context.workTypes } : {}),
       ...(context.inputTypes ? { inputTypes: context.inputTypes } : {}),
-      // Evidence compiled into the release travels with it, so a skill that
-      // depends on it is satisfiable wherever the release is usable.
-      availableEvidence: evidenceBindings.map((binding) => binding.id),
+      availableEvidence: availableEvidence.map((binding) => binding.id),
+      availableTools: descriptor.availableToolKeys ?? [],
     },
   });
-  if (!decision) return null;
+  if (!decision || decision.exclusions.length > 0 || decision.degraded) return null;
 
   // Map the Foundry's banded confidence onto the run route's 0-1 scale, keeping
   // the existing thresholds meaningful: high clears automatic routing, medium
@@ -401,6 +408,31 @@ export function foundryRoutingConfidence(
         : 0.2;
 
   return { confidence, reason: routingReason(decision) };
+}
+
+// Foundry evidence is published training material copied from pasted sources.
+// A dangling binding is not available merely because it has an ID. Live
+// artifact resources are separately reauthorized by getAgentRuntime.
+function usableReleaseEvidence(bindings: EvidenceBinding[]) {
+  return bindings.filter((binding) => binding.confirmed && binding.extraction?.sourceId === binding.sourceId);
+}
+
+function runtimeRoutingDescriptor(runtime: SelectedAgentRuntime): AgentRoutingDescriptor {
+  return {
+    agentId: runtime.agentId,
+    versionId: runtime.versionId,
+    title: runtime.title,
+    summary: runtime.summary,
+    description: typeof runtime.routing?.description === "string" ? runtime.routing.description : "",
+    examples: Array.isArray(runtime.routing?.examples)
+      ? runtime.routing.examples.filter((value): value is string => typeof value === "string") : [],
+    negativeExamples: Array.isArray(runtime.routing?.negativeExamples)
+      ? runtime.routing.negativeExamples.filter((value): value is string => typeof value === "string") : [],
+    foundry: runtime.foundry,
+    evaluation: runtime.evaluation,
+    availableToolKeys: [...enabledAgentToolKeys(runtime.tools)],
+    updatedAt: Date.now(),
+  };
 }
 
 export function descriptorRoutingConfidence(
@@ -454,7 +486,8 @@ export function resolveAgentRequest(
   } catch {
     return null;
   }
-  const { mission, skills, evidenceBindings } = content.foundry;
+  const { mission, skills } = content.foundry;
+  const evidenceBindings = usableReleaseEvidence(content.foundry.evidenceBindings);
   if (skills.length === 0) return null;
 
   const evidenceIds = evidenceBindings.map((binding) => binding.id);
@@ -609,8 +642,8 @@ export async function selectAgentRuntime(params: {
       return {
         descriptor,
         confidence:
-          competence?.confidence ??
-          descriptorRoutingConfidence(params.prompt, descriptor),
+          descriptor.foundry ? competence?.confidence ?? 0
+            : descriptorRoutingConfidence(params.prompt, descriptor),
         ...(competence?.reason ? { competenceReason: competence.reason } : {}),
       };
     })
@@ -631,19 +664,19 @@ export async function selectAgentRuntime(params: {
     source: "automatic" | "continued";
     competenceReason?: string;
   } | null =
-    retained &&
+    retained && retained.confidence >= 0.64 &&
     (!best ||
       best.descriptor.agentId === retained.descriptor.agentId ||
       best.confidence < Math.max(0.78, retained.confidence + 0.2))
       ? {
           descriptor: retained.descriptor,
-          confidence: Math.max(0.8, retained.confidence),
+          confidence: retained.confidence,
           source: "continued",
           ...(retained.competenceReason
             ? { competenceReason: retained.competenceReason }
             : {}),
         }
-      : best && best.confidence >= 0.64
+      : best && best.confidence >= (best.descriptor.foundry ? 0.8 : 0.64)
         ? {
             descriptor: best.descriptor,
             confidence: best.confidence,
@@ -657,7 +690,22 @@ export async function selectAgentRuntime(params: {
   const runtime = await query<{ agentId: string }, SelectedAgentRuntime>(
     "spectraArtifacts:getAgentRuntime",
     { agentId: selected.descriptor.agentId },
-  );
+  ).catch(() => null);
+  if (!runtime || runtime.agentId !== selected.descriptor.agentId || runtime.routing?.enabled !== true) return null;
+  // Listing and invocation are separate authorization reads. Recheck the
+  // actual release after selection so revocation/republication cannot retain
+  // a decision made for older competence or permissions.
+  const currentDescriptor = runtimeRoutingDescriptor(runtime);
+  const currentCompetence = foundryRoutingConfidence(params.prompt, currentDescriptor, {
+    ...(params.workTypes ? { workTypes: params.workTypes } : {}),
+  });
+  const currentConfidence = currentDescriptor.foundry ? currentCompetence?.confidence ?? 0
+    : descriptorRoutingConfidence(params.prompt, currentDescriptor);
+  const requiredConfidence = selected.source === "automatic" && currentDescriptor.foundry ? 0.8 : 0.64;
+  if (currentConfidence < requiredConfidence) return null;
+  selected.descriptor = currentDescriptor;
+  selected.confidence = currentConfidence;
+  selected.competenceReason = currentCompetence?.reason;
   const skills = rows(runtime.skills)
     .map((skill) => ({
       ...skill,
@@ -737,6 +785,7 @@ export async function selectAgentRuntime(params: {
       typeof tool.key === "string" ? [tool.key] : [],
     ),
   });
+  if (resolved?.shouldDecline) return null;
 
   return {
     ...selected,

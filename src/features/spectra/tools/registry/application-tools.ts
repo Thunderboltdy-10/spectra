@@ -8,6 +8,9 @@ import { preferenceLayerValuesSchema } from "../../settings/schema/preferences";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
+const refreshRead = z.boolean().optional().describe(
+  "Fetch and permission-check a new snapshot, even after an identical read. Without this, an earlier snapshot may be reused. This does not authorize a write or a provider sync.",
+);
 const calendarTimeFields = {
   startAt: z.number().optional(), endAt: z.number().optional(),
   startLocal: z.string().optional(), endLocal: z.string().optional(),
@@ -89,6 +92,7 @@ export function registerApplicationTools() {
     inputSchema: z.object({
       query: z.string().min(1).max(500),
       blueprintKey: z.string().nullable().optional(),
+      refresh: refreshRead,
     }),
   });
   define({
@@ -105,6 +109,7 @@ export function registerApplicationTools() {
         .optional(),
       scopeNodeId: z.string().nullable().optional(),
       limit: z.number().int().min(1).max(40).optional(),
+      refresh: refreshRead,
     }),
   });
   define({
@@ -113,14 +118,14 @@ export function registerApplicationTools() {
     title: "Read work",
     description:
       "Read current canonical content and metadata, permission-checking the exact artifact id even when it is not open or selected. Large items return explicit partial coverage; request cellAddresses/sheetId or blockIds to inspect more regions.",
-    inputSchema: z.object({ artifactId: z.string().min(1), cellAddresses: z.array(z.string().regex(/^[A-Za-z]{1,3}[1-9]\d{0,6}$/)).max(32).optional(), sheetId: z.string().optional(), blockIds: z.array(z.string()).max(16).optional() }),
+    inputSchema: z.object({ artifactId: z.string().min(1), cellAddresses: z.array(z.string().regex(/^[A-Za-z]{1,3}[1-9]\d{0,6}$/)).max(32).optional(), sheetId: z.string().optional(), blockIds: z.array(z.string()).max(16).optional(), refresh: refreshRead }),
   });
   define({
     ...readDefaults,
     id: "read_workspace",
     title: "Read workspace",
     description: "Read one permissioned workspace and its current item map.",
-    inputSchema: z.object({ workspaceId: z.string().min(1) }),
+    inputSchema: z.object({ workspaceId: z.string().min(1), refresh: refreshRead }),
   });
   define({
     ...readDefaults,
@@ -128,7 +133,7 @@ export function registerApplicationTools() {
     title: "Read conversation",
     description:
       "Read the recent messages and title of one permissioned Spectra conversation.",
-    inputSchema: z.object({ threadId: z.string().min(1) }),
+    inputSchema: z.object({ threadId: z.string().min(1), refresh: refreshRead }),
   });
   define({
     ...readDefaults,
@@ -139,6 +144,7 @@ export function registerApplicationTools() {
     inputSchema: z.object({
       query: z.string().min(3).max(500),
       depth: z.enum(["focused", "deep"]),
+      refresh: refreshRead,
     }),
   });
   define({
@@ -159,7 +165,7 @@ export function registerApplicationTools() {
       from: z.number().nullable().optional(),
       to: z.number().nullable().optional(),
       limit: z.number().int().min(1).max(100).optional(),
-      refresh: z.boolean().optional(),
+      refresh: refreshRead,
     }),
   });
   define({
@@ -174,6 +180,7 @@ export function registerApplicationTools() {
       maxResults: z.number().int().min(1).max(20).optional(),
       mode: z.enum(["quick", "verified", "deep"]).optional(),
       timeoutMs: z.number().int().min(5_000).max(600_000).optional(),
+      refresh: refreshRead,
       searches: z
         .array(
           z.object({
@@ -253,7 +260,7 @@ export function registerApplicationTools() {
       concurrencyDomain: `create:${kind}`,
     });
 
-  define({ ...readDefaults, id: "read_calendar", title: "Read Calendar", description: "Read bounded Calendar range metadata, unscheduled plans, saved scheduled-work-block ids/revisions, source precision, and capability truth without treating Calendar as work. Use exact targetItemId or targetTitle for a named block outside the visible range and continue with the returned cursor.", inputSchema: z.object({ from: z.number(), to: z.number(), targetItemId: z.string().optional(), targetTitle: z.string().optional(), cursor: z.string().optional(), unscheduledCursor: z.string().optional(), partialCursor: z.string().optional(), migrationCursor: z.string().optional(), plannerCursor: z.string().optional(), targetCursor: z.string().optional(), limit: z.number().int().positive().max(250).optional() }) });
+  define({ ...readDefaults, id: "read_calendar", title: "Read Calendar", description: "Read bounded Calendar range metadata, unscheduled plans, saved scheduled-work-block ids/revisions, source precision, and capability truth without treating Calendar as work. Use exact targetItemId or targetTitle for a named block outside the visible range and continue with the returned cursor.", inputSchema: z.object({ from: z.number(), to: z.number(), targetItemId: z.string().optional(), targetTitle: z.string().optional(), cursor: z.string().optional(), unscheduledCursor: z.string().optional(), partialCursor: z.string().optional(), migrationCursor: z.string().optional(), plannerCursor: z.string().optional(), targetCursor: z.string().optional(), limit: z.number().int().positive().max(250).optional(), refresh: refreshRead }) });
   define({ ...mutationDefaults, id: "schedule_calendar_task", title: "Schedule Calendar plan", description: "Create a movable work block for an existing plan while preserving any official deadline. Prefer startLocal/endLocal (YYYY-MM-DDTHH:mm) with the intended IANA timezone instead of calculating epoch milliseconds yourself.", inputSchema: z.object({ taskItemId: z.string().optional(), planArtifactId: z.string().optional(), planTaskId: z.string().optional(), ...calendarTimeFields, timezone: z.string(), idempotencyKey: z.string().min(8).max(240).optional() }), concurrencyDomain: "calendar:gesture" });
   define({ ...mutationDefaults, id: "create_calendar_personal_event", title: "Add Calendar personal event", description: "Create a personal Calendar event through the same write path as the human Add event control. Use this for free-form events that are not work blocks on an existing planner task. Prefer startLocal/endLocal (YYYY-MM-DDTHH:mm) with the intended IANA timezone; Spectra converts the wall time.", inputSchema: z.object({ title: z.string().min(1).max(500), ...calendarTimeFields, timezone: z.string(), notes: z.string().max(20_000).optional(), allDay: z.boolean().optional(), linkedArtifactIds: z.array(z.string()).max(24).optional() }), concurrencyDomain: "calendar:gesture" });
   define({ ...mutationDefaults, id: "move_calendar_block", title: "Move Calendar block", description: "Move one scheduled work block through the same revision-checked gesture contract as a human drag. Prefer startLocal/endLocal (YYYY-MM-DDTHH:mm) and timezone for wall times; Spectra converts DST rules. Never guess UTC offsets.", inputSchema: z.object({ itemId: z.string(), ...calendarTimeFields, timezone: z.string().optional(), expectedRevision: z.number() }), concurrencyDomain: "calendar:gesture" });
@@ -288,7 +295,7 @@ export function registerApplicationTools() {
   define({ ...appActionDefaults, id: "import_managebac_resource", title: "Import school resource", description: "Open the selected ManageBac class shelf to import a permissioned resource into Library through the human school flow.", inputSchema: z.object({ sourceRecordId: z.string().min(1), refresh: z.boolean().optional(), requestKey: z.string().min(8).max(240).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_resource_import", aiAvailability: "prohibited", prohibitionReason: "AI resource import is unavailable. Open the selected ManageBac class shelf and use Import resource there; the school route verifies provider identity and saves an import receipt." });
   define({ ...appActionDefaults, id: "change_managebac_mapping", title: "Change ManageBac mapping", description: "ManageBac mapping changes use the dedicated human admin flow; AI mapping mutation is deferred until that typed path is exposed.", inputSchema: z.object({ mappingId: z.string(), patch: jsonObject }), risk: "high", approval: "always", authorityTarget: "managebac_mapping", aiAvailability: "prohibited", prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow." });
   define({ ...appActionDefaults, id: "insert_reference", title: "Insert reference", description: "Insert a reference through the shared work/reference command path.", inputSchema: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional() }), risk: "medium", approval: "policy", authorityTarget: "content" });
-  define({ ...readDefaults, id: "read_embeds", title: "Read embeds", description: "Read live or pinned embeds and their source identities without mutating the source.", inputSchema: z.object({ hostWorkId: z.string() }) });
+  define({ ...readDefaults, id: "read_embeds", title: "Read embeds", description: "Read live or pinned embeds and their source identities without mutating the source.", inputSchema: z.object({ hostWorkId: z.string(), refresh: refreshRead }) });
   /* W9-02's copy is formatting-only here; retain W9-01's shared registry, including resource import.
   define({
     ...appActionDefaults,
@@ -529,7 +536,7 @@ export function registerApplicationTools() {
     title: "Read embeds",
     description:
       "Read live or pinned embeds and their source identities without mutating the source.",
-    inputSchema: z.object({ hostWorkId: z.string() }),
+    inputSchema: z.object({ hostWorkId: z.string(), refresh: refreshRead }),
   });
   */
   for (const [id, title, reason] of [

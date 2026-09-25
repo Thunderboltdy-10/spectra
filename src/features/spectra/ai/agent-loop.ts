@@ -4,6 +4,7 @@ import type {
   OpenRouterUsage,
 } from "./openrouter-stream";
 import { toModelToolResult } from "../tools/execution/tool-result";
+import { readSnapshot, stableReadObservation, type ReadSnapshot } from "./read-snapshot";
 
 export type SpectraAgentMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -60,7 +61,7 @@ function mergeUsage(
   };
 }
 
-function callFingerprint(call: OpenRouterAgentToolCall) {
+function callFingerprint(call: OpenRouterAgentToolCall, read = false) {
   let args = call.arguments.trim();
   try {
     const sortKeys = (value: unknown): unknown => {
@@ -72,7 +73,12 @@ function callFingerprint(call: OpenRouterAgentToolCall) {
           .map(([key, item]) => [key, sortKeys(item)]),
       );
     };
-    args = JSON.stringify(sortKeys(JSON.parse(args)));
+    const parsed = JSON.parse(args);
+    // Refresh changes whether to fetch, not which snapshot is being requested.
+    // Invalid values must still reach schema validation instead of a cache hit.
+    if (read && parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.refresh === "boolean")
+      delete parsed.refresh;
+    args = JSON.stringify(sortKeys(parsed));
   } catch {
     // The tool executor returns the parse error to the model. Keep the raw
     // arguments in the fingerprint so an actually corrected call is distinct.
@@ -112,7 +118,8 @@ export async function runSpectraAgentLoop(input: {
   const messages = [...input.messages];
   const repeatedCalls = new Map<string, number>();
   const savedResults = new Map<string, unknown>();
-  const savedReadResults = new Map<string, unknown>();
+  const savedReadResults = new Map<string, ReadSnapshot>();
+  const readRequestVersions = new Map<string, number>();
   const retryableReadFailures = new Set<string>();
   const readObservations = new Set<string>();
   let turnsWithoutProgress = 0;
@@ -262,23 +269,34 @@ export async function runSpectraAgentLoop(input: {
         };
       }
       toolCalls += 1;
-      const fingerprint = callFingerprint(call);
+      const isRead = input.isParallelSafeTool?.(call) === true && !input.isMutationTool?.(call);
+      let refresh = false;
+      if (isRead) {
+        try { refresh = JSON.parse(call.arguments)?.refresh === true; }
+        catch { /* The executor returns the argument error. */ }
+      }
+      const fingerprint = callFingerprint(call, isRead);
       const repetition = (repeatedCalls.get(fingerprint) ?? 0) + 1;
-      repeatedCalls.set(fingerprint, repetition);
+      if (!refresh) repeatedCalls.set(fingerprint, repetition);
       if (savedResults.has(fingerprint))
         return savedResults.get(fingerprint);
-      if (savedReadResults.has(fingerprint))
+      // Every explicit refresh reaches the authenticated executor, including
+      // successive identical requests. A failed refresh invalidates old reuse.
+      if (refresh) savedReadResults.delete(fingerprint);
+      const cachedSnapshot = savedReadResults.get(fingerprint);
+      if (cachedSnapshot)
         return {
           status: 0,
           ok: true,
           code: "read_result_reused",
           message:
-            "This exact read already returned successfully. Use its earlier result in this conversation; no fresh data was fetched.",
+            "Reuse only the earlier snapshot identified here, including its recorded revisions. No fresh data or permissions were checked. Use refresh: true if a new observation is needed.",
+          readSnapshot: { ...cachedSnapshot, reused: true },
         };
       // One retry of an explicitly retryable read is useful recovery. Never
       // infer that an unacknowledged mutation is safe to execute again.
       const retryRead = repetition === 2 && retryableReadFailures.delete(fingerprint);
-      if (repetition === 2 && !retryRead)
+      if (!refresh && repetition === 2 && !retryRead)
         return {
             status: 1,
             ok: false,
@@ -288,7 +306,7 @@ export async function runSpectraAgentLoop(input: {
             message:
               "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
           };
-      if (repetition >= 3)
+      if (!refresh && repetition >= 3)
         return {
           status: 1,
           ok: false,
@@ -298,14 +316,19 @@ export async function runSpectraAgentLoop(input: {
           message:
             "This exact tool request has already been repeated without progress. Use the earlier result or finish the task.",
         };
+      const readVersion = (readRequestVersions.get(fingerprint) ?? 0) + 1;
+      if (isRead) readRequestVersions.set(fingerprint, readVersion);
       const observe = (result: unknown) => {
         const normalized = toModelToolResult(result);
-        if (input.isParallelSafeTool?.(call)) {
+        if (isRead) {
           if (normalized.status === 0) {
-            savedReadResults.set(fingerprint, result);
-            const observation = callFingerprint({ ...call, arguments: JSON.stringify(normalized) });
+            const snapshot = readSnapshot(normalized, call.id);
+            if (readRequestVersions.get(fingerprint) === readVersion)
+              savedReadResults.set(fingerprint, snapshot);
+            const observation = callFingerprint({ ...call, arguments: JSON.stringify(stableReadObservation(normalized)) });
             if (!readObservations.has(observation)) madeProgress = true;
             readObservations.add(observation);
+            return { ...normalized, readSnapshot: { ...snapshot, reused: false } };
           } else if ("retryable" in normalized && normalized.retryable === true) {
             retryableReadFailures.add(fingerprint);
           }

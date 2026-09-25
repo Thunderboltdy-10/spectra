@@ -8,11 +8,9 @@ import { api } from "../../../../convex/_generated/api";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
-  getSpectraArtifactVersions,
   postSpectra,
   type SpectraArtifact,
   type SpectraArtifactEmbed,
-  type SpectraArtifactVersion,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import type { CompatibilityProfile } from "../commands/types";
@@ -31,6 +29,7 @@ import { transitionFor } from "../motion/grammar";
 import { SelectField } from "@/components/ui/select";
 import { embedCapabilitiesFor } from "../capabilities";
 import { useArtifactEmbedContainer } from "./artifact-embed-host";
+import { usePinVersionPicker } from "./use-pin-version-picker";
 
 type Interaction = ArtifactEmbedInteraction;
 
@@ -76,9 +75,12 @@ export function ArtifactEmbedsPanel({
   const [mode, setMode] = useState<"compact" | "expanded">("compact");
   const [interaction, setInteraction] = useState<Interaction>("read");
   const [versionPolicy, setVersionPolicy] = useState<"live" | "pinned">("live");
-  const [pinnedVersionId, setPinnedVersionId] = useState("");
   const [referenceView, setReferenceView] = useState("");
-  const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
+  const pinnedVersions = usePinVersionPicker(
+    sourceArtifactId,
+    open && creating && versionPolicy === "pinned",
+  );
+  const pinnedVersionId = pinnedVersions.selectedId;
 
   useEffect(() => {
     if (!open) return;
@@ -89,28 +91,8 @@ export function ArtifactEmbedsPanel({
     setMode("compact");
     setInteraction("read");
     setVersionPolicy("live");
-    setPinnedVersionId("");
     setReferenceView("");
-    setVersions([]);
   }, [open, regions]);
-
-  useEffect(() => {
-    if (!open || !sourceArtifactId || versionPolicy !== "pinned") return;
-    void getSpectraArtifactVersions(sourceArtifactId, 60)
-      .then((result) => {
-        setVersions(result.versions);
-        setPinnedVersionId(
-          (current) => current || result.versions[0]?._id || "",
-        );
-      })
-      .catch((error) =>
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Could not load source versions.",
-        ),
-      );
-  }, [open, sourceArtifactId, versionPolicy]);
 
   const candidates = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -512,8 +494,6 @@ export function ArtifactEmbedsPanel({
                           onClick={() => {
                             setSourceArtifactId(artifact._id);
                             setReferenceView("");
-                            setVersions([]);
-                            setPinnedVersionId("");
                           }}
                           className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-2 text-left ${sourceArtifactId === artifact._id ? "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-hover))]" : "hover:bg-[var(--bg-hover)]"}`}
                         >
@@ -592,12 +572,50 @@ export function ArtifactEmbedsPanel({
                       <SelectField
                         label="Pinned version"
                         value={pinnedVersionId}
-                        onChange={setPinnedVersionId}
-                        options={versions.map((version) => ({
+                        onChange={pinnedVersions.select}
+                        disabled={pinnedVersions.versions.length === 0}
+                        options={pinnedVersions.versions.map((version) => ({
                           value: version._id,
                           label: `${version.name || version.summary || "Saved version"} · ${new Date(version.createdAt).toLocaleString()}`,
                         }))}
                       />
+                      {pinnedVersions.loading ? (
+                        <p
+                          role="status"
+                          className="mt-2 text-micro text-[var(--text-secondary)]"
+                        >
+                          Loading saved versions…
+                        </p>
+                      ) : pinnedVersions.error ? (
+                        <p
+                          role="alert"
+                          className="mt-2 text-micro text-[var(--text-secondary)]"
+                        >
+                          {pinnedVersions.error}
+                        </p>
+                      ) : pinnedVersions.isDone &&
+                        pinnedVersions.versions.length === 0 ? (
+                        <p
+                          role="status"
+                          className="mt-2 text-micro text-[var(--text-secondary)]"
+                        >
+                          No saved versions.
+                        </p>
+                      ) : null}
+                      {!pinnedVersions.loading &&
+                      (pinnedVersions.error ||
+                        (!pinnedVersions.isDone &&
+                          pinnedVersions.cursor !== null)) ? (
+                        <button
+                          type="button"
+                          onClick={pinnedVersions.loadMore}
+                          className="mt-2 h-7 rounded-control border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        >
+                          {pinnedVersions.error
+                            ? "Retry loading versions"
+                            : "Load older versions"}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

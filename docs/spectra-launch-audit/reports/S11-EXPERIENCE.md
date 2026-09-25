@@ -54,6 +54,16 @@ At the coordinator's request the bounded theme source is being committed for rev
 
 Coordinator source review found a hydration layout shift in that candidate: delaying the iframe also omitted its initial height. A matching, inert placeholder now reserves 220px compact, 420px expanded, or the caller's explicit viewport height until the single iframe mounts. The existing loading overlay and optional toolbar remain in place. Three SSR-to-hydration cases check the reserved height, its replacement by exactly one iframe, actual initial theme, and absence of recoverable hydration errors. These cases are added but still await the scheduled test slot; scoped ESLint and diff checks pass.
 
+## Unit 3: paged, source-scoped pin selection
+
+The old picker requests up to 60 full version rows whenever pinned policy is selected, including when the creation form is closed. It neither cancels requests nor associates results with the selected source; after selecting A then B, a slower A response can repopulate A's rows and chosen pin beneath B. Source selection clears state locally, but that alone cannot fence later responses.
+
+The panel now uses one focused hook over HISTORY-R's metadata API. It requests 20 rows only while the panel and creation form are open with pinned policy. Source changes, closure, Strict Mode replacement and unmount abort the owned request; request identity also rejects transports that ignore cancellation. Render-derived state hides an old source's rows and selected pin before effects run. Explicit older-page loading appends and deduplicates rows, preserves a chosen pin, and retries the same cursor after failure. An empty nonfinal page still offers continuation; the first available row becomes selected once it arrives. Wrong-source rows and invalid continuation cursors produce a retryable error without replacing known rows. Creating a pin still uses the existing backend-authorized action and never requests version detail/snapshot bodies.
+
+Ten hook tests cover demand and page size, append/dedupe, selection, source and reopen races, empty-page continuation, initial/next-page failure, wrong-source/cursor rejection, Strict Mode and unmount. Scoped ESLint and `git diff --check` pass. Execution is pending the coordinator's guarded slot; this is a source-review candidate, not a passing-test claim.
+
+Integration dependency: HISTORY-R `15fe9531ea1029a09d94a674a2024d76c4b35be9` supplies `SpectraArtifactVersionSummary` and the four-argument paged `getSpectraArtifactVersions` helper; its follow-up demand fix is `b9577781`. This worktree intentionally has no shared `data/api.ts` changes and still has the old API baseline. Full type validation therefore belongs on the coordinator's coherent integrated base. Mocked hook tests exercise the agreed metadata contract only; they do not establish backend cost or history authorization.
+
 ## Architecture and independent decision ledger
 
 Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb47-5362-7f51-83b1-0a2b0775fe3d`, turn `01a0cb47-a868-7672-9b1b-a8eac6a69b5a`; final live S9/S10-AI `01a0d3b1-e48a-7292-b2eb-051452e961ae`, turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`. The latter explicitly deferred ownership, chat/side-panel and theme-consistent embeds; its successful contract counts were not authenticated embed acceptance. Relevant ancestry inspected: `f683c055`, `b63daf0c`, with current callers read on `d9aabfb5`.
@@ -75,7 +85,7 @@ Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb
 
 ## Remaining finite units
 
-1. Finish unit 2 validation after the dependency hold; then run live light/dark, authored-theme and standalone-export checks in the reserved Profile A slot.
+1. Finish units 2 and 3 validation in the scheduled guarded slot; then run live light/dark, authored-theme, standalone-export and pin-picker checks in the reserved Profile A slot.
 2. Resolve retained pinned-source authorization consistently with DURABLE/HISTORY/SECURITY; then test source deletion, revocation, restore and playback through the authenticated endpoint.
 3. Split container metadata from demand-loaded embed detail with DATA; measure row bytes, subscriptions and browser mount counts. Include live-runtime retry/asset cleanup and navigation.
 4. Prove owning placement, AI-selected placement, chat/dock navigation and native/export fallback across disposable document/presentation/sheet fixtures with OFFICE and RUNTIME.
@@ -83,6 +93,6 @@ Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb
 
 Coordinator policy decision after unit 1: retained pin playback must preserve independent source rights. A deleted-source exception may evaluate retained source grants only with a live authorized host, confirmed surviving placement and the exact retained version/build. It must not grant rights to new host readers, fall back to latest, or become a generic history/artifact bypass. This seam is coordinated with SECURITY and HISTORY-R (`01a0d86a-925d-7ce0-9535-91ccc06570a4`); the theme unit changes no authority.
 
-Next assigned client unit after theme validation: pin-picker pages of 20 metadata rows and stale-source fencing. HISTORY-R's forthcoming `data/api.ts` helper contract is `getSpectraArtifactVersions(artifactId, limit = 20, cursor?, signal?) -> { versions: SpectraArtifactVersionSummary[], continueCursor: string | null, isDone: boolean }`. It preserves ID, source, title/name/summary, parent/version timing and creator metadata but not snapshot/provenance bodies. The picker will use that helper after its candidate/base is available, clear the selected pin when the source changes, abort superseded requests and independently reject late responses. It needs no lazy-detail request.
+Unit 3 implements HISTORY-R's agreed `data/api.ts` helper contract: `getSpectraArtifactVersions(artifactId, limit = 20, cursor?, signal?) -> { versions: SpectraArtifactVersionSummary[], continueCursor: string | null, isDone: boolean }`. It preserves ID, source, title/name/summary, parent/version timing and creator metadata but not snapshot/provenance bodies. The picker uses no lazy-detail request.
 
 A further concrete client lead for the next placement/navigation unit: ComposerArtifactDock's local `keptSourceIds` is never scoped/reset when `threadId` changes. It can mark an artifact as already kept in a different conversation even while the new thread query is empty. Reproduce switching conversations with the same artifact before changing this state; it is not part of the two current repair units.

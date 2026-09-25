@@ -7,7 +7,7 @@ import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity"
 import { MAX_ATTACHMENT_BYTES } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
-import { applicationOperationScope } from "./spectraApplicationWriteScope";
+import { applicationApprovalScope } from "./spectraApplicationWriteScope";
 import {
   ensureThreadWorkspacePlacement,
   requireArtifactCapability,
@@ -1294,6 +1294,21 @@ export const updateStatus = mutation({
     }
     const now = Date.now();
     const terminal = isTerminalRunStatus(args.status);
+    if (args.status === "awaiting_confirmation" && run.approval?.status !== "pending") {
+      const operations = await ctx.db.query("spectraOperations")
+        .withIndex("by_run", q => q.eq("runId", run._id)).collect();
+      for (const operation of operations) {
+        if (operation.executionId !== args.executionId || operation.status !== "proposed" ||
+            operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+        await ctx.db.patch(operation._id, {
+          output: {
+            ...(operation.output && typeof operation.output === "object" ? operation.output : {}),
+            pendingApplicationScope: await applicationApprovalScope(ctx, operation, run),
+            approvedApplicationScope: undefined,
+          },
+        });
+      }
+    }
     if (
       terminal &&
       !run.agentUsageSettledAt &&
@@ -2422,14 +2437,18 @@ export const claimConfirmation = mutation({
       throw new Error("This approval was already handled in another view.");
     }
     const now = Date.now();
-    // Bind this approval to the exact application inputs shown in the plan.
-    // A new operation or an edited target cannot borrow an earlier approval.
+    // The scope was frozen when the approval was presented. Never approve a
+    // newly expanded subtree or changed operation just because Apply was clicked.
     for (const operation of currentOperations) {
-      if (operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+      if (operation.status !== "proposed" || operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+      const output = operation.output && typeof operation.output === "object" ? operation.output : {};
+      const scope = await applicationApprovalScope(ctx, operation, run);
+      if (output.pendingApplicationScope !== scope)
+        throw new Error("AI_APPLICATION_APPROVAL_SCOPE_CHANGED: The proposed targets changed. Ask Spectra to prepare a new approval.");
       await ctx.db.patch(operation._id, {
         output: {
-          ...(operation.output && typeof operation.output === "object" ? operation.output : {}),
-          approvedApplicationScope: applicationOperationScope(operation),
+          ...output,
+          approvedApplicationScope: scope,
         },
       });
     }

@@ -9,6 +9,71 @@ import { projectTimetableSnapshot } from "./quizPrivacy";
 import { artifactScopeDigest } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
+import { applicationWriteReceipt } from "./spectraApplicationWriteScope";
+import { vUiObserverInterest, vUiObservationFence } from "./spectraUiObservationSchema";
+import {
+  mergeUiObserverInterest, prepareUiObservation, acknowledgeUiObservation,
+  expireUiObservation, uiObservationSnapshot,
+} from "./spectraUiObservation";
+
+const uiOperationArgs = { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations") };
+
+async function requireUiOperation(ctx: Parameters<typeof requireOwnedRun>[0], args: { runId: Id<"spectraAiRuns">; executionId: string; operationId: Id<"spectraOperations"> }) {
+  const run = await requireOwnedRun(ctx, args.runId);
+  const operation = await ctx.db.get(args.operationId);
+  if (!operation || operation.runId !== run._id || operation.actorType !== "ai" ||
+    run.executionId !== args.executionId || operation.executionId !== args.executionId)
+    throw new Error("UI_OBSERVATION_STALE");
+  if (!applicationWriteReceipt(operation.output) && (run.status !== "running" || operation.status !== "executing"))
+    throw new Error("UI_OBSERVATION_INACTIVE");
+  return { run, operation };
+}
+
+export const setUiObserverInterest = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), clientId: v.string(), mode: v.union(v.literal("ordinary"), v.literal("follow"), v.literal("released")) },
+  handler: async (ctx, args) => {
+    const run = await requireOwnedRun(ctx, args.runId);
+    if (run.executionId !== args.executionId || !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status))
+      throw new Error("UI_OBSERVATION_INACTIVE");
+    const next = mergeUiObserverInterest(run, args.executionId, args);
+    if (JSON.stringify(next) !== JSON.stringify(run.uiObserverInterests))
+      await ctx.db.patch(run._id, { uiObserverInterests: next });
+    return { registered: args.mode !== "released" };
+  },
+});
+
+export const prepareUiAction = mutation({
+  args: uiOperationArgs,
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    return prepareUiObservation(ctx, run, operation);
+  },
+});
+
+export const readUiAction = query({
+  args: uiOperationArgs,
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    return uiObservationSnapshot(run, operation);
+  },
+});
+
+export const acknowledgeUiAction = mutation({
+  args: { ...uiOperationArgs, fence: vUiObservationFence, observer: vUiObserverInterest, outcome: v.union(v.literal("target_ready"), v.literal("invisible"), v.literal("released")) },
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    return acknowledgeUiObservation(ctx, run, operation, { ...args.fence, ...args.observer, outcome: args.outcome });
+  },
+});
+
+export const expireUiAction = mutation({
+  args: { ...uiOperationArgs, epoch: v.number() },
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    if (operation.uiObservation?.epoch !== args.epoch) return uiObservationSnapshot(run, operation);
+    return uiObservationSnapshot(run, await expireUiObservation(ctx, run, operation, Date.now()));
+  },
+});
 
 function artifactSnapshot(artifact: {
   blueprintKey: string;

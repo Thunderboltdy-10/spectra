@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSchema";
 import {
   artifactEmbedContainerTypeValidator,
   artifactEmbedContextPolicyValidator,
@@ -4151,6 +4152,7 @@ export default defineSchema({
     ),
     retryable: v.optional(v.boolean()),
     preservedPartial: v.optional(v.boolean()),
+    uiObserverInterests: v.optional(vUiObserverInterests),
     workerId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
     heartbeatAt: v.optional(v.number()),
@@ -4250,6 +4252,7 @@ export default defineSchema({
     ),
     input: v.any(),
     output: v.optional(v.any()),
+    uiObservation: v.optional(vUiObservation),
     affected: v.array(v.object({ type: v.string(), id: v.string() })),
     requiresConfirmation: v.optional(v.boolean()),
     pendingArtifactId: v.optional(v.id("spectraArtifacts")),

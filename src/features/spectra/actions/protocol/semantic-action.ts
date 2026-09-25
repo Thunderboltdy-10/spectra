@@ -1,4 +1,57 @@
 import type { CollaborationPolicy } from "../../realtime/policies";
+import { z } from "zod";
+
+export const SMART_COMPLETION_TARGET = "/settings/writing/smartCompletion";
+
+/** A server-derived action point, never a client-issued write permit. The
+ * existing application operation and its receipt remain authoritative. */
+export const observedActionIdentitySchema = z.object({
+  runId: z.string().min(1).max(200),
+  executionId: z.string().min(1).max(200),
+  operationId: z.string().min(1).max(200),
+  operationDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  epoch: z.number().int().positive(),
+  sequence: z.literal(0),
+}).strict();
+
+export type ObservedActionIdentity = z.infer<typeof observedActionIdentitySchema>;
+
+export const settingsToggleActionSchema = observedActionIdentitySchema.extend({
+  kind: z.literal("settings_toggle"),
+  target: z.literal(SMART_COMPLETION_TARGET),
+  checked: z.boolean(),
+  expiresAt: z.number().int().positive(),
+}).strict();
+
+export type SettingsToggleAction = z.infer<typeof settingsToggleActionSchema>;
+
+export type UiObservationFence = Pick<ObservedActionIdentity, "epoch" | "operationDigest" | "sequence">;
+export const uiObservationSnapshotSchema = z.object({
+  phase: z.enum(["waiting", "sealed", "headless", "committed"]),
+  action: settingsToggleActionSchema.optional(),
+  ownerClientId: z.string().min(1).max(120).optional(),
+  participants: z.array(z.object({
+    clientId: z.string().min(1).max(120),
+    mode: z.enum(["ordinary", "follow"]),
+    outcome: z.enum(["target_ready", "invisible", "released"]).optional(),
+  }).strict()).max(8).optional(),
+  result: z.unknown().optional(),
+}).strict();
+export type UiObservationSnapshot = z.infer<typeof uiObservationSnapshotSchema>;
+
+/** Only this exact patch has a real control adapter. A larger settings command
+ * must not masquerade as a single toggle or discard its other effects. */
+export function smartCompletionValue(patch: unknown): boolean | undefined {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+  const sections = Object.keys(patch);
+  if (sections.length !== 1 || sections[0] !== "writing") return;
+  const writing = (patch as Record<string, unknown>).writing;
+  if (!writing || typeof writing !== "object" || Array.isArray(writing)) return;
+  const keys = Object.keys(writing);
+  if (keys.length !== 1 || keys[0] !== "smartCompletion") return;
+  const value = (writing as Record<string, unknown>).smartCompletion;
+  return typeof value === "boolean" ? value : undefined;
+}
 
 export type SemanticActionAnchor = {
   workId: string;

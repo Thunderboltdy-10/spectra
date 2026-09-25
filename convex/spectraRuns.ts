@@ -9,6 +9,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
 import { currentArtifactApprovalScope } from "./spectraArtifactWriteScope";
+import { mergeUiObserverInterest, uiObservationSnapshot } from "./spectraUiObservation";
+import { vUiObserverInterest } from "./spectraUiObservationSchema";
 import {
   ensureThreadWorkspacePlacement,
   requireArtifactCapability,
@@ -1672,6 +1674,7 @@ export const heartbeat = mutation({
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     workerId: v.string(),
+    awaitedOperationId: v.optional(v.id("spectraOperations")),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
@@ -1682,13 +1685,16 @@ export const heartbeat = mutation({
     )
       return { alive: false };
     const now = Date.now();
+    const operation = args.awaitedOperationId ? await ctx.db.get(args.awaitedOperationId) : null;
+    const observation = operation?.runId === run._id && operation.executionId === args.executionId
+      ? uiObservationSnapshot(run, operation) : undefined;
     if (!shouldRenewSpectraRunLease(run.leaseExpiresAt, now))
-      return { alive: true };
+      return { alive: true, ...(observation ? { observation } : {}) };
     await ctx.db.patch(args.runId, {
       heartbeatAt: now,
       leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
     });
-    return { alive: true };
+    return { alive: true, ...(observation ? { observation } : {}) };
   },
 });
 
@@ -2412,7 +2418,7 @@ export const selectTab = mutation({
 });
 
 export const claimConfirmation = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), uiObserver: v.optional(vUiObserverInterest) },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
@@ -2482,6 +2488,7 @@ export const claimConfirmation = mutation({
         claimedAt: now,
         decidedAt: now,
       },
+      ...(args.uiObserver ? { uiObserverInterests: mergeUiObserverInterest(run, args.executionId, args.uiObserver) } : {}),
       workerId: undefined,
       leaseExpiresAt: undefined,
       heartbeatAt: now,

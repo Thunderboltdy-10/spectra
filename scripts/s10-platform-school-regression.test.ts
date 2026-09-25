@@ -9,7 +9,7 @@ import { convexTest } from "convex-test";
 import type { FunctionArgs, FunctionReturnType, WithoutSystemFields } from "convex/server";
 import schema from "../convex/schema";
 import { api } from "../convex/_generated/api";
-import type { Doc } from "../convex/_generated/dataModel";
+import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { QueryCtx } from "../convex/_generated/server";
 import { adminOverview, recordsForPurpose } from "../convex/managebac";
 import { agentGovernance } from "../convex/administration";
@@ -121,7 +121,7 @@ describe("S10 School known-failure audit witnesses", () => {
     const read = () => observe(fixture, ctx => purposeHandler(ctx, args));
     const before = await read();
     expect(before.result.records.map(row => row.id)).toEqual([targetId]);
-    const fillerIds = [];
+    const fillerIds: Id<"externalRecords">[] = [];
     let fifty: Awaited<ReturnType<typeof read>> | undefined;
     for (const [start, count] of [[0, 50], [50, 450]]) {
       fillerIds.push(...await fixture.t.run(async ctx => {
@@ -245,7 +245,7 @@ describe("S10 School known-failure audit witnesses", () => {
     const read = () => observe(fixture, ctx => governanceHandler(ctx, {}));
     const before = await read();
     expect(before.result.agents.map(row => row.agentId)).toEqual([agentId]);
-    const unrelated = [];
+    const unrelated: Id<"spectraArtifacts">[] = [];
     let twenty: Awaited<ReturnType<typeof read>> | undefined;
     for (const count of [20, 180]) {
       unrelated.push(...await fixture.t.run(async ctx => {

@@ -17,6 +17,12 @@ const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
 const MAX_CLAIMS_PER_CONTEXT = 24;
 const MAX_LIST = 300;
+const EVIDENCE_WINDOW = 12;
+const AUTHORED_EVIDENCE_TYPES = [
+  "user_statement",
+  "correction",
+  "product_event",
+] as const;
 
 const vScope = v.union(
   v.literal("private_global"),
@@ -65,6 +71,7 @@ type MemoryCtx = QueryCtx | MutationCtx;
 type Actor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
 type Scope = Doc<"memoryClaims">["scope"];
 type ClaimType = Doc<"memoryClaims">["claimType"];
+type EvidenceAccessCache = Map<string, boolean>;
 
 function hash(value: string) {
   let first = 0x811c9dc5;
@@ -341,11 +348,13 @@ async function evidenceIsCurrentlyAvailable(
     );
   }
   if (evidence.sourceType === "workspace" && evidence.sourceId) {
+    const id = ctx.db.normalizeId("spectraWorkspaces", evidence.sourceId);
+    if (!id) return false;
     const decision = await evaluateAccessForActor(
       ctx,
       actor,
       "workspace",
-      evidence.sourceId,
+      id,
     );
     return decision.allowed && decision.capabilities.includes("read");
   }
@@ -368,11 +377,12 @@ async function claimHasCurrentEvidence(
   ctx: MemoryCtx,
   actor: Actor,
   claimId: Id<"memoryClaims">,
+  accessCache: EvidenceAccessCache = new Map(),
 ) {
-  const evidence = await evidenceForClaim(ctx, claimId);
+  const evidence = await evidenceCandidatesForClaim(ctx, claimId);
   if (evidence.length === 0) return false;
   for (const item of evidence)
-    if (await evidenceIsCurrentlyAvailable(ctx, actor, item)) return true;
+    if (await checkEvidenceAccess(ctx, actor, item, accessCache)) return true;
   return false;
 }
 
@@ -456,7 +466,69 @@ async function evidenceForClaim(ctx: MemoryCtx, claimId: Id<"memoryClaims">) {
     .query("memoryEvidence")
     .withIndex("by_claim_created", (q) => q.eq("claimId", claimId))
     .order("desc")
-    .take(12);
+    .take(EVIDENCE_WINDOW);
+}
+
+/** Keep bounded source previews without aging out an explicit user statement. */
+async function evidenceCandidatesForClaim(
+  ctx: MemoryCtx,
+  claimId: Id<"memoryClaims">,
+) {
+  const recent = await evidenceForClaim(ctx, claimId);
+  if (
+    recent.length < EVIDENCE_WINDOW ||
+    recent.some((item) =>
+      item.accessStatus === "available" &&
+      AUTHORED_EVIDENCE_TYPES.some((type) => item.sourceType === type),
+    )
+  ) return recent;
+  const authored = await Promise.all(
+    AUTHORED_EVIDENCE_TYPES.map((sourceType) =>
+      ctx.db.query("memoryEvidence")
+        .withIndex("by_claim_source_access_created", (q) => q
+          .eq("claimId", claimId)
+          .eq("sourceType", sourceType)
+          .eq("accessStatus", "available"),
+        )
+        .order("desc")
+        .first(),
+    ),
+  );
+  return [
+    ...recent,
+    ...authored.filter((item): item is Doc<"memoryEvidence"> => item !== null),
+  ];
+}
+
+/** Cache only within one authenticated database invocation, never across reads. */
+async function checkEvidenceAccess(
+  ctx: MemoryCtx,
+  actor: Actor,
+  evidence: Doc<"memoryEvidence">,
+  accessCache: EvidenceAccessCache,
+) {
+  if (evidence.accessStatus !== "available") return false;
+  const key = JSON.stringify([
+    evidence.sourceType, evidence.sourceId, evidence.schoolId,
+  ]);
+  const cached = accessCache.get(key);
+  if (cached !== undefined) return cached;
+  const allowed = await evidenceIsCurrentlyAvailable(ctx, actor, evidence);
+  accessCache.set(key, allowed);
+  return allowed;
+}
+
+async function currentEvidenceForClaim(
+  ctx: MemoryCtx,
+  actor: Actor,
+  claimId: Id<"memoryClaims">,
+  accessCache: EvidenceAccessCache,
+) {
+  const available: Array<Doc<"memoryEvidence">> = [];
+  for (const item of await evidenceCandidatesForClaim(ctx, claimId))
+    if (await checkEvidenceAccess(ctx, actor, item, accessCache))
+      available.push(item);
+  return available;
 }
 
 async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
@@ -838,24 +910,23 @@ export const listMine = query({
         all.findIndex((candidate) => candidate._id === claim._id) === index,
     );
     const needle = normalizeProposition(args.search ?? "");
-    const visible: Array<Doc<"memoryClaims">> = [];
+    const accessCache: EvidenceAccessCache = new Map();
+    const visible: Array<ReturnType<typeof claimProjection>> = [];
     for (const claim of candidates) {
       if (claim.status === "deleted") continue;
       if (args.scope && claim.scope !== args.scope) continue;
       if (args.claimType && claim.claimType !== args.claimType) continue;
       if (needle && !claim.normalizedProposition.includes(needle)) continue;
       if (!(await canReadClaim(ctx, actor, claim))) continue;
-      visible.push(claim);
+      const evidence = await currentEvidenceForClaim(ctx, actor, claim._id, accessCache);
+      if (evidence.length === 0) continue;
+      visible.push(claimProjection(claim, evidence));
       if (visible.length >= Math.max(1, Math.min(args.limit ?? 100, 200)))
         break;
     }
     return {
       preferences,
-      claims: await Promise.all(
-        visible.map(async (claim) =>
-          claimProjection(claim, await evidenceForClaim(ctx, claim._id)),
-        ),
-      ),
+      claims: visible,
     };
   },
 });
@@ -1091,11 +1162,12 @@ export const exportMine = query({
       )
     ).flat();
     const visible = [];
-    for (const claim of claims)
-      if (await canReadClaim(ctx, actor, claim))
-        visible.push(
-          claimProjection(claim, await evidenceForClaim(ctx, claim._id)),
-        );
+    const accessCache: EvidenceAccessCache = new Map();
+    for (const claim of claims) {
+      if (!(await canReadClaim(ctx, actor, claim))) continue;
+      const evidence = await currentEvidenceForClaim(ctx, actor, claim._id, accessCache);
+      if (evidence.length > 0) visible.push(claimProjection(claim, evidence));
+    }
     return {
       format: "spectra-memory-export",
       version: 1,
@@ -1219,6 +1291,7 @@ export const contextForRunBase = internalQuery({
       score: number;
       retrievalSignal: number;
     }> = [];
+    const accessCache: EvidenceAccessCache = new Map();
     for (const claim of claims) {
       if (claim.status !== "active") {
         if (claim.status === "disputed") exclusions.disputed += 1;
@@ -1251,7 +1324,7 @@ export const contextForRunBase = internalQuery({
         exclusions.permission += 1;
         continue;
       }
-      if (!(await claimHasCurrentEvidence(ctx, actor, claim._id))) {
+      if (!(await claimHasCurrentEvidence(ctx, actor, claim._id, accessCache))) {
         exclusions.permission += 1;
         continue;
       }
@@ -1337,10 +1410,7 @@ export const contextForRunBase = internalQuery({
     }
     const contextClaims = await Promise.all(
       selected.map(async (claim, index) => {
-        const evidence = [];
-        for (const item of await evidenceForClaim(ctx, claim._id))
-          if (await evidenceIsCurrentlyAvailable(ctx, actor, item))
-            evidence.push(item);
+        const evidence = await currentEvidenceForClaim(ctx, actor, claim._id, accessCache);
         return {
           citation: `M${index + 1}`,
           claimId: claim._id,
@@ -1428,6 +1498,8 @@ export const recordRetrieval = mutation({
       const claim = await ctx.db.get(claimId);
       if (
         !claim ||
+        claim.status !== "active" ||
+        (claim.expiresAt !== undefined && claim.expiresAt <= Date.now()) ||
         !(await canReadClaim(ctx, actor, claim)) ||
         !(await claimHasCurrentEvidence(ctx, actor, claim._id))
       )

@@ -116,6 +116,7 @@ const authenticatedRequests = new WeakSet();
 const documentMessageTails = new WeakMap();
 const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
+const unappliedDocumentMessages = new WeakSet();
 const documentPersistenceQueues = new WeakMap();
 const documentCheckpointSchedulers = new WeakMap();
 const canonicalRooms = new WeakMap();
@@ -163,6 +164,7 @@ async function acquireDocumentMessage(document, socketId) {
   await previous;
   const queue = pendingMessageReleases.get(socketId) ?? [];
   queue.push(() => {
+    unappliedDocumentMessages.delete(document);
     releaseCurrent();
     if (documentMessageTails.get(document) === tail)
       documentMessageTails.delete(document);
@@ -284,7 +286,7 @@ async function catchUpCanonicalRoom(document, context) {
   return canonicalRoom(document, context).run(async session => {
     const { document: canonical, stored } = await session.refresh();
     const pending = documentPersistenceQueues.get(document);
-    if (pending?.pending.length || pending?.flushing) return stored.nextSequence;
+    if (pending?.pending.length || pending?.flushing || unappliedDocumentMessages.has(document)) return stored.nextSequence;
     mergeCanonicalIntoLive(canonical, document);
     const frontierHash = documentFrontierHash(canonical);
     if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
@@ -572,7 +574,8 @@ async function persistAcceptedMessages(document, entries) {
       // Do not let native LWW state erase a later speculative branch before
       // that branch's native-overlap check. Publish only after the whole
       // captured batch drains and no newer batch is pending.
-      if (index === entries.length && !documentPersistenceQueues.get(document)?.pending.length) {
+      if (index === entries.length && !documentPersistenceQueues.get(document)?.pending.length &&
+          !unappliedDocumentMessages.has(document)) {
         mergeCanonicalIntoLive(canonical, document);
         const open = openDocuments.get(durableHeadKey(context));
         if (open?.document === document) open.nextSequence = Math.max(open.nextSequence, accepted.result.sequence + 1);
@@ -1159,6 +1162,9 @@ const server = new Server({
       // Keep the pre-apply hook deliberately cheap. Hocuspocus applies and
       // broadcasts as soon as this returns; projection and Convex persistence
       // are batched only after peers have received the keystroke.
+      // Hocuspocus awaits between this hook and apply. Canonical native state
+      // must not replace the authored base during that captured interval.
+      unappliedDocumentMessages.add(document);
       messageQueue(socketId).push({
         context: { ...context },
         connection,
@@ -1186,6 +1192,7 @@ const server = new Server({
   },
 
   async afterHandleMessage({ socketId, document }) {
+    unappliedDocumentMessages.delete(document);
     const queue = acceptedDocumentMessages.get(socketId);
     const accepted = queue?.shift();
     if (!queue?.length) acceptedDocumentMessages.delete(socketId);
@@ -1340,7 +1347,8 @@ const server = new Server({
           if (vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
             throw new Error("COLLABORATION_RECOVERY_VECTOR_SIZE");
           const pending = documentPersistenceQueues.get(document);
-          if (!pending?.pending.length && !pending?.flushing) mergeCanonicalIntoLive(canonical, document);
+          if (!pending?.pending.length && !pending?.flushing && !unappliedDocumentMessages.has(document))
+            mergeCanonicalIntoLive(canonical, document);
           sendGatewayState(connection, {
             type: "spectra.recovery_vector", confirmationId: request.confirmationId,
             stateVector: Buffer.from(vector).toString("base64"),

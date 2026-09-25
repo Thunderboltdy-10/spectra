@@ -25,6 +25,8 @@ The tail carries existing `regionIds` and DURABLE's optional `nativeReconciliati
 
 Rebased canonical state is published to the live document only after all captured groups pass admission and no newer batch is pending. A regression source covers a first disjoint group committing while a later group conflicts: the latter's live draft remains intact and receives no durable acknowledgement. Idle refresh likewise defers publication if another batch arrived during its read.
 
+The captured interval between Hocuspocus's awaited `beforeHandleMessage` and `afterHandleMessage` is also protected. An update in that interval is not yet in the persistence queue, so queue emptiness alone cannot authorize native publication. A per-document marker prevents batch, idle and recovery-vector publication until apply completes; release/disconnect clears it. Prepared regressions cover deferred idle publication and a compaction fallback containing a delete-only change whose state vector did not change. These additional tests remain unrun.
+
 ## D2: causal recovery and retained local bases
 
 The independent `c705dbce` fixtures were consumed. The large-state transport fixture now supplies a real durable server vector and still requires the tiny offline edit to send less than 1 KiB. Existing negotiated fragmentation already supports assembled messages up to 256 MiB; the old 1 MiB observation referred to raw frame size. Recovery now requests the committed vector, sends the causal delta including deletes/unresolved dependencies, and waits for a matching complete frontier. Genuinely large new content retains the negotiated framing path. Duplicate and truncated frame regressions supplement the existing real Hocuspocus two-way framing test.
@@ -42,3 +44,7 @@ Prepared tests cover two-tab journals against one large immutable base, zero rep
 RUNTIME's guarded baseline reports two `collaboration-persistence-window` failures because its source-extracted confirmation harness omitted `documentFrontierHash`, so the durable callback never started. The missing dependency is supplied. Three lifecycle failures used ID-only/no-frontier acknowledgements as proof of complete durability; fixtures now send actual complete frontiers and assert IDs alone stay pending. A fourth expected a previous modify grant after authentication failed; it now expects unknown access until a fresh authorization succeeds. These changes preserve the production receipt and authorization rules.
 
 The pinned body/native retention test's drain helper accepts only `complete`, while the deletion coordinator explicitly treats `retained` as terminal while a live pin exists. This was referred to DURABLE for fixture/retention confirmation; no deletion or retention behavior was changed here.
+
+## Runtime preparation after dependency hold
+
+Coordinator explicitly authorized creating the missing local `node_modules` junction. The exact primary target was verified to exist and the local entry verified absent before creation; no existing entry or dependency was deleted or replaced. Executable checks still await this lane's explicit guarded slot after DURABLE. The original no-dependency-change statement above describes the earlier source-only phase.

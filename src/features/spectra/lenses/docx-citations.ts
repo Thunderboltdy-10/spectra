@@ -169,6 +169,15 @@ export async function writeCitationMapping(document: Document, item: WordCitatio
   }
   const { root, partName } = part;
   const existing = matches[0]?.node;
+  if (existing) {
+    let supported = false;
+    try { supported = wordSourceReferenceSchema.safeParse(JSON.parse(mappingText(existing))).success; } catch { /* Opaque extension payload. */ }
+    if (!supported) {
+      // Absence in a projection cannot delete a payload that it could not read.
+      if (!item.sourceRef) return;
+      throw new Error("DOCX_REGION_READ_ONLY: This citation mapping has an unmodeled payload. Its native XML remains preserved.");
+    }
+  }
   if (!item.sourceRef) {
     if (existing) { root.removeChild(existing); document.office.markDirty(partName); }
     return;

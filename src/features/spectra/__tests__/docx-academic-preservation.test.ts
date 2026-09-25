@@ -71,6 +71,16 @@ describe("DOCX academic identity and native properties", () => {
     expect((await citationMappings(document)).get("one")).toEqual(ref);
   });
 
+  it("carries an unrecognized mapping payload instead of deleting it when the projection has no source reference", async () => {
+    const document = Document.create(); document.addParagraph("Neighbor");
+    mapping(document, "/customXml/future.xml", '<m:citation id="one" v:version="future">{"futureFormat":true}<v:opaque>keep</v:opaque></m:citation>');
+    const before = unzipSync(await document.save())["customXml/future.xml"];
+    expect((await citationMappings(document)).has("one")).toBe(false);
+    await writeCitationMapping(document, { ...citation, sourceRef: undefined });
+    expect(unzipSync(await document.save())["customXml/future.xml"]).toEqual(before);
+    await expect(writeCitationMapping(document, citation)).rejects.toThrow(/unmodeled payload/);
+  });
+
   it("preserves rich native run boundaries through merged runs and text edits, and honors explicit underline removal", () => {
     const note = parseXml(`<w:footnote xmlns:w="${WML_NAMESPACE}" xmlns:v="urn:vendor" w:id="1"><w:p v:id="paragraph"><w:pPr><w:pStyle w:val="FootnoteText" v:style="kept"/></w:pPr><w:r v:id="marker"><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r><w:r v:id="red"><w:rPr><w:u w:val="single" w:color="FF0000"/></w:rPr><w:t v:text="kept">Red</w:t></w:r><w:r v:id="blue"><w:rPr><w:u w:val="single" w:color="0000FF"/></w:rPr><w:t> blue</w:t></w:r></w:p></w:footnote>`).root;
     expect(noteContent(note)).toBeDefined();

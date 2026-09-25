@@ -1,7 +1,7 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, XmlElement } from "@ariadng/office/xml";
 import type { WordCommentData, WordRevisionInline } from "./docx-academic-schema";
-import { relatedWordPart, storyText, wordAttr, wordElement, wordElements, wordText, writeStoryContent } from "./docx-academic";
+import { hasUnmodeledRunToggles, relatedWordPart, storyText, wordAttr, wordElement, wordElements, wordRunPropertyEnabled, wordText, writeStoryContent } from "./docx-academic";
 
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
 
@@ -22,14 +22,10 @@ export function supportedRevision(element: XmlElement): WordRevisionInline | und
   // Other formatting, moves and nested structures remain exact regional carry.
   const allowed = new Set([element.localName, "r", "rPr", "t", "delText", "b", "i", "u"]);
   if (!element.elements().length || element.elements().some((node) => node.localName !== "r") || wordElements(element).some((node) => node.namespaceUri() !== WML_NAMESPACE || !allowed.has(node.localName))) return undefined;
-  if (wordElements(element).some((node) => node.localName === "u" && ![undefined, "single"].includes(wordAttr(node, "val")))) return undefined;
-  if (wordElements(element).some((node) => ["b", "i"].includes(node.localName) && ["0", "false", "off"].includes(wordAttr(node, "val") ?? ""))) return undefined;
+  if (hasUnmodeledRunToggles(element)) return undefined;
   const content = element.elements().map((run) => {
     const props = run.find(WML_NAMESPACE, "rPr");
-    const enabled = (name: string) => {
-      const prop = props?.find(WML_NAMESPACE, name);
-      return Boolean(prop && !["0", "false", "off", "none"].includes(wordAttr(prop, "val") ?? ""));
-    };
+    const enabled = (name: string) => wordRunPropertyEnabled(props?.find(WML_NAMESPACE, name));
     return { text: wordText(run), ...(enabled("b") ? { bold: true } : {}), ...(enabled("i") ? { italic: true } : {}), ...(enabled("u") ? { underline: true } : {}) };
   });
   return {

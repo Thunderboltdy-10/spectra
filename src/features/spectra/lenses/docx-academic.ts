@@ -38,11 +38,20 @@ export function wordVisibleText(root: XmlElement): string {
   return root.elements().map(wordVisibleText).join("");
 }
 
+export function wordRunPropertyEnabled(property: XmlElement | undefined) {
+  return Boolean(property && !["0", "false", "off", "none"].includes(wordAttr(property, "val") ?? ""));
+}
+
+export function hasUnmodeledRunToggles(root: XmlElement) {
+  return wordElements(root).some((element) => element.localName === "u"
+    ? ![undefined, "single", "none"].includes(wordAttr(element, "val"))
+    : ["b", "i"].includes(element.localName) && ![undefined, "0", "false", "off", "1", "true", "on"].includes(wordAttr(element, "val")));
+}
+
 export function noteContent(root: XmlElement): WordNoteContent | undefined {
   const allowed = new Set(["footnote", "endnote", "p", "pPr", "pStyle", "r", "rPr", "rStyle", "t", "tab", "br", "cr", "b", "i", "u", "footnoteRef", "endnoteRef"]);
   if (wordElements(root).some((element) => element.namespaceUri() !== WML_NAMESPACE || !allowed.has(element.localName))) return undefined;
-  if (wordElements(root).some((element) => element.localName === "u" && ![undefined, "single"].includes(wordAttr(element, "val")))) return undefined;
-  if (wordElements(root).some((element) => ["b", "i"].includes(element.localName) && ["0", "false", "off"].includes(wordAttr(element, "val") ?? ""))) return undefined;
+  if (hasUnmodeledRunToggles(root)) return undefined;
   if (wordElements(root).some((element) => element.localName === "r" && wordText(element) && element.find(WML_NAMESPACE, "rPr")?.find(WML_NAMESPACE, "rStyle"))) return undefined;
   const paragraphs = root.elements().filter((element) => element.localName === "p");
   if (!paragraphs.length) return undefined;
@@ -50,10 +59,7 @@ export function noteContent(root: XmlElement): WordNoteContent | undefined {
     const text = wordText(run);
     if (!text) return [];
     const props = run.find(WML_NAMESPACE, "rPr");
-    const enabled = (name: string) => {
-      const item = props?.find(WML_NAMESPACE, name);
-      return Boolean(item && !["0", "false", "off", "none"].includes(wordAttr(item, "val") ?? ""));
-    };
+    const enabled = (name: string) => wordRunPropertyEnabled(props?.find(WML_NAMESPACE, name));
     return [{ text, ...(enabled("b") ? { bold: true } : {}), ...(enabled("i") ? { italic: true } : {}), ...(enabled("u") ? { underline: true } : {}) }];
   }));
 }
@@ -145,7 +151,12 @@ function writeRunFormat(run: XmlElement, item: WordNoteContent[number][number]) 
         const node = wordElement(name, props);
         if (name === "u") node.setAttributeNs(WML_NAMESPACE, "val", "single");
       }
-    } else for (const node of existing) props!.removeChild(node);
+      for (const node of existing) if (!wordRunPropertyEnabled(node)) node.setAttributeNs(WML_NAMESPACE, "val", name === "u" ? "single" : "1");
+    } else for (const node of existing) {
+      // Existing explicit off values can suppress a native style. Keep them
+      // through unrelated text/format edits instead of exposing that style.
+      if (wordRunPropertyEnabled(node)) props!.removeChild(node);
+    }
   }
 }
 

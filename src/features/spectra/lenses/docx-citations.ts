@@ -68,8 +68,7 @@ export async function upsertWordSource(document: Document, source: WordSource) {
     if (value === undefined) { if (previous[0]) parent.removeChild(previous[0]); return; }
     const node = previous[0] ?? bibElement(parent, name);
     if (mappingText(node) === value) return;
-    for (const child of [...node.children]) if (child instanceof XmlText) node.removeChild(child);
-    node.insertBefore(new XmlText(value), node.children[0] ?? null);
+    writeMappingText(node, value);
   };
   replace(element, "Tag", source.tag); replace(element, "SourceType", source.sourceType);
   for (const [key, name] of Object.entries(FIELDS)) replace(element, name, source[key as keyof typeof FIELDS]);
@@ -147,9 +146,14 @@ function mappingEntries(root: XmlElement) {
 }
 
 function mappingText(node: XmlElement) {
-  const copy = node.clone();
-  for (const child of copy.elements()) copy.removeChild(child);
-  return copy.text();
+  return node.children.filter((child) => child.kind === "text" || child.kind === "cdata").map((child) => child.text).join("");
+}
+
+function writeMappingText(node: XmlElement, value: string) {
+  const textNodes = node.children.filter((child) => child.kind === "text" || child.kind === "cdata");
+  if (textNodes[0]) textNodes[0].text = value;
+  else node.insertBefore(new XmlText(value), node.children[0] ?? null);
+  for (const text of textNodes.slice(1)) node.removeChild(text);
 }
 
 export async function writeCitationMapping(document: Document, item: WordCitationInline) {
@@ -188,9 +192,7 @@ export async function writeCitationMapping(document: Document, item: WordCitatio
   node.setAttribute("id", item.citationId);
   // The JSON text is ours; attributes, extension children and their ordering
   // belong to the native author and survive updates of this record.
-  const textNodes = node.children.filter((child) => child instanceof XmlText);
-  node.insertBefore(new XmlText(JSON.stringify(item.sourceRef)), textNodes[0] ?? node.children[0] ?? null);
-  for (const text of textNodes) node.removeChild(text);
+  writeMappingText(node, JSON.stringify(item.sourceRef));
   document.office.markDirty(partName);
 }
 

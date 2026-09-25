@@ -3,9 +3,11 @@ import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, serializeNode } from "@ariadng/office/xml";
 import { strFromU8, unzipSync } from "fflate";
 import { citationMappings, collectWordSources, upsertWordSource, writeCitationMapping } from "../lenses/docx-citations";
-import { noteContent, storyText, wordElements, writeStoryContent } from "../lenses/docx-academic";
+import { nativeNote, noteContent, storyText, wordElements, writeStoryContent } from "../lenses/docx-academic";
 import { appendRevision, reviewRevision, supportedRevision, upsertNativeComment } from "../lenses/docx-academic-review";
-import { docxLens } from "../lenses/docx-lens";
+import { docxLens, docxProjectionReadbackDigest, docxProjectionSemanticDigest } from "../lenses/docx-lens";
+import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
+import { docxProjectionFromContent } from "../lenses/document-projection";
 import type { WordCitationInline } from "../lenses/docx-citation-schema";
 
 const META = "urn:spectra:academic:v1";
@@ -19,6 +21,52 @@ function mapping(document: Document, name: string, body: string) {
 }
 
 describe("DOCX academic identity and native properties", () => {
+  it.each(["0", "false", "off"])("materializes explicit %s note toggles as on without losing native property attributes", async (off) => {
+    const document = Document.create(); document.addParagraph("Claim"); document.addParagraph("Neighbor");
+    const empty = await docxLens.open(await document.save());
+    const block = empty.projection.blocks[0]!;
+    const bytes = await docxLens.mutate(empty.preservedCarry, { kind: "insert-note", noteType: "footnote", noteId: "1", content: [[{ text: "Evidence" }]], anchor: { regionId: block.id, expectedText: block.text, start: 0, end: 0 } });
+    const native = await Document.open(bytes);
+    const note = (await nativeNote(native, "footnote", "1"))!;
+    const run = wordElements(note.note).find((node) => node.localName === "r" && node.find(WML_NAMESPACE, "t"))!;
+    run.insertBefore(parseXml(`<w:rPr xmlns:w="${WML_NAMESPACE}" xmlns:v="urn:vendor"><w:b w:val="${off}" v:stamp="bold"/><w:i w:val="${off}" v:stamp="italic"/><w:u w:val="none" w:color="FF0000" w:themeColor="accent1" v:stamp="underline"/></w:rPr>`).root, run.children[0] ?? null);
+    native.office.markDirty(note.partName);
+    const base = await docxLens.open(await native.save());
+    expect(base.projection.nativeBinding.wordNotes?.[0]?.readOnlyReason).toBeUndefined();
+    expect(base.projection.nativeBinding.wordNotes?.[0]?.content).toEqual([[{ text: "Evidence" }]]);
+    const desired = docxProjectionFromContent(applyDocumentAcademicOperations(base.projection, [{ kind: "edit-note", noteType: "footnote", noteId: "1", expectedText: "Evidence", content: [[{ text: "Evidence", bold: true, italic: true, underline: true }]] }]), base.projection).projection;
+    const output = await docxLens.materialize({ carry: base.preservedCarry, projection: desired });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.nativeBinding.wordNotes?.[0]?.content).toEqual([[{ text: "Evidence", bold: true, italic: true, underline: true }]]);
+    expect(await docxProjectionReadbackDigest(reopened.projection, desired)).toBe(await docxProjectionSemanticDigest(desired));
+    const xml = strFromU8(unzipSync(output)["word/footnotes.xml"]!);
+    for (const value of ['w:b w:val="1"', 'w:i w:val="1"', 'w:u w:val="single"', 'w:color="FF0000"', 'w:themeColor="accent1"', 'v:stamp="bold"', 'v:stamp="italic"', 'v:stamp="underline"']) expect(xml).toContain(value);
+
+    const textOnly = docxProjectionFromContent(applyDocumentAcademicOperations(base.projection, [{ kind: "edit-note", noteType: "footnote", noteId: "1", expectedText: "Evidence", content: [[{ text: "Changed evidence" }]] }]), base.projection).projection;
+    const edited = await docxLens.materialize({ carry: base.preservedCarry, projection: textOnly });
+    const editedXml = strFromU8(unzipSync(edited)["word/footnotes.xml"]!);
+    expect(editedXml).toContain(`w:b w:val="${off}"`);
+    expect(editedXml).toContain('w:u w:val="none"');
+    expect(editedXml).toContain('w:color="FF0000"');
+  });
+
+  it("materializes off-to-on revision formatting while retaining underline color and native attributes", async () => {
+    const document = Document.create();
+    document.addParagraph("").element.appendChild(parseXml(`<w:ins xmlns:w="${WML_NAMESPACE}" xmlns:v="urn:vendor" w:id="8" w:author="Author"><w:r><w:rPr><w:b w:val="0" v:stamp="bold"/><w:i w:val="false"/><w:u w:val="none" w:color="FF0000"/></w:rPr><w:t>Reviewed</w:t></w:r></w:ins>`).root);
+    document.addParagraph("Neighbor");
+    const base = await docxLens.open(await document.save());
+    expect(base.projection.blocks[0]?.attrs?.nativeReadOnly).toBeUndefined();
+    const desired = { ...base.projection, blocks: base.projection.blocks.map((block) => ({ ...block, inlineContent: block.inlineContent?.map((inline) => inline.kind === "revision" ? { ...inline, content: [{ text: inline.text, bold: true, italic: true, underline: true }] } : inline) })) };
+    const output = await docxLens.materialize({ carry: base.preservedCarry, projection: desired });
+    const reopened = await docxLens.open(output);
+    const revision = reopened.projection.blocks[0]?.inlineContent?.find((item) => item.kind === "revision");
+    expect(revision).toMatchObject({ content: [{ text: "Reviewed", bold: true, italic: true, underline: true }] });
+    expect(await docxProjectionReadbackDigest(reopened.projection, desired)).toBe(await docxProjectionSemanticDigest(desired));
+    const xml = strFromU8(unzipSync(output)["word/document.xml"]!);
+    expect(xml).toContain('w:color="FF0000"');
+    expect(xml).toContain('v:stamp="bold"');
+  });
+
   it("preserves source field and author extensions when known source values change", async () => {
     const document = Document.create(); document.addParagraph("Neighbor");
     const bib = "http://schemas.openxmlformats.org/officeDocument/2006/bibliography";
@@ -79,6 +127,17 @@ describe("DOCX academic identity and native properties", () => {
     await writeCitationMapping(document, { ...citation, sourceRef: undefined });
     expect(unzipSync(await document.save())["customXml/future.xml"]).toEqual(before);
     await expect(writeCitationMapping(document, citation)).rejects.toThrow(/unmodeled payload/);
+  });
+
+  it("updates CDATA mapping text once while retaining its native representation and opaque child", async () => {
+    const document = Document.create(); document.addParagraph("Neighbor");
+    mapping(document, "/customXml/cdata.xml", `<m:citation id="one"><![CDATA[${JSON.stringify(ref)}]]><v:opaque>keep</v:opaque></m:citation>`);
+    await writeCitationMapping(document, { ...citation, sourceRef: { ...ref, sourceId: "changed" } });
+    const output = await document.save();
+    const xml = strFromU8(unzipSync(output)["customXml/cdata.xml"]!);
+    expect(xml).toContain('<![CDATA[{"sourceId":"changed"');
+    expect(xml).toContain("<v:opaque>keep</v:opaque>");
+    expect((await citationMappings(await Document.open(output))).get("one")?.sourceId).toBe("changed");
   });
 
   it("preserves rich native run boundaries through merged runs and text edits, and honors explicit underline removal", () => {

@@ -2,6 +2,8 @@
 
 Status: **source candidate, validation pending the guarded focused slot**. Requires SECURITY's `6f7b7676` helper commit (`managebacVisibility.ts` and its fixtures). No schema change or backend publication.
 
+The follow-up also consumes SECURITY `328890bb` (its approved exact membership index and visibility-reader factory). Memory creates one lazy reader per authenticated list/export/context invocation, reusing actor/integration/mapping and class-period checks across distinct source records. No reader or claim-access result survives that invocation. The memory patch itself adds no schema field; the dependency does add its documented index.
+
 The earlier `450e4df8` repair rechecked sources across memory context/list/export but left two provenance weaknesses: ManageBac checked school alone, and `product_event` counted as independent authored evidence. This follow-up supersedes those portions of the first report.
 
 ManageBac availability now delegates to `getReadableManagebacSourceRecord(ctx, actor, sourceId)`. It accepts only exact `managebac:<externalRecords ID>` provenance. The shared helper verifies current actor/membership, current integration and verified mapping, source state, explicit audience, and class membership/selection in the same academic period. Missing, malformed and unresolved legacy identities fail closed. Legitimate inherited class material remains readable; no capped list is used as proof of access.

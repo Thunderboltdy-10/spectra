@@ -180,6 +180,31 @@ describe("current ManageBac source authority in memory", () => {
     expect(visible.list[0]?.evidence.map((row) => row.sourceType)).toEqual(["user_statement"]);
     expect(JSON.stringify(visible)).not.toContain(`managebac:${source.recordId}`);
   });
+
+  it("shares current class authority across distinct ManageBac sources within a memory read", async () => {
+    const f = await fixture();
+    const source = await managebacMemory(f);
+    await f.t.run(async (ctx) => {
+      const { _id: recordId, _creationTime: recordCreated, ...record } = (await ctx.db.get(source.recordId))!;
+      const { _id: evidenceId, _creationTime: evidenceCreated, ...evidence } = (await ctx.db.get(source.evidenceId))!;
+      void recordId; void recordCreated; void evidenceId; void evidenceCreated;
+      for (let i = 0; i < 3; i += 1) {
+        const id = await ctx.db.insert("externalRecords", { ...record, providerRecordId: `reading-${i}` });
+        await ctx.db.insert("memoryEvidence", { ...evidence, sourceId: `managebac:${id}` });
+      }
+    });
+    const measured = await f.reader.run(async (ctx) => {
+      const observer = observeDatabase(ctx.db);
+      const result = await listMineHandler({ ...ctx, db: observer.db }, {});
+      return { result, ...observer.snapshot() };
+    });
+    expect(measured.result.claims[0]?.evidence).toHaveLength(4);
+    for (const table of ["schoolIntegrations", "externalIdentityMappings", "managebacClassSelections"])
+      expect(measured.reads.filter((row) => row.table === table)).toHaveLength(1);
+    expect(measured.reads.filter((row) => row.index === "by_visibility_membership")).toHaveLength(3);
+    await f.t.run((ctx) => ctx.db.patch(source.mappingId, { status: "revoked" }));
+    expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+  });
 });
 
 describe("memory source authority across retrieval and user projections", () => {

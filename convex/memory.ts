@@ -12,7 +12,7 @@ import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { memoryEmbedding } from "./memoryEmbedding";
-import { getReadableManagebacSourceRecord } from "./managebacVisibility";
+import { createManagebacVisibilityReader } from "./managebacVisibility";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
@@ -71,7 +71,14 @@ type MemoryCtx = QueryCtx | MutationCtx;
 type Actor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
 type Scope = Doc<"memoryClaims">["scope"];
 type ClaimType = Doc<"memoryClaims">["claimType"];
-type EvidenceAccessCache = Map<string, boolean>;
+type EvidenceAccessCache = {
+  results: Map<string, boolean>;
+  managebac?: ReturnType<typeof createManagebacVisibilityReader>;
+};
+
+function newEvidenceAccessCache(): EvidenceAccessCache {
+  return { results: new Map() };
+}
 
 function hash(value: string) {
   let first = 0x811c9dc5;
@@ -325,6 +332,7 @@ async function evidenceIsCurrentlyAvailable(
   ctx: MemoryCtx,
   actor: Actor,
   evidence: Doc<"memoryEvidence">,
+  accessCache: EvidenceAccessCache,
 ) {
   if (evidence.accessStatus !== "available") return false;
   if (
@@ -332,10 +340,11 @@ async function evidenceIsCurrentlyAvailable(
     evidence.sourceType === "correction"
   )
     return true;
-  if (evidence.sourceType === "managebac")
-    return evidence.sourceId
-      ? Boolean(await getReadableManagebacSourceRecord(ctx, actor, evidence.sourceId))
-      : false;
+  if (evidence.sourceType === "managebac") {
+    if (!evidence.sourceId) return false;
+    const reader = accessCache.managebac ??= createManagebacVisibilityReader(ctx, actor);
+    return Boolean(await reader.readSource(evidence.sourceId));
+  }
   if (evidence.sourceType === "thread") {
     const id = evidence.sourceId
       ? ctx.db.normalizeId("spectraThreads", evidence.sourceId)
@@ -378,7 +387,7 @@ async function claimHasCurrentEvidence(
   ctx: MemoryCtx,
   actor: Actor,
   claimId: Id<"memoryClaims">,
-  accessCache: EvidenceAccessCache = new Map(),
+  accessCache: EvidenceAccessCache = newEvidenceAccessCache(),
 ) {
   const evidence = await evidenceCandidatesForClaim(ctx, claimId);
   if (evidence.length === 0) return false;
@@ -512,10 +521,10 @@ async function checkEvidenceAccess(
   const key = JSON.stringify([
     evidence.sourceType, evidence.sourceId, evidence.schoolId,
   ]);
-  const cached = accessCache.get(key);
+  const cached = accessCache.results.get(key);
   if (cached !== undefined) return cached;
-  const allowed = await evidenceIsCurrentlyAvailable(ctx, actor, evidence);
-  accessCache.set(key, allowed);
+  const allowed = await evidenceIsCurrentlyAvailable(ctx, actor, evidence, accessCache);
+  accessCache.results.set(key, allowed);
   return allowed;
 }
 
@@ -911,7 +920,7 @@ export const listMine = query({
         all.findIndex((candidate) => candidate._id === claim._id) === index,
     );
     const needle = normalizeProposition(args.search ?? "");
-    const accessCache: EvidenceAccessCache = new Map();
+    const accessCache = newEvidenceAccessCache();
     const visible: Array<ReturnType<typeof claimProjection>> = [];
     for (const claim of candidates) {
       if (claim.status === "deleted") continue;
@@ -1165,7 +1174,7 @@ export const exportMine = query({
       )
     ).flat();
     const visible = [];
-    const accessCache: EvidenceAccessCache = new Map();
+    const accessCache = newEvidenceAccessCache();
     for (const claim of claims) {
       if (!(await canReadClaim(ctx, actor, claim))) continue;
       const evidence = await currentEvidenceForClaim(ctx, actor, claim._id, accessCache);
@@ -1294,7 +1303,7 @@ export const contextForRunBase = internalQuery({
       score: number;
       retrievalSignal: number;
     }> = [];
-    const accessCache: EvidenceAccessCache = new Map();
+    const accessCache = newEvidenceAccessCache();
     for (const claim of claims) {
       if (claim.status !== "active") {
         if (claim.status === "disputed") exclusions.disputed += 1;

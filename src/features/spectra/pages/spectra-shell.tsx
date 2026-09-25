@@ -65,6 +65,9 @@ import {
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
+import { useShellArtifactOpen } from "../components/use-shell-artifact-open";
+import { useShellArtifactContent } from "../components/use-shell-artifact-content";
+import { mergeShellArtifactContent } from "../components/shell-artifact-content";
 import {
   CommandBar,
   CommandBarMenuItem,
@@ -144,7 +147,6 @@ import {
   beginArtifactImportOriginal,
   completeArtifactImport,
   getSpectraArtifact,
-  getSpectraArtifactForDeepLink,
   exportSpectraWorkspaceManifest,
   getSpectraOverview,
   getSpectraRunDetail,
@@ -1121,17 +1123,17 @@ export function SpectraShell({
   }, [requestedWorkspaceId]);
   const requestedThreadId = searchParams.get("threadId") ?? undefined;
   const requestedHome = searchParams.get("home") === "1";
-  const [overview, setOverview] = useState<SpectraOverview | null>(null);
-  // Library/overview rows are intentionally summary-only. Keep detail
-  // payloads in the shell so opening one cannot mount a default document and
-  // let collaboration persist that shell over a rich committed snapshot.
-  const [hydratedArtifacts, setHydratedArtifacts] = useState<
-    Record<string, SpectraArtifact>
-  >({});
-  const [pendingHydratedOpen, setPendingHydratedOpen] = useState<{
-    artifactId: string;
-    historyMode: "push" | "replace" | "none";
-  } | null>(null);
+  const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const {
+    pending: pendingArtifactOpen,
+    loadingId: openingArtifactId,
+    open: loadArtifactForOpen,
+    cancel: cancelArtifactOpen,
+  } = useShellArtifactOpen();
+  const { overview, setOverview, hydratedArtifacts, setHydratedArtifacts } = useShellArtifactContent(
+    openObjects.filter((object) => object.type === "artifact").map((object) => object.id),
+    pendingArtifactOpen?.artifact._id,
+  );
   const [overviewLoadState, setOverviewLoadState] = useState<OverviewLoadState>(
     { status: "loading" },
   );
@@ -1316,7 +1318,6 @@ export function SpectraShell({
   const overviewRequestSequence = useRef(0);
   const restoredViewScope = useRef<string | null>(null);
   const workspaceImportInputRef = useRef<HTMLInputElement | null>(null);
-  const openObjects = useSpectraContextStore((state) => state.openObjects);
   const setObjectAvailability = useSpectraContextStore(
     (state) => state.setObjectAvailability,
   );
@@ -1448,7 +1449,7 @@ export function SpectraShell({
         return null;
       }
     },
-    [],
+    [setOverview],
   );
 
   const loadWorkspace = useCallback(
@@ -1517,7 +1518,7 @@ export function SpectraShell({
           setWorkspaceLoading(false);
       }
     },
-    [],
+    [setOverview],
   );
 
   useEffect(() => {
@@ -1705,7 +1706,7 @@ export function SpectraShell({
       const listedIds = new Set(snapshotArtifacts.map((artifact) => artifact._id));
       const listed = snapshotArtifacts.map((artifact) => {
         const hydrated = hydratedArtifacts[artifact._id];
-        const base = hydrated ?? artifact;
+        const base = mergeShellArtifactContent(artifact, hydrated);
         const live = liveIdentityByKey.get(`work:${artifact._id}`);
         if (!live) return base;
         const placements = live.workspaceContextId
@@ -1741,23 +1742,22 @@ export function SpectraShell({
     },
     [hydratedArtifacts, liveIdentityByKey, snapshotArtifacts],
   );
+  const missingOpenArtifactIds = JSON.stringify(openObjects
+    .filter((object) => object.type === "artifact" &&
+      object.id !== requestedArtifactId && object.id !== openingArtifactId &&
+      object.id !== pendingArtifactOpen?.artifact._id &&
+      !allArtifacts.some((artifact) => artifact._id === object.id && artifact.content !== undefined))
+    .map((object) => object.id));
+  const hasOverview = Boolean(overview);
   useEffect(() => {
-    const known = new Set(allArtifacts.map((artifact) => artifact._id));
-    const missing = [
-      ...new Set(
-        openObjects
-          .filter(
-            (object) => object.type === "artifact" && !known.has(object.id),
-          )
-          .map((object) => object.id),
-      ),
-    ];
-    if (!overview || missing.length === 0) return;
+    const missing = JSON.parse(missingOpenArtifactIds) as string[];
+    if (!hasOverview || missing.length === 0) return;
     let cancelled = false;
+    const controller = new AbortController();
     void Promise.all(
       missing.map((artifactId) =>
-        getSpectraArtifact(artifactId)
-          .then(({ artifact }) => ({ artifactId, artifact }))
+        getSpectraArtifact(artifactId, { signal: controller.signal })
+          .then(({ artifact }) => ({ artifactId, artifact: artifact.content !== undefined && artifact.accessLevel !== null && artifact.status !== "deleted" ? artifact : null }))
           .catch(() => ({ artifactId, artifact: null })),
       ),
     ).then((loaded) => {
@@ -1768,31 +1768,24 @@ export function SpectraShell({
         .map((item) => item.artifact)
         .filter((artifact): artifact is SpectraArtifact => artifact !== null);
       if (artifacts.length > 0)
-        setOverview((current) =>
-          current
-            ? {
-                ...current,
-                artifacts: [
-                  ...artifacts.filter(
-                    (artifact) =>
-                      !current.artifacts.some(
-                        (item) => item._id === artifact._id,
-                      ),
-                  ),
-                  ...current.artifacts,
-                ],
-              }
-            : current,
-        );
+        setHydratedArtifacts((current) => ({
+          ...current,
+          ...Object.fromEntries(artifacts.map((artifact) => [artifact._id, artifact])),
+        }));
     });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [allArtifacts, openObjects, overview, setObjectAvailability]);
+  }, [hasOverview, missingOpenArtifactIds, setObjectAvailability, setHydratedArtifacts]);
   const runs = overview?.runs ?? [];
+  const readyStudioArtifacts = useMemo(
+    () => allArtifacts.filter((artifact) => artifact.content !== undefined && artifact.accessLevel !== null && artifact.status !== "deleted"),
+    [allArtifacts],
+  );
   const studio = useArtifactStudioState(
     "spectra.shared.artifactStudio",
-    allArtifacts,
+    readyStudioArtifacts,
   );
   const chatBrowserArtifactId = studio.activeArtifactId ?? requestedArtifactId;
   const chatBrowserScope = chatBrowserArtifactId ? "artifact" : selectedWorkspaceId ? "workspace" : "library";
@@ -2180,7 +2173,7 @@ export function SpectraShell({
     () =>
       tileArtifactIds.flatMap((id) => {
         const artifact = allArtifacts.find((item) => item._id === id);
-        return artifact ? [artifact] : [];
+        return artifact?.content !== undefined && artifact.accessLevel !== null && artifact.status !== "deleted" ? [artifact] : [];
       }),
     [allArtifacts, tileArtifactIds],
   );
@@ -2417,6 +2410,9 @@ export function SpectraShell({
     // The focused-artifact read is the authoritative reconciliation boundary.
     if (focused?.artifact) {
       const canonical = focused.artifact;
+      setHydratedArtifacts((current) => current[canonical._id]
+        ? { ...current, [canonical._id]: canonical }
+        : current);
       setOverview((current) =>
         current
           ? {
@@ -2451,7 +2447,7 @@ export function SpectraShell({
       );
     }
     return next;
-  }, [commandFocusArtifact?._id, loadOverview, selectedWorkspaceId]);
+  }, [commandFocusArtifact?._id, loadOverview, selectedWorkspaceId, setHydratedArtifacts, setOverview]);
   const applyLiveArtifactPatch = useCallback(
     (artifactId: string, patch: Record<string, unknown>) => {
       const apply = (artifact: SpectraArtifact): SpectraArtifact => {
@@ -2690,6 +2686,9 @@ export function SpectraShell({
         };
       };
       let missing = true;
+      setHydratedArtifacts((current) => current[artifactId]
+        ? { ...current, [artifactId]: apply(current[artifactId]) }
+        : current);
       setOverview((current) => {
         if (!current) return current;
         const exists =
@@ -2756,7 +2755,7 @@ export function SpectraShell({
           .catch(() => undefined);
       }
     },
-    [],
+    [setHydratedArtifacts, setOverview],
   );
   const runEngine = useSpectraRun({
     surface: composerThread
@@ -2827,9 +2826,7 @@ export function SpectraShell({
     const exchange = runEngine.liveExchange;
     if (!exchange?.runId || exchange.status !== "failed") return;
     const runId = exchange.runId;
-    setOverview((current) => {
-      if (!current) return current;
-      const clearChrome = (artifact: SpectraArtifact): SpectraArtifact => {
+    const clearChrome = (artifact: SpectraArtifact): SpectraArtifact => {
         if (
           artifact.aiRunId !== runId &&
           !(artifact.aiEffects ?? []).some((effect) => effect.runId === runId)
@@ -2852,7 +2849,18 @@ export function SpectraShell({
           aiStateExpiresAt: undefined,
           aiRunId: undefined,
         };
-      };
+    };
+    setHydratedArtifacts((current) => {
+      let changed = false;
+      const next = Object.fromEntries(Object.entries(current).map(([id, artifact]) => {
+        const cleared = clearChrome(artifact);
+        changed ||= cleared !== artifact;
+        return [id, cleared];
+      }));
+      return changed ? next : current;
+    });
+    setOverview((current) => {
+      if (!current) return current;
       return {
         ...current,
         artifacts: current.artifacts.map(clearChrome),
@@ -2875,6 +2883,8 @@ export function SpectraShell({
     runEngine.liveExchange?.runId,
     runEngine.liveExchange?.status,
     selectedWorkspaceId,
+    setOverview,
+    setHydratedArtifacts,
   ]);
 
   useEffect(() => {
@@ -2920,6 +2930,9 @@ export function SpectraShell({
       if (!artifactId) return;
       void getSpectraArtifact(artifactId)
         .then(({ artifact }) => {
+          setHydratedArtifacts((current) => current[artifact._id]
+            ? { ...current, [artifact._id]: artifact }
+            : current);
           setOverview((current) => {
             if (!current) return current;
             return {
@@ -3031,22 +3044,17 @@ export function SpectraShell({
    * tree stores. A work made a moment ago is not in the loaded overview yet, so a
    * miss refreshes once instead of failing silently.
    */
+  function requestArtifactOpen(
+    artifactId: string,
+    historyMode: "push" | "replace" | "none" = "push",
+    mode: "split" | "tab" = "split",
+  ) {
+    return loadArtifactForOpen(artifactId, historyMode, mode,
+      isProgrammaticOpen() || isProgrammaticFollowOpen());
+  }
+
   function openArtifactById(artifactId: string) {
-    const known = allArtifacts.find((item) => item._id === artifactId);
-    if (known) {
-      openArtifactPanel(known);
-      return;
-    }
-    void getSpectraArtifact(artifactId)
-      .then(({ artifact }) => {
-        setOverview((current) =>
-          current &&
-          !current.artifacts.some((item) => item._id === artifact._id)
-            ? { ...current, artifacts: [artifact, ...current.artifacts] }
-            : current,
-        );
-        openArtifactPanel(artifact);
-      })
+    void requestArtifactOpen(artifactId)
       .catch(() => toast.error("That work could not be opened."));
   }
 
@@ -3068,6 +3076,7 @@ export function SpectraShell({
       window.location.search,
     );
     if (!routeArtifactId) {
+      if (previousRequestedArtifactIdRef.current) cancelArtifactOpen();
       if (previousRequestedArtifactIdRef.current && studio.isOpen) {
         studio.closeStudio();
         setSelection(null);
@@ -3078,39 +3087,9 @@ export function SpectraShell({
     }
     previousRequestedArtifactIdRef.current = routeArtifactId;
     if (openedDeepLinkRef.current === routeArtifactId) return;
-    const artifact = allArtifacts.find((item) => item._id === routeArtifactId);
-    if (artifact) {
-      openedDeepLinkRef.current = routeArtifactId;
-      openArtifactPanel(artifact, "replace");
-      return;
-    }
     if (!overview) return;
     openedDeepLinkRef.current = routeArtifactId;
-    void getSpectraArtifactForDeepLink(routeArtifactId)
-      .then(({ artifact: resolvedArtifact }) => {
-        if (
-          artifactIdFromSpectraLocation(
-            window.location.pathname,
-            window.location.search,
-          ) !== routeArtifactId
-        )
-          return;
-        if (!resolvedArtifact) {
-          toast.error("That work is not available.", {
-            description:
-              "It may have been deleted, or it may not be shared with your account.",
-          });
-          replaceWorkspaceLocation(selectedWorkspaceId);
-          return;
-        }
-        setOverview((current) =>
-          current &&
-          !current.artifacts.some((item) => item._id === resolvedArtifact._id)
-            ? { ...current, artifacts: [resolvedArtifact, ...current.artifacts] }
-            : current,
-        );
-        openArtifactPanel(resolvedArtifact, "replace");
-      })
+    void requestArtifactOpen(routeArtifactId, "replace")
       .catch(() => {
         if (
           artifactIdFromSpectraLocation(
@@ -3119,7 +3098,6 @@ export function SpectraShell({
           ) !== routeArtifactId
         )
           return;
-        openedDeepLinkRef.current = null;
         toast.error("That work could not be loaded. Try again.");
       });
     // openArtifactPanel is a render-local function; the guard ref, not the dep
@@ -3143,6 +3121,7 @@ export function SpectraShell({
    * the shell must not hold a copy of the tree to find out (D42).
    */
   const openBoardContainerById = (target: ContainerTarget) => {
+    cancelArtifactOpen();
     if (target.workspaceId) {
       goToWorkspaceHub(target.workspaceId as Id<"spectraWorkspaces">);
       return;
@@ -3158,6 +3137,7 @@ export function SpectraShell({
   }
 
   function openSelectedArtifactsInTiles() {
+    cancelArtifactOpen();
     const selectedIds = [...selectedContextIds]
       .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
       .slice(0, 24);
@@ -3205,6 +3185,7 @@ export function SpectraShell({
   }
 
   function closeTileSet() {
+    cancelArtifactOpen();
     clearTiles();
   }
 
@@ -3212,23 +3193,17 @@ export function SpectraShell({
     artifact: SpectraArtifact,
     historyMode: "push" | "replace" | "none" = "push",
   ) {
-    if (artifact.content === undefined) {
-      void getSpectraArtifact(artifact._id)
-        .then(({ artifact: hydrated }) => {
-          setHydratedArtifacts((current) => ({
-            ...current,
-            [hydrated._id]: hydrated,
-          }));
-          setPendingHydratedOpen({
-            artifactId: hydrated._id,
-            historyMode,
-          });
-        })
-        .catch(() => toast.error("That work could not be opened."));
-      return;
-    }
+    void requestArtifactOpen(artifact._id, historyMode)
+      .catch(() => toast.error("That work could not be opened."));
+  }
+
+  function openResolvedArtifactPanel(
+    artifact: SpectraArtifact,
+    historyMode: "push" | "replace" | "none",
+    preserveFollow: boolean,
+  ) {
     // A user-chosen open ends spectating; a follow-dispatched open does not.
-    if (!isProgrammaticOpen() && !isProgrammaticFollowOpen()) {
+    if (!preserveFollow) {
       disengageFollowAi();
       disengageFollow("user_input");
     }
@@ -3256,7 +3231,7 @@ export function SpectraShell({
     openedDeepLinkRef.current = artifact._id;
     // Open beside existing work by default; expand to full-page via Maximize.
     studio.openSplit(artifact);
-    pushShellNav(
+    if (historyMode !== "none") pushShellNav(
       {
         kind: "artifact-split",
         hubTabId: activeHubTabId,
@@ -3275,31 +3250,39 @@ export function SpectraShell({
   }
 
   useEffect(() => {
-    if (!pendingHydratedOpen) return;
-    const artifact = allArtifacts.find(
-      (candidate) => candidate._id === pendingHydratedOpen.artifactId,
-    );
-    if (!artifact || artifact.content === undefined) return;
-    const { historyMode } = pendingHydratedOpen;
-    setPendingHydratedOpen(null);
-    openArtifactPanel(artifact, historyMode);
-  // openArtifactPanel intentionally remains render-local; this effect only
-  // runs while the pending hydration record exists and clears it before use.
+    if (!pendingArtifactOpen) return;
+    const { artifact, historyMode, mode, preserveFollow } = pendingArtifactOpen;
+    setHydratedArtifacts((current) => ({ ...current, [artifact._id]: artifact }));
+    cancelArtifactOpen();
+    if (mode === "tab") openResolvedArtifactTab(artifact, historyMode);
+    else openResolvedArtifactPanel(artifact, historyMode, preserveFollow);
+  // The pending request carries its own fresh body, never a cached list row.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allArtifacts, pendingHydratedOpen]);
+  }, [pendingArtifactOpen, cancelArtifactOpen]);
 
   function openArtifactTab(artifact: SpectraArtifact) {
+    if (!openObjects.some((object) => object.type === "artifact" && object.id === artifact._id) || artifact.content === undefined) {
+      void requestArtifactOpen(artifact._id, "push", "tab")
+        .catch(() => toast.error("That work could not be opened."));
+      return;
+    }
+    cancelArtifactOpen();
+    openResolvedArtifactTab(artifact, "push");
+  }
+
+  function openResolvedArtifactTab(artifact: SpectraArtifact, historyMode: "push" | "replace" | "none") {
     openedDeepLinkRef.current = artifact._id;
     studio.openTab(artifact);
-    pushShellNav({
+    if (historyMode !== "none") pushShellNav({
       kind: "artifact-tab",
       hubTabId: null,
       workspaceId: selectedWorkspaceId,
       artifactId: artifact._id,
-    });
+    }, historyMode);
   }
 
   function activateArtifactTab(artifactId: string) {
+    cancelArtifactOpen();
     openedDeepLinkRef.current = artifactId;
     studio.activateTab(artifactId);
     pushShellNav({
@@ -3311,6 +3294,7 @@ export function SpectraShell({
   }
 
   function closeActiveStudio() {
+    cancelArtifactOpen();
     openedDeepLinkRef.current = null;
     studio.closeStudio();
     setSelection(null);
@@ -3390,24 +3374,22 @@ export function SpectraShell({
     workspaceId?: string;
     artifactId?: string;
   }) {
+    cancelArtifactOpen();
     restoringNavRef.current = true;
     try {
       if (
         (entry.kind === "artifact-split" || entry.kind === "artifact-tab") &&
         entry.artifactId
       ) {
-        const artifact = allArtifacts.find(
-          (item) => item._id === entry.artifactId,
-        );
-        if (!artifact) return;
+        openedDeepLinkRef.current = entry.artifactId;
         if (entry.hubTabId) setActiveHubTabId(entry.hubTabId);
         if (entry.workspaceId) {
           setSelectedWorkspaceId(entry.workspaceId);
-          replaceWorkspaceLocation(entry.workspaceId);
           void loadWorkspace(entry.workspaceId);
         }
-        if (entry.kind === "artifact-tab") studio.openTab(artifact);
-        else studio.openSplit(artifact);
+        replaceWorkspaceLocation(entry.workspaceId, entry.artifactId);
+        void requestArtifactOpen(entry.artifactId, "none", entry.kind === "artifact-tab" ? "tab" : "split")
+          .catch(() => toast.error("That work could not be opened."));
         return;
       }
       studio.closeStudio();
@@ -3463,6 +3445,7 @@ export function SpectraShell({
   }
 
   function setActiveHubDestination(label: string, workspaceId?: string) {
+    cancelArtifactOpen();
     studio.closeStudio();
     if (activeHubTabId && hubTabs.some((tab) => tab.id === activeHubTabId)) {
       setHubTabs((current) =>
@@ -3488,6 +3471,7 @@ export function SpectraShell({
   }
 
   function goToWorkspaceHub(workspaceId: string) {
+    cancelArtifactOpen();
     const target = workspaces.find((item) => item._id === workspaceId);
     const next =
       hubTabs.find((tab) => tab.workspaceId === workspaceId) ??
@@ -3508,6 +3492,7 @@ export function SpectraShell({
   }
 
   function goToHomeHub() {
+    cancelArtifactOpen();
     const home = hubTabs.find((tab) => !tab.workspaceId) ?? workspaceHubTab();
     if (!hubTabs.some((tab) => tab.id === home.id))
       setHubTabs((current) => [...current, home]);
@@ -3519,6 +3504,7 @@ export function SpectraShell({
   }
 
   function activateHubTab(tabId: string) {
+    cancelArtifactOpen();
     const tab = hubTabs.find((item) => item.id === tabId);
     if (!tab) return;
     setActiveHubTabId(tabId);
@@ -3536,6 +3522,7 @@ export function SpectraShell({
   }
 
   function addHomeHubTab() {
+    cancelArtifactOpen();
     const next = workspaceHubTab();
     setHubTabs((current) => [...current, next]);
     setActiveHubTabId(next.id);
@@ -3577,6 +3564,7 @@ export function SpectraShell({
   }
 
   function closeArtifactTab(artifactId: string) {
+    cancelArtifactOpen();
     const closesFinalArtifact = studio.tabs.length === 1;
     const fallbackArtifactId =
       studio.activeArtifactId === artifactId
@@ -3828,28 +3816,13 @@ export function SpectraShell({
           importJobId: beginning.jobId,
         }).catch(() => undefined);
       }
-      const refreshed = await loadOverview(selectedWorkspaceId, true);
+      await loadOverview(selectedWorkspaceId, true);
       // The overview is intentionally summary-only and does not carry the
       // document body. Hydrate the committed artifact before mounting the
       // collaborative editor, otherwise its empty/default document can be
       // checkpointed over the just-imported rich snapshot.
-      const imported = await getSpectraArtifact(created.artifactId)
-        .then((result) => result.artifact)
-        .catch(() =>
-          refreshed?.artifacts.find(
-            (work) => work._id === created.artifactId,
-          ),
-        );
-      if (imported) {
-        setHydratedArtifacts((current) => ({
-          ...current,
-          [imported._id]: imported,
-        }));
-        setPendingHydratedOpen({
-          artifactId: imported._id,
-          historyMode: "push",
-        });
-      }
+      await requestArtifactOpen(created.artifactId)
+        .catch(() => toast.error("The import was saved, but its editor could not be opened. Open it again from Library."));
       if (completedImport.status === "awaiting_commit") {
         toast.warning(
           `${title} is available in ${selectedWorkspaceId ? "this workspace" : "your Library"}; its import history is still being saved.`,

@@ -45,6 +45,46 @@ Private reproducible evidence: `.spectra-local/launch-s11/performance/measure-lo
 - `git diff --check`: passed.
 - No full suite, full typecheck, Next build, browser mutation, backend publication, native Office or production proof in this unit. Profile A slot requested through coordinator; no competing browser or service started.
 
-## Next bounded unit
+## Unit 2: release closed bodies and fence selected opens
 
-Repair shell retained bodies and stale selected-open requests, while preserving mounted tabs/tiles, exact content (including empty/shorter revisions), current authority and live collaboration. Measure retained serialized fixture bytes and request counts deterministically; obtain cold/warm live browser evidence when RUNTIME allocates a slot. Remaining broader work: module-level overview/workspace TTL caches and account boundaries, expensive live-model hydration, retained echo hints, real subscriptions/worker/blob lifecycle measurements. This report is not a launch-readiness verdict.
+Status: implementation prepared; final validation pending the coordinator's shared dependency hold. Unit 1 is committed as `03e4d429`.
+
+The baseline has two independent lifetime failures. `hydratedArtifacts` only grows, and detail reads also insert complete bodies into overview and workspace rows. Returning to a closed artifact can therefore reuse an old body and old permissions indefinitely. Separately, selected opens use independent promises; a late response can open A after B or after closing the studio. The old `hydrated ?? listed` merge also masks freshly read canonical content.
+
+The shell now retains complete bodies only for explicit open work and the pending selected-open handoff. Closed overview/workspace rows keep their metadata; settled AI preview bodies are released too. Active previews retain their existing behavior. The helpers preserve object references for open content and unchanged state, and never mutate the original cached response. Explicitly denied/deleted details are released.
+
+Selected opens use the existing `createLatestStudioLoad` cancellation and in-flight coalescing contract through a small hook. Every completed reopen revalidates through the artifact endpoint; no completed-body cache is added. Closing, switching hubs, navigating history, or unmounting fences pending responses. Follow intent is captured before asynchronous loading. Imports still hydrate the committed artifact before mounting, and an editor-open error after a saved import is reported as an opening failure. Restored work and tiles are not mounted from summary-only rows; missing restored reads receive AbortSignals. The selected/deep-linked request is excluded from the separate restored-work fetch batch to avoid duplicate detail hydration.
+
+Fresh detail remains an indivisible body/version/permission snapshot. A metadata-only list cannot overwrite its role. Focused canonical refresh, lens activation and AI preview/clear updates also refresh retained open data so the initial hydration cannot hide later saved content. Existing editor keys and provider code are unchanged.
+
+Additional exact files: `components/shell-artifact-content.ts`, `components/use-shell-artifact-content.ts`, `components/use-shell-artifact-open.ts`, their two focused test files, and the already reserved shell. No data/api.ts, server/schema, editor/provider, embed or native writer edits.
+
+### Deterministic retention measurement
+
+The dependency-free private `measure-retention.cjs` uses 24 generated documents, 400 paragraphs each. It compares the baseline shell's append-only record with the production release helpers. Unique content objects are counted once across representations; byte counts are their serialized UTF-8 content, **not V8/browser heap measurements**.
+
+| State after visiting 24 documents | Retained bodies | Serialized body bytes | Metadata rows |
+| --- | ---: | ---: | ---: |
+| Baseline, all closed | 24 | 3,975,008 | 24 |
+| Change, two explicit tabs remain open | 2 | 330,784 | 24 |
+| Change, all closed | 0 | 0 | 24 |
+
+One release traversal measured 0.1571 ms; an unchanged warm traversal measured 0.0080 ms and returned the same overview object. These tiny synthetic timings are not artifact-open latency. Private evidence is `retention-measurements.json`. Warm reopen now intentionally performs a fresh authorized read; no network reduction is claimed for that operation. An immutable, versioned body cache would need fresh authorization and a separate cost comparison before introduction.
+
+### Candidate verification and remaining acceptance
+
+- The initial eight new hook/content tests passed, alongside the emitted loading graph test (nine tests total).
+- Coverage subsequently extended to explicit denied/deleted data, canceled unstarted reads and the final same-timestamp permission case. Final rerun awaits the dependency hold being lifted.
+- The subsequent validation attempt failed before test collection: shared `@jridgewell/sourcemap-codec` disappeared; ESLint also could not resolve `@eslint-community/eslint-utils`. The same tools had passed earlier. Coordinator/RUNTIME confirmed a shared dependency deletion incident and ordered all tests stopped. This is infrastructure contamination, not a claimed product-test failure or pass. No dependency install, removal or link recreation was attempted here.
+- New helper tests exercise actual React hooks and pure retention functions, not a live full shell. Current live browser, heap/subscription and production Next acceptance remain unrun. Typecheck and Profile A slots are requested from the coordinator.
+
+### Additional source review and residual units
+
+- S9 DURABLE acceptance task `01a0cb5e-daed-7563-915d-a746b6da993d`, turn `01a0cb5f-951a-7fc0-9b43-051d18da2904`, records the actual 43.68 MB repeated-upload failure, rejected browser digest approach, and switch to the authenticated durable-checkpoint barrier. Keep that server-authoritative save boundary; the current changes do not hash or re-upload artifact bodies.
+- Module-level overview/workspace TTL caches still lack eviction/account-scoped keys; this unit does not alter data/api.ts. Their authority and real payload cost need DATA/SECURITY coordination.
+- Restored tabs still use the existing batched detail-loading strategy. Prioritizing the visible tab and measuring very large simultaneous tile sets is a separate latency unit; arbitrary row/body truncation is not a substitute.
+- Library's `seenRef` retains visited **tree metadata** for drag ancestry. Measure row volume before changing that correctness contract.
+- Python runtime source has explicit termination and blob revocation on timeout, cancel and run-limit paths; retained reusable-worker lifetime and exceptional constructor/callback paths are not live-verified here. EMBEDS owns interactive runtime rendering and lifecycle.
+- S10's full-JSON echo aliases involve save/restore ordering, not this shell store; COLLAB/HISTORY must review them. Real subscription counts and transport memory remain runtime evidence gaps.
+
+This report is not a launch-readiness verdict.

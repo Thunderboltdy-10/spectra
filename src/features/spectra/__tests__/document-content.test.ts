@@ -43,7 +43,7 @@ describe("document content conversion without a studio", () => {
       content: [{ type: "paragraph", attrs: { blockId: "docx:paragraph:a" }, content: [{ type: "text", text: "A" }] }],
     }, previous);
     expect(converted.blocks).toHaveLength(1);
-    expect(converted.nativeBinding).toBe(previous.nativeBinding);
+    expect(Reflect.get(converted, "nativeBinding")).toBe(previous.nativeBinding);
     expect(converted.nativeProjectionComplete).toBe(true);
     expect(JSON.stringify(converted.nativeIntent)).toContain("docx:paragraph:b");
     expect(JSON.stringify(converted.nativeIntent)).toContain("delete-region");

@@ -29,4 +29,6 @@ Initial AI context is compact authorized orientation; model chooses retrieval/sk
 
 ## Acceptance still required
 
+At integration84828047 after controlled dependency restoration, all14discovered changed focused test files passed (137tests,20.88s). Integrated typecheck returned5diagnostics: two fixture unknown-type sites (three errors), a converter preservation assertion property type, and the existing embed nullable value. Owners are repairing these; tests are not a launch verdict. RUNTIME's guarded private full baseline runs separately. Raw logs are under ignored `.spectra-local/launch-s11/integrated-*84828047.log`.
+
 Restore a stable exact-lock test environment and rerun integrated affected checks. Publish only one frozen local backend/frontend revision through RUNTIME, then Profile A visible/invisible/Follow AI, multi-actor/tab editing, native disposable-file crash/retry/round-trip/history, source revocation, embed lifecycle, and cold/warm latency/memory/row-byte/traffic measurements. No production or launch-ready claim has been made.

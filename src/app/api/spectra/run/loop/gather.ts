@@ -32,6 +32,10 @@ export function summarizeArtifact(
     title: artifact.title,
     summary: artifact.summary,
     updatedAt: artifact.updatedAt,
+    ...(artifact.contentAvailable === false ? {
+      contentAvailable: false,
+      metadataIncomplete: artifact.metadataIncomplete === true,
+    } : {}),
     placements: rows(artifact.placements).map((placement) => ({
       workspaceId: placement.workspaceId,
       workspaceTitle: placement.workspaceTitle,
@@ -173,7 +177,29 @@ export async function buildContext(
     | "executionId"
   >,
   prompt = "",
+  options: { mode?: "orientation" | "expanded" } = {},
 ) {
+  const expanded = options.mode !== "orientation";
+  const artifactReads = new Map<string, Promise<unknown>>();
+  const readArtifact = (artifactId: string) => {
+    let pending = artifactReads.get(artifactId);
+    if (!pending) {
+      pending = query<unknown & object, unknown>(
+        expanded ? "spectraArtifacts:get" : "spectraContext:getArtifact",
+        { actorClerkId, artifactId },
+      ).catch(() => null);
+      artifactReads.set(artifactId, pending);
+    }
+    return pending;
+  };
+  const readWorkspace = (workspaceId: string) =>
+    query<unknown & object, unknown>(
+      expanded ? "orgTree:listWorkspaceContents" : "spectraContext:getWorkspace",
+      { actorClerkId, workspaceId, ...(expanded ? { includeDetails: false } : {}) },
+    ).catch(() => null);
+  const hydrate = (artifact: Record<string, unknown>) => expanded
+    ? hydrateArtifactWithLiveContent(artifact)
+    : Promise.resolve(artifact);
   const explicitContextObjects = Array.isArray(body.explicitContextObjects)
     ? body.explicitContextObjects
         .filter(
@@ -222,21 +248,16 @@ export async function buildContext(
           : body.workspaceId
             ? "workspace"
             : "global");
-  const lightweightConversation =
-    /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))[!?.,\s]*$/i.test(
-      prompt.trim(),
-    );
-  // Target resolution always receives breadth. Artifact content remains
-  // shallow here and is hydrated only for the resolved targets below.
-  const shouldLoadArtifactCatalog = true;
-  const shouldLoadWorkspaceMap = true;
+  // Initial turns get authenticated orientation. Discovery and source content
+  // are read by tools when needed; resume callers may retain expanded context.
+  const shouldLoadArtifactCatalog = expanded;
+  const shouldLoadWorkspaceMap = expanded;
   const shouldLoadThreadMap =
-    (focusMode === "global" && !lightweightConversation) ||
+    expanded && (focusMode === "global" ||
     focusMode === "thread" ||
-    explicitContextObjects.some((item) => item.type === "thread");
+    explicitContextObjects.some((item) => item.type === "thread"));
   const shouldLoadActivity =
-    (focusMode === "global" && !lightweightConversation) ||
-    focusMode === "workspace";
+    expanded && (focusMode === "global" || focusMode === "workspace");
   const retrievalTerms = [
     ...new Set(
       prompt
@@ -299,17 +320,10 @@ export async function buildContext(
         }).catch(() => [])
       : Promise.resolve([]),
     body.workspaceId
-      ? query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
-          actorClerkId,
-          workspaceId: body.workspaceId,
-          includeDetails: false,
-        }).catch(() => null)
+      ? readWorkspace(body.workspaceId)
       : Promise.resolve(null),
     body.artifactId
-      ? query<unknown & object, unknown>("spectraArtifacts:get", {
-          actorClerkId,
-          artifactId: body.artifactId,
-        }).catch(() => null)
+      ? readArtifact(body.artifactId)
       : Promise.resolve(null),
     body.threadId
       ? query<unknown & object, unknown>("spectraThreads:get", {
@@ -324,7 +338,7 @@ export async function buildContext(
           limit: 8,
         }).catch(() => [])
       : Promise.resolve([]),
-    lightweightConversation
+    !expanded
       ? Promise.resolve(null)
       : act<unknown & object, unknown>("memory:contextForRun", {
           actorClerkId,
@@ -332,7 +346,7 @@ export async function buildContext(
           workspaceId: body.workspaceId,
           artifactId: body.artifactId,
         }).catch(() => null),
-    body.scopeNodeId
+    expanded && body.scopeNodeId
       ? query<unknown & object, unknown>("orgTree:subtree", {
           actorClerkId,
           nodeId: body.scopeNodeId,
@@ -410,19 +424,13 @@ export async function buildContext(
   const effectiveFocusedArtifact = explicitMutationOnly
     ? null
     : continuationArtifactId && continuationArtifactId !== body.artifactId
-      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
-          actorClerkId,
-          artifactId: continuationArtifactId,
-        }).catch(() => null)
+      ? await readArtifact(continuationArtifactId)
       : focusedArtifact;
   const threadAttachmentArtifact =
     !body.artifactId &&
     continuedArtifactId &&
     (!explicitMutationOnly || requestedMutationArtifactIds.includes(continuedArtifactId))
-      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
-          actorClerkId,
-          artifactId: continuedArtifactId,
-        }).catch(() => null)
+      ? await readArtifact(continuedArtifactId)
       : null;
   const durableSelectedArtifactIds = [
     ...new Set([
@@ -432,25 +440,19 @@ export async function buildContext(
     ]),
   ].filter((id) => !explicitlyExcludedArtifactIds.has(id)).slice(0, 24);
   const selectedRows = await Promise.all(
-    durableSelectedArtifactIds.map((artifactId) =>
-      query<unknown & object, unknown>("spectraArtifacts:get", {
-        actorClerkId,
-        artifactId,
-      }).catch(() => null),
-    ),
+    durableSelectedArtifactIds.map(readArtifact),
   );
-  // Convex spectraArtifacts.content can lag the collaboration room (projection
-  // races / omitted projections). Prefer live Yjs for focused + selected
-  // artifacts so just-saved editor state is what the model reviews.
+  // Expanded context reads live editor state. Orientation carries only identity;
+  // the read/write tools hydrate the current content at the execution boundary.
   const [liveFocusedArtifact, ...liveSelectedRows] = await Promise.all([
     effectiveFocusedArtifact && typeof effectiveFocusedArtifact === "object"
-      ? hydrateArtifactWithLiveContent(
+      ? hydrate(
           effectiveFocusedArtifact as Record<string, unknown>,
         )
       : Promise.resolve(null),
     ...selectedRows.map((row) =>
       row && typeof row === "object"
-        ? hydrateArtifactWithLiveContent(row as Record<string, unknown>)
+        ? hydrate(row as Record<string, unknown>)
         : Promise.resolve(null),
     ),
   ]);
@@ -490,16 +492,13 @@ export async function buildContext(
     : explicitlyNamedExistingArtifactId(targetingPrompt, baseArtifacts);
   const namedExistingArtifact =
     namedExistingArtifactId && namedExistingArtifactId !== effectiveArtifactId
-      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
-          actorClerkId,
-          artifactId: namedExistingArtifactId,
-        }).catch(() => null)
+      ? await readArtifact(namedExistingArtifactId)
       : null;
   const resolvedFocusedArtifact =
     explicitMutationOnly
       ? hydratedFocusedArtifact
       : namedExistingArtifact && typeof namedExistingArtifact === "object"
-      ? await hydrateArtifactWithLiveContent(
+      ? await hydrate(
           namedExistingArtifact as Record<string, unknown>,
         )
       : hydratedFocusedArtifact;
@@ -561,7 +560,7 @@ export async function buildContext(
     ]),
   ].slice(0, 12);
   const linkRows = await Promise.all(
-    linkedContextIds.map(async (artifactId) => ({
+    (expanded ? linkedContextIds : []).map(async (artifactId) => ({
       artifactId,
       links: rows(
         await query<unknown & object, unknown>(
@@ -589,13 +588,7 @@ export async function buildContext(
         (id): id is string => typeof id === "string" && id !== body.workspaceId,
       )
       .slice(0, 3)
-      .map((workspaceId) =>
-        query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
-          actorClerkId,
-          workspaceId,
-          includeDetails: false,
-        }).catch(() => null),
-      ),
+      .map(readWorkspace),
   );
   const explicitWorkspaceObjectsById = new Map(
     explicitWorkspaceDetails.flatMap((detail) => {
@@ -629,7 +622,7 @@ export async function buildContext(
       )
       .slice(0, 3)
       .map((threadId) =>
-        query<unknown & object, unknown>("spectraThreads:get", {
+        query<unknown & object, unknown>(expanded ? "spectraThreads:get" : "spectraThreads:getSummary", {
           actorClerkId,
           threadId,
         }).catch(() => null),
@@ -673,7 +666,15 @@ export async function buildContext(
           : "visible",
     ]),
   ) as Record<string, "open" | "selected" | "explicit" | "visible">;
-  const workspaces = rows(workspaceRows).map((item) => ({
+  const authorizedWorkspaces = [
+    ...rows(workspaceRows),
+    ...[workspace, ...explicitWorkspaceDetails].flatMap((detail) => {
+      const record = detail && typeof detail === "object" ? detail as Record<string, unknown> : null;
+      return record?.workspace && typeof record.workspace === "object"
+        ? [record.workspace as Record<string, unknown>] : [];
+    }),
+  ];
+  const workspaces = [...new Map(authorizedWorkspaces.map((item) => [item._id, item])).values()].map((item) => ({
     id: item._id,
     title: item.title,
     description: item.description,
@@ -749,7 +750,15 @@ export async function buildContext(
             .filter((item) => item.id),
         }
       : null;
-  const threads = rows(threadRows)
+  const authorizedThreads = [
+    ...rows(threadRows),
+    ...[threadDetail, ...explicitThreadDetails].flatMap((detail) => {
+      const record = detail && typeof detail === "object" ? detail as Record<string, unknown> : null;
+      return record?.thread && typeof record.thread === "object"
+        ? [record.thread as Record<string, unknown>] : [];
+    }),
+  ];
+  const threads = [...new Map(authorizedThreads.map((item) => [item._id, item])).values()]
     .map((item) => ({
       id: item._id,
       title: item.title,
@@ -974,7 +983,14 @@ export async function buildContext(
     selectedArtifactIds: ownedSelectedArtifactIds,
     focusMode: contextFocusMode,
     currentLibraryLocation: libraryLocation,
-    packet: contextPacket,
+    packet: {
+      ...contextPacket,
+      contextMode: expanded ? "expanded" : "orientation",
+      omitted: {
+        ...contextPacket.omitted,
+        ...(expanded ? {} : { artifactContents: true, workspaceDiscovery: true, memoryRetrieval: true }),
+      },
+    },
     memoryRetrieval:
       longTermMemory && typeof longTermMemory === "object"
         ? (longTermMemory as Record<string, unknown>)

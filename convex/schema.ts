@@ -947,6 +947,7 @@ export default defineSchema({
     .index("by_source_identity", ["integrationId", "sourceIdentityKey"])
     .index("by_integration_type", ["integrationId", "recordType"])
     .index("by_account_type", ["mappedAccountId", "recordType"])
+    .index("by_visibility_membership", ["integrationId", "providerClassId", "academicPeriodKey", "mappedAccountId", "recordType"])
     .index("by_class_type", ["providerClassId", "recordType"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),
 

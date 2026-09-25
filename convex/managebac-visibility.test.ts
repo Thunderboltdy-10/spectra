@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
-import { canReadManagebacRecord, getReadableManagebacSourceRecord } from "./managebacVisibility";
+import { canReadManagebacRecord, createManagebacVisibilityReader, getReadableManagebacSourceRecord } from "./managebacVisibility";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -238,6 +238,38 @@ describe("current single-record ManageBac visibility", () => {
       await ctx.db.insert("externalRecords", body);
     });
     expect(await f.read()).toBe(true);
+  });
+
+  it("shares identity and exact class reads within one multi-record query only", async () => {
+    const f = await fixture();
+    const result = await f.t.run(async ctx => {
+      const source = (await ctx.db.get(f.recordId))!;
+      const { _id, _creationTime, ...body } = source;
+      void _id; void _creationTime;
+      const ids = [f.recordId];
+      for (let i = 0; i < 3; i++) ids.push(await ctx.db.insert("externalRecords", { ...body, providerRecordId: `resource-${i + 2}` }));
+      const queries: Record<string, number> = {};
+      const observedCtx = { ...ctx, db: new Proxy(ctx.db, {
+        get(target, key) {
+          if (key === "query") return (...args: Parameters<typeof ctx.db.query>) => {
+            queries[args[0]] = (queries[args[0]] ?? 0) + 1;
+            return target.query(...args);
+          };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) };
+      const reader = createManagebacVisibilityReader(observedCtx, f.actor);
+      const allowed = await Promise.all(ids.map(async id => Boolean(await reader.readSource(`managebac:${id}`))));
+      return { allowed, queries };
+    });
+    expect(result.allowed).toEqual([true, true, true, true]);
+    expect(result.queries).toMatchObject({
+      schoolMemberships: 1, schoolIntegrations: 1, externalIdentityMappings: 1,
+      externalRecords: 3, managebacClassSelections: 1,
+    });
+    await f.t.run(ctx => ctx.db.patch(f.mappingId, { status: "revoked" }));
+    expect(await f.read()).toBe(false);
   });
 
   it.each(["", "managebac:", "managebac:old-provider-key", "managebac:a:b", "other:source", " managebac:source"])("denies unresolved provenance %s", async sourceId => {

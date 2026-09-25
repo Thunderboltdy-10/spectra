@@ -1,6 +1,6 @@
 # S11 memory source-authority follow-up
 
-Status: **source candidate, validation pending the guarded focused slot**. Requires SECURITY's `6f7b7676` helper commit (`managebacVisibility.ts` and its fixtures). No schema change or backend publication.
+Status: **31/31 memory tests, 38/38 visibility tests and 7/7 authority tests passed; scoped ESLint passed** under the RUNTIME guard and assigned focused slot. Requires SECURITY's `6f7b7676` helper commit (`managebacVisibility.ts` and its fixtures). No memory schema change or backend publication.
 
 The follow-up also consumes SECURITY `328890bb` (its approved exact membership index and visibility-reader factory). Memory creates one lazy reader per authenticated list/export/context invocation, reusing actor/integration/mapping and class-period checks across distinct source records. No reader or claim-access result survives that invocation. The memory patch itself adds no schema field; the dependency does add its documented index.
 
@@ -19,4 +19,6 @@ node node_modules/vitest/vitest.mjs run convex/memory-retrieval.test.ts convex/m
 node node_modules/eslint/bin/eslint.js convex/memory.ts convex/memory-retrieval.test.ts --max-warnings=0
 ```
 
-Use only the RUNTIME-provided guard and scheduled slot. The original 23/23 result and 23-call ledger in `S11-CONTEXT.md` describe the earlier commit; they are not validation of this follow-up. Removing one authored evidence category also removes its fallback query. ManageBac checks add real source/mapping/membership reads; no cost or latency claim is made before measurement.
+Use only the RUNTIME-provided guard and scheduled slot. The original 23/23 result and 23-call ledger in `S11-CONTEXT.md` describe the earlier commit. The current 21-versus-221-evidence fixture returned identical results and **22 API calls, 22 documents and 13,646 UTF-8 JSON row bytes** in both cases. Removing one authored evidence category removed its fallback query; absolute bytes can vary slightly with generated IDs/timestamps between runs.
+
+The direct memory handler fixture with four distinct ManageBac sources made one integration query, one identity-mapping query, three exact membership probes and one selection query, then correctly denied the next invocation after mapping revocation. Source rows still receive current reads. These are returned-row/query observations, not engine scans or billing. Logs: `.spectra-local/launch-s11/context/context-guarded-tests.log` and `context-guarded-lint.log`. No full typecheck/build or served ManageBac/backend acceptance was performed.

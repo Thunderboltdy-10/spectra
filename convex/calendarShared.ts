@@ -212,14 +212,14 @@ export async function upsertSourceCalendarItem(
     revision: (existing?.revision ?? 0) + 1,
     updatedAt: now,
   };
+  let itemId: Id<"calendarItems">;
+  let created = false;
   if (
     existing?.status === "active" &&
     existing.sourceLocked &&
     existing.sourceHash === input.sourceHash
   ) {
-    // An unchanged provider hash does not authorize rewriting the derived
-    // schedulable task: a person may have edited that unlocked copy locally.
-    // Refresh only provenance freshness on the source-owned calendar row.
+    // Freshness-only syncs do not advance the source row's edit revision.
     if (
       existing.sourceFreshAt !== input.fetchedAt ||
       existing.sourceUrl !== input.sourceUrl ||
@@ -232,38 +232,8 @@ export async function upsertSourceCalendarItem(
         sourceCapabilityState:
           time.precision === "unknown" ? "partial" : "available",
       });
-    if (!isDeadline)
-      return { itemId: existing._id, created: false, precision: time.precision };
-    const taskSourceKey = `${input.sourceKey}:task`.slice(0, 500);
-    const unchangedTask = await ctx.db
-      .query("calendarItems")
-      .withIndex("by_source_key", (q) =>
-        q.eq("ownerAccountId", input.ownerAccountId).eq("sourceKey", taskSourceKey),
-      )
-      .unique();
-    if (
-      unchangedTask?.status === "active" &&
-      unchangedTask.sourceHash === input.sourceHash
-    ) {
-      if (
-        unchangedTask.sourceFreshAt !== input.fetchedAt ||
-        unchangedTask.sourceUrl !== input.sourceUrl
-      )
-        await ctx.db.patch(unchangedTask._id, {
-          sourceFreshAt: input.fetchedAt,
-          sourceUrl: input.sourceUrl,
-        });
-      return {
-        itemId: existing._id,
-        taskItemId: unchangedTask._id,
-        created: false,
-        precision: time.precision,
-      };
-    }
-  }
-  let itemId: Id<"calendarItems">;
-  let created = false;
-  if (existing) {
+    itemId = existing._id;
+  } else if (existing) {
     await ctx.db.patch(existing._id, patch);
     itemId = existing._id;
   } else {
@@ -288,15 +258,7 @@ export async function upsertSourceCalendarItem(
       q.eq("ownerAccountId", input.ownerAccountId).eq("sourceKey", taskSourceKey),
     )
     .unique();
-  const taskPatch = {
-    title,
-    notes: patch.notes,
-    kind: "task" as const,
-    allDay: false,
-    timezone: time.timezone,
-    timePrecision: "unknown" as const,
-    status: "active" as const,
-    sourceLocked: false,
+  const taskSourcePatch = {
     sourceProvider: "managebac",
     sourceRecordId: input.sourceRecordId,
     sourceKey: taskSourceKey,
@@ -306,18 +268,56 @@ export async function upsertSourceCalendarItem(
     sourceCapabilityState: "available" as const,
     officialDeadlineItemId: itemId,
     classId: patch.classId,
-    revision: (existingTask?.revision ?? 0) + 1,
-    updatedAt: now,
   };
-  const taskItemId = existingTask
-    ? (await ctx.db.patch(existingTask._id, taskPatch), existingTask._id)
-    : await ctx.db.insert("calendarItems", {
-        ownerAccountId: input.ownerAccountId,
-        schoolId: input.schoolId,
+  let taskItemId: Id<"calendarItems">;
+  if (existingTask) {
+    // The locked row is also the previous source baseline. Advance copied
+    // text only when it still matches that baseline; a personal edit (even
+    // clearing notes) wins. Without a matching baseline, preserve the copy.
+    // Status and scheduling always belong to the person, across every hash.
+    const sourceChanged = existingTask.sourceHash !== input.sourceHash;
+    const canMergeText =
+      sourceChanged && existing?.sourceLocked &&
+      existingTask.sourceHash === existing.sourceHash;
+    const taskPatch = {
+      ...taskSourcePatch,
+      ...(canMergeText && existingTask.title === existing.title ? { title } : {}),
+      ...(canMergeText && existingTask.notes === existing.notes
+        ? { notes: patch.notes }
+        : {}),
+    };
+    if (
+      Object.entries(taskPatch).some(
+        ([key, value]) => existingTask[key as keyof typeof existingTask] !== value,
+      )
+    ) {
+      await ctx.db.patch(existingTask._id, {
         ...taskPatch,
-        linkedArtifactIds: [],
-        createdBy: "source",
-        createdAt: now,
+        ...(sourceChanged
+          ? { revision: existingTask.revision + 1, updatedAt: now }
+          : {}),
       });
+    }
+    taskItemId = existingTask._id;
+  } else {
+    taskItemId = await ctx.db.insert("calendarItems", {
+      ownerAccountId: input.ownerAccountId,
+      schoolId: input.schoolId,
+      ...taskSourcePatch,
+      title,
+      notes: patch.notes,
+      kind: "task",
+      allDay: false,
+      timezone: time.timezone,
+      timePrecision: "unknown",
+      status: "active",
+      sourceLocked: false,
+      revision: 1,
+      updatedAt: now,
+      linkedArtifactIds: [],
+      createdBy: "source",
+      createdAt: now,
+    });
+  }
   return { itemId, taskItemId, created, precision: time.precision };
 }

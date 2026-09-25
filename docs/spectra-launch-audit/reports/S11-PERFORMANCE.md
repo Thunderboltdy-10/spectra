@@ -47,7 +47,7 @@ Private reproducible evidence: `.spectra-local/launch-s11/performance/measure-lo
 
 ## Unit 2: release closed bodies and fence selected opens
 
-Status: implementation prepared; final validation pending the coordinator's shared dependency hold. Unit 1 is committed as `03e4d429`.
+Status: candidate source committed as `6ce896a5`; final validation pending the coordinator's shared dependency hold. Unit 1 is committed as `03e4d429`. Neither candidate is a release verdict.
 
 The baseline has two independent lifetime failures. `hydratedArtifacts` only grows, and detail reads also insert complete bodies into overview and workspace rows. Returning to a closed artifact can therefore reuse an old body and old permissions indefinitely. Separately, selected opens use independent promises; a late response can open A after B or after closing the studio. The old `hydrated ?? listed` merge also masks freshly read canonical content.
 
@@ -77,6 +77,7 @@ One release traversal measured 0.1571 ms; an unchanged warm traversal measured 0
 - Coverage subsequently extended to explicit denied/deleted data, canceled unstarted reads and the final same-timestamp permission case. Final rerun awaits the dependency hold being lifted.
 - The subsequent validation attempt failed before test collection: shared `@jridgewell/sourcemap-codec` disappeared; ESLint also could not resolve `@eslint-community/eslint-utils`. The same tools had passed earlier. Coordinator/RUNTIME confirmed a shared dependency deletion incident and ordered all tests stopped. This is infrastructure contamination, not a claimed product-test failure or pass. No dependency install, removal or link recreation was attempted here.
 - New helper tests exercise actual React hooks and pure retention functions, not a live full shell. Current live browser, heap/subscription and production Next acceptance remain unrun. Typecheck and Profile A slots are requested from the coordinator.
+- A private `browser-metrics.js` Playwright CLI function is prepared for the assigned Profile A tab. It samples CDP heap/DOM/listener metrics and observed Resource Timing bytes, then detaches its CDP session. It has not been executed and is not live evidence.
 
 ### Additional source review and residual units
 

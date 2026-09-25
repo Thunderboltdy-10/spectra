@@ -48,90 +48,106 @@ export function WorkbenchInspectorTabs({
   work: SpectraArtifact;
   overview: ReactNode;
 }) {
-  const [tab, setTab] = useState<WorkbenchInspectorTab>("overview");
+  const [tabSelection, setTabSelection] = useState<{ workId: string; tab: WorkbenchInspectorTab }>({ workId: work._id, tab: "overview" });
+  const tab = tabSelection.workId === work._id ? tabSelection.tab : "overview";
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
   const [versions, setVersions] = useState<SpectraArtifactVersionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const historyRequestRef = useRef<AbortController | null>(null);
-  const refreshRequestRef = useRef<AbortController | null>(null);
+  const commentsRequestRef = useRef<AbortController | null>(null);
+  const activeWorkRef = useRef<string | null>(null);
   const [includeResolved, setIncludeResolved] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [commentBody, setCommentBody] = useState("");
   const [loading, setLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [loadedWorkId, setLoadedWorkId] = useState<string | null>(null);
+  const [loadedCommentsWorkId, setLoadedCommentsWorkId] = useState<string | null>(null);
+  const [loadedHistoryWorkId, setLoadedHistoryWorkId] = useState<string | null>(null);
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
 
   useEffect(() => {
-    setTab("overview");
+    activeWorkRef.current = work._id;
+    setTabSelection({ workId: work._id, tab: "overview" });
     setComments([]);
     setVersions([]);
     setHistoryCursor(null);
     setHistoryLoading(false);
     setHistoryError(null);
+    setLoading(false);
+    setCommentsError(null);
     setCommentBody("");
-    setLoadedWorkId(null);
+    setLoadedCommentsWorkId(null);
+    setLoadedHistoryWorkId(null);
     setSelectedCommentId(null);
     return () => {
+      activeWorkRef.current = null;
       historyRequestRef.current?.abort();
-      refreshRequestRef.current?.abort();
+      commentsRequestRef.current?.abort();
     };
   }, [work._id]);
 
-  const refresh = useCallback(async () => {
-    refreshRequestRef.current?.abort();
-    historyRequestRef.current?.abort();
+  const refreshComments = useCallback(async () => {
+    if (activeWorkRef.current !== work._id) return;
+    commentsRequestRef.current?.abort();
     const request = new AbortController();
-    refreshRequestRef.current = request;
-    setHistoryCursor(null);
-    setHistoryLoading(false);
-    setHistoryError(null);
+    commentsRequestRef.current = request;
+    setCommentsError(null);
     setLoading(true);
     try {
-      const [commentResult, versionResult] = await Promise.all([
-        getSpectraArtifactComments(work._id, true),
-        getSpectraArtifactVersions(work._id, 20, undefined, request.signal),
-      ]);
+      const commentResult = await getSpectraArtifactComments(work._id, true);
       if (request.signal.aborted) return;
       setComments(commentResult.comments);
-      setVersions(versionResult.versions);
-      setHistoryCursor(versionResult.isDone ? null : versionResult.continueCursor);
-      setLoadedWorkId(work._id);
+      setLoadedCommentsWorkId(work._id);
     } catch (error) {
       if (request.signal.aborted) return;
-      setHistoryError("Could not load version history. Try again.");
-      toast.error(error instanceof Error ? error.message : "Could not load inspector activity.");
+      setCommentsError(error instanceof Error ? error.message : "Could not load comments.");
     } finally {
-      if (!request.signal.aborted) setLoading(false);
+      if (!request.signal.aborted) {
+        commentsRequestRef.current = null;
+        setLoading(false);
+      }
     }
   }, [work._id]);
 
-  const loadOlderHistory = useCallback(async () => {
-    if (!historyCursor) return;
+  const loadHistory = useCallback(async (cursor?: string) => {
+    if (activeWorkRef.current !== work._id) return;
     historyRequestRef.current?.abort();
     const request = new AbortController();
     historyRequestRef.current = request;
     setHistoryLoading(true);
     setHistoryError(null);
+    if (cursor === undefined) {
+      setVersions([]);
+      setHistoryCursor(null);
+    }
     try {
-      const page = await getSpectraArtifactVersions(work._id, 20, historyCursor, request.signal);
+      const page = await getSpectraArtifactVersions(work._id, 20, cursor, request.signal);
       if (request.signal.aborted) return;
-      setVersions(current => [...new Map([...current, ...page.versions].map(version => [version._id, version])).values()]);
+      setVersions(current => cursor === undefined ? page.versions : [...new Map([...current, ...page.versions].map(version => [version._id, version])).values()]);
       setHistoryCursor(page.isDone ? null : page.continueCursor);
+      setLoadedHistoryWorkId(work._id);
     } catch (error) {
       if (!request.signal.aborted)
-        setHistoryError(error instanceof Error ? error.message : "Could not load older versions.");
+        setHistoryError(error instanceof Error ? error.message : "Could not load version history.");
     } finally {
-      if (!request.signal.aborted) setHistoryLoading(false);
+      if (!request.signal.aborted) {
+        historyRequestRef.current = null;
+        setHistoryLoading(false);
+      }
     }
-  }, [historyCursor, work._id]);
+  }, [work._id]);
 
   useEffect(() => {
-    if (tab === "overview" || loadedWorkId === work._id) return;
-    void refresh();
-  }, [loadedWorkId, refresh, tab, work._id]);
+    if (tab === "comments" && loadedCommentsWorkId !== work._id &&
+        commentsRequestRef.current?.signal.aborted !== false) void refreshComments();
+  }, [loadedCommentsWorkId, refreshComments, tab, work._id]);
+  useEffect(() => {
+    if (tab === "history" && loadedHistoryWorkId !== work._id &&
+        historyRequestRef.current?.signal.aborted !== false) void loadHistory();
+  }, [loadedHistoryWorkId, loadHistory, tab, work._id]);
 
   const visibleComments = useMemo(
     () => comments.filter((comment) =>
@@ -162,7 +178,7 @@ export function WorkbenchInspectorTabs({
         mentionedAccountIds: [],
       });
       setCommentBody("");
-      await refresh();
+      await refreshComments();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add this comment.");
     } finally {
@@ -178,7 +194,7 @@ export function WorkbenchInspectorTabs({
         commentId: comment._id,
         resolved: comment.status !== "resolved",
       });
-      await refresh();
+      await refreshComments();
     } finally {
       setBusy(null);
     }
@@ -201,7 +217,7 @@ export function WorkbenchInspectorTabs({
           regionId: "work:root",
           fallbackExcerpt: `Whole ${work.title}`,
         });
-        await refresh();
+        await refreshComments();
       } finally {
         setBusy(null);
       }
@@ -230,7 +246,7 @@ export function WorkbenchInspectorTabs({
             type="button"
             role="tab"
             aria-selected={tab === key}
-            onClick={() => setTab(key)}
+            onClick={() => setTabSelection({ workId: work._id, tab: key })}
             className={`h-9 border-b-2 text-caption font-medium transition ${tab === key ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"}`}
           >
             {tabLabels[key]}
@@ -252,7 +268,8 @@ export function WorkbenchInspectorTabs({
           </div>
           <div className="mt-3 space-y-2">
             {loading ? <LoadingState /> : null}
-            {!loading && visibleComments.length === 0 ? <EmptyState icon={MessageSquare} text="No comments yet. Add a general comment or select content in the editor to anchor one precisely." /> : null}
+            {!loading && !commentsError && visibleComments.length === 0 ? <EmptyState icon={MessageSquare} text="No comments yet. Add a general comment or select content in the editor to anchor one precisely." /> : null}
+            {commentsError ? <div role="alert" className="text-micro text-[var(--text-secondary)]"><p>{commentsError}</p><button type="button" disabled={loading} onClick={() => void refreshComments()} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3">Retry comments</button></div> : null}
             {visibleComments.map((comment) => {
               const orphaned = comment.status === "orphaned";
               return (
@@ -294,8 +311,7 @@ export function WorkbenchInspectorTabs({
             ))}
           </div>
           <div className="mt-3 space-y-1">
-            {loading ? <LoadingState /> : null}
-            {!loading && !historyError && history.length === 0 ? <EmptyState icon={Clock3} text="No matching loaded history." /> : null}
+            {!historyLoading && !historyError && history.length === 0 ? <EmptyState icon={Clock3} text="No matching loaded history." /> : null}
             {history.map((entry) => (
               <div key={entry.id} className="flex gap-2.5 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
                 {entry.category === "ai" ? <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" /> : <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />}
@@ -303,8 +319,8 @@ export function WorkbenchInspectorTabs({
               </div>
             ))}
             {historyError ? <p role="alert" className="py-2 text-micro text-[var(--text-secondary)]">{historyError}</p> : null}
-            {historyLoading ? <LoadingState /> : !loading && (historyCursor || historyError) ? (
-              <button type="button" onClick={() => void (historyCursor ? loadOlderHistory() : refresh())} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3 text-micro text-[var(--text-primary)]">
+            {historyLoading ? <LoadingState /> : historyCursor || historyError ? (
+              <button type="button" onClick={() => void loadHistory(historyCursor ?? undefined)} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3 text-micro text-[var(--text-primary)]">
                 {historyError ? "Retry history" : "Load older versions"}
               </button>
             ) : null}

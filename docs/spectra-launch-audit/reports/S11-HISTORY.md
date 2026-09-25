@@ -32,6 +32,8 @@ The comparison overlay fetches the first metadata page and selects its first ent
 
 The history cases in `src/features/spectra/__tests__/api-route.test.ts` cover cursor forwarding, selected-detail routing, and invalid page-size rejection. `workbench-history-pagination.test.tsx` covers manual page loading, failed-page retry without losing metadata, and stale artifact responses even when the mocked reader ignores abort.
 
+Coordinator review of `15fe9531` identified that the workbench still fetched comments and history together. The follow-up separates their requests, loaded-source markers and error/loading states: opening Comments never fetches history, opening History never fetches comments, and comment create/resolve/reanchor refreshes only comments. Already loaded or pending data is reused when switching tabs. The selected tab is scoped to its artifact so switching artifacts cannot trigger the previous artifact's tab before the reset effect runs. Added unexecuted regression cases verify demand separation, comment-mutation refresh, and completion/pending requests across tab switches. This correction is confined to the workbench, its focused tests and this report.
+
 - Paginate newest-to-oldest with finite count/byte budget, equal timestamps, inserted newer versions and no overlap; include more than 100 versions.
 - List responses omit before/after, full provenance, run bodies and spill/native payloads; hydration only on exact selection.
 - Detail rejects a version belonging to another artifact and unauthorized, revoked or deleted sources; read-only quiz history stays hidden; timetable snapshots remain projected.

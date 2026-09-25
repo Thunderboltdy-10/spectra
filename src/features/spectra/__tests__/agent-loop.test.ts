@@ -2,6 +2,76 @@ import { describe, expect, it, vi } from "vitest";
 import { runSpectraAgentLoop } from "../ai/agent-loop";
 
 describe("runSpectraAgentLoop", () => {
+  it("gives a read cycle actionable feedback while keeping all requested writes available", async () => {
+    const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"deck"}' };
+    const write = (id: string) => ({ id, name: "propose_operation", arguments: JSON.stringify({ id }) });
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...read, id: "repeat-1" }] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...read, id: "repeat-2" }] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [write("deck-citations")] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [write("guide-citations")] })
+      .mockResolvedValueOnce({ text: "Added citations to the deck and guide.", toolCalls: [] });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true });
+    const result = await runSpectraAgentLoop({
+      messages: [{ role: "user", content: "Add citations to both the deck and guide." }],
+      requestTurn, executeTool,
+      isParallelSafeTool: (call) => call.name === "read_artifact",
+      isMutationTool: (call) => call.name === "propose_operation",
+      isTerminalTool: () => false,
+    });
+    expect(executeTool.mock.calls.map(([call]) => call.id)).toEqual(["read", "deck-citations", "guide-citations"]);
+    expect(requestTurn.mock.calls[3]![0]).toContainEqual(expect.objectContaining({
+      role: "system", content: expect.stringContaining("Continue every unresolved part"),
+    }));
+    expect(result).toMatchObject({ turns: 6, text: "Added citations to the deck and guide." });
+  });
+
+  it("bounds a non-responsive retrieval cycle without replaying reads", async () => {
+    const requestTurn = vi.fn().mockResolvedValue({ text: "", toolCalls: [
+      { id: "read", name: "read_artifact", arguments: '{"artifactId":"deck"}' },
+    ] });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true });
+    await expect(runSpectraAgentLoop({ messages: [], requestTurn, executeTool,
+      isParallelSafeTool: () => true, isTerminalTool: () => false })).rejects.toMatchObject({ name: "SpectraAgentNoProgressError" });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(requestTurn).toHaveBeenCalledTimes(7); // one useful read, four stalled turns, two finalization attempts
+  });
+
+  it("retries one transient read failure with identical arguments", async () => {
+    const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"guide"}' };
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...read, id: "retry" }] })
+      .mockResolvedValueOnce({ text: "Read the guide.", toolCalls: [] });
+    const executeTool = vi.fn().mockRejectedValueOnce(new Error("Temporary connection failure"))
+      .mockResolvedValueOnce({ ok: true, artifact: { id: "guide" } });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool,
+      isParallelSafeTool: () => true, isTerminalTool: () => false });
+    expect(executeTool).toHaveBeenCalledTimes(2);
+    expect(result.text).toBe("Read the guide.");
+  });
+
+  it("does not repeat an unacknowledged mutation as if it were a safe read retry", async () => {
+    const write = { id: "write", name: "write", arguments: '{"id":"guide"}' };
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [write] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...write, id: "retry" }] })
+      .mockResolvedValueOnce({ text: "The write result is unconfirmed.", toolCalls: [] });
+    const executeTool = vi.fn().mockRejectedValue(new Error("Connection lost after sending"));
+    await runSpectraAgentLoop({ messages: [], requestTurn, executeTool,
+      isMutationTool: () => true, isTerminalTool: () => false });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors Stop arriving during a final model response", async () => {
+    const controller = new AbortController();
+    await expect(runSpectraAgentLoop({ messages: [], signal: controller.signal,
+      requestTurn: async () => { controller.abort(); return { text: "Done", toolCalls: [] }; },
+      executeTool: vi.fn(), isTerminalTool: () => false,
+    })).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("feeds back a saved mutation receipt on retry without executing it again", async () => {
     const call = { id: "write", name: "schedule_calendar_task", arguments: '{"planTaskId":"essay"}' };
     const requestTurn = vi.fn().mockResolvedValueOnce({ text: "", toolCalls: [call] })
@@ -132,7 +202,7 @@ describe("runSpectraAgentLoop", () => {
     expect(repeatedResult?.content).not.toContain("large canonical content");
   });
 
-  it("blocks repeated reads of one artifact and asks the agent to use its existing results", async () => {
+  it("allows distinct reads of useful regions in the same artifact", async () => {
     const read = (id: string, blockId: string) => ({
       id,
       name: "read_artifact",
@@ -148,7 +218,9 @@ describe("runSpectraAgentLoop", () => {
         text: "",
         toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }],
       });
-    const executeTool = vi.fn().mockResolvedValue({ ok: true, artifact: { title: "Guide" } });
+    const executeTool = vi.fn(async (call: { arguments: string }) => ({
+      ok: true, artifact: { title: "Guide", block: JSON.parse(call.arguments).blockIds[0] },
+    }));
 
     const result = await runSpectraAgentLoop({
       messages: [{ role: "user", content: "Update the guide" }],
@@ -159,13 +231,7 @@ describe("runSpectraAgentLoop", () => {
     });
 
     expect(result.terminalTool?.name).toBe("submit_plan");
-    expect(executeTool).toHaveBeenCalledTimes(3);
-    expect(requestTurn.mock.calls[4]?.[0]).toContainEqual(
-      expect.objectContaining({
-        role: "tool",
-        content: expect.stringContaining("read_target_budget_reached"),
-      }),
-    );
+    expect(executeTool).toHaveBeenCalledTimes(4);
   });
 
   it("uses one terminal-only recovery turn when the ordinary turn budget is reached", async () => {
@@ -195,7 +261,7 @@ describe("runSpectraAgentLoop", () => {
     const result = await runSpectraAgentLoop({
       messages: [{ role: "user", content: "Review this conversation" }],
       requestTurn,
-      executeTool: vi.fn().mockResolvedValue({ ok: true }),
+      executeTool: vi.fn(async (call: { arguments: string }) => ({ ok: true, thread: JSON.parse(call.arguments) })),
       isParallelSafeTool: (call) => call.name === "read_thread",
       isTerminalTool: (call) => call.name === "submit_plan",
       budget: { maxTurns: 4 },

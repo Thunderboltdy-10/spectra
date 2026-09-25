@@ -102,6 +102,22 @@ function submitFocusedUpdate(blueprintKey: string) {
   }), { status: 200 });
 }
 
+function submitRawPlanResponse(raw: string) {
+  return new Response(JSON.stringify({
+    model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ message: {
+      content: "", tool_calls: [{ id: "plan", type: "function", function: {
+        name: "submit_plan", arguments: raw,
+      } }],
+    } }],
+  }), { status: 200 });
+}
+
+function ordinaryResponse(content: string) {
+  return new Response(JSON.stringify({
+    model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{ message: { content } }],
+  }), { status: 200 });
+}
+
 function setup(
   plan: unknown,
   initialStatus: "queued" | "failed" = "queued",
@@ -436,7 +452,13 @@ function setup(
   });
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.SPECTRA_TEST_INLINE_RUNS = "1";
-  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
+  const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+    model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: {
+      content: "", tool_calls: [{ id: "plan", type: "function", function: {
+        name: "submit_plan", arguments: JSON.stringify(plan),
+      } }],
+    } }],
+  }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return {
     convexQuery,
@@ -449,6 +471,25 @@ function setup(
 }
 
 describe("Spectra run route", () => {
+  it("uses one ordinary model response for a factual answer without proposing work", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{
+        finish_reason: "stop", message: { content: "The Moon reflects sunlight." },
+      }],
+    }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Why can we see the Moon?" }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ type: "final", summary: "The Moon reflects sunlight." }));
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
+    expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraOperations:recordPlan")))
+      .toEqual([expect.arrayContaining([expect.any(String), expect.objectContaining({ operations: [] })])]);
+  });
+
   it("fans independent multi-output study packs into typed parallel workers", async () => {
     const { fetchMock } = setup({});
     fetchMock.mockImplementation(async (_url, init) => {
@@ -1045,7 +1086,7 @@ describe("Spectra run route", () => {
     const raw = JSON.stringify(plan);
     const truncated = raw.slice(0, raw.indexOf("Which study resource") + "Which study resource".length);
     const { convexMutation, fetchMock } = setup(plan);
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "DeepSeek", choices: [{ message: { content: truncated } }] }), { status: 200 }));
+    fetchMock.mockImplementation(async () => submitRawPlanResponse(truncated));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", threadId: "thread-real", prompt: "Create a study resource." }) }));
     expect(response.status).toBe(200);
@@ -1058,7 +1099,7 @@ describe("Spectra run route", () => {
     const raw = JSON.stringify({ ...plan, conversationSummary: "x".repeat(500) });
     const truncated = raw.slice(0, raw.indexOf("What topic") + "What topic should the flashcard deck".length);
     const { convexMutation, fetchMock } = setup(plan);
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "DeepSeek", choices: [{ message: { content: truncated } }] }), { status: 200 }));
+    fetchMock.mockImplementation(async () => submitRawPlanResponse(truncated));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", threadId: "thread-real", prompt: "Flashcard deck" }) }));
     expect(response.status).toBe(200);
@@ -1066,46 +1107,44 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string; outcome?: string }).status === "awaiting_resolution" && (args as { outcome?: string }).outcome === "awaiting_input")).toBe(true);
   });
 
-  it("answers an explicit exact-reply command without invoking the heavy planner", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  it("answers an exact-reply request through one ordinary model turn", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "unused", operations: [] };
     const { convexMutation, fetchMock } = setup(answerPlan);
+    fetchMock.mockImplementation(async () => ordinaryResponse("Ready."));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Reply with exactly: Ready." }) }));
     expect(response.status).toBe(200);
     await response.text();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary === "Ready.")).toBe(true);
-    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
-      { runId: "run-real", stage: "intake", status: "entered" },
-      { runId: "run-real", stage: "plan", status: "entered" },
-      { runId: "run-real", stage: "resolve", status: "skipped", reason: "immediate answer has no mutation stages" },
-      { runId: "run-real", stage: "gather", status: "skipped", reason: "immediate answer has no mutation stages" },
-      { runId: "run-real", stage: "act", status: "skipped", reason: "immediate answer has no mutation stages" },
-      { runId: "run-real", stage: "verify", status: "skipped", reason: "immediate answer has no mutation stages" },
-      { runId: "run-real", stage: "report", status: "entered" },
-    ]);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
   });
 
-  it("answers a greeting without hydrating context or invoking the mutation planner", async () => {
+  it("lets the model answer a greeting without a canned reply", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "unused", operations: [] };
     const { convexMutation, fetchMock } = setup(answerPlan);
+    fetchMock.mockImplementation(async () => ordinaryResponse("Hello. What would you like to work on?"));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Hi" }) }));
     expect(response.status).toBe(200);
     await response.text();
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary?.startsWith("Hi!"))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary === "Hello. What would you like to work on?")).toBe(true);
   });
 
-  it("offers immediate bounded format choices for an underspecified study resource", async () => {
+  it("lets the model clarify an underspecified study resource", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "unused", operations: [] };
     const { convexMutation, fetchMock } = setup(answerPlan);
+    fetchMock.mockImplementation(async () => submitRawPlanResponse(JSON.stringify({
+      decision: "clarify", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0,
+        targetArtifactId: null, targetWorkspaceId: null },
+      finalResponse: "What subject should it cover?", operations: [],
+    })));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Create a study resource for me." }) }));
     expect(response.status).toBe(200);
     await response.text();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { decision?: string }).decision === "clarify")).toBe(true);
   });
 
@@ -1114,7 +1153,7 @@ describe("Spectra run route", () => {
     const { fetchMock } = setup(answerPlan);
     fetchMock.mockReset()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "native unavailable" } }), { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: { content: JSON.stringify(answerPlan) } }] }), { status: 200 }));
+      .mockResolvedValueOnce(ordinaryResponse(answerPlan.finalResponse));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Answer briefly." }) }));
     expect(response.status).toBe(200);
@@ -1136,15 +1175,15 @@ describe("Spectra run route", () => {
     const { convexMutation, fetchMock } = setup(answerPlan);
     fetchMock.mockReset()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "native unavailable" } }), { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "Baidu", choices: [{ message: { content: JSON.stringify(malformed) } }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "Baidu", choices: [{ message: { content: JSON.stringify(answerPlan) } }] }), { status: 200 }));
+      .mockResolvedValueOnce(submitRawPlanResponse(JSON.stringify(malformed)))
+      .mockResolvedValueOnce(ordinaryResponse(answerPlan.finalResponse));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Answer briefly." }) }));
     expect(response.status).toBe(200);
     await response.text();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const repairBody = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { messages?: Array<{ role?: string; content?: string }> };
-    expect(repairBody.messages?.some((message) => message.role === "system" && String(message.content).includes("repairing a previously generated plan"))).toBe(true);
+    expect(repairBody.messages?.some((message) => message.role === "system" && String(message.content).includes("Continue the full request, preserving accepted staged work"))).toBe(true);
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string; finalSummary?: string }).status === "completed" && (args as { finalSummary?: string }).finalSummary === "Recovered cleanly.")).toBe(true);
   });
 
@@ -1165,14 +1204,14 @@ describe("Spectra run route", () => {
       const isRepair = body.messages?.some(
         (message) =>
           message.role === "system" &&
-          String(message.content).includes("repairing a previously generated plan"),
+          String(message.content).includes("Correct the validation issue below using the tools"),
       );
       if (isRepair) {
         return new Response(
           JSON.stringify({
             model: "deepseek/deepseek-v4-pro-20260423",
             provider: "DeepSeek",
-            choices: [{ message: { content: JSON.stringify(answerPlan) } }],
+            choices: [{ message: { content: answerPlan.finalResponse } }],
           }),
           { status: 200 },
         );
@@ -1224,7 +1263,7 @@ describe("Spectra run route", () => {
       return body.messages?.some(
         (message) =>
           message.role === "system" &&
-          String(message.content).includes("repairing a previously generated plan"),
+          String(message.content).includes("Correct the validation issue below using the tools"),
       );
     });
     expect(repairCalls).toHaveLength(1);
@@ -1583,8 +1622,8 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.type === "final")).toBe(true);
   });
 
-  it("commits a staged focused mutation only after the whole-request terminal plan", async () => {
-    const { convexMutation, fetchMock } = setup({});
+  it("commits a staged focused mutation after an ordinary final response without another plan", async () => {
+    const { convexMutation, fetchMock, getSavedArtifact } = setup({});
     const operation = {
       type: "artifact.update",
       input: {
@@ -1633,33 +1672,13 @@ describe("Spectra run route", () => {
         (message) => message.role === "tool",
       );
       expect(payload.tool_choice).toBe("auto");
-      const call = hasObservation
-        ? {
-            id: "submit-final",
-            type: "function",
-            function: {
-              name: "submit_plan",
-              arguments: JSON.stringify({
-                plan: {
-                  decision: "operate",
-                  intent: {
-                    mode: "update",
-                    requestedArtifactTypes: ["flashcard_deck"],
-                    requestedVisibleArtifactCount: 0,
-                    targetArtifactId: "artifact-real",
-                    targetWorkspaceId: null,
-                  },
-                  conversationTitle: "Recall deck summary",
-                  conversationSummary: "Refined the open deck summary.",
-                  choices: null,
-                  progressUpdates: [],
-                  operations: [],
-                  finalResponse: "Updated the deck summary.",
-                },
-              }),
-            },
-          }
-        : {
+      expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:recordPlan"))).toBe(false);
+      if (hasObservation) return new Response(JSON.stringify({
+        model: "openai/gpt-6-luna", provider: "OpenAI", choices: [{
+          finish_reason: "stop", message: { content: "Updated the deck summary." },
+        }],
+      }), { status: 200 });
+      const call = {
             id: "stage-summary",
             type: "function",
             function: {
@@ -1709,6 +1728,7 @@ describe("Spectra run route", () => {
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(recordPlan?.[1]).toMatchObject({ operations: [operation] });
+    expect(getSavedArtifact().summary).toBe(operation.input.summary);
     expect(
       events.some((event) => {
         if (event.type !== "status" && event.type !== "progress") return false;

@@ -48,7 +48,6 @@ import {
   callMixedTaskGraphWorkers,
   callModel,
   callParallelCreationWorkers,
-  fastConversationalPlan,
   fastFocusedDeckHintPlan,
   fastFocusedMetadataPlan,
   fastFocusedPlannerPlan,
@@ -365,8 +364,7 @@ async function runAttempt(
     const immediatePlan =
       params.agentId || params.continuedThread
         ? null
-        : (fastConversationalPlan(params.prompt) ??
-          (await fastUnavailableManageBacPlan(params.prompt)));
+        : await fastUnavailableManageBacPlan(params.prompt);
     if (immediatePlan) {
       loop.enter("plan");
       publicText = immediatePlan.finalResponse;
@@ -839,8 +837,7 @@ async function runAttempt(
     const focusedToolPlan =
       parallelCreations.length || (params.attachments?.length ?? 0) > 0
         ? null
-        : (fastConversationalPlan(params.prompt) ??
-          (explicitlyTargetsFocusedArtifact
+        : (explicitlyTargetsFocusedArtifact
             ? (fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
               fastFocusedDeckHintPlan(params.prompt, context.focusedArtifact) ??
               fastFocusedQuizSettingsPlan(
@@ -848,7 +845,7 @@ async function runAttempt(
                 context.focusedArtifact,
               ) ??
               fastFocusedMetadataPlan(params.prompt, context.focusedArtifact))
-            : null));
+            : null);
     if (focusedToolPlan) {
       publish({
         type: "status",
@@ -3847,8 +3844,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       !body.agentId &&
       !body.threadId?.trim() &&
       attachments.length === 0
-        ? (fastConversationalPlan(prompt) ??
-          (await fastUnavailableManageBacPlan(prompt)))
+        ? await fastUnavailableManageBacPlan(prompt)
         : null;
     if (inlinePlan) {
       const initialCard = await latestCard(actor.clerkId, created.runId);

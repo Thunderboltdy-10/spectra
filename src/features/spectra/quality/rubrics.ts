@@ -1,11 +1,7 @@
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { auditDeck, estimateTextOverflow } from "../presentation/audit";
-import {
-  BIBLIOGRAPHY_SLIDE_MARKER,
-  collectDeckCitations,
-  planBibliographySlides,
-} from "../presentation/bibliography";
+import { BIBLIOGRAPHY_SLIDE_MARKER } from "../presentation/bibliography";
 import {
   ensurePresentationReadingOrders,
   isPresentationLayoutId,
@@ -403,25 +399,20 @@ function presentationHasEditableNumericVisual(deck: PresentationContent) {
 function evaluatePresentation(content: unknown, prompt: string, numericSourceRequired = false) {
   const deck = normalizePresentationContent(content);
   ensurePresentationReadingOrders(deck);
-  // Spectra owns these generated source pages. They count toward the user's
-  // requested total even though the narrative and layout rubric ignores them.
+  // Existing bibliography pages count toward the total. Citations alone do
+  // not imply additional slides; validate the same sequence that will save.
   const authoredSlides = deck.slides.filter(
     (slide) => slide.accessibility?.label !== BIBLIOGRAPHY_SLIDE_MARKER,
   );
   const structureFindings: ArtifactQualityFinding[] = [];
   const requestedCount = requestedSlideCount(prompt);
-  const existingReferenceCount = deck.slides.length - authoredSlides.length;
-  const plannedReferenceCount =
-    collectDeckCitations(deck).length > 0
-      ? planBibliographySlides(deck).slides.length
-      : existingReferenceCount;
-  const totalSlideCount = authoredSlides.length + plannedReferenceCount;
+  const totalSlideCount = deck.slides.length;
   if (requestedCount !== undefined && totalSlideCount !== requestedCount)
     structureFindings.push(
       finding(
         "structure",
         "blocker",
-        `Create exactly ${requestedCount} total slides, including generated References pages; the draft has ${totalSlideCount}.`,
+        `Create exactly ${requestedCount} total slides; the draft has ${totalSlideCount}.`,
         "/slides",
       ),
     );
@@ -1224,7 +1215,7 @@ export function artifactQualityPromptSection(
       : "";
   const presentationInstructions =
     blueprintKey === "presentation"
-      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested total slide count, including References pages Spectra generates from citations. Reserve enough room for those pages, and do not add a References slide yourself.\n- Use at least four layout types on decks with six or more authored narrative slides, and never repeat the same layout three times in a row.\n- Keep display copy short: titles under eight words, body frames under forty words. Park supporting detail in speakerNotes.\n- Set every visible text-bearing object, including chart and table labels, to at least 20px. Rebalance its layout if the text does not fit.\n- On each slide with three or more visible objects, include accessibility.readingOrder with every visible object ID exactly once in the intended spoken order.\n- When asked for a chart, author an object with type chart and content containing chartType, categories, and named numeric series whose values and categories align. Put units in the series names and valueAxisTitle; do not simulate a chart with shapes or an image. When asked for a table, author a table object with editable rows and cells.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Put editable visuals, charts, or diagrams on at least one third of the authored narrative slides."
+      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested total using the actual slide sequence. Keep citations on supported narrative slides; add a separate bibliography only when requested or appropriate to the brief, and include it in the total. No References pages are added automatically.\n- Use at least four layout types on decks with six or more authored narrative slides, and never repeat the same layout three times in a row.\n- Keep display copy short: titles under eight words, body frames under forty words. Park supporting detail in speakerNotes.\n- Set every visible text-bearing object, including chart and table labels, to at least 20px. Rebalance its layout if the text does not fit.\n- On each slide with three or more visible objects, include accessibility.readingOrder with every visible object ID exactly once in the intended spoken order.\n- When asked for a chart, author an object with type chart and content containing chartType, categories, and named numeric series whose values and categories align. Put units in the series names and valueAxisTitle; do not simulate a chart with shapes or an image. When asked for a table, author a table object with editable rows and cells.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Put editable visuals, charts, or diagrams on at least one third of the authored narrative slides."
       : "";
   return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The minimum self-critique score is ${rubric.passScore}/100, with no blocker findings.${intent}${documentEvidenceInstructions}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
     presentationInstructions

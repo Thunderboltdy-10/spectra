@@ -1,81 +1,72 @@
 import { describe, expect, it } from "vitest";
-import {
-  enforceAiPresentationContentPolicy,
-  requestedNarrativeSlideCountWithoutReferences,
-} from "@/features/spectra/presentation/ai-content-policy";
-import { BIBLIOGRAPHY_SLIDE_MARKER } from "@/features/spectra/presentation/bibliography";
-import type { PresentationContent } from "@/features/spectra/presentation/model";
+import { enforceAiPresentationContentPolicy } from "../presentation/ai-content-policy";
+import { applyBibliographySlides, BIBLIOGRAPHY_SLIDE_MARKER } from "../presentation/bibliography";
+import { normalizePresentationContent } from "../presentation/model";
 
-const request =
-  "Make the deck exactly six narrative slides. Remove the separate References slide and keep citations in native speaker notes or citation metadata.";
-
-function deckWithGeneratedReferences() {
-  return {
-    settings: {},
-    theme: { tokens: {} },
-    slides: [
-      ...Array.from({ length: 6 }, (_, index) => ({
-        id: `slide-${index + 1}`,
-        title: `Narrative ${index + 1}`,
-        objects: [],
-        accessibility: { readingOrder: [] },
-        speakerNotes: "",
-        sourceRefs:
-          index === 0 ? ["evidence:source-1"] : [],
-        citations:
-          index === 0
-            ? [
-                {
-                  id: "citation-source-1",
-                  label: "Urban heat reading, page 1",
-                  sourceRefs: ["evidence:source-1"],
-                },
-              ]
-            : [],
-      })),
-      {
-        id: "bibliography",
-        title: "References",
-        objects: [],
-        accessibility: {
-          label: BIBLIOGRAPHY_SLIDE_MARKER,
-          readingOrder: [],
-        },
-        speakerNotes: "",
-        sourceRefs: [],
-        citations: [],
-      },
-    ],
-  } as unknown as PresentationContent;
+function citedDeck() {
+  return normalizePresentationContent({
+    slides: [{
+      id: "finding", title: "Shade reduced heat", speakerNotes: "Explain the measurement limits.",
+      accessibility: { readingOrder: ["claim"] },
+      sourceRefs: ["evidence:reading-p2"],
+      citations: [{ id: "reading", label: "Courtyard study, p. 2", sourceRefs: ["evidence:reading-p2"] }],
+      objects: [{ id: "claim", type: "text", content: { text: "The shaded surface was cooler." } }],
+    }],
+  });
 }
 
-describe("AI presentation citation policy", () => {
-  it("keeps an explicitly requested narrative slide count without losing verified citations", () => {
-    const deck = deckWithGeneratedReferences();
-
-    expect(requestedNarrativeSlideCountWithoutReferences(request)).toBe(6);
-    expect(enforceAiPresentationContentPolicy(deck, request).slides).toHaveLength(6);
-    expect(deck.slides[0]?.citations?.[0]?.sourceRefs).toEqual([
-      "evidence:source-1",
-    ]);
-    expect(deck.slides.some((slide) => slide.title === "References")).toBe(
-      false,
-    );
-  });
-
+describe("AI presentation content policy", () => {
   it.each([
-    "The deck must have exactly six narrative slides and no separate References slide, with citations in metadata.",
-    "Make exactly six slides without a separate References slide; retain citations in speaker notes.",
-    "Create exactly six narrative slides. Do not include a separate References slide; keep citation metadata.",
-  ])("recognizes natural no-reference wording: %s", (prompt) => {
-    expect(requestedNarrativeSlideCountWithoutReferences(prompt)).toBe(6);
+    "Make a one-slide summary from the reading.",
+    "Keep citations in notes, with no bibliography page.",
+    "Resume la lectura en una diapositiva.",
+    "Révise uniquement les notes de présentation.",
+  ])("does not add slides to cited work: %s", (prompt) => {
+    const deck = citedDeck();
+    const before = structuredClone(deck);
+    expect(enforceAiPresentationContentPolicy(deck, prompt)).toEqual(before);
   });
 
-  it("keeps generated bibliography behavior unless the user explicitly requests otherwise", () => {
-    expect(
-      requestedNarrativeSlideCountWithoutReferences(
-        "Update the deck and keep the citations.",
-      ),
-    ).toBeNull();
+  it("accepts creative work without inventing a source requirement", () => {
+    const deck = normalizePresentationContent({ slides: [{ id: "story", title: "The lost umbrella", objects: [] }] });
+    expect(() => enforceAiPresentationContentPolicy(deck,
+      "Make exactly one slide. No References slide; keep my performance cues in speaker notes.",
+    )).not.toThrow();
+    expect(deck.slides).toHaveLength(1);
+    expect(deck.slides[0]!.citations ?? []).toEqual([]);
+  });
+
+  it("preserves an explicitly generated bibliography through unrelated edits, even without citations", () => {
+    const deck = citedDeck();
+    applyBibliographySlides(deck);
+    const bibliography = structuredClone(deck.slides[1]);
+    deck.slides[0]!.citations = [];
+    deck.slides[0]!.speakerNotes = "A revised delivery cue.";
+    enforceAiPresentationContentPolicy(deck, "Update the speaker notes.");
+    expect(deck.slides[1]).toEqual(bibliography);
+    expect(deck.slides[0]!.speakerNotes).toBe("A revised delivery cue.");
+  });
+
+  it("does not resurrect a removed generated slide on later writes or replay", () => {
+    const deck = citedDeck();
+    applyBibliographySlides(deck);
+    deck.slides = deck.slides.filter((slide) => slide.accessibility?.label !== BIBLIOGRAPHY_SLIDE_MARKER);
+    enforceAiPresentationContentPolicy(deck, "Remove the separate source slide.");
+    expect(deck.slides).toHaveLength(1);
+    const saved = JSON.parse(JSON.stringify(deck));
+    enforceAiPresentationContentPolicy(saved, "Make the title shorter.");
+    expect(saved.slides).toHaveLength(1);
+    enforceAiPresentationContentPolicy(saved, "Make the title shorter.");
+    expect(saved).toEqual(deck);
+    expect(saved.slides[0].citations[0].sourceRefs).toEqual(["evidence:reading-p2"]);
+  });
+
+  it("does not mistake a narrative title for a generated bibliography", () => {
+    const deck = citedDeck();
+    deck.slides[0]!.title = "References in JavaScript";
+    expect(() => enforceAiPresentationContentPolicy(deck,
+      "Make exactly one slide without a References slide and keep citations in metadata.",
+    )).not.toThrow();
+    expect(deck.slides[0]!.title).toBe("References in JavaScript");
   });
 });

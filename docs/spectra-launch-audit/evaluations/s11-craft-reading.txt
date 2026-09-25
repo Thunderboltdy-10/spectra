@@ -1,0 +1,13 @@
+Student council timetable pilot — synthetic evaluation fixture
+
+This is fictional data for testing Spectra, not an actual school study.
+
+One year group tried a shared weekly planning session for six weeks. A comparison group kept its usual schedule. The groups were not randomly assigned. Students reported weekly minutes spent resolving timetable clashes.
+
+Group,Before (min/week),After (min/week),Respondents before,Respondents after
+Planning session,46,29,28,23
+Usual schedule,22,24,25,24
+
+The planning-session group reported 17 fewer minutes per week after the pilot; the comparison group reported 2 more. The groups started at different levels, and the surveys did not identify individual respondents. Changes could reflect different respondents, other timetable changes, or reporting differences. The pilot does not establish that the planning session caused the reduction.
+
+The council can consider repeating the pilot with clearer measurement and a comparison design. No information on cost, attainment, wellbeing or other schools was collected. A school-wide recommendation would require additional evidence.

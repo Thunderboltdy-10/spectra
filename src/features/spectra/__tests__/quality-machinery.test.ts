@@ -410,7 +410,7 @@ describe("P4.I4 quality machinery", () => {
     expect(report.passed).toBe(true);
   });
 
-  it("counts generated References pages toward the requested total slide count", () => {
+  it("counts only actual slides, including an explicitly generated bibliography", () => {
     const content = realizeGeneratedPresentation(presentationDraft());
     content.slides.forEach((slide) => {
       slide.citations = [
@@ -424,7 +424,7 @@ describe("P4.I4 quality machinery", () => {
     const beforeReferences = evaluateArtifactQuality({
       blueprintKey: "presentation",
       content,
-      prompt: "Create a 7-slide presentation for teachers.",
+      prompt: "Create a 6-slide presentation for teachers.",
     });
     expect(beforeReferences.findings).not.toContainEqual(
       expect.objectContaining({
@@ -466,9 +466,9 @@ describe("P4.I4 quality machinery", () => {
       content,
       prompt: "Create a 6-slide presentation for teachers.",
     });
-    expect(narrativeOnlyReport.findings).not.toContainEqual(
+    expect(narrativeOnlyReport.findings).toContainEqual(
       expect.objectContaining({
-        message: expect.stringContaining("total slides"),
+        message: expect.stringContaining("exactly 6 total slides"),
       }),
     );
     applyBibliographySlides(content);

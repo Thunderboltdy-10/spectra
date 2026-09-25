@@ -49,6 +49,24 @@ export function retainShellHydratedArtifacts(
   return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
 }
 
+/** A current canonical denial releases every representation of its body. */
+export function revokeShellOverviewArtifact(overview: SpectraOverview | null, artifactId: string) {
+  if (!overview) return overview;
+  const revoke = (artifact: SpectraArtifact) => artifact._id === artifactId
+    ? releaseShellArtifactContent({ ...artifact, accessLevel: null, capabilities: [] })
+    : artifact;
+  return {
+    ...overview,
+    artifacts: overview.artifacts.map(revoke),
+    workspace: overview.workspace ? {
+      ...overview.workspace,
+      items: overview.workspace.items.map((item) => item.artifact?._id === artifactId
+        ? { ...item, artifact: revoke(item.artifact) }
+        : item),
+    } : overview.workspace,
+  };
+}
+
 /** A refreshed canonical body must beat the earlier detail used to open it. */
 export function mergeShellArtifactContent(
   listed: SpectraArtifact,
@@ -58,6 +76,8 @@ export function mergeShellArtifactContent(
   // A metadata-only list may be cached across a permission change. Preserve
   // the complete authorized detail, including its role and version, rather
   // than grafting older list permissions onto the freshly fetched body.
+  // Explicit revocation from fresh reads is applied before this merge through
+  // createShellArtifactAccess; absence and cached metadata are not authority.
   return listed.content !== undefined && listed.updatedAt > hydrated.updatedAt
     ? listed
     : hydrated;

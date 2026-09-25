@@ -1104,9 +1104,9 @@ export async function getSpectraArtifact(artifactId: string, options?: { signal?
   );
 }
 
-export async function getSpectraArtifactForDeepLink(artifactId: string) {
+export async function getSpectraArtifactForDeepLink(artifactId: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
-  const response = await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" });
+  const response = await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal });
   if (response.status === 404) return { artifact: null };
   if (response.status === 403) {
     const payload = await response.clone().json().catch(() => null);

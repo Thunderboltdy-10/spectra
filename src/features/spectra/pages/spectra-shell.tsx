@@ -68,6 +68,7 @@ import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import { useShellArtifactOpen } from "../components/use-shell-artifact-open";
 import { useShellArtifactContent } from "../components/use-shell-artifact-content";
 import { mergeShellArtifactContent } from "../components/shell-artifact-content";
+import { createShellArtifactAccess } from "../components/shell-artifact-access";
 import {
   CommandBar,
   CommandBarMenuItem,
@@ -146,7 +147,6 @@ import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
-  getSpectraArtifact,
   exportSpectraWorkspaceManifest,
   getSpectraOverview,
   getSpectraRunDetail,
@@ -1124,13 +1124,14 @@ export function SpectraShell({
   const requestedThreadId = searchParams.get("threadId") ?? undefined;
   const requestedHome = searchParams.get("home") === "1";
   const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const [artifactAccess] = useState(createShellArtifactAccess);
   const {
     pending: pendingArtifactOpen,
     loadingId: openingArtifactId,
     open: loadArtifactForOpen,
     cancel: cancelArtifactOpen,
-  } = useShellArtifactOpen();
-  const { overview, setOverview, hydratedArtifacts, setHydratedArtifacts } = useShellArtifactContent(
+  } = useShellArtifactOpen(artifactAccess.read);
+  const { overview, setOverview, hydratedArtifacts, setHydratedArtifacts, revokeArtifact } = useShellArtifactContent(
     openObjects.filter((object) => object.type === "artifact").map((object) => object.id),
     pendingArtifactOpen?.artifact._id,
   );
@@ -1321,6 +1322,13 @@ export function SpectraShell({
   const setObjectAvailability = useSpectraContextStore(
     (state) => state.setObjectAvailability,
   );
+  useEffect(() => artifactAccess.subscribe((artifactId) => {
+    const wasOpen = useSpectraContextStore.getState().openObjects.some((object) => object.type === "artifact" && object.id === artifactId);
+    const wasOpening = cancelArtifactOpen(artifactId);
+    revokeArtifact(artifactId);
+    setObjectAvailability("artifact", artifactId);
+    if (wasOpen || wasOpening) toast.error("That work is no longer available.");
+  }), [artifactAccess, cancelArtifactOpen, revokeArtifact, setObjectAvailability]);
   const liveIdentitySources = useMemo(() => {
     const seen = new Set<string>();
     const sources: Array<{
@@ -1410,10 +1418,15 @@ export function SpectraShell({
   const loadOverview = useCallback(
     async (workspaceId?: string, quiet = false) => {
       const sequence = ++overviewRequestSequence.current;
+      const accessRefresh = quiet ? artifactAccess.beginListRefresh() : null;
       if (!quiet) setOverviewLoadState({ status: "loading" });
       try {
         const next = await getSpectraOverview(workspaceId, quiet);
         if (sequence !== overviewRequestSequence.current) return null;
+        accessRefresh?.reconcile([
+          ...next.artifacts,
+          ...(next.workspace?.items.flatMap((item) => item.artifact ? [item.artifact] : []) ?? []),
+        ]);
         setOverview((current) => mergeLiveAiOverview(current, next));
         setOverviewLoadState({ status: "ready" });
         setSelectedWorkspaceId(
@@ -1447,9 +1460,11 @@ export function SpectraShell({
           toast.error("Spectra could not refresh this view. Try again.");
         }
         return null;
+      } finally {
+        accessRefresh?.finish();
       }
     },
-    [setOverview],
+    [artifactAccess, setOverview],
   );
 
   const loadWorkspace = useCallback(
@@ -1474,9 +1489,11 @@ export function SpectraShell({
         return;
       }
       setWorkspaceLoading(true);
+      const accessRefresh = force ? artifactAccess.beginListRefresh() : null;
       try {
         const result = await getSpectraWorkspace(workspaceId, force);
         if (sequence !== workspaceRequestSequence.current) return;
+        accessRefresh?.reconcile(result.workspace?.items.flatMap((item) => item.artifact ? [item.artifact] : []) ?? []);
         setSelectedWorkspaceId(workspaceId);
         setOverview((current) =>
           current
@@ -1514,11 +1531,12 @@ export function SpectraShell({
         if (fallback && sequence === workspaceRequestSequence.current)
           setOverview(fallback);
       } finally {
+        accessRefresh?.finish();
         if (sequence === workspaceRequestSequence.current)
           setWorkspaceLoading(false);
       }
     },
-    [setOverview],
+    [artifactAccess, setOverview],
   );
 
   useEffect(() => {
@@ -1756,16 +1774,15 @@ export function SpectraShell({
     const controller = new AbortController();
     void Promise.all(
       missing.map((artifactId) =>
-        getSpectraArtifact(artifactId, { signal: controller.signal })
-          .then(({ artifact }) => ({ artifactId, artifact: artifact.content !== undefined && artifact.accessLevel !== null && artifact.status !== "deleted" ? artifact : null }))
-          .catch(() => ({ artifactId, artifact: null })),
+        artifactAccess.read(artifactId, { signal: controller.signal })
+          .then(({ artifact }) => artifact?.content !== undefined ? artifact : null)
+          // A transient error does not establish revocation. Canonical null
+          // responses notify the shared access listener above.
+          .catch(() => null),
       ),
     ).then((loaded) => {
       if (cancelled) return;
-      for (const item of loaded)
-        if (!item.artifact) setObjectAvailability("artifact", item.artifactId);
       const artifacts = loaded
-        .map((item) => item.artifact)
         .filter((artifact): artifact is SpectraArtifact => artifact !== null);
       if (artifacts.length > 0)
         setHydratedArtifacts((current) => ({
@@ -1777,7 +1794,7 @@ export function SpectraShell({
       cancelled = true;
       controller.abort();
     };
-  }, [hasOverview, missingOpenArtifactIds, setObjectAvailability, setHydratedArtifacts]);
+  }, [artifactAccess, hasOverview, missingOpenArtifactIds, setHydratedArtifacts]);
   const runs = overview?.runs ?? [];
   const readyStudioArtifacts = useMemo(
     () => allArtifacts.filter((artifact) => artifact.content !== undefined && artifact.accessLevel !== null && artifact.status !== "deleted"),
@@ -2398,18 +2415,13 @@ export function SpectraShell({
   );
   const refreshRunData = useCallback(async () => {
     const focusedArtifactId = commandFocusArtifact?._id;
-    const [next, focused] = await Promise.all([
-      loadOverview(selectedWorkspaceId, true),
-      focusedArtifactId
-        ? getSpectraArtifact(focusedArtifactId).catch(() => null)
-        : Promise.resolve(null),
-    ]);
+    const overviewRefresh = loadOverview(selectedWorkspaceId, true);
     // The workspace overview and the artifact query travel independently. A
     // run can commit between those reads, leaving an open editor and its card
     // one revision behind even though the operation completed successfully.
     // The focused-artifact read is the authoritative reconciliation boundary.
-    if (focused?.artifact) {
-      const canonical = focused.artifact;
+    const focusedRefresh = focusedArtifactId ? artifactAccess.read(focusedArtifactId).then(({ artifact: canonical }) => {
+      if (!canonical) return;
       setHydratedArtifacts((current) => current[canonical._id]
         ? { ...current, [canonical._id]: canonical }
         : current);
@@ -2445,9 +2457,10 @@ export function SpectraShell({
             }
           : current,
       );
-    }
+    }).catch(() => undefined) : Promise.resolve();
+    const [next] = await Promise.all([overviewRefresh, focusedRefresh]);
     return next;
-  }, [commandFocusArtifact?._id, loadOverview, selectedWorkspaceId, setHydratedArtifacts, setOverview]);
+  }, [artifactAccess, commandFocusArtifact?._id, loadOverview, selectedWorkspaceId, setHydratedArtifacts, setOverview]);
   const applyLiveArtifactPatch = useCallback(
     (artifactId: string, patch: Record<string, unknown>) => {
       const apply = (artifact: SpectraArtifact): SpectraArtifact => {
@@ -2719,8 +2732,9 @@ export function SpectraShell({
       // shell. Seed from the canonical artifact endpoint so list/timeline AI
       // states light up instead of silently dropping the patch.
       if (missing) {
-        void getSpectraArtifact(artifactId)
+        void artifactAccess.read(artifactId)
           .then(({ artifact }) => {
+            if (!artifact) return;
             setOverview((current) => {
               if (!current) return current;
               if (
@@ -2755,7 +2769,7 @@ export function SpectraShell({
           .catch(() => undefined);
       }
     },
-    [setHydratedArtifacts, setOverview],
+    [artifactAccess, setHydratedArtifacts, setOverview],
   );
   const runEngine = useSpectraRun({
     surface: composerThread
@@ -2928,8 +2942,9 @@ export function SpectraShell({
       artifactId: string;
     }) => {
       if (!artifactId) return;
-      void getSpectraArtifact(artifactId)
+      void artifactAccess.read(artifactId)
         .then(({ artifact }) => {
+          if (!artifact) return;
           setHydratedArtifacts((current) => current[artifact._id]
             ? { ...current, [artifact._id]: artifact }
             : current);
@@ -3049,8 +3064,11 @@ export function SpectraShell({
     historyMode: "push" | "replace" | "none" = "push",
     mode: "split" | "tab" = "split",
   ) {
+    const mounted = useSpectraContextStore.getState().openObjects.some((object) => object.type === "artifact" && object.id === artifactId)
+      ? readyStudioArtifacts.find((artifact) => artifact._id === artifactId)
+      : undefined;
     return loadArtifactForOpen(artifactId, historyMode, mode,
-      isProgrammaticOpen() || isProgrammaticFollowOpen());
+      isProgrammaticOpen() || isProgrammaticFollowOpen(), mounted);
   }
 
   function openArtifactById(artifactId: string) {
@@ -3261,13 +3279,8 @@ export function SpectraShell({
   }, [pendingArtifactOpen, cancelArtifactOpen]);
 
   function openArtifactTab(artifact: SpectraArtifact) {
-    if (!openObjects.some((object) => object.type === "artifact" && object.id === artifact._id) || artifact.content === undefined) {
-      void requestArtifactOpen(artifact._id, "push", "tab")
-        .catch(() => toast.error("That work could not be opened."));
-      return;
-    }
-    cancelArtifactOpen();
-    openResolvedArtifactTab(artifact, "push");
+    void requestArtifactOpen(artifact._id, "push", "tab")
+      .catch(() => toast.error("That work could not be opened."));
   }
 
   function openResolvedArtifactTab(artifact: SpectraArtifact, historyMode: "push" | "replace" | "none") {

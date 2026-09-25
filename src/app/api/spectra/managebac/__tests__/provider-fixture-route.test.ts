@@ -293,9 +293,13 @@ describe("ManageBac route provider fixture", () => {
     delete process.env.SPECTRA_MANAGEBAC_TEST_FIXTURE_ORIGIN;
     harness.mutation = undefined;
     harness.query = undefined;
+    vi.restoreAllMocks();
   });
 
   it("uses the real route and local Convex boundary for identity, classes, tasks, timetable and resources", async () => {
+    // The provider fixture's deadlines are September 18–20, 2026. Keep the
+    // actual upcoming-deadline query inside that term as the wall clock advances.
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-15T12:00:00Z"));
     fixture = fixtureModule.createManageBacProviderFixture();
     const origin = await fixture.start();
     stop = fixture.stop;

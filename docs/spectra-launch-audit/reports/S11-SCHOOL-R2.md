@@ -4,7 +4,7 @@ Date: 2026-09-25. Worker: `01a0d847-532e-7061-9f90-ea0fc9e52ab3`.
 
 ## Status and scope
 
-**Unvalidated source candidate, not completed enforcement or release acceptance.** RUNTIME/coordinator's dependency hold remains in effect. No R2 test, lint, typecheck, build or live acceptance has run. `git diff --check` passes. The helper was committed independently as `3b8f9e0565e45d723b91d9022232470a482d6d73` to unblock SECURITY/COLLAB hook development; subsequent source refinements accompany this report. R1 discovery is independent candidate `115ad267fa0e5505561b3ce60f2f728e0aba413a`.
+**Locally validated helper/model/refresh candidate; complete enforcement and live acceptance remain open.** Coordinator released a guarded SCHOOL slot on September 25. All 30 R2 tests pass (12 shared helper, 14 model, 4 signed-import), within a 124/124 run across 15 files. Scoped lint and diff checks pass. Commands used RUNTIME's inherited filesystem guard and one worker; the slot was explicitly released afterward. No full typecheck, build or live acceptance is claimed. Helper commit: `3b8f9e0565e45d723b91d9022232470a482d6d73`; normalization/provider refresh and tests: `aa8c79a1bc9b29d0e32242ea97db2800931d3872`. R1 is independent candidate `115ad267fa0e5505561b3ce60f2f728e0aba413a`.
 
 Coordinator approved the shared pure helper, legacy/array root binding, fieldwise provider refresh, and enforcement through the existing AI and collaboration write paths. This worker changes the helper, planner data normalization, and the narrow existing `safelyRefreshProjection` branch/calls. SECURITY owns AI preview/commit and first-effect hooks; COLLAB owns gateway before/result validation and the backend projection hooks with other shared-store owners. No general Calendar or ManageBac access expansion, frontend redesign, shared-service mutation or deployment is part of this candidate.
 
@@ -45,7 +45,7 @@ COLLAB identified `prepareCanonicalAppend` as the first gateway location with th
 
 **Open integration issue:** provider refresh can advance canonical artifact content while an already-open Yjs room still contains older source facts. A later edit must not roll those facts back. Rejecting a stale source payload is safer than accepting it, but live behavior also needs a correct rebase/recovery path; permanent stale-room rejection is not complete functionality. No stale-room recovery is implemented or claimed in this worker's candidate.
 
-## Pending evidence
+## Validation and remaining evidence
 
 `shared/planner-source.test.ts` specifies migration, source/hash/ref stripping, duplicate/moved root references, legacy/root/task date modification, valid personal editing/removal, copied/custom text, date withdrawal and independent personal/nonlegacy official task controls.
 
@@ -53,4 +53,8 @@ COLLAB identified `prepareCanonicalAppend` as the first gateway location with th
 
 `convex/managebac-planner-source.test.ts` uses the signed disposable ingestion fixture and real triggers to check legacy/array refresh, official Calendar/compact planner convergence, customized title/summary/empty notes/completion/checklist, extra personal tasks, unchanged replay, and a removed root. Its fixture edit models persistence through the real mutation wrapper; it does not stand in for AI/gateway authorization tests, which belong to their hook owners.
 
-All of these tests are **unrun under the hold**. After explicit clearance, run them together with R1, refresh, isolation/retention and existing planner reminder/Calendar suites using one worker. Capture original-source failures and fixed results separately. Scoped lint and an authorized TypeScript slot remain required. Actual AI/gateway handler tests and stale-room/provider-refresh tests must pass before marking R2 complete.
+All three suites pass against the repaired source. The combined original-source comparison used `a423dffc` versions of `calendar.ts`, `managebac.ts` and planner `model.ts`, with the newly introduced pure helper still available to the tests. Model suite: **11 failed / 3 passed**; signed-import suite: **4 failed / 0 passed**. These failures expose lost normalized source/ref fields and the inability of that normalized result to satisfy the new preservation contract. Several stop at the normalization boundary before executing refresh, so this comparison is not an isolated reproduction of every refresh defect and the failure count is not a defect count. The repaired signed-import cases exercise refresh end to end and pass, including customized text and root deletion.
+
+Sources were restored byte-for-byte in `finally` before the final passing run. Private evidence is `.spectra-local/launch-s11/school/r1-r2-baseline.{json,log}`, `r1-r2-final.{json,log}` and `r1-r2-lint.log`. The final 124-case run also includes R1, task refresh, isolation/retention, Calendar paging/bounded/idempotency, scheduling, reminders, client time handling and the real route against a local disposable provider. The two corrected older test setups and route's fixed-date clock are documented in the R1 report.
+
+Actual AI/gateway handler tests, verified-content hydration at their hooks, and stale-room/provider-refresh recovery tests must pass before marking R2 complete. Full TypeScript remains an integration gate; no further executable checks ran after releasing the slot to ENGINE.

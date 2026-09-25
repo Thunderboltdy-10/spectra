@@ -262,7 +262,7 @@ async function selectFixtureClass(
   }));
   const selection = await t.withIdentity(alice).mutation(api.managebac.setSelectedClasses, { recordIds: [recordId] });
   expect(selection.selectedRecordIds).toEqual([recordId]);
-  return recordId;
+  return selection;
 }
 
 async function commitPage(
@@ -1632,7 +1632,7 @@ describe("ManageBac account isolation", () => {
   it("keeps personal overlay notes when a deadline source hash refreshes", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
-    await selectFixtureClass(t, fixture, "class-notes");
+    const selection = await selectFixtureClass(t, fixture, "class-notes");
     const now = Date.now();
     const seeded = await t.run(async (ctx) => {
       const recordId = await ctx.db.insert("externalRecords", {
@@ -1708,7 +1708,7 @@ describe("ManageBac account isolation", () => {
         trigger: "user",
         stage: "syncing:deadlines",
         capabilityIds: [fixture.capabilityId],
-        selectionRevision: 0,
+        selectionRevision: selection.selectionRevision,
         leaseOwner: "overlay-notes-worker",
         leaseToken: "overlay-notes-lease",
         leaseExpiresAt: now + 120_000,

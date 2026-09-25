@@ -82,7 +82,7 @@ export function ViewportContextPicker() {
         );
         const outcome = [...dispatched.results].reverse().find(
           (value): value is SpectraCommandOutcome =>
-            Boolean(value) &&
+            value !== null &&
             typeof value === "object" &&
             "status" in value &&
             ["completed", "pending", "needs-human", "failed"].includes(

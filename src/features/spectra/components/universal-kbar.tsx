@@ -307,7 +307,9 @@ export function UniversalKBar() {
         setResultMessage(value.message);
         return;
       }
-      const message = value?.message ?? `${entry.label} completed.`;
+      const message = value && typeof value === "object"
+        ? value.message
+        : `${entry.label} completed.`;
       setResultMessage(message);
       setParametersFor(null);
       setConfirming(null);

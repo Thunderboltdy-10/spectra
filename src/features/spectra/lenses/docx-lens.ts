@@ -2,10 +2,7 @@ import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/do
 import { comparePackages } from "@ariadng/office/preservation";
 import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
-import {
-  authoredSemanticValue,
-  authoredSemanticsEqual,
-} from "../../../../shared/document-projection.mjs";
+import { authoredSemanticValue } from "../../../../shared/document-projection.mjs";
 import { firstNativeFontFamily } from "../office-fonts";
 import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, deleteNativeComment, hasUnsupportedRevision, nativeComment, supportedRevision, upsertNativeComment } from "./docx-academic-review";
@@ -14,7 +11,7 @@ import { academicMappingParts, appendWordBibliography, appendWordCitation, bibli
 import type { WordSource, WordCitationInline } from "./docx-citation-schema";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
-import { restoreDocxBlockCarryMetadata, docxOperationsBetween } from "./document-projection";
+import { docxOperationsBetween } from "./document-projection";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -2476,284 +2473,6 @@ function projectedParagraphFormat(paragraph: Paragraph): DocxParagraphFormat | u
   return format;
 }
 
-const RUN_FORMAT_FIELDS = [
-  "bold",
-  "italic",
-  "underline",
-  "strike",
-  "fontFamily",
-  "fontSizePoints",
-  "color",
-  "highlight",
-  "shading",
-] as const;
-
-const PARAGRAPH_FORMAT_FIELDS = [
-  "alignment",
-  "lineSpacing",
-  "spacingAfterPoints",
-  "indentLevel",
-  "border",
-  "shading",
-] as const;
-
-/**
- * The subset of a format record the writer actually changed, or undefined when
- * nothing did. A missing incoming record means the surface never carried
- * formatting for that block, which is not the same as clearing it, so it
- * produces no operation at all.
- */
-function changedFormatFields<T extends Record<string, unknown>>(
-  before: unknown,
-  after: unknown,
-  fields: readonly string[],
-): T | undefined {
-  if (!after || typeof after !== "object") return undefined;
-  const previous = (before && typeof before === "object" ? before : {}) as Record<
-    string,
-    unknown
-  >;
-  const incoming = after as Record<string, unknown>;
-  const patch: Record<string, unknown> = {};
-  for (const field of fields) {
-    if (!(field in incoming)) continue;
-    const next = incoming[field] ?? null;
-    const current = previous[field] ?? null;
-    if (next !== current) patch[field] = incoming[field];
-  }
-  return Object.keys(patch).length ? (patch as T) : undefined;
-}
-
-function parseTableText(value: string) {
-  return value.split(/\r?\n/).map((row) =>
-    row
-      .replace(/^\s*\|/, "")
-      .replace(/\|\s*$/, "")
-      .split("|")
-      .map((cell) => cell.trim()),
-  );
-}
-
-function richTextWithoutImages(content: readonly DocxRichInline[]) {
-  return content
-    .filter((item) => item.kind !== "image")
-    .map((item) => item.kind === "text" || item.kind === "citation" || item.kind === "bibliography" ? item.text : item.kind === "revision" ? item.revisionKind === "ins" ? item.text : "" : item.kind === "equation" ? item.latex : "")
-    .join("");
-}
-
-function richContentWithoutImages(content: readonly DocxRichInline[]) {
-  return content.filter((item) => item.kind !== "image");
-}
-
-function richContentWithoutImagesOrLayout(content: readonly DocxRichInline[]) {
-  return richContentWithoutImages(content).map((item) =>
-    item.kind === "equation" ? { ...item, display: "block" as const } : item,
-  );
-}
-
-function imageOccurrenceSequence(content: readonly DocxRichInline[]) {
-  return content
-    .filter((item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image")
-    .map((item) => item.occurrenceId ?? item.partName ?? item.assetId ?? "");
-}
-
-function imageOccurrenceOrderChanged(
-  before: readonly DocxRichInline[],
-  after: readonly DocxRichInline[],
-) {
-  const previous = imageOccurrenceSequence(before);
-  const next = imageOccurrenceSequence(after);
-  return previous.length === next.length &&
-    previous.some((value, index) => value !== next[index]);
-}
-
-function authoredRichContentChanged(
-  before: readonly DocxRichInline[],
-  after: readonly DocxRichInline[],
-) {
-  return !authoredSemanticsEqual(
-    richContentWithoutImagesOrLayout(before),
-    richContentWithoutImagesOrLayout(after),
-  ) || imageOccurrenceOrderChanged(before, after);
-}
-
-function authoredRichRowsChanged(
-  before: DocxRichInline[][][] | undefined,
-  after: DocxRichInline[][][] | undefined,
-) {
-  if (!before || !after) return before !== after;
-  if (before.length !== after.length) return true;
-  return before.some((row, rowIndex) =>
-    row.length !== after[rowIndex]!.length ||
-    row.some((cell, columnIndex) =>
-      authoredRichContentChanged(cell, after[rowIndex]![columnIndex]!),
-    ),
-  );
-}
-
-function imageRichRowsChanged(
-  before: DocxRichInline[][][] | undefined,
-  after: DocxRichInline[][][] | undefined,
-) {
-  if (!before || !after) return false;
-  return before.some((row, rowIndex) =>
-    row.some((cell, columnIndex) =>
-      imageOperationsBetween(
-        "table",
-        cell,
-        after[rowIndex]?.[columnIndex] ?? [],
-      ).length > 0,
-    ),
-  ) || after.some((row, rowIndex) =>
-    row.some((cell, columnIndex) =>
-      imageOperationsBetween(
-        "table",
-        before[rowIndex]?.[columnIndex] ?? [],
-        cell,
-      ).length > 0,
-    ),
-  );
-}
-
-function imageOperationsBetween(
-  regionId: string,
-  beforeContent: readonly DocxRichInline[] = [],
-  afterContent: readonly DocxRichInline[] = [],
-  location?: { row: number; column: number },
-): DocxOperation[] {
-  const beforeImages = beforeContent.filter(
-    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
-  );
-  const afterImages = afterContent.filter(
-    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
-  );
-  const sameOccurrence = (
-    left: Extract<DocxRichInline, { kind: "image" }>,
-    right: Extract<DocxRichInline, { kind: "image" }>,
-  ) =>
-    left.occurrenceId && right.occurrenceId
-      ? left.occurrenceId === right.occurrenceId
-      : left.partName === right.partName;
-  const removed = beforeImages.flatMap<DocxOperation>((item) => {
-    if (afterImages.some((candidate) => sameOccurrence(item, candidate)) || !item.partName)
-      return [];
-    return [{
-      kind: "delete-image" as const,
-      regionId,
-      partName: item.partName,
-      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
-    }];
-  });
-  const changed = afterImages.flatMap<DocxOperation>((item): DocxOperation[] => {
-    if (item.kind !== "image") return [];
-    const previous = beforeImages.find((candidate) => sameOccurrence(candidate, item));
-    if (!previous && item.assetId)
-      return [{
-        kind: "insert-image",
-        regionId,
-        ...(location ?? {}),
-        assetId: item.assetId,
-        mediaType: item.mediaType,
-        ...(item.altText !== undefined ? { altText: item.altText } : {}),
-        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
-        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
-        ...(item.crop !== undefined ? { crop: item.crop } : {}),
-      }];
-    if (!previous && item.partName)
-      return [{
-        kind: "insert-image",
-        regionId,
-        ...(location ?? {}),
-        partName: item.partName,
-        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
-        mediaType: item.mediaType,
-        ...(item.altText !== undefined ? { altText: item.altText } : {}),
-        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
-        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
-        ...(item.crop !== undefined ? { crop: item.crop } : {}),
-      }];
-    if (!previous || !item.partName) return [];
-    if (item.assetId && item.assetId !== previous.assetId)
-      return [{
-        kind: "replace-image",
-        regionId,
-        partName: item.partName,
-        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
-        assetId: item.assetId,
-        mediaType: item.mediaType,
-        ...(item.altText !== undefined ? { altText: item.altText } : {}),
-        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
-        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
-        ...(item.crop !== undefined ? { crop: item.crop } : {}),
-      }];
-    const operation: Extract<DocxOperation, { kind: "update-image" }> = {
-      kind: "update-image",
-      regionId,
-      partName: item.partName,
-      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
-      ...(item.altText !== previous.altText ? { altText: item.altText } : {}),
-      ...(item.widthEmu !== previous.widthEmu ? { widthEmu: item.widthEmu } : {}),
-      ...(item.heightEmu !== previous.heightEmu ? { heightEmu: item.heightEmu } : {}),
-      ...(JSON.stringify(item.crop) !== JSON.stringify(previous.crop)
-        ? { crop: item.crop ?? {} }
-        : {}),
-    };
-    return operation.altText !== undefined ||
-      operation.widthEmu !== undefined ||
-      operation.heightEmu !== undefined ||
-      operation.crop !== undefined
-      ? [operation]
-      : [];
-  });
-  return [...removed, ...changed];
-}
-
-function inlineContentForTextOperation(
-  beforeContent: readonly DocxRichInline[],
-  afterContent: readonly DocxRichInline[],
-) {
-  const retainedParts = new Set(
-    beforeContent.flatMap((item) =>
-      item.kind === "image" && item.partName ? [item.partName] : [],
-    ),
-  );
-  return afterContent.filter(
-    (item) => item.kind !== "image" || (item.partName && retainedParts.has(item.partName)),
-  );
-}
-
-function imageDeletionOperations(operations: readonly DocxOperation[]) {
-  return operations.filter((operation) => operation.kind === "delete-image");
-}
-
-function nonImageDeletionOperations(operations: readonly DocxOperation[]) {
-  return operations.filter((operation) => operation.kind !== "delete-image");
-}
-
-function equationLayoutBetween(
-  regionId: string,
-  before: DocxProjectionBlock,
-  after: DocxProjectionBlock,
-): DocxOperation[] {
-  const beforeEquation = (before.inlineContent ?? []).find((item) => item.kind === "equation");
-  const afterEquation = (after.inlineContent ?? []).find((item) => item.kind === "equation");
-  if (!beforeEquation || !afterEquation) return [];
-  const beforeDisplay = before.attrs?.display === "inline" || beforeEquation.display === "inline" ? "inline" : "block";
-  const afterDisplay = after.attrs?.display === "inline" || afterEquation.display === "inline" ? "inline" : "block";
-  const beforeAlignment = before.attrs?.alignment === "left" || before.attrs?.alignment === "right" || before.attrs?.alignment === "center"
-    ? before.attrs.alignment
-    : "center";
-  const afterAlignment = after.attrs?.alignment === "left" || after.attrs?.alignment === "right" || after.attrs?.alignment === "center"
-    ? after.attrs.alignment
-    : "center";
-  if (beforeDisplay === afterDisplay && beforeAlignment === afterAlignment) return [];
-  return [{
-    kind: "set-equation-layout",
-    regionId,
-    ...(beforeDisplay !== afterDisplay ? { display: afterDisplay } : {}),
-    ...(beforeAlignment !== afterAlignment ? { alignment: afterAlignment } : {}),
-  }];
-}
 
 function fidelityFeature(
   entries: LensFidelityEntry[],
@@ -3626,7 +3345,7 @@ async function applyDelta(
   const document = await Document.open(carry.safePayload ?? carry.payload);
   const identity = ensureStableRegionIds(document);
   const aliases = identity.aliases;
-  const opened = await projectDocument(document, carry.profile, identity.identityStable);
+  let opened = await projectDocument(document, carry.profile, identity.identityStable);
   const commentMarkerShape = (id: string) => wordElements(document.body()).filter((node) => ["commentRangeStart", "commentRangeEnd", "commentReference"].includes(node.localName) && wordAttr(node, "id") === id).map((node) => node.localName).join(",");
   const originalCommentShapes = new Map((opened.projection.nativeBinding.wordComments ?? []).map((comment) => [comment.id, commentMarkerShape(comment.id)]));
   const operations = [...(delta.kind === "ai-edit" ? delta.operations : [delta])];
@@ -3637,7 +3356,11 @@ async function applyDelta(
   for (const operation of operations) {
     if (operation.kind === "insert-word-citation" || operation.kind === "edit-word-citation" || operation.kind === "remove-word-citation" || operation.kind === "regenerate-word-bibliography" || operation.kind === "insert-note" || operation.kind === "edit-note" || operation.kind === "move-note" || operation.kind === "delete-note" || operation.kind === "add-word-comment" || operation.kind === "edit-word-comment" || operation.kind === "delete-word-comment" || operation.kind === "track-text" || operation.kind === "review-revision") {
       const current = await projectDocument(document, carry.profile, identity.identityStable);
-      const desired = applyDocumentAcademicOperations(current.projection, [operation]);
+      const resolved = { ...operation,
+        ...("anchor" in operation ? { anchor: { ...operation.anchor, regionId: resolveRegionId(operation.anchor.regionId) } } : {}),
+        ...("regionId" in operation ? { regionId: resolveRegionId(operation.regionId) } : {}),
+      };
+      const desired = applyDocumentAcademicOperations(current.projection, [resolved]);
       const next = docxProjectionSchema.parse({ ...current.projection, blocks: desired.blocks });
       const inferred = docxOperationsBetween(current.projection, next);
       operations.splice(operations.indexOf(operation) + 1, 0, ...inferred);
@@ -3659,6 +3382,9 @@ async function applyDelta(
           : {}),
       }, options);
       if (operation.regionId) born.set(operation.regionId, inserted);
+      // Later operations may target the caller's new ID. Resolve both its
+      // native locator and its fidelity/block entry against the current XML.
+      opened = await projectDocument(document, carry.profile, identity.identityStable);
       continue;
     }
     if (operation.kind === "reorder-regions") {
@@ -3864,221 +3590,10 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
   },
 
   async materialize({ projection, carry, options }) {
-    const before = new Map(carry.projection.blocks.map((block) => [block.id, block]));
-    const operations: Exclude<DocxSemanticDelta, { kind: "ai-edit" }>[] = [];
-    const beforePage = carry.projection.pageSetup ?? {};
-    const afterPage = projection.pageSetup ?? {};
-    const pageFields = ["size", "orientation", "margins", "columns"] as const;
-    const pagePatch = Object.fromEntries(
-      pageFields.flatMap((field) =>
-        JSON.stringify(beforePage[field]) === JSON.stringify(afterPage[field])
-          ? []
-          : [[field, afterPage[field]]],
-      ),
-    );
-    if (Object.keys(pagePatch).length)
-      operations.push({
-        kind: "update-section",
-        ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
-        ...pagePatch,
-      } as DocxOperation);
-    for (const slot of ["header", "footer"] as const)
-      if (beforePage[slot] !== afterPage[slot])
-        operations.push({
-          kind: "update-header-footer",
-          ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
-          slot,
-          text: afterPage[slot] ?? "",
-        });
-    for (const [blockIndex, block] of projection.blocks.entries()) {
-      const previous = before.get(block.id);
-      if (!previous) {
-        if (block.type === "table")
-          throw new DocxLensError(
-            "DOCX_UNSUPPORTED_EDIT",
-            "Adding a new table to a mounted Word file is unavailable in strict native mode.",
-          );
-        operations.push({
-          kind: "insert-paragraph",
-          regionId: block.id,
-          afterRegionId: blockIndex > 0 ? projection.blocks[blockIndex - 1]!.id : null,
-          text: block.text,
-          ...(block.inlineContent ? { inlineContent: block.inlineContent } : {}),
-          ...(typeof block.attrs?.styleId === "string"
-            ? { style: block.attrs.styleId }
-            : {}),
-        });
-        continue;
-      }
-      // Yjs/Convex content normalization is allowed to omit native locator
-      // metadata from an otherwise unchanged block. Keep the retained
-      // paragraph/table locator as the source of truth; only semantic fields
-      // supplied by the incoming projection may replace it.
-      const recoveredBlock = restoreDocxBlockCarryMetadata(previous, block);
-      const incomingAttrs = { ...(recoveredBlock.attrs ?? {}) };
-      delete incomingAttrs.paragraphIndex;
-      delete incomingAttrs.tableIndex;
-      delete incomingAttrs.rowCount;
-      delete incomingAttrs.columnCount;
-      const effectiveBlock = {
-        ...recoveredBlock,
-        attrs: {
-          ...(previous.attrs ?? {}),
-          ...incomingAttrs,
-        },
-      };
-      before.delete(block.id);
-      const previousInline: DocxRichInline[] = previous.inlineContent ?? [];
-      const nextInline: DocxRichInline[] = effectiveBlock.inlineContent ?? [];
-      const paragraphImageOperations = imageOperationsBetween(
-        block.id,
-        previousInline,
-        nextInline,
-      );
-      if (effectiveBlock.type === "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.rows) !== JSON.stringify(previous.rows) || authoredRichRowsChanged(previous.richRows, effectiveBlock.richRows) || imageRichRowsChanged(previous.richRows, effectiveBlock.richRows))) {
-        const oldRows = previous.rows ?? parseTableText(previous.text);
-        const newRows = effectiveBlock.rows ?? parseTableText(effectiveBlock.text);
-        if (newRows.length > oldRows.length)
-          for (let row = oldRows.length; row < newRows.length; row += 1)
-            operations.push({ kind: "insert-table-row", regionId: block.id, row });
-        if (newRows.length < oldRows.length)
-          for (let row = oldRows.length - 1; row >= newRows.length; row -= 1)
-            operations.push({ kind: "delete-table-row", regionId: block.id, row });
-        const oldColumns = Math.max(0, ...oldRows.map((row) => row.length));
-        const newColumns = Math.max(0, ...newRows.map((row) => row.length));
-        if (newColumns > oldColumns)
-          for (let column = oldColumns; column < newColumns; column += 1)
-            operations.push({ kind: "insert-table-column", regionId: block.id, column });
-        if (newColumns < oldColumns)
-          for (let column = oldColumns - 1; column >= newColumns; column -= 1)
-            operations.push({ kind: "delete-table-column", regionId: block.id, column });
-        newRows.forEach((row, rowIndex) =>
-          row.forEach((text, columnIndex) => {
-            const nextRich: DocxRichInline[] | undefined = effectiveBlock.richRows?.[rowIndex]?.[columnIndex];
-            const previousRich: DocxRichInline[] | undefined = previous.richRows?.[rowIndex]?.[columnIndex];
-            const imageOperations = imageOperationsBetween(
-              block.id,
-              previousRich,
-              nextRich,
-              { row: rowIndex, column: columnIndex },
-            );
-            const deletedImages = imageDeletionOperations(imageOperations);
-            const otherImageOperations = nonImageDeletionOperations(imageOperations);
-            const visibleText = nextRich
-              ? richTextWithoutImages(nextRich)
-              : text;
-            const previousVisibleText = previousRich
-              ? richTextWithoutImages(previousRich)
-              : oldRows[rowIndex]?.[columnIndex] ?? "";
-            const nonImageRichChanged = authoredRichContentChanged(
-              previousRich ?? [],
-              nextRich ?? [],
-            );
-            operations.push(...deletedImages);
-            if (visibleText !== previousVisibleText || nonImageRichChanged) {
-              const textInlineContent = nextRich
-                ? inlineContentForTextOperation(previousRich ?? [], nextRich)
-                : undefined;
-              operations.push({
-                kind: "edit-table-cell",
-                regionId: block.id,
-                row: rowIndex,
-                column: columnIndex,
-                text,
-                ...(textInlineContent ? { inlineContent: textInlineContent } : {}),
-              });
-            }
-            operations.push(...otherImageOperations);
-          }),
-        );
-      } else if (effectiveBlock.type !== "table" && (
-        effectiveBlock.text !== previous.text ||
-        authoredRichContentChanged(previous.inlineContent ?? [], effectiveBlock.inlineContent ?? []) ||
-        paragraphImageOperations.length > 0 ||
-        effectiveBlock.attrs?.display !== previous.attrs?.display ||
-        effectiveBlock.attrs?.alignment !== previous.attrs?.alignment
-      )) {
-        const imageOperations = paragraphImageOperations;
-        const deletedImages = imageDeletionOperations(imageOperations);
-        const otherImageOperations = nonImageDeletionOperations(imageOperations);
-        const layoutOperations = equationLayoutBetween(block.id, previous, effectiveBlock);
-        const hasImages = previousInline.some((item) => item.kind === "image") ||
-          nextInline.some((item) => item.kind === "image");
-        const visibleText = hasImages
-          ? richTextWithoutImages(nextInline)
-          : effectiveBlock.text;
-        const previousVisibleText = hasImages
-          ? richTextWithoutImages(previousInline)
-          : previous.text;
-        const richChanged = authoredRichContentChanged(previousInline, nextInline);
-        if (visibleText === previousVisibleText && !richChanged) {
-          operations.push(...deletedImages, ...otherImageOperations, ...layoutOperations);
-          continue;
-        }
-        const textInlineContent = effectiveBlock.inlineContent
-          ? inlineContentForTextOperation(previousInline, nextInline)
-          : undefined;
-        operations.push(...deletedImages, {
-          kind: "replace-paragraph",
-          regionId: block.id,
-          text: effectiveBlock.text,
-          ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
-        }, ...otherImageOperations, ...layoutOperations);
-      }
-      const nextStyle = effectiveBlock.attrs?.styleId;
-      if (
-        typeof nextStyle === "string" &&
-        nextStyle !== previous.attrs?.styleId
-      )
-        operations.push({
-          kind: "apply-style",
-          regionId: block.id,
-          style: nextStyle,
-        });
-      // Only the properties the writer actually changed are written. Writing
-      // the whole projected set back would turn resolved formatting into direct
-      // formatting — a style-bold heading would gain its own `w:b`, and the next
-      // person to edit the style in Word would find it no longer applied.
-      const runDelta = changedFormatFields(
-        previous.attrs?.format,
-        effectiveBlock.attrs?.format,
-        RUN_FORMAT_FIELDS,
-      );
-      if (runDelta)
-        operations.push({ kind: "format-runs", regionId: block.id, format: runDelta });
-      const paragraphDelta = changedFormatFields(
-        previous.attrs?.paragraphFormat,
-        effectiveBlock.attrs?.paragraphFormat,
-        PARAGRAPH_FORMAT_FIELDS,
-      );
-      if (paragraphDelta)
-        operations.push({
-          kind: "format-paragraph",
-          regionId: block.id,
-          format: paragraphDelta,
-        });
-    }
-    if (before.size)
-      operations.push(
-        ...[...before.keys()].map((regionId) => ({
-          kind: "delete-region" as const,
-          regionId,
-        })),
-      );
-    const order = projection.blocks.map((block) => block.id);
-    const priorOrder = carry.projection.blocks.map((block) => block.id);
-    const retained = new Set(order);
-    const existing = new Set(priorOrder);
-    const retainedBefore = priorOrder.filter((id) => retained.has(id));
-    const retainedAfter = order.filter((id) => existing.has(id));
-    // Insert and delete operations already establish the desired position for
-    // new blocks and remove absent blocks. A native reorder is only necessary
-    // when retained regions changed relative order. Avoiding a redundant
-    // reorder matters for valid Word structures (for example bibliography
-    // content controls) where several projected regions intentionally share a
-    // carrier and therefore cannot be moved independently.
-    if (retainedAfter.some((id, index) => id !== retainedBefore[index]))
-      operations.push({ kind: "reorder-regions", order });
+    const existing = new Set(carry.projection.blocks.map((block) => block.id));
+    if (projection.blocks.some((block) => block.type === "table" && !existing.has(block.id)))
+      throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "Adding a new table to a mounted Word file is unavailable in strict native mode.");
+    const operations = docxOperationsBetween(carry.projection, projection);
     if (!operations.length) return carry.payload;
     return applyDelta(carry, { kind: "ai-edit", operations }, options as DocxWriteOptions | undefined);
   },

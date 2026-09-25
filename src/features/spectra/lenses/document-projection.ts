@@ -17,6 +17,8 @@ import {
   docxRichInlineSchema,
   docxSemanticDeltaSchema,
   type DocxOperation,
+  type DocxRunFormat,
+  type DocxParagraphFormat,
   type DocxProjection,
   type DocxRichInline,
 } from "./projection-contracts";
@@ -551,11 +553,69 @@ function equationLayoutBetween(
   }];
 }
 
+const RUN_FORMAT_FIELDS = [
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "fontFamily",
+  "fontSizePoints",
+  "color",
+  "highlight",
+  "shading",
+] as const;
+
+const PARAGRAPH_FORMAT_FIELDS = [
+  "alignment",
+  "lineSpacing",
+  "spacingAfterPoints",
+  "indentLevel",
+  "border",
+  "shading",
+] as const;
+
+/**
+ * The subset of a format record the writer actually changed, or undefined when
+ * nothing did. A missing incoming record means the surface never carried
+ * formatting for that block, which is not the same as clearing it, so it
+ * produces no operation at all.
+ */
+function changedFormatFields<T extends Record<string, unknown>>(
+  before: unknown,
+  after: unknown,
+  fields: readonly string[],
+): T | undefined {
+  if (!after || typeof after !== "object") return undefined;
+  const previous = (before && typeof before === "object" ? before : {}) as Record<
+    string,
+    unknown
+  >;
+  const incoming = after as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!(field in incoming)) continue;
+    const next = incoming[field] ?? null;
+    const current = previous[field] ?? null;
+    if (next !== current) patch[field] = incoming[field];
+  }
+  return Object.keys(patch).length ? (patch as T) : undefined;
+}
+
 export function docxOperationsBetween(
   before: DocxProjection,
   after: DocxProjection,
 ): DocxOperation[] {
   const previous = new Map(before.blocks.map((block) => [block.id, block]));
+  after = { ...after, blocks: after.blocks.map((block) => {
+    const old = previous.get(block.id);
+    if (!old) return block;
+    // Storage can omit native locator/carry metadata. Recover it once, before
+    // both editor conversion and native materialization use this delta policy.
+    const recovered = restoreDocxBlockCarryMetadata(old, block);
+    const attrs = { ...recovered.attrs };
+    for (const key of ["paragraphIndex", "tableIndex", "rowCount", "columnCount"]) delete attrs[key];
+    return { ...recovered, attrs: { ...old.attrs, ...attrs } };
+  }) };
   const operations: DocxOperation[] = [];
   const beforePage = before.pageSetup ?? {};
   const afterPage = after.pageSetup ?? {};
@@ -584,17 +644,23 @@ export function docxOperationsBetween(
     const old = previous.get(block.id);
     previous.delete(block.id);
     if (!old) {
-      if (block.type !== "table")
-        operations.push({
-          kind: "insert-paragraph",
-          regionId: block.id,
-          afterRegionId: index ? after.blocks[index - 1]!.id : null,
-          text: block.text,
-          ...(block.inlineContent ? { inlineContent: block.inlineContent } : {}),
-          ...(typeof block.attrs?.styleId === "string"
-            ? { style: block.attrs.styleId }
-            : {}),
-        });
+      if (block.type === "table") throw new Error("DOCX_UNSUPPORTED_EDIT: Adding a new table to a mounted Word file is unavailable in strict native mode.");
+      operations.push({
+        kind: "insert-paragraph",
+        regionId: block.id,
+        afterRegionId: index ? after.blocks[index - 1]!.id : null,
+        text: block.text,
+        ...(block.inlineContent ? { inlineContent: block.inlineContent } : {}),
+        ...(typeof block.attrs?.styleId === "string"
+          ? { style: block.attrs.styleId }
+          : {}),
+      });
+      const equation = block.inlineContent?.find((item) => item.kind === "equation");
+      if (equation) operations.push({
+        kind: "set-equation-layout", regionId: block.id,
+        display: block.attrs?.display === "inline" || equation.display === "inline" ? "inline" : "block",
+        ...(block.attrs?.alignment === "left" || block.attrs?.alignment === "right" || block.attrs?.alignment === "center" ? { alignment: block.attrs.alignment } : {}),
+      });
       return;
     }
     if (block.type === "table" && old.type === "table") {
@@ -687,17 +753,28 @@ export function docxOperationsBetween(
       const textInlineContent = block.inlineContent
         ? inlineContentForTextOperation(previousInline, nextInline)
         : undefined;
-      const inlineContentChanged = JSON.stringify(previousInline) !== JSON.stringify(nextInline);
       operations.push(...deletedImages, {
         kind: "replace-paragraph",
         regionId: block.id,
         text: block.text,
-        ...(inlineContentChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
+        ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
       }, ...otherImageOperations, ...layoutOperations);
       // Apply retained text before adding/replacing drawings so the text rewrite
       // never clears a surviving picture operation that follows it.
     }
   });
+  const oldBlocks = new Map(before.blocks.map((block) => [block.id, block]));
+  for (const block of after.blocks) {
+    if (block.type === "table") continue;
+    const old = oldBlocks.get(block.id);
+    const style = block.attrs?.styleId;
+    if (old && typeof style === "string" && style !== old.attrs?.styleId)
+      operations.push({ kind: "apply-style", regionId: block.id, style });
+    const runFormat = changedFormatFields<DocxRunFormat>(old?.attrs?.format, block.attrs?.format, RUN_FORMAT_FIELDS);
+    if (runFormat) operations.push({ kind: "format-runs", regionId: block.id, format: runFormat });
+    const paragraphFormat = changedFormatFields<DocxParagraphFormat>(old?.attrs?.paragraphFormat, block.attrs?.paragraphFormat, PARAGRAPH_FORMAT_FIELDS);
+    if (paragraphFormat) operations.push({ kind: "format-paragraph", regionId: block.id, format: paragraphFormat });
+  }
   operations.push(
     ...[...previous.keys()].map((regionId) => ({
       kind: "delete-region" as const,

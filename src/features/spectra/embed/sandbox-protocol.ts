@@ -1,4 +1,10 @@
 import { normalizeCodeNetworkOrigins } from "../code/network-policy";
+import {
+  sanitizeSpectraThemeTokens,
+  SPECTRA_EMBED_THEME_TOKENS,
+  SPECTRA_EMBED_TOKEN_ALIASES,
+  type SpectraSandboxTheme,
+} from "./theme-tokens";
 
 export const SPECTRA_EMBED_SDK_VERSION = "1.2" as const;
 
@@ -105,6 +111,7 @@ export type SpectraSandboxHostMessage = {
   channel: string;
   theme: "light" | "dark";
   reducedMotion: boolean;
+  themeTokens?: SpectraSandboxTheme["themeTokens"];
   resources?: Record<string, unknown>;
   parameters?: Record<string, string | number | boolean>;
   exportRequest?: { id: string; format: "svg" | "png" | "webm" };
@@ -263,6 +270,7 @@ export function buildSpectraSandboxDocument({
   title,
   networkAllowlist = [],
   initialParameters = {},
+  initialTheme,
 }: {
   files: SpectraSandboxFile[];
   tests?: SpectraSandboxTest[];
@@ -271,6 +279,7 @@ export function buildSpectraSandboxDocument({
   title: string;
   networkAllowlist?: string[];
   initialParameters?: Record<string, string | number | boolean>;
+  initialTheme?: SpectraSandboxTheme;
 }): SpectraSandboxDocument {
   const diagnostics: string[] = [];
   const cleanFiles = files
@@ -489,6 +498,38 @@ export function buildSpectraSandboxDocument({
   const channel = ${safeJson(channel)};
   const version = ${safeJson(SPECTRA_EMBED_SDK_VERSION)};
   const budgets = ${safeJson(SPECTRA_EMBED_BUDGETS)};
+  const themeTokenNames = ${safeJson(SPECTRA_EMBED_THEME_TOKENS)};
+  const tokenAliases = ${safeJson(SPECTRA_EMBED_TOKEN_ALIASES)};
+  let themeTokenSnapshot = Object.freeze({});
+  const applyTheme = (message) => {
+    const root = document.documentElement;
+    root.dataset.spectraTheme = message.theme === 'dark' ? 'dark' : 'light';
+    root.dataset.spectraReducedMotion = message.reducedMotion ? 'true' : 'false';
+    const hasTokens = message.themeTokens && typeof message.themeTokens === 'object' && !Array.isArray(message.themeTokens);
+    const next = hasTokens ? {} : { ...themeTokenSnapshot };
+    if (hasTokens) {
+      for (const name of themeTokenNames) {
+        const value = message.themeTokens[name];
+        if (typeof value === 'string' && value.trim().length > 0 && value.length <= 256 && !/[<>;{}]|(?:url|expression)\\s*\\(/i.test(value)) {
+          next[name] = value.trim();
+        }
+      }
+    }
+    themeTokenSnapshot = Object.freeze(next);
+    // Defaults precede authored CSS, so an intentional visual theme wins.
+    const style = document.getElementById('spectra-theme-tokens');
+    if (style) style.textContent = ':root{color-scheme:' + root.dataset.spectraTheme + ';' + Object.entries(next).map(([name, value]) => name + ':' + value).join(';') + '}';
+  };
+  applyTheme(${safeJson({
+    theme: initialTheme?.theme === "dark" ? "dark" : "light",
+    reducedMotion: initialTheme?.reducedMotion === true,
+    themeTokens: sanitizeSpectraThemeTokens(initialTheme?.themeTokens),
+  })});
+  const sdkTokens = Object.freeze(Object.defineProperties({}, Object.fromEntries(
+    Object.entries(tokenAliases).map(([name, [token, fallback]]) => [name, {
+      enumerable: true, get: () => getComputedStyle(document.documentElement).getPropertyValue(token).trim() || themeTokenSnapshot[token] || fallback,
+    }]),
+  )));
   const allowedNetworkOrigins = new Set(${safeJson(allowedNetworkOrigins)});
   let sent = 0;
   let consoleEntries = 0;
@@ -623,8 +664,7 @@ export function buildSpectraSandboxDocument({
   window.addEventListener('message', (event) => {
     const message = event.data;
     if (event.source !== parent || !message || message.type !== 'spectra:host' || message.channel !== channel) return;
-    document.documentElement.dataset.spectraTheme = message.theme === 'dark' ? 'dark' : 'light';
-    document.documentElement.dataset.spectraReducedMotion = message.reducedMotion ? 'true' : 'false';
+    applyTheme(message);
     if (message.resources && typeof message.resources === 'object' && !Array.isArray(message.resources)) resourceSnapshot = Object.freeze(message.resources);
     if (message.parameters && typeof message.parameters === 'object' && !Array.isArray(message.parameters)) parameterSnapshot = Object.freeze(message.parameters);
     if (message.exportRequest && typeof message.exportRequest === 'object') void exportGraphic(message.exportRequest);
@@ -633,7 +673,7 @@ export function buildSpectraSandboxDocument({
   });
   window.SpectraEmbed = Object.freeze({
     version,
-    tokens: Object.freeze({ ink: '#25241f', muted: '#6f6d66', line: '#dedbd3', paper: '#fbfaf7', mint: '#26a77a', cyan: '#258ed3', violet: 'var(--brand-primary)', orange: '#dc7a2b' }),
+    tokens: sdkTokens,
     get resources() { return resourceSnapshot; },
     getResource(id) { return typeof id === 'string' ? resourceSnapshot[id] : undefined; },
     listResources() { return Object.keys(resourceSnapshot); },
@@ -761,6 +801,9 @@ export function buildSpectraSandboxDocument({
   const connectSource = allowedNetworkOrigins.length
     ? allowedNetworkOrigins.join(" ")
     : "'none'";
-  const srcDoc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; connect-src ${connectSource}; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src 'none'"><title>${cleanTitle}</title><style>:root{color-scheme:light;--spectra-ink:#25241f;--spectra-muted:#6f6d66;--spectra-line:#dedbd3;--spectra-paper:#fbfaf7;--spectra-mint:#26a77a;--spectra-cyan:#258ed3;--spectra-violet:var(--brand-primary);--spectra-orange:#dc7a2b}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--spectra-paper);color:var(--spectra-ink);font-family:"Avenir Next","Segoe UI",sans-serif}body{padding:18px}button,input,select,textarea{font:inherit}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}html[data-spectra-reduced-motion="true"] *,html[data-spectra-reduced-motion="true"] *::before,html[data-spectra-reduced-motion="true"] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}${styles.join("\n").replace(/<\/style/gi, "<\\/style")}</style><script>${bootstrap.replace(/<\/script/gi, "<\\/script")}</script></head><body>${body}<script>try{${execution}}catch(error){window.dispatchEvent(new ErrorEvent('error',{message:String(error&&error.message||error),error}));}finally{window.__spectraReady();${testExecution}}</script></body></html>`;
+  const themeAliasStyles = Object.entries(SPECTRA_EMBED_TOKEN_ALIASES)
+    .map(([name, [token, fallback]]) => `--spectra-${name}:var(${token},${fallback})`)
+    .join(";");
+  const srcDoc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; connect-src ${connectSource}; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src 'none'"><title>${cleanTitle}</title><style id="spectra-theme-tokens"></style><style>:root{${themeAliasStyles}}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--spectra-paper);color:var(--spectra-ink);font-family:var(--font-sans,system-ui,sans-serif)}body{padding:18px}button,input,select,textarea{font:inherit}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}html[data-spectra-reduced-motion="true"] *,html[data-spectra-reduced-motion="true"] *::before,html[data-spectra-reduced-motion="true"] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}${styles.join("\n").replace(/<\/style/gi, "<\\/style")}</style><script>${bootstrap.replace(/<\/script/gi, "<\\/script")}</script></head><body>${body}<script>try{${execution}}catch(error){window.dispatchEvent(new ErrorEvent('error',{message:String(error&&error.message||error),error}));}finally{window.__spectraReady();${testExecution}}</script></body></html>`;
   return { srcDoc, diagnostics, sourceBytes };
 }

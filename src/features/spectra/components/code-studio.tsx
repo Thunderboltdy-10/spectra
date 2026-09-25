@@ -61,6 +61,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 import { Button } from "@/components/ui/button";
 import { type OverflowItem } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
@@ -1987,6 +1988,7 @@ export function CodeStudio({
     const output = buildSpectraSandboxDocument({
       files: previewFiles,
       channel: "spectra-standalone-export",
+      initialTheme: readSpectraSandboxTheme(workbook.accessibility?.reducedMotion),
       title: workbook.visualisation.title || title,
       networkAllowlist:
         workbook.networkPolicy?.mode === "allowlist"

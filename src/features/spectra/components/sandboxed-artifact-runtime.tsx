@@ -11,6 +11,7 @@ import {
   type SpectraSandboxAsset,
   type SpectraSandboxTest,
 } from "../embed/sandbox-protocol";
+import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 
 export type SpectraRuntimeStatus = "loading" | "ready" | "error" | "limited";
 const EMPTY_NETWORK_ALLOWLIST: string[] = [];
@@ -59,6 +60,7 @@ export function SandboxedArtifactRuntime({
     ? `spectra-runtime-${stableId}-description`
     : undefined;
   const approvedNetworkOrigins = networkAllowlist ?? EMPTY_NETWORK_ALLOWLIST;
+  const [clientMounted, setClientMounted] = useState(false);
   const [generation, setGeneration] = useState(0);
   const channel = `spectra-${stableId}-${generation}`;
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -107,9 +109,28 @@ export function SandboxedArtifactRuntime({
         channel,
         title,
         networkAllowlist: approvedNetworkOrigins,
+        initialTheme: clientMounted
+          ? readSpectraSandboxTheme(forceReducedMotion)
+          : undefined,
       }),
-    [approvedNetworkOrigins, assets, channel, files, tests, title],
+    // Theme updates are messages, not a reason to reconstruct the document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      approvedNetworkOrigins,
+      assets,
+      channel,
+      clientMounted,
+      files,
+      tests,
+      title,
+    ],
   );
+
+  useEffect(() => {
+    // Capture real computed tokens before artifact code runs, while keeping
+    // server output and the first hydration render identical.
+    setClientMounted(true);
+  }, []);
 
   useEffect(() => {
     onEventRef.current = onEvent;
@@ -121,12 +142,15 @@ export function SandboxedArtifactRuntime({
   useEffect(() => {
     setStatus("loading");
     setMessage(document.diagnostics[0] ?? null);
-    setHeight(viewportHeight ?? (compact ? 220 : 420));
     onStatusChangeRef.current?.(
       "loading",
       document.diagnostics[0] ?? null,
       document.diagnostics,
     );
+  }, [document]);
+
+  useEffect(() => {
+    setHeight(viewportHeight ?? (compact ? 220 : 420));
   }, [compact, document, viewportHeight]);
 
   useEffect(() => {
@@ -145,22 +169,6 @@ export function SandboxedArtifactRuntime({
           "ready",
           document.diagnostics[0] ?? null,
           document.diagnostics,
-        );
-        const reducedMotion =
-          forceReducedMotion ||
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        const dark = documentElementTheme() === "dark";
-        frameRef.current?.contentWindow?.postMessage(
-          {
-            type: "spectra:host",
-            channel,
-            theme: dark ? "dark" : "light",
-            reducedMotion,
-            resources: safeResources,
-            parameters: safeParameters,
-            ...(exportRequest ? { exportRequest } : {}),
-          },
-          "*",
         );
       } else if (payload.type === "spectra:resize") {
         if (viewportHeight === undefined)
@@ -190,33 +198,34 @@ export function SandboxedArtifactRuntime({
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [
-    channel,
-    compact,
-    document.diagnostics,
-    forceReducedMotion,
-    exportRequest,
-    safeResources,
-    safeParameters,
-    viewportHeight,
-  ]);
+  }, [channel, compact, document.diagnostics, viewportHeight]);
 
   useEffect(() => {
     if (status !== "ready") return;
-    frameRef.current?.contentWindow?.postMessage(
-      {
-        type: "spectra:host",
-        channel,
-        theme: documentElementTheme(),
-        reducedMotion:
-          forceReducedMotion ||
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-        resources: safeResources,
-        parameters: safeParameters,
-        ...(exportRequest ? { exportRequest } : {}),
-      },
-      "*",
-    );
+    const sendHostState = () =>
+      frameRef.current?.contentWindow?.postMessage(
+        {
+          type: "spectra:host",
+          channel,
+          ...readSpectraSandboxTheme(forceReducedMotion),
+          resources: safeResources,
+          parameters: safeParameters,
+          ...(exportRequest ? { exportRequest } : {}),
+        },
+        "*",
+      );
+    sendHostState();
+    const observer = new MutationObserver(sendHostState);
+    observer.observe(window.document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-theme", "data-spectra-motion"],
+    });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    reducedMotion.addEventListener("change", sendHostState);
+    return () => {
+      observer.disconnect();
+      reducedMotion.removeEventListener("change", sendHostState);
+    };
   }, [
     channel,
     exportRequest,
@@ -262,19 +271,21 @@ export function SandboxedArtifactRuntime({
           </button>
         </div>
       ) : null}
-      <iframe
-        key={channel}
-        ref={frameRef}
-        title={`${title} interactive preview`}
-        aria-describedby={descriptionId}
-        srcDoc={document.srcDoc}
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        loading="lazy"
-        allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
-        className="block w-full border-0 bg-white transition-[height] duration-300 motion-reduce:transition-none"
-        style={{ height }}
-      />
+      {clientMounted ? (
+        <iframe
+          key={channel}
+          ref={frameRef}
+          title={`${title} interactive preview`}
+          aria-describedby={descriptionId}
+          srcDoc={document.srcDoc}
+          sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
+          className="block w-full border-0 bg-[var(--bg-primary)] transition-[height] duration-300 motion-reduce:transition-none"
+          style={{ height }}
+        />
+      ) : null}
       {status === "loading" ? (
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-0 ${toolbar ? "top-8" : "top-0"} flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)]`}
@@ -343,11 +354,4 @@ function RuntimeFailure({
       </div>
     </div>
   );
-}
-
-function documentElementTheme() {
-  return document.documentElement.classList.contains("dark") ||
-    document.documentElement.dataset.theme === "dark"
-    ? "dark"
-    : "light";
 }

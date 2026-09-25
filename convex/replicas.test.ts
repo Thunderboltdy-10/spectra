@@ -156,6 +156,7 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: actor.accountId,
+      schoolId: actor.schoolId,
       blueprintKey: "resource",
       resourceClass: "resource",
       nativeFormat: "docx",

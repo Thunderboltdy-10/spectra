@@ -1,43 +1,9 @@
 import { createHash } from "crypto";
-
-export const MAX_EMBED_RUNTIME_BYTES = 14_000_000;
-
-export async function readBoundedRuntimeResponse(
-  response: Response,
-  limit = MAX_EMBED_RUNTIME_BYTES,
-) {
-  if (!response.body)
-    throw new Error(
-      "RUNTIME_BUILD_UNAVAILABLE: The published build is unavailable.",
-    );
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      length += value.byteLength;
-      if (length > limit) {
-        await reader.cancel();
-        throw new Error(
-          "RUNTIME_BUILD_LIMIT: The published build exceeds its safety budget.",
-        );
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
+import { MAX_EMBED_RUNTIME_BYTES } from "./runtime-response";
+export {
+  MAX_EMBED_RUNTIME_BYTES,
+  readBoundedRuntimeResponse,
+} from "./runtime-response";
 
 export function verifyEmbeddedRuntimeBytes(
   bytes: Uint8Array,

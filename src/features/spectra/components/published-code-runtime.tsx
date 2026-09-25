@@ -10,138 +10,53 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  isPublishedCodeBuildPayload,
-  type PublishedCodeBuildPayload,
-} from "../code/published-build";
+import { type PublishedCodeBuildPayload } from "../code/published-build";
 import { codeParameterSnapshot } from "../code/model";
 import {
   runPythonInIsolatedWorker,
   type PythonRuntimeEvent,
 } from "../code/python-runtime";
 import { pythonChartToHtml } from "../code/python-chart";
-import { publishedRuntimeSourceUrl } from "../code/published-runtime-source";
+import {
+  loadPublishedRuntimeBuild,
+  type RuntimeBuild,
+} from "../code/published-runtime-loader";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 
-type RuntimeBuild = {
-  buildId: string;
-  artifactVersionId: string;
-  runtime: "browser" | "react" | "python";
-  payloadHash?: string;
-  sdkVersion: string;
-  payloadBytes?: number;
-  storageUrl?: string;
-};
-
-const MAX_PAYLOAD_BYTES = 14_000_000;
-
-async function sha256(bytes: ArrayBuffer) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function verifyEmbeddedAssets(
-  payload: PublishedCodeBuildPayload,
-  signal: AbortSignal,
-) {
-  for (const asset of payload.assets) {
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    const marker = `data:${asset.mediaType};base64,`;
-    if (!asset.dataUrl.startsWith(marker))
-      throw new Error(
-        `Published asset ${asset.path} has an invalid media envelope.`,
-      );
-    const encoded = asset.dataUrl.slice(marker.length);
-    if (encoded.length > Math.ceil(asset.bytes / 3) * 4 + 8)
-      throw new Error(
-        `Published asset ${asset.path} exceeds its recorded size.`,
-      );
-    let binary: string;
-    try {
-      binary = atob(encoded);
-    } catch {
-      throw new Error(
-        `Published asset ${asset.path} is not valid base64 data.`,
-      );
-    }
-    if (binary.length !== asset.bytes)
-      throw new Error(`Published asset ${asset.path} has an unexpected size.`);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1)
-      bytes[index] = binary.charCodeAt(index);
-    const digest = await sha256(bytes.buffer);
-    if (digest !== asset.sha256)
-      throw new Error(
-        `Published asset ${asset.path} failed its integrity check.`,
-      );
-  }
-}
-
-async function loadBuild(
-  build: RuntimeBuild,
-  signal: AbortSignal,
-  embedId?: string,
-) {
-  const sourceUrl = publishedRuntimeSourceUrl(build, embedId);
-  const response = await fetch(sourceUrl, {
-    cache: "no-store",
-    signal,
-    credentials: "omit",
-    referrerPolicy: "no-referrer",
-  });
-  if (!response.ok)
-    throw new Error("The retained runtime package is unavailable.");
-  const declared = Number(response.headers.get("content-length") || 0);
-  if (declared > MAX_PAYLOAD_BYTES)
-    throw new Error("The runtime package exceeds its safety budget.");
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > MAX_PAYLOAD_BYTES)
-    throw new Error("The runtime package exceeds its safety budget.");
-  if (
-    build.payloadBytes !== undefined &&
-    bytes.byteLength !== build.payloadBytes
-  ) {
-    throw new Error("The retained runtime package has an unexpected size.");
-  }
-  const digest = await sha256(bytes);
-  if (build.payloadHash && digest !== build.payloadHash) {
-    throw new Error("The retained runtime package failed its integrity check.");
-  }
-  const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-  if (!isPublishedCodeBuildPayload(value))
-    throw new Error(
-      "The retained runtime package is not valid Spectra output.",
-    );
-  if (
-    value.artifactVersionId !== build.artifactVersionId ||
-    value.runtime !== build.runtime ||
-    value.sdkVersion !== build.sdkVersion
-  ) {
-    throw new Error(
-      "The retained runtime package does not match its published record.",
-    );
-  }
-  await verifyEmbeddedAssets(value, signal);
-  return value;
-}
-
-export function PublishedCodeRuntime({
-  title,
-  build,
-  embedId,
-  compact,
-  resources,
-  allowInteraction = true,
-}: {
+type PublishedCodeRuntimeProps = {
   title: string;
   build: RuntimeBuild;
   embedId?: string;
   compact: boolean;
   resources?: Record<string, unknown>;
   allowInteraction?: boolean;
-}) {
+};
+
+export function PublishedCodeRuntime(props: PublishedCodeRuntimeProps) {
+  const { build, embedId } = props;
+  // A changed source must dispose the old iframe/worker before rendering.
+  // Equivalent query projections should preserve the active preview.
+  const identity = JSON.stringify([
+    embedId,
+    build.buildId,
+    build.artifactVersionId,
+    build.runtime,
+    build.payloadHash,
+    build.sdkVersion,
+    build.payloadBytes,
+    build.storageUrl,
+  ]);
+  return <PublishedCodeRuntimeInstance key={identity} {...props} />;
+}
+
+function PublishedCodeRuntimeInstance({
+  title,
+  build,
+  embedId,
+  compact,
+  resources,
+  allowInteraction = true,
+}: PublishedCodeRuntimeProps) {
   const [payload, setPayload] = useState<PublishedCodeBuildPayload | null>(
     null,
   );
@@ -155,11 +70,18 @@ export function PublishedCodeRuntime({
   const [pythonOutput, setPythonOutput] = useState<string[]>([]);
   const [pythonPreview, setPythonPreview] = useState<string | null>(null);
   const workerRef = useRef<{ cancel: () => void } | null>(null);
-  const generationRef = useRef(0);
+  const [attempt, setAttempt] = useState(0);
+  const {
+    buildId,
+    artifactVersionId,
+    runtime,
+    payloadHash,
+    sdkVersion,
+    payloadBytes,
+    storageUrl,
+  } = build;
 
-  const reload = useCallback(() => {
-    generationRef.current += 1;
-    const generation = generationRef.current;
+  useEffect(() => {
     workerRef.current?.cancel();
     workerRef.current = null;
     setPayload(null);
@@ -169,15 +91,26 @@ export function PublishedCodeRuntime({
     setPythonOutput([]);
     setPythonPreview(null);
     const controller = new AbortController();
-    void loadBuild(build, controller.signal, embedId)
+    void loadPublishedRuntimeBuild(
+      {
+        buildId,
+        artifactVersionId,
+        runtime,
+        payloadHash,
+        sdkVersion,
+        payloadBytes,
+        storageUrl,
+      },
+      controller.signal,
+      embedId,
+    )
       .then((value) => {
-        if (generation !== generationRef.current) return;
+        if (controller.signal.aborted) return;
         setPayload(value);
         setLoadState("ready");
       })
       .catch((reason) => {
-        if (controller.signal.aborted || generation !== generationRef.current)
-          return;
+        if (controller.signal.aborted) return;
         setError(
           reason instanceof Error
             ? reason.message
@@ -186,9 +119,18 @@ export function PublishedCodeRuntime({
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [build, embedId]);
+  }, [
+    attempt,
+    buildId,
+    artifactVersionId,
+    runtime,
+    payloadHash,
+    sdkVersion,
+    payloadBytes,
+    storageUrl,
+    embedId,
+  ]);
 
-  useEffect(() => reload(), [reload]);
   useEffect(() => () => workerRef.current?.cancel(), []);
 
   const handlePythonEvent = useCallback((event: PythonRuntimeEvent) => {
@@ -277,7 +219,10 @@ export function PublishedCodeRuntime({
         icon={AlertTriangle}
         title="Published build unavailable"
         detail={error ?? "The retained build could not be opened safely."}
-        action={{ label: "Retry", onClick: reload }}
+        action={{
+          label: "Retry",
+          onClick: () => setAttempt((value) => value + 1),
+        }}
       />
     );
   }

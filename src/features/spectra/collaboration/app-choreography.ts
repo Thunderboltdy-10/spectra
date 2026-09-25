@@ -1,5 +1,5 @@
 export type AppSurface =
-  "library" | "workspace" | "settings" | "calendar" | "artifact" | "none";
+  "library" | "workspace" | "settings" | "calendar" | "school" | "artifact" | "none";
 
 export type AppViewportSnapshot = {
   visibleSurfaces: readonly AppSurface[];
@@ -10,6 +10,8 @@ export type AppViewportSnapshot = {
    * runs are visible; only the followed actor may change the route. */
   followedActorId?: string | null;
   actorId?: string;
+  /** Exact control visibility, when measured. A mounted page alone is not proof. */
+  targetVisible?: boolean;
 };
 
 export type AppChoreographyDecision = {
@@ -27,24 +29,15 @@ export function arbitrateAppSurface(
 ): AppChoreographyDecision {
   const actorIsFollowed =
     viewport.followingActor &&
-    (!viewport.followedActorId || !viewport.actorId || viewport.followedActorId === viewport.actorId);
-  if (viewport.visibleSurfaces.includes(target))
+    (!viewport.followedActorId || viewport.followedActorId === viewport.actorId);
+  if (target === "none")
+    return { surface: "none", navigate: false, animate: false, reason: "No action target is available." };
+  if (viewport.targetVisible ?? viewport.visibleSurfaces.includes(target))
     return {
       surface: target,
       navigate: false,
       animate: true,
       reason: "The target is already visible.",
-    };
-  if (
-    viewport.focusedSurface &&
-    viewport.visibleSurfaces.includes(viewport.focusedSurface) &&
-    viewport.focusedSurface === target
-  )
-    return {
-      surface: target,
-      navigate: false,
-      animate: true,
-      reason: "The target owns the current focus.",
     };
   if (
     viewport.recentSurface &&
@@ -95,7 +88,6 @@ export function resolveAppChoreographySurface(
 }
 
 export const APP_CHOREOGRAPHY_CLAIM_TTL_MS = 8_000;
-export const APP_CHOREOGRAPHY_SETTLE_MS = 280;
 
 export type AppChoreographyRequest = {
   actorId: string;
@@ -105,7 +97,7 @@ export type AppChoreographyRequest = {
   summary: string;
 };
 
-export type AppChoreographyStatus = "queued" | "performing" | "blocked" | "completed" | "cancelled";
+export type AppChoreographyStatus = "queued" | "performing" | "blocked" | "completed" | "failed" | "cancelled";
 
 export type AppChoreographyEntry = AppChoreographyRequest & {
   status: AppChoreographyStatus;
@@ -116,12 +108,17 @@ export type AppChoreographyEntry = AppChoreographyRequest & {
  * One coordinator for every non-artifact surface. The semantic operation is
  * committed elsewhere; this class only owns visible bodies and target claims.
  * Each actor has an independent FIFO queue, while a target claim is shared so
- * two actors cannot animate or overwrite the same control at once.
+ * two actors cannot perform the same local control at once. These are local
+ * presentation claims, not authority to write: server revision/region fences
+ * still protect canonical effects. Only an execution acknowledgement completes
+ * an entry; elapsed animation time never establishes success.
  */
 export class AppChoreographyCoordinator {
   private readonly queues = new Map<string, AppChoreographyEntry[]>();
   private readonly active = new Map<string, AppChoreographyEntry>();
-  private readonly claims = new Map<string, { actorId: string; expiresAt: number }>();
+  private readonly claims = new Map<string, string>();
+  private readonly expiresAt = new Map<string, number>();
+  private readonly listeners = new Set<() => void>();
   private readonly now: () => number;
   private readonly claimTtlMs: number;
 
@@ -136,22 +133,41 @@ export class AppChoreographyCoordinator {
   }
 
   enqueue(request: AppChoreographyRequest): AppChoreographyEntry {
+    this.expireClaims();
+    const existing = [this.active.get(request.actorId), ...(this.queues.get(request.actorId) ?? [])]
+      .find((entry) => entry?.operationId === request.operationId);
+    if (existing) {
+      if (existing.target !== request.target || existing.targetKey !== request.targetKey)
+        throw new Error("An in-flight operation cannot change its choreography target.");
+      return existing;
+    }
     const entry: AppChoreographyEntry = { ...request, status: "queued" };
     const queue = this.queues.get(request.actorId) ?? [];
     queue.push(entry);
     this.queues.set(request.actorId, queue);
     this.pump(request.actorId);
+    this.emit();
     return entry;
   }
 
   complete(actorId: string, operationId: string): boolean {
+    return this.finish(actorId, operationId, "completed");
+  }
+
+  fail(actorId: string, operationId: string, reason: string): boolean {
+    return this.finish(actorId, operationId, "failed", reason);
+  }
+
+  private finish(actorId: string, operationId: string, status: "completed" | "failed", reason?: string): boolean {
+    this.expireClaims();
     const entry = this.active.get(actorId);
     if (!entry || entry.operationId !== operationId) return false;
-    entry.status = "completed";
+    entry.status = status;
+    entry.reason = reason;
     this.active.delete(actorId);
     this.releaseClaim(entry);
-    this.pump(actorId);
     this.pumpAllBlocked();
+    this.emit();
     return true;
   }
 
@@ -171,9 +187,9 @@ export class AppChoreographyCoordinator {
         count += 1;
       }
     }
-    this.queues.set(actorId, queue.filter((entry) => entry.status === "queued"));
-    this.pump(actorId);
+    this.queues.set(actorId, queue.filter((entry) => entry.status !== "cancelled"));
     this.pumpAllBlocked();
+    this.emit();
     return count;
   }
 
@@ -184,54 +200,71 @@ export class AppChoreographyCoordinator {
     ].map((entry) => ({ ...entry }));
   }
 
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  /** A real performer renews its lease at progress boundaries, never on a timer. */
+  renewClaim(actorId: string, operationId: string): boolean {
+    this.expireClaims();
+    const entry = this.active.get(actorId);
+    if (!entry || entry.operationId !== operationId) return false;
+    this.expiresAt.set(actorId, this.now() + this.claimTtlMs);
+    return true;
+  }
+
   /** Drop claims whose TTL elapsed so a crashed performer cannot deadlock a control. */
   expireClaims(now = this.now()): number {
     let released = 0;
-    for (const [key, claim] of [...this.claims.entries()]) {
-      if (claim.expiresAt > now) continue;
-      this.claims.delete(key);
+    for (const [actorId, expiresAt] of [...this.expiresAt.entries()]) {
+      if (expiresAt > now) continue;
       released += 1;
-      const holder = this.active.get(claim.actorId);
-      if (holder && this.claimKey(holder) === key) {
+      const holder = this.active.get(actorId);
+      if (holder) {
         holder.status = "cancelled";
         holder.reason = "The control claim expired.";
-        this.active.delete(claim.actorId);
+        this.active.delete(actorId);
+        this.releaseClaim(holder);
       }
     }
-    if (released) this.pumpAllBlocked();
+    if (released) {
+      this.pumpAllBlocked();
+      this.emit();
+    }
     return released;
   }
 
   private pump(actorId: string): void {
-    this.expireClaims();
     if (this.active.has(actorId)) return;
     const queue = this.queues.get(actorId) ?? [];
-    while (queue.length && queue[0]!.status !== "queued") queue.shift();
     const next = queue[0];
-    if (!next) return;
+    if (!next) {
+      this.queues.delete(actorId);
+      return;
+    }
     const key = this.claimKey(next);
     const owner = key ? this.claims.get(key) : undefined;
-    if (owner && owner.actorId !== actorId) {
+    if (owner && owner !== actorId) {
       next.status = "blocked";
-      next.reason = `Waiting for ${owner.actorId} to release ${key}`;
+      next.reason = `Waiting for ${owner} to release ${key}`;
       return;
     }
     queue.shift();
     next.status = "performing";
-    if (key) {
-      this.claims.set(key, {
-        actorId,
-        expiresAt: this.now() + this.claimTtlMs,
-      });
-    }
+    delete next.reason;
+    if (!queue.length) this.queues.delete(actorId);
+    if (key) this.claims.set(key, actorId);
+    this.expiresAt.set(actorId, this.now() + this.claimTtlMs);
     this.active.set(actorId, next);
   }
 
   private pumpAllBlocked(): void {
     for (const actorId of this.queues.keys()) {
-      const queue = this.queues.get(actorId) ?? [];
-      const blocked = queue.find((entry) => entry.status === "blocked");
-      if (blocked) blocked.status = "queued";
       this.pump(actorId);
     }
   }
@@ -242,7 +275,8 @@ export class AppChoreographyCoordinator {
 
   private releaseClaim(entry: AppChoreographyEntry): void {
     const key = this.claimKey(entry);
-    if (key && this.claims.get(key)?.actorId === entry.actorId) {
+    this.expiresAt.delete(entry.actorId);
+    if (key && this.claims.get(key) === entry.actorId) {
       this.claims.delete(key);
     }
   }
@@ -251,6 +285,7 @@ export class AppChoreographyCoordinator {
 export function appSurfaceFromPathname(pathname: string): AppSurface {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/calendar")) return "calendar";
+  if (pathname.startsWith("/school")) return "school";
   if (pathname.startsWith("/workspace")) return "workspace";
   if (pathname.startsWith("/library")) return "library";
   return "workspace";
@@ -265,6 +300,7 @@ export function appSurfaceFromChoreographyTarget(target: string): AppSurface {
   )
     return "settings";
   if (target.includes("calendar")) return "calendar";
+  if (target.includes("school")) return "school";
   if (
     target.includes("artifact") ||
     target.includes("workbar") ||
@@ -279,6 +315,7 @@ export function appSurfaceForNavigation(destination: string): AppSurface | null 
     destination === "workspace" ||
     destination === "settings" ||
     destination === "calendar" ||
+    destination === "school" ||
     destination === "artifact"
     ? destination
     : null;

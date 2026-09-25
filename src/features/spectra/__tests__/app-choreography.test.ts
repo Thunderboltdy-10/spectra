@@ -7,6 +7,18 @@ import {
 } from "../collaboration/app-choreography";
 
 describe("app choreography arbitration", () => {
+  it.each(["settings", "school", "calendar", "library"] as const)("uses exact visibility on %s and requires reveal while following", (target) => {
+    const viewport = { visibleSurfaces: [target], targetVisible: false, followingActor: false, actorId: "a", followedActorId: "a" };
+    expect(arbitrateAppSurface(target, viewport)).toMatchObject({ animate: false, navigate: false });
+    expect(arbitrateAppSurface(target, { ...viewport, followingActor: true })).toMatchObject({ animate: true, navigate: true });
+    expect(arbitrateAppSurface(target, { ...viewport, targetVisible: true })).toMatchObject({ animate: true, navigate: false });
+  });
+
+  it("does not grant an unattributed actor the selected actor's Follow permission", () => {
+    expect(arbitrateAppSurface("settings", { visibleSurfaces: [], followingActor: true, followedActorId: "a" }))
+      .toMatchObject({ animate: false, navigate: false });
+  });
+
   it("animates a visible target exactly once", () => {
     expect(
       arbitrateAppSurface("library", {
@@ -64,6 +76,7 @@ describe("app choreography arbitration", () => {
     expect(appSurfaceFromPathname("/workspace")).toBe("workspace");
     expect(appSurfaceFromPathname("/workspace/class-1")).toBe("workspace");
     expect(appSurfaceFromPathname("/library")).toBe("library");
+    expect(appSurfaceFromPathname("/school/course-1")).toBe("school");
   });
 
   it("commits identically when the visual layer is disabled", () => {

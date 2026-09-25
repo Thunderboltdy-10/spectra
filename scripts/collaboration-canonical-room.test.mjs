@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, stateVectorHash, durableFrontierHash } from "./collaboration-canonical-room.mjs";
+import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, stateVectorHash, durableFrontierHash, nativeOverlap } from "./collaboration-canonical-room.mjs";
 import { createCollaborationGatewayBridgeClient } from "./collaboration-gateway-bridge-client.mjs";
 import { initializeNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds } from "./collaboration-native-projection.mjs";
 import { isRebaseablePersistenceFailure } from "./collaboration-persist.mjs";
@@ -9,6 +9,15 @@ import { isRebaseablePersistenceFailure } from "./collaboration-persist.mjs";
 const projection = doc => JSON.stringify(nativeArtifactProjection(doc, 4));
 const regions = (before, after) => nativeChangedRegionIds(JSON.parse(before), JSON.parse(after));
 const clone = doc => { const result = new Y.Doc(); Y.applyUpdate(result, Y.encodeStateAsUpdate(doc)); return result; };
+
+it("identifies native overlap since the authored base while allowing disjoint regions", () => {
+  const nativeRegions = new Map([["metadata:title", { regionId: "metadata:title", sequence: 7, operationId: "native-op" }]]);
+  expect(nativeOverlap({ baseSequence: 7, authoredRegions: ["metadata:title"], nativeRegions })).toMatchObject({ operationId: "native-op", regionId: "metadata:title" });
+  expect(nativeOverlap({ baseSequence: 7, authoredRegions: ["metadata:summary"], nativeRegions })).toBeNull();
+  expect(nativeOverlap({ baseSequence: 8, authoredRegions: ["metadata:title"], nativeRegions })).toBeNull();
+  expect(nativeOverlap({ baseSequence: 7, authoredRegions: ["artifact:structure"], nativeRegions })).not.toBeNull();
+  expect(nativeOverlap({ baseSequence: 7, authoredRegions: ["metadata:title"], nativeRegions, historyFloor: 8 })).toMatchObject({ historyUnavailable: true });
+});
 
 it("replays a native delete and disjoint browser delta against the exact durable sequence", async () => {
   const base = new Y.Doc();

@@ -281,6 +281,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private localRecoveryDeliveryPending = false;
   private recoveryConfirmation: { id: string; changeVersion: number } | null = null;
   private recoveryConfirmationSequence = 0;
+  private recoveryVectorRequest: string | null = null;
+  private nativeConflict: CollaborationTransportSnapshot["recoveryConflict"];
   private localChangeVersion = 0;
   private documentChangeVersion = 0;
   private durabilityEpoch = 0;
@@ -337,13 +339,19 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   subscribePresence = this.snapshots.subscribePresence;
   subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
-  markLocalRecoveryPending() {
+  markLocalRecoveryPending(conflict?: CollaborationTransportSnapshot["recoveryConflict"]) {
     if (this.destroyed || this.localRecoveryPending) return;
     // Restored IndexedDB work is authored state even though its Yjs update
     // origin is LOCAL_PERSISTENCE_ORIGIN. Keep it pending until the gateway
     // confirms the complete merged document hash, never just socket sync.
     this.localRecoveryPending = true;
     this.localDurabilityPending = true;
+    if (conflict) {
+      this.nativeConflict = conflict;
+      this.update({ state: "unsynchronized", recoveryConflict: conflict,
+        error: "A native edit changed the same part of this work. The local draft is preserved for review." });
+      return;
+    }
     this.updateSynchronizationState();
     this.sendLocalRecoveryUpdate();
   }
@@ -352,6 +360,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     const provider = this.provider;
     if (
       !this.localRecoveryPending ||
+      this.nativeConflict ||
       this.localRecoveryDeliveryPending ||
       !provider?.synced ||
       this.level === "read" ||
@@ -361,17 +370,36 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       return;
     this.localRecoveryDeliveryPending = true;
     try {
-      // The initial Hocuspocus handshake asks the room for state based on the
-      // local vector, but does not reliably transmit a preloaded local branch.
-      // After the server baseline has merged, send the full Yjs state; the
-      // gateway persists only its missing delta and treats repeats as no-ops.
-      provider.documentUpdateHandler(Y.encodeStateAsUpdate(this.document), {
+      // Ask for the committed causal base. A restored branch can contain a
+      // tiny edit to a large artifact; its whole body need not be uploaded.
+      this.recoveryVectorRequest = `vector:${++this.recoveryConfirmationSequence}`;
+      provider.sendStateless(JSON.stringify({ type: "spectra.recovery_request", confirmationId: this.recoveryVectorRequest }));
+    } catch {
+      this.recoveryVectorRequest = null;
+      this.localRecoveryDeliveryPending = false;
+      this.updateSynchronizationState("Spectra could not request the saved baseline. Retry synchronization to recover the local draft.");
+    }
+  }
+
+  private sendLocalRecoveryDelta(requestId: string, encodedVector: string) {
+    const provider = this.provider;
+    if (!provider?.synced || requestId !== this.recoveryVectorRequest || this.destroyed || this.level !== "modify") return;
+    try {
+      if (encodedVector.length > 180_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encodedVector)) throw new Error("COLLABORATION_RECOVERY_VECTOR_INVALID");
+      const vector = Uint8Array.from(atob(encodedVector), character => character.charCodeAt(0));
+      Y.decodeStateVector(vector);
+      // encodeStateAsUpdate retains deletes and unresolved causal dependencies.
+      // A genuinely large new branch uses the existing negotiated framing.
+      const delta = Y.encodeStateAsUpdate(this.document, vector);
+      provider.documentUpdateHandler(delta, {
         clientId: this.clientId,
         kind: "spectra-local-recovery",
       });
+      this.recoveryVectorRequest = null;
       provider.flushPendingUpdates();
       this.requestDurableConfirmation();
     } catch {
+      this.recoveryVectorRequest = null;
       this.recoveryConfirmation = null;
       this.localRecoveryDeliveryPending = false;
       this.updateSynchronizationState(
@@ -381,6 +409,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   private requestDurableConfirmation() {
+    if (this.nativeConflict) return;
     if (!this.provider?.synced || this.recoveryConfirmation || !this.localDurabilityPending || this.destroyed) return;
     const confirmation = { id: `recovery:${++this.recoveryConfirmationSequence}`, changeVersion: this.localChangeVersion };
     this.recoveryConfirmation = confirmation;
@@ -388,6 +417,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   private confirmDurableFrontier(confirmedHash: string) {
+    if (this.nativeConflict) return;
     if (!/^[a-f0-9]{64}$/.test(confirmedHash)) return;
     const frontier = encodeDurableFrontier(Y, this.document);
     if (!frontier) return;
@@ -415,6 +445,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (next.presence) this.presence = next.presence;
     if ("error" in next) this.error = next.error;
     this.snapshots.apply({
+      ...(this.nativeConflict ? { recoveryConflict: this.nativeConflict } : {}),
       state: this.state,
       level: this.level,
       ...(this.accountId ? { accountId: this.accountId } : {}),
@@ -816,8 +847,17 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               documentHash?: unknown;
               confirmationId?: unknown;
               frontierHash?: unknown;
+              stateVector?: unknown;
+              code?: unknown;
+              regionIds?: unknown;
+              nativeOperationId?: unknown;
               message?: unknown;
             };
+            if (message.type === "spectra.recovery_vector") {
+              if (typeof message.confirmationId === "string" && typeof message.stateVector === "string")
+                this.sendLocalRecoveryDelta(message.confirmationId, message.stateVector);
+              return;
+            }
             if (message?.type === "spectra.permission_changed") {
               void fetchCollaborationSession(
                 this.artifactId,
@@ -925,12 +965,20 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               this.updateSynchronizationState();
               return;
             }
-            if (message.type === "spectra.durable_failed")
+            if (message.type === "spectra.durable_failed") {
+              if (message.code === "COLLABORATION_NATIVE_OVERLAP") {
+                this.nativeConflict = {
+                  regionIds: Array.isArray(message.regionIds) ? message.regionIds.filter((value): value is string => typeof value === "string").slice(0, 128) : [],
+                  nativeOperationId: typeof message.nativeOperationId === "string" ? message.nativeOperationId : null,
+                };
+                this.websocketProvider?.disconnect();
+              }
               this.updateSynchronizationState(
                 typeof message.message === "string"
                   ? message.message
                   : "This edit could not be synchronized. Your local draft is still available.",
               );
+            }
           } catch {
             // Ignore malformed stateless payloads from the gateway.
           }
@@ -942,6 +990,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           // reconnect, where it receives a fresh durable pending/ack lifecycle.
           this.durablePendingUpdateIds.clear();
           this.localRecoveryDeliveryPending = false;
+          this.recoveryVectorRequest = null;
           this.recoveryConfirmation = null;
           const revoked =
             event.code === 4403 && collaborationAccessRevoked(event.reason);
@@ -1066,6 +1115,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
 
   async retry() {
     if (this.destroyed) throw new Error("COLLABORATION_CLOSED");
+    if (this.nativeConflict) return;
     if (this.state === "permission_lost")
       throw new Error("COLLABORATION_ACCESS_LOST");
     if (!this.provider) {

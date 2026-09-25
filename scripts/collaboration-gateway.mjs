@@ -37,7 +37,7 @@ import {
   createDurablePayloadManifest,
 } from "./collaboration-durable-capacity.mjs";
 import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "./collaboration-gateway-bridge-client.mjs";
-import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive } from "./collaboration-canonical-room.mjs";
+import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, nativeOverlap } from "./collaboration-canonical-room.mjs";
 import {
   durableHeadKey,
   isRebaseablePersistenceFailure,
@@ -280,6 +280,7 @@ function canonicalRoom(document, context) {
 }
 
 async function catchUpCanonicalRoom(document, context) {
+  await flushPersistence(document);
   return canonicalRoom(document, context).run(async session => {
     const { document: canonical, stored } = await session.refresh();
     mergeCanonicalIntoLive(canonical, document);
@@ -297,8 +298,6 @@ let compactionInFlight = false;
 async function compactStoredRoom(context, { countAppend = true } = {}) {
   if (!context?.artifactId || !context?.partitionKey) return;
   const key = durableHeadKey(context);
-  const open = openDocuments.get(key);
-  if (open) await catchUpCanonicalRoom(open.document, context);
   const local = compactionState.get(key) ?? {
     appends: 0,
     lastSnapshotAt: null,
@@ -313,6 +312,8 @@ async function compactStoredRoom(context, { countAppend = true } = {}) {
   if (!due || compactionInFlight) return;
   compactionInFlight = true;
   try {
+    const open = openDocuments.get(key);
+    if (open) await catchUpCanonicalRoom(open.document, context);
     const stored = await bridge("load", {
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
@@ -421,7 +422,7 @@ function forceCanonicalReconnect(context, reason) {
       peer.context?.partitionKey !== context.partitionKey
     )
       continue;
-    sendGatewayState(peer, {
+    if (!reason.includes("COLLABORATION_NATIVE_OVERLAP")) sendGatewayState(peer, {
       type: "spectra.durable_failed",
       message: DURABLE_FAILURE_USER_MESSAGE,
     });
@@ -519,7 +520,19 @@ async function persistAcceptedMessages(document, entries) {
         rebuild = true;
         const refreshed = await session.refresh();
         canonical = refreshed.document;
-        mergeCanonicalIntoLive(canonical, document);
+        const authoredRegions = first.nativeProjectionBefore && group.at(-1).nativeProjectionAfter
+          ? nativeChangedRegionIds(first.nativeProjectionBefore, group.at(-1).nativeProjectionAfter)
+          : group.flatMap(entry => entry.regionIds);
+        const overlap = nativeOverlap({ baseSequence: first.baseSequence, authoredRegions,
+          nativeRegions: refreshed.nativeRegions, historyFloor: refreshed.historyFloor });
+        if (overlap) {
+          for (const entry of group) sendGatewayState(entry.connection, {
+            type: "spectra.durable_failed", code: "COLLABORATION_NATIVE_OVERLAP",
+            message: "A native edit changed the same part of this work. Your local draft is preserved; review the conflicting changes before retrying.",
+            regionIds: [overlap.regionId], nativeOperationId: overlap.operationId,
+          });
+          throw new Error("COLLABORATION_NATIVE_OVERLAP");
+        }
         const native = isNativeArtifactDocument(canonical);
         const beforeModel = native ? null : artifactModelState(canonical);
         const prepared = prepareCanonicalAppend({
@@ -555,6 +568,8 @@ async function persistAcceptedMessages(document, entries) {
         canonical = (await session.refresh()).document;
       } else session.commit(accepted.result.sequence);
       mergeCanonicalIntoLive(canonical, document);
+      const open = openDocuments.get(durableHeadKey(context));
+      if (open?.document === document) open.nextSequence = Math.max(open.nextSequence, accepted.result.sequence + 1);
       for (const entry of group) sendGatewayState(entry.connection, {
         type: "spectra.durable_ack", updateIds: [entry.messageId],
       });
@@ -608,6 +623,9 @@ async function flushPersistence(document) {
   }
   clearTimeout(queue.timer);
   queue.timer = null;
+  const lastPending = queue.pending.at(-1);
+  if (lastPending && isNativeArtifactDocument(document))
+    lastPending.nativeProjectionAfter = nativeArtifactProjection(document, lastPending.context.schemaVersion);
   const entries = queue.pending.splice(0);
   queue.firstPendingAt = null;
   queue.pendingBytes = 0;
@@ -1068,6 +1086,8 @@ const server = new Server({
     }
     activeConnections.add(connection);
     openDocuments.set(durableHeadKey(connection.context), { document, nextSequence: 0 });
+    try { await catchUpCanonicalRoom(document, connection.context); }
+    catch (error) { forceCanonicalReconnect(connection.context, collaborationFailureMessage(error)); }
     const unwatch = authorizationGuard.watch(connection);
     connection.onClose(() => {
       activeConnections.delete(connection);
@@ -1093,7 +1113,6 @@ const server = new Server({
     await acquireDocumentMessage(document, socketId);
     try {
       await reauthorize(context);
-      await catchUpCanonicalRoom(document, context);
       const nativeBefore = isNativeArtifactDocument(document);
       // Sync step 2 often contains the complete client state on room join.
       // Accept the bounded realtime frame, but persist only the canonical
@@ -1122,6 +1141,8 @@ const server = new Server({
       const previousPending = documentPersistenceQueues.get(document)?.pending.at(-1);
       const continuesNativeBatch = nativeBefore && previousPending?.nativeBefore &&
         samePersistenceBatch(previousPending, { context, nativeInitialization: false });
+      if (nativeBefore && previousPending && !continuesNativeBatch)
+        previousPending.nativeProjectionAfter = nativeArtifactProjection(document, previousPending.context.schemaVersion);
       const nativeProjectionBefore = nativeBefore && !continuesNativeBatch
         ? nativeArtifactProjection(document, context.schemaVersion)
         : null;
@@ -1139,6 +1160,7 @@ const server = new Server({
         nativeBefore,
         nativeProjectionBefore,
         baseStateVectorHash,
+        baseSequence: openDocuments.get(durableHeadKey(context))?.nextSequence,
         messageId: `${context.clientId}:${updateHash}`,
       });
     } catch (error) {
@@ -1289,7 +1311,7 @@ const server = new Server({
     if (payload.length > 256) return;
     let request;
     try { request = JSON.parse(payload); } catch { return; }
-    if (request?.type !== "spectra.durable_confirm" ||
+    if (!["spectra.durable_confirm", "spectra.recovery_request"].includes(request?.type) ||
         typeof request.confirmationId !== "string" ||
         !/^[a-zA-Z0-9:-]{1,120}$/.test(request.confirmationId)) return;
     await reauthorize(connection.context);
@@ -1304,6 +1326,20 @@ const server = new Server({
     finally { releaseDocumentMessage(connection.socketId); }
     try {
       await barrier;
+      if (request.type === "spectra.recovery_request") {
+        await canonicalRoom(document, connection.context).run(async session => {
+          const { document: canonical } = await session.refresh();
+          const vector = Y.encodeStateVector(canonical);
+          if (vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
+            throw new Error("COLLABORATION_RECOVERY_VECTOR_SIZE");
+          mergeCanonicalIntoLive(canonical, document);
+          sendGatewayState(connection, {
+            type: "spectra.recovery_vector", confirmationId: request.confirmationId,
+            stateVector: Buffer.from(vector).toString("base64"),
+          });
+        });
+        return;
+      }
       sendGatewayState(connection, {
         type: "spectra.durable_ack",
         confirmationId: request.confirmationId,

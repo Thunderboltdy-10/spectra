@@ -18,6 +18,7 @@ function harness(persist = vi.fn(async () => undefined)) {
   };
   const sent = vi.fn();
   const deps = { Y, persistenceQueue, persistenceFlushDelay, documentPersistenceQueues: queues,
+    isNativeArtifactDocument: () => false,
     sendGatewayState: sent, forceCanonicalReconnect: vi.fn(), collaborationFailureMessage: String };
   const code = source.slice(source.indexOf("function schedulePersistence("), source.indexOf("function sessionClaims("));
   const handlers = new Function(...Object.keys(deps), `let lastPersistenceFailure; ${code}; return {schedulePersistence, flushPersistence};`)(...Object.values(deps));

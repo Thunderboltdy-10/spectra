@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createHash } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import * as Y from "yjs";
+import { encodeDurableFrontier } from "../../../../shared/collaboration-durable-frontier.mjs";
 
 const hocuspocus = vi.hoisted(() => ({
   callbacks: null as null | {
@@ -46,7 +47,12 @@ vi.mock("@hocuspocus/provider", () => ({
     destroy = vi.fn();
     forceSync = vi.fn();
     documentUpdateHandler = vi.fn();
-    sendStateless = vi.fn();
+    sendStateless = vi.fn((payload: string) => {
+      const request = JSON.parse(payload);
+      if (request.type === "spectra.recovery_request") hocuspocus.callbacks?.onStateless({ payload: JSON.stringify({
+        type: "spectra.recovery_vector", confirmationId: request.confirmationId, stateVector: "AA==",
+      }) });
+    });
     flushPendingUpdates = vi.fn();
     setAwarenessField = vi.fn();
 
@@ -61,6 +67,7 @@ import { HocuspocusArtifactTransport } from "../collaboration/hocuspocus-transpo
 
 describe("P5.I2 Hocuspocus transport lifecycle", () => {
   beforeEach(() => {
+    vi.stubGlobal("crypto", webcrypto);
     window.sessionStorage.clear();
     hocuspocus.provider = null;
     hocuspocus.websocket = null;
@@ -158,6 +165,9 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
         updateIds: ["dense-sheet-client:update-1"],
       }),
     });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+    hocuspocus.callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_frontier",
+      frontierHash: createHash("sha256").update(encodeDurableFrontier(Y, transport.document)!).digest("hex") }) });
     await flushed;
     expect(transport.getSyncSnapshot()).toMatchObject({
       state: "synchronized",
@@ -279,7 +289,7 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     const callbacks = hocuspocus.callbacks!;
     provider.synced = true;
     callbacks.onSynced({ state: true });
-    const request = JSON.parse(provider.sendStateless.mock.calls[0][0]);
+    const request = provider.sendStateless.mock.calls.map(call => JSON.parse(call[0])).find(value => value.type === "spectra.durable_confirm");
     expect(request).toMatchObject({ type: "spectra.durable_confirm" });
     expect(JSON.stringify(request).length).toBeLessThan(120);
     callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", updateIds: [] }) });
@@ -290,7 +300,10 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
     callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_pending", updateIds: ["later"] }) });
     callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", updateIds: ["later"] }) });
-    expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 });
+    expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_frontier",
+      frontierHash: createHash("sha256").update(encodeDurableFrontier(Y, transport.document)!).digest("hex") }) });
+    await vi.waitFor(() => expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 }));
     expect(provider.documentUpdateHandler).toHaveBeenCalledOnce();
     transport.destroy();
   });
@@ -304,15 +317,16 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     const callbacks = hocuspocus.callbacks!;
     provider.synced = true;
     callbacks.onSynced({ state: true });
-    const first = JSON.parse(provider.sendStateless.mock.calls[0][0]);
+    const first = provider.sendStateless.mock.calls.map(call => JSON.parse(call[0])).find(value => value.type === "spectra.durable_confirm");
     callbacks.onDisconnect({ event: { code: 1006, reason: "restart" } });
     callbacks.onSynced({ state: true });
-    const second = JSON.parse(provider.sendStateless.mock.calls[1][0]);
+    const second = provider.sendStateless.mock.calls.map(call => JSON.parse(call[0])).filter(value => value.type === "spectra.durable_confirm").at(-1);
     expect(second.confirmationId).not.toBe(first.confirmationId);
     callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: first.confirmationId }) });
     expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
-    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: second.confirmationId }) });
-    expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 });
+    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: second.confirmationId,
+      frontierHash: createHash("sha256").update(encodeDurableFrontier(Y, transport.document)!).digest("hex") }) });
+    await vi.waitFor(() => expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 }));
     transport.destroy();
   });
 

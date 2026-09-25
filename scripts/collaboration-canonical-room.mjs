@@ -16,6 +16,8 @@ export function createCanonicalRoom({ load, expectedRoomId }) {
   let stored = null;
   let document = null;
   let tail = Promise.resolve();
+  const nativeRegions = new Map();
+  let historyFloor = 0;
   function invalidate() {
     document?.destroy();
     document = null;
@@ -44,11 +46,17 @@ export function createCanonicalRoom({ load, expectedRoomId }) {
         ? Uint8Array.from(Buffer.from(item.update, "base64")) : item.update);
     }
     stored = latest;
+    historyFloor = Math.max(historyFloor, latest.snapshot?.throughSequence ?? 0);
+    for (const entry of latest.updates ?? []) if (entry.nativeReconciliationOperationId) {
+      for (const regionId of entry.regionIds ?? []) nativeRegions.set(regionId, {
+        regionId, sequence: entry.sequence, operationId: entry.nativeReconciliationOperationId,
+      });
+    }
     if (latest.liveStateVectorHash && stateVectorHash(document) !== latest.liveStateVectorHash) {
       invalidate();
       throw new Error("COLLABORATION_REPLAY_HEAD_MISMATCH");
     }
-    return { document, stored };
+    return { document, stored, nativeRegions, historyFloor };
   }
   return {
     run(work) {
@@ -83,4 +91,15 @@ export function prepareCanonicalAppend({ document, stored, update, projection, r
     projectionJson: after,
     regionIds: regions(before, after),
   };
+}
+
+export function nativeOverlap({ baseSequence, authoredRegions, nativeRegions, historyFloor = 0 }) {
+  if (!Number.isSafeInteger(baseSequence)) return null;
+  if (baseSequence < historyFloor) return { regionId: "artifact:structure", operationId: null, historyUnavailable: true };
+  for (const change of nativeRegions.values()) {
+    if (change.sequence < baseSequence) continue;
+    if (authoredRegions.includes("artifact:structure") || change.regionId === "artifact:structure" || authoredRegions.includes(change.regionId))
+      return change;
+  }
+  return null;
 }

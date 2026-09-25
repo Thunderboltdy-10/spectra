@@ -5,7 +5,7 @@ import * as Y from "yjs";
 import {createCollaborationGatewayBridgeClient} from "./collaboration-gateway-bridge-client.mjs";
 import {planMergedUpdatePersist} from "./collaboration-durable-capacity.mjs";
 import {samePersistenceBatch} from "./collaboration-persist.mjs";
-import {createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive} from "./collaboration-canonical-room.mjs";
+import {createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, nativeOverlap} from "./collaboration-canonical-room.mjs";
 import {MAX_DURABLE_UPDATE_BYTES} from "./collaboration-update-envelope.mjs";
 import {initializeNativeArtifactDocument, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds} from "./collaboration-native-projection.mjs";
 
@@ -32,6 +32,7 @@ it("does not acknowledge semantically unchanged Yjs structs before their durable
   const deps={Y, samePersistenceBatch, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds,
     NATIVE_PROJECTION_REGION:"$spectra:native-projection",sendGatewayState:ack,planMergedUpdatePersist,
     MAX_DURABLE_UPDATE_BYTES,canonicalRoom:()=>room,prepareCanonicalAppend,mergeCanonicalIntoLive,
+    nativeOverlap,
     artifactProjection:document=>JSON.stringify(nativeArtifactProjection(document,4)),
     createHash,appendWithRetry:append,checkpointScheduler:()=>({note:vi.fn()})};
   const persist=new Function(...Object.keys(deps),`${code}; return persistAcceptedMessages;`)(...Object.values(deps));

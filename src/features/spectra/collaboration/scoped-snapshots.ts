@@ -41,6 +41,7 @@ function syncEqual(
     left.displayName === right.displayName &&
     left.unsynchronizedChanges === right.unsynchronizedChanges &&
     left.error === right.error
+    && left.recoveryConflict === right.recoveryConflict
   );
 }
 
@@ -177,6 +178,7 @@ export class ScopedCollaborationSnapshots {
 
   apply(patch: Partial<CollaborationTransportSnapshot>) {
     const nextSync: CollaborationSyncSnapshot = {
+      recoveryConflict: patch.recoveryConflict ?? this.sync.recoveryConflict,
       state: patch.state ?? this.sync.state,
       level: patch.level !== undefined ? patch.level : this.sync.level,
       unsynchronizedChanges:

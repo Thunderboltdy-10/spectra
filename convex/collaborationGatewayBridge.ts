@@ -202,7 +202,7 @@ export const exchange = action({
         contentHash: string;
         payload?: { url: string; digest: string; byteLength: number };
       } | null = null;
-      const updates: Array<{ sequence: number; update: string; payload?: { url: string; digest: string; byteLength: number } }> = [];
+      const updates: Array<{ sequence: number; update: string; regionIds: string[]; nativeReconciliationOperationId: string | null; payload?: { url: string; digest: string; byteLength: number } }> = [];
       let roomId: string | null = null;
       let schemaVersion = 1;
       let nextSequence = 1;
@@ -284,6 +284,8 @@ export const exchange = action({
           }
           updates.push({
             sequence: update.sequence,
+            regionIds: update.regionIds,
+            nativeReconciliationOperationId: update.nativeReconciliationOperationId,
             update: updateBytes.toString("base64"),
             ...(descriptor ? { payload: descriptor } : {}),
           });

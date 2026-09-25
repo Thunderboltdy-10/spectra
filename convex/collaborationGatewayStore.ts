@@ -383,6 +383,8 @@ export const load = internalQuery({
         : null,
       updates: updates.map((update) => ({
         sequence: update.sequence,
+        regionIds: update.regionIds,
+        nativeReconciliationOperationId: (update as typeof update & { nativeReconciliationOperationId?: string }).nativeReconciliationOperationId ?? null,
         update: update.update,
         byteLength: update.byteLength,
         payloadRef: update.payloadRef ?? null,

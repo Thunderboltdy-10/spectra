@@ -139,6 +139,8 @@ export type CollaborationCursor = {
   };
 };
 
+export type NativeRecoveryConflict = { regionIds: string[]; nativeOperationId: string | null };
+
 export type CollaborationTransportSnapshot = {
   state: CollaborationSyncState;
   level: "read" | "modify" | null;
@@ -147,6 +149,7 @@ export type CollaborationTransportSnapshot = {
   unsynchronizedChanges: number;
   presence: CollaborationPresence[];
   error?: string;
+  recoveryConflict?: NativeRecoveryConflict;
 };
 
 export type CollaborationSyncSnapshot = {
@@ -156,6 +159,7 @@ export type CollaborationSyncSnapshot = {
   displayName?: string;
   unsynchronizedChanges: number;
   error?: string;
+  recoveryConflict?: NativeRecoveryConflict;
 };
 
 export type PresencePreviewSnapshot = {
@@ -234,7 +238,7 @@ export type ArtifactCollaborationTransport = {
    * remote durable acknowledgement. Providers that already queue the restored
    * update during document hydration may implement this as a no-op.
    */
-  markLocalRecoveryPending?(): void;
+  markLocalRecoveryPending?(conflict?: NativeRecoveryConflict): void;
   retry(): Promise<void>;
   disconnect(): void;
   destroy(): void;

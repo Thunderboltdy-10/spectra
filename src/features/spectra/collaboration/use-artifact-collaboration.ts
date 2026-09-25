@@ -90,6 +90,10 @@ export function useArtifactCollaboration(
       document: next.document,
       modelVersion: schemaVersion,
     });
+    const unsubscribeRecovery = next.subscribeSync(() => {
+      const conflict = next.getSyncSnapshot().recoveryConflict;
+      if (conflict) persistence.preserveConflict(conflict);
+    });
     let cancelled = false;
     // Restore the bounded local Yjs state before joining the room. The room's
     // state-vector handshake then merges the offline branch rather than
@@ -101,12 +105,12 @@ export function useArtifactCollaboration(
         if (durability.state === "error")
           throw new Error("LOCAL_COLLABORATION_RESTORE_FAILED");
         if (durability?.pendingRemoteSync)
-          next.markLocalRecoveryPending?.();
+          next.markLocalRecoveryPending?.(durability.recoveryConflict);
         setTransport(next);
         setLocalPersistence(persistence);
       })
       .then(() => {
-        if (!cancelled) void next.connect();
+        if (!cancelled && !persistence.getSnapshot().recoveryConflict) void next.connect();
       })
       .catch(() => {
         if (cancelled) return;
@@ -117,6 +121,7 @@ export function useArtifactCollaboration(
       });
     return () => {
       cancelled = true;
+      unsubscribeRecovery();
       persistence.destroy();
       next.destroy();
       setTransport(null);
@@ -159,8 +164,7 @@ export function useArtifactCollaboration(
   useEffect(() => {
     if (
       snapshot.unsynchronizedChanges === 0 &&
-      snapshot.state !== "unsynchronized" &&
-      snapshot.state !== "reconnecting"
+      snapshot.state === "synchronized"
     ) {
       recoveryAttemptRef.current = 0;
     }
@@ -196,6 +200,8 @@ export function useArtifactCollaboration(
       !transport ||
       recoveringRef.current ||
       snapshot.level === "read" ||
+      snapshot.recoveryConflict ||
+      (localDurability.pendingRemoteSync && ["error", "quota_exceeded"].includes(localDurability.state)) ||
       snapshot.unsynchronizedChanges === 0 ||
       snapshot.state !== "unsynchronized"
     )
@@ -207,15 +213,21 @@ export function useArtifactCollaboration(
     // reapply that draft under a fresh region claim.
     recoveringRef.current = true;
     const attempt = recoveryAttemptRef.current;
+    if (attempt >= 8) { recoveringRef.current = false; return; }
     const recoveryDelay = syncRetryDelayMs(
       attempt + 1,
       `collaboration-recovery:${artifactId}`,
     );
-    recoveryAttemptRef.current = Math.min(attempt + 1, 32);
+    recoveryAttemptRef.current = attempt + 1;
     const timer = window.setTimeout(() => {
-      transport.destroy();
-      setGeneration((value) => value + 1);
-      recoveringRef.current = false;
+      void (async () => {
+        await localPersistence?.persistNow();
+        const local = localPersistence?.getSnapshot();
+        if (!local || !["ready", "local_only"].includes(local.state)) { recoveringRef.current = false; return; }
+        transport.destroy();
+        setGeneration((value) => value + 1);
+        recoveringRef.current = false;
+      })();
     }, recoveryDelay);
     return () => {
       window.clearTimeout(timer);
@@ -225,13 +237,23 @@ export function useArtifactCollaboration(
     snapshot.level,
     snapshot.state,
     snapshot.unsynchronizedChanges,
+    snapshot.recoveryConflict,
     transport,
     artifactId,
+    localPersistence,
+    localDurability.state,
+    localDurability.pendingRemoteSync,
   ]);
   const recoverAuthoritative = useCallback(() => {
-    transport?.destroy();
-    setGeneration((value) => value + 1);
-  }, [transport]);
+    recoveryAttemptRef.current = 0;
+    void (async () => {
+      await localPersistence?.retry();
+      const local = localPersistence?.getSnapshot();
+      if (!local || !["ready", "local_only"].includes(local.state)) return;
+      transport?.destroy();
+      setGeneration((value) => value + 1);
+    })();
+  }, [transport, localPersistence]);
   const canRecoverOffline =
     localDurability.state === "ready" ||
     localDurability.state === "local_only" ||

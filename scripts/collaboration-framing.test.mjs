@@ -37,6 +37,16 @@ describe("bounded Yjs message framing", () => {
     assembler.accept(frames[0]); now = 30_001;
     expect(() => assembler.accept(frames[1])).toThrow("INVALID");
   });
+  it("rejects duplicate and truncated frames without accepting a partial Yjs update", () => {
+    const frames = [...frameMessage(new Uint8Array(FRAME_BYTES * 2))];
+    const duplicate = createMessageAssembler();
+    expect(duplicate.accept(frames[0])).toBeNull();
+    expect(() => duplicate.accept(frames[0])).toThrow("INVALID");
+    duplicate.reset();
+    const truncated = createMessageAssembler();
+    expect(() => truncated.accept(frames[0].subarray(0, frames[0].length - 1))).toThrow("INVALID");
+    truncated.reset();
+  });
 });
 
 

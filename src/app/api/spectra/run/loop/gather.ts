@@ -177,7 +177,11 @@ export async function buildContext(
     | "executionId"
   >,
   prompt = "",
-  options: { mode?: "orientation" | "expanded" } = {},
+  options: {
+    mode?: "orientation" | "expanded";
+    /** Server-restored intent already composed in full into the prompt. */
+    restoredGoal?: { originalRequest: string; clarificationResponses: string[] };
+  } = {},
 ) {
   const expanded = options.mode !== "orientation";
   const artifactReads = new Map<string, Promise<unknown>>();
@@ -381,9 +385,8 @@ export async function buildContext(
           (continuationRecord.askingRun as Record<string, unknown>).userPrompt,
         )
       : "";
-  const targetingPrompt = [prompt, continuationOriginalPrompt]
-    .filter((value) => value.trim())
-    .join("\n");
+  const targetingPrompt = options.restoredGoal ? prompt
+    : [prompt, continuationOriginalPrompt].filter((value) => value.trim()).join("\n");
   const explicitMutationOnly = isExplicitExistingArtifactUpdateOnly(prompt);
   const requestedMutationArtifactIds = explicitMutationOnly
     ? explicitMutationArtifactIdsFromPrompt(prompt)
@@ -846,7 +849,7 @@ export async function buildContext(
   const clarificationRun = continuationRecord?.askingRun && typeof continuationRecord.askingRun === "object"
     ? (continuationRecord.askingRun as Record<string, unknown>)
     : clarificationTrace?.run as Record<string, unknown> | undefined;
-  const activeGoal = selectedClarification
+  const activeGoal = !options.restoredGoal && selectedClarification
     ? {
         request: clarificationRun?.userPrompt,
         question: selectedClarification.content,
@@ -985,6 +988,16 @@ export async function buildContext(
     currentLibraryLocation: libraryLocation,
     packet: {
       ...contextPacket,
+      ...(options.restoredGoal ? {
+        // The full restored goal is already in callModel's current User
+        // request. An excerpt here must not replace it or duplicate long text.
+        activeGoal: {
+          source: "restored_run",
+          requestLocation: "current_user_request",
+          clarificationResponseCount: options.restoredGoal.clarificationResponses.length,
+          rule: "The current User request contains the complete original request and all consumed clarification answers. Preserve its compatible scope and unfinished work. Earlier conversation excerpts do not replace that request.",
+        },
+      } : {}),
       contextMode: expanded ? "expanded" : "orientation",
       omitted: {
         ...contextPacket.omitted,

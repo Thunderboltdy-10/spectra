@@ -38,6 +38,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -59,10 +60,10 @@ import {
 } from "../components/artifact-blueprint-sheet";
 import { workTypeMeta } from "../components/artifact-card";
 import {
+  StudioSplitPlaceholder,
   StudioTabRail,
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
-import { ArtifactStudio } from "../components/artifact-studio";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import {
   CommandBar,
@@ -243,6 +244,11 @@ function aiEditedExpiresAt(
     return artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS;
   return undefined;
 }
+
+const ArtifactStudio = dynamic(
+  () => import("../components/artifact-studio").then((module) => module.ArtifactStudio),
+  { loading: () => <StudioSplitPlaceholder /> },
+);
 
 function expireLiveAiChrome<T extends SpectraArtifact>(
   artifact: T,

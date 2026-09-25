@@ -3,13 +3,6 @@ import type { ArtifactTypeKey } from "../artifacts/types";
 import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { uploadArtifactAsset } from "../data/api";
 import { artifactBlobSha256 } from "../components/artifact-studio-file-utils";
-import { documentContentFromJson } from "../components/artifact-studio";
-import { importDocxPayload } from "../lenses/docx-adapter";
-import {
-  compactDocxContentForStorage,
-  compactDocxEditorJsonForStorage,
-  compactDocxProjectionForStorage,
-} from "../lenses/document-projection";
 
 function imagePixelDimensions(
   bytes: Uint8Array,
@@ -102,6 +95,15 @@ export async function materializeJsonImages(node: JSONContent, artifactId: strin
 
 /** Parse a Library DOCX and bind every supported image before canonical commit. */
 export async function projectDocxImportWithDurableImages(file: File, artifactId: string) {
+  const [
+    { documentContentFromJson },
+    { importDocxPayload },
+    { compactDocxContentForStorage, compactDocxEditorJsonForStorage, compactDocxProjectionForStorage },
+  ] = await Promise.all([
+    import("../components/document-content"),
+    import("../lenses/docx-adapter"),
+    import("../lenses/document-projection"),
+  ]);
   const checked = await readBoundedArchive(
     new Uint8Array(await file.arrayBuffer()),
     OFFICE_ARCHIVE_LIMITS,

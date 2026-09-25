@@ -4,6 +4,8 @@ import { insertOperationReference } from "../operations/reference-content";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
 import { workYjsOrigins } from "../work/models/yjs/origins";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { createDefaultPresentationContent } from "../presentation/model";
+import { presentationContentSchema } from "../artifacts/schemas";
 
 const reference = { embedId: "embed", placementOperationId: "operation", containerRegionId: "reference-region",
   containerType: "artifact", containerId: "host", sourceArtifactId: "source", mode: "compact", interaction: "read", versionPolicy: "live", contextPolicy: "summary", state: "ready" };
@@ -36,9 +38,54 @@ describe("unmounted reference content", () => {
     expect(() => insertOperationReference("whiteboard", { ...board, layers: board.layers.map((layer) => ({ ...layer, locked: true })) }, reference)).toThrow("Unlock");
   });
 
+  it("embeds a linked Code artifact in a presentation and preserves canonical identity", () => {
+    const deck = createDefaultPresentationContent();
+    const codeReference = {
+      ...reference,
+      label: "Interactive lab",
+      sourceArtifactId: "code-artifact-7",
+      versionPolicy: "live",
+    };
+    const changed = insertOperationReference("presentation", deck, codeReference) as typeof deck;
+    const embed = changed.slides.at(-1)?.objects.find((object) => object.id === reference.containerRegionId);
+    expect(embed).toMatchObject({
+      type: "embed",
+      sourceBinding: { artifactId: "code-artifact-7", kind: "artifact", live: true },
+      content: {
+        embedId: reference.embedId,
+        placementOperationId: reference.placementOperationId,
+        sourceArtifactId: "code-artifact-7",
+      },
+    });
+    expect(presentationContentSchema.safeParse(changed).success).toBe(true);
+    expect(insertOperationReference("presentation", changed, codeReference)).toBe(changed);
+  });
+
+  it("creates a new slide when the active slide has no non-overlapping embed slot", () => {
+    const deck = createDefaultPresentationContent();
+    deck.slides[0]!.objects = [{
+      id: "background",
+      type: "shape",
+      x: 0,
+      y: 0,
+      width: 1_000,
+      height: 562.5,
+      rotation: 0,
+      content: { shape: "rectangle" },
+      readingOrder: 0,
+    }];
+    const changed = insertOperationReference("presentation", deck, reference) as typeof deck;
+    expect(changed.slides).toHaveLength(deck.slides.length + 1);
+    expect(changed.slides.at(-1)?.objects[0]).toMatchObject({
+      id: reference.containerRegionId,
+      type: "embed",
+    });
+    expect(presentationContentSchema.safeParse(changed).success).toBe(true);
+  });
+
   it("rejects identity conflicts and gives unsupported hosts a supported alternative", () => {
     const saved = insertOperationReference("document", { blocks: [] }, reference);
     expect(() => insertOperationReference("document", saved, { ...reference, embedId: "other" })).toThrow("CONFLICT");
-    expect(() => insertOperationReference("quiz", {}, reference)).toThrow("document or board");
+    expect(() => insertOperationReference("quiz", {}, reference)).toThrow("documents, whiteboards, and presentations");
   });
 });

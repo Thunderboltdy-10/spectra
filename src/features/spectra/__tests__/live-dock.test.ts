@@ -177,6 +177,8 @@ describe("Live Dock V2", () => {
     expect(runHook).not.toContain("force: true");
     expect(runHook).toContain("let targetThreadId = target?.threadId");
     expect(runHook).toContain("threadId: targetThreadId");
+    expect(runHook).toContain("mergeContinuationAttachments");
+    expect(runHook).toContain("attachmentsByThreadId.current.get(targetThreadId)");
     const surface = read(
       "src/features/spectra/components/conversation-surface.tsx",
     );

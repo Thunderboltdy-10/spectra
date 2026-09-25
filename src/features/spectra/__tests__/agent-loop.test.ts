@@ -33,7 +33,7 @@ describe("runSpectraAgentLoop", () => {
     expect(executeTool).toHaveBeenCalledTimes(2);
   });
 
-  it("executes on-demand reads and returns the terminal plan without a turn cap", async () => {
+  it("executes on-demand reads and returns the terminal plan", async () => {
     const requestTurn = vi
       .fn()
       .mockResolvedValueOnce({
@@ -63,23 +63,30 @@ describe("runSpectraAgentLoop", () => {
     );
   });
 
-  it("returns structured feedback before rejecting a proven no-progress cycle", async () => {
+  it("returns structured feedback for an identical no-progress cycle", async () => {
     const repeated = {
       text: "",
       toolCalls: [
         { id: "same", name: "search_objects", arguments: '{"query":"cell"}' },
       ],
     };
-    const requestTurn = vi.fn().mockResolvedValue(repeated);
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce(repeated)
+      .mockResolvedValueOnce(repeated)
+      .mockResolvedValueOnce(repeated)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }],
+      });
     const executeTool = vi.fn().mockResolvedValue({ ok: true, results: [] });
-    await expect(
-      runSpectraAgentLoop({
+    const result = await runSpectraAgentLoop({
         messages: [{ role: "user", content: "Find cell notes" }],
         requestTurn,
         executeTool,
-        isTerminalTool: () => false,
-      }),
-    ).rejects.toThrow(/repeated the identical search_objects request/i);
+        isTerminalTool: (call) => call.name === "submit_plan",
+      });
+    expect(result.turns).toBe(4);
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(requestTurn.mock.calls[2]?.[0]).toContainEqual(
       expect.objectContaining({
@@ -87,6 +94,119 @@ describe("runSpectraAgentLoop", () => {
         content: expect.stringContaining("identical_tool_call_repeated"),
       }),
     );
+  });
+
+  it("reuses an identical successful read without copying its payload into history", async () => {
+    const read = (id: string) => ({
+      id,
+      name: "read_artifact",
+      arguments: '{"artifactId":"guide-1"}',
+    });
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r1")] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r2")] })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }],
+      });
+    const executeTool = vi.fn().mockResolvedValue({
+      ok: true,
+      artifact: { title: "Guide", content: "large canonical content" },
+    });
+
+    await runSpectraAgentLoop({
+      messages: [],
+      requestTurn,
+      executeTool,
+      isParallelSafeTool: (call) => call.name === "read_artifact",
+      isTerminalTool: (call) => call.name === "submit_plan",
+    });
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    const repeatedResult = requestTurn.mock.calls[2]![0].find(
+      (message: { role: string; tool_call_id?: string }) =>
+        message.role === "tool" && message.tool_call_id === "r2",
+    );
+    expect(repeatedResult?.content).toContain("read_result_reused");
+    expect(repeatedResult?.content).not.toContain("large canonical content");
+  });
+
+  it("blocks repeated reads of one artifact and asks the agent to use its existing results", async () => {
+    const read = (id: string, blockId: string) => ({
+      id,
+      name: "read_artifact",
+      arguments: JSON.stringify({ artifactId: "guide-1", blockIds: [blockId] }),
+    });
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r1", "b1")] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r2", "b2")] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r3", "b3")] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [read("r4", "b4")] })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }],
+      });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, artifact: { title: "Guide" } });
+
+    const result = await runSpectraAgentLoop({
+      messages: [{ role: "user", content: "Update the guide" }],
+      requestTurn,
+      executeTool,
+      isParallelSafeTool: (call) => call.name === "read_artifact",
+      isTerminalTool: (call) => call.name === "submit_plan",
+    });
+
+    expect(result.terminalTool?.name).toBe("submit_plan");
+    expect(executeTool).toHaveBeenCalledTimes(3);
+    expect(requestTurn.mock.calls[4]?.[0]).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        content: expect.stringContaining("read_target_budget_reached"),
+      }),
+    );
+  });
+
+  it("uses one terminal-only recovery turn when the ordinary turn budget is reached", async () => {
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "r1", name: "read_thread", arguments: '{"threadId":"t1"}' }],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "r2", name: "read_thread", arguments: '{"threadId":"t2"}' }],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "r3", name: "read_thread", arguments: '{"threadId":"t3"}' }],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "r4", name: "read_thread", arguments: '{"threadId":"t4"}' }],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "done", name: "submit_plan", arguments: "{}" }],
+      });
+
+    const result = await runSpectraAgentLoop({
+      messages: [{ role: "user", content: "Review this conversation" }],
+      requestTurn,
+      executeTool: vi.fn().mockResolvedValue({ ok: true }),
+      isParallelSafeTool: (call) => call.name === "read_thread",
+      isTerminalTool: (call) => call.name === "submit_plan",
+      budget: { maxTurns: 4 },
+    });
+
+    expect(result.terminalTool?.name).toBe("submit_plan");
+    expect(result.turns).toBe(5);
+    expect(requestTurn.mock.calls[4]?.[0][0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("Finish now using the context and tool results already gathered"),
+    });
   });
 
   it("treats maxTotalTokens as a per-turn prompt budget, not a cumulative sum", async () => {

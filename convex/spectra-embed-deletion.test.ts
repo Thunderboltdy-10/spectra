@@ -25,7 +25,13 @@ async function drainDeletion(t: ReturnType<typeof convexTest>, jobId: Id<"artifa
   const runInternal = (t as unknown as { mutation: (fn: unknown, args: unknown) => Promise<unknown> }).mutation.bind(t);
   for (let i = 0; i < 100; i += 1) {
     const job = await t.run((ctx) => ctx.db.get(jobId));
-    if (!job || job.phase === "complete" || job.phase === "failed") return;
+    if (
+      !job ||
+      job.phase === "complete" ||
+      job.phase === "failed" ||
+      job.phase === "retained"
+    )
+      return;
     await runInternal(process, { jobId, generation });
   }
   throw new Error("deletion did not drain");

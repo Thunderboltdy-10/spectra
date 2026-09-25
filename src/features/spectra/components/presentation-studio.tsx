@@ -833,6 +833,23 @@ function PresentationObjectView({
               ? linkedArtifact.blueprintKey.replaceAll("_", " ")
               : "The source was removed or permission changed"}
           </small>
+          {linkedArtifact ? (
+            <button
+              type="button"
+              className="presentation-linked-open"
+              aria-label={`Open ${linkedArtifact.title}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                void spectraBus.command("work.open", {
+                  workId: linkedArtifact._id,
+                  surface: "panel",
+                });
+              }}
+            >
+              Open linked work
+            </button>
+          ) : null}
         </div>
       ) : object.type === "group" ? (
         <div className="presentation-group-frame">

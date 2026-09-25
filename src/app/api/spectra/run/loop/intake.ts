@@ -29,6 +29,7 @@ import { matchSpectraCreationShorthand } from "@/features/spectra/operations/cre
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { SPECTRA_BLUEPRINT_KEYS } from "@/features/spectra/operations/schema";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
+import { isExplicitExistingArtifactUpdateOnly } from "./target-scope";
 import {
   bytesToArrayBuffer,
   decodeBase64DataUrl,
@@ -1413,13 +1414,149 @@ function creationTargetsForClause(clause: string): CreationCandidate[] {
   });
 }
 
+const artifactCountWords: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+const artifactTitleHeadings: Array<{
+  blueprintKey: WorkTypeKey;
+  expression: RegExp;
+}> = [
+  {
+    blueprintKey: "flashcard_deck",
+    expression: /\b(?:flashcards?|flashcard\s+deck|deck)\s+title\s*:/gi,
+  },
+  { blueprintKey: "quiz", expression: /\bquiz(?:zes)?\s+title\s*:/gi },
+  {
+    blueprintKey: "planner_task",
+    expression: /\b(?:planner\s+task|study\s+task|task)\s+title\s*:/gi,
+  },
+  {
+    blueprintKey: "document",
+    expression:
+      /\b(?:document|notes?|guide|outline|summary|handout|study\s+sheet|revision\s+sheet)\s+title\s*:/gi,
+  },
+  { blueprintKey: "agent", expression: /\bagent\s+title\s*:/gi },
+  {
+    blueprintKey: "presentation",
+    expression: /\b(?:presentation|slide\s*deck|slides?)\s+title\s*:/gi,
+  },
+  {
+    blueprintKey: "sheets",
+    expression: /\b(?:spreadsheet|workbook|sheets?)\s+title\s*:/gi,
+  },
+  {
+    blueprintKey: "code",
+    expression: /\b(?:code|visuali[sz]ation|web\s*app)\s+title\s*:/gi,
+  },
+  {
+    blueprintKey: "whiteboard",
+    expression: /\b(?:whiteboard|canvas|mind\s*map)\s+title\s*:/gi,
+  },
+];
+
+function exactArtifactCount(value: string): number | null {
+  const normalized = value.trim().toLocaleLowerCase();
+  const count = artifactCountWords[normalized] ?? Number(normalized);
+  return Number.isInteger(count) && count > 0 && count <= 10 ? count : null;
+}
+
+function explicitArtifactManifest(
+  prompt: string,
+): ProvisionalCreation[] | null {
+  const declaration =
+    /\b(?:create|make|build|generate|write|draft)\s+(?:exactly|only)\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:new\s+)?artifacts?\b/i.exec(
+      prompt,
+    );
+  if (!declaration) return null;
+  const count = exactArtifactCount(declaration[1]!);
+  if (count === null) return [];
+
+  const declarationStart = declaration.index ?? 0;
+  const declarationBodyStart = declarationStart + declaration[0].length;
+  const boundary = /[.?!;\r\n]/.exec(prompt.slice(declarationBodyStart));
+  const declarationEnd = boundary
+    ? declarationBodyStart + boundary.index
+    : Math.min(prompt.length, declarationBodyStart + 240);
+  const targets = creationTargetsForClause(
+    prompt.slice(declarationBodyStart, declarationEnd),
+  );
+  const uniqueTargets = targets.filter(
+    (target, index, all) =>
+      all.findIndex(
+        (candidate) => candidate.blueprintKey === target.blueprintKey,
+      ) === index,
+  );
+  // An exact count is stronger than speculative shell detection. If the
+  // declaration does not name exactly that many supported artifact types,
+  // let the normal planner resolve it without pre-creating guesses.
+  if (uniqueTargets.length !== count) return [];
+
+  const headings = artifactTitleHeadings.flatMap(({ blueprintKey, expression }) =>
+    Array.from(prompt.matchAll(expression), (match) => ({
+      blueprintKey,
+      index: match.index ?? 0,
+      length: match[0].length,
+      title: prompt
+        .slice((match.index ?? 0) + match[0].length)
+        .match(/^\s*([^.!?\r\n]+)/)?.[1]
+        ?.trim(),
+    })),
+  ).sort((left, right) => left.index - right.index);
+  const sharedEvidenceIndex = prompt.search(/\bfor each evidence-supported\b/i);
+  const commonLead = prompt.slice(declarationStart, declarationEnd).trim();
+  const sharedEvidence =
+    sharedEvidenceIndex >= 0 ? prompt.slice(sharedEvidenceIndex).trim() : "";
+
+  return uniqueTargets.map((target) => {
+    const heading = headings.find(
+      (candidate) => candidate.blueprintKey === target.blueprintKey,
+    );
+    if (!heading) {
+      return {
+        blueprintKey: target.blueprintKey,
+        label: target.label,
+        clause: prompt.trim(),
+      };
+    }
+    const nextHeading = headings.find(
+      (candidate) => candidate.index > heading.index,
+    );
+    const sectionEnd = Math.min(
+      nextHeading?.index ?? prompt.length,
+      sharedEvidenceIndex > heading.index ? sharedEvidenceIndex : prompt.length,
+    );
+    const artifactSection = prompt.slice(heading.index, sectionEnd).trim();
+    return {
+      blueprintKey: target.blueprintKey,
+      label: target.label,
+      requestedTitle: heading.title || undefined,
+      clause: [commonLead, artifactSection, sharedEvidence]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  });
+}
+
 export function provisionalCreations(prompt: string): ProvisionalCreation[] {
+  if (isExplicitExistingArtifactUpdateOnly(prompt)) return [];
   const requestShape = prompt
     .trim()
     .replace(
       /\b(?:do not|don't|dont|without)\s+(?:change|edit|update|modify|rewrite|replace)[^.?!]*(?:[.?!]|$)/gi,
       " ",
     );
+  const explicitManifest = explicitArtifactManifest(requestShape);
+  if (explicitManifest) return explicitManifest;
   const verbs = [
     ...requestShape.matchAll(
       /\b(?:create|make|build|generate|write|draft)\b/gi,
@@ -1487,6 +1624,7 @@ export function provisionalSingleCreation(prompt: string): {
   requestedTitle?: string;
 } | null {
   const clean = prompt.trim();
+  if (isExplicitExistingArtifactUpdateOnly(clean)) return null;
   // Structural edits of an open sheet/doc/quiz must never fan out a create shell.
   if (promptLooksLikeFocusedStructuralEdit(clean)) return null;
   const requestShape = clean.replace(
@@ -1550,6 +1688,7 @@ export function parallelCreationContract(
   prompt: string,
   focusedArtifactOpen = false,
 ) {
+  if (isExplicitExistingArtifactUpdateOnly(prompt)) return [];
   if (
     focusedArtifactOpen &&
     promptLooksLikeFocusedStructuralEdit(prompt) &&

@@ -112,6 +112,8 @@ import type {
 import { validatePlanAgainstIntent } from "@/features/spectra/operations/validate-plan";
 import { RunStateMachine } from "@/features/spectra/runs/state";
 import type { RunProtocolState } from "@/features/spectra/runs/state";
+import { classifyRunAttemptAbort } from "@/features/spectra/ai/run-lifecycle";
+import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
 import { withWorkerConvexToken } from "@/lib/convex-worker-context";
@@ -215,6 +217,7 @@ async function runAttempt(
     choiceMessageId?: string;
     choiceKey?: string;
     clarificationExecutionId?: string;
+    continuationRunId?: string;
     batchSelections?: Body["batchSelections"];
     attachments?: PreparedAttachment[];
     signal?: AbortSignal;
@@ -275,7 +278,6 @@ async function runAttempt(
     : leaseController.signal;
   const heartbeat = setInterval(() => {
     void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", {
-      actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
@@ -284,7 +286,7 @@ async function runAttempt(
         if (!result.alive) leaseController.abort();
       })
       .catch(() => null);
-  }, 1_000);
+  }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
   const persistQueuedEvents = () => {
     if (eventFlushTimer) {
@@ -634,6 +636,7 @@ async function runAttempt(
         choiceMessageId: params.choiceMessageId,
         choiceKey: params.choiceKey,
         clarificationExecutionId: params.clarificationExecutionId,
+        continuationRunId: params.continuationRunId,
         batchSelections: params.batchSelections,
         executionId: params.executionId,
       },
@@ -1651,7 +1654,6 @@ async function runAttempt(
 
     if (plan.decision !== "operate") {
       loop.enter("report", "answer, clarification, and refusal do not mutate");
-      stopHeartbeat();
       await Promise.all([
         mutate("spectraArtifacts:discardPendingForRun", {
           actorClerkId: params.actorClerkId,
@@ -1696,6 +1698,7 @@ async function runAttempt(
         providerUsed: modelResult.provider,
         usage: modelResult.usage,
       });
+      stopHeartbeat();
       await saveAssistantMessage({
         actorClerkId: params.actorClerkId,
         threadId: params.threadId,
@@ -1779,8 +1782,8 @@ async function runAttempt(
         providerUsed: modelResult.provider,
         usage: modelResult.usage,
       });
+      stopHeartbeat();
       await Promise.all([
-        stopHeartbeat(),
         mutate("spectraArtifacts:pausePendingForApproval", {
           actorClerkId: params.actorClerkId,
           runId: params.runId,
@@ -1888,6 +1891,7 @@ async function runAttempt(
           attachmentNames: params.attachments?.map(
             (attachment) => attachment.name,
           ),
+          prompt: params.prompt,
           researchEvidence,
           contextSummary: context.selectedArtifactIds.length
             ? `Based on ${context.selectedArtifactIds.length} selected artifact${context.selectedArtifactIds.length === 1 ? "" : "s"}${params.threadId ? " and a continued thread" : ""}`
@@ -2240,8 +2244,8 @@ async function runAttempt(
             providerUsed: modelResult.provider,
             usage: modelResult.usage,
           });
+          stopHeartbeat();
           await Promise.all([
-            stopHeartbeat(),
             mutate("spectraArtifacts:settleStagedForRun", {
               actorClerkId: params.actorClerkId,
               runId: params.runId,
@@ -2357,7 +2361,6 @@ async function runAttempt(
         }
       }
     }
-    stopHeartbeat();
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -2437,6 +2440,7 @@ async function runAttempt(
       providerUsed: modelResult.provider,
       usage: modelResult.usage,
     });
+    stopHeartbeat();
     await saveAssistantMessage({
       actorClerkId: params.actorClerkId,
       threadId: params.threadId,
@@ -2476,7 +2480,6 @@ async function runAttempt(
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "run failed before later stages completed");
-    stopHeartbeat();
     console.error(
       "[spectra.run.failure]",
       JSON.stringify({
@@ -2496,20 +2499,26 @@ async function runAttempt(
     // or validation fails. Let those writes finish before cleanup so a late
     // stage cannot resurrect an `updating` artifact after the run is terminal.
     await Promise.allSettled(progressiveWrites);
-    const stoppedExternally = await query<
+    const latestAttempt = await query<
       { actorClerkId: string; runId: string },
       RunDetail
     >("spectraRuns:get", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
     })
-      .then((detail) => detail.run.status === "cancelled")
-      .catch(() => false);
-    if (
-      (error instanceof DOMException && error.name === "AbortError") ||
-      executionSignal.aborted ||
-      stoppedExternally
-    ) {
+      .catch(() => null);
+    const abortDisposition = classifyRunAttemptAbort({
+      current: latestAttempt
+        ? {
+            status: latestAttempt.run.status,
+            executionId: latestAttempt.run.executionId,
+            workerId: latestAttempt.run.workerId,
+          }
+        : null,
+      executionId: params.executionId,
+      workerId: params.workerId,
+    });
+    if (abortDisposition === "user_stopped") {
       advanceProtocolState("cancelled", "run_cancelled");
       await mutate("spectraOperations:cancelPending", {
         actorClerkId: params.actorClerkId,
@@ -2602,6 +2611,20 @@ async function runAttempt(
       await flushEvents();
       return;
     }
+    // A worker whose lease was replaced must not settle the newer owner's run
+    // as failed, and an abort after a terminal transition must not replace the
+    // already durable result. The active owner or stale-run reconciler will
+    // publish the authoritative state.
+    if (
+      abortDisposition === "already_settled" ||
+      abortDisposition === "ownership_lost" ||
+      abortDisposition === "state_unavailable"
+    ) {
+      if (abortDisposition !== "already_settled")
+        publish({ type: "interrupted", runId: params.runId });
+      await flushEvents();
+      return;
+    }
     const preservedOutcome = operationOutcomes.some(({ affected }) =>
       affected.some((item) => item.id),
     );
@@ -2624,6 +2647,12 @@ async function runAttempt(
       runId: params.runId,
       executionId: params.executionId,
     }).catch(() => null);
+    if (!commitStarted && !preservedOutcome)
+      await mutate("spectraArtifacts:discardPendingForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null);
     await mutate("spectraArtifacts:failPendingForRun", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
@@ -2648,6 +2677,7 @@ async function runAttempt(
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
+      workerId: params.workerId,
       status: "failed",
       error: message,
       resultTitle: preservedOutcome
@@ -2685,6 +2715,7 @@ async function runAttempt(
       retryable: recovery.retryable,
       preservedPartial: recovery.preservedPartial,
     }).catch(() => null);
+    stopHeartbeat();
     card = await latestCard(params.actorClerkId, params.runId).catch(
       () => card,
     );
@@ -2982,12 +3013,11 @@ async function resumeOperationsAttempt(params: {
   );
   const heartbeat = setInterval(() => {
     void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", {
-      actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
     }).catch(() => null);
-  }, 1_000);
+  }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
   try {
     for (let index = 0; index < operations.length; index += 1) {
@@ -3314,7 +3344,6 @@ async function resumeOperationsAttempt(params: {
         }
       }
     }
-    stopHeartbeat();
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -3369,6 +3398,7 @@ async function resumeOperationsAttempt(params: {
       ],
       outcome: "canonical_saved",
     });
+    stopHeartbeat();
     await saveAssistantMessage({
       actorClerkId: params.actorClerkId,
       threadId: state.run.threadId,
@@ -3388,7 +3418,6 @@ async function resumeOperationsAttempt(params: {
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "resumed run failed before later stages completed");
-    stopHeartbeat();
     const message = publicError(error);
     // A resumed approval can fail after one operation has committed and before
     // later proposed rows are consumed. Clear the unconsumed operation/shell
@@ -3439,6 +3468,7 @@ async function resumeOperationsAttempt(params: {
       retryable: false,
       preservedPartial: partial,
     }).catch(() => null);
+    stopHeartbeat();
     await Promise.all([
       saveAssistantMessage({
         actorClerkId: params.actorClerkId,
@@ -3625,6 +3655,10 @@ async function executeScheduledRun(body: Body) {
             typeof payload.clarificationExecutionId === "string"
               ? payload.clarificationExecutionId
               : undefined,
+          continuationRunId:
+            typeof payload.continuationRunId === "string"
+              ? payload.continuationRunId
+              : undefined,
           batchSelections: Array.isArray(payload.batchSelections)
             ? payload.batchSelections.filter(
                 (value): value is NonNullable<Body["batchSelections"]>[number] =>
@@ -3740,6 +3774,8 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       resultCardId: string;
       threadId: string;
       executionId: string;
+      continuationRunId?: string;
+      retainedAttachments?: boolean;
       created: boolean;
     };
     try {
@@ -3750,6 +3786,8 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           resultCardId: string;
           threadId: string;
           executionId: string;
+          continuationRunId?: string;
+          retainedAttachments?: boolean;
           created: boolean;
         }
       >("spectraRuns:beginRun", {
@@ -3868,6 +3906,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       surface,
       threadId,
       continuedThread: Boolean(body.threadId?.trim()),
+      continuationRunId: created.continuationRunId,
       workspaceId: placementWorkspaceId,
       scopeNodeId: body.scopeNodeId,
       artifactId: body.artifactId,
@@ -3910,6 +3949,10 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         card: streamCard(initialCard),
       });
       emit({ type: "thread_ready", runId: created.runId, threadId });
+      const continuedAttachments =
+        created.continuationRunId || created.retainedAttachments
+        ? await loadPersistedRunAttachments(created.runId, created.executionId)
+        : attachments;
       await runAttempt(
         {
           actorClerkId: actor.clerkId,
@@ -3918,6 +3961,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           executionId: created.executionId,
           workerId: `event:${crypto.randomUUID()}`,
           ...executionPayload,
+          attachments: continuedAttachments,
         },
         emit,
       );

@@ -169,9 +169,20 @@ export async function executeApplicationCommand(
       scopeKey: "account",
       values: patch,
     });
+    const changedSection = [
+      "ai",
+      "writing",
+      "appearance",
+      "workbar",
+      "privacy",
+      "integrations",
+    ].find((section) => Object.hasOwn(patch, section));
     onUiEvent?.({
       key: "settings_changed",
-      payload: { targetId: "preferences", note: "Updated Spectra settings" },
+      payload: {
+        targetId: changedSection === "integrations" ? "devices" : changedSection ?? "ai",
+        note: "Updated Spectra settings",
+      },
     });
     return settings;
   }
@@ -517,6 +528,26 @@ export async function executeApplicationCommand(
     } });
     return result;
   }
+  if (command === "add_comment") {
+    const artifactId = String(parsed.artifactId);
+    const anchor = parsed.anchor as { regionId: string; fallbackExcerpt?: string };
+    const result = await applyMutation("artifactComments:create", {
+      actorClerkId,
+      artifactId,
+      body: String(parsed.body),
+      anchor,
+      mentionedAccountIds: [],
+    });
+    onUiEvent?.({
+      key: "comment_added",
+      payload: {
+        targetId: artifactId,
+        regionId: anchor.regionId,
+        note: "Added an AI comment",
+      },
+    });
+    return result;
+  }
   throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
 }
 
@@ -754,6 +785,7 @@ export async function executeOperation(
     attachmentIds?: string[];
     researchEvidence?: unknown;
     contextSummary?: string;
+    prompt?: string;
     pendingArtifactId?: string;
     pendingWorkspaceId?: string;
     preclaimed?: boolean;
@@ -837,6 +869,7 @@ export async function executeOperation(
       onConflict: context.onRegionConflict,
       onConflictResolved: context.onRegionConflictResolved,
       collaborationClientId: context.collaborationClientId,
+      prompt: context.prompt,
       resolveDesired: () => ({
         title: input.title,
         summary: creationSummary,
@@ -999,6 +1032,7 @@ export async function executeOperation(
       runId,
       operationId,
       executionId: context.executionId,
+      prompt: context.prompt,
       signal: context.signal,
       onConflict: context.onRegionConflict,
       onConflictResolved: context.onRegionConflictResolved,
@@ -1203,6 +1237,8 @@ export async function executeOperation(
     });
     affected = operation.input.command === "insert_reference"
       ? [{ type: "artifact", id: String(operation.input.args.hostWorkId) }]
+      : operation.input.command === "add_comment"
+        ? [{ type: "artifact", id: String(operation.input.args.artifactId) }]
       : [];
   }
   await mutate("spectraOperations:markExecuted", {

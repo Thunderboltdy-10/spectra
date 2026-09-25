@@ -1,5 +1,6 @@
 import { documentBlocksFromJson, documentContentToProseMirrorJson, type DocumentJsonNode } from "../lenses/document-projection";
 import { createWhiteboardNode, normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizePresentationContent } from "../presentation/model";
 
 export type OperationReference = Record<string, unknown> & {
   embedId: string;
@@ -49,5 +50,68 @@ export function insertOperationReference(type: string, content: unknown, referen
       id: reference.containerRegionId, content: reference };
     return { ...current, ...board, nodes: [...board.nodes, node], zOrder: [...board.zOrder, node.id] };
   }
-  throw new Error("Live references can be inserted into documents and whiteboards. Use a document or board as the host.");
+  if (type === "presentation") {
+    const deck = normalizePresentationContent(content);
+    const slide = deck.slides.at(-1);
+    if (!slide) throw new Error("A presentation needs a slide before adding linked work.");
+    const canvasHeight = deck.settings?.aspectRatio === "4:3" ? 750 : 562.5;
+    const width = 440;
+    const height = 210;
+    const gap = 18;
+    const xs = [40, 520];
+    const ys = [48, 276, 504].filter((candidate) => candidate + height <= canvasHeight);
+    const fits = (x: number, y: number) =>
+      slide.objects.every((object) =>
+        x + width + gap <= object.x ||
+        object.x + object.width + gap <= x ||
+        y + height + gap <= object.y ||
+        object.y + object.height + gap <= y,
+      );
+    const slot = ys.flatMap((y) => xs.map((x) => ({ x, y }))).find(({ x, y }) => fits(x, y));
+    let host = deck;
+    let targetSlide = slide;
+    let position = slot;
+    if (!position) {
+      targetSlide = {
+        id: `reference-slide:${reference.containerRegionId}`,
+        title: "Linked work",
+        objects: [],
+        sourceRefs: [],
+        accessibility: { label: "Linked work" },
+      };
+      position = { x: 280, y: Math.max(48, Math.round((canvasHeight - height) / 2)) };
+      host = { ...deck, slides: [...deck.slides, targetSlide] };
+    }
+    const nextOrder = targetSlide.objects.reduce(
+      (maximum, object) => Math.max(maximum, object.readingOrder ?? 0),
+      -1,
+    ) + 1;
+    const label = typeof reference.label === "string" ? reference.label : "Linked work";
+    const object = {
+      id: reference.containerRegionId,
+      type: "embed" as const,
+      ...position,
+      width,
+      height,
+      rotation: 0,
+      content: {
+        embedId: reference.embedId,
+        placementOperationId: reference.placementOperationId,
+        containerRegionId: reference.containerRegionId,
+        label,
+        sourceArtifactId: reference.sourceArtifactId,
+      },
+      altText: `${label} · linked artifact`,
+      readingOrder: nextOrder,
+      sourceBinding: {
+        artifactId: String(reference.sourceArtifactId),
+        kind: "artifact" as const,
+        live: reference.versionPolicy === "live",
+      },
+    };
+    const updatedSlide = { ...targetSlide, objects: [...targetSlide.objects, object] };
+    const slides = host.slides.map((candidate) => candidate.id === targetSlide.id ? updatedSlide : candidate);
+    return { ...host, slides };
+  }
+  throw new Error("Live references can be inserted into documents, whiteboards, and presentations. Use one of those as the host.");
 }

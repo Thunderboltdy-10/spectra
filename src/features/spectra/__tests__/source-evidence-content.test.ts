@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildAttachmentEvidence } from "../ai/attachment-evidence";
-import { prepareContentEvidence } from "../ai/source-evidence-content";
+import { prepareContentEvidence, prepareContentPatchEvidence } from "../ai/source-evidence-content";
+import { prepareOperationForQuality } from "@/app/api/spectra/run/loop/plan";
 import { parseModelOperation } from "../operations/schema";
 import { documentContentToProseMirrorJson, documentBlocksFromJson } from "../lenses/document-projection";
 import { normalizePresentationContent, producePresentationContent } from "../presentation/model";
@@ -68,5 +69,82 @@ describe("server-owned artifact evidence", () => {
     expect(deck.slides[0]).toMatchObject({ sourceRefs, citations: [{ label: "Cooling study.pdf, p. 3", sourceRefs }] });
     const edited = producePresentationContent(deck, (draft) => { draft.slides[0]!.sourceRefs = [bundle.evidence[0]!.id]; });
     expect(edited.slides[0]!.sourceRefs).toEqual([bundle.evidence[0]!.id]);
+  });
+
+  it("materializes verified native citations in whole-slide-array patches", () => {
+    const slide = { id: "s1", title: "Cooling", sourceRefs: [span.id], objects: [] };
+    const patch = prepareContentPatchEvidence("presentation", {
+      changes: [{ path: "/slides", value: [slide] }],
+    }, bundle) as { changes: Array<{ path: string; value: unknown }> };
+    const value = patch.changes[0]!.value as Array<Record<string, unknown>>;
+    expect(value[0]).toMatchObject({
+      id: "s1",
+      sourceRefs: [span.id],
+      citations: [{ label: "Cooling study.pdf, p. 3", sourceRefs: [span.id] }],
+    });
+  });
+
+  it("routes presentation artifact updates through citation preparation", () => {
+    const operation = prepareOperationForQuality({
+      type: "artifact.update",
+      input: {
+        artifactId: "presentation-1",
+        blueprintKey: "presentation",
+        title: null,
+        summary: null,
+        content: null,
+        contentPatch: {
+          changes: [{
+            path: "/slides",
+            value: [{ id: "s1", title: "Cooling", sourceRefs: [span.id], objects: [] }],
+          }],
+        },
+        tags: null,
+      },
+    }, bundle);
+    expect(operation.type).toBe("artifact.update");
+    if (operation.type !== "artifact.update") throw new Error("Expected an artifact update.");
+    const patchedSlides = operation.input.contentPatch?.changes[0]?.value as Array<Record<string, unknown>>;
+    expect(patchedSlides[0]).toMatchObject({
+      citations: [{ label: "Cooling study.pdf, p. 3", sourceRefs: [span.id] }],
+    });
+  });
+
+  it("refreshes citation metadata when a patch changes only slide sourceRefs", () => {
+    const replacement = bundle.evidence[0]!;
+    const patch = prepareContentPatchEvidence("presentation", {
+      changes: [{ path: "/slides/0/sourceRefs", value: [replacement.id] }],
+    }, bundle) as { changes: Array<{ path: string; value: unknown }> };
+    expect(patch.changes).toEqual([
+      { path: "/slides/0/sourceRefs", value: [replacement.id] },
+      {
+        path: "/slides/0/citations",
+        value: expect.arrayContaining([
+          expect.objectContaining({ label: "Cooling study.pdf, p. 1", sourceRefs: [replacement.id] }),
+        ]),
+      },
+    ]);
+  });
+
+  it("replaces authored citation labels with metadata generated from verified evidence", () => {
+    const patch = prepareContentPatchEvidence("presentation", {
+      changes: [{
+        path: "/slides/0/citations",
+        value: [{ id: "made-up", label: "Wrong source", sourceRefs: [span.id] }],
+      }],
+    }, bundle) as { changes: Array<{ path: string; value: unknown }> };
+    const citations = patch.changes[0]!.value as Array<Record<string, unknown>>;
+    expect(citations).toHaveLength(1);
+    expect(citations[0]).toMatchObject({
+      label: "Cooling study.pdf, p. 3",
+      sourceRefs: [span.id],
+    });
+    expect(citations[0]!.id).not.toBe("made-up");
+  });
+
+  it("rejects invented evidence in presentation content patches", () => {
+    expect(() => prepareContentPatchEvidence("presentation", {
+      changes: [{ path: "/slides", value: [{ id: "s1", sourceRefs: ["evidence:invented"] }] }],
+    }, bundle)).toThrow("NOT_ISSUED");
   });
 });

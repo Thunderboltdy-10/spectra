@@ -14,7 +14,10 @@ import {
   whiteboardContentSchema,
 } from "../artifacts/schemas";
 import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
-import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
+import {
+  coerceCommonPlanSchemaSlips,
+  stripNonIntentContextFields,
+} from "./plan-diagnostics";
 import { normalizeAiPreferencePatch } from "../settings/schema/preferences";
 import { documentAcademicOperationsSchema } from "../commands/office/document-academic-operations";
 import { createdDependencyIndex, mapOperationArtifactReferences } from "./dependencies";
@@ -81,19 +84,30 @@ const shortText = z.string().trim().min(1).max(240);
 const summaryText = z.string().trim().max(2_000);
 const idText = z.string().trim().min(1).max(180);
 const tagsSchema = z.array(z.string().trim().min(1).max(48)).max(16);
+function isSafeContentPatchPointer(path: string): boolean {
+  if (!path.startsWith("/") || path.length < 2) return false;
+  const segments = path.slice(1).split("/");
+  if (
+    segments.some(
+      (segment) => !segment || /~(?![01])/.test(segment),
+    )
+  )
+    return false;
+  return !segments.some((segment) => {
+    const decoded = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    return ["__proto__", "prototype", "constructor"].includes(decoded);
+  });
+}
 const contentPatchSchema = z
   .object({
     changes: z
       .array(
         z
           .object({
-            path: z
-              .string()
-              .trim()
-              .regex(
-                /^\/(?!.*(?:__proto__|prototype|constructor)(?:\/|$))[A-Za-z0-9_~:\/-]+$/,
-              )
-              .max(240),
+            // JSON Pointer segments may contain spaces, punctuation, dots and
+            // Unicode. The old ASCII-only filter rejected legitimate model
+            // paths before plan recovery could repair or apply the operation.
+            path: z.string().trim().max(240).refine(isSafeContentPatchPointer),
             value: z.unknown(),
           })
           .strict(),
@@ -240,7 +254,7 @@ function updateInput<T extends z.ZodTypeAny>(
     .strict();
 }
 
-const artifactUpdateInputSchema = z.union([
+const artifactUpdateInputSchema = z.discriminatedUnion("blueprintKey", [
   updateInput("document", documentContentSchema),
   updateInput("flashcard_deck", flashcardDeckContentSchema),
   updateInput("quiz", quizContentSchema),
@@ -461,6 +475,17 @@ export const spectraPlanSchema = z
         path: ["operations"],
         message: "operate plans require at least one operation",
       });
+    if (
+      plan.decision === "clarify" &&
+      !plan.choices &&
+      !/[?？]/.test(plan.finalResponse)
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["finalResponse"],
+        message:
+          "A clarification without answer options must ask a clear question the user can answer in this conversation.",
+      });
   });
 
 export type SpectraPlan = z.infer<typeof spectraPlanSchema>;
@@ -547,6 +572,17 @@ function preprocessModelOperationContent(value: unknown) {
   )
     return value;
   const input = { ...(row.input as Record<string, unknown>) };
+  // Models sometimes emit the patch changes directly instead of using the
+  // documented `{ changes: [...] }` envelope. Repair only arrays whose full
+  // contents already pass the exact patch schema; anything else still fails
+  // strict validation rather than being guessed into a different operation.
+  if (
+    row.type === "artifact.update" &&
+    Array.isArray(input.contentPatch) &&
+    contentPatchSchema.safeParse({ changes: input.contentPatch }).success
+  ) {
+    input.contentPatch = { changes: input.contentPatch };
+  }
   if (
     typeof input.blueprintKey === "string" &&
     (SPECTRA_BLUEPRINT_KEYS as readonly string[]).includes(
@@ -792,7 +828,9 @@ export function compactOperationsRemappingCreated(
 export function parseSpectraPlan(value: unknown) {
   const plan = spectraPlanSchema.parse(
     normalizePlanIntentMode(
-      preprocessPlanOperations(coerceCommonPlanSchemaSlips(value)),
+      preprocessPlanOperations(
+        stripNonIntentContextFields(coerceCommonPlanSchemaSlips(value)),
+      ),
     ),
   );
   const operations = plan.operations.map(parseModelOperation);

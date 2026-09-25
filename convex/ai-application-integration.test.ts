@@ -29,6 +29,68 @@ async function fixture() {
 }
 
 describe("AI application integration", () => {
+  it("accepts the worker heartbeat payload used by the runtime", async () => {
+    const f = await fixture();
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, { workerId: "runtime-worker" }));
+    const result = await f.actor.mutation(api.spectraRuns.heartbeat, {
+      runId: f.ids.runId,
+      executionId: "attempt",
+      workerId: "runtime-worker",
+    });
+    expect(result).toEqual({ alive: true });
+  });
+
+  it("keeps healthy run leases read-only while artifact progress reads run ownership", async () => {
+    const f = await fixture();
+    const heartbeatAt = 123;
+    const leaseExpiresAt = Date.now() + 120_000;
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, {
+      workerId: "runtime-worker",
+      heartbeatAt,
+      leaseExpiresAt,
+    }));
+
+    const [heartbeat] = await Promise.all([
+      f.actor.mutation(api.spectraRuns.heartbeat, {
+        runId: f.ids.runId,
+        executionId: "attempt",
+        workerId: "runtime-worker",
+      }),
+      f.actor.mutation(api.spectraArtifacts.updateAiEffect, {
+        artifactId: f.ids.artifactId,
+        runId: f.ids.runId,
+        executionId: "attempt",
+        title: "Updating integration guide",
+        activity: "edit",
+        operationIndex: 0,
+      }),
+    ]);
+
+    expect(heartbeat).toEqual({ alive: true });
+    const afterProgress = await f.t.run(async ctx => ({
+      run: await ctx.db.get(f.ids.runId),
+      artifact: await ctx.db.get(f.ids.artifactId),
+    }));
+    expect(afterProgress.run).toMatchObject({ heartbeatAt, leaseExpiresAt });
+    expect(afterProgress.artifact).toMatchObject({
+      aiState: "updating",
+      aiRunId: f.ids.runId,
+      aiExecutionId: "attempt",
+    });
+
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, {
+      leaseExpiresAt: Date.now() + 30_000,
+    }));
+    expect(await f.actor.mutation(api.spectraRuns.heartbeat, {
+      runId: f.ids.runId,
+      executionId: "attempt",
+      workerId: "runtime-worker",
+    })).toEqual({ alive: true });
+    const renewedRun = await f.t.run(ctx => ctx.db.get(f.ids.runId));
+    expect(renewedRun?.heartbeatAt).toBeGreaterThan(heartbeatAt);
+    expect(renewedRun?.leaseExpiresAt).toBeGreaterThan(leaseExpiresAt);
+  });
+
   it("executes all four journaled Calendar writes with exact wall times and receipt replay", async () => {
     const f = await fixture();
     const event = await f.operation("create_calendar_personal_event", { title: "Study group", startLocal: "2026-09-25T16:00", endLocal: "2026-09-25T17:00", timezone: "Europe/Madrid", linkedArtifactIds: [f.ids.artifactId] });
@@ -89,6 +151,36 @@ describe("AI persisted source evidence", () => {
         artifactId: f.ids.artifactId, runId: f.ids.runId, executionId: "attempt", resolved: { contentRef: saved!.content, refs: [second.id] },
       })).rejects.toThrow("RESEARCH_CONTENT_CHANGED");
     }
+  });
+
+  it("keeps attachment evidence when target resolution adds a later context snapshot", async () => {
+    const f = await fixture();
+    const source = createVerifiedSource({ title: "Cooling reference", url: "https://example.test/cooling", content: "Tree shade lowers surface heating.", accessedAt: new Date(0).toISOString(), sourceType: "web", authority: "primary", provider: "fixture" });
+    const evidence = createEvidenceSpan(source, "Tree shade lowers surface heating.");
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.runId, { contextSnapshot: { researchEvidence: { sources: [source], evidence: [evidence], citations: [], partial: false }, qualityRequirements: { numericSourceRequired: true } } });
+      await ctx.db.patch(f.ids.artifactId, { content: { blocks: [{ sourceRefs: [evidence.id] }] } });
+    });
+    await f.actor.mutation(makeFunctionReference<"mutation">("spectraRuns:setContextSnapshot"), {
+      runId: f.ids.runId,
+      executionId: "attempt",
+      contextSnapshot: { targetResolutions: [{ role: "primary", status: "resolved" }] },
+    });
+    await f.actor.action(api.spectraArtifacts.attachResearchEvidence, { artifactId: f.ids.artifactId, runId: f.ids.runId, executionId: "attempt" });
+    const [run, artifact] = await f.t.run(async ctx => [
+      await ctx.db.get(f.ids.runId),
+      await ctx.db.get(f.ids.artifactId),
+    ] as const);
+    expect(run?.contextSnapshot).toMatchObject({
+      qualityRequirements: { numericSourceRequired: true },
+      researchEvidence: { sources: [source], evidence: [evidence] },
+      targetResolutions: [{ role: "primary", status: "resolved" }],
+    });
+    expect(artifact?.createdFrom?.sourceBundle).toMatchObject({
+      sources: [source],
+      evidence: [evidence],
+      citations: [{ sourceId: source.id, evidenceIds: [evidence.id] }],
+    });
   });
 
   it("never turns a bare source ref into the first evidence passage", async () => {

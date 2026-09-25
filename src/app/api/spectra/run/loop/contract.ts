@@ -28,6 +28,8 @@ export type Body = {
   choiceMessageId?: string;
   choiceKey?: string;
   clarificationExecutionId?: string;
+  /** Trusted run context for a same-thread continuation returned by beginRun. */
+  continuationRunId?: string;
   batchSelections?: Array<{
     questionId: string;
     choiceKey: string;
@@ -151,6 +153,7 @@ export type RunState = {
   decision?: SpectraPlan["decision"];
   planIntent?: unknown;
   executionId?: string;
+  workerId?: string;
   approval?: {
     executionId: string;
     status: "pending" | "accepted" | "rejected" | "revised";

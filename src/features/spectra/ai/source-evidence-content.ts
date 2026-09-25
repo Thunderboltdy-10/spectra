@@ -151,3 +151,120 @@ export function prepareContentEvidence(blueprintKey: string, value: unknown, bun
   }
   return value;
 }
+
+/**
+ * Materialize server-verified citation metadata when an AI update writes a
+ * presentation through JSON-pointer patches instead of replacing its full
+ * content. Root slide-array and whole-slide writes carry enough context to
+ * derive native citations. A sourceRefs-only write adds a matching citations
+ * patch so the previous citation list cannot silently go stale.
+ */
+export function prepareContentPatchEvidence(
+  blueprintKey: string,
+  value: unknown,
+  bundle?: ResearchEvidenceBundle,
+) {
+  if (blueprintKey !== "presentation") return value;
+  const patch = row(value);
+  if (!Array.isArray(patch.changes)) return value;
+
+  const changes = patch.changes as unknown[];
+  const citationChanges = new Map<string, unknown>();
+  let preparedAnyChange = false;
+  const preparedChanges = changes.flatMap((entry) => {
+    const change = row(entry);
+    if (typeof change.path !== "string") return [entry];
+    const segments = change.path
+      .replace(/^\//, "")
+      .split("/")
+      .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+    if (segments[0] !== "slides") return [entry];
+
+    if (segments.length === 1 && Array.isArray(change.value)) {
+      const prepared = row(
+        prepareContentEvidence("presentation", { slides: change.value }, bundle),
+      );
+      preparedAnyChange = true;
+      return [{ ...change, value: prepared.slides ?? change.value }];
+    }
+
+    if (
+      segments.length === 2 &&
+      change.value &&
+      typeof change.value === "object" &&
+      !Array.isArray(change.value)
+    ) {
+      const prepared = row(
+        prepareContentEvidence("presentation", { slides: [change.value] }, bundle),
+      );
+      preparedAnyChange = true;
+      return [{ ...change, value: (prepared.slides as unknown[] | undefined)?.[0] ?? change.value }];
+    }
+
+    if (
+      segments.length === 3 &&
+      segments[2] === "sourceRefs" &&
+      Array.isArray(change.value)
+    ) {
+      const slideIndex = segments[1]!;
+      const prepared = row(
+        prepareContentEvidence(
+          "presentation",
+          { slides: [{ id: `patched-slide-${slideIndex}`, sourceRefs: change.value }] },
+          bundle,
+        ),
+      );
+      const slide = row((prepared.slides as unknown[] | undefined)?.[0]);
+      citationChanges.set(`/slides/${slideIndex}/citations`, slide.citations ?? []);
+      preparedAnyChange = true;
+    }
+
+    if (
+      segments.length === 3 &&
+      segments[2] === "citations" &&
+      Array.isArray(change.value)
+    ) {
+      const evidenceRefs = [
+        ...new Set(
+          change.value.flatMap((citation) =>
+            (Array.isArray(row(citation).sourceRefs)
+              ? (row(citation).sourceRefs as unknown[])
+              : []
+            ).filter(
+              (ref): ref is string =>
+                typeof ref === "string" && ref.startsWith("evidence:"),
+            ),
+          ),
+        ),
+      ];
+      if (evidenceRefs.length) {
+        const prepared = row(
+          prepareContentEvidence(
+            "presentation",
+            {
+              slides: [
+                { id: `patched-slide-${segments[1]!}`, sourceRefs: evidenceRefs },
+              ],
+            },
+            bundle,
+          ),
+        );
+        const slide = row((prepared.slides as unknown[] | undefined)?.[0]);
+        preparedAnyChange = true;
+        return [{ ...change, value: slide.citations ?? [] }];
+      }
+    }
+
+    return [entry];
+  });
+
+  if (!preparedAnyChange) return value;
+  const withoutStaleCitations = preparedChanges.filter((entry) => {
+    const path = row(entry).path;
+    return typeof path !== "string" || !citationChanges.has(path);
+  });
+  for (const [path, citationValue] of citationChanges) {
+    withoutStaleCitations.push({ path, value: citationValue });
+  }
+  return { ...patch, changes: withoutStaleCitations };
+}

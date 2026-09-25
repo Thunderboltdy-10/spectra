@@ -25,6 +25,28 @@ describe("application capability registry", () => {
     });
   });
 
+  it("lets the agent add a durable comment to a precise artifact region", () => {
+    expect(APPLICATION_AGENT_TOOL_IDS).toContain("add_comment");
+    expect(
+      spectraToolRegistry.parseInput("add_comment", {
+        artifactId: "doc-1",
+        body: "Check this evidence.",
+        anchor: { regionId: "block:argument-2", fallbackExcerpt: "The evidence" },
+      }),
+    ).toEqual({
+      artifactId: "doc-1",
+      body: "Check this evidence.",
+      anchor: { regionId: "block:argument-2", fallbackExcerpt: "The evidence" },
+    });
+    expect(() =>
+      spectraToolRegistry.parseInput("add_comment", {
+        artifactId: "doc-1",
+        body: "A comment",
+        anchor: { regionId: " " },
+      }),
+    ).toThrow();
+  });
+
   it("requires only the fields that each organization action actually needs", () => {
     expect(
       spectraToolRegistry.parseInput("organize_library", {

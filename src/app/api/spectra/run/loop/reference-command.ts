@@ -13,8 +13,8 @@ export async function executeReferenceInsertion(input: {
   throwIfAborted(input.signal);
   const host = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; compatibilityProfile?: string }>(
     "spectraArtifacts:get", { actorClerkId: input.actorClerkId, artifactId: input.hostWorkId });
-  if (!["document", "whiteboard"].includes(host.blueprintKey))
-    throw new Error("Live references can be inserted into documents and whiteboards. Use a document or board as the host.");
+  if (!["document", "whiteboard", "presentation"].includes(host.blueprintKey))
+    throw new Error("Live references can be inserted into documents, whiteboards, and presentations. Use one of those as the host.");
   if (host.compatibilityProfile === "strict-native")
     throw new Error("This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.");
   const target = await query<{ actorClerkId: string; artifactId: string }, { title: string; blueprintKey: string; schemaVersion?: number }>(

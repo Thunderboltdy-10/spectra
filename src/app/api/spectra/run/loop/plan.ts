@@ -4,9 +4,13 @@ import type {
   Surface,
 } from "./contract";
 import { rows, summarizeArtifact } from "./gather";
+import { explicitMutationScopeViolation } from "./target-scope";
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
-import { prepareContentEvidence } from "@/features/spectra/ai/source-evidence-content";
-import { attachmentEvidencePrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
+import {
+  prepareContentEvidence,
+  prepareContentPatchEvidence,
+} from "@/features/spectra/ai/source-evidence-content";
+import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
 import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
@@ -34,6 +38,10 @@ import {
 } from "./resolve";
 import { runSpectraAgentLoop } from "@/features/spectra/ai/agent-loop";
 import type { SpectraAgentMessage } from "@/features/spectra/ai/agent-loop";
+import {
+  budgetForAgentPass,
+  type SpectraAgentPassMode,
+} from "@/features/spectra/ai/agent-pass-budget";
 import {
   committedApplicationObservation,
   describeApplicationObservation,
@@ -95,7 +103,8 @@ import {
 } from "@/features/spectra/operations/hollow-content";
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import {
-  dropPlanIntentFocusHint,
+  describeZodPlanIssues,
+  stripNonIntentContextFields,
   isRepairablePlanFailure,
 } from "@/features/spectra/operations/plan-diagnostics";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
@@ -170,9 +179,10 @@ function recordPlanRecoveryFailure(stage: string, error: unknown, candidate: str
         ? "invalid-json"
         : "other",
     issuePaths: error instanceof ZodError
-      ? error.issues.slice(0, 8).map((issue) => ({
-          path: issue.path.join("."),
+      ? describeZodPlanIssues(error, 12).map((issue) => ({
+          path: issue.path,
           code: issue.code,
+          message: issue.message,
         }))
       : undefined,
     candidateCharacters: candidate.length,
@@ -321,7 +331,7 @@ export function parseStreamedPlanText(
     // Older/loose submit_plan tool calls may echo the context-only focus hint
     // inside intent. It never grants target authority; explicit owned IDs below
     // remain required and all other unrecognized intent fields stay invalid.
-    dropPlanIntentFocusHint(raw);
+    stripNonIntentContextFields(raw);
     if (rawIntent && Array.isArray(rawIntent.requestedArtifactTypes)) {
       const aliases: Record<string, (typeof SPECTRA_BLUEPRINT_KEYS)[number]> = {
         doc: "document",
@@ -1175,6 +1185,12 @@ export function parseStreamedPlanText(
         .trim()
         .slice(0, 4_000);
       if (!partialResponse || partialResponse.length < 12) throw originalError;
+      const answerablePartialResponse =
+        /^(?:what|which|who|when|where|why|how|can|could|would|do|does|did|is|are|should|will)\b/i.test(
+          partialResponse,
+        ) && !/[?？]$/.test(partialResponse)
+          ? `${partialResponse.replace(/[.!]+$/g, "")}?`
+          : partialResponse;
       const requestedArtifactTypes = /flashcard|deck/i.test(candidate)
         ? ["flashcard_deck" as const]
         : /quiz/i.test(candidate)
@@ -1197,7 +1213,7 @@ export function parseStreamedPlanText(
         conversationSummary: null,
         choices: null,
         operations: [],
-        finalResponse: partialResponse,
+        finalResponse: answerablePartialResponse,
       });
     }
   }
@@ -1927,8 +1943,19 @@ export function prepareOperationForQuality(
     !isQualityBlueprintKey(operation.input.blueprintKey)
   )
     return operation;
-  if (operation.type === "artifact.update" && operation.input.content === null)
-    return operation;
+  if (operation.type === "artifact.update" && operation.input.content === null) {
+    if (!operation.input.contentPatch) return operation;
+    const contentPatch = prepareContentPatchEvidence(
+      operation.input.blueprintKey,
+      operation.input.contentPatch,
+      evidence,
+    ) as typeof operation.input.contentPatch;
+    if (contentPatch === operation.input.contentPatch) return operation;
+    return parseModelOperation({
+      ...operation,
+      input: { ...operation.input, contentPatch },
+    });
+  }
   return parseModelOperation({
     ...operation,
     input: {
@@ -2721,7 +2748,7 @@ export function agentSystemPrompt(
     : "For requested mutations, call propose_operation once for each complete independent change as soon as it is ready, wait for Spectra's observation, and continue. Application tools also stage operations; they do not perform writes during planning. Use exactly one tool call per turn. When all work is represented, call submit_plan exactly once. Its operations array contains only mutations not already accepted (normally []). Include intent.obligations: one id, description and operationIndexes array for each requested outcome, covering the entire request and using final indexes (staged operations first). Source workspaces are read context, destination workspaces govern placement, and mutation targets are separate. Never substitute one role for another. Do not say an operation is saved because it is staged. If a single focused propose_operation fulfills the entire request, set fulfillsRequest:true; otherwise leave it false and continue.";
   const retrievalGuidance = singleCreationBlueprint
     ? "Prefer the compact orientation and attachments. Skip discovery tools for a fresh create."
-    : "Do not guess missing context and do not preload everything. Use search_objects and the read tools whenever the compact orientation is insufficient. If two or more permissioned work items remain plausible mutation targets, call request_context_target with those evidence-backed candidates and stop. If exactly one permissioned candidate remains, use its exact id and continue the mutation without asking the user to choose. For other bounded ambiguity, call ask_user_choice. Never use visible focus as a fallback for a failed named target.";
+    : "Do not guess missing context and do not preload everything. Use search_objects and the read tools whenever the compact orientation is insufficient. When the user names exact artifact ids, read each once to verify ownership and blueprint, then use those exact ids even if the artifacts are not open or selected; Follow AI off only prevents viewport navigation. If the request asks for updates to multiple exact targets, work on every named target. Ask request_context_target only when one requested target still has two or more plausible permissioned candidates after exact ids and explicit names are resolved. If exactly one candidate remains, use its exact id without asking. For other material ambiguity, ask one bounded question with options or a clear free-text question in this same conversation. Never use visible focus as a fallback for a failed named target.";
   const calendarGuidance =
     "For Calendar move or resize requests, match the named block against both calendar.items and calendar.scheduledWorkBlocks; the latter is an owner-scoped index for blocks outside the requested visible range. Use the scheduled block's exact itemId and revision for the move or resize. For scheduling, prefer planArtifactId plus planTaskId from Calendar results and never invent taskItemId.";
   return `${systemPrompt(surface, "tools")}\n\n${calendarGuidance}
@@ -3719,6 +3746,13 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
       : null;
   return {
     version: 3,
+    explicitMutationOnly: record.explicitMutationOnly === true,
+    explicitMutationTargetIds: Array.isArray(record.explicitMutationTargetIds)
+      ? record.explicitMutationTargetIds.filter((id): id is string => typeof id === "string").slice(0, 8)
+      : [],
+    unresolvedExplicitMutationTargetIds: Array.isArray(record.unresolvedExplicitMutationTargetIds)
+      ? record.unresolvedExplicitMutationTargetIds.filter((id): id is string => typeof id === "string").slice(0, 8)
+      : [],
     activeGoal: record.activeGoal,
     effectiveFocus: record.effectiveFocus,
     currentView: record.currentView,
@@ -3807,6 +3841,42 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
   };
 }
 
+/** Bind explicit update-only requests to the permission-checked target set.
+ * The ordinary intent schema carries one targetArtifactId, so multi-target
+ * updates clear that singular hint and rely on the exact scope guard below. */
+export function normalizeExplicitMutationPlanIntent(
+  plan: SpectraPlan,
+  targetArtifactIds: readonly string[],
+  artifactBlueprints: ReadonlyMap<
+    string,
+    (typeof SPECTRA_BLUEPRINT_KEYS)[number]
+  >,
+): SpectraPlan {
+  if (!targetArtifactIds.length) return plan;
+  const requestedArtifactTypes = [
+    ...new Set(
+      targetArtifactIds.flatMap((id) => {
+        const blueprintKey = artifactBlueprints.get(id);
+        return blueprintKey ? [blueprintKey] : [];
+      }),
+    ),
+  ];
+  if (requestedArtifactTypes.length !== new Set(targetArtifactIds).size)
+    return plan;
+  return parseSpectraPlan({
+    ...plan,
+    intent: {
+      ...plan.intent,
+      mode: "update",
+      requestedArtifactTypes,
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId:
+        targetArtifactIds.length === 1 ? targetArtifactIds[0]! : null,
+      targetWorkspaceId: null,
+    },
+  });
+}
+
 export async function callModel(
   surface: Surface,
   prompt: string,
@@ -3848,6 +3918,19 @@ export async function callModel(
     context && typeof context === "object" && !Array.isArray(context)
       ? (context as Record<string, unknown>)
       : {};
+  const explicitMutationOnly = contextRecord.explicitMutationOnly === true;
+  const explicitMutationTargetIds = Array.isArray(contextRecord.explicitMutationTargetIds)
+    ? contextRecord.explicitMutationTargetIds.filter((id): id is string => typeof id === "string").slice(0, 8)
+    : [];
+  const unresolvedExplicitMutationTargetIds = Array.isArray(contextRecord.unresolvedExplicitMutationTargetIds)
+    ? contextRecord.unresolvedExplicitMutationTargetIds.filter((id): id is string => typeof id === "string").slice(0, 8)
+    : [];
+  const explicitMutationScopeInstruction = explicitMutationOnly
+    ? `\n\nExact update-only scope from the latest user steering:\n- Update only these permission-verified artifact ids: ${explicitMutationTargetIds.join(", ") || "none"}.\n- Targets Spectra could not verify: ${unresolvedExplicitMutationTargetIds.join(", ") || "none"}. If any target is unresolved, make no mutations; tell the user which exact id could not be verified and do not choose a substitute.\n- Do not create artifacts or perform unrelated application actions. Finish every verified target with its own artifact.update operation. For multiple targets, use intent.mode=update and leave intent.targetArtifactId null; the exact target set is enforced separately.\n- The latest message changes remaining scope while compatible prior instructions and source evidence stay active. Preserve the guide/deck requirements from the conversation.`
+    : "";
+  const effectiveForcedSingleCreation = explicitMutationOnly
+    ? undefined
+    : forcedSingleCreation;
   // The compact packet contains canonical owned ids and blueprint families in
   // several projections (focus, selection, workspace map). Build one trusted
   // lookup so harmless provider omissions such as an update without a repeated
@@ -3941,8 +4024,9 @@ export async function callModel(
     /\b(?:edit|update|change|rewrite|replace|repair|fix|remove|archive)\s+(?:absolutely\s+)?everything\b/i.test(
       prompt,
     );
-  const speculativeSingleCreation =
-    forcedSingleCreation ?? provisionalSingleCreation(prompt);
+  const speculativeSingleCreation = explicitMutationOnly
+    ? null
+    : effectiveForcedSingleCreation ?? provisionalSingleCreation(prompt);
   const calendarActionRequested = promptRequestsCalendarAction(prompt);
   // Any Calendar write (personal event, schedule existing task, or new planner
   // + schedule) needs the ordinary agent tool set. Single-creation note/planner
@@ -3951,12 +4035,14 @@ export async function callModel(
   // An explicitly assigned creation worker owns only its blueprint. The
   // parent coordination worker handles any Calendar scheduling alongside it.
   const calendarNeedsCoordination = !forcedSingleCreation && calendarActionRequested;
+  const effectiveCalendarNeedsCoordination =
+    !explicitMutationOnly && calendarNeedsCoordination;
   // An open presentation + "make slide 3 more concise" still matches create
   // shorthand for the same blueprint. Keep that as a focused update unless the
   // user explicitly asked to create/build another object (or a worker was
   // already assigned that create).
   const openArtifactCreateCollision =
-    !forcedSingleCreation &&
+    !effectiveForcedSingleCreation &&
     Boolean(updateTarget) &&
     Boolean(speculativeSingleCreation) &&
     speculativeSingleCreation!.blueprintKey === updateTarget!.blueprintKey &&
@@ -3978,7 +4064,7 @@ export async function callModel(
     explicitlyTargetsFocusedArtifact &&
     /\barchive\b/i.test(prompt) &&
     !requestsBroadMutation;
-  const directFocusedAction = !calendarNeedsCoordination && !forcedCoordination &&
+  const directFocusedAction = !effectiveCalendarNeedsCoordination && !forcedCoordination &&
     (directFocusedMutation || directFocusedArchive);
   const durableConversation = rows(orientation.conversation).flatMap(
     (message): SpectraAgentMessage[] => {
@@ -4001,10 +4087,12 @@ export async function callModel(
   const userContent = nativeOpenRouterAttachmentContent(userText, attachments);
   const primaryRouting = getSpectraProviderRouting("primary");
   assertPrimarySpectraRouting(primaryRouting);
-  const boundedSingleCreation = calendarNeedsCoordination
+  const boundedSingleCreation = explicitMutationOnly
     ? null
-    : forcedSingleCreation
-      ? forcedSingleCreation
+    : effectiveCalendarNeedsCoordination
+    ? null
+    : effectiveForcedSingleCreation
+      ? effectiveForcedSingleCreation
       : forceGeneralPlan ||
           directFocusedAction ||
           openArtifactCreateCollision ||
@@ -4021,7 +4109,7 @@ export async function callModel(
   });
   const agentRequiresDiscovery = forcedCoordination
     ? false
-    : calendarNeedsCoordination
+    : effectiveCalendarNeedsCoordination
       ? true
       : shouldAllowAgentDiscovery({
           prompt,
@@ -4050,7 +4138,7 @@ export async function callModel(
       { role: "user", content: userContent },
     ],
   };
-  type RequestMode = "initial" | "repair" | "fallback" | "encouragement";
+  type RequestMode = SpectraAgentPassMode;
   const request = (
     provider: Record<string, unknown>,
     mode: RequestMode,
@@ -4075,13 +4163,13 @@ export async function callModel(
       ? [
           {
             role: "system",
-            content: singleCreationRepair
+            content: (singleCreationRepair
               ? mode === "encouragement"
                 ? `${systemPrompt(surface)}\n\nYou are completing the same single-artifact create after a near-miss draft. Keep the user's meaning. Fix every validation issue below. Return one complete JSON object with exactly these fields for the ${singleCreationBlueprintKey!.replaceAll("_", " ")}: title, workSummary, summary, content, tags, conversationTitle, conversationSummary, finalResponse. Do not wrap them in a Spectra plan, decision, intent, or operations array.`
                 : `${systemPrompt(surface)}\n\nYou are repairing a previously generated single-artifact create payload. Preserve the user's requested meaning and every valid generated value. Correct only JSON syntax, missing nullable fields, and invalid ${singleCreationBlueprintKey!.replaceAll("_", " ")} content shapes. Return one complete JSON object with title, workSummary, summary, content, tags, conversationTitle, conversationSummary, and finalResponse — not a Spectra plan envelope.`
               : mode === "encouragement"
                 ? `${systemPrompt(surface)}\n\nYou are completing the same user request after a near-miss draft. Keep the user's meaning. Fix every validation issue below. Prefer complete, schema-valid artifact content (for quizzes: every multiple-choice / true-false question needs at least two non-empty options and a correctAnswer that matches one option). Return one complete JSON object and nothing else.`
-                : `${systemPrompt(surface)}\n\nYou are repairing a previously generated plan. Preserve the user's requested meaning and every valid generated value. Correct only JSON syntax, missing nullable fields, invalid enum/schema shapes, and contradictions identified by validation. Return one complete JSON object and nothing else.`,
+                : `${systemPrompt(surface)}\n\nYou are repairing a previously generated plan. Preserve the user's requested meaning and every valid generated value. Correct only JSON syntax, missing nullable fields, invalid enum/schema shapes, and contradictions identified by validation. Return one complete JSON object and nothing else.`) + explicitMutationScopeInstruction,
           },
           {
             role: "user",
@@ -4120,7 +4208,16 @@ export async function callModel(
             singleCreationAgentTool(singleCreationBlueprint),
           ]
         : ordinaryAgentTools;
+    const updateScopeReadTools = new Set([
+      "search_objects", "search_library", "read_artifact", "read_workspace",
+      "read_thread", "retrieve_memory", "get_school_data", "read_calendar",
+      "read_embeds", "web_search", "propose_operation", "submit_plan",
+    ]);
+    const updateScopeTools = unresolvedExplicitMutationTargetIds.length
+      ? new Set(["submit_plan"])
+      : updateScopeReadTools;
     const agentTools = baseAgentTools.filter((tool) =>
+      (!explicitMutationOnly || updateScopeTools.has(tool.function.name)) &&
       selectedAgentAllowsModelTool(contextRecord, tool.function.name),
     );
     return fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -4178,6 +4275,37 @@ export async function callModel(
   const committedApplicationSummaries: string[] = [];
   let qualityCritiqueFailures = 0;
   let lastQualityFailure: unknown;
+  const assertExplicitMutationScope = (
+    operations: readonly ModelOperation[],
+    requireAllTargets = false,
+  ) => {
+    if (!explicitMutationOnly) return;
+    if (unresolvedExplicitMutationTargetIds.length && operations.length) {
+      throw new Error(
+        `No updates can be staged because Spectra could not verify every exact target id: ${unresolvedExplicitMutationTargetIds.join(", ")}. Tell the user which id could not be verified and do not substitute another artifact.`,
+      );
+    }
+    for (const operation of operations) {
+      const violation = explicitMutationScopeViolation(
+        operation,
+        explicitMutationTargetIds,
+      );
+      if (violation) throw new Error(violation);
+    }
+    if (requireAllTargets && !unresolvedExplicitMutationTargetIds.length) {
+      const updatedIds = new Set(
+        operations.flatMap((operation) =>
+          operation.type === "artifact.update" ? [operation.input.artifactId] : [],
+        ),
+      );
+      const missingIds = explicitMutationTargetIds.filter((id) => !updatedIds.has(id));
+      if (missingIds.length) {
+        throw new Error(
+          `This update-only request names every exact target as required work. Add the missing artifact.update operation(s) for ${missingIds.join(", ")} before submitting the plan.`,
+        );
+      }
+    }
+  };
   const parseAndCheckPlan = (text: string) => {
     let candidateText = text;
     if (acceptedAgentOperations.length) {
@@ -4231,6 +4359,23 @@ export async function callModel(
       ),
       finalResponse: cleanText(parsed.finalResponse) ?? "",
     });
+    if (explicitMutationOnly && unresolvedExplicitMutationTargetIds.length) {
+      const unresolvedIds = unresolvedExplicitMutationTargetIds.join(", ");
+      parsed = parseSpectraPlan({
+        ...parsed,
+        decision: "answer",
+        choices: null,
+        operations: [],
+        finalResponse: `I couldn't verify every exact artifact id (${unresolvedIds}), so I left all requested artifacts unchanged.`,
+      });
+    } else {
+      parsed = normalizeExplicitMutationPlanIntent(
+        parsed,
+        explicitMutationTargetIds,
+        ownedArtifactBlueprints,
+      );
+      assertExplicitMutationScope(parsed.operations, true);
+    }
     if (committedApplicationSummaries.length) {
       const groundedSummary = [
         ...committedApplicationSummaries,
@@ -4413,10 +4558,20 @@ export async function callModel(
         onProgressUpdate?.(update as NativeProgressInput);
     }
     const operations = extractCompleteJsonArrayItems(text, "operations");
+    if (explicitMutationOnly && unresolvedExplicitMutationTargetIds.length) {
+      emittedOperationCount = operations.length;
+      return;
+    }
     while (emittedOperationCount < operations.length) {
       const index = emittedOperationCount;
       emittedOperationCount += 1;
       const streamed = operations[index];
+      if (
+        explicitMutationOnly &&
+        (unresolvedExplicitMutationTargetIds.length > 0 ||
+          explicitMutationScopeViolation(streamed, explicitMutationTargetIds))
+      )
+        continue;
       if (
         updateTarget &&
         streamed &&
@@ -4547,24 +4702,25 @@ export async function callModel(
   };
   const buildAgentSystemContent = async (encouragementNudge = "") => {
     const qualityBlueprint =
-      (calendarNeedsCoordination
+      (effectiveCalendarNeedsCoordination
         ? undefined
-        : forcedSingleCreation?.blueprintKey) ??
+        : effectiveForcedSingleCreation?.blueprintKey) ??
       singleCreationBlueprint ??
       (directFocusedAction ? focusedBlueprintKey : undefined);
     return (
-      (forcedSingleCreation && !calendarNeedsCoordination
-        ? await artifactWorkerSystemPrompt(forcedSingleCreation.blueprintKey)
+      (effectiveForcedSingleCreation && !effectiveCalendarNeedsCoordination
+        ? await artifactWorkerSystemPrompt(effectiveForcedSingleCreation.blueprintKey)
         : forcedCoordination
           ? coordinationWorkerSystemPrompt()
           : agentSystemPrompt(surface, singleCreationBlueprint)) +
-      (!forcedSingleCreation && !forcedCoordination && (directFocusedAction || singleCreationBlueprint)
+      (!effectiveForcedSingleCreation && !forcedCoordination && (directFocusedAction || singleCreationBlueprint)
         ? await focusedArtifactSkillSystemSection(singleCreationBlueprint ?? focusedBlueprintKey)
         : "") +
       (qualityBlueprint
         ? artifactQualityPromptSection(qualityBlueprint, prompt)
         : "") +
       selectedAgentSystemSection(contextRecord) +
+      explicitMutationScopeInstruction +
       encouragementNudge
     );
   };
@@ -4776,7 +4932,7 @@ export async function callModel(
     emittedWorkerProgress = "";
     const agentResult = await runSpectraAgentLoop({
       messages,
-      budget: agentRuntimeBudget,
+      budget: budgetForAgentPass(requestMode, agentRuntimeBudget),
       signal,
       isParallelSafeTool: (call) =>
         spectraToolRegistry.get(call.name)?.parallelSafe === true,
@@ -4870,6 +5026,7 @@ export async function callModel(
               ),
               mergedResearchEvidence(),
             );
+            assertExplicitMutationScope([operation]);
             assertSelectedAgentAllowsOperations(contextRecord, [operation]);
             assertRequestedArtifactContent([operation], prompt, numericSourceRequired);
             assertRequestedArtifactMutation([operation], prompt);
@@ -4928,7 +5085,19 @@ export async function callModel(
                       message: finding.message,
                       path: finding.path,
                     })),
-                    repair: artifactQualityRepairInstructions(error.report),
+                    repair: [
+                      artifactQualityRepairInstructions(error.report),
+                      ...(error.report.blueprintKey === "document" &&
+                      error.report.findings.some(
+                        (finding) => finding.criterionId === "evidence",
+                      )
+                        ? [
+                            attachmentEvidenceRepairPrompt(
+                              mergedResearchEvidence(),
+                            ),
+                          ]
+                        : []),
+                    ].join("\n\n"),
                   }
                 : {}),
             };
@@ -5241,11 +5410,9 @@ export async function callModel(
         if (directFocusedAction) {
           const repairIssues =
             primaryFailure instanceof ZodError
-              ? primaryFailure.issues
-                  .slice(0, 10)
+              ? describeZodPlanIssues(primaryFailure, 10)
                   .map(
-                    (issue) =>
-                      `${issue.path.join(".") || "plan"}: ${issue.message}`,
+                    (issue) => `${issue.path || "plan"}: ${issue.message}`,
                   )
                   .join("\n")
               : primaryFailure instanceof Error
@@ -5346,11 +5513,9 @@ export async function callModel(
       if (directFocusedAction) {
         const repairIssues =
           primaryFailure instanceof ZodError
-            ? primaryFailure.issues
-                .slice(0, 10)
+            ? describeZodPlanIssues(primaryFailure, 10)
                 .map(
-                  (issue) =>
-                    `${issue.path.join(".") || "plan"}: ${issue.message}`,
+                  (issue) => `${issue.path || "plan"}: ${issue.message}`,
                 )
                 .join("\n")
             : primaryFailure instanceof Error

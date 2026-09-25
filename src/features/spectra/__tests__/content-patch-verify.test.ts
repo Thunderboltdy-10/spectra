@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import { contentPatchChangeMatchesSaved } from "../ai/content-patch-verify";
 
 describe("content patch verification", () => {
+  it("verifies normalized presentation slide arrays without accepting dropped citations", () => {
+    const authored = [{
+      id: "slide-1",
+      title: "Cooling",
+      sourceRefs: ["evidence:span-1"],
+      citations: [{ id: "citation-1", label: "Cooling study.pdf, p. 1", sourceRefs: ["evidence:span-1"] }],
+      objects: [{ id: "chart-1", type: "chart", content: { chartType: "column", categories: ["A"] } }],
+    }];
+    const saved = [{
+      ...authored[0],
+      layoutId: "title-visual-text",
+      accessibility: { readingOrder: ["chart-1"] },
+      objects: [{ ...authored[0]!.objects[0], x: 20, y: 30, style: { fontSize: 22 } }],
+    }];
+
+    expect(contentPatchChangeMatchesSaved("/slides", authored, saved, { blueprintKey: "presentation" })).toBe(true);
+    expect(contentPatchChangeMatchesSaved("/slides", authored, [{ ...saved[0]!, citations: [] }], { blueprintKey: "presentation" })).toBe(false);
+    expect(contentPatchChangeMatchesSaved("/slides", authored, [...saved, { id: "extra" }], { blueprintKey: "presentation" })).toBe(false);
+  });
+
   it("accepts unicode dash and whitespace soft matches for document text", () => {
     expect(
       contentPatchChangeMatchesSaved(

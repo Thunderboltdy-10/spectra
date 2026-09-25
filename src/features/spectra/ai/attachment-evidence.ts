@@ -80,3 +80,21 @@ export function attachmentEvidencePrompt(bundle: ResearchEvidenceBundle | undefi
     `Source ${source.id}: ${source.title}\n${bundle.evidence.filter((span) => span.sourceId === source.id).map((span) => `${span.id}${span.page ? ` (page ${span.page})` : ""}\n${span.excerpt}`).join("\n\n")}`,
   ).join("\n\n")}`;
 }
+
+/** A compact retry-only index when an artifact quality critique found no source refs. */
+export function attachmentEvidenceRepairPrompt(bundle: ResearchEvidenceBundle | undefined) {
+  if (!bundle) return "No extracted, verified attachment evidence is available for citation.";
+  const sources = new Map(bundle.sources.map((source) => [source.id, source]));
+  const rows: string[] = [];
+  let characters = 0;
+  for (const span of bundle.evidence) {
+    const source = sources.get(span.sourceId);
+    if (!source) continue;
+    const row = `- ${span.id}${span.page ? ` (p. ${span.page})` : ""} — ${source.title}: ${span.excerpt.slice(0, 260).replace(/\s+/g, " ")}`;
+    if (rows.length >= 48 || characters + row.length > 18_000) break;
+    rows.push(row);
+    characters += row.length;
+  }
+  if (!rows.length) return "No extracted, verified attachment evidence is available for citation.";
+  return `Verified attachment evidence handles for this retry. Add the exact relevant evidence: ids to each evidence-supported document block's sourceRefs. Do not author source metadata or citations yourself; Spectra will materialize them.\n${rows.join("\n")}`;
+}

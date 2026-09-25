@@ -6685,6 +6685,59 @@ button:not(:disabled),
   animation: spectra-ai-activity-pulse 1.5s ease-in-out infinite alternate;
 }
 
+.spectra-follow-ai-status {
+  position: fixed;
+  z-index: 90;
+  inset-block-start: 56px;
+  inset-inline-end: 20px;
+  display: flex;
+  max-width: min(300px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 8px 11px;
+  background: color-mix(in oklab, var(--bg-elevated) 94%, transparent);
+  color: var(--text-primary);
+  box-shadow: 0 8px 28px color-mix(in oklab, var(--text-primary) 12%, transparent);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+.spectra-follow-ai-status > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spectra-follow-ai-status > strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectra-follow-ai-cursor {
+  position: fixed;
+  z-index: 91;
+  overflow: visible;
+  fill: var(--accent-cyan);
+  filter: drop-shadow(0 1px 1px var(--bg-primary))
+    drop-shadow(0 2px 5px color-mix(in oklab, var(--text-primary) 42%, transparent));
+  pointer-events: none;
+  transition: left 180ms ease-out, top 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-follow-ai-cursor {
+    transition: none;
+  }
+}
+
 @keyframes spectra-ai-activity-pulse {
   from {
     opacity: 0.68;
@@ -7901,11 +7954,23 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: flex-start;
   justify-content: center;
   flex-direction: column;
-  border: 1px solid color-mix(in oklab, #735ce7 24%, var(--border-default));
+  border: 1px solid color-mix(in oklab, var(--accent-cyan) 24%, var(--border-default));
   border-radius: 9px;
-  background: color-mix(in oklab, #735ce7 5%, var(--bg-primary));
+  background: color-mix(in oklab, var(--accent-cyan) 5%, var(--bg-primary));
   padding: 8%;
   color: var(--text-primary);
+}
+
+.presentation-linked-open {
+  margin-block-start: 4%;
+  border: 1px solid color-mix(in oklab, var(--accent-cyan) 38%, var(--border-default));
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: color-mix(in oklab, var(--accent-cyan) 9%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-size: 0.6cqw;
+  font-weight: 600;
+  pointer-events: auto;
 }
 
 .presentation-linked-artifact span,

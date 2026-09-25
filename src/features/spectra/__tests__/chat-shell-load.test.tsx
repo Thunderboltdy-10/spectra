@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => {
     getThread: vi.fn(),
     getResultCards: vi.fn(),
     postSpectra: vi.fn(),
+    run: vi.fn(),
+    toastError: vi.fn(),
   };
 });
 
@@ -49,7 +51,7 @@ vi.mock("next/dynamic", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), message: vi.fn() },
+  toast: { error: mocks.toastError, message: vi.fn() },
 }));
 
 vi.mock("@/stores/spectra-context-store", () => ({
@@ -106,7 +108,7 @@ vi.mock("../ai/use-spectra-run", () => ({
       liveExchange: null,
       submitting: false,
       activeRunId: null,
-      run: vi.fn(),
+      run: mocks.run,
       stop: vi.fn(),
       steer: vi.fn(),
       retry: vi.fn(),
@@ -122,11 +124,19 @@ vi.mock("../components/conversation-surface", () => ({
     loadError,
     detail,
     loading,
+    onChoice,
   }: {
     empty: ReactNode;
     loadError?: ReactNode;
     detail?: { messages?: Array<{ _id: string; content: string }> } | null;
     loading?: boolean;
+    onChoice?: (choice: {
+      title: string;
+      key: string;
+      clarificationId: string;
+      choiceMessageId: string;
+      executionId: string;
+    }) => void;
   }) => (
     <div data-testid="conversation-surface">
       {loading ? <div>Loading conversation</div> : null}
@@ -135,6 +145,22 @@ vi.mock("../components/conversation-surface", () => ({
       {detail?.messages?.map((message) => (
         <p key={message._id}>{message.content}</p>
       ))}
+      {onChoice ? (
+        <button
+          type="button"
+          onClick={() =>
+            onChoice({
+              title: "Student",
+              key: "student",
+              clarificationId: "clarification-1",
+              choiceMessageId: "message-1",
+              executionId: "run-1",
+            })
+          }
+        >
+          Answer saved question
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -196,6 +222,8 @@ beforeEach(() => {
   mocks.getResultCards.mockResolvedValue({ resultCards: [] });
   mocks.getThreads.mockResolvedValue({ threads: [] });
   mocks.getOverview.mockResolvedValue({ workspaces: [], artifacts: [] });
+  mocks.run.mockReset();
+  mocks.toastError.mockReset();
   mocks.runOptions.current = null;
 });
 
@@ -223,6 +251,43 @@ describe("ChatShell load states", () => {
       await screen.findByText("This conversation could not load"),
     ).toBeTruthy();
     expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+  });
+
+  it("answers a clarification in its existing conversation", async () => {
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getThread.mockResolvedValueOnce({
+      thread: { _id: "saved-thread", title: "Saved conversation" },
+      messages: [],
+      traces: [],
+    });
+    render(<ChatShell />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Answer saved question" }));
+
+    await waitFor(() =>
+      expect(mocks.run).toHaveBeenCalledWith(
+        "Student",
+        [],
+        expect.objectContaining({
+          threadId: "saved-thread",
+          clarificationId: "clarification-1",
+          choiceMessageId: "message-1",
+          executionId: "run-1",
+        }),
+      ),
+    );
+    expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+  });
+
+  it("does not start a new chat when a clarification has lost its thread", async () => {
+    render(<ChatShell />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Answer saved question" }));
+
+    expect(mocks.run).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      expect.stringContaining("no longer linked to a conversation"),
+    );
   });
 
   it("redirects a confirmed missing thread through the normal new-chat route", async () => {

@@ -4,6 +4,7 @@ import {
   CONTEXT_LIMITS,
   typedArtifactStructure,
 } from "../ai/context-builder";
+import { boundedArtifactRead } from "../ai/bounded-artifact-read";
 
 function artifact(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -101,6 +102,36 @@ describe("Wave 6 bounded context builder", () => {
     expect(packet.threadMap).toEqual([
       expect.objectContaining({ id: "thread-context", explicit: true }),
     ]);
+  });
+
+  it("carries an exact update-only scope beside full same-thread context", () => {
+    const first = artifact("guide", { title: "Revision guide" });
+    const second = artifact("deck", { title: "Six-slide deck", blueprintKey: "presentation" });
+    const packet = buildBoundedContextPacket({
+      prompt: "Update only these exact artifacts in place and preserve the prior brief.",
+      focusMode: "selection",
+      artifacts: [first, second],
+      workspaceIndexArtifacts: [first, second],
+      selectedArtifactIds: ["guide", "deck"],
+      explicitMutationOnly: true,
+      explicitMutationTargetIds: ["guide", "deck"],
+      unresolvedExplicitMutationTargetIds: [],
+      conversation: Array.from({ length: 8 }, (_, index) => ({
+        role: index % 2 ? "assistant" : "user",
+        content: `Prior specification ${index}`,
+      })),
+      currentView: "chat",
+    });
+
+    expect(packet).toMatchObject({
+      effectiveFocus: "selection",
+      explicitMutationOnly: true,
+      explicitMutationTargetIds: ["guide", "deck"],
+      unresolvedExplicitMutationTargetIds: [],
+      targetPriors: { visibleArtifactId: null, threadAttachmentArtifactId: null },
+    });
+    expect(packet.selectedObjects.map((item) => item.id)).toEqual(["guide", "deck"]);
+    expect(packet.conversation.map((item) => item.content)).toContain("Prior specification 0");
   });
 
   it("keeps canonical Library node ids available for organization requests", () => {
@@ -362,6 +393,94 @@ describe("Wave 6 bounded context builder", () => {
     });
   });
 
+  it("preserves exact native chart and table values in oversized presentation reads", () => {
+    const deck = artifact("heat-deck", {
+      blueprintKey: "presentation",
+      content: {
+        theme: { id: "theme-1", name: "Classroom" },
+        slides: [
+          {
+            id: "slide-data",
+            title: "Compare neighborhoods",
+            citations: [{
+              id: "citation-1",
+              label: "Urban heat reading, p. 2",
+              sourceRefs: ["evidence:heat-page-2"],
+            }],
+            objects: [
+              {
+                id: "chart-1",
+                type: "chart",
+                content: {
+                  chartType: "column",
+                  grouping: "clustered",
+                  categories: ["Civic Center", "Riverside", "North Blocks"],
+                  categoryAxisTitle: "Neighborhood",
+                  valueAxisTitle: "Temperature (°C)",
+                  series: [
+                    {
+                      name: "Surface temperature (°C)",
+                      categories: ["Civic Center", "Riverside", "North Blocks"],
+                      values: [41.2, 35.7, 38.9],
+                    },
+                    {
+                      name: "Air temperature (°C)",
+                      categories: ["Civic Center", "Riverside", "North Blocks"],
+                      values: [33.1, 31.8, 32.6],
+                    },
+                  ],
+                },
+              },
+              {
+                id: "table-1",
+                type: "table",
+                content: {
+                  headers: ["Neighborhood", "Canopy (%)", "Surface (°C)", "Air (°C)"],
+                  rows: [["Civic Center", 8, 41.2, 33.1]],
+                },
+              },
+            ],
+          },
+        ],
+        sourceText: "x".repeat(70_000),
+      },
+    });
+
+    const result = boundedArtifactRead(deck) as {
+      content: {
+        slides: Array<{
+          citations: Array<{ sourceRefs: string[] }>;
+          objects: Array<{ type: string; content: Record<string, unknown> }>;
+        }>;
+      };
+      contentCoverage: { complete: boolean };
+    };
+    const [chart, table] = result.content.slides[0]!.objects;
+
+    expect(result.contentCoverage.complete).toBe(false);
+    expect(result.content.slides[0]!.citations[0]!.sourceRefs).toEqual([
+      "evidence:heat-page-2",
+    ]);
+    expect(chart).toMatchObject({
+      type: "chart",
+      content: {
+        chartType: "column",
+        categories: ["Civic Center", "Riverside", "North Blocks"],
+        series: [
+          { name: "Surface temperature (°C)", values: [41.2, 35.7, 38.9] },
+          { name: "Air temperature (°C)", values: [33.1, 31.8, 32.6] },
+        ],
+      },
+    });
+    expect(table).toMatchObject({
+      type: "table",
+      content: {
+        headers: ["Neighborhood", "Canopy (%)", "Surface (°C)", "Air (°C)"],
+        rows: [["Civic Center", 8, 41.2, 33.1]],
+      },
+    });
+  });
+
   it("preserves structured thread purpose and origin while compacting recent turns", () => {
     const packet = buildBoundedContextPacket({
       prompt: "Continue the work",
@@ -419,6 +538,26 @@ describe("Wave 6 bounded context builder", () => {
       intent: { mode: "mixed" },
     });
     expect(packet.activeGoal?.rule).toMatch(/authoritative current goal/i);
+  });
+
+  it("keeps a typed clarification reply attached to the unresolved request", () => {
+    const packet = buildBoundedContextPacket({
+      prompt: "Use the existing study guide and update it in place.",
+      focusMode: "thread",
+      artifacts: [],
+      continuationThreadId: "thread-current",
+      activeGoal: {
+        request: "Update the existing study guide with the attached source data.",
+        question: "Which guide should I update?",
+        userResponse: "Use the guide in the current workspace, id wx12345678901234567890.",
+      },
+    });
+    expect(packet.activeGoal).toMatchObject({
+      request: "Update the existing study guide with the attached source data.",
+      question: "Which guide should I update?",
+      userResponse: "Use the guide in the current workspace, id wx12345678901234567890.",
+    });
+    expect(packet.activeGoal?.rule).toMatch(/explicit user response/i);
   });
 
   it("keeps trailing planted document blocks in focused structure", () => {

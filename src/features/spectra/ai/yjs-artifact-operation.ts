@@ -35,11 +35,7 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
-import {
-  applyBibliographySlides,
-  collectDeckCitations,
-  removeBibliographySlides,
-} from "@/features/spectra/presentation/bibliography";
+import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
 import type { PresentationContent } from "@/features/spectra/presentation/model";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { refreshGeneratedArtifactSummary } from "@/features/spectra/operations/hollow-content";
@@ -1617,25 +1613,20 @@ export async function readLiveArtifactValue(params: {
 
 /**
  * Deterministic per-type content policy applied to every AI write after
- * schema validation. The model can only produce create/update payloads, so
- * derived structure that must stay honest lives here rather than in the
- * prompt: for presentations the References slides are rebuilt from actual
- * slide citations on every write (build_bibliography), which means a deck
- * with citations always carries a truthful, current references trail and a
- * deck whose citations were removed loses its stale generated slides. This is
- * the execution half of INV-09 for decks — the AI can never hand-author or
- * forget a bibliography.
+ * schema validation. For presentations, generated References slides are
+ * rebuilt from actual slide citations by default. An explicit request to keep
+ * an exact narrative slide count may instead retain verified citations in
+ * native notes/metadata without adding a separate slide.
  */
-function enforceAiContentPolicy(typeKey: ArtifactTypeKey, content: unknown) {
+function enforceAiContentPolicy(
+  typeKey: ArtifactTypeKey,
+  content: unknown,
+  prompt: string,
+) {
   if (typeKey !== "presentation") return content;
   const deck = content as PresentationContent;
   if (!Array.isArray(deck.slides)) return content;
-  if (collectDeckCitations(deck).length > 0) {
-    applyBibliographySlides(deck);
-  } else {
-    removeBibliographySlides(deck);
-  }
-  return deck;
+  return enforceAiPresentationContentPolicy(deck, prompt);
 }
 
 export async function applyAiArtifactMutation(params: {
@@ -1643,6 +1634,7 @@ export async function applyAiArtifactMutation(params: {
   runId: string;
   operationId: string;
   executionId: string;
+  prompt?: string;
   /** User-initiated snapshot restore (Undo this run). Not an active AI op. */
   claimActorKind?: "ai" | "human";
   resolveDesired: (current: ArtifactLiveValue) => ArtifactLiveValue;
@@ -1887,7 +1879,11 @@ export async function applyAiArtifactMutation(params: {
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
         ].slice(0, 80),
-        content: enforceAiContentPolicy(typeKey, validated.data),
+        content: enforceAiContentPolicy(
+          typeKey,
+          validated.data,
+          params.prompt ?? "",
+        ),
       };
     };
     const normalizedDesired = resolveValidatedValue(current);

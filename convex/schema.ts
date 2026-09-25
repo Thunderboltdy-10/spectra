@@ -3288,6 +3288,8 @@ export default defineSchema({
     schoolId: v.optional(v.id("schools")),
     parentCommentId: v.optional(v.id("artifactComments")),
     authorAccountId: v.id("accounts"),
+    authorKind: v.optional(v.union(v.literal("human"), v.literal("ai"))),
+    authorDisplayName: v.optional(v.string()),
     body: v.string(),
     anchor: v.object({
       regionId: v.string(),

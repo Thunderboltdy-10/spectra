@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import {
   coerceCommonPlanSchemaSlips,
-  dropPlanIntentFocusHint,
+  describeZodPlanIssues,
+  stripNonIntentContextFields,
   formatPlanApplicationPublicError,
   formatZodPlanPublicError,
   isQuietRetryableApplyFailure,
@@ -87,7 +88,7 @@ describe("plan diagnostics and schema slip recovery", () => {
       finalResponse: "No document change is needed.",
     };
 
-    const normalized = dropPlanIntentFocusHint(structuredClone(planWithHint));
+    const normalized = stripNonIntentContextFields(structuredClone(planWithHint));
     expect(parseSpectraPlan(normalized).intent.targetArtifactId).toBeNull();
     expect(normalized.intent).not.toHaveProperty("focus");
 
@@ -95,9 +96,33 @@ describe("plan diagnostics and schema slip recovery", () => {
       ...planWithHint,
       intent: { ...planWithHint.intent, unverifiedTarget: "artifact-1" },
     };
-    expect(() => parseSpectraPlan(dropPlanIntentFocusHint(withOtherUnknownField))).toThrow(
+    expect(() => parseSpectraPlan(stripNonIntentContextFields(withOtherUnknownField))).toThrow(
       /unrecognized key/i,
     );
+  });
+
+  it("strips only copied activeGoal context from the strict operation intent", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "update",
+        requestedArtifactTypes: ["document"],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: "doc-1",
+        targetWorkspaceId: null,
+        activeGoal: {
+          request: "Update the existing guide and presentation.",
+          userResponse: "Use the five-row dataset.",
+        },
+        finalResponse: "The response belongs at the plan level.",
+      },
+      operations: [{ type: "artifact.archive", input: { artifactId: "doc-1" } }],
+      finalResponse: "Updated the guide.",
+    });
+
+    expect(plan.intent.targetArtifactId).toBe("doc-1");
+    expect(plan.intent).not.toHaveProperty("activeGoal");
+    expect(plan.intent).not.toHaveProperty("finalResponse");
   });
 
   it("coerces common envelope slips so Zod does not dead-end", () => {
@@ -117,6 +142,102 @@ describe("plan diagnostics and schema slip recovery", () => {
     });
     expect(plan.finalResponse).toBe("42");
     expect(plan.decision).toBe("answer");
+  });
+
+  it("fills an empty obligation from the remaining staged operation indexes", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "update",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+        obligations: [
+          { id: "guide", description: "Update the guide", operationIndexes: [0] },
+          { id: "deck", description: "Update the presentation", operationIndexes: [] },
+        ],
+      },
+      conversationTitle: null,
+      conversationSummary: null,
+      choices: null,
+      operations: [
+        { type: "artifact.archive", input: { artifactId: "guide-id" } },
+        { type: "artifact.archive", input: { artifactId: "deck-id" } },
+      ],
+      finalResponse: "Both requested updates are ready.",
+    });
+
+    expect(plan.intent.obligations?.map((item) => item.operationIndexes)).toEqual([
+      [0],
+      [1],
+    ]);
+  });
+
+  it("maps multiple empty obligations only when there is one remaining operation each", () => {
+    const coerced = coerceCommonPlanSchemaSlips({
+      decision: "operate",
+      intent: {
+        mode: "update",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+        obligations: [
+          { id: "one", description: "First outcome", operationIndexes: [] },
+          { id: "two", description: "Second outcome", operationIndexes: [] },
+        ],
+      },
+      operations: [
+        { type: "artifact.archive", input: { artifactId: "one" } },
+        { type: "artifact.archive", input: { artifactId: "two" } },
+      ],
+      finalResponse: "Done.",
+    }) as { intent: { obligations: Array<{ operationIndexes: number[] }> } };
+
+    expect(coerced.intent.obligations.map((item) => item.operationIndexes)).toEqual([
+      [0],
+      [1],
+    ]);
+  });
+
+  it("rejects a clarification that has no options and no answerable question", () => {
+    expect(() => parseSpectraPlan({
+      decision: "clarify",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: null,
+      conversationSummary: null,
+      choices: null,
+      operations: [],
+      finalResponse: "The requested edits are not yet saved and the artifacts must be open.",
+    })).toThrow(/must ask a clear question/i);
+  });
+
+  it("allows a free-text clarification question in the existing conversation", () => {
+    const plan = parseSpectraPlan({
+      decision: "clarify",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: null,
+      conversationSummary: null,
+      choices: null,
+      operations: [],
+      finalResponse: "Which of these two documents should I update?",
+    });
+
+    expect(plan.decision).toBe("clarify");
+    expect(plan.choices).toBeNull();
   });
 
   it("coerces empty titles/summaries and synthesizes blank finalResponse", () => {
@@ -248,6 +369,32 @@ describe("plan diagnostics and schema slip recovery", () => {
     ).toContain("misread the request intent");
   });
 
+  it("surfaces the matching blueprint branch beneath an invalid union", () => {
+    const schema = z.union([
+      z.object({
+        blueprintKey: z.literal("document"),
+        content: z.object({ blocks: z.array(z.string()) }),
+      }),
+      z.object({
+        blueprintKey: z.literal("presentation"),
+        content: z.object({ slides: z.array(z.string()) }),
+      }),
+    ]);
+    const parsed = schema.safeParse({
+      blueprintKey: "document",
+      content: { blocks: [12] },
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+
+    expect(describeZodPlanIssues(parsed.error)).toEqual([
+      expect.objectContaining({
+        path: "content.blocks.0",
+        code: "invalid_type",
+      }),
+    ]);
+  });
+
   it("does not map Convex validator or region-claim failures to a targeting miss", () => {
     expect(
       formatPlanApplicationPublicError(
@@ -274,6 +421,20 @@ describe("plan diagnostics and schema slip recovery", () => {
         new Error("Invalid artifact reference. The operation must use an owned id from the current context."),
       ),
     ).toContain("open or selected object");
+  });
+
+  it("repairs missing verified slide citations and explains the recovery clearly", () => {
+    const failure = new Error(
+      "PRESENTATION_CITATION_EVIDENCE_REQUIRED: The requested reference-free deck must retain verified citation metadata on its narrative slides.",
+    );
+
+    expect(isRepairablePlanFailure(failure)).toBe(true);
+    expect(formatPlanApplicationPublicError(failure)).toContain(
+      "verified citations on its narrative slides",
+    );
+    expect(formatPlanApplicationPublicError(failure)).not.toContain(
+      "open the file from Library with Spectra Bridge connected",
+    );
   });
 
   it("marks schema slips as repairable and ownership failures as not", () => {
@@ -441,6 +602,23 @@ describe("plan diagnostics and schema slip recovery", () => {
       isRepairablePlanFailure(
         new Error(
           "The proposed artifact update is unrelated to the interpreted request.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("repairs update-only target coverage and scope slips in the same run", () => {
+    expect(
+      isRepairablePlanFailure(
+        new Error(
+          "This update-only request names every exact target as required work. Add the missing artifact.update operation(s) before submitting the plan.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isRepairablePlanFailure(
+        new Error(
+          "This request only allows updates to the exact named artifacts. The proposed target is outside that scope.",
         ),
       ),
     ).toBe(true);

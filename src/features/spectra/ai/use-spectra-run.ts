@@ -16,12 +16,17 @@ import {
   type SpectraRunTab,
 } from "../data/api";
 import type { CommandAttachment } from "../components/command-bar";
+import { mergeContinuationAttachments } from "./continuation-context";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 import { noteAiLocation } from "../collaboration/follow-ai";
-import { handleSpectraAiUiEvent } from "../collaboration/ai-ui-events";
+import {
+  handleSpectraAiUiEvent,
+  rememberCommittedArtifactResult,
+} from "../collaboration/ai-ui-events";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { spectraBus } from "../events";
+import { isRetryableRunStatus } from "./run-lifecycle";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -75,30 +80,29 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
         operationType: event.operationType,
         ...(event.preview ? { preview: event.preview } : {}),
       });
-      // Follow AI: work may be happening in an artifact that is not open.
-      {
-        const artifactId =
-          event.preview?.pendingArtifactId ?? event.preview?.targetId;
-        if (artifactId) {
-          noteAiLocation({
-            actorId: runId,
-            artifactId,
-            ...(event.preview?.title ? { note: event.preview.title } : {}),
-          });
-          // Artifact cards tell the same story even while the editor is closed.
-          if (event.preview?.title) {
-            let published = runFeedArtifacts.get(runId);
-            if (!published) {
-              published = new Set();
-              runFeedArtifacts.set(runId, published);
-            }
-            published.add(artifactId);
-            publishArtifactAiActivity(artifactId, RUN_FEED_SOURCE, {
-              phase: "editing",
-              detail: event.preview.title,
-            });
-          }
+      // Existing targets are already readable; pending create shells are not.
+      // Keep their activity visible in cards, but wait for operation_result
+      // before trying to open a newly created artifact in Follow AI.
+      if (event.preview?.targetId) {
+        noteAiLocation({
+          actorId: runId,
+          artifactId: event.preview.targetId,
+          ...(event.preview.title ? { note: event.preview.title } : {}),
+        });
+      }
+      const activityArtifactId =
+        event.preview?.pendingArtifactId ?? event.preview?.targetId;
+      if (activityArtifactId && event.preview?.title) {
+        let published = runFeedArtifacts.get(runId);
+        if (!published) {
+          published = new Set();
+          runFeedArtifacts.set(runId, published);
         }
+        published.add(activityArtifactId);
+        publishArtifactAiActivity(activityArtifactId, RUN_FEED_SOURCE, {
+          phase: "editing",
+          detail: event.preview.title,
+        });
       }
       break;
     case "ui_event":
@@ -114,6 +118,8 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
           ? { affected: event.affected }
           : {}),
       });
+      if (event.type === "operation_result")
+        rememberCommittedArtifactResult(event);
       break;
     case "status":
       recordRunEvent({ type: event.type, runId, message: event.message });
@@ -374,6 +380,9 @@ export function useSpectraRun({
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
+  const attachmentsByThreadId = useRef(
+    new Map<string, CommandAttachment[]>(),
+  );
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(
     new Map<AbortController, { runId: string | null; exchangeId?: string }>(),
@@ -828,6 +837,14 @@ export function useSpectraRun({
           }
           if (event.type === "thread_ready") {
             durableThreadId.current = event.threadId;
+            const submittedAttachments = Array.isArray(body.attachments)
+              ? (body.attachments as CommandAttachment[])
+              : [];
+            if (submittedAttachments.length)
+              attachmentsByThreadId.current.set(
+                event.threadId,
+                submittedAttachments,
+              );
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
                 ? { ...current, threadId: event.threadId }
@@ -1090,6 +1107,8 @@ export function useSpectraRun({
             (preferences.ai.continueCurrentConversation
               ? durableThreadId.current
               : undefined));
+      if (continuedThreadId && attachments.length)
+        attachmentsByThreadId.current.set(continuedThreadId, attachments);
       toast.dismiss();
       return new Promise<boolean>((resolve) => {
         const exchangeId = crypto.randomUUID();
@@ -1237,6 +1256,7 @@ export function useSpectraRun({
         | "replace_goal"
         | "cancel_current_action",
       text: string,
+      nextAttachments: CommandAttachment[] = [],
     ) => {
       const clean = text.trim();
       if (!clean || queuedSteering.current.has(runId)) return false;
@@ -1269,6 +1289,10 @@ export function useSpectraRun({
           const detail = await getSpectraRunDetail(runId);
           targetThreadId = detail.run.threadId;
         }
+        if (!targetThreadId?.trim())
+          throw new Error(
+            "This response is not attached to a saved conversation, so it cannot be continued in a new chat. Open the conversation and continue there.",
+          );
         // Steering is a stop-then-continue transaction. The tab projection can
         // lag the run detail by a heartbeat, and the old worker can still be
         // unwinding while the stop response reaches the browser. Resolve a
@@ -1342,7 +1366,12 @@ export function useSpectraRun({
             : mode === "redirect_next_step"
               ? `Change the next step: ${clean}`
               : `Refine the current goal: ${clean}`;
-        const accepted = await run(steerPrompt, [], {
+        const retainedAttachments = attachmentsByThreadId.current.get(targetThreadId) ?? [];
+        const continuationAttachments = mergeContinuationAttachments(
+          retainedAttachments,
+          nextAttachments,
+        );
+        const accepted = await run(steerPrompt, continuationAttachments, {
           threadId: targetThreadId,
         });
         queuedSteering.current.delete(runId);
@@ -1478,6 +1507,10 @@ export function useSpectraRun({
         return;
       }
       if (actionKey === "retry") {
+        if (!isRetryableRunStatus(card.status)) {
+          toast.info("This run is waiting for your reply in this conversation.");
+          return;
+        }
         toast.dismiss();
         setActiveRequestCount((count) => count + 1);
         try {
@@ -1517,7 +1550,14 @@ export function useSpectraRun({
       if (!clean) return false;
       setActiveRequestCount((count) => count + 1);
       try {
-        await consume({ action: "revise", runId: card.runId, revision: clean });
+        const version = await resolveDisplayedRunVersion(card.runId);
+        await consume({
+          action: "revise",
+          runId: card.runId,
+          revision: clean,
+          executionId: version.executionId,
+          attemptId: version.attemptId,
+        });
       } catch (error) {
         toast.error(
           error instanceof Error
@@ -1528,9 +1568,16 @@ export function useSpectraRun({
       } finally {
         setActiveRequestCount((count) => Math.max(0, count - 1));
       }
-      return run(`Revise the pending proposal with this feedback: ${clean}`);
+      const threadId = card.provenance?.threadId;
+      return run(
+        `Revise the pending proposal with this feedback: ${clean}`,
+        threadId
+          ? (attachmentsByThreadId.current.get(threadId) ?? [])
+          : [],
+        threadId ? { threadId } : undefined,
+      );
     },
-    [consume, run],
+    [consume, resolveDisplayedRunVersion, run],
   );
 
   const openDetails = useCallback(

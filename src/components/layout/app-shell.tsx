@@ -1229,7 +1229,7 @@ export function AppShell({
             contentClassName,
           )}
         >
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="relative min-h-0 min-w-0 flex-1" data-spectra-app-surface="true">
             {children}
             <GlobalRouteWorkbench />
           </div>

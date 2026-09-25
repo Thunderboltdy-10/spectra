@@ -313,6 +313,7 @@ export function __resetFollowAi(): void {
   following = false;
   followedActorId = null;
   location = null;
+  surfaceLocation = null;
   lastDispatchedArtifactId = null;
   lastDispatchedSurfaceKey = null;
   programmaticOpenAt = 0;

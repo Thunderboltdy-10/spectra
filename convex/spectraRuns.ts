@@ -29,6 +29,10 @@ import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 import { recordMeterEvent } from "./metering";
 import { writeAuditEvent } from "./auditShared";
 import {
+  shouldRenewSpectraRunLease,
+  SPECTRA_RUN_LEASE_DURATION_MS,
+} from "../src/features/spectra/ai/run-lease";
+import {
   compactResultCardForRead,
   compactStoredResultCardSummary,
   compactStoredRunTabSummary,
@@ -397,12 +401,19 @@ async function runHasAttachmentInput(
     .query("spectraRunAttachments")
     .withIndex("by_run_execution", (q) => q.eq("runId", runId))
     .collect();
-  const hasRetainedBytes = retained.some(
+  const retainedCandidates = retained.filter(
     (attachment) =>
       attachment.status !== "quarantined" &&
       attachment.status !== "uploading" &&
       attachment.storageId !== undefined,
   );
+  const hasRetainedBytes = (
+    await Promise.all(
+      retainedCandidates.map((attachment) =>
+        ctx.storage.getUrl(attachment.storageId!),
+      ),
+    )
+  ).some(Boolean);
   return serializedInput && !hasRetainedBytes;
 }
 
@@ -461,13 +472,13 @@ async function durableArtifactWritesArmRunUndoIncludingPending(
 function recoveryForRun(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
-  hasAttachmentInput: boolean,
+  attachmentsUnavailable: boolean,
 ) {
   const recovery = interruptionRecovery(
     operationStatuses,
     hasPartialResponse,
   );
-  return hasAttachmentInput ? { ...recovery, retryable: false } : recovery;
+  return attachmentsUnavailable ? { ...recovery, retryable: false } : recovery;
 }
 
 type ContinuationSelection = { questionId: string; choiceKey: string; choiceTitle: string };
@@ -691,7 +702,13 @@ export const beginRun = mutation({
         throw new Error("That artifact is no longer available.");
     }
     let continuationRun: Doc<"spectraAiRuns"> | null = null;
-    if (args.clarificationId || args.clarificationMessageId || args.clarificationExecutionId || args.choiceKey) {
+    const hasClarificationReply = Boolean(
+      args.clarificationId ||
+        args.clarificationMessageId ||
+        args.clarificationExecutionId ||
+        args.choiceKey,
+    );
+    if (hasClarificationReply) {
       if (
         !args.clarificationId ||
         !args.clarificationMessageId ||
@@ -723,13 +740,25 @@ export const beginRun = mutation({
       continuationRun = askingRun;
     }
     if (thread) {
-      const activeRun = (
+      const activeRuns = (
         await ctx.db
           .query("spectraAiRuns")
           .withIndex("by_thread", (q) => q.eq("threadId", thread!._id))
           .collect()
-      ).find((run) => isActiveRunStatus(run.status) && run._id !== continuationRun?._id);
-      if (activeRun)
+      )
+        .filter((run) => isActiveRunStatus(run.status))
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      const activeRun = activeRuns[0] ?? null;
+      // A clarification can be answered in ordinary chat text. Resolve the
+      // most recent waiting run in this same authenticated thread instead of
+      // forcing the user to select a missing or hidden choice card. A normal
+      // message cannot bypass a live worker or an approval request.
+      if (
+        !hasClarificationReply &&
+        activeRun?.status === "awaiting_resolution"
+      )
+        continuationRun = activeRun;
+      if (activeRun && activeRun._id !== continuationRun?._id)
         throw new Error(
           "This conversation is still responding. Start a new thread to work in parallel, or wait for it to finish.",
         );
@@ -743,19 +772,67 @@ export const beginRun = mutation({
         );
     }
 
+    // Keep attached source files available on the next message in the same
+    // thread. A normal follow-up after a completed or interrupted run should
+    // not lose file context merely because the browser did not upload the
+    // same bytes again. Limit this to the thread's immediately preceding
+    // terminal run and never inherit across accounts or active work.
+    let attachmentSourceRun = continuationRun;
+    const incomingAttachments = recordValue(args.messageMetadata).attachments;
+    const hasIncomingAttachments =
+      Array.isArray(incomingAttachments) && incomingAttachments.length > 0;
+    if (
+      !attachmentSourceRun &&
+      thread &&
+      !hasIncomingAttachments &&
+      thread.lastRunId
+    ) {
+      const latestRun = await ctx.db.get(thread.lastRunId);
+      if (
+        latestRun &&
+        latestRun.ownerAccountId === actor._id &&
+        latestRun.schoolId === actor.schoolId &&
+        latestRun.threadId === thread._id &&
+        !isActiveRunStatus(latestRun.status)
+      )
+        attachmentSourceRun = latestRun;
+    }
+
     const now = Date.now();
     if (continuationRun) {
-      const message = await ctx.db.get(args.clarificationMessageId!);
-      if (!message) throw new Error("This clarification is no longer available. Start a new request.");
-      const metadata = recordValue(message.metadata);
-      const clarification = recordValue(metadata.clarification);
-      const consumedClarification = { ...clarification, status: "consumed", consumedAt: now };
-      await ctx.db.patch(message._id, {
-        metadata: {
-          ...metadata,
-          clarification: consumedClarification,
-        },
-      });
+      const threadMessages = thread
+        ? await ctx.db
+            .query("spectraMessages")
+            .withIndex("by_thread_ordinal", (q) =>
+              q.eq("threadId", thread!._id),
+            )
+            .order("desc")
+            .collect()
+        : [];
+      const message = args.clarificationMessageId
+        ? await ctx.db.get(args.clarificationMessageId)
+        : threadMessages.find(
+            (candidate) =>
+              candidate.role === "assistant" &&
+              candidate.runId === continuationRun!._id,
+          );
+      if (args.clarificationMessageId && !message)
+        throw new Error("This clarification is no longer available. Start a new request.");
+      if (message) {
+        const metadata = recordValue(message.metadata);
+        const clarification = recordValue(metadata.clarification);
+        if (Object.keys(clarification).length > 0)
+          await ctx.db.patch(message._id, {
+            metadata: {
+              ...metadata,
+              clarification: {
+                ...clarification,
+                status: "consumed",
+                consumedAt: now,
+              },
+            },
+          });
+      }
       await ctx.db.patch(continuationRun._id, {
         status: "completed",
         phase: "completed",
@@ -765,7 +842,15 @@ export const beginRun = mutation({
         workerId: undefined,
         leaseExpiresAt: undefined,
         heartbeatAt: now,
-        clarification: { ...continuationRun.clarification!, status: "consumed", consumedAt: now },
+        ...(continuationRun.clarification
+          ? {
+              clarification: {
+                ...continuationRun.clarification,
+                status: "consumed" as const,
+                consumedAt: now,
+              },
+            }
+          : {}),
         updatedAt: now,
       });
       const priorCards = await ctx.db
@@ -829,7 +914,7 @@ export const beginRun = mutation({
       submissionKey: args.submissionKey,
       executionId,
       eventSequence: 1,
-      leaseExpiresAt: now + 2 * 60_000,
+      leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
       phase: "created",
       heartbeatAt: now,
       attemptCount: 1,
@@ -840,6 +925,48 @@ export const beginRun = mutation({
     });
     const createdRun = await ctx.db.get(runId);
     if (!createdRun) throw new Error("AI run could not be created");
+    let retainedAttachmentsCopied = false;
+    const priorExecutionId = attachmentSourceRun?.executionId;
+    if (attachmentSourceRun && priorExecutionId) {
+      const sourceAttachments = await ctx.db
+        .query("spectraRunAttachments")
+        .withIndex("by_run_execution", (q) =>
+          q
+            .eq("runId", attachmentSourceRun!._id)
+            .eq("executionId", priorExecutionId),
+        )
+        .collect();
+      for (const attachment of sourceAttachments) {
+        if (
+          attachment.ownerAccountId !== actor._id ||
+          attachment.status !== "active" ||
+          !attachment.storageId
+        )
+          continue;
+        const storageUrl = await ctx.storage.getUrl(attachment.storageId);
+        if (!storageUrl) continue;
+        await ctx.db.insert("spectraRunAttachments", {
+          runId,
+          executionId,
+          ownerAccountId: actor._id,
+          storageId: attachment.storageId,
+          originalFileId: attachment.originalFileId,
+          sha256: attachment.sha256,
+          status: "active",
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          handling: attachment.handling,
+          extractedText: attachment.extractedText,
+          pageCount: attachment.pageCount,
+          sourceMap: attachment.sourceMap,
+          provenance: attachment.provenance,
+          createdAt: now,
+          updatedAt: now,
+        });
+        retainedAttachmentsCopied = true;
+      }
+    }
     const runSummary = projectRunTabSummary(createdRun);
     const resultCardId = await ctx.db.insert("spectraResultCards", {
       runId,
@@ -989,6 +1116,8 @@ export const beginRun = mutation({
       resultCardId,
       threadId,
       executionId,
+      continuationRunId: continuationRun?._id,
+      retainedAttachments: retainedAttachmentsCopied,
       nodeId,
       created: true,
     };
@@ -1138,10 +1267,13 @@ export const updateStatus = mutation({
         v.literal("failed"),
       ),
     ),
+    workerId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
+    if (args.workerId && run.workerId !== args.workerId)
+      return { ignored: true, status: run.status };
     // A confirmation event can reach the browser just before the durable
     // approval transition finishes. A stale heartbeat/status retry must not
     // put that run back into `running` (or `queued`) after approval has been
@@ -1498,13 +1630,13 @@ export const claimExecution = mutation({
       // currently running.
       status: "running",
       workerId,
-      leaseExpiresAt: now + 2 * 60_000,
+      leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
       heartbeatAt: now,
       phase: run.phase === "created" ? "preparing" : run.phase,
       outcome: "executing",
       updatedAt: now,
     });
-    return { claimed: true, leaseExpiresAt: now + 2 * 60_000 };
+    return { claimed: true, leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS };
   },
 });
 
@@ -1523,9 +1655,11 @@ export const heartbeat = mutation({
     )
       return { alive: false };
     const now = Date.now();
+    if (!shouldRenewSpectraRunLease(run.leaseExpiresAt, now))
+      return { alive: true };
     await ctx.db.patch(args.runId, {
       heartbeatAt: now,
-      leaseExpiresAt: now + 2 * 60_000,
+      leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
     });
     return { alive: true };
   },
@@ -1848,7 +1982,8 @@ export const reconcileStaleRuns = internalMutation({
     const active = [...queued, ...running];
     let interrupted = 0;
     for (const run of active) {
-      const [operations, messages] = await Promise.all([
+      const [operations, messages, recentEvents, attachmentsUnavailable] =
+        await Promise.all([
         ctx.db
           .query("spectraOperations")
           .withIndex("by_run", (q) => q.eq("runId", run._id))
@@ -1857,6 +1992,12 @@ export const reconcileStaleRuns = internalMutation({
           .query("spectraMessages")
           .withIndex("by_run", (q) => q.eq("runId", run._id))
           .collect(),
+        ctx.db
+          .query("spectraRunEvents")
+          .withIndex("by_run_sequence", (q) => q.eq("runId", run._id))
+          .order("desc")
+          .take(40),
+        runHasAttachmentInput(ctx, run._id),
       ]);
       const currentOperations = operations.filter(
         (operation) => operation.executionId === run.executionId,
@@ -1865,11 +2006,10 @@ export const reconcileStaleRuns = internalMutation({
         (message) =>
           message.role === "assistant" && message.content.trim().length > 0,
       );
-      const hasAttachmentInput = messages.some(messageHasAttachmentInput);
       const recovery = recoveryForRun(
         currentOperations.map((operation) => operation.status),
         hasPartialResponse,
-        hasAttachmentInput,
+        attachmentsUnavailable,
       );
       await Promise.all(
         currentOperations
@@ -1885,12 +2025,25 @@ export const reconcileStaleRuns = internalMutation({
             }),
           ),
       );
+      const persistedError = recentEvents.find((event) => {
+        if (event.executionId !== run.executionId || event.type !== "error")
+          return false;
+        const payload = recordValue(event.payload);
+        return typeof payload.message === "string" && payload.message.trim();
+      });
+      const persistedMessage = persistedError
+        ? recordValue(persistedError.payload).message
+        : undefined;
       const error =
-        hasAttachmentInput
+        attachmentsUnavailable
           ? ATTACHMENT_RETRY_MESSAGE
-          : recovery.recoveryState === "partial"
-          ? "The run was interrupted after partial work was preserved. Review the affected objects before continuing."
-          : "The run was interrupted before changes were applied and can be retried safely.";
+          : typeof run.error === "string" && run.error.trim()
+            ? run.error
+            : typeof persistedMessage === "string"
+              ? persistedMessage
+              : recovery.recoveryState === "partial"
+                ? "The run was interrupted after partial work was preserved. Review the affected objects before continuing."
+                : "The run was interrupted before changes were applied and can be retried safely.";
       if (
         !run.agentUsageSettledAt &&
         run.selectedAgentId &&
@@ -3258,8 +3411,23 @@ export const setContextSnapshot = mutation({
       run.executionId !== args.executionId
     )
       throw new Error("This context belongs to an older run attempt.");
+    const previous =
+      run.contextSnapshot &&
+      typeof run.contextSnapshot === "object" &&
+      !Array.isArray(run.contextSnapshot)
+        ? (run.contextSnapshot as Record<string, unknown>)
+        : {};
+    const next =
+      args.contextSnapshot &&
+      typeof args.contextSnapshot === "object" &&
+      !Array.isArray(args.contextSnapshot)
+        ? (args.contextSnapshot as Record<string, unknown>)
+        : {};
     await ctx.db.patch(args.runId, {
-      contextSnapshot: args.contextSnapshot,
+      // Later planning snapshots add target resolution and verification data.
+      // Keep earlier server-owned evidence and quality constraints intact so
+      // artifact persistence and retry recovery can still use them.
+      contextSnapshot: { ...previous, ...next },
       updatedAt: Date.now(),
     });
     return { runId: args.runId };

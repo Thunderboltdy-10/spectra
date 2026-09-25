@@ -740,7 +740,7 @@ export type SpectraArtifactComment = {
   artifactId: string;
   parentCommentId?: string;
   authorAccountId: string;
-  author: { accountId: string; name: string; avatarUrl?: string } | null;
+  author: { accountId: string; name: string; avatarUrl?: string; kind?: "human" | "ai" } | null;
   body: string;
   anchor: {
     regionId: string;
@@ -779,7 +779,7 @@ export type SpectraArtifactCommentNotification = {
     blueprintKey: SpectraBlueprintKey;
   };
   comment: { body: string; regionId: string };
-  author: { accountId: string; name: string; avatarUrl?: string } | null;
+  author: { accountId: string; name: string; avatarUrl?: string; kind?: "human" | "ai" } | null;
 };
 
 export type SpectraPlannerReminderNotification = {

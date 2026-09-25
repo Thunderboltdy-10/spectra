@@ -2709,6 +2709,17 @@ export function ThreadConversation({
             : choice.description
               ? `${choice.title}: ${choice.description}`
               : choice.title,
+          [],
+          {
+            // A clarification is a follow-up in the conversation that asked
+            // it, independent of the user's default new-chat preference.
+            threadId,
+            clarificationId: choice.clarificationId,
+            choiceKey: choice.key,
+            choiceMessageId: choice.choiceMessageId,
+            executionId: choice.executionId,
+            batchSelections: choice.batchSelections,
+          },
         )
       }
       activeCards={runEngine.cards.filter((card) =>

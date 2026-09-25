@@ -205,7 +205,11 @@ function setup(
     if (name.includes("spectraRunJobs:cancelForRun")) return { cancelled: true };
     if (name.includes("spectraRunJobs:generateAttachmentUploadUrl")) return "https://example.test/upload";
     if (name.includes("spectraRunJobs:registerAttachment")) return { attachmentId: "attachment-real" };
-    if (name.includes("spectraRuns:claimExecution")) return { claimed: true };
+    if (name.includes("spectraRuns:claimExecution")) {
+      run.status = "running";
+      run.workerId = args?.workerId;
+      return { claimed: true };
+    }
     if (name.includes("spectraRuns:heartbeat")) return { alive: true };
     if (name.includes("regionClaims:acquire")) return { claimId: "claim-real", status: "active" };
     if (name.includes("regionClaims:renew")) return { renewed: true };

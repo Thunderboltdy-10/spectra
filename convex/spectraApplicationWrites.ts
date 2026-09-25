@@ -22,10 +22,25 @@ function semanticInput(input: Row) {
 }
 
 /** A fixed semantic dispatch. Callers cannot supply a Convex function name. */
-function mutationFor(command: string, args: Row, runId: string, operationId: string, scopeNodeId?: string) {
+function mutationFor(command: string, args: Row, runId: string, executionId: string, operationId: string, scopeNodeId?: string) {
   const targetIds = strings(args.targetIds);
   const destination = typeof args.destinationId === "string" && args.destinationId.trim() ? args.destinationId.trim() : scopeNodeId;
   switch (command) {
+    case "add_comment": return { name: "artifactComments:create", args: {
+      artifactId: args.artifactId,
+      body: String(args.body ?? ""),
+      ...(typeof args.parentCommentId === "string" ? { parentCommentId: args.parentCommentId } : {}),
+      anchor: {
+        regionId: String(row(args.anchor).regionId ?? "work:root"),
+        ...(typeof row(args.anchor).fallbackExcerpt === "string"
+          ? { fallbackExcerpt: row(args.anchor).fallbackExcerpt }
+          : {}),
+      },
+      mentionedAccountIds: [],
+      aiRunId: runId,
+      aiExecutionId: executionId,
+      aiOperationId: operationId,
+    } };
     case "change_spectra_settings": return { name: "accountPreferences:writeLayer", args: { scope: "account", scopeKey: "account", values: normalizeAiPreferencePatch(args.patch) } };
     case "organize_library": {
       switch (args.action) {
@@ -137,7 +152,7 @@ export const execute = mutation({
     if (needsConfirmation && (run.approval?.status !== "accepted" || run.approval.executionId !== args.executionId || row(operation.output).approvedApplicationScope !== scope))
       throw new Error("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
     const snapshot = row(run.contextSnapshot);
-    const spec = mutationFor(String(input.command), row(input.args), String(run._id), String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined);
+    const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined);
     // MutationCtx.runMutation executes inside this transaction. Its permission
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.

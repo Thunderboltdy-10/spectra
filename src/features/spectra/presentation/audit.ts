@@ -4,6 +4,7 @@ import {
   type PresentationObject,
   type PresentationSlide,
 } from "./model";
+import { BIBLIOGRAPHY_SLIDE_MARKER } from "./bibliography";
 
 /**
  * Reading a deck for the things that quietly ruin it in a room.
@@ -142,6 +143,8 @@ export function auditDeck(deck: PresentationContent): DeckAuditReport {
   const citationsAnywhere = deck.slides.some((slide) => slide.citations?.length);
 
   deck.slides.forEach((slide, slideIndex) => {
+    const generatedBibliography =
+      slide.accessibility?.label === BIBLIOGRAPHY_SLIDE_MARKER;
     const background = slideBackground(slide, deck);
     const visible = slide.objects.filter((object) => !object.hidden);
 
@@ -204,7 +207,11 @@ export function auditDeck(deck: PresentationContent): DeckAuditReport {
 
     // Source coverage only means something once the deck cites at all. A deck
     // with no citations anywhere is a different decision, not an omission.
-    if (citationsAnywhere && !slide.citations?.length) {
+    if (
+      citationsAnywhere &&
+      !generatedBibliography &&
+      !slide.citations?.length
+    ) {
       const hasClaim = visible.some(
         (object) => presentationObjectText(object).trim().length > 60,
       );

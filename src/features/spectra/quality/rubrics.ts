@@ -2,6 +2,12 @@ import { normalizeArtifactContent } from "../ai/content-normalization";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { auditDeck, estimateTextOverflow } from "../presentation/audit";
 import {
+  BIBLIOGRAPHY_SLIDE_MARKER,
+  collectDeckCitations,
+  planBibliographySlides,
+} from "../presentation/bibliography";
+import {
+  ensurePresentationReadingOrders,
   isPresentationLayoutId,
   presentationLayoutRoleIssues,
   realizeGeneratedPresentation,
@@ -396,14 +402,26 @@ function presentationHasEditableNumericVisual(deck: PresentationContent) {
 
 function evaluatePresentation(content: unknown, prompt: string, numericSourceRequired = false) {
   const deck = normalizePresentationContent(content);
+  ensurePresentationReadingOrders(deck);
+  // Spectra owns these generated source pages. They count toward the user's
+  // requested total even though the narrative and layout rubric ignores them.
+  const authoredSlides = deck.slides.filter(
+    (slide) => slide.accessibility?.label !== BIBLIOGRAPHY_SLIDE_MARKER,
+  );
   const structureFindings: ArtifactQualityFinding[] = [];
   const requestedCount = requestedSlideCount(prompt);
-  if (requestedCount !== undefined && deck.slides.length !== requestedCount)
+  const existingReferenceCount = deck.slides.length - authoredSlides.length;
+  const plannedReferenceCount =
+    collectDeckCitations(deck).length > 0
+      ? planBibliographySlides(deck).slides.length
+      : existingReferenceCount;
+  const totalSlideCount = authoredSlides.length + plannedReferenceCount;
+  if (requestedCount !== undefined && totalSlideCount !== requestedCount)
     structureFindings.push(
       finding(
         "structure",
         "blocker",
-        `Create exactly ${requestedCount} slides; the draft has ${deck.slides.length}.`,
+        `Create exactly ${requestedCount} total slides, including generated References pages; the draft has ${totalSlideCount}.`,
         "/slides",
       ),
     );
@@ -421,7 +439,7 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
     );
   const placeholder =
     /^(?:slide \d+|title|subtitle|add a clear idea|new slide)$/i;
-  deck.slides.forEach((slide, index) => {
+  authoredSlides.forEach((slide, index) => {
     if (!slide.title.trim() || placeholder.test(slide.title.trim()))
       structureFindings.push(
         finding(
@@ -433,9 +451,9 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
       );
   });
   const uniqueTitles = new Set(
-    deck.slides.map((slide) => slide.title.trim().toLocaleLowerCase()),
+    authoredSlides.map((slide) => slide.title.trim().toLocaleLowerCase()),
   );
-  if (deck.slides.length >= 4 && uniqueTitles.size < deck.slides.length * 0.8)
+  if (authoredSlides.length >= 4 && uniqueTitles.size < authoredSlides.length * 0.8)
     structureFindings.push(
       finding(
         "structure",
@@ -451,7 +469,7 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
   );
 
   const layoutFindings: ArtifactQualityFinding[] = [];
-  deck.slides.forEach((slide, index) => {
+  authoredSlides.forEach((slide, index) => {
     if (!isPresentationLayoutId(slide.layoutId)) {
       layoutFindings.push(
         finding(
@@ -492,7 +510,7 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
   );
 
   const densityFindings: ArtifactQualityFinding[] = [];
-  const slideWordCounts = deck.slides.map((slide) =>
+  const slideWordCounts = authoredSlides.map((slide) =>
     slide.objects
       .filter(
         (object) =>
@@ -503,7 +521,7 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
         0,
       ),
   );
-  deck.slides.forEach((slide, index) => {
+  authoredSlides.forEach((slide, index) => {
     const visible = slide.objects.filter((object) => !object.hidden);
     const textObjects = visible.filter((object) =>
       Boolean(presentationObjectText(object).trim()),
@@ -555,9 +573,12 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
   );
 
   const pacingFindings: ArtifactQualityFinding[] = [];
-  const layouts = deck.slides.map((slide) => slide.layoutId ?? "");
-  if (deck.slides.length >= 6) {
-    const expectedVariety = Math.min(4, Math.ceil(deck.slides.length / 3));
+  const layouts = authoredSlides.map((slide) => slide.layoutId ?? "");
+  if (authoredSlides.length >= 6) {
+    const expectedVariety =
+      authoredSlides.length >= 6
+        ? 4
+        : Math.min(3, Math.ceil(authoredSlides.length / 2));
     if (new Set(layouts).size < expectedVariety)
       pacingFindings.push(
         finding(
@@ -584,11 +605,12 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
     }
   }
   const visualSlides = deck.slides.filter((slide) =>
+    slide.accessibility?.label !== BIBLIOGRAPHY_SLIDE_MARKER &&
     slide.objects.some(isPurposefulPresentationVisual),
   ).length;
   if (
-    deck.slides.length >= 6 &&
-    visualSlides < Math.ceil(deck.slides.length / 3)
+    authoredSlides.length >= 6 &&
+    visualSlides < Math.ceil(authoredSlides.length / 3)
   )
     pacingFindings.push(
       finding(
@@ -599,9 +621,9 @@ function evaluatePresentation(content: unknown, prompt: string, numericSourceReq
     );
   const textHeavySlides = slideWordCounts.filter((count) => count > 25).length;
   if (
-    deck.slides.length >= 8 &&
+    authoredSlides.length >= 8 &&
     visualSlides === 0 &&
-    textHeavySlides >= Math.ceil(deck.slides.length / 2)
+    textHeavySlides >= Math.ceil(authoredSlides.length / 2)
   )
     pacingFindings.push(
       finding(
@@ -1196,10 +1218,16 @@ export function artifactQualityPromptSection(
     blueprintKey === "document"
       ? `\n- Editing intent for this request: ${classifyDocumentEditIntent(prompt)}.`
       : "";
-  return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The minimum self-critique score is ${rubric.passScore}/100, with no blocker findings.${intent}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
+  const documentEvidenceInstructions =
+    blueprintKey === "document" && documentPromptRequiresSources(prompt)
+      ? "\n- For every document block that relies on supplied evidence, set sourceRefs to the exact server-issued evidence IDs shown in context. Do not use filenames or invent handles. Spectra will materialize verified document.sources and native citations from those references; do not author source metadata yourself."
+      : "";
+  const presentationInstructions =
     blueprintKey === "presentation"
-      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested slide count exactly.\n- Use at least four layout types on decks of six or more slides, and never repeat the same layout three times in a row.\n- Keep display copy short: titles under eight words, body frames under forty words. Park supporting detail in speakerNotes.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Put editable visuals, charts, or diagrams on at least one third of the deck."
-      : ""
+      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested total slide count, including References pages Spectra generates from citations. Reserve enough room for those pages, and do not add a References slide yourself.\n- Use at least four layout types on decks with six or more authored narrative slides, and never repeat the same layout three times in a row.\n- Keep display copy short: titles under eight words, body frames under forty words. Park supporting detail in speakerNotes.\n- Set every visible text-bearing object, including chart and table labels, to at least 20px. Rebalance its layout if the text does not fit.\n- On each slide with three or more visible objects, include accessibility.readingOrder with every visible object ID exactly once in the intended spoken order.\n- When asked for a chart, author an object with type chart and content containing chartType, categories, and named numeric series whose values and categories align. Put units in the series names and valueAxisTitle; do not simulate a chart with shapes or an image. When asked for a table, author a table object with editable rows and cells.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Put editable visuals, charts, or diagrams on at least one third of the authored narrative slides."
+      : "";
+  return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The minimum self-critique score is ${rubric.passScore}/100, with no blocker findings.${intent}${documentEvidenceInstructions}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
+    presentationInstructions
   }`;
 }
 

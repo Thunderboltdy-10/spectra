@@ -8,6 +8,20 @@ export type SpectraAiUiEvent = {
   payload?: Record<string, unknown>;
 };
 
+/** Remember only canonical artifact effects. operation_preview names a pending
+ * shell that public artifact reads cannot open yet; following that id causes
+ * a 403 loop while the real saved result is still being prepared. */
+export function rememberCommittedArtifactResult(event: {
+  runId: string;
+  affected: Array<{ type: string; id: string }>;
+}): void {
+  const artifactId = [...event.affected]
+    .reverse()
+    .find((item) => item.type === "artifact" && item.id.trim())?.id;
+  if (!artifactId) return;
+  noteAiLocation({ actorId: event.runId, artifactId });
+}
+
 function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key === "organize_library") {
     const targetId = event.payload?.targetId;
@@ -139,6 +153,23 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     noteAiLocation({ ...(event.runId ? { actorId: event.runId } : {}), artifactId: hostWorkId, note: message });
     return;
   }
+  if (event.key === "comment_added") {
+    const artifactId = event.payload?.targetId;
+    if (typeof artifactId !== "string" || !artifactId) return;
+    const regionId = event.payload?.regionId;
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId,
+      ...(typeof regionId === "string" && regionId
+        ? { path: `/comments/${regionId}` }
+        : {}),
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Added an AI comment",
+    });
+    return;
+  }
   if (event.key !== "navigate" && event.key !== "navigate_spectra") return;
   const destination = event.payload?.destination;
   const targetId = event.payload?.targetId;
@@ -169,19 +200,6 @@ function rememberEvent(event: SpectraAiUiEvent): void {
  * and the app choreography coordinator. Non-followed actors update remembered
  * location without moving the user. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
-  // This is a requested application action. Follow controls incidental AI
-  // movement; it must not suppress an explicit request to open a view.
-  if (event.key === "navigate_spectra") {
-    const destination = event.payload?.destination;
-    const target = typeof event.payload?.targetId === "string" ? event.payload.targetId : undefined;
-    if (destination === "artifact" && target) {
-      void spectraBus.command("work.open", { workId: target, surface: "panel" });
-    } else if (destination === "library" || destination === "calendar" || destination === "settings" || destination === "workspace") {
-      void spectraBus.command("navigation.show", { route: destination, intent: "explicit", ...(target ? { target } : {}) });
-    }
-    if (event.runId) performAppUiEvent(event);
-    return;
-  }
   rememberEvent(event);
   if (event.runId) performAppUiEvent(event);
 }

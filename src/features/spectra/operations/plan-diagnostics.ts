@@ -13,7 +13,7 @@ import { alignIntentWithCreates } from "./intent-alignment";
  */
 export function isRepairablePlanFailure(error: unknown) {
   if (error instanceof SyntaxError || error instanceof ZodError) return true;
-  return /plan|JSON|schema|structured|truncated|empty|incomplete|hollow|no meaningful stream|stall|outer object|closing|unexpected character|position \d+|artifact quality critique|shared (?:presentation|sheets|document) rubric|generated (?:deck|quiz|planner task|timetable|code artifact|document|presentation|workbook|whiteboard|agent).*(?:must|omitted|hollow|no scheduled|incomplete)|requested (?:cards|questions|subtasks|due date|events)|more visible artifacts|unrelated to the interpreted request|does not match the interpreted request|Author (?:concrete time blocks|real source files)|Content patch index is out of range|did not contain the requested content change|reliability (?:context|time|token spend) budget|paused this agent after its reliability|stopped this agent after \d+ (?:model turns|tool calls)/i.test(
+  return /PRESENTATION_CITATION_EVIDENCE_REQUIRED|plan|JSON|schema|structured|truncated|empty|incomplete|hollow|no meaningful stream|stall|outer object|closing|unexpected character|position \d+|artifact quality critique|shared (?:presentation|sheets|document) rubric|generated (?:deck|quiz|planner task|timetable|code artifact|document|presentation|workbook|whiteboard|agent).*(?:must|omitted|hollow|no scheduled|incomplete)|requested (?:cards|questions|subtasks|due date|events)|more visible artifacts|unrelated to the interpreted request|does not match the interpreted request|Author (?:concrete time blocks|real source files)|Content patch index is out of range|did not contain the requested content change|reliability (?:context|time|token spend) budget|paused this agent after its reliability|stopped this agent after \d+ (?:model turns|tool calls)|update-only request names every exact target|outside that scope/i.test(
     error instanceof Error ? error.message : "",
   );
 }
@@ -37,6 +37,52 @@ export function isQuietRetryableApplyFailure(error: unknown) {
   return /has not finished synchronizing|synchronized AI version is unavailable|AI_ARTIFACT_(?:CONNECT|SYNC|CONNECTION|INITIALIZATION|BASELINE|LIVE_STATE|SCHEMA)|ARTIFACT_REGION_PATH_INVALID|live artifact model is unavailable|Cannot set propert(?:y|ies) .*\bundefined\b|undefined is not an object|Invalid input(?: at [\w.[\]"]+)?:|expected string, received undefined|rowIdentities|columnIdentities/i.test(
     quietRetryFailureMessage(error),
   );
+}
+
+/**
+ * Zod reports a failed blueprint union as one `invalid_union` issue. That hides
+ * the useful nested reason from both the repair prompt and local diagnostics.
+ * Prefer the branch whose blueprint discriminator matched, then retain a
+ * bounded set of actionable leaf paths.
+ */
+export function describeZodPlanIssues(error: ZodError, limit = 12) {
+  type IssueLike = {
+    code?: string;
+    message?: string;
+    path?: Array<string | number>;
+    errors?: unknown;
+  };
+  const flattened: Array<{ path: string; code: string; message: string }> = [];
+  const visit = (issues: unknown[]) => {
+    for (const value of issues) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const issue = value as IssueLike;
+      const nested = Array.isArray(issue.errors)
+        ? issue.errors.filter(Array.isArray) as unknown[][]
+        : [];
+      if (issue.code === "invalid_union" && nested.length) {
+        const matchingBlueprintBranches = nested.filter((branch) =>
+          !branch.some((candidate) => {
+            if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+            const child = candidate as IssueLike;
+            return child.code === "invalid_value" && child.path?.at(-1) === "blueprintKey";
+          }),
+        );
+        const branches = matchingBlueprintBranches.length
+          ? matchingBlueprintBranches
+          : [...nested].sort((left, right) => left.length - right.length).slice(0, 2);
+        for (const branch of branches) visit(branch);
+        continue;
+      }
+      flattened.push({
+        path: (issue.path ?? []).map(String).join("."),
+        code: issue.code ?? "unknown",
+        message: issue.message ?? "Invalid value",
+      });
+    }
+  };
+  visit(error.issues);
+  return flattened.slice(0, Math.max(1, limit));
 }
 
 export function formatZodPlanPublicError(error: ZodError) {
@@ -102,6 +148,9 @@ export function formatPlanApplicationPublicError(error: unknown) {
     return "Spectra paused after its recovery passes. Your saved work is safe, and this run can be retried.";
   const message =
     error instanceof Error ? error.message : "Spectra run failed.";
+  if (/PRESENTATION_CITATION_EVIDENCE_REQUIRED/i.test(message)) {
+    return "This presentation needs verified citations on its narrative slides. Keep the cited sources in this conversation and ask Spectra to restore the citations; no change was saved.";
+  }
   if (/AI_ARTIFACT_REGION_BUSY/i.test(message)) {
     return "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
   }
@@ -150,13 +199,15 @@ export function formatPlanApplicationPublicError(error: unknown) {
   return humanizePublicFailure(message);
 }
 
-/** `focus` is prompt context only; canonical targets use owned object ids. */
-export function dropPlanIntentFocusHint<T>(value: T): T {
+/** Prompt context and top-level reply fields are not part of strict intent. */
+export function stripNonIntentContextFields<T>(value: T): T {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const plan = value as Record<string, unknown>;
   const intent = plan.intent;
   if (!intent || typeof intent !== "object" || Array.isArray(intent)) return value;
   delete (intent as Record<string, unknown>).focus;
+  delete (intent as Record<string, unknown>).activeGoal;
+  delete (intent as Record<string, unknown>).finalResponse;
   return value;
 }
 
@@ -288,6 +339,58 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
   ) {
     // Prefer the conversational reply over a contradictory operate envelope.
     plan.operations = [];
+  }
+  const operationList = plan.operations;
+  if (
+    plan.decision === "operate" &&
+    Array.isArray(operationList) &&
+    operationList.length > 0 &&
+    plan.intent &&
+    typeof plan.intent === "object" &&
+    !Array.isArray(plan.intent)
+  ) {
+    const intent = plan.intent as Record<string, unknown>;
+    const obligations = Array.isArray(intent.obligations)
+      ? intent.obligations.filter(
+          (obligation): obligation is Record<string, unknown> =>
+            Boolean(obligation) &&
+            typeof obligation === "object" &&
+            !Array.isArray(obligation),
+        )
+      : [];
+    const missing = obligations.filter(
+      (obligation) =>
+        !Array.isArray(obligation.operationIndexes) ||
+        obligation.operationIndexes.length === 0,
+    );
+    const covered = new Set(
+      obligations.flatMap((obligation) =>
+        Array.isArray(obligation.operationIndexes)
+          ? obligation.operationIndexes.filter(
+              (index): index is number =>
+                Number.isInteger(index) &&
+                index >= 0 &&
+                index < operationList.length,
+            )
+          : [],
+      ),
+    );
+    const unassigned = operationList
+      .map((_, index) => index)
+      .filter((index) => !covered.has(index));
+    // Operation indexes are bookkeeping, not target authority. Repair only a
+    // mapping that is unambiguous: one empty obligation can own all remaining
+    // operations, or multiple empty obligations each have exactly one.
+    if (missing.length === 1 && unassigned.length > 0) {
+      missing[0]!.operationIndexes = unassigned;
+    } else if (
+      missing.length > 1 &&
+      missing.length === unassigned.length
+    ) {
+      missing.forEach((obligation, index) => {
+        obligation.operationIndexes = [unassigned[index]!];
+      });
+    }
   }
   return alignIntentWithCreates(plan);
 }

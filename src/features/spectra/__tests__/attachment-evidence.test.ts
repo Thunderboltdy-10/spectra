@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildAttachmentEvidence } from "../ai/attachment-evidence";
+import {
+  attachmentEvidenceRepairPrompt,
+  buildAttachmentEvidence,
+} from "../ai/attachment-evidence";
 import { contentHash, verifyCitation } from "../sources/records";
 import type { PreparedAttachment } from "../compute/files/attachment-preprocessor";
 import { prepareAttachments } from "../compute/files/attachment-preprocessor";
@@ -50,6 +53,17 @@ describe("uploaded source evidence", () => {
     expect(retry.evidence[0]!.id).toBe(first.evidence[0]!.id);
     expect(changed.sources[0]!.id).not.toBe(first.sources[0]!.id);
     expect(()=>verifyCitation({sourceId:changed.sources[0]!.id,evidenceIds:[first.evidence[0]!.id]},changed.sources,changed.evidence)).toThrow("CITATION_EVIDENCE_MISMATCH");
+  });
+
+  it("puts exact server-issued evidence handles in a compact repair prompt", () => {
+    const bundle = buildAttachmentEvidence([upload("Shade lowers surface heating.")])!;
+    const span = bundle.evidence[0]!;
+    const prompt = attachmentEvidenceRepairPrompt(bundle);
+
+    expect(prompt).toContain(`Verified attachment evidence handles`);
+    expect(prompt).toContain(span.id);
+    expect(prompt).toContain(bundle.sources[0]!.title);
+    expect(prompt).not.toContain("fabricated");
   });
 
   it("does not infer pages or web verification from uploaded instructions", () => {

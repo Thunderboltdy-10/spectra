@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  explicitArtifactIdsFromPrompt,
   explicitlyNamedExistingArtifactId,
 } from "@/app/api/spectra/run/loop/gather";
 import { resolveCreatedArtifactDependencies } from "@/app/api/spectra/run/loop/act";
@@ -29,6 +30,7 @@ import {
   parseModelOperation,
   parseSpectraPlan,
 } from "@/features/spectra/operations/schema";
+import { validatePlanAgainstIntent } from "@/features/spectra/operations/validate-plan";
 
 type Context = Awaited<ReturnType<typeof buildContext>>;
 
@@ -134,6 +136,17 @@ function updatePlan(
 }
 
 describe("P4.I2 artifact target resolution", () => {
+  it("recognizes exact user-named artifact ids without treating run ids as artifacts", () => {
+    expect(
+      explicitArtifactIdsFromPrompt(
+        "Update wx76vwa1ttg0p5vccm7m3h8ry98f1718 and wx71ayyqjky5hqv5sr200mp9s58f1fj7 in thread y579h3ry6wwa0yk8czce64agsh8f012q for run wh72nexx212zaxd0ppvw8kvnxh8f0myt.",
+      ),
+    ).toEqual([
+      "wx76vwa1ttg0p5vccm7m3h8ry98f1718",
+      "wx71ayyqjky5hqv5sr200mp9s58f1fj7",
+    ]);
+  });
+
   it("retains each bounded Calendar page and exact off-range targets for the next model read", () => {
     const compact = compactCalendarForAgent({
       range: { from: 1, to: 2 },
@@ -430,6 +443,47 @@ describe("P4.I2 artifact target resolution", () => {
       resolvedArtifactId: "pendulum-9",
       resolvedTitle: "Pendulum IA 10",
     });
+  });
+
+  it("keeps multi-target updates valid after resolving each owned artifact", () => {
+    const artifacts = [
+      candidate("guide-a", "Urban Heat Guide", "document"),
+      candidate("deck-b", "Urban Heat Presentation", "presentation", 2),
+    ];
+    const guide = updatePlan("guide-a", "document");
+    const deck = updatePlan("deck-b", "presentation");
+    const plan = parseSpectraPlan({
+      ...guide,
+      intent: {
+        ...guide.intent,
+        requestedArtifactTypes: ["document", "presentation"],
+        targetArtifactId: null,
+      },
+      operations: [guide.operations[0], deck.operations[0]],
+      finalResponse: "Updated the guide and presentation.",
+    });
+    const artifactBlueprints = new Map([
+      ["guide-a", "document"],
+      ["deck-b", "presentation"],
+    ] as const);
+    const resolved = resolvePlanArtifactTargets(
+      plan,
+      context(artifacts, null, { selectedArtifactIds: ["guide-a", "deck-b"] }),
+      "Update guide-a and deck-b in place.",
+    ).plan;
+
+    expect(resolved.operations.map((operation) =>
+      operation.type === "artifact.update" ? operation.input.artifactId : null,
+    )).toEqual(["guide-a", "deck-b"]);
+    expect(resolved.intent.targetArtifactId).toBeNull();
+    expect(() =>
+      validatePlanAgainstIntent(resolved, {
+        artifactIds: new Set(["guide-a", "deck-b"]),
+        artifactBlueprints,
+        workspaceIds: new Set(),
+        placementNodes: new Map(),
+      }),
+    ).not.toThrow();
   });
 
   it("resolves a named cross-type target instead of the open document", () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import {
   createEvidenceSpan,
   createVerifiedSource,
@@ -148,6 +148,46 @@ async function seedRun(
 }
 
 describe("AI run create and recovery lifecycle", () => {
+  it("does not say retained attachments were lost when reconciling a stale run", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, {
+      status: "running",
+      hasAttachments: true,
+      hasRetainedAttachment: true,
+    });
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.runId, {
+        workerId: "stale-worker",
+        leaseExpiresAt: Date.now() - 1,
+        eventSequence: 1,
+      });
+      await ctx.db.insert("spectraRunEvents", {
+        runId: fixture.runId,
+        executionId: "execution-1",
+        sequence: 1,
+        type: "error",
+        payload: {
+          type: "error",
+          message: "Artifact quality critique did not pass the shared presentation rubric (77/100, required 80).",
+        },
+        createdAt: now,
+      });
+    });
+
+    await t.mutation(internal.spectraRuns.reconcileStaleRuns, {});
+
+    const { run, card } = await t.run(async (ctx) => ({
+      run: await ctx.db.get(fixture.runId),
+      card: await ctx.db.get(fixture.cardId),
+    }));
+    expect(run?.status).toBe("failed");
+    expect(run?.retryable).toBe(true);
+    expect(run?.error).not.toContain("Attached files are not retained");
+    expect(run?.error).toContain("Artifact quality critique");
+    expect(card?.summary).not.toContain("Reattach them");
+  });
+
   it("finalizes a synchronized pending create after live staging marks it updating", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedRun(t, { status: "running" });
@@ -572,6 +612,219 @@ describe("AI run create and recovery lifecycle", () => {
     });
     const run = await t.run((ctx) => ctx.db.get(fixture.runId));
     expect(run?.outcome).toBe("answer_only");
+  });
+
+  it("does not let a replaced worker mark a live run cancelled", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, { status: "running" });
+    await t.run((ctx) =>
+      ctx.db.patch(fixture.runId, { workerId: "current-worker" }),
+    );
+    const result = await t.withIdentity(identity).mutation(
+      api.spectraRuns.updateStatus,
+      {
+        runId: fixture.runId,
+        executionId: "execution-1",
+        workerId: "replaced-worker",
+        status: "cancelled",
+      },
+    );
+    expect(result).toMatchObject({ ignored: true, status: "running" });
+    const run = await t.run((ctx) => ctx.db.get(fixture.runId));
+    expect(run).toMatchObject({ status: "running", workerId: "current-worker" });
+  });
+
+  it("continues a typed clarification in the same thread and retains its attachments", async () => {
+    const t = convexTest(schema, modules);
+    aggregateTest.register(t, "orgNodeCountByType");
+    aggregateTest.register(t, "orgNodeCountByWorkspace");
+    aggregateTest.register(t, "orgNodeCountByParent");
+    const fixture = await seedRun(t, { status: "running" });
+    const askingMessageId = await t.run(async (ctx) => {
+      const now = Date.now();
+      const userMessageId = await ctx.db.insert("spectraMessages", {
+        threadId: fixture.threadId,
+        schoolId: fixture.schoolId,
+        role: "user",
+        content: "Update the study guide using the attached data.",
+        runId: fixture.runId,
+        createdAt: now,
+        ordinal: 1,
+      });
+      const messageId = await ctx.db.insert("spectraMessages", {
+        threadId: fixture.threadId,
+        schoolId: fixture.schoolId,
+        role: "assistant",
+        content: "Which study guide should I update? You can type its title or ID.",
+        runId: fixture.runId,
+        metadata: {
+          clarification: {
+            id: "clarification-text-1",
+            executionId: "execution-1",
+            status: "pending",
+            options: [],
+          },
+        },
+        createdAt: now,
+        ordinal: 2,
+      });
+      await ctx.db.patch(fixture.threadId, {
+        messageCount: 2,
+        updatedAt: now,
+      });
+      await ctx.db.patch(fixture.runId, {
+        status: "awaiting_resolution",
+        outcome: "awaiting_input",
+        clarification: {
+          id: "clarification-text-1",
+          messageId,
+          executionId: "execution-1",
+          status: "pending",
+          options: [],
+          targetIds: [],
+          authority: {
+            ownerAccountId: String(fixture.accountId),
+            schoolId: String(fixture.schoolId),
+            capturedAt: now,
+          },
+          createdAt: now,
+        },
+      });
+      await ctx.db.patch(fixture.cardId, {
+        status: "awaiting_resolution",
+        title: "Waiting for your reply",
+        updatedAt: now,
+      });
+      const storageId = await ctx.storage.store(
+        new Blob(["synthetic source evidence"], { type: "text/plain" }),
+      );
+      await ctx.db.insert("spectraRunAttachments", {
+        runId: fixture.runId,
+        executionId: "execution-1",
+        ownerAccountId: fixture.accountId,
+        storageId,
+        originalFileId: "synthetic-source-1",
+        sha256: "b".repeat(64),
+        status: "active",
+        name: "source-notes.txt",
+        mimeType: "text/plain",
+        size: 25,
+        handling: "text",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const userMessage = await ctx.db.get(userMessageId);
+      if (!userMessage) throw new Error("fixture user message missing");
+      return messageId;
+    });
+
+    const continuation = await t.withIdentity(identity).mutation(
+      api.spectraRuns.beginRun,
+      {
+        sourceSurface: "chat",
+        userPrompt: "Use the guide with ID wx12345678901234567890 and update it in place.",
+        submissionKey: "typed-clarification-continuation",
+        threadId: fixture.threadId,
+      },
+    );
+    expect(continuation).toMatchObject({
+      created: true,
+      threadId: fixture.threadId,
+      continuationRunId: fixture.runId,
+    });
+    const { askingRun, askingCard, askingMessage, attachments, newMessage } =
+      await t.run(async (ctx) => {
+        const messages = await ctx.db
+          .query("spectraMessages")
+          .withIndex("by_thread_ordinal", (q) =>
+            q.eq("threadId", fixture.threadId),
+          )
+          .collect();
+        const continuedMessage = messages.find(
+          (message) => message.runId === continuation.runId && message.role === "user",
+        );
+        const clonedAttachments = await ctx.db
+          .query("spectraRunAttachments")
+          .withIndex("by_run_execution", (q) =>
+            q.eq("runId", continuation.runId).eq("executionId", continuation.executionId),
+          )
+          .collect();
+        return {
+          askingRun: await ctx.db.get(fixture.runId),
+          askingCard: await ctx.db.get(fixture.cardId),
+          askingMessage: await ctx.db.get(askingMessageId),
+          attachments: clonedAttachments,
+          newMessage: continuedMessage,
+        };
+      });
+    expect(askingRun).toMatchObject({
+      status: "completed",
+      outcome: "answer_only",
+      clarification: { status: "consumed" },
+    });
+    expect(askingCard).toMatchObject({ status: "completed", title: "Continued" });
+    expect((askingMessage?.metadata as { clarification?: { status?: string } })?.clarification?.status).toBe("consumed");
+    expect(newMessage?.content).toBe(
+      "Use the guide with ID wx12345678901234567890 and update it in place.",
+    );
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      runId: continuation.runId,
+      executionId: continuation.executionId,
+      ownerAccountId: fixture.accountId,
+      originalFileId: "synthetic-source-1",
+      status: "active",
+      name: "source-notes.txt",
+    });
+    const storedAttachment = await t.withIdentity(identity).query(
+      api.spectraRuns.listRunAttachments,
+      { runId: continuation.runId, executionId: continuation.executionId },
+    );
+    expect(storedAttachment).toHaveLength(1);
+    expect(storedAttachment[0]?.url).toBeTruthy();
+    await expect(
+      t.withIdentity(identity).mutation(api.spectraRuns.beginRun, {
+        sourceSurface: "chat",
+        userPrompt: "This should not bypass the new live run.",
+        submissionKey: "typed-clarification-second-submit",
+        threadId: fixture.threadId,
+      }),
+    ).rejects.toThrow("This conversation is still responding");
+
+    // A normal same-thread follow-up after an interrupted attempt should keep
+    // the latest attached source without asking the browser to upload it again.
+    await t.run((ctx) =>
+      ctx.db.patch(continuation.runId, { status: "failed", updatedAt: Date.now() }),
+    );
+    const followUp = await t.withIdentity(identity).mutation(
+      api.spectraRuns.beginRun,
+      {
+        sourceSurface: "chat",
+        userPrompt: "Continue with the source already attached to this thread.",
+        submissionKey: "same-thread-retained-source-followup",
+        threadId: fixture.threadId,
+      },
+    );
+    expect(followUp).toMatchObject({
+      created: true,
+      threadId: fixture.threadId,
+      retainedAttachments: true,
+    });
+    expect(followUp.continuationRunId).toBeUndefined();
+    const followUpAttachments = await t.run((ctx) =>
+      ctx.db
+        .query("spectraRunAttachments")
+        .withIndex("by_run_execution", (q) =>
+          q.eq("runId", followUp.runId).eq("executionId", followUp.executionId),
+        )
+        .collect(),
+    );
+    expect(followUpAttachments).toHaveLength(1);
+    expect(followUpAttachments[0]).toMatchObject({
+      name: "source-notes.txt",
+      status: "active",
+      originalFileId: "synthetic-source-1",
+    });
   });
 
   it("consumes a selected clarification once and resolves it by message id past the history page", async () => {

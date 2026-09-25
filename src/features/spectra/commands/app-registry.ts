@@ -846,6 +846,7 @@ export const APPLICATION_TOOL_COMMAND_MAP = {
   import_managebac_resource: "app.managebac.import-resource",
   change_managebac_mapping: "app.managebac.mapping",
   insert_reference: "app.reference.insert",
+  add_comment: "app.comments.add",
   begin_reference_picking: "app.reference.begin-picking",
   begin_context_picking: "app.context.begin-picking",
   manage_account: "app.settings.manage-account",

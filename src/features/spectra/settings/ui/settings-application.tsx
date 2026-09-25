@@ -264,7 +264,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     privacy: <PrivacySettings />,
   };
   return (
-    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]">
+    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]" data-spectra-app-surface="true">
       <SurfaceField scale="stage" behind />
       <div className="w-full px-4 pb-36 pt-6 sm:px-6 lg:px-8 lg:pt-8">
         <ProductPageHeader
@@ -291,7 +291,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
               window.history.replaceState(null, "", `/settings?section=${id}`);
             }}
           />
-          <div className="max-w-[1080px] py-2">
+          <div className="max-w-[1080px] py-2" data-spectra-ai-target={active}>
             <h2 id="settings-section-title" className="sr-only">
               {SECTIONS.find((section) => section.id === active)?.label}
             </h2>

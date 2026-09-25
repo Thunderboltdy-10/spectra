@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   activeExecution: undefined as unknown,
   getMessages: vi.fn(),
   getTrace: vi.fn(),
+  postSpectra: vi.fn(),
   useQuery: vi.fn(),
 }));
 
@@ -23,7 +24,7 @@ vi.mock("../data/api", () => ({
   getSpectraThreadMessages: mocks.getMessages,
   getSpectraThreadRunTrace: mocks.getTrace,
   getSpectraWorkspaces: vi.fn(),
-  postSpectra: vi.fn(),
+  postSpectra: mocks.postSpectra,
   resolveSpectraOperationConflict: vi.fn(),
   submitSpectraAgentFeedback: vi.fn(),
 }));
@@ -100,6 +101,8 @@ beforeEach(() => {
   mocks.activeExecution = undefined;
   mocks.getMessages.mockReset();
   mocks.getTrace.mockReset();
+  mocks.postSpectra.mockReset();
+  mocks.postSpectra.mockResolvedValue({ ok: true });
   mocks.useQuery.mockReset();
   mocks.useQuery.mockReturnValue(undefined);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -242,5 +245,64 @@ describe("ConversationSurface history and saved results", () => {
     expect(screen.getByText("Created Study guide")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Load more run history" }));
     await waitFor(() => expect(mocks.getTrace).toHaveBeenCalledTimes(6));
+  });
+
+  it("keeps a clarification choice attached to its originating message and attempt", async () => {
+    const source = detail("thread-a", "Choose the destination.");
+    const clarificationDetail: SpectraThreadDetail = {
+      ...source,
+      messages: [
+        {
+          _id: "clarification-message",
+          threadId: "thread-a",
+          role: "assistant",
+          content: "Choose the destination.",
+          runId: "run-1",
+          createdAt: 2,
+          metadata: {
+            choices: {
+              question: "Where should the new guide go?",
+              options: [
+                { key: "workspace-a", title: "Workspace A" },
+                { key: "workspace-b", title: "Workspace B" },
+              ],
+            },
+            clarification: {
+              id: "clarification-1",
+              executionId: "execution-1",
+            },
+          },
+        },
+      ],
+    };
+    const onChoice = vi.fn();
+    render(
+      <ConversationSurface
+        detail={clarificationDetail}
+        threadId="thread-a"
+        onChoice={onChoice}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace B" }));
+
+    await waitFor(() =>
+      expect(mocks.postSpectra).toHaveBeenCalledWith({
+        action: "selectMessageChoice",
+        messageId: "clarification-message",
+        clarificationId: "clarification-1",
+        executionId: "execution-1",
+        choiceMessageId: "clarification-message",
+        choiceKey: "workspace-b",
+        choiceTitle: "Workspace B",
+      }),
+    );
+    expect(onChoice).toHaveBeenCalledWith({
+      title: "Workspace B",
+      key: "workspace-b",
+      choiceMessageId: "clarification-message",
+      clarificationId: "clarification-1",
+      executionId: "execution-1",
+    });
   });
 });

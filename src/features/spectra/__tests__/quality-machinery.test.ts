@@ -10,7 +10,12 @@ import { creationToolContentJsonSchema, parseSpectraPlan } from "../operations/s
 import { hasNumericTableSource } from "../quality/source-requirements";
 import { auditDeck } from "../presentation/audit";
 import {
+  applyBibliographySlides,
+  BIBLIOGRAPHY_SLIDE_MARKER,
+} from "../presentation/bibliography";
+import {
   PRESENTATION_LAYOUT_OPTIONS,
+  ensurePresentationReadingOrders,
   realizeGeneratedPresentation,
 } from "../presentation/layouts";
 import {
@@ -52,7 +57,17 @@ function chartObject(id: string) {
   };
 }
 
-function presentationDraft() {
+function presentationDraft(): {
+  theme: { id: string; name: string; tokens: Record<string, string> };
+  settings: { aspectRatio: "16:9" };
+  slides: Array<{
+    id: string;
+    title: string;
+    layoutId: string;
+    objects: Array<Record<string, unknown>>;
+    accessibility?: { label?: string; readingOrder?: string[] };
+  }>;
+} {
   return {
     theme: {
       id: "calm-green",
@@ -359,6 +374,151 @@ describe("P4.I4 quality machinery", () => {
       "pacing",
       "accessibility",
     ]);
+  });
+
+  it("raises chart labels to the readable floor and derives missing reading order", () => {
+    const draft = presentationDraft();
+    const chartSlide = draft.slides[3];
+    const orderSlide = draft.slides[4];
+    expect(chartSlide).toBeDefined();
+    expect(orderSlide).toBeDefined();
+    if (!chartSlide || !orderSlide) return;
+    chartSlide.objects = chartSlide.objects.map((object) =>
+      object.type === "chart"
+        ? { ...object, style: { fontSize: 18 } }
+        : object,
+    );
+    orderSlide.accessibility = undefined;
+
+    const content = realizeGeneratedPresentation(draft);
+    const chart = content.slides[3]?.objects.find(
+      (object) => object.type === "chart",
+    );
+    const visibleOrderSlide = content.slides[4]?.objects.filter(
+      (object) => !object.hidden,
+    ) ?? [];
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 6-slide presentation for teachers.",
+    });
+
+    expect(chart?.style?.fontSize).toBeGreaterThanOrEqual(20);
+    expect(content.slides[4]?.accessibility?.readingOrder).toEqual(
+      visibleOrderSlide.map((object) => object.id),
+    );
+    expect(report.passed).toBe(true);
+  });
+
+  it("counts generated References pages toward the requested total slide count", () => {
+    const content = realizeGeneratedPresentation(presentationDraft());
+    content.slides.forEach((slide) => {
+      slide.citations = [
+        {
+          id: `citation-${slide.id}`,
+          label: "Urban heat reading, p. 1",
+          sourceRefs: ["evidence:urban-heat-reading-p1"],
+        },
+      ];
+    });
+    const beforeReferences = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 7-slide presentation for teachers.",
+    });
+    expect(beforeReferences.findings).not.toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("total slides"),
+      }),
+    );
+    applyBibliographySlides(content);
+
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 7-slide presentation for teachers.",
+    });
+
+    expect(content.slides.at(-1)?.accessibility?.label).toBe(
+      BIBLIOGRAPHY_SLIDE_MARKER,
+    );
+    expect(content.slides).toHaveLength(7);
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("total slides"),
+      }),
+    );
+    const overfullReport = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 6-slide presentation for teachers.",
+    });
+    expect(overfullReport.findings).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("exactly 6 total slides"),
+      }),
+    );
+
+    content.slides.splice(content.slides.length - 2, 1);
+    content.slides.pop();
+    const narrativeOnlyReport = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 6-slide presentation for teachers.",
+    });
+    expect(narrativeOnlyReport.findings).not.toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("total slides"),
+      }),
+    );
+    applyBibliographySlides(content);
+    const exactTotalReport = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a 6-slide presentation for teachers.",
+    });
+    expect(content.slides).toHaveLength(6);
+    expect(exactTotalReport.findings).not.toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("exactly 6 total slides"),
+      }),
+    );
+  });
+
+  it("realizes generated reading order before the quality audit", () => {
+    const content = presentationDraft();
+    content.slides[3]!.accessibility = undefined;
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt: "Create a presentation for teachers.",
+    });
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/reading order/i),
+      }),
+    );
+  });
+
+  it("repairs missing reading order for AI-generated and cited slides", () => {
+    const deck = realizeGeneratedPresentation(presentationDraft());
+    const slide = deck.slides[4];
+    expect(slide).toBeDefined();
+    if (!slide) return;
+    slide.accessibility = undefined;
+    expect(auditDeck(deck).counts.readingOrder).toBeGreaterThan(0);
+
+    ensurePresentationReadingOrders(deck);
+
+    const repairedSlide = deck.slides[4]!;
+    expect(repairedSlide.accessibility?.readingOrder).toEqual(
+      repairedSlide.objects
+        .filter((object) => !object.hidden)
+        .slice()
+        .sort((left, right) => left.y - right.y || left.x - right.x)
+        .map((object) => object.id),
+    );
+    expect(auditDeck(deck).counts.readingOrder).toBe(0);
   });
 
   it("rejects deck-shaped documents and makes the failure repairable", () => {

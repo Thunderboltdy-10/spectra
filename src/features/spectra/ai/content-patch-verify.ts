@@ -14,6 +14,30 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function authoredValueMatches(authored: unknown, saved: unknown): boolean {
+  if (typeof authored === "string" && typeof saved === "string")
+    return stringishMatch(authored, saved);
+  if (Array.isArray(authored))
+    return (
+      Array.isArray(saved) &&
+      authored.length === saved.length &&
+      authored.every((value, index) => authoredValueMatches(value, saved[index]))
+    );
+  if (isPlainObject(authored)) {
+    if (!isPlainObject(saved)) return false;
+    const keys = Object.keys(authored).filter(
+      (key) => authored[key] !== undefined && authored[key] !== null,
+    );
+    return (
+      keys.length > 0 &&
+      keys.every(
+        (key) => key in saved && authoredValueMatches(authored[key], saved[key]),
+      )
+    );
+  }
+  return JSON.stringify(saved) === JSON.stringify(authored);
+}
+
 function stringishMatch(authored: string, saved: string) {
   const normalize = (value: string) =>
     value
@@ -181,6 +205,17 @@ export function contentPatchChangeMatchesSaved(
   },
 ): boolean {
   if (JSON.stringify(savedValue) === JSON.stringify(authoredValue)) return true;
+
+  // Whole-slide writes are normalized with editor geometry and defaults before
+  // persistence. Verify the authored slide content recursively while allowing
+  // those extra saved fields; arrays remain exact so omitted slides, objects,
+  // citations, or chart/table rows cannot pass as a successful write.
+  if (
+    context?.blueprintKey === "presentation" &&
+    /^\/(?:content\/)?slides$/.test(path) &&
+    Array.isArray(authoredValue)
+  )
+    return authoredValueMatches(authoredValue, savedValue);
 
   // Document (and other) scalar text writes often diverge slightly after Yjs
   // normalize / concurrent peer merges. Prefer containment over brittle

@@ -8,6 +8,7 @@ import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
+import { isRetryableRunStatus } from "../ai/run-lifecycle";
 import { clearSpectraRunAgent, postSpectra } from "../data/api";
 import { spectraBus } from "../events";
 
@@ -208,7 +209,7 @@ export function ResultCardStack({
                 </div>
               ) : null}
             </div>
-            <div className="flex items-center">{card.actions.filter((action) => !awaitingApproval || (action.key !== "confirm" && action.key !== "cancel" && action.key !== "reject")).map((action) => {
+            <div className="flex items-center">{card.actions.filter((action) => (!awaitingApproval || (action.key !== "confirm" && action.key !== "cancel" && action.key !== "reject")) && (action.key !== "retry" || isRetryableRunStatus(card.status))).map((action) => {
               const ActionIcon = actionIcon(action.key);
               return <IconAction
                 key={`${card.id}-${action.key}`}

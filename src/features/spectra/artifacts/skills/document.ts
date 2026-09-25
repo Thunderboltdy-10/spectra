@@ -32,6 +32,7 @@ export const documentSkill = defineArtifactSkill({
     "For claims based on supplied evidence, put the exact supporting evidence handles in the block's sourceRefs. Spectra creates readable native citation fields and source metadata; do not invent verified sources or duplicate those citations in prose.",
     "For study material, teach the idea before testing it: explain mechanisms, connect concepts, include a worked example and likely misconception, then add a few retrieval questions with answers. Match depth to the learner and supplied evidence; do not pad with generic introductions.",
     "Choose a clear reading hierarchy with a specific title, useful headings, short focused paragraphs, and a table or diagram only where it explains a relationship. Keep prose substantive and the result easy to revise or print.",
+    "For a native table, add a labelled header row before every requested data row. A request for five records means all five records remain data rows beneath the header; keep measurements and units in clearly named, separate columns.",
     "For a narrow text edit, use the actual stable block path /blocks/id:<blockId>/text or its supplied index. Rewrite the section body without overwriting its heading or unrelated blocks.",
     "Inspect outline, selected blocks, sources, comments, embeds, and constraints.",
     "Insert, rewrite, move, split, merge, format, summarize, expand, translate, or partially restore the smallest stable blocks that satisfy the request.",
@@ -45,7 +46,7 @@ export const documentSkill = defineArtifactSkill({
     "Use a proposal and comparison for a broad rewrite instead of silently replacing the live document.",
   ],
   validation: [
-    "Check schema, stable IDs, heading order, broken references, citation targets, table structure, equation syntax, asset and embed access, and layout overflow.",
+    "Check schema, stable IDs, heading order, broken references, citation targets, table structure, equation syntax, asset and embed access, and layout overflow. Verify that a table's first row labels the columns and every requested record remains present as a data row.",
     "Verify keyboard order, alt text or captions, contrast, print representation, requested constraints, and that untargeted blocks remain byte-equivalent where required.",
   ],
   approvals: [

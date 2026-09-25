@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import {
   operationRequiresConfirmation,
   parseOperationInput,
@@ -124,6 +125,93 @@ describe("Spectra operation policy", () => {
     if (plan.operations[0]?.type === "artifact.update") expect(plan.operations[0].input.contentPatch?.changes[0]?.path).toBe("/questions/0/timeLimitSeconds");
   });
 
+  it("repairs a direct contentPatch changes array without weakening validation", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["quiz"], requestedVisibleArtifactCount: 0, targetArtifactId: "quiz-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "quiz-1",
+          blueprintKey: "quiz",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: [{ path: "/questions/0/timeLimitSeconds", value: 72 }],
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the quiz timing.",
+    });
+
+    expect(plan.operations[0]).toMatchObject({
+      type: "artifact.update",
+      input: {
+        contentPatch: {
+          changes: [{ path: "/questions/0/timeLimitSeconds", value: 72 }],
+        },
+      },
+    });
+    expect(() => parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["quiz"], requestedVisibleArtifactCount: 0, targetArtifactId: "quiz-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "quiz-1",
+          blueprintKey: "quiz",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: [{ path: "/questions/0/timeLimitSeconds", value: 72, unexpected: true }],
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the quiz timing.",
+    })).toThrow();
+  });
+
+  it("reports the exact field when a strict artifact update contains an unknown key", () => {
+    let caught: unknown;
+    try {
+      parseSpectraPlan({
+        decision: "operate",
+        intent: {
+          mode: "update",
+          requestedArtifactTypes: ["document"],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: "doc-1",
+          targetWorkspaceId: null,
+        },
+        operations: [{
+          type: "artifact.update",
+          input: {
+            artifactId: "doc-1",
+            blueprintKey: "document",
+            title: null,
+            summary: null,
+            content: null,
+            tags: null,
+            unsupportedHint: "discard me",
+          },
+        }],
+        finalResponse: "Updated the document.",
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ZodError);
+    expect((caught as ZodError).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: ["operations", 0, "input"],
+          code: "unrecognized_keys",
+        }),
+      ]),
+    );
+  });
+
   it("accepts stable document block selectors while rejecting prototype paths", () => {
     expect(() => parseSpectraPlan({
       decision: "operate",
@@ -158,6 +246,45 @@ describe("Spectra operation policy", () => {
         },
       }],
       finalResponse: "Updated the document.",
+    })).toThrow();
+  });
+
+  it("accepts normal JSON Pointer punctuation while rejecting malformed escapes", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 0, targetArtifactId: "doc-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "doc-1",
+          blueprintKey: "document",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: { changes: [{ path: "/blocks/Urban Heat: What’s Happening/reading-order (first)/text", value: "Updated" }] },
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the section.",
+    });
+
+    expect(plan.operations[0]?.type).toBe("artifact.update");
+    expect(() => parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 0, targetArtifactId: "doc-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "doc-1",
+          blueprintKey: "document",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: { changes: [{ path: "/blocks/name~2with~escape/text", value: "Unsafe" }] },
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the section.",
     })).toThrow();
   });
 

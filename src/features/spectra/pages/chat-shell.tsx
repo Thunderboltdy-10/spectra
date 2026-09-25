@@ -887,22 +887,30 @@ export function ChatShell() {
             )
           }
           onChoice={(choice) =>
-            void runEngine.run(
-              choice.title === "Skipped"
-                ? "Skip that question and continue with reasonable defaults."
-                : choice.description
-                  ? `${choice.title}: ${choice.description}`
-                  : choice.title,
-              [],
-              {
-                threadId: threadId ?? undefined,
-                clarificationId: choice.clarificationId,
-                choiceKey: choice.key,
-                choiceMessageId: choice.choiceMessageId,
-                executionId: choice.executionId,
-                batchSelections: choice.batchSelections,
-              },
-            )
+            {
+              if (!threadId?.trim()) {
+                toast.error(
+                  "This clarification is no longer linked to a conversation. Reload it before answering.",
+                );
+                return;
+              }
+              void runEngine.run(
+                choice.title === "Skipped"
+                  ? "Skip that question and continue with reasonable defaults."
+                  : choice.description
+                    ? `${choice.title}: ${choice.description}`
+                    : choice.title,
+                [],
+                {
+                  threadId,
+                  clarificationId: choice.clarificationId,
+                  choiceKey: choice.key,
+                  choiceMessageId: choice.choiceMessageId,
+                  executionId: choice.executionId,
+                  batchSelections: choice.batchSelections,
+                },
+              );
+            }
           }
           activeCards={activeCards}
           onCardAction={(card, action, target) =>

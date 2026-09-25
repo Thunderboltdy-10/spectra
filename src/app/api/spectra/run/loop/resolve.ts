@@ -944,10 +944,34 @@ export function resolvePlanArtifactTargets(
     throw new Error(
       "The requested artifactId target could not be resolved to a permissioned candidate.",
     );
+  const updateTargets = [
+    ...new Set(
+      resolutions.flatMap((resolution) =>
+        resolution.role.endsWith(":artifact.update") &&
+        resolution.resolvedArtifactId
+          ? [resolution.resolvedArtifactId]
+          : [],
+      ),
+    ),
+  ];
   const primary = resolutions.find(
     (resolution) => resolution.resolvedArtifactId,
   );
-  if (primary?.resolvedArtifactId)
+  // intent.targetArtifactId is a singular hint. Preserve it for one-target
+  // updates, but do not overwrite an explicit multi-target update plan with
+  // the first operation's id; the validator would then reject every later
+  // target even though each operation resolved to permissioned work.
+  if (updateTargets.length > 1)
+    next = parseSpectraPlan({
+      ...next,
+      intent: { ...next.intent, targetArtifactId: null },
+    });
+  else if (updateTargets.length === 1)
+    next = parseSpectraPlan({
+      ...next,
+      intent: { ...next.intent, targetArtifactId: updateTargets[0]! },
+    });
+  else if (primary?.resolvedArtifactId)
     next = parseSpectraPlan({
       ...next,
       intent: {

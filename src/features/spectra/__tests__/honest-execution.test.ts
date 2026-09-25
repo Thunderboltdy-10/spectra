@@ -205,7 +205,7 @@ describe("P4.I3 honest execution and authority", () => {
     );
     // Must not keep note+personal-event on create_note-only tool list.
     expect(gate).toContain(
-      "const calendarNeedsCoordination = calendarActionRequested",
+      "const calendarNeedsCoordination = !forcedSingleCreation && calendarActionRequested",
     );
     expect(gate).not.toContain(
       "const calendarNeedsCoordination = calendarCreatesPlannerTask",

@@ -150,8 +150,9 @@ export const list = query({
         author: author
           ? {
               accountId: author._id,
-              name: author.name,
+              name: comment.authorDisplayName ?? author.name,
               avatarUrl: author.avatarUrl,
+              kind: comment.authorKind ?? "human",
             }
           : null,
         mentions: comment.mentionedAccountIds
@@ -274,8 +275,9 @@ export async function loadArtifactCommentNotifications(
       author: author
         ? {
             accountId: author._id,
-            name: author.name,
+            name: comment.authorDisplayName ?? author.name,
             avatarUrl: author.avatarUrl,
+            kind: comment.authorKind ?? "human",
           }
         : null,
     });
@@ -331,6 +333,9 @@ export const create = mutation({
     body: v.string(),
     anchor,
     mentionedAccountIds: v.array(v.id("accounts")),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    aiExecutionId: v.optional(v.string()),
+    aiOperationId: v.optional(v.id("spectraOperations")),
   },
   handler: async (ctx, args) => {
     const { actor, artifact, decision } = await requireArtifactCapability(
@@ -338,10 +343,11 @@ export const create = mutation({
       args.artifactId,
       "comment",
     );
-    const body = args.body
+    const normalizeCommentBody = (value: string) => value
       .replace(/\u0000/g, "")
       .trim()
       .slice(0, 20_000);
+    const body = normalizeCommentBody(args.body);
     if (!body)
       throw new Error("COMMENT_BODY_REQUIRED: Write a comment before posting.");
     const regionId = args.anchor.regionId.trim().slice(0, 240);
@@ -357,6 +363,49 @@ export const create = mutation({
       throw new Error(
         "COMMENT_REGION_PRIVATE: Answer keys and author feedback are not visible in read-only quiz access.",
       );
+    }
+    const aiAttribution = Boolean(
+      args.aiRunId || args.aiExecutionId || args.aiOperationId,
+    );
+    let authorDisplayName: string | undefined;
+    if (aiAttribution) {
+      if (!args.aiRunId || !args.aiExecutionId || !args.aiOperationId)
+        throw new Error("AI_COMMENT_ATTRIBUTION_INCOMPLETE");
+      const [run, operation] = await Promise.all([
+        ctx.db.get(args.aiRunId),
+        ctx.db.get(args.aiOperationId),
+      ]);
+      const operationInput = operation?.input as
+        | { command?: unknown; args?: Record<string, unknown> }
+        | undefined;
+      const operationArgs = operationInput?.args;
+      const requestedAnchor = operationArgs?.anchor as
+        | { regionId?: unknown; fallbackExcerpt?: unknown }
+        | undefined;
+      if (
+        !run ||
+        run.ownerAccountId !== actor.accountId ||
+        run.schoolId !== actor.schoolId ||
+        run.status !== "running" ||
+        run.executionId !== args.aiExecutionId ||
+        operation?.runId !== run._id ||
+        operation.executionId !== args.aiExecutionId ||
+        operation.actorType !== "ai" ||
+        operation.type !== "app.command" ||
+        operation.status !== "executing" ||
+        operationInput?.command !== "add_comment" ||
+        operationArgs?.artifactId !== args.artifactId ||
+        typeof operationArgs?.body !== "string" ||
+        normalizeCommentBody(operationArgs.body) !== body ||
+        operationArgs?.parentCommentId !== args.parentCommentId ||
+        requestedAnchor?.regionId !== regionId ||
+        (typeof requestedAnchor?.fallbackExcerpt === "string" &&
+          requestedAnchor.fallbackExcerpt.trim().slice(0, 500) !==
+            args.anchor.fallbackExcerpt?.trim().slice(0, 500))
+      ) {
+        throw new Error("AI_COMMENT_OPERATION_NOT_ACTIVE");
+      }
+      authorDisplayName = `${actor.name?.trim().slice(0, 160) || "Spectra"}'s AI`;
     }
     const mentionedAccountIds = [...new Set(args.mentionedAccountIds)].slice(
       0,
@@ -382,6 +431,9 @@ export const create = mutation({
       schoolId: artifact.schoolId,
       parentCommentId: args.parentCommentId,
       authorAccountId: actor.accountId,
+      ...(aiAttribution
+        ? { authorKind: "ai" as const, authorDisplayName }
+        : { authorKind: "human" as const }),
       body,
       anchor: {
         regionId,

@@ -46,6 +46,7 @@ type CommandBarProps = {
       | "replace_goal"
       | "cancel_current_action",
     text: string,
+    attachments?: CommandAttachment[],
   ) => void | Promise<unknown>;
 };
 
@@ -429,6 +430,7 @@ export function CommandBar({
             activeRunId,
             "refine_current_goal",
             draft,
+            draftAttachments,
           );
           if (accepted === false) {
             setValue(draft);

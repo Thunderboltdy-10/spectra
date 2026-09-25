@@ -180,7 +180,10 @@ function buildBibliographySlide(
     speakerNotes: page
       .map((entry, pageIndex) => entryText(entry, startIndex + pageIndex))
       .join("\n"),
-    accessibility: { label: BIBLIOGRAPHY_SLIDE_MARKER },
+    accessibility: {
+      label: BIBLIOGRAPHY_SLIDE_MARKER,
+      readingOrder: objects.map((object) => object.id),
+    },
     transition: { kind: "fade", durationMs: 350 },
   };
 }

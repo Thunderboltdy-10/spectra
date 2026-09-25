@@ -7,6 +7,11 @@ import {
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { createHash } from "node:crypto";
+import {
+  explicitMutationArtifactIdsFromPrompt,
+  explicitlyExcludedArtifactIdsFromPrompt,
+  isExplicitExistingArtifactUpdateOnly,
+} from "./target-scope";
 
 export function rows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -94,6 +99,13 @@ export function explicitlyNamedExistingArtifactId(
   return matches.length === 1 ? matches[0]!.id : undefined;
 }
 
+/** Opaque artifact ids named by the user are candidates, never authority.
+ * buildContext loads each through spectraArtifacts:get so ownership and
+ * school access are checked before they reach the model. */
+export function explicitArtifactIdsFromPrompt(prompt: string) {
+  return [...new Set(prompt.match(/\bwx[a-z0-9]{20,}\b/gi) ?? [])].slice(0, 8);
+}
+
 export async function hydrateArtifactWithLiveContent(
   artifact: Record<string, unknown> | null,
 ): Promise<Record<string, unknown> | null> {
@@ -156,6 +168,7 @@ export async function buildContext(
     | "choiceMessageId"
     | "choiceKey"
     | "clarificationExecutionId"
+    | "continuationRunId"
     | "batchSelections"
     | "executionId"
   >,
@@ -357,6 +370,16 @@ export async function buildContext(
   const targetingPrompt = [prompt, continuationOriginalPrompt]
     .filter((value) => value.trim())
     .join("\n");
+  const explicitMutationOnly = isExplicitExistingArtifactUpdateOnly(prompt);
+  const requestedMutationArtifactIds = explicitMutationOnly
+    ? explicitMutationArtifactIdsFromPrompt(prompt)
+    : [];
+  const explicitlyExcludedArtifactIds = new Set(
+    explicitlyExcludedArtifactIdsFromPrompt(targetingPrompt),
+  );
+  const explicitPromptArtifactIds = explicitMutationOnly
+    ? requestedMutationArtifactIds
+    : explicitArtifactIdsFromPrompt(targetingPrompt);
   const continuationClarification =
     continuationRecord?.clarification && typeof continuationRecord.clarification === "object"
       ? (continuationRecord.clarification as Record<string, unknown>)
@@ -379,24 +402,35 @@ export async function buildContext(
     ? [selectedContinuationTargetId]
     : continuationTargetIds;
   const continuationArtifactId = boundContinuationTargetIds[0];
-  const effectiveArtifactId = continuationArtifactId ?? body.artifactId;
-  const effectiveFocusedArtifact =
-    continuationArtifactId && continuationArtifactId !== body.artifactId
+  const effectiveArtifactId = explicitMutationOnly
+    ? requestedMutationArtifactIds.length === 1
+      ? requestedMutationArtifactIds[0]
+      : undefined
+    : continuationArtifactId ?? body.artifactId;
+  const effectiveFocusedArtifact = explicitMutationOnly
+    ? null
+    : continuationArtifactId && continuationArtifactId !== body.artifactId
       ? await query<unknown & object, unknown>("spectraArtifacts:get", {
           actorClerkId,
           artifactId: continuationArtifactId,
         }).catch(() => null)
       : focusedArtifact;
   const threadAttachmentArtifact =
-    !body.artifactId && continuedArtifactId
+    !body.artifactId &&
+    continuedArtifactId &&
+    (!explicitMutationOnly || requestedMutationArtifactIds.includes(continuedArtifactId))
       ? await query<unknown & object, unknown>("spectraArtifacts:get", {
           actorClerkId,
           artifactId: continuedArtifactId,
         }).catch(() => null)
       : null;
   const durableSelectedArtifactIds = [
-    ...new Set([...selectedArtifactIds, ...boundContinuationTargetIds]),
-  ].slice(0, 24);
+    ...new Set([
+      ...(explicitMutationOnly ? [] : selectedArtifactIds),
+      ...(explicitMutationOnly ? [] : boundContinuationTargetIds),
+      ...explicitPromptArtifactIds,
+    ]),
+  ].filter((id) => !explicitlyExcludedArtifactIds.has(id)).slice(0, 24);
   const selectedRows = await Promise.all(
     durableSelectedArtifactIds.map((artifactId) =>
       query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -420,8 +454,19 @@ export async function buildContext(
         : Promise.resolve(null),
     ),
   ]);
-  const hydratedFocusedArtifact =
-    liveFocusedArtifact ?? effectiveFocusedArtifact;
+  const selectedExplicitMutationTargetRows = requestedMutationArtifactIds.flatMap(
+    (id) =>
+      liveSelectedRows.flatMap((row) =>
+        row && typeof row === "object" && row._id === id
+          ? [row as Record<string, unknown>]
+          : [],
+      ),
+  );
+  const hydratedFocusedArtifact = explicitMutationOnly
+    ? requestedMutationArtifactIds.length === 1
+      ? selectedExplicitMutationTargetRows[0] ?? null
+      : null
+    : liveFocusedArtifact ?? effectiveFocusedArtifact;
   const baseArtifacts = [
     ...rows(artifactRows),
     ...retrievedRows.flatMap((result) => rows(result)),
@@ -437,11 +482,12 @@ export async function buildContext(
   ].filter(
     (artifact, index, all) =>
       all.findIndex((candidate) => candidate._id === artifact._id) === index,
+  ).filter(
+    (artifact) => !explicitlyExcludedArtifactIds.has(String(artifact._id)),
   );
-  const namedExistingArtifactId = explicitlyNamedExistingArtifactId(
-    targetingPrompt,
-    baseArtifacts,
-  );
+  const namedExistingArtifactId = explicitMutationOnly
+    ? undefined
+    : explicitlyNamedExistingArtifactId(targetingPrompt, baseArtifacts);
   const namedExistingArtifact =
     namedExistingArtifactId && namedExistingArtifactId !== effectiveArtifactId
       ? await query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -450,13 +496,20 @@ export async function buildContext(
         }).catch(() => null)
       : null;
   const resolvedFocusedArtifact =
-    namedExistingArtifact && typeof namedExistingArtifact === "object"
+    explicitMutationOnly
+      ? hydratedFocusedArtifact
+      : namedExistingArtifact && typeof namedExistingArtifact === "object"
       ? await hydrateArtifactWithLiveContent(
           namedExistingArtifact as Record<string, unknown>,
         )
       : hydratedFocusedArtifact;
   const resolvedEffectiveArtifactId =
-    namedExistingArtifactId ?? effectiveArtifactId;
+    explicitMutationOnly
+      ? requestedMutationArtifactIds.length === 1 &&
+        selectedExplicitMutationTargetRows.length === 1
+        ? requestedMutationArtifactIds[0]
+        : undefined
+      : namedExistingArtifactId ?? effectiveArtifactId;
   const artifacts = [
     ...baseArtifacts,
     ...(resolvedFocusedArtifact && typeof resolvedFocusedArtifact === "object"
@@ -465,6 +518,8 @@ export async function buildContext(
   ].filter(
     (artifact, index, all) =>
       all.findIndex((candidate) => candidate._id === artifact._id) === index,
+  ).filter(
+    (artifact) => !explicitlyExcludedArtifactIds.has(String(artifact._id)),
   );
   // Agent artifacts are routing candidates, not ordinary knowledge. Keep
   // their instructions out of catalog/workspace context unless the user is
@@ -473,7 +528,9 @@ export async function buildContext(
     (artifact) =>
       artifact.blueprintKey !== "agent" ||
       artifact._id === resolvedEffectiveArtifactId ||
-      selectedArtifactIds.includes(String(artifact._id)) ||
+      (explicitMutationOnly
+        ? requestedMutationArtifactIds.includes(String(artifact._id))
+        : selectedArtifactIds.includes(String(artifact._id))) ||
       artifact._id === namedExistingArtifactId,
   );
   const ownedArtifactIdSet = new Set(
@@ -487,11 +544,20 @@ export async function buildContext(
       ...(namedExistingArtifactId ? [namedExistingArtifactId] : []),
     ]),
   ].filter((id) => ownedArtifactIdSet.has(id));
+  const verifiedExplicitMutationTargetIds = requestedMutationArtifactIds.filter(
+    (id) => ownedArtifactIdSet.has(id),
+  );
+  const unresolvedExplicitMutationTargetIds = requestedMutationArtifactIds.filter(
+    (id) => !ownedArtifactIdSet.has(id),
+  );
   const linkedContextIds = [
     ...new Set([
       ...ownedSelectedArtifactIds,
       ...(resolvedEffectiveArtifactId ? [resolvedEffectiveArtifactId] : []),
-      ...(continuedArtifactId ? [continuedArtifactId] : []),
+      ...(continuedArtifactId &&
+      (!explicitMutationOnly || verifiedExplicitMutationTargetIds.includes(continuedArtifactId))
+        ? [continuedArtifactId]
+        : []),
     ]),
   ].slice(0, 12);
   const linkRows = await Promise.all(
@@ -599,7 +665,8 @@ export async function buildContext(
   const contextReasons = Object.fromEntries(
     ownedSelectedArtifactIds.map((id) => [
       id,
-      explicitArtifactIds.has(id)
+      explicitArtifactIds.has(id) ||
+      verifiedExplicitMutationTargetIds.includes(id)
         ? "explicit"
         : id === resolvedEffectiveArtifactId
           ? "open"
@@ -701,6 +768,11 @@ export async function buildContext(
     resolvedFocusedArtifact && typeof resolvedFocusedArtifact === "object"
       ? (resolvedFocusedArtifact as Record<string, unknown>)
       : null;
+  const contextFocusMode = explicitMutationOnly
+    ? verifiedExplicitMutationTargetIds.length === 1
+      ? "artifact"
+      : "selection"
+    : focusMode;
   const conversation =
     threadDetail && typeof threadDetail === "object"
       ? rows((threadDetail as Record<string, unknown>).messages)
@@ -739,6 +811,12 @@ export async function buildContext(
           const selection = metadata.choiceSelection as Record<string, unknown> | undefined;
           return clarification?.id === body.clarificationId && clarification?.executionId === body.clarificationExecutionId && selection?.clarificationId === body.clarificationId && selection?.key === body.choiceKey && Boolean(message.runId);
         })
+      : body.continuationRunId
+        ? [...continuedMessages].reverse().find(
+            (message) =>
+              message.role === "assistant" &&
+              message.runId === body.continuationRunId,
+          )
       : undefined;
   const clarificationMetadata =
     selectedClarification?.metadata &&
@@ -764,6 +842,8 @@ export async function buildContext(
         request: clarificationRun?.userPrompt,
         question: selectedClarification.content,
         selectedChoice: clarificationSelection?.title,
+        userResponse:
+          body.continuationRunId && !body.choiceKey ? prompt : undefined,
         intent: clarificationRun?.planIntent,
       }
     : null;
@@ -785,7 +865,7 @@ export async function buildContext(
     : undefined;
   const contextPacket = buildBoundedContextPacket({
     prompt,
-    focusMode,
+    focusMode: contextFocusMode,
     workspace: focusMode === "global" ? null : currentWorkspace,
     artifacts: ordinaryContextArtifacts,
     workspaceIndexArtifacts: artifacts,
@@ -793,6 +873,9 @@ export async function buildContext(
     // sent artifactId — even if focusMode still says workspace/global. Dropping
     // it under focusMode=workspace made QC invent creates (E-03 sheets).
     focusedArtifact: focusedRecord,
+    explicitMutationOnly,
+    explicitMutationTargetIds: verifiedExplicitMutationTargetIds,
+    unresolvedExplicitMutationTargetIds,
     selectedArtifactIds: ownedSelectedArtifactIds,
     conversation,
     conversationMemory,
@@ -853,7 +936,12 @@ export async function buildContext(
       .map((artifact) => summarizeArtifact(artifact)),
     contextReasons,
     continuationThreadId: body.threadId,
-    threadAttachmentArtifactId: continuedArtifactId,
+    threadAttachmentArtifactId:
+      explicitMutationOnly &&
+      (!continuedArtifactId ||
+        !verifiedExplicitMutationTargetIds.includes(continuedArtifactId))
+        ? undefined
+        : continuedArtifactId,
   });
   return {
     workspaces,
@@ -884,7 +972,7 @@ export async function buildContext(
     conversation,
     currentThreadId: body.threadId ?? null,
     selectedArtifactIds: ownedSelectedArtifactIds,
-    focusMode,
+    focusMode: contextFocusMode,
     currentLibraryLocation: libraryLocation,
     packet: contextPacket,
     memoryRetrieval:
@@ -895,7 +983,15 @@ export async function buildContext(
       typeof continuedThread?.retainedAgentId === "string"
         ? continuedThread.retainedAgentId
         : null,
-    threadAttachmentArtifactId: continuedArtifactId ?? null,
+    threadAttachmentArtifactId:
+      explicitMutationOnly &&
+      (!continuedArtifactId ||
+        !verifiedExplicitMutationTargetIds.includes(continuedArtifactId))
+        ? null
+        : continuedArtifactId ?? null,
+    explicitMutationOnly,
+    explicitMutationTargetIds: verifiedExplicitMutationTargetIds,
+    unresolvedExplicitMutationTargetIds,
   };
 }
 

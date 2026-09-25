@@ -85,8 +85,21 @@ describe("Wave 4 controlled operation engine", () => {
     expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
   });
 
-  it("allows one repeated requested type when the model counted artifact types instead of objects", () => {
+  it("rejects a repeated requested type when the visible count only authorizes one object", () => {
     const intent = { ...createIntent(1), mode: "mixed" as const };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Created two requested decks.",
+      operations: [deckOperation(), deckOperation("Second requested deck")],
+    });
+    expect(() => validatePlanAgainstIntent(plan, references)).toThrow(
+      /more visible artifacts than the interpreted request/i,
+    );
+  });
+
+  it("allows a repeated requested type when each visible object is authorized", () => {
+    const intent = { ...createIntent(2), mode: "mixed" as const };
     const plan = parseSpectraPlan({
       decision: "operate",
       intent,

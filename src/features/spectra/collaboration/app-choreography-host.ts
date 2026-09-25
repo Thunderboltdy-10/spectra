@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { createElement, Fragment, useEffect, useState } from "react";
 import {
   APP_CHOREOGRAPHY_SETTLE_MS,
   AppChoreographyCoordinator,
@@ -18,6 +18,7 @@ import {
   getFollowedAiActorId,
   isFollowingAi,
   isProgrammaticOpen,
+  useFollowAi,
 } from "./follow-ai";
 import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
@@ -38,6 +39,7 @@ const UI_EVENT_CAPABILITY: Record<string, string> = {
   calendar_changed: "app.page.calendar",
   bridge_setup: "app.bridge.setup",
   reference_insert: "app.reference.insert",
+  comment_added: "app.comments.add",
   navigate: "app.navigate",
   navigate_spectra: "app.navigate",
 };
@@ -247,6 +249,115 @@ export function __resetAppChoreographyHost(): void {
 }
 
 export function AppChoreographyMount() {
+  const follow = useFollowAi();
+  const [cursor, setCursor] = useState<{ left: number; top: number } | null>(null);
   useEffect(() => startAppChoreographyMaintenance(), []);
-  return null;
+  useEffect(() => {
+    if (!follow.following || typeof window === "undefined") {
+      setCursor(null);
+      return;
+    }
+    let disposed = false;
+    const locate = () => {
+      if (disposed) return;
+      const location = follow.location;
+      const surface = follow.surfaceLocation;
+      const preferArtifact = Boolean(
+        location && (!surface || location.updatedAt >= surface.updatedAt),
+      );
+      const targetKey = preferArtifact
+        ? location?.path?.split("/").filter(Boolean).at(-1)
+        : surface?.target;
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "[data-spectra-ai-target], [data-ai-region], [data-node-id], [data-calendar-item-id]",
+        ),
+      );
+      const target = targetKey
+        ? candidates.find((element) =>
+            [
+              element.dataset.spectraAiTarget,
+              element.dataset.aiRegion,
+              element.dataset.nodeId,
+              element.dataset.calendarItemId,
+            ].includes(targetKey),
+          )
+        : null;
+      const rect = target?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        setCursor({
+          left: Math.max(8, Math.min(window.innerWidth - 20, rect.left + 12)),
+          top: Math.max(8, Math.min(window.innerHeight - 20, rect.top + 12)),
+        });
+        return;
+      }
+      const appSurface = document.querySelector<HTMLElement>(
+        "[data-spectra-app-surface='true']",
+      );
+      const appRect = appSurface?.getBoundingClientRect();
+      setCursor({
+        left: Math.max(8, Math.min(window.innerWidth - 20, (appRect?.right ?? window.innerWidth) - 36)),
+        top: Math.max(8, Math.min(window.innerHeight - 20, (appRect?.top ?? 52) + 28)),
+      });
+    };
+    // Show the current target as soon as Follow AI changes location; animation
+    // frames and settle timers keep it attached as navigation and layout finish.
+    locate();
+    const firstFrame = window.requestAnimationFrame(locate);
+    const afterNavigation = [90, 260, 620].map((delay) =>
+      window.setTimeout(locate, delay),
+    );
+    window.addEventListener("resize", locate);
+    window.addEventListener("scroll", locate, true);
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(firstFrame);
+      afterNavigation.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener("resize", locate);
+      window.removeEventListener("scroll", locate, true);
+    };
+  }, [
+    follow.following,
+    follow.location,
+    follow.surfaceLocation,
+  ]);
+  if (!follow.following) return null;
+  const activity = follow.location?.note ?? follow.surfaceLocation?.note ?? "Watching the current Spectra task";
+  const surfaceName = follow.location
+    ? "Artifact"
+    : follow.surfaceLocation?.route
+      ? follow.surfaceLocation.route[0]!.toUpperCase() + follow.surfaceLocation.route.slice(1)
+      : "Spectra";
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      "div",
+      {
+        className: "spectra-follow-ai-status",
+        role: "status",
+        "aria-live": "polite",
+        "data-spectra-follow-ai-viewport": "true",
+      },
+      createElement("span", null, `${surfaceName} · Spectra AI`),
+      createElement("strong", null, activity),
+    ),
+    cursor
+      ? createElement(
+          "svg",
+          {
+            "aria-hidden": true,
+            className: "spectra-follow-ai-cursor",
+            "data-spectra-follow-ai-cursor": "true",
+            style: { left: cursor.left, top: cursor.top },
+            viewBox: "0 0 24 30",
+            width: 24,
+            height: 30,
+          },
+          createElement("path", {
+            d: "M2 1.8v21.1l5.8-5.4 4.1 9.4 3.8-1.7-4.2-9.1h8.1L2 1.8Z",
+          }),
+        )
+      : null,
+  );
 }

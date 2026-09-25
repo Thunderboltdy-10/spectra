@@ -360,13 +360,79 @@ export function typedArtifactStructure(
           layoutId: row.layoutId,
           sectionId: row.sectionId,
           speakerNotes: text(row.speakerNotes, 500),
+          citations: Array.isArray(row.citations)
+            ? row.citations.slice(0, 12).map((citationValue) => {
+                const citation = citationValue as Record<string, unknown>;
+                return {
+                  id: text(citation.id, 120),
+                  label: text(citation.label, 240),
+                  sourceRefs: Array.isArray(citation.sourceRefs)
+                    ? citation.sourceRefs.slice(0, 12).map((ref) => text(ref, 160))
+                    : [],
+                };
+              })
+            : [],
           objects: Array.isArray(row.objects)
             ? row.objects.slice(0, 40).map((objectValue) => {
                 const object = objectValue as Record<string, unknown>;
+                const objectContent = object.content;
+                const contentRecord =
+                  objectContent &&
+                  typeof objectContent === "object" &&
+                  !Array.isArray(objectContent)
+                    ? (objectContent as Record<string, unknown>)
+                    : null;
+                const visualContent =
+                  object.type === "chart" && contentRecord
+                    ? {
+                        chartType: contentRecord.chartType,
+                        grouping: contentRecord.grouping,
+                        categories: Array.isArray(contentRecord.categories)
+                          ? contentRecord.categories.slice(0, 32).map((item) => text(item, 160))
+                          : [],
+                        categoryAxisTitle: text(contentRecord.categoryAxisTitle, 120),
+                        valueAxisTitle: text(contentRecord.valueAxisTitle, 120),
+                        series: Array.isArray(contentRecord.series)
+                          ? contentRecord.series.slice(0, 8).map((seriesValue) => {
+                              const series = seriesValue as Record<string, unknown>;
+                              return {
+                                name: text(series.name, 160),
+                                categories: Array.isArray(series.categories)
+                                  ? series.categories.slice(0, 32).map((item) => text(item, 160))
+                                  : undefined,
+                                values: Array.isArray(series.values)
+                                  ? series.values.slice(0, 32).map((item) =>
+                                      typeof item === "number" || typeof item === "string"
+                                        ? item
+                                        : null,
+                                    )
+                                  : [],
+                              };
+                            })
+                          : [],
+                      }
+                    : object.type === "table" && contentRecord
+                      ? {
+                          headers: Array.isArray(contentRecord.headers)
+                            ? contentRecord.headers.slice(0, 24).map((item) => text(item, 160))
+                            : [],
+                          rows: Array.isArray(contentRecord.rows)
+                            ? contentRecord.rows.slice(0, 48).map((rowValue) =>
+                                Array.isArray(rowValue)
+                                  ? rowValue.slice(0, 24).map((item) =>
+                                      typeof item === "number" || typeof item === "string"
+                                        ? item
+                                        : null,
+                                    )
+                                  : [],
+                              )
+                            : [],
+                        }
+                      : text(compactText(objectContent, 480), 480);
                 return {
                   id: object.id,
                   type: object.type,
-                  content: text(compactText(object.content, 480), 480),
+                  content: visualContent,
                   altText: text(object.altText, 240),
                   x: object.x,
                   y: object.y,
@@ -585,6 +651,9 @@ export function buildBoundedContextPacket(input: {
   workspaceIndexArtifacts?: ArtifactRecord[];
   focusedArtifact?: ArtifactRecord | null;
   selectedArtifactIds?: string[];
+  explicitMutationOnly?: boolean;
+  explicitMutationTargetIds?: string[];
+  unresolvedExplicitMutationTargetIds?: string[];
   conversation?: Array<{ role: unknown; content: unknown }>;
   conversationMemory?: {
     title?: unknown;
@@ -603,6 +672,7 @@ export function buildBoundedContextPacket(input: {
     request?: unknown;
     question?: unknown;
     selectedChoice?: unknown;
+    userResponse?: unknown;
     intent?: unknown;
   } | null;
   currentView?: string;
@@ -755,7 +825,14 @@ export function buildBoundedContextPacket(input: {
     version: 2,
     effectiveFocus: input.focusMode,
     rules:
-      "Explicit selection wins. Continued thread supplies conversation history; visible workspace/artifact may remain additional focus. Excerpts are bounded and omissions are intentional.",
+      input.explicitMutationOnly
+        ? "The latest user message explicitly scopes this run to updating exact existing artifact ids. Only the listed verified targets may be mutated; unresolved ids are not permission to choose another object. Continued thread supplies conversation history. Excerpts are bounded and omissions are intentional."
+        : "Explicit selection wins. Continued thread supplies conversation history; visible workspace/artifact may remain additional focus. Excerpts are bounded and omissions are intentional.",
+    explicitMutationOnly: input.explicitMutationOnly === true,
+    explicitMutationTargetIds: (input.explicitMutationTargetIds ?? []).slice(0, 8),
+    unresolvedExplicitMutationTargetIds: (
+      input.unresolvedExplicitMutationTargetIds ?? []
+    ).slice(0, 8),
     contextLayers: {
       continuation: input.continuationThreadId
         ? "conversation history is highest priority"
@@ -901,8 +978,9 @@ export function buildBoundedContextPacket(input: {
           request: compactText(input.activeGoal.request, 2_400),
           question: compactText(input.activeGoal.question, 1_000),
           selectedChoice: compactText(input.activeGoal.selectedChoice, 500),
+          userResponse: compactText(input.activeGoal.userResponse, 1_000),
           intent: input.activeGoal.intent ?? null,
-          rule: "This unresolved request is the authoritative current goal. The selected choice answers its question. Earlier requests in the thread are historical and must not be revived.",
+          rule: "This unresolved request is the authoritative current goal. The selected choice or explicit user response answers its question. Earlier requests in the thread are historical and must not be revived.",
         }
       : null,
     profile: focusedMutation ? "focused_mutation" : "full",

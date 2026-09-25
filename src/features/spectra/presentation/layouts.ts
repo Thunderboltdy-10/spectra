@@ -205,6 +205,26 @@ function finalizeReadingOrder(slide: PresentationSlide) {
   };
 }
 
+/**
+ * Preserve a complete authored reading order, and derive a deterministic one
+ * from visible object placement when a generated or partially edited slide
+ * omits it. AI writes use this at the persistence boundary so verification
+ * sees the same accessible order the editor can infer from the canvas.
+ */
+export function ensurePresentationReadingOrders(deck: PresentationContent) {
+  for (const slide of deck.slides) {
+    const visible = visibleObjects(slide);
+    const ids = visible.map((object) => object.id);
+    const declared = slide.accessibility?.readingOrder ?? [];
+    const complete =
+      declared.length === ids.length &&
+      new Set(declared).size === ids.length &&
+      ids.every((id) => declared.includes(id));
+    if (!complete) finalizeReadingOrder(slide);
+  }
+  return deck;
+}
+
 export function applyPresentationLayout(
   deck: PresentationContent,
   slideIndex: number,
@@ -590,6 +610,14 @@ function fitGeneratedSlide(deck: PresentationContent, slide: PresentationSlide) 
         role,
         object.style?.align === "center" ? "center" : undefined,
       );
+    else if (object.type === "chart" || object.type === "table") {
+      // Charts and tables carry visible labels too, but do not use text-frame
+      // fitting for them: their own renderer owns the internal layout. Keep
+      // authored label sizing above the shared presentation readability floor.
+      const fontSize = Number(object.style?.fontSize ?? 21);
+      if (Number.isFinite(fontSize) && fontSize < 20)
+        object.style = { ...object.style, fontSize: 20 };
+    }
     const room = Math.max(40, height - object.y - 16);
     while (estimateTextOverflow(object) && object.height < room)
       object.height = Math.min(room, object.height + 16);

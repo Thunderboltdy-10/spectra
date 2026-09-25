@@ -55,12 +55,42 @@ function mergeUsage(
 function callFingerprint(call: OpenRouterAgentToolCall) {
   let args = call.arguments.trim();
   try {
-    args = JSON.stringify(JSON.parse(args));
+    const sortKeys = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(sortKeys);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, item]) => [key, sortKeys(item)]),
+      );
+    };
+    args = JSON.stringify(sortKeys(JSON.parse(args)));
   } catch {
     // The tool executor returns the parse error to the model. Keep the raw
     // arguments in the fingerprint so an actually corrected call is distinct.
   }
   return `${call.name}:${args}`;
+}
+
+function readTargetFingerprint(call: OpenRouterAgentToolCall): string | null {
+  const targetField =
+    call.name === "read_artifact"
+      ? "artifactId"
+      : call.name === "read_workspace"
+        ? "workspaceId"
+        : call.name === "read_thread"
+          ? "threadId"
+          : null;
+  if (!targetField) return null;
+  try {
+    const args = JSON.parse(call.arguments) as Record<string, unknown>;
+    const target = args[targetField];
+    return typeof target === "string" && target.trim()
+      ? `${call.name}:${target.trim()}`
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -95,11 +125,17 @@ export async function runSpectraAgentLoop(input: {
   const messages = [...input.messages];
   const repeatedCalls = new Map<string, number>();
   const savedResults = new Map<string, unknown>();
+  const savedReadResults = new Map<string, unknown>();
+  const readsByTarget = new Map<string, number>();
   let usage: OpenRouterUsage | undefined;
   let model: string | undefined;
   let provider: string | undefined;
   let turns = 0;
   let toolCalls = 0;
+  let finalizationOnly = false;
+  let finalizationNudgeAdded = false;
+  let finalizationTurns = 0;
+  let lastFinalizationText = "";
   const startedAt = Date.now();
   const maxTurns = Math.max(4, Math.min(40, input.budget?.maxTurns ?? 24));
   const maxToolCalls = Math.max(
@@ -125,18 +161,44 @@ export async function runSpectraAgentLoop(input: {
     Math.min(2_000_000, maxPromptTokens * 4),
   );
 
+  const enterFinalizationOnly = (reason: string) => {
+    finalizationOnly = true;
+    if (finalizationNudgeAdded) return;
+    const systemMessage = messages.find((message) => message.role === "system");
+    const nudge = `\n\nReliability guardrail: ${reason}. Finish now using the context and tool results already gathered. Do not call any more read or write tools. Return one valid terminal plan or the terminal creation tool. If the request cannot be completed from existing evidence, give a concise, honest answer that says what is missing.`;
+    if (systemMessage) {
+      const index = messages.indexOf(systemMessage);
+      messages[index] = {
+        ...systemMessage,
+        content:
+          typeof systemMessage.content === "string"
+            ? systemMessage.content + nudge
+            : `${String(systemMessage.content)}${nudge}`,
+      };
+    } else {
+      messages.unshift({ role: "system", content: nudge.trim() });
+    }
+    finalizationNudgeAdded = true;
+  };
+
   while (true) {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (turns >= maxTurns)
-      throw new Error(
-        `Spectra stopped this agent after ${maxTurns} model turns without a completed result. Continue in the thread to resume with the preserved context.`,
-      );
-    if (Date.now() - startedAt >= maxElapsedMs)
-      throw new Error(
-        "Spectra paused this agent after its reliability time budget. Continue in the thread to resume safely.",
-      );
+    if (!finalizationOnly && turns >= maxTurns)
+      enterFinalizationOnly(`its ${maxTurns}-turn limit was reached`);
+    if (!finalizationOnly && Date.now() - startedAt >= maxElapsedMs)
+      enterFinalizationOnly("its time limit was reached");
+    if (finalizationOnly && finalizationTurns >= 2)
+      return {
+        text: lastFinalizationText,
+        model,
+        provider,
+        usage,
+        turns,
+      } satisfies SpectraAgentLoopResult;
     turns += 1;
+    if (finalizationOnly) finalizationTurns += 1;
     const turn = await input.requestTurn(messages, turns);
+    if (finalizationOnly) lastFinalizationText = turn.text;
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
     const turnPromptTokens = turn.usage?.promptTokens ?? 0;
@@ -185,20 +247,38 @@ export async function runSpectraAgentLoop(input: {
     const executeOne = async (call: OpenRouterAgentToolCall) => {
       if (input.signal?.aborted)
         throw new DOMException("Aborted", "AbortError");
+      if (finalizationOnly)
+        return {
+          status: 1,
+          ok: false,
+          code: "finalization_required",
+          message:
+            "Do not call more tools. Use the tool results already in this conversation and return a terminal plan now.",
+        };
+      if (toolCalls >= maxToolCalls) {
+        enterFinalizationOnly(`its ${maxToolCalls}-tool limit was reached`);
+        return {
+          status: 1,
+          ok: false,
+          code: "tool_budget_reached",
+          message:
+            "No more tools can be called in this run. Use the tool results already in this conversation and return a terminal plan now.",
+        };
+      }
       toolCalls += 1;
-      if (toolCalls > maxToolCalls)
-        throw new Error(
-          `Spectra stopped this agent after ${maxToolCalls} tool calls without a completed result. Continue in the thread to resume safely.`,
-        );
       const fingerprint = callFingerprint(call);
       const repetition = (repeatedCalls.get(fingerprint) ?? 0) + 1;
       repeatedCalls.set(fingerprint, repetition);
-      if (repetition >= 3)
-        throw new Error(
-          `Spectra stopped after the agent repeated the identical ${call.name} request without making progress.`,
-        );
       if (repetition === 2 && savedResults.has(fingerprint))
         return savedResults.get(fingerprint);
+      if (repetition === 2 && savedReadResults.has(fingerprint))
+        return {
+          status: 0,
+          ok: true,
+          code: "read_result_reused",
+          message:
+            "This exact read already returned successfully. Use its earlier result in this conversation; no fresh data was fetched.",
+        };
       if (repetition === 2)
         return {
             status: 1,
@@ -209,12 +289,37 @@ export async function runSpectraAgentLoop(input: {
             message:
               "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
           };
+      if (repetition >= 3)
+        return {
+          status: 1,
+          ok: false,
+          code: "identical_tool_call_repeated",
+          error:
+            "This exact tool request has already been repeated without progress. Use the earlier result or finish the task.",
+          message:
+            "This exact tool request has already been repeated without progress. Use the earlier result or finish the task.",
+        };
+      const readTarget = readTargetFingerprint(call);
+      if (readTarget) {
+        const previousReads = readsByTarget.get(readTarget) ?? 0;
+        if (previousReads >= 3)
+          return {
+            status: 1,
+            ok: false,
+            code: "read_target_budget_reached",
+            message:
+              "This item has already been read three times in this run. Use its existing tool results, make the requested changes, and submit the complete plan. Do not reread this item.",
+          };
+        readsByTarget.set(readTarget, previousReads + 1);
+      }
       try {
         const result = await input.executeTool(call);
         if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const normalized = toModelToolResult(result);
         if (input.isMutationTool?.(call) && normalized.status === 0)
           savedResults.set(fingerprint, result);
+        else if (input.isParallelSafeTool?.(call) && normalized.status === 0)
+          savedReadResults.set(fingerprint, result);
         return result;
       } catch (error) {
         if (input.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;

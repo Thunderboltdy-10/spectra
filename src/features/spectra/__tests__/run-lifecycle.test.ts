@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyRunAttemptAbort,
   cancelRun,
   completeRun,
   createQueuedRun,
   createResultCardForRun,
   failRun,
+  isRetryableRunStatus,
   markRunRunning,
 } from "@/features/spectra/ai";
 import type { SpectraId } from "@/features/spectra/core";
@@ -13,6 +15,42 @@ const runId = "run_1" as SpectraId<"aiRuns">;
 const resultCardId = "card_1" as SpectraId<"resultCards">;
 
 describe("Spectra AIRun lifecycle", () => {
+  it("allows retry only for terminal runs that the server accepts", () => {
+    expect(isRetryableRunStatus("failed")).toBe(true);
+    expect(isRetryableRunStatus("cancelled")).toBe(true);
+    expect(isRetryableRunStatus("awaiting_resolution")).toBe(false);
+    expect(isRetryableRunStatus("awaiting_confirmation")).toBe(false);
+    expect(isRetryableRunStatus("running")).toBe(false);
+  });
+
+  it("marks a run cancelled only after the durable run state says it was stopped", () => {
+    expect(classifyRunAttemptAbort({
+      current: { status: "running", executionId: "exec-1", workerId: "worker-1" },
+      executionId: "exec-1",
+      workerId: "worker-1",
+    })).toBe("runtime_abort");
+    expect(classifyRunAttemptAbort({
+      current: { status: "cancelled", executionId: "exec-1" },
+      executionId: "exec-1",
+      workerId: "worker-1",
+    })).toBe("user_stopped");
+    expect(classifyRunAttemptAbort({
+      current: { status: "running", executionId: "exec-1", workerId: "worker-2" },
+      executionId: "exec-1",
+      workerId: "worker-1",
+    })).toBe("ownership_lost");
+    expect(classifyRunAttemptAbort({
+      current: { status: "completed", executionId: "exec-1" },
+      executionId: "exec-1",
+      workerId: "worker-1",
+    })).toBe("already_settled");
+    expect(classifyRunAttemptAbort({
+      current: null,
+      executionId: "exec-1",
+      workerId: "worker-1",
+    })).toBe("state_unavailable");
+  });
+
   it("transitions queued runs through running and completed", () => {
     const queued = createQueuedRun({
       id: runId,

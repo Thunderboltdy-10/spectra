@@ -17,6 +17,22 @@ describe("S10 independent review: clarification and citation continuation", () =
     expect(orientation).toHaveProperty("activeGoal", activeGoal);
   });
 
+  it("keeps exact update-only target ids and unresolved ids in the agent orientation", () => {
+    const orientation = buildAgentOrientation(
+      {
+        explicitMutationOnly: true,
+        explicitMutationTargetIds: ["wx-target-a", "wx-target-b"],
+        unresolvedExplicitMutationTargetIds: ["wx-missing"],
+      },
+      "Update the exact targets in place.",
+    );
+    expect(orientation).toMatchObject({
+      explicitMutationOnly: true,
+      explicitMutationTargetIds: ["wx-target-a", "wx-target-b"],
+      unresolvedExplicitMutationTargetIds: ["wx-missing"],
+    });
+  });
+
   it("updates a generated native citation when a follow-up replaces the passage from the same source", () => {
     const first = "Shade reduces direct solar exposure.";
     const second = "The small observational sample does not establish causation.";

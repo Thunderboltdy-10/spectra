@@ -1,6 +1,48 @@
 import type { AIRun, ResultCard, SpectraId } from "../core";
 import { getSpectraModelId } from "./model-config";
 
+export type RunAttemptStatus =
+  | "queued"
+  | "running"
+  | "awaiting_confirmation"
+  | "awaiting_resolution"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export function isRetryableRunStatus(status: RunAttemptStatus): boolean {
+  return status === "failed" || status === "cancelled";
+}
+
+/** A transport/model AbortError is not a user stop. Only the durable run
+ * transition made by the Stop or Cancel action authorizes the cancelled UI. */
+export function classifyRunAttemptAbort(input: {
+  current: {
+    status: RunAttemptStatus;
+    executionId?: string;
+    workerId?: string;
+  } | null;
+  executionId: string;
+  workerId: string;
+}):
+  | "user_stopped"
+  | "already_settled"
+  | "ownership_lost"
+  | "runtime_abort"
+  | "state_unavailable" {
+  const { current } = input;
+  if (!current) return "state_unavailable";
+  if (current?.status === "cancelled") return "user_stopped";
+  if (current?.status === "completed" || current?.status === "failed")
+    return "already_settled";
+  if (
+    current.executionId !== input.executionId ||
+    current.workerId !== input.workerId
+  )
+    return "ownership_lost";
+  return "runtime_abort";
+}
+
 type CreateRunInput = {
   id: SpectraId<"aiRuns">;
   ownerAccountId: string;

@@ -23,7 +23,7 @@ export const getArtifact = query({
         summary.blueprintKey === "agent" ? "agent" : "artifact", summary,
       );
       if (!access.allowed || !access.capabilities.includes("read") ||
-        summary.schoolId !== actor.schoolId || summary.blueprintKey === "thread_reference") return null;
+        summary.blueprintKey === "thread_reference") return null;
       metadata = summary.projection && typeof summary.projection === "object"
         ? summary.projection as Record<string, unknown> : {};
       metadata = { ...metadata, _id: artifactId, blueprintKey: summary.blueprintKey, updatedAt: summary.updatedAt };
@@ -31,7 +31,7 @@ export const getArtifact = query({
       // Legacy/missing read models remain readable without a migration shortcut.
       // This fallback reads one canonical row; the normal path never does.
       const artifact = await ctx.db.get(artifactId);
-      if (!artifact || artifact.schoolId !== actor.schoolId || artifact.blueprintKey === "thread_reference") return null;
+      if (!artifact || artifact.blueprintKey === "thread_reference") return null;
       const access = await evaluateAccessForActorWithLoadedResource(
         ctx, actor, artifact.blueprintKey === "agent" ? "agent" : "artifact", artifactId,
         { resource: artifact, ownerAccountId: artifact.ownerAccountId, schoolId: artifact.schoolId, lifecycle: artifact.status },
@@ -63,7 +63,7 @@ export const getWorkspace = query({
         schoolId: workspace.schoolId, lifecycle: workspace.status,
       } : null,
     );
-    if (!workspace || !access.allowed || !access.capabilities.includes("read") || workspace.schoolId !== actor.schoolId) return null;
+    if (!workspace || !access.allowed || !access.capabilities.includes("read")) return null;
     return {
       workspace: {
         _id: workspaceId, title: workspace.title.slice(0, 240),

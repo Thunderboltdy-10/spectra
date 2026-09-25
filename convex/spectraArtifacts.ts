@@ -3421,67 +3421,81 @@ export const dismissAiEdit = mutation({
 });
 
 export const listVersions = query({
-  args: { artifactId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const { artifact, decision } = await requireArtifactCapability(
       ctx,
       args.artifactId,
     );
+    if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1))
+      throw new Error("ARTIFACT_HISTORY_PAGE_SIZE_INVALID");
     if (artifact.blueprintKey === "quiz" && decision.level === "read")
-      return [];
-    const allVersions = await ctx.db
+      return { versions: [], continueCursor: null, isDone: true };
+    // Legacy versions may carry inline bodies. Bound those database reads as
+    // well as the response; only getVersion opens retained snapshot objects.
+    const page = await ctx.db
       .query("spectraArtifactVersions")
       .withIndex("by_artifact_created", (q) =>
         q.eq("artifactId", args.artifactId),
       )
-      .order("asc")
-      .collect();
-    const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
-    const selected = allVersions.slice(-limit).reverse();
-    return Promise.all(
-      selected.map(async (version) => {
-        const [hydrated, creators, run] = await Promise.all([
-          hydrateVersionSafely(ctx, version),
-          Promise.all(
-            (version.creatorAccountIds ?? []).map((accountId) =>
-              ctx.db.get(accountId),
-            ),
-          ),
-          version.runId ? ctx.db.get(version.runId) : null,
-        ]);
-        const projectedHydrated =
-          artifact.blueprintKey === "timetable"
-            ? {
-                ...hydrated,
-                ...("before" in hydrated && hydrated.before !== undefined
-                  ? { before: projectTimetableSnapshot(hydrated.before) }
-                  : {}),
-                ...("after" in hydrated && hydrated.after !== undefined
-                  ? { after: projectTimetableSnapshot(hydrated.after) }
-                  : {}),
-              }
-            : hydrated;
-        return {
-          ...projectedHydrated,
-          versionNumber:
-            allVersions.findIndex(
-              (candidate) => candidate._id === version._id,
-            ) + 1,
-          creators: creators
-            .filter((creator): creator is NonNullable<typeof creator> =>
-              Boolean(creator),
-            )
-            .map((creator) => ({
-              accountId: creator._id,
-              name: creator.name,
-              avatarUrl: creator.avatarUrl,
-            })),
-          run: run
-            ? { runId: run._id, finalSummary: run.finalSummary }
-            : undefined,
-        };
-      }),
+      .order("desc")
+      .paginate({
+        numItems: Math.min(args.limit ?? 20, 50),
+        cursor: args.cursor ?? null,
+        maximumRowsRead: 50,
+        maximumBytesRead: 2_000_000,
+      });
+    const creatorIds = [...new Set(page.page.flatMap(version => version.creatorAccountIds ?? []))];
+    const creators = new Map(
+      (await Promise.all(creatorIds.map(accountId => ctx.db.get(accountId))))
+        .filter((creator): creator is NonNullable<typeof creator> => Boolean(creator))
+        .map(creator => [creator._id, {
+          accountId: creator._id, name: creator.name, avatarUrl: creator.avatarUrl,
+        }]),
     );
+    return {
+      versions: page.page.map(version => ({
+        _id: version._id,
+        artifactId: version.artifactId,
+        parentVersionId: version.parentVersionId,
+        source: version.source,
+        runId: version.runId,
+        summary: version.summary,
+        name: version.name,
+        createdAt: version.createdAt,
+        creatorAccountIds: version.creatorAccountIds,
+        creators: (version.creatorAccountIds ?? []).flatMap(accountId => {
+          const creator = creators.get(accountId);
+          return creator ? [creator] : [];
+        }),
+      })),
+      continueCursor: page.isDone ? null : page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});
+
+/** Hydrate one selected version, always under current source authorization. */
+export const getVersion = query({
+  args: { artifactId: v.id("spectraArtifacts"), versionId: v.id("spectraArtifactVersions") },
+  handler: async (ctx, args) => {
+    const { artifact, decision } = await requireArtifactCapability(ctx, args.artifactId);
+    if (artifact.blueprintKey === "quiz" && decision.level === "read") return null;
+    const version = await ctx.db.get(args.versionId);
+    if (!version || version.artifactId !== artifact._id)
+      throw new Error("ARTIFACT_VERSION_NOT_FOUND");
+    const hydrated = await hydrateVersionSafely(ctx, version);
+    return artifact.blueprintKey === "timetable"
+      ? {
+          ...hydrated,
+          before: hydrated.before === undefined ? undefined : projectTimetableSnapshot(hydrated.before),
+          after: hydrated.after === undefined ? undefined : projectTimetableSnapshot(hydrated.after),
+        }
+      : hydrated;
   },
 });
 

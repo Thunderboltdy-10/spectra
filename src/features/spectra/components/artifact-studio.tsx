@@ -148,10 +148,12 @@ import { contextSourceRegistry } from "../context";
 import {
   getSpectraArtifactLinks,
   getSpectraArtifactVersions,
+  getSpectraArtifactVersion,
   postSpectra,
   type SpectraArtifact,
   type SpectraArtifactLink,
   type SpectraArtifactVersion,
+  type SpectraArtifactVersionSummary,
 } from "../data/api";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
 import { spectraBus } from "../events";
@@ -1275,8 +1277,15 @@ function HistoryComparisonOverlay({
   changes,
   selectedRegions,
   busyVersionId,
+  listLoading,
+  listError,
+  hasMore,
+  previewLoading,
+  previewError,
   readOnly,
   onSelect,
+  onLoadMore,
+  onRetryList,
   onSelectedRegionsChange,
   onRestore,
   onCreateCheckpoint,
@@ -1284,13 +1293,20 @@ function HistoryComparisonOverlay({
 }: {
   artifact: SpectraArtifact;
   current: ArtifactSnapshot;
-  versions: SpectraArtifactVersion[];
+  versions: SpectraArtifactVersionSummary[];
   selected: SpectraArtifactVersion | null;
   changes: HumanChange[];
   selectedRegions: Set<string>;
   busyVersionId: string | null;
+  listLoading: boolean;
+  listError: string | null;
+  hasMore: boolean;
+  previewLoading: boolean;
+  previewError: string | null;
   readOnly: boolean;
-  onSelect: (version: SpectraArtifactVersion) => void;
+  onSelect: (version: SpectraArtifactVersionSummary) => void;
+  onLoadMore: () => void;
+  onRetryList: () => void;
   onSelectedRegionsChange: (regions: Set<string>) => void;
   onRestore: (
     version: SpectraArtifactVersion,
@@ -1361,7 +1377,7 @@ function HistoryComparisonOverlay({
           </span>
           {selected ? (
             <span className="truncate rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-2 py-1 text-caption font-medium text-[var(--brand-primary)]">
-              Previewing v{selected.versionNumber ?? "—"} from{" "}
+              Previewing {historyKind(selected)} from{" "}
               {new Date(selected.createdAt).toLocaleString()}
             </span>
           ) : null}
@@ -1461,7 +1477,7 @@ function HistoryComparisonOverlay({
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-chrome flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
                     <span className="text-micro font-semibold text-[var(--text-primary)]">
-                      Version v{selected.versionNumber ?? "—"}
+                      {historyKind(selected)}
                     </span>
                     <span className="rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--brand-primary)]">
                       Preview only
@@ -1508,6 +1524,16 @@ function HistoryComparisonOverlay({
                 </section>
               </div>
             )
+          ) : previewLoading ? (
+            <div role="status" className="flex min-h-0 flex-1 items-center justify-center gap-2 p-8 text-micro text-[var(--text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading saved version…
+            </div>
+          ) : previewError ? (
+            <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-micro text-[var(--text-secondary)]">
+              <p>{previewError}</p>
+              {selected ? <button type="button" onClick={() => onSelect(selected)} className="h-8 rounded-control border border-[var(--border-default)] px-3">Retry preview</button> : null}
+            </div>
           ) : selected ? (
             <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center">
               <div className="max-w-[380px]">
@@ -1580,7 +1606,7 @@ function HistoryComparisonOverlay({
                 Version history
               </h3>
               <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                {versions.length} meaningful versions
+                {versions.length} versions loaded{hasMore ? " · more available" : ""}
               </p>
             </div>
             {!readOnly ? (
@@ -1684,7 +1710,7 @@ function HistoryComparisonOverlay({
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-micro font-semibold text-[var(--text-primary)]">
-                        v{version.versionNumber ?? versions.length - index}
+                        {version.name || historyKind(version)}
                       </span>
                       <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                         {new Date(version.createdAt).toLocaleString([], {
@@ -1712,7 +1738,18 @@ function HistoryComparisonOverlay({
                 </button>
               );
             })}
-            {versions.length === 0 ? (
+            {listError ? (
+              <div role="alert" className="px-4 py-3 text-micro text-[var(--text-secondary)]">
+                <p>{listError}</p>
+                <button type="button" onClick={onRetryList} disabled={listLoading} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3">Retry history</button>
+              </div>
+            ) : null}
+            {listLoading ? (
+              <p role="status" className="px-4 py-3 text-micro text-[var(--text-secondary)]">Loading history…</p>
+            ) : hasMore && !listError ? (
+              <button type="button" onClick={onLoadMore} className="m-2 h-8 rounded-control border border-[var(--border-default)] px-3 text-micro text-[var(--text-primary)]">Load older versions</button>
+            ) : null}
+            {versions.length === 0 && !listLoading && !listError ? (
               <div className="px-4 py-10 text-center text-micro leading-5 text-[var(--text-tertiary)]">
                 Meaningful human and AI editing sessions will appear here.
               </div>
@@ -3044,10 +3081,82 @@ function ArtifactStudioEditor({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsPinnedRef = useRef(false);
   const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
-  const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
+  const [versions, setVersions] = useState<SpectraArtifactVersionSummary[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const previewRequestRef = useRef<AbortController | null>(null);
+  const historyActiveArtifactRef = useRef<string | null>(null);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] =
     useState<SpectraArtifactVersion | null>(null);
+  const selectHistoryVersion = useCallback(async (version: SpectraArtifactVersionSummary) => {
+    if (version.artifactId !== artifact._id || historyActiveArtifactRef.current !== artifact._id) return;
+    previewRequestRef.current?.abort();
+    const request = new AbortController();
+    previewRequestRef.current = request;
+    setPreviewVersion(version);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const result = await getSpectraArtifactVersion(artifact._id, version._id, request.signal);
+      if (request.signal.aborted) return;
+      if (!result.version || result.version._id !== version._id || result.version.artifactId !== artifact._id)
+        throw new Error("This saved version is no longer available to you.");
+      setPreviewVersion({ ...version, ...result.version });
+    } catch (error) {
+      if (!request.signal.aborted)
+        setPreviewError(error instanceof Error ? error.message : "Could not load this saved version.");
+    } finally {
+      if (!request.signal.aborted) setPreviewLoading(false);
+    }
+  }, [artifact._id]);
+  const loadHistoryPage = useCallback(async (cursor?: string) => {
+    if (historyActiveArtifactRef.current !== artifact._id) return;
+    historyRequestRef.current?.abort();
+    const request = new AbortController();
+    historyRequestRef.current = request;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    if (cursor === undefined) {
+      previewRequestRef.current?.abort();
+      setVersions([]);
+      setHistoryCursor(null);
+      setPreviewVersion(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+    }
+    try {
+      const result = await getSpectraArtifactVersions(artifact._id, 20, cursor, request.signal);
+      if (request.signal.aborted) return;
+      setVersions(current => cursor === undefined ? result.versions :
+        [...new Map([...current, ...result.versions].map(version => [version._id, version])).values()]);
+      setHistoryCursor(result.isDone ? null : result.continueCursor);
+      if (cursor === undefined && result.versions[0]) void selectHistoryVersion(result.versions[0]);
+    } catch (error) {
+      if (!request.signal.aborted)
+        setHistoryError(error instanceof Error ? error.message : "Could not load version history.");
+    } finally {
+      if (!request.signal.aborted) setHistoryLoading(false);
+    }
+  }, [artifact._id, selectHistoryVersion]);
+  useEffect(() => {
+    historyActiveArtifactRef.current = historyOpen ? artifact._id : null;
+    if (historyOpen) void loadHistoryPage();
+    else {
+      setVersions([]);
+      setPreviewVersion(null);
+      setHistoryCursor(null);
+    }
+    return () => {
+      historyActiveArtifactRef.current = null;
+      historyRequestRef.current?.abort();
+      previewRequestRef.current?.abort();
+    };
+  }, [artifact._id, historyOpen, loadHistoryPage]);
   const [selectedRestoreRegions, setSelectedRestoreRegions] = useState<
     Set<string>
   >(() => new Set());
@@ -5139,7 +5248,7 @@ function ArtifactStudioEditor({
     version: SpectraArtifactVersion,
     regionIds?: readonly string[],
   ) {
-    if (readOnly) return;
+    if (readOnly || version.artifactId !== artifact._id || version._id !== previewVersion?._id) return;
     if (!version.after) {
       setLiveConflict({
         message:
@@ -5242,9 +5351,7 @@ function ArtifactStudioEditor({
       artifactId: artifact._id,
       name,
     });
-    const result = await getSpectraArtifactVersions(artifact._id, 100);
-    setVersions(result.versions);
-    setPreviewVersion(result.versions[0] ?? null);
+    await loadHistoryPage();
   }
 
   function keepLocalEdits() {
@@ -5380,15 +5487,7 @@ function ArtifactStudioEditor({
   const studioDensity = useStudioDensity(studioSurfaceRef, responsiveContract);
   const loadVersionHistory = useCallback(() => {
     setHistoryOpen(true);
-    void getSpectraArtifactVersions(artifact._id, 100).then((result) => {
-      setVersions(result.versions);
-      setPreviewVersion(
-        result.versions.find((version) => version.after) ??
-          result.versions[0] ??
-          null,
-      );
-    });
-  }, [artifact._id]);
+  }, []);
   const showInspector = useCallback(
     (panel: StudioInspectorPanel) => {
       if (panel === "history") {
@@ -6454,13 +6553,20 @@ function ArtifactStudioEditor({
             content,
             tags: tagsFromDraft(tagDraft),
           }}
-          versions={versions}
-          selected={previewVersion}
+          versions={versions.filter(version => version.artifactId === artifact._id)}
+          selected={previewVersion?.artifactId === artifact._id ? previewVersion : null}
           changes={previewDiff}
           selectedRegions={selectedRestoreRegions}
           busyVersionId={historyBusy}
+          listLoading={historyLoading}
+          listError={historyError}
+          hasMore={historyCursor !== null}
+          previewLoading={previewLoading}
+          previewError={previewError}
           readOnly={readOnly}
-          onSelect={setPreviewVersion}
+          onSelect={(version) => void selectHistoryVersion(version)}
+          onLoadMore={() => { if (historyCursor) void loadHistoryPage(historyCursor); }}
+          onRetryList={() => void loadHistoryPage(historyCursor ?? undefined)}
           onSelectedRegionsChange={setSelectedRestoreRegions}
           onRestore={(version, regionIds) =>
             void restoreVersion(version, regionIds)
@@ -6799,8 +6905,35 @@ function StudioDetails({
     "details",
   );
   const [historyVersions, setHistoryVersions] = useState<
-    SpectraArtifactVersion[]
+    SpectraArtifactVersionSummary[]
   >([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const loadHistoryPage = useCallback(async (cursor?: string) => {
+    historyRequestRef.current?.abort();
+    const request = new AbortController();
+    historyRequestRef.current = request;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    if (cursor === undefined) {
+      setHistoryVersions([]);
+      setHistoryCursor(null);
+    }
+    try {
+      const result = await getSpectraArtifactVersions(artifact._id, 20, cursor, request.signal);
+      if (request.signal.aborted) return;
+      setHistoryVersions(current => cursor === undefined ? result.versions :
+        [...new Map([...current, ...result.versions].map(version => [version._id, version])).values()]);
+      setHistoryCursor(result.isDone ? null : result.continueCursor);
+    } catch (error) {
+      if (!request.signal.aborted)
+        setHistoryError(error instanceof Error ? error.message : "Could not load version history.");
+    } finally {
+      if (!request.signal.aborted) setHistoryLoading(false);
+    }
+  }, [artifact._id]);
   const visibleTags = tagsFromDraft(tagDraft);
   const detailDeckCards =
     artifact.blueprintKey === "flashcard_deck"
@@ -6816,10 +6949,9 @@ function StudioDetails({
   }, [artifact._id]);
   useEffect(() => {
     if (detailsTab !== "history") return;
-    void getSpectraArtifactVersions(artifact._id)
-      .then((result) => setHistoryVersions(result.versions))
-      .catch(() => setHistoryVersions([]));
-  }, [artifact._id, detailsTab]);
+    void loadHistoryPage();
+    return () => historyRequestRef.current?.abort();
+  }, [detailsTab, loadHistoryPage]);
   const linkedIds = new Set(
     durableLinks.flatMap((link) =>
       link.artifact?.id ? [link.artifact.id] : [],
@@ -7311,7 +7443,7 @@ function StudioDetails({
         <div className="p-3">
           <SideCard title="History">
             <div className="space-y-2">
-              {historyVersions.map((version, index) => (
+              {historyVersions.filter(version => version.artifactId === artifact._id).map((version, index) => (
                 <div
                   key={version._id}
                   className="rounded-control bg-[var(--bg-primary)] px-3 py-2.5"
@@ -7324,13 +7456,22 @@ function StudioDetails({
                   </div>
                   <div className="mt-1 flex items-center justify-between text-micro text-[var(--text-tertiary)]">
                     <span>
-                      {version.source === "ai" ? "Spectra edit" : "Manual save"}
+                      {historyKind(version)}
                     </span>
                     <span>{formatRelativeTime(version.createdAt)}</span>
                   </div>
                 </div>
               ))}
-              {historyVersions.length === 0 ? (
+              {historyError ? (
+                <div role="alert" className="text-micro text-[var(--text-secondary)]">
+                  <p>{historyError}</p>
+                  <button type="button" onClick={() => void loadHistoryPage(historyCursor ?? undefined)} disabled={historyLoading} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3">Retry history</button>
+                </div>
+              ) : null}
+              {historyLoading ? <p role="status" className="text-micro text-[var(--text-secondary)]">Loading history…</p> : historyCursor && !historyError ? (
+                <button type="button" onClick={() => void loadHistoryPage(historyCursor)} className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro">Load older versions</button>
+              ) : null}
+              {historyVersions.length === 0 && !historyLoading && !historyError ? (
                 <p className="text-micro leading-5 text-[var(--text-secondary)]">
                   No saved versions yet.
                 </p>

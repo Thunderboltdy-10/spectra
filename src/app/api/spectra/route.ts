@@ -499,11 +499,23 @@ export async function GET(request: NextRequest) {
 
     if (action === "artifactVersions") {
       const artifactId = requireString(params.get("artifactId"), "artifactId");
-      const versions = await spectraQuery("spectraArtifacts:listVersions", {
+      const limit = params.has("limit") ? Number(params.get("limit")) : undefined;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1))
+        return badRequest("Choose a positive whole-number page size.");
+      const page = await spectraQuery("spectraArtifacts:listVersions", {
         artifactId,
-        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+        limit,
+        cursor: params.get("cursor") ?? undefined,
       });
-      return ok({ versions });
+      return ok(page);
+    }
+
+    if (action === "artifactVersion") {
+      const version = await spectraQuery("spectraArtifacts:getVersion", {
+        artifactId: requireString(params.get("artifactId"), "artifactId"),
+        versionId: requireString(params.get("versionId"), "versionId"),
+      });
+      return ok({ version });
     }
 
     if (action === "agentReleases") {

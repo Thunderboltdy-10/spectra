@@ -273,17 +273,36 @@ describe("Spectra API route", () => {
     });
   });
 
-  it("lists durable artifact versions", async () => {
-    const convexQuery = vi.fn().mockResolvedValue([{ _id: "version_1", artifactId: "artifact_1", source: "ai" }]);
+  it("forwards a metadata history page and its continuation cursor", async () => {
+    const page = { versions: [{ _id: "version_1", artifactId: "artifact_1", source: "ai" }], continueCursor: "next-page", isDone: false };
+    const convexQuery = vi.fn().mockResolvedValue(page);
     const convexMutation = vi.fn();
     vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
-    const versionsResponse = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactVersions&artifactId=artifact_1&limit=20"));
+    const versionsResponse = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactVersions&artifactId=artifact_1&limit=20&cursor=current-page"));
 
     expect(versionsResponse.status).toBe(200);
-    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listVersions", { artifactId: "artifact_1", limit: 20 });
+    expect(await versionsResponse.json()).toEqual(page);
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listVersions", { artifactId: "artifact_1", limit: 20, cursor: "current-page" });
+  });
+
+  it("loads one selected version and rejects invalid history page sizes before querying", async () => {
+    const version = { _id: "version_1", artifactId: "artifact_1", snapshotState: "ready", after: { content: {} } };
+    const convexQuery = vi.fn().mockResolvedValue(version);
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactVersion&artifactId=artifact_1&versionId=version_1"));
+    expect(await response.json()).toEqual({ version });
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:getVersion", { artifactId: "artifact_1", versionId: "version_1" });
+    convexQuery.mockClear();
+    for (const limit of ["NaN", "-1", "0", "1.5", "Infinity"]) {
+      const invalid = await route.GET(new NextRequest(`http://localhost/api/spectra?action=artifactVersions&artifactId=artifact_1&limit=${limit}`));
+      expect(invalid.status).toBe(400);
+    }
+    expect(convexQuery).not.toHaveBeenCalled();
   });
 
   it("assigns a permanent chat thread only when a workspace is explicitly selected", async () => {

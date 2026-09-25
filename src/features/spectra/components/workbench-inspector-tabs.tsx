@@ -12,7 +12,7 @@ import {
   Send,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   getSpectraArtifactComments,
@@ -20,7 +20,7 @@ import {
   postSpectra,
   type SpectraArtifact,
   type SpectraArtifactComment,
-  type SpectraArtifactVersion,
+  type SpectraArtifactVersionSummary,
 } from "../data/api";
 import { spectraBus } from "../events";
 import {
@@ -50,7 +50,12 @@ export function WorkbenchInspectorTabs({
 }) {
   const [tab, setTab] = useState<WorkbenchInspectorTab>("overview");
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
-  const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
+  const [versions, setVersions] = useState<SpectraArtifactVersionSummary[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const refreshRequestRef = useRef<AbortController | null>(null);
   const [includeResolved, setIncludeResolved] = useState(false);
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("all");
   const [commentBody, setCommentBody] = useState("");
@@ -63,27 +68,65 @@ export function WorkbenchInspectorTabs({
     setTab("overview");
     setComments([]);
     setVersions([]);
+    setHistoryCursor(null);
+    setHistoryLoading(false);
+    setHistoryError(null);
     setCommentBody("");
     setLoadedWorkId(null);
     setSelectedCommentId(null);
+    return () => {
+      historyRequestRef.current?.abort();
+      refreshRequestRef.current?.abort();
+    };
   }, [work._id]);
 
   const refresh = useCallback(async () => {
+    refreshRequestRef.current?.abort();
+    historyRequestRef.current?.abort();
+    const request = new AbortController();
+    refreshRequestRef.current = request;
+    setHistoryCursor(null);
+    setHistoryLoading(false);
+    setHistoryError(null);
     setLoading(true);
     try {
       const [commentResult, versionResult] = await Promise.all([
         getSpectraArtifactComments(work._id, true),
-        getSpectraArtifactVersions(work._id, 60),
+        getSpectraArtifactVersions(work._id, 20, undefined, request.signal),
       ]);
+      if (request.signal.aborted) return;
       setComments(commentResult.comments);
       setVersions(versionResult.versions);
+      setHistoryCursor(versionResult.isDone ? null : versionResult.continueCursor);
       setLoadedWorkId(work._id);
     } catch (error) {
+      if (request.signal.aborted) return;
+      setHistoryError("Could not load version history. Try again.");
       toast.error(error instanceof Error ? error.message : "Could not load inspector activity.");
     } finally {
-      setLoading(false);
+      if (!request.signal.aborted) setLoading(false);
     }
   }, [work._id]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (!historyCursor) return;
+    historyRequestRef.current?.abort();
+    const request = new AbortController();
+    historyRequestRef.current = request;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const page = await getSpectraArtifactVersions(work._id, 20, historyCursor, request.signal);
+      if (request.signal.aborted) return;
+      setVersions(current => [...new Map([...current, ...page.versions].map(version => [version._id, version])).values()]);
+      setHistoryCursor(page.isDone ? null : page.continueCursor);
+    } catch (error) {
+      if (!request.signal.aborted)
+        setHistoryError(error instanceof Error ? error.message : "Could not load older versions.");
+    } finally {
+      if (!request.signal.aborted) setHistoryLoading(false);
+    }
+  }, [historyCursor, work._id]);
 
   useEffect(() => {
     if (tab === "overview" || loadedWorkId === work._id) return;
@@ -97,7 +140,7 @@ export function WorkbenchInspectorTabs({
   );
   const history = useMemo(
     () => filterInspectorHistory([
-      ...versions.map(versionToHistory),
+      ...versions.filter(version => version.artifactId === work._id).map(versionToHistory),
       { id: `created:${work._id}`, category: "change", summary: "Work created", createdAt: work.createdAt },
       ...(work.isShared ? [{ id: `access:${work._id}`, category: "access" as const, summary: `Shared with ${work.sharedWithCount ?? 0} collaborator${work.sharedWithCount === 1 ? "" : "s"}`, createdAt: work.updatedAt }] : []),
       ...(work.createdFrom?.sourceAttachmentNames ?? []).map((name, index) => ({ id: `source:${work._id}:${index}`, category: "source" as const, summary: `Source attached: ${name}`, createdAt: work.createdAt })),
@@ -252,13 +295,19 @@ export function WorkbenchInspectorTabs({
           </div>
           <div className="mt-3 space-y-1">
             {loading ? <LoadingState /> : null}
-            {!loading && history.length === 0 ? <EmptyState icon={Clock3} text="No matching history yet." /> : null}
+            {!loading && !historyError && history.length === 0 ? <EmptyState icon={Clock3} text="No matching loaded history." /> : null}
             {history.map((entry) => (
               <div key={entry.id} className="flex gap-2.5 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
                 {entry.category === "ai" ? <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" /> : <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />}
                 <div className="min-w-0"><p className="text-micro leading-4 text-[var(--text-primary)]">{entry.summary}</p><p className="mt-0.5 text-micro capitalize text-[var(--text-tertiary)]">{entry.category} · {formatRelativeTime(entry.createdAt)}</p></div>
               </div>
             ))}
+            {historyError ? <p role="alert" className="py-2 text-micro text-[var(--text-secondary)]">{historyError}</p> : null}
+            {historyLoading ? <LoadingState /> : !loading && (historyCursor || historyError) ? (
+              <button type="button" onClick={() => void (historyCursor ? loadOlderHistory() : refresh())} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3 text-micro text-[var(--text-primary)]">
+                {historyError ? "Retry history" : "Load older versions"}
+              </button>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -266,7 +315,7 @@ export function WorkbenchInspectorTabs({
   );
 }
 
-function versionToHistory(version: SpectraArtifactVersion): InspectorHistoryEntry {
+function versionToHistory(version: SpectraArtifactVersionSummary): InspectorHistoryEntry {
   const category: InspectorHistoryEntry["category"] =
     version.source === "ai" ? "ai"
       : version.source === "import" || version.source === "migration" ? "import"

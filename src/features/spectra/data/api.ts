@@ -447,6 +447,7 @@ export type SpectraArtifactLink = {
 export type SpectraArtifactVersion = {
   _id: string;
   artifactId: string;
+  parentVersionId?: string;
   source:
     | "manual"
     | "ai"
@@ -476,6 +477,17 @@ export type SpectraArtifactVersion = {
   creators?: Array<{ accountId: string; name: string; avatarUrl?: string }>;
   run?: { runId: string; finalSummary?: string };
   createdAt: number;
+};
+
+export type SpectraArtifactVersionSummary = Pick<SpectraArtifactVersion,
+  "_id" | "artifactId" | "parentVersionId" | "source" | "runId" | "summary" | "name" |
+  "createdAt" | "creatorAccountIds" | "creators"
+>;
+
+export type SpectraArtifactVersionPage = {
+  versions: SpectraArtifactVersionSummary[];
+  continueCursor: string | null;
+  isDone: boolean;
 };
 
 /**
@@ -1839,14 +1851,28 @@ export async function resolveSpectraOperationConflict(
 export async function getSpectraArtifactVersions(
   artifactId: string,
   limit = 20,
+  cursor?: string,
+  signal?: AbortSignal,
 ) {
   const qs = new URLSearchParams({
     action: "artifactVersions",
     artifactId,
     limit: String(limit),
   });
-  return readJson<{ versions: SpectraArtifactVersion[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  if (cursor !== undefined) qs.set("cursor", cursor);
+  return readJson<SpectraArtifactVersionPage>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
+  );
+}
+
+export async function getSpectraArtifactVersion(
+  artifactId: string,
+  versionId: string,
+  signal?: AbortSignal,
+) {
+  const qs = new URLSearchParams({ action: "artifactVersion", artifactId, versionId });
+  return readJson<{ version: SpectraArtifactVersion | null }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
   );
 }
 

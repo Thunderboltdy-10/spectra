@@ -192,36 +192,6 @@ export function durableHeadKey(context) {
   return `${context.artifactId}:${context.partitionKey}`;
 }
 
-export function appendBaseStateVectorHash({
-  lastPersistedHash,
-  capturedBaseHash,
-}) {
-  if (typeof lastPersistedHash === "string" && lastPersistedHash.length >= 16)
-    return lastPersistedHash;
-  return capturedBaseHash;
-}
-
-export function rebaseAppendPayload(payload, liveStateVectorHash) {
-  if (
-    typeof liveStateVectorHash !== "string" ||
-    liveStateVectorHash.length < 16
-  )
-    return payload;
-  if (payload.baseStateVectorHash === liveStateVectorHash) return payload;
-  return {
-    ...payload,
-    baseStateVectorHash: liveStateVectorHash,
-  };
-}
-
-export function resolveRebaseHead({ lastPersistedHash, storedLiveHash }) {
-  if (typeof storedLiveHash === "string" && storedLiveHash.length >= 16)
-    return storedLiveHash;
-  if (typeof lastPersistedHash === "string" && lastPersistedHash.length >= 16)
-    return lastPersistedHash;
-  return null;
-}
-
 export function samePersistenceBatch(left, right) {
   const leftContext = left?.context ?? {};
   const rightContext = right?.context ?? {};

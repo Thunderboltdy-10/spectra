@@ -339,7 +339,7 @@ describe("P9.I3 summary-writer integration", () => {
         updatedAt: createdAt,
       });
       await upsertArtifactSummary(ctx, (await ctx.db.get(artifactId))!);
-      await ctx.db.insert("collaborationRooms", {
+      const roomId = await ctx.db.insert("collaborationRooms", {
         artifactId,
         schoolId: actor.schoolId,
         typeKey: "document",
@@ -354,7 +354,7 @@ describe("P9.I3 summary-writer integration", () => {
         createdAt,
         updatedAt: createdAt,
       });
-      return { artifactId, createdAt };
+      return { artifactId, createdAt, roomId };
     });
 
     await t.mutation(internal.collaborationGatewayStore.append, {
@@ -365,6 +365,8 @@ describe("P9.I3 summary-writer integration", () => {
       clientId: "p9-summary-writer",
       policyVersion: 0,
       idempotencyKey: "p9-summary-writer:1",
+      expectedRoomId: seeded.roomId,
+      expectedNextSequence: 1,
       update: new Uint8Array([1]).buffer,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: "next-state-vector-1",

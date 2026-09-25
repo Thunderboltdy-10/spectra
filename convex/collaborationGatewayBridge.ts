@@ -441,6 +441,9 @@ export const exchange = action({
         clientId: text(payload.clientId, "client_id", 180),
         policyVersion: integer(payload.policyVersion, "policy_version"),
         idempotencyKey: text(payload.idempotencyKey, "idempotency_key", 180),
+        expectedRoomId: text(payload.expectedRoomId, "expected_room_id") as Id<"collaborationRooms">,
+        expectedNextSequence: integer(payload.expectedNextSequence, "expected_next_sequence"),
+        claimBaseStateVectorHash: optionalText(payload.claimBaseStateVectorHash, "claim_base_state_vector_hash", 180),
         update: update.buffer.slice(
           update.byteOffset,
           update.byteOffset + update.byteLength,

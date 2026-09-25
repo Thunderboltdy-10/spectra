@@ -253,6 +253,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:one",
       update: arrayBufferCopy(first.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: first.hash,
       regionIds: ["intro"],
@@ -280,6 +282,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
         policyVersion: 0,
         idempotencyKey: "human:one",
         update: arrayBufferCopy(first.update),
+        expectedRoomId: seed.roomId,
+        expectedNextSequence: 1,
         baseStateVectorHash: "initial-state-vector",
         stateVectorHash: first.hash,
         regionIds: ["intro"],
@@ -309,6 +313,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:two",
       update: arrayBufferCopy(second.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 2,
       baseStateVectorHash: first.hash,
       stateVectorHash: second.hash,
       regionIds: ["intro"],
@@ -349,6 +355,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "crash-window:append",
       update: arrayBufferCopy(durable.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: durable.hash,
       regionIds: ["intro"],
@@ -416,6 +424,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "no-content:append",
       update: arrayBufferCopy(noContentChange.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: noContentChange.hash,
       regionIds: ["$spectra:native-projection"],
@@ -487,6 +497,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
         policyVersion: 0,
         idempotencyKey: `stale-head:${index + 1}`,
         update: arrayBufferCopy(update.update),
+        expectedRoomId: seed.roomId,
+        expectedNextSequence: index + 1,
         baseStateVectorHash: index === 0 ? "initial-state-vector" : first.hash,
         stateVectorHash: update.hash,
         regionIds: ["intro"],
@@ -596,6 +608,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "load:durable",
       update: arrayBufferCopy(update.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: update.hash,
       regionIds: ["intro"],
@@ -678,7 +692,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(leftover.room?.snapshotSequence).toBe(12);
   });
 
-  it("rebases overlapping Yjs CAS instead of rejecting a stale base hash", async () => {
+  it("rejects an overlapping append until its actual causal state is rebased", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);
     const first = yjsUpdate("typed");
@@ -692,11 +706,13 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:one",
       update: arrayBufferCopy(first.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: first.hash,
       regionIds: ["intro"],
     });
-    const rebased = await t.mutation(internal.collaborationGatewayStore.append, {
+    await expect(t.mutation(internal.collaborationGatewayStore.append, {
       accountId: seed.accountId,
       actorKind: "human",
       artifactId: seed.artifactId,
@@ -705,20 +721,19 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:two",
       update: arrayBufferCopy(overlapping.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: overlapping.hash,
       regionIds: ["intro"],
-    });
-    expect(rebased).toMatchObject({
-      duplicate: false,
-      rebased: true,
-    });
+    })).rejects.toThrow("COLLABORATION_BASE_STATE_STALE");
+
     const after = await t.run(async (ctx) => ({
       artifact: await ctx.db.get(seed.artifactId),
       updates: await ctx.db.query("collaborationUpdates").collect(),
     }));
-    expect(after.updates).toHaveLength(2);
-    expect(after.artifact?.liveStateVectorHash).toBe(overlapping.hash);
+    expect(after.updates).toHaveLength(1);
+    expect(after.artifact?.liveStateVectorHash).toBe(first.hash);
   });
 
   it("rejects a snapshot whose state is ahead of its durable sequence", async () => {
@@ -734,6 +749,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:durable",
       update: arrayBufferCopy(durable.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: durable.hash,
       regionIds: ["intro"],
@@ -849,6 +866,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       policyVersion: 0,
       idempotencyKey: "human:durable",
       update: arrayBufferCopy(durable.update),
+      expectedRoomId: seed.roomId,
+      expectedNextSequence: 1,
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: durable.hash,
       regionIds: ["intro"],
@@ -934,6 +953,33 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(recovered.room?.lastProjectionSequence).toBeUndefined();
     expect(recovered.snapshots).toHaveLength(0);
   });
+
+  it("fences delete-only appends by sequence and retries receipts by causal bytes", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const doc = new Y.Doc(); doc.getText("body").insert(0, "native text");
+    const first = Y.encodeStateAsUpdate(doc);
+    const hash = hashBytes(Y.encodeStateVector(doc));
+    const args = { accountId: seed.accountId, actorKind: "human" as const, artifactId: seed.artifactId,
+      partitionKey: "root", clientId: "native", policyVersion: 0, expectedRoomId: seed.roomId,
+      expectedNextSequence: 1, idempotencyKey: "native:base", update: arrayBufferCopy(first),
+      baseStateVectorHash: "initial-state-vector", stateVectorHash: hash, regionIds: ["intro"] };
+    await t.mutation(internal.collaborationGatewayStore.append, args);
+    const vector = Y.encodeStateVector(doc);
+    doc.getText("body").delete(0, 6);
+    expect(hashBytes(Y.encodeStateVector(doc))).toBe(hash);
+    await t.mutation(internal.collaborationGatewayStore.append, { ...args, expectedNextSequence: 2,
+      idempotencyKey: "native:delete", update: arrayBufferCopy(Y.encodeStateAsUpdate(doc, vector)), baseStateVectorHash: hash });
+    await expect(t.mutation(internal.collaborationGatewayStore.append, { ...args,
+      expectedNextSequence: 2, baseStateVectorHash: hash, idempotencyKey: "browser:stale" })).rejects.toThrow("COLLABORATION_BASE_STATE_STALE");
+    expect(await t.run(ctx => ctx.db.get(seed.roomId))).toMatchObject({ nextSequence: 3 });
+    expect(await t.mutation(internal.collaborationGatewayStore.append, { ...args,
+      stateVectorHash: "a-later-recomputed-result" })).toMatchObject({ duplicate: true, sequence: 1, stateVectorHash: hash });
+    const changed = first.slice(); changed[changed.length - 1] ^= 1;
+    await expect(t.mutation(internal.collaborationGatewayStore.append, { ...args,
+      update: arrayBufferCopy(changed) })).rejects.toThrow("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    doc.destroy();
+  });
 });
 
 
@@ -952,6 +998,8 @@ it("retains spilled append/snapshot owners and a lost receipt after compaction",
   const args = {accountId: seed.accountId, artifactId: seed.artifactId, actorKind: "human" as const,
     partitionKey: "root", clientId: "spilled", policyVersion: 0, idempotencyKey: "lost-receipt",
     update: new ArrayBuffer(0), payloadRef: stored.payloadRef, payloadDigest: digest, byteLength: encoded.update.byteLength,
+    expectedRoomId: seed.roomId,
+    expectedNextSequence: 1,
     baseStateVectorHash: "initial-state-vector", stateVectorHash: encoded.hash, regionIds: ["intro"]};
   expect(await t.mutation(internal.collaborationGatewayStore.append,args)).toMatchObject({sequence: 1, duplicate: false});
   const owners = await t.run(ctx => ctx.db.query("collaborationPayloadOwners").withIndex("by_payload", q => q.eq("payloadRef", stored.payloadRef)).collect());

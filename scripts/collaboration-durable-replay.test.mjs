@@ -4,7 +4,8 @@ import {afterEach, expect, it, vi} from "vitest";
 import * as Y from "yjs";
 import {createCollaborationGatewayBridgeClient} from "./collaboration-gateway-bridge-client.mjs";
 import {planMergedUpdatePersist} from "./collaboration-durable-capacity.mjs";
-import {appendBaseStateVectorHash, durableHeadKey, samePersistenceBatch} from "./collaboration-persist.mjs";
+import {samePersistenceBatch} from "./collaboration-persist.mjs";
+import {createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive} from "./collaboration-canonical-room.mjs";
 import {MAX_DURABLE_UPDATE_BYTES} from "./collaboration-update-envelope.mjs";
 import {initializeNativeArtifactDocument, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds} from "./collaboration-native-projection.mjs";
 
@@ -16,23 +17,30 @@ it("does not acknowledge semantically unchanged Yjs structs before their durable
   const doc=new Y.Doc();
   initializeNativeArtifactDocument(doc,{title:"Sheet",typeKey:"sheets",schemaVersion:4,tags:[],content:{sheets:[{id:"s",name:"Sheet",cells:{A1:{value:1}}}]}});
   const before=nativeArtifactProjection(doc,4);
+  const initial=Y.encodeStateAsUpdate(doc);
   const vector=Y.encodeStateVector(doc);
   doc.getMap("causal-only-metadata").set("operation","one");
   const delta=Y.encodeStateAsUpdate(doc,vector);
   const ack=vi.fn();
-  const append=vi.fn(async () => {throw new Error("fixture persistence failure");});
+  const append=vi.fn(async prepare => {
+    const prepared = await prepare();
+    expect(prepared.payload.regionIds).toEqual(["$spectra:native-projection"]);
+    throw new Error("fixture persistence failure");
+  });
+  const room=createCanonicalRoom({expectedRoomId:"room",load:async()=>({roomId:"room",nextSequence:2,
+    updates:[{sequence:1,update:initial}]})});
   const deps={Y, samePersistenceBatch, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds,
     NATIVE_PROJECTION_REGION:"$spectra:native-projection",sendGatewayState:ack,planMergedUpdatePersist,
-    MAX_DURABLE_UPDATE_BYTES,appendBaseStateVectorHash,durableHeads:new Map(),durableHeadKey,
+    MAX_DURABLE_UPDATE_BYTES,canonicalRoom:()=>room,prepareCanonicalAppend,mergeCanonicalIntoLive,
+    artifactProjection:document=>JSON.stringify(nativeArtifactProjection(document,4)),
     createHash,appendWithRetry:append,checkpointScheduler:()=>({note:vi.fn()})};
   const persist=new Function(...Object.keys(deps),`${code}; return persistAcceptedMessages;`)(...Object.values(deps));
   const context={artifactId:"a",partitionKey:"root",accountId:"owner",clientId:"human",actorKind:"human",schemaVersion:4,policyVersion:0};
   try {
     await expect(persist(doc,[{context,documentUpdate:delta,nativeProjectionBefore:before,baseStateVectorHash:"base-hash",stateVectorHash:"new-hash",messageId:"m"}],Y.encodeStateAsUpdate(doc))).rejects.toThrow("fixture persistence failure");
     expect(append).toHaveBeenCalledOnce();
-    expect(append.mock.calls[0][0].regionIds).toEqual(["$spectra:native-projection"]);
     expect(ack).not.toHaveBeenCalled();
-  } finally {doc.destroy();}
+  } finally {await room.dispose();doc.destroy();}
 });
 
 it.each(["missing", "digest", "sequence", "generation"])("refuses incomplete replay: %s", async failure => {

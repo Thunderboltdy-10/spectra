@@ -37,13 +37,11 @@ import {
   createDurablePayloadManifest,
 } from "./collaboration-durable-capacity.mjs";
 import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "./collaboration-gateway-bridge-client.mjs";
+import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive } from "./collaboration-canonical-room.mjs";
 import {
-  appendBaseStateVectorHash,
   durableHeadKey,
   isRebaseablePersistenceFailure,
   permanentPersistenceFailure,
-  rebaseAppendPayload,
-  resolveRebaseHead,
   samePersistenceBatch,
   chainPersistThenCompact,
   collaborationFailureMessage,
@@ -120,7 +118,8 @@ const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
 const documentPersistenceQueues = new WeakMap();
 const documentCheckpointSchedulers = new WeakMap();
-const durableHeads = new Map();
+const canonicalRooms = new WeakMap();
+const openDocuments = new Map();
 const checkpointSchedulers = new Set();
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
@@ -244,18 +243,13 @@ function persistenceQueue(document) {
   if (existing) return existing;
   const created = {
     pending: [],
-    snapshotAfterFirst: null,
     firstPendingAt: null,
     pendingBytes: 0,
     flushing: null,
     timer: null,
     chain: chainPersistThenCompact({
       persist: (batch) =>
-        persistAcceptedMessages(
-          document,
-          batch.entries,
-          batch.snapshotAfterFirst,
-        ),
+        persistAcceptedMessages(document, batch.entries),
       compact: (batch) => compactStoredRoom(batch.entries[0]?.context),
       onCompactError: (error) => {
         process.stderr.write(
@@ -268,10 +262,33 @@ function persistenceQueue(document) {
   return created;
 }
 
-function rememberDurableHead(context, hash) {
-  const key = durableHeadKey(context);
-  if (!key || typeof hash !== "string" || hash.length < 16) return;
-  durableHeads.set(key, hash);
+function canonicalRoom(document, context) {
+  let room = canonicalRooms.get(document);
+  if (!room) {
+    room = { context, session: null };
+    room.session = createCanonicalRoom({
+      expectedRoomId: context.roomId,
+      load: afterSequence => bridge("load", {
+        artifactId: room.context.artifactId, partitionKey: room.context.partitionKey,
+        accountId: room.context.accountId, policyVersion: room.context.policyVersion, afterSequence,
+      }),
+    });
+    canonicalRooms.set(document, room);
+  }
+  room.context = context;
+  return room.session;
+}
+
+async function catchUpCanonicalRoom(document, context) {
+  return canonicalRoom(document, context).run(async session => {
+    const { document: canonical, stored } = await session.refresh();
+    mergeCanonicalIntoLive(canonical, document);
+    const frontierHash = documentFrontierHash(canonical);
+    if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
+    const open = openDocuments.get(durableHeadKey(context));
+    if (open?.document === document) open.nextSequence = stored.nextSequence;
+    return stored.nextSequence;
+  });
 }
 
 const compactionState = new Map();
@@ -280,6 +297,8 @@ let compactionInFlight = false;
 async function compactStoredRoom(context, { countAppend = true } = {}) {
   if (!context?.artifactId || !context?.partitionKey) return;
   const key = durableHeadKey(context);
+  const open = openDocuments.get(key);
+  if (open) await catchUpCanonicalRoom(open.document, context);
   const local = compactionState.get(key) ?? {
     appends: 0,
     lastSnapshotAt: null,
@@ -428,272 +447,132 @@ function rejectPeerUpdate(connection, reason) {
   }
 }
 
-async function appendWithRetry(payload, entries) {
+async function appendWithRetry(prepare, entries) {
   let attempt = 0;
   let rebaseAttempts = 0;
-  let nextPayload = payload;
+  let prepared = null;
   for (;;) {
     try {
-      // The room applies updates before the persistence debounce. Recheck live
-      // authority immediately before the durable append instead of relying on
-      // the cached connection lease used by beforeHandleMessage.
       await reauthorizePersistenceEntries(entries);
-      const result = await bridge("append", nextPayload);
+      prepared ??= await prepare();
+      const result = await bridge("append", prepared.payload);
       lastPersistenceFailure = null;
-      rememberDurableHead(entries[0].context, nextPayload.stateVectorHash);
-      // Revocation can land while Convex commits. Do not confirm durability to
-      // a peer until its actor still has write access after the append.
       await reauthorizePersistenceEntries(entries);
-      for (const entry of entries)
-        sendGatewayState(entry.connection, {
-          type: "spectra.durable_ack",
-          updateIds: [entry.messageId],
-        });
-      return result;
+      return { result, ...prepared };
     } catch (error) {
-      if (
-        isRebaseablePersistenceFailure(error) &&
-        rebaseAttempts < PERSISTENCE_REBASE_MAX_ATTEMPTS
-      ) {
-        const context = entries[0].context;
-        let liveHash = resolveRebaseHead({
-          lastPersistedHash: durableHeads.get(durableHeadKey(context)),
-          storedLiveHash: null,
-        });
-        let rebased = rebaseAppendPayload(nextPayload, liveHash);
-        if (rebased.baseStateVectorHash === nextPayload.baseStateVectorHash) {
-          try {
-            const stored = await bridge("load", {
-              artifactId: context.artifactId,
-              partitionKey: context.partitionKey,
-      accountId: context.accountId,
-      policyVersion: context.policyVersion,
-            });
-            liveHash = resolveRebaseHead({
-              lastPersistedHash: liveHash,
-              storedLiveHash: stored?.liveStateVectorHash,
-            });
-            rememberDurableHead(context, liveHash);
-            rebased = rebaseAppendPayload(nextPayload, liveHash);
-          } catch {
-            rebased = nextPayload;
-          }
-        }
-        if (rebased.baseStateVectorHash !== nextPayload.baseStateVectorHash) {
-          nextPayload = rebased;
-          rebaseAttempts += 1;
-          attempt += 1;
-          process.stderr.write(
-            `[durable append] rebasing overlapping Yjs CAS onto ${rebased.baseStateVectorHash}\n`,
-          );
-          continue;
-        }
+      if (isRebaseablePersistenceFailure(error) && rebaseAttempts < PERSISTENCE_REBASE_MAX_ATTEMPTS) {
+        // An explicit CAS rejection proves the attempt did not commit. Only
+        // then may its derived projection/frontier be replaced. An ambiguous
+        // network failure retries the exact envelope and operation identity.
+        prepared = null;
+        rebaseAttempts += 1;
       }
       const persistenceMessage = collaborationFailureMessage(error);
-      const persistenceRecord = {
-        code:
-          persistenceMessage.match(/COLLABORATION_[A-Z_]+/)?.[0] ??
-          "COLLABORATION_APPEND_FAILED",
-        at: Date.now(),
-        attempt: attempt + 1,
-      };
-      if (permanentPersistenceFailure(error)) {
-        lastPersistenceFailure = persistenceRecord;
-        process.stderr.write(`[durable append] ${persistenceMessage}\n`);
-        forceCanonicalReconnect(entries[0].context, persistenceMessage);
-        throw error;
-      }
       attempt += 1;
-      if (attempt >= 12) {
-        lastPersistenceFailure = persistenceRecord;
-        // Exhausted transient retries still leave the shared room ahead of Convex.
-        // Surface unsynchronized/reconnect honesty instead of dropping the ack.
+      lastPersistenceFailure = {
+        code: persistenceMessage.match(/COLLABORATION_[A-Z_]+/)?.[0] ?? "COLLABORATION_APPEND_FAILED",
+        at: Date.now(), attempt,
+      };
+      if (permanentPersistenceFailure(error) || attempt >= 12 ||
+          (isRebaseablePersistenceFailure(error) && rebaseAttempts >= PERSISTENCE_REBASE_MAX_ATTEMPTS)) {
         forceCanonicalReconnect(entries[0].context, persistenceMessage);
         throw error;
       }
-      const retryMs = Math.min(
-        PERSISTENCE_RETRY_MAX_MS,
-        collaborationRetryDelayMs(error, attempt - 1),
-      );
-      process.stderr.write(
-        `[durable append] retrying in ${retryMs}ms (${persistenceMessage})\n`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, retryMs));
+      const retryMs = Math.min(PERSISTENCE_RETRY_MAX_MS, collaborationRetryDelayMs(error, attempt - 1));
+      process.stderr.write(`[durable append] retrying in ${retryMs}ms (${persistenceMessage})\n`);
+      await new Promise(resolve => setTimeout(resolve, retryMs));
     }
   }
 }
 
-async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
-  if (!entries.length || !snapshotAfterFirst) return;
-  const scratch = new Y.Doc();
-  try {
-    Y.applyUpdate(scratch, snapshotAfterFirst);
-    let index = 0;
-    let lastCheckpoint = null;
-    while (index < entries.length) {
-      const group = [entries[index]];
-      if (index > 0) Y.applyUpdate(scratch, entries[index].documentUpdate);
-      index += 1;
-      while (
-        index < entries.length &&
-        samePersistenceBatch(group[0], entries[index])
-      ) {
-        Y.applyUpdate(scratch, entries[index].documentUpdate);
-        group.push(entries[index]);
-        index += 1;
-      }
-      const first = group[0];
-      const last = group[group.length - 1];
-      const nativeAfter = isNativeArtifactDocument(scratch);
-      const afterProjection = nativeAfter
-        ? nativeArtifactProjection(scratch, first.context.schemaVersion)
-        : null;
-      let regionIds = nativeAfter
-        ? nativeChangedRegionIds(first.nativeProjectionBefore, afterProjection)
-        : [...new Set(group.flatMap((entry) => entry.regionIds))];
-      // Semantically unchanged Yjs structs/delete sets still affect replay and
-      // future offline deltas. They must reach the log before acknowledgement.
-      if (!regionIds.length && nativeAfter) regionIds = [NATIVE_PROJECTION_REGION];
-      const immediateProjection =
-        first.context.actorKind === "ai" ||
-        group.some((entry) => entry.nativeInitialization);
-      const projectionJson = immediateProjection
-        ? artifactProjection(scratch, first.context.schemaVersion)
-        : null;
-      const projectionPayloadRef = null;
-      const projectionPayloadDigest = null;
-      const projectionHotStub = null;
-      const mergePlan = planMergedUpdatePersist(
-        Y,
-        group.map((entry) => entry.documentUpdate),
-        MAX_DURABLE_UPDATE_BYTES,
-      );
-      let appendResult = null;
-      let baseHash = appendBaseStateVectorHash({
-        lastPersistedHash: durableHeads.get(durableHeadKey(first.context)),
-        capturedBaseHash: first.baseStateVectorHash,
+async function persistAcceptedMessages(document, entries) {
+  if (!entries.length) return;
+  let index = 0;
+  while (index < entries.length) {
+    const group = [entries[index++]];
+    while (index < entries.length && samePersistenceBatch(group[0], entries[index])) group.push(entries[index++]);
+    const first = group[0];
+    const context = first.context;
+    const mergePlan = planMergedUpdatePersist(Y, group.map(entry => entry.documentUpdate), MAX_DURABLE_UPDATE_BYTES);
+    // A group is one CAS and acknowledgement boundary, inline or spilled.
+    const update = mergePlan.mode === "spill" ? mergePlan.update : mergePlan.batches[0].merged;
+    const updateHash = createHash("sha256").update(update).digest("base64url");
+    let updateEnvelope = { update: Buffer.from(update).toString("base64") };
+    if (mergePlan.mode === "spill") {
+      const storedPayload = await bridge("storeDurablePayload", {
+        artifactId: context.artifactId, partitionKey: context.partitionKey,
+        accountId: context.accountId, policyVersion: context.policyVersion,
+        kind: "yjs-update", digest: mergePlan.manifest.digest,
+        mediaType: mergePlan.manifest.mediaType, bytesBase64: Buffer.from(update).toString("base64"),
       });
-      const nativeInitialization = group.some(
-        (entry) => entry.nativeInitialization,
-      );
-      if (mergePlan.mode === "spill") {
-        const storedPayload = await bridge("storeDurablePayload", {
-          artifactId: first.context.artifactId,
-          partitionKey: first.context.partitionKey,
-          accountId: first.context.accountId,
-          kind: "yjs-update",
-          digest: mergePlan.manifest.digest,
-          mediaType: mergePlan.manifest.mediaType,
-          bytesBase64: Buffer.from(mergePlan.update).toString("base64"),
-      policyVersion: first.context.policyVersion,
-        });
-        const manifest = {
-          ...mergePlan.manifest,
-          payloadRef: storedPayload.payloadRef,
-        };
-        const updateHash = createHash("sha256")
-          .update(mergePlan.update)
-          .digest("base64url");
-        appendResult = await appendWithRetry(
-          {
-            artifactId: first.context.artifactId,
-            partitionKey: first.context.partitionKey,
-            accountId: first.context.accountId,
-            actorKind: first.context.actorKind,
-            clientId: first.context.clientId,
-            policyVersion: first.context.policyVersion,
-            idempotencyKey: `${first.context.clientId}:${updateHash}`,
-            update: "",
-            baseStateVectorHash: baseHash,
-            stateVectorHash: last.stateVectorHash,
-            regionIds,
-            nativeInitialization,
-            projectionJson,
-            projectionHash: projectionJson
-              ? createHash("sha256").update(projectionJson).digest("base64url")
-              : projectionPayloadDigest,
-            payloadManifest: manifest,
-            payloadRef: storedPayload.payloadRef,
-            payloadDigest: manifest.digest,
-            byteLength: mergePlan.update.byteLength,
-            projectionPayloadRef,
-            projectionPayloadDigest,
-            projectionHotStub,
-          },
-          group,
-        );
-      } else {
-        const batches = mergePlan.batches;
-        for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-          const batch = batches[batchIndex];
-          const updateHash = createHash("sha256")
-            .update(batch.merged)
-            .digest("base64url");
-          const isLast = batchIndex === batches.length - 1;
-          appendResult = await appendWithRetry(
-            {
-              artifactId: first.context.artifactId,
-              partitionKey: first.context.partitionKey,
-              accountId: first.context.accountId,
-              actorKind: first.context.actorKind,
-              clientId: first.context.clientId,
-              policyVersion: first.context.policyVersion,
-              idempotencyKey: `${first.context.clientId}:${updateHash}`,
-              update: Buffer.from(batch.merged).toString("base64"),
-              baseStateVectorHash: baseHash,
-              stateVectorHash: last.stateVectorHash,
-              regionIds,
-              nativeInitialization: nativeInitialization && batchIndex === 0,
-              // Projection rides the final sub-batch so split merges do not
-              // rewrite the hot artifact row multiple times.
-              projectionJson: isLast ? projectionJson : null,
-              projectionHash:
-                isLast && projectionJson
-                  ? createHash("sha256")
-                      .update(projectionJson)
-                      .digest("base64url")
-                  : isLast
-                    ? projectionPayloadDigest
-                    : null,
-              projectionPayloadRef: isLast ? projectionPayloadRef : null,
-              projectionPayloadDigest: isLast
-                ? projectionPayloadDigest
-                : null,
-              projectionHotStub: isLast ? projectionHotStub : null,
-            },
-            group,
-          );
-          baseHash = last.stateVectorHash;
-        }
-      }
-      lastCheckpoint = {
-        artifactId: first.context.artifactId,
-        partitionKey: first.context.partitionKey,
-        accountId: first.context.accountId,
-        clientId: first.context.clientId,
-        policyVersion: first.context.policyVersion,
-        schemaVersion: first.context.schemaVersion,
-        roomId: first.context.roomId,
-        stateVectorHash: last.stateVectorHash,
-        throughSequence: appendResult?.sequence ?? null,
+      updateEnvelope = {
+        update: "", payloadRef: storedPayload.payloadRef,
+        payloadDigest: mergePlan.manifest.digest, byteLength: update.byteLength,
+        payloadManifest: { ...mergePlan.manifest, payloadRef: storedPayload.payloadRef },
       };
     }
-    if (lastCheckpoint) {
-      checkpointScheduler(document).note(lastCheckpoint);
-      const frontierHash = documentFrontierHash(scratch);
-      if (frontierHash) document.broadcastStateless(JSON.stringify({
-        type: "spectra.durable_frontier", frontierHash,
-      }));
-    }
-  } finally {
-    scratch.destroy();
+    await canonicalRoom(document, context).run(async session => {
+      let canonical;
+      let rebuild = false;
+      const accepted = await appendWithRetry(async () => {
+        if (rebuild) session.invalidate();
+        rebuild = true;
+        const refreshed = await session.refresh();
+        canonical = refreshed.document;
+        mergeCanonicalIntoLive(canonical, document);
+        const native = isNativeArtifactDocument(canonical);
+        const beforeModel = native ? null : artifactModelState(canonical);
+        const prepared = prepareCanonicalAppend({
+          document: canonical, stored: refreshed.stored, update,
+          projection: doc => artifactProjection(doc, context.schemaVersion),
+          regions: (before, after) => native || isNativeArtifactDocument(canonical)
+            ? nativeChangedRegionIds(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null)
+            : changedArtifactRegions(beforeModel, artifactModelState(canonical)),
+        });
+        if (!prepared.regionIds.length && isNativeArtifactDocument(canonical)) prepared.regionIds = [NATIVE_PROJECTION_REGION];
+        const immediateProjection = context.actorKind === "ai" || group.some(entry => entry.nativeInitialization);
+        const projectionJson = immediateProjection ? prepared.projectionJson : null;
+        const { frontierHash, projectionJson: _projection, ...cas } = prepared;
+        return {
+          frontierHash,
+          payload: {
+            ...cas, ...updateEnvelope,
+            artifactId: context.artifactId, partitionKey: context.partitionKey,
+            accountId: context.accountId, actorKind: context.actorKind,
+            clientId: context.clientId, policyVersion: context.policyVersion,
+            idempotencyKey: `${context.clientId}:${updateHash}`,
+            claimBaseStateVectorHash: first.baseStateVectorHash,
+            nativeInitialization: group.some(entry => entry.nativeInitialization),
+            projectionJson,
+            projectionHash: projectionJson ? createHash("sha256").update(projectionJson).digest("base64url") : null,
+          },
+        };
+      }, group);
+      if (accepted.result.duplicate) {
+        // A prior process may have committed this delta before losing its ack.
+        // Read its current descendants instead of advancing from our attempt.
+        session.invalidate();
+        canonical = (await session.refresh()).document;
+      } else session.commit(accepted.result.sequence);
+      mergeCanonicalIntoLive(canonical, document);
+      for (const entry of group) sendGatewayState(entry.connection, {
+        type: "spectra.durable_ack", updateIds: [entry.messageId],
+      });
+      const frontierHash = documentFrontierHash(canonical);
+      if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
+      checkpointScheduler(document).note({
+        artifactId: context.artifactId, partitionKey: context.partitionKey,
+        accountId: context.accountId, clientId: context.clientId,
+        policyVersion: context.policyVersion, schemaVersion: context.schemaVersion,
+        roomId: context.roomId, stateVectorHash: documentStateVectorHash(canonical),
+        throughSequence: accepted.result.sequence,
+      });
+    });
   }
 }
-
 function schedulePersistence(document, entry) {
   const queue = persistenceQueue(document);
   if (queue.pending.length === 0) {
-    queue.snapshotAfterFirst = Y.encodeStateAsUpdate(document);
     queue.firstPendingAt = Date.now();
   }
   queue.pending.push(entry);
@@ -733,9 +612,7 @@ async function flushPersistence(document) {
   queue.firstPendingAt = null;
   queue.pendingBytes = 0;
   if (!entries.length) return queue.chain.persistTail;
-  const snapshotAfterFirst = queue.snapshotAfterFirst;
-  queue.snapshotAfterFirst = null;
-  const flushing = queue.chain.enqueue({ entries, snapshotAfterFirst }).catch(error => {
+  const flushing = queue.chain.enqueue({ entries }).catch(error => {
       lastPersistenceFailure = { code: "COLLABORATION_APPEND_FAILED", at: Date.now(), attempt: 1 };
       forceCanonicalReconnect(entries[0].context, collaborationFailureMessage(error));
       throw error;
@@ -1182,7 +1059,7 @@ const server = new Server({
     }
   },
 
-  async connected({ connection }) {
+  async connected({ connection, document }) {
     try { await reauthorize(connection.context); }
     catch {
       connection.webSocket.close(connection.context.authorizationRevoked ? 4403 : 1013,
@@ -1190,6 +1067,7 @@ const server = new Server({
       return;
     }
     activeConnections.add(connection);
+    openDocuments.set(durableHeadKey(connection.context), { document, nextSequence: 0 });
     const unwatch = authorizationGuard.watch(connection);
     connection.onClose(() => {
       activeConnections.delete(connection);
@@ -1215,6 +1093,7 @@ const server = new Server({
     await acquireDocumentMessage(document, socketId);
     try {
       await reauthorize(context);
+      await catchUpCanonicalRoom(document, context);
       const nativeBefore = isNativeArtifactDocument(document);
       // Sync step 2 often contains the complete client state on room join.
       // Accept the bounded realtime frame, but persist only the canonical
@@ -1446,7 +1325,6 @@ const server = new Server({
       policyVersion: context.policyVersion,
     });
     let storedDocument = applyStoredRoomUpdates(Y, stored);
-    rememberDurableHead(context, stored?.liveStateVectorHash);
     if (isNativeArtifactDocument(storedDocument)) {
       const observedStateVectorHash = documentStateVectorHash(storedDocument);
       const durableHeadSequence = Math.max(
@@ -1510,7 +1388,6 @@ const server = new Server({
               });
               storedDocument.destroy();
               storedDocument = applyStoredRoomUpdates(Y, stored);
-              rememberDurableHead(context, stored?.liveStateVectorHash);
             } else if (projectionForBridge) {
               await bridge("checkpoint", {
                 artifactId: context.artifactId,
@@ -1535,7 +1412,6 @@ const server = new Server({
               });
               storedDocument.destroy();
               storedDocument = applyStoredRoomUpdates(Y, stored);
-              rememberDurableHead(context, stored?.liveStateVectorHash);
             } else {
               process.stderr.write(
                 `[onLoadDocument:repair] checkpoint deferred — projection not inline (chars=${observedProjectionJson.length})\n`,
@@ -1630,7 +1506,6 @@ const server = new Server({
       }
       bootstrapPayload.projectionJson = projectionJson;
       await bridge("bootstrap", bootstrapPayload);
-      rememberDurableHead(context, stateVectorHash);
     }
     await reauthorize(context);
     return document;
@@ -1651,6 +1526,9 @@ const server = new Server({
         // await close hooks, so rejecting here would crash unrelated rooms.
         process.stderr.write(`[disconnect] ${collaborationFailureMessage(error)}\n`);
       }
+      for (const [key, open] of openDocuments) if (open.document === document) openDocuments.delete(key);
+      await canonicalRooms.get(document)?.session.dispose();
+      canonicalRooms.delete(document);
     }
   },
 });
@@ -1701,6 +1579,12 @@ async function enforceActivePolicyVersions() {
               );
             } catch {}
             connection.webSocket.close(4403, "Access or permissions changed");
+          }
+          const permitted = group.connections.find(connection => activeConnections.has(connection));
+          const open = openDocuments.get(durableHeadKey(group));
+          if (permitted && open && (current.roomId !== permitted.context.roomId || current.nextSequence !== open.nextSequence)) {
+            try { await catchUpCanonicalRoom(open.document, permitted.context); }
+            catch (error) { forceCanonicalReconnect(permitted.context, collaborationFailureMessage(error)); }
           }
         } catch {
           // Independent connection deadlines still expire stale grants while

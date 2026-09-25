@@ -3,7 +3,7 @@ import { makeFunctionReference } from "convex/server";
 import { mutation } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { normalizeAiPreferencePatch } from "../src/features/spectra/settings/schema/preferences";
-import { applicationOperationScope, applicationWriteReceipt } from "./spectraApplicationWriteScope";
+import { applicationApprovalScope, applicationOperationScope, applicationWriteReceipt } from "./spectraApplicationWriteScope";
 import { mapOperationArtifactReferences } from "../src/features/spectra/operations/dependencies";
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
@@ -139,7 +139,9 @@ export const execute = mutation({
       throw new Error("AI_APPLICATION_OPERATION_NOT_ACTIVE");
     let needsConfirmation = operation.requiresConfirmation || confirmedCommands.has(String(input.command));
     const targetIds = strings(row(input.args).targetIds);
-    if (["organize_library", "delete_library_items", "change_sync_policy"].includes(String(input.command)) && targetIds.length) {
+    // Deletion's bounded approval scope below includes exact local identities;
+    // repeating the legacy count query would expand the subtree without a bound.
+    if (["organize_library", "change_sync_policy"].includes(String(input.command)) && targetIds.length) {
       const isPolicy = input.command === "change_sync_policy";
       const effect = await ctx.runQuery(makeFunctionReference<"query">(isPolicy ? "replicas:localEffectCount" : "replicas:localEffectCountForNodes"), isPolicy ? { workIds: targetIds } : { nodeIds: targetIds });
       const count = Number(row(effect).count);
@@ -149,7 +151,8 @@ export const execute = mutation({
         throw new Error("AI_APPLICATION_LOCAL_EFFECT_CHANGED");
       needsConfirmation ||= count > 0 || planned.localFileCountUnknown === true;
     }
-    if (needsConfirmation && (run.approval?.status !== "accepted" || run.approval.executionId !== args.executionId || row(operation.output).approvedApplicationScope !== scope))
+    if (needsConfirmation && (run.approval?.status !== "accepted" || run.approval.executionId !== args.executionId ||
+        row(operation.output).approvedApplicationScope !== await applicationApprovalScope(ctx, operation, run)))
       throw new Error("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
     const snapshot = row(run.contextSnapshot);
     const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined);

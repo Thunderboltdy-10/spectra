@@ -1,0 +1,62 @@
+# S11-SECURITY — finite authorization and approval review
+
+Date: 2026-09-25. Coordinator: `01a0d83f-92fb-7b80-9ea4-99fcecef20aa`. Worker: `01a0d846-5cc7-7162-ae9e-bcad7af153db`.
+
+## First repair: approve the presented effect, not a later subtree
+
+**Reproduced P1:** a Library folder-deletion approval bound only the command's root IDs. `orgTree.trash` later expanded the current subtree. A new child arriving before acceptance was silently approved; replacing a child after acceptance with another child of the same count deleted the replacement. Local-file counts did not distinguish identities. Repeating the pending-status update also admitted the changed subtree. These were real public-handler sequences against disposable `convex-test` data, not source-text assertions.
+
+At baseline `d9aabfb5735bdcd8a620af8a7bdaa85aba08d150`, the extended scope suite had **3 failures / 23 passes**. The substitution case returned `{ trashed: [{ trashed: 2 }] }` rather than denying the mutation. This is not a live attack or a production result.
+
+The repair freezes each confirmed application operation's scope in `spectraRuns.updateStatus(awaiting_confirmation)`, before the runtime publishes confirmation. Acceptance verifies that stored scope instead of creating a fresh authorization from current targets. Execution verifies it again in the same Convex transaction as the nested application mutation and receipt commit. A pending-status retry never refreshes the scope.
+
+The scope includes run, execution, operation, exact input and implicit Library destination identity. Library deletion also binds the actual node IDs, parent/source identities, names, ownership, workspace placement and exact local replica/file identities. The snapshot is stored as a versioned SHA-256 fingerprint, not a second tree or content store. This prevents cross-run scope copying, added/substituted descendants, changed inputs and same-count local-file substitution. An understated local-file consequence is rejected before presenting approval.
+
+The existing receipt scope and replay order are retained. A lost-reply recovery returns the committed result before reevaluating targets, including after the user restores the deleted folder; it does not delete the restored folder again. Current identity, run ownership and execution checks still precede replay. Normal unconfirmed folder creation and Calendar operations retain their existing behavior.
+
+## Scope, configuration and source evidence
+
+Effective `gpt-6-astra / xhigh / danger-full-access / approval never` was independently verified by the coordinator. Checkout: `<local-workspace>`, branch `codex/s11-security-scope`, base `d9aabfb5`. Only this worktree was edited. The `node_modules` junction points to the coordinator-restored primary dependency tree; its target was not modified by this worker. No service, publication, browser, native Office or real-school mutation was performed.
+
+Read completely: the integration checkout's `S11-CHARTER.md` and private `USER-BRIEF.md`. Read the original S11 request through `read_thread`; consulted `S11-FLEET.md`. Actual historical conversation evidence includes:
+
+- S9 integration `01a0cb47-5362-7f51-83b1-0a2b0775fe3d`, turn `01a0cb47-a868-7672-9b1b-a8eac6a69b5a`: integrated `b63daf0c`, claimed deterministic action/approval/receipt coverage, explicitly deferred live acceptance; explained the separate ManageBac import identity/receipt path.
+- S10 AI `01a0d32a-9164-74a0-9320-b4c2c7967a35`, turn `01a0d333-8bfc-7a62-839a-6a17713e8378`: original Stop race finding, explicit choice of nested same-transaction mutation over edits to many handlers; subsequent exact scope, count-only local consequence, derived producer and receipt-preservation decisions. Actual messages `exec-6c61bb3b-f05c-4c25-b145-3ce4c7549f24`, `exec-67f5d803-528e-43ab-84bd-0dfce2096242`, and `exec-9f83e06e-06fb-40e2-947b-6109f34bb4cd` provide the relevant decisions.
+- S10 SECURITY replacement `01a0d384-85e9-77c3-af03-7604dced52f4`: actual independent 7/7 authorization-deadline rerun and inherited expired-workspace metadata-leak reproduction. Its current source report also records the earlier 22-case approval/receipt checks.
+- Final S9-AI live task `01a0d3b1-e48a-7292-b2eb-051452e961ae`, turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`: approval revision/control and authority failures were live leads; the task did not establish current subtree approval safety. No old live claim is promoted to present acceptance.
+
+Relevant source inventory: `b63daf0c` S9 integration; `eac1567b` introduced the current application gateway/scope helpers, approval binding and receipt-preserving integration; `d9aabfb5` is the current starting caller set. Read current `spectraRuns`, `spectraOperations`, `spectraApplicationWrites`, `spectraApplicationWriteScope`, `orgTree.trash`, `orgTreeShared.trashNode/subtreeNodes`, local-effect count queries, operation policy, application tool registry and runtime approval/artifact execution callers.
+
+## Decision review
+
+| Source decision | Current evidence and verdict | Test / consequence / residual |
+| --- | --- | --- |
+| S9 typed application actions, fixed registry, forbidden account actions | **Keep.** `prepareApplicationCommand` rejects prohibited tools; gateway dispatch has no arbitrary function-name argument or account-deletion branch. | Ordinary folder/Calendar positive controls still pass. A full inventory of every non-gateway mutation remains separate work. |
+| S10 common transactional gateway for Stop, current attempt and effect receipt | **Keep.** Authenticated run/op checks and nested `ctx.runMutation` precede receipt commit in `execute`. | Existing foreign-actor, cancelled/failed/superseded/unclaimed, target-authority and receipt recovery cases pass. No live cancellation race is claimed. |
+| S10 approval snapshot created at acceptance, structural input equality | **Replace at approval boundary.** Acceptance had no immutable presented-effect binding. Store pending fingerprint at presentation; require the same fingerprint at acceptance/write. | New pending-input, unseen-child and pending-status retry cases pass. Legacy pending approvals require a fresh proposal. |
+| S10 local-file count as changed-effect protection | **Replace for Library deletion.** Count equality permits identity substitution; subtree expansion can also affect cloud-only descendants. Bind bounded node/local identity footprint; retain exact current transaction checks. | Same-count child and file-path substitution cases pass. Rename/move/sync-policy still use legacy count logic and require a later scoped review. |
+| S10 receipt preservation after reporting failure | **Keep.** `markFailed` preserves the committed receipt and `execute` replays it before new-effect checks. | Real deletion -> lost reply -> manual restore -> replay leaves restored nodes intact. Existing settings/folder receipt cases also pass. |
+| S10 mandatory confirmed command set despite false model flag | **Keep.** Settings/delete/sync/sharing/ManageBac commands require approval independently of `requiresConfirmation`. | Existing false-flag, absent/pending/rejected/wrong-attempt/unbound cases pass. No blanket new confirmation for ordinary reversible operations. |
+| S9/S10 permission-scoped ManageBac retrieval | **Needs further evidence.** `recordsForPurpose` filters personal and audience-scoped rows and current class membership. Class inheritance currently keys on provider class ID without academic period. | Potential cross-period inheritance issue sent to SCHOOL; no leak reproduction or patch claimed here. |
+| S9/S10 artifact update/archive approval guarantees | **Needs replacement in a separate unit.** Current artifact mutations do not share the application gateway's exact approval binding; full wipe is not recognized for ordinary Office edits by `evaluatePlanPolicy`. | Exact bypass callers listed below; no artifact guard patch or end-to-end wipe protection claimed. |
+
+## Validation and cost boundary
+
+- Before repair: `node node_modules/vitest/vitest.mjs run convex/ai-operation-scope-security.test.ts --maxWorkers=1` — **3 failed, 23 passed**, actual subtree mutation reproduced.
+- After first expansion: scope + `ai-run-lifecycle` + `ai-application-integration` — **53/53** across 3 files.
+- Final combined scope + lifecycle + application-integration suite — **57/57 across 3 files** (34 scope cases, 23 neighbors). Includes file substitution, understated consequence, actual rejection, and corrected plans with cancelled prior operations.
+- Scoped ESLint on all four modified TypeScript files and `git diff --check` passed. Full typecheck/build/suite belong to coordinator/RUNTIME and were not run here.
+- The tests exercise pending/accepted/rejected approvals, changed stored inputs, malicious confirmation flags, another actor, stale attempts, same-user concurrent runs, local-file substitution, oversized subtrees, real nested writes and recovery. They do not simulate a production transaction retry, actual browser control, native file write or active grant revocation during Bridge transfer.
+
+**Bounded cost, derived from source rather than a production measurement:** at most 200 target roots, 1,000 distinct subtree nodes, 1,000 local replica rows and 50 replicas per work. Traversal uses the existing indexed live-child query with an overflow sentinel; it refuses over-limit scope rather than truncating. No node/artifact content is copied into the stored approval. Each pending/accepted fingerprint is 67 ASCII characters plus field overhead. The proof is recalculated at presentation, acceptance and first execution; committed receipt replay does not expand the tree. Deletion no longer runs the old unbounded local-count expansion in the gateway. Existing deletion/restore implementation and resumable deletion jobs are unchanged.
+
+These caps are an explicit safety tradeoff for exact bounded review. Oversized AI deletion requires a smaller reviewed plan; this is not a claim that arbitrarily large approved subtrees can execute in one transaction. Human deletion behavior is unchanged. A future batched AI deletion needs an immutable manifest and durable resumable effect contract; silently slicing a large subtree would be incorrect.
+
+## Next finite units and ownership boundaries
+
+1. **Artifact full-wipe and archive enforcement.** Current `act.ts` resolves `artifact.update` through `applyAiArtifactMutation`, including full `content`, `contentPatch`, and academic operations. It then calls `spectraArtifacts.stageAiPatch(commit:true)`; that handler checks actor/run but not operation approval. `artifact.archive` directly calls `spectraArtifacts.archive` without run/operation binding. `evaluatePlanPolicy` treats ordinary Office update as direct and only recognizes broad Code rewrites. Proposed next contract: classify destructive effect from authoritative before/after content, bind exact target/base/effect/attempt at preview, and enforce before the first Yjs/native/canonical write, including cumulative/bulk wipe equivalents. Do not guard only the final `stageAiPatch`, since native/Yjs effects precede it. Requires coordinated ownership with AI/COLLAB/HISTORY and authority review of storage-backed content; no edits made there.
+2. **Remaining app local-target scopes and Bridge revocation.** Extend identity-bound scope review to rename/move/sync-policy, then challenge grant revocation during claims/commit and original-file connection approval using BRIDGE's disposable fixtures. Existing `bridgeSync` has device/current-actor/artifact capability guards; a fresh acceptance of the complete connection/write path is not established by this unit.
+3. **ManageBac inherited visibility.** Independently reproduce class-period, selected/retired membership, staff audience and cross-user/cross-school cases through `recordsForPurpose`, class candidates and resource import. SCHOOL owns `managebac.ts`; evidence/coordination sent before any change. No prompt-based authorization accepted.
+4. **Memory retrieval authorization candidate.** CONTEXT owns a reported cached-memory evidence permission leak and its repair; independent authority review can follow its candidate. No duplicate edit.
+
+No launch-readiness conclusion follows from this finite repair. Its source and deterministic guarantees require coordinator review/integration and paired served-runtime acceptance.

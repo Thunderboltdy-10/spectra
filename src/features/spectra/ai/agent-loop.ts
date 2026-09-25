@@ -26,6 +26,14 @@ export type SpectraAgentLoopResult = {
   turns: number;
 };
 
+/** A semantic stall has already used its local recovery turns, not a provider outage. */
+export class SpectraAgentNoProgressError extends Error {
+  constructor() {
+    super("This attempt stopped after repeated requests made no further progress. Continue in this conversation to retry the remaining work.");
+    this.name = "SpectraAgentNoProgressError";
+  }
+}
+
 function mergeUsage(
   total: OpenRouterUsage | undefined,
   value: OpenRouterUsage | undefined,
@@ -72,27 +80,6 @@ function callFingerprint(call: OpenRouterAgentToolCall) {
   return `${call.name}:${args}`;
 }
 
-function readTargetFingerprint(call: OpenRouterAgentToolCall): string | null {
-  const targetField =
-    call.name === "read_artifact"
-      ? "artifactId"
-      : call.name === "read_workspace"
-        ? "workspaceId"
-        : call.name === "read_thread"
-          ? "threadId"
-          : null;
-  if (!targetField) return null;
-  try {
-    const args = JSON.parse(call.arguments) as Record<string, unknown>;
-    const target = args[targetField];
-    return typeof target === "string" && target.trim()
-      ? `${call.name}:${target.trim()}`
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Runs the model/tool/result loop under explicit reliability guardrails. These
  * are not commercial quotas: they prevent a malformed agent from consuming
@@ -126,13 +113,16 @@ export async function runSpectraAgentLoop(input: {
   const repeatedCalls = new Map<string, number>();
   const savedResults = new Map<string, unknown>();
   const savedReadResults = new Map<string, unknown>();
-  const readsByTarget = new Map<string, number>();
+  const retryableReadFailures = new Set<string>();
+  const readObservations = new Set<string>();
+  let turnsWithoutProgress = 0;
   let usage: OpenRouterUsage | undefined;
   let model: string | undefined;
   let provider: string | undefined;
   let turns = 0;
   let toolCalls = 0;
   let finalizationOnly = false;
+  let stalled = false;
   let finalizationNudgeAdded = false;
   let finalizationTurns = 0;
   let lastFinalizationText = "";
@@ -165,7 +155,7 @@ export async function runSpectraAgentLoop(input: {
     finalizationOnly = true;
     if (finalizationNudgeAdded) return;
     const systemMessage = messages.find((message) => message.role === "system");
-    const nudge = `\n\nReliability guardrail: ${reason}. Finish now using the context and tool results already gathered. Do not call any more read or write tools. Return one valid terminal plan or the terminal creation tool. If the request cannot be completed from existing evidence, give a concise, honest answer that says what is missing.`;
+    const nudge = `\n\nReliability guardrail: ${reason}. Finish now using the context and tool results already gathered. Do not call any more read or write tools. Give a final response, or use the required terminal tool for an assigned creation or coordination task. Preserve every requested outcome and distinguish staged work from saved results. If the request cannot be completed from existing evidence, say precisely what remains incomplete.`;
     if (systemMessage) {
       const index = messages.indexOf(systemMessage);
       messages[index] = {
@@ -187,7 +177,8 @@ export async function runSpectraAgentLoop(input: {
       enterFinalizationOnly(`its ${maxTurns}-turn limit was reached`);
     if (!finalizationOnly && Date.now() - startedAt >= maxElapsedMs)
       enterFinalizationOnly("its time limit was reached");
-    if (finalizationOnly && finalizationTurns >= 2)
+    if (finalizationOnly && finalizationTurns >= 2) {
+      if (stalled) throw new SpectraAgentNoProgressError();
       return {
         text: lastFinalizationText,
         model,
@@ -195,9 +186,11 @@ export async function runSpectraAgentLoop(input: {
         usage,
         turns,
       } satisfies SpectraAgentLoopResult;
+    }
     turns += 1;
     if (finalizationOnly) finalizationTurns += 1;
     const turn = await input.requestTurn(messages, turns);
+    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (finalizationOnly) lastFinalizationText = turn.text;
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
@@ -225,7 +218,8 @@ export async function runSpectraAgentLoop(input: {
         turns,
       } satisfies SpectraAgentLoopResult;
 
-    if (turn.toolCalls.length === 0)
+    if (turn.toolCalls.length === 0) {
+      if (stalled && !turn.text.trim()) throw new SpectraAgentNoProgressError();
       return {
         text: turn.text,
         model,
@@ -233,6 +227,7 @@ export async function runSpectraAgentLoop(input: {
         usage,
         turns,
       } satisfies SpectraAgentLoopResult;
+    }
 
     messages.push({
       role: "assistant",
@@ -244,6 +239,7 @@ export async function runSpectraAgentLoop(input: {
       })),
     });
 
+    let madeProgress = false;
     const executeOne = async (call: OpenRouterAgentToolCall) => {
       if (input.signal?.aborted)
         throw new DOMException("Aborted", "AbortError");
@@ -253,7 +249,7 @@ export async function runSpectraAgentLoop(input: {
           ok: false,
           code: "finalization_required",
           message:
-            "Do not call more tools. Use the tool results already in this conversation and return a terminal plan now.",
+            "Use the existing results and give your final response. Explain any remaining work accurately.",
         };
       if (toolCalls >= maxToolCalls) {
         enterFinalizationOnly(`its ${maxToolCalls}-tool limit was reached`);
@@ -262,16 +258,16 @@ export async function runSpectraAgentLoop(input: {
           ok: false,
           code: "tool_budget_reached",
           message:
-            "No more tools can be called in this run. Use the tool results already in this conversation and return a terminal plan now.",
+            "No more tools can be called in this run. Use the existing results and give your final response, including any remaining work.",
         };
       }
       toolCalls += 1;
       const fingerprint = callFingerprint(call);
       const repetition = (repeatedCalls.get(fingerprint) ?? 0) + 1;
       repeatedCalls.set(fingerprint, repetition);
-      if (repetition === 2 && savedResults.has(fingerprint))
+      if (savedResults.has(fingerprint))
         return savedResults.get(fingerprint);
-      if (repetition === 2 && savedReadResults.has(fingerprint))
+      if (savedReadResults.has(fingerprint))
         return {
           status: 0,
           ok: true,
@@ -279,7 +275,10 @@ export async function runSpectraAgentLoop(input: {
           message:
             "This exact read already returned successfully. Use its earlier result in this conversation; no fresh data was fetched.",
         };
-      if (repetition === 2)
+      // One retry of an explicitly retryable read is useful recovery. Never
+      // infer that an unacknowledged mutation is safe to execute again.
+      const retryRead = repetition === 2 && retryableReadFailures.delete(fingerprint);
+      if (repetition === 2 && !retryRead)
         return {
             status: 1,
             ok: false,
@@ -299,32 +298,31 @@ export async function runSpectraAgentLoop(input: {
           message:
             "This exact tool request has already been repeated without progress. Use the earlier result or finish the task.",
         };
-      const readTarget = readTargetFingerprint(call);
-      if (readTarget) {
-        const previousReads = readsByTarget.get(readTarget) ?? 0;
-        if (previousReads >= 3)
-          return {
-            status: 1,
-            ok: false,
-            code: "read_target_budget_reached",
-            message:
-              "This item has already been read three times in this run. Use its existing tool results, make the requested changes, and submit the complete plan. Do not reread this item.",
-          };
-        readsByTarget.set(readTarget, previousReads + 1);
-      }
+      const observe = (result: unknown) => {
+        const normalized = toModelToolResult(result);
+        if (input.isParallelSafeTool?.(call)) {
+          if (normalized.status === 0) {
+            savedReadResults.set(fingerprint, result);
+            const observation = callFingerprint({ ...call, arguments: JSON.stringify(normalized) });
+            if (!readObservations.has(observation)) madeProgress = true;
+            readObservations.add(observation);
+          } else if ("retryable" in normalized && normalized.retryable === true) {
+            retryableReadFailures.add(fingerprint);
+          }
+        } else if (normalized.status === 0) {
+          madeProgress = true;
+          if (input.isMutationTool?.(call)) savedResults.set(fingerprint, result);
+        }
+        return result;
+      };
       try {
         const result = await input.executeTool(call);
         if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-        const normalized = toModelToolResult(result);
-        if (input.isMutationTool?.(call) && normalized.status === 0)
-          savedResults.set(fingerprint, result);
-        else if (input.isParallelSafeTool?.(call) && normalized.status === 0)
-          savedReadResults.set(fingerprint, result);
-        return result;
+        return observe(result);
       } catch (error) {
         if (input.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
-        return { ok: false, code: "tool_execution_failed", retryable: true,
-          message: error instanceof Error ? error.message : String(error) };
+        return observe({ ok: false, code: "tool_execution_failed", retryable: true,
+          message: error instanceof Error ? error.message : String(error) });
       }
     };
     const terminalCallIds = new Set(terminalCalls.map((call) => call.id));
@@ -381,6 +379,19 @@ export async function runSpectraAgentLoop(input: {
           usage,
           turns,
         } satisfies SpectraAgentLoopResult;
+    }
+    turnsWithoutProgress = madeProgress ? 0 : turnsWithoutProgress + 1;
+    if (!finalizationOnly && turnsWithoutProgress === 2) {
+      // Add feedback after the observations, preserving the stable prompt
+      // prefix and the complete user request. Writes remain available here.
+      messages.push({
+        role: "system",
+        content: "The last two tool turns added no new information or accepted work. Use the results already available, correct a failed request, or take the next needed action. Continue every unresolved part of the user's request; an accepted operation covers only that operation. If nothing useful remains possible, explain the concrete missing information or failed action. Do not repeat the same retrieval cycle or invent saved results.",
+      });
+    }
+    if (!finalizationOnly && turnsWithoutProgress >= 4) {
+      stalled = true;
+      enterFinalizationOnly("four consecutive tool turns added no new information or accepted work");
     }
   }
 }

@@ -48,11 +48,32 @@ function validateWriteReceipt(
     targetRevision: request.targetRevision,
     resultPayloadHash: request.contentHash,
     target: { regionIds: request.regionIds, partNames: request.partNames },
-    basePayloadHash: /^[a-f0-9]{64}$/.test(replica?.contentHash ?? request.baseRevision)
-      ? replica?.contentHash ?? request.baseRevision
+    // The watcher can observe the result before this receipt arrives. The
+    // receipt still proves the queued base, never that mutable observation.
+    basePayloadHash: /^[a-f0-9]{64}$/.test(request.baseRevision)
+      ? request.baseRevision
       : undefined,
     nativeFormat: replica?.nativeFormat ?? work.nativeFormat,
   });
+}
+
+async function writeRevisionStillApplicable(
+  ctx: MutationCtx,
+  request: Doc<"bridgeWriteRequests">,
+  replica: Doc<"workReplicas"> | null,
+) {
+  if (!replica) return false;
+  if (replica.revision === request.baseRevision) return true;
+  // After replace/restart, discovery or upload can beat the durable ack.
+  // Accept only the exact queued bytes, with their retained payload binding.
+  // Metadata-only discovery need not attach that payload to the local row.
+  if (replica.revision !== request.targetRevision ||
+      replica.contentHash !== request.contentHash ||
+      request.targetRevision !== request.contentHash) return false;
+  const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
+  const payload = payloadId ? await ctx.db.get(payloadId) : null;
+  return Boolean(payload && payload.accountId === request.accountId &&
+    payload.state === "active" && payload.hash === request.contentHash);
 }
 
 async function digest(value: string) {
@@ -1346,8 +1367,9 @@ export const refreshWriteClaim = mutation({
       ctx.db.get(request.workId), ctx.db.get(request.replicaId), ctx.db.get(request.mountId),
     ]);
     if (!work || work.status === "deleted" || !(await hasArtifactModify(ctx, actor, request.workId)) ||
-        !activeReplicaWriteTarget(replica, mount, device) || replica?.revision !== request.baseRevision ||
-        replica.mountId !== request.mountId || replica.deviceId !== request.deviceId) return { valid: false };
+        !activeReplicaWriteTarget(replica, mount, device) || !replica ||
+        replica.mountId !== request.mountId || replica.deviceId !== request.deviceId ||
+        !(await writeRevisionStillApplicable(ctx, request, replica))) return { valid: false };
     await ctx.db.patch(request._id, { claimedAt: now, updatedAt: now });
     return { valid: true };
   },
@@ -1525,7 +1547,17 @@ export const completeWrite = mutation({
         candidate.baseRevision === request.targetRevision &&
         (candidate.state === "verified" || candidate.state === "conflicted"),
       );
-      if (newerTerminalWrite || (replica && replica.revision !== request.baseRevision)) {
+      const hasNewerWrite = queuedWrites.some((candidate) =>
+        candidate._id !== request._id &&
+        candidate.replicaId === request.replicaId &&
+        (candidate.state === "pending" || candidate.state === "claimed") &&
+        candidate.baseRevision === request.targetRevision,
+      );
+      // A different cloud head without a queued descendant is not evidence
+      // that this old receipt may replace it, even when disk still has B.
+      const unrelatedCloudHead = cloud?.payloadRef && !hasNewerWrite &&
+        cloud.revision !== request.baseRevision && cloud.revision !== request.targetRevision;
+      if (newerTerminalWrite || unrelatedCloudHead || !(await writeRevisionStillApplicable(ctx, request, replica))) {
         const errorCode = "superseded-by-newer-write";
         await ctx.db.patch(request._id, {
           state: "failed",
@@ -1537,12 +1569,6 @@ export const completeWrite = mutation({
         await failStorageTransitionForRequest(ctx, request, errorCode, now, "conflicted");
         return completion("failed", { ignored: true, reason: errorCode });
       }
-      const hasNewerWrite = queuedWrites.some((candidate) =>
-        candidate._id !== request._id &&
-        candidate.replicaId === request.replicaId &&
-        (candidate.state === "pending" || candidate.state === "claimed") &&
-        candidate.baseRevision === request.targetRevision,
-      );
       await ctx.db.patch(request.replicaId, {
         payloadRef: request.payloadRef,
         baseRevision: request.targetRevision,

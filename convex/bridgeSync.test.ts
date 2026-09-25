@@ -7,6 +7,7 @@ import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
 import { syncRetryAt } from "../shared/sync-retry-policy";
+import { nativeOperationId, type NativeSaveReceipt } from "../shared/native-office-contract";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
@@ -16,7 +17,7 @@ async function seedUploadCandidates(
 ) {
   return t.run(async (ctx) => {
     const workId = await ctx.db.insert("spectraArtifacts", {
-      ownerAccountId: fixture.accountId, blueprintKey: "resource", title: "Upload candidate",
+      ownerAccountId: fixture.accountId, schoolId: fixture.schoolId, blueprintKey: "resource", title: "Upload candidate",
       content: {}, tags: [], status: "active", createdAt: Date.now(), updatedAt: Date.now(),
     });
     const replicaIds = [];
@@ -135,7 +136,8 @@ describe("Bridge structure receipts", () => {
     const fixture = await seedBridge(t);
     const { workId, replicaIds } = await seedUploadCandidates(t, fixture, 1);
     const requestId = await t.run(ctx => ctx.db.insert("bridgeFsRequests", {
-      ...fixture, workId, replicaId: replicaIds[0], localResourceId: "lr_0000000000000000",
+      accountId: fixture.accountId, deviceId: fixture.deviceId, mountId: fixture.mountId,
+      workId, replicaId: replicaIds[0], localResourceId: "lr_0000000000000000",
       direction: "spectra-to-disk", kind: "rename", sourceRelativePath: "candidate-0.docx",
       targetRelativePath: "renamed.docx", idempotencyKey: "rename-receipt", state: "pending", baseRevision: "a".repeat(64),
       explanation: "Disposable rename", createdAt: Date.now(), updatedAt: Date.now(),
@@ -370,6 +372,206 @@ describe("Bridge structure receipts", () => {
   });
 });
 
+describe("Bridge write acknowledgement after native observation", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  async function seedWrite(observation: "upload" | "metadata", withReceipt = true) {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const hash = async (bytes: string) => Array.from(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes))),
+      byte => byte.toString(16).padStart(2, "0"),
+    ).join("");
+    const baseHash = await hash("native base");
+    const targetBytes = "native result";
+    const targetHash = await hash(targetBytes);
+    const resource = {
+      localResourceId: "lr_eeeeeeeeeeeeeeee", relativePath: "Essay.docm",
+      nativeFormat: "docm", size: targetBytes.length, contentHash: baseHash,
+    };
+    const { registrations } = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential, mountId: fixture.mountId, resources: [resource],
+    });
+    const registration = registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId || !registration.workId)
+      throw new Error("Expected a discovered replica");
+    const { replicaId, workId } = registration;
+    const projection = { type: "doc", content: [{ type: "paragraph", content: [] }] };
+    const seeded = await t.run(async ctx => {
+      const now = Date.now();
+      const payloadId = await ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId, hash: targetHash,
+        storageId: await ctx.storage.store(new Blob([targetBytes])), bytes: targetBytes.length,
+        mediaType: "application/octet-stream", refCount: 1, state: "active", createdAt: now, verifiedAt: now,
+      });
+      const basePayloadId = await ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId, hash: baseHash,
+        storageId: await ctx.storage.store(new Blob(["native base"])), bytes: 11,
+        mediaType: "application/octet-stream", refCount: 2, state: "active", createdAt: now, verifiedAt: now,
+      });
+      const cloudId = await ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId, workId, kind: "cloud", nativeFormat: "docm",
+        payloadRef: String(basePayloadId), revision: baseHash, contentHash: baseHash,
+        baseRevision: baseHash, state: "current", updatedAt: now,
+      });
+      await ctx.db.patch(replicaId, { revision: baseHash, contentHash: baseHash, baseRevision: baseHash, state: "pending" });
+      if (observation === "metadata") await ctx.db.insert("syncPolicies", {
+        accountId: fixture.accountId, scopeKind: "item", scopeId: String(workId),
+        preset: "device", contentDirection: "local-to-spectra", discovery: "auto", structure: "independent",
+        cloudContent: "metadata-only", includeGlobs: [], excludeGlobs: [], timing: "continuous",
+        protectedOriginal: false, createdAt: now, updatedAt: now,
+      });
+      const nativeReceipt: NativeSaveReceipt = {
+        kind: "native-office-save", format: "docx", artifactId: String(workId),
+        operationId: nativeOperationId(String(workId), baseHash, targetHash),
+        basePayloadHash: baseHash, resultPayloadHash: targetHash, baseRevision: baseHash, resultRevision: targetHash,
+        targets: { regionIds: [], partNames: [] }, semantic: { resultDigest: targetHash, readbackDigest: targetHash },
+        preservedPartNames: ["word/vbaProject.bin"], state: "pending",
+      };
+      const requestId = await ctx.db.insert("bridgeWriteRequests", {
+        accountId: fixture.accountId, deviceId: fixture.deviceId, mountId: fixture.mountId,
+        workId, replicaId, localResourceId: resource.localResourceId, relativePath: resource.relativePath,
+        payloadRef: String(payloadId), baseRevision: baseHash, targetRevision: targetHash, contentHash: targetHash,
+        projectionBaseContent: projection, projectionBaseContentHash: targetHash, projectionBaseTextIndex: "result",
+        idempotencyKey: "observed-native-write", nativeReceipt: withReceipt ? nativeReceipt : undefined,
+        regionIds: [], partNames: [], state: "pending", expiresAt: now + 86_400_000,
+        createdAt: now, updatedAt: now,
+      });
+      const operationId = await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId, workId, replicaId, idempotencyKey: "observed-native-write",
+        direction: "cloud-to-local", revisionBefore: baseHash, revisionAfter: targetHash,
+        state: "pending", actorKind: "user", createdAt: now, updatedAt: now,
+      });
+      return { payloadId, cloudId, requestId, operationId };
+    });
+    const claim = async () => {
+      const { request } = await t.mutation(api.bridgeSync.claimWrite, { credential });
+      if (!request) throw new Error("Expected write claim");
+      return { credential, requestId: request.requestId, claimGeneration: request.claimGeneration, claimToken: request.claimToken };
+    };
+    const firstClaim = await claim();
+    const observe = async () => {
+      await t.mutation(api.bridgeSync.discoverResourcesPage, {
+        credential, mountId: fixture.mountId, resources: [{ ...resource, contentHash: targetHash }],
+      });
+      if (observation === "upload") await t.mutation(api.bridgeSync.commitPayloadUpload, {
+        credential, replicaId, hash: targetHash, bytes: targetBytes.length,
+        mediaType: "application/octet-stream", payloadRef: String(seeded.payloadId),
+      });
+    };
+    return { t, ...fixture, ...seeded, replicaId, workId, projection, baseHash, targetHash, firstClaim, claim, observe };
+  }
+
+  it.each(["upload", "metadata"] as const)("accepts a lost receipt after %s observed its exact native result", async observation => {
+    const f = await seedWrite(observation);
+    await f.observe();
+    expect((await f.t.run(ctx => ctx.db.get(f.replicaId)))?.revision).toBe(f.targetHash);
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+      ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+    })).toEqual({ state: "verified" });
+    const after = await f.t.run(async ctx => ({
+      local: await ctx.db.get(f.replicaId), request: await ctx.db.get(f.requestId), operation: await ctx.db.get(f.operationId),
+    }));
+    expect(after.local).toMatchObject({
+      revision: f.targetHash, projectionBaseRevision: f.targetHash, projectionBaseContent: f.projection,
+      relativePath: "Essay.docm", nativeFormat: "docm", state: "current",
+    });
+    expect(after.request?.nativeReceipt).toMatchObject({ basePayloadHash: f.baseHash, state: "applied", preservedPartNames: ["word/vbaProject.bin"] });
+    expect(after.operation?.state).toBe("verified");
+    await f.t.mutation(api.bridgeSync.completeWrite, { ...f.firstClaim, outcome: "waiting", errorCode: "office-locked" });
+    expect(await f.t.run(ctx => ctx.db.get(f.replicaId))).toEqual(after.local);
+  });
+
+  it("recovers a legacy write without an Office receipt after its upload echo", async () => {
+    const f = await seedWrite("upload", false);
+    await f.observe();
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+      ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+    })).toEqual({ state: "verified" });
+  });
+
+  it("redrives a lost native receipt after observation while rejecting the expired claim", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const f = await seedWrite("upload");
+    await f.observe();
+    clock.mockReturnValue(Date.now() + BRIDGE_CLAIM_REDRIVE_MS + 1);
+    const recovered = await f.claim();
+    expect(recovered.claimGeneration).toBe(f.firstClaim.claimGeneration + 1);
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, recovered)).toEqual({ valid: true });
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
+    for (const outcome of ["verified", "waiting", "failed", "conflicted"] as const) {
+      expect(await f.t.mutation(api.bridgeSync.completeWrite, { ...f.firstClaim, outcome, actualRevision: f.targetHash }))
+        .toMatchObject({ ignored: true, reason: "stale-claim" });
+    }
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, { ...recovered, outcome: "verified", actualRevision: f.targetHash }))
+      .toEqual({ state: "verified" });
+  });
+
+  it.each(["newer-native", "wrong-hash", "unavailable-payload", "wrong-payload"] as const)(
+    "does not treat %s as a recoverable native result", async reason => {
+      const f = await seedWrite("upload");
+      await f.observe();
+      await f.t.run(async ctx => {
+        if (reason === "newer-native") await ctx.db.patch(f.replicaId, { revision: "c".repeat(64), contentHash: "c".repeat(64) });
+        if (reason === "wrong-hash") await ctx.db.patch(f.replicaId, { contentHash: "c".repeat(64) });
+        if (reason === "unavailable-payload") await ctx.db.patch(f.payloadId, { state: "quarantined" });
+        if (reason === "wrong-payload") await ctx.db.patch(f.payloadId, { hash: "c".repeat(64) });
+      });
+      const before = await f.t.run(async ctx => ({ local: await ctx.db.get(f.replicaId), cloud: await ctx.db.get(f.cloudId) }));
+      expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
+      expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+        ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+      })).toMatchObject({ state: "failed", ignored: true, reason: "superseded-by-newer-write" });
+      expect(await f.t.run(async ctx => ({ local: await ctx.db.get(f.replicaId), cloud: await ctx.db.get(f.cloudId) }))).toEqual(before);
+    },
+  );
+
+  it("rejects a receipt rebased to the observed result instead of its queued base", async () => {
+    const f = await seedWrite("upload");
+    await f.observe();
+    await f.t.run(async ctx => {
+      const request = await ctx.db.get(f.requestId);
+      await ctx.db.patch(f.requestId, { nativeReceipt: { ...(request!.nativeReceipt as NativeSaveReceipt), basePayloadHash: f.targetHash } });
+    });
+    const before = await f.t.run(ctx => ctx.db.get(f.replicaId));
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+      ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+    })).toMatchObject({ state: "failed", errorCode: "NATIVE_RECEIPT_BASE_MISMATCH" });
+    expect(await f.t.run(ctx => ctx.db.get(f.replicaId))).toEqual(before);
+  });
+
+  it("preserves a different cloud head when an old native acknowledgement arrives", async () => {
+    const f = await seedWrite("upload");
+    await f.observe();
+    await f.t.run(ctx => ctx.db.patch(f.cloudId, {
+      revision: "c".repeat(64), contentHash: "c".repeat(64), state: "ahead",
+      projectionBaseContent: { newer: "cloud edit" },
+    }));
+    const before = await f.t.run(async ctx => ({ local: await ctx.db.get(f.replicaId), cloud: await ctx.db.get(f.cloudId) }));
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+      ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+    })).toMatchObject({ state: "failed", ignored: true, reason: "superseded-by-newer-write" });
+    expect(await f.t.run(async ctx => ({ local: await ctx.db.get(f.replicaId), cloud: await ctx.db.get(f.cloudId) }))).toEqual(before);
+  });
+
+  it("rechecks permission after the native result was observed", async () => {
+    const f = await seedWrite("upload");
+    await f.observe();
+    await f.t.run(async ctx => {
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: "reassigned-native-owner", email: "reassigned@example.test", emailVerified: true,
+        name: "Reassigned", status: "active", createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await ctx.db.patch(f.workId, { ownerAccountId: accountId });
+    });
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
+    expect(await f.t.mutation(api.bridgeSync.completeWrite, {
+      ...f.firstClaim, outcome: "verified", actualRevision: f.targetHash,
+    })).toEqual({ state: "failed" });
+    expect(await f.t.run(ctx => ctx.db.get(f.requestId))).toMatchObject({ errorCode: "permission-revoked" });
+  });
+});
+
 function setupTest() {
   const t = convexTest(schema, modules);
   aggregateTest.register(t, "orgNodeCountByType");
@@ -449,7 +651,7 @@ async function seedBridge(t: ReturnType<typeof convexTest>) {
       createdAt: now,
       updatedAt: now,
     });
-    return { accountId, deviceId, mountId };
+    return { accountId, schoolId, deviceId, mountId };
   });
 }
 

@@ -61,9 +61,10 @@ export const personalOverview = query({
         .take(ROW_LIMIT + 1) : [],
       ctx.db
         .query("spectraWorkspaces")
-        .withIndex("by_account_activity", (q) =>
+        .withIndex("by_account_status_activity", (q) =>
           q
             .eq("ownerAccountId", actor.accountId)
+            .eq("status", "active")
             .gte("lastActivityAt", args.from)
             .lte("lastActivityAt", args.to),
         )
@@ -96,9 +97,8 @@ export const personalOverview = query({
     const work = workRows.slice(0, ROW_LIMIT).filter(
       (item) => item.status !== "deleted" && item.blueprintKey !== "timetable",
     );
-    const workspaces = workspaceRows
-      .slice(0, ROW_LIMIT)
-      .filter((item) => item.status === "active");
+    // Archived history must not consume the active-workspace aggregation bound.
+    const workspaces = workspaceRows.slice(0, ROW_LIMIT);
     const runs = runRows.slice(0, ROW_LIMIT);
     const meters = meterRows.slice(0, ROW_LIMIT);
     const byType = [...work.reduce((result, item) => {

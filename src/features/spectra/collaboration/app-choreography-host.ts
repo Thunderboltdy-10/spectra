@@ -2,13 +2,12 @@
 
 import { createElement, Fragment, useEffect, useState } from "react";
 import {
-  APP_CHOREOGRAPHY_SETTLE_MS,
   AppChoreographyCoordinator,
-  appSurfaceForNavigation,
-  appSurfaceFromChoreographyTarget,
   appSurfaceFromPathname,
   arbitrateAppSurface,
   type AppChoreographyRequest,
+  type AppChoreographyEntry,
+  type AppChoreographyDecision,
   type AppSurface,
   type AppViewportSnapshot,
 } from "./app-choreography";
@@ -21,33 +20,64 @@ import {
   useFollowAi,
 } from "./follow-ai";
 import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
-import { getSpectraMotionSnapshot } from "../motion/motion-level";
-import { capabilityById } from "../capabilities/catalog";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 
-const UI_EVENT_CAPABILITY: Record<string, string> = {
-  organize_library: "app.library.organize",
-  settings_changed: "app.settings.change",
-  sync_policy_changed: "app.sync.policy.change",
-  memory_written: "app.memory.write",
-  sharing_changed: "app.sharing.change",
-  managebac_sync_requested: "app.managebac.sync",
-  managebac_classes_selected: "app.managebac.sync",
-  calendar_changed: "app.page.calendar",
-  bridge_setup: "app.bridge.setup",
-  reference_insert: "app.reference.insert",
-  comment_added: "app.comments.add",
-  navigate: "app.navigate",
-  navigate_spectra: "app.navigate",
+let coordinator = new AppChoreographyCoordinator();
+const artifactPerformers = new Map<string, AiPerformer>();
+let claimTicker: number | null = null;
+
+export type AppPerformanceContext = {
+  signal: AbortSignal;
+  /** Read at every control boundary; never cache visibility for a whole edit. */
+  decision: () => AppChoreographyDecision;
+  /** Acknowledge actual progress and renew the local claim before the next step. */
+  checkpoint: () => boolean;
 };
 
-let coordinator = new AppChoreographyCoordinator();
-const settleTimers = new Map<string, number>();
-let artifactPerformer: AiPerformer | null = null;
-let claimTicker: number | null = null;
+type PendingPerformance = {
+  entry: AppChoreographyEntry;
+  execute: (context: AppPerformanceContext) => void | Promise<void>;
+  abort: AbortController;
+  started: boolean;
+};
+const pendingPerformances = new Map<string, PendingPerformance>();
+let stopObservingCoordinator = coordinator.subscribe(reconcilePerformances);
+
+function performanceKey(request: Pick<AppChoreographyRequest, "actorId" | "operationId">): string {
+  return JSON.stringify([request.actorId, request.operationId]);
+}
+
+function reconcilePerformances(): void {
+  for (const [key, pending] of pendingPerformances) {
+    const { entry, abort } = pending;
+    if (entry.status === "cancelled" || entry.status === "failed" || entry.status === "completed") {
+      pendingPerformances.delete(key);
+      abort.abort();
+      continue;
+    }
+    if (pending.started || entry.status !== "performing") continue;
+    pending.started = true;
+    // Defer until enqueue has returned; synchronous callbacks cannot reorder the queue.
+    void Promise.resolve().then(async () => {
+      if (abort.signal.aborted) return;
+      try {
+        await pending.execute({
+          signal: abort.signal,
+          decision: () => arbitrateAppSurface(entry.target, currentViewportSnapshot(entry.actorId, entry)),
+          checkpoint: () => !abort.signal.aborted && coordinator.renewClaim(entry.actorId, entry.operationId),
+        });
+        if (!abort.signal.aborted && pendingPerformances.get(key) === pending)
+          coordinator.complete(entry.actorId, entry.operationId);
+      } catch (error) {
+        if (!abort.signal.aborted && pendingPerformances.get(key) === pending)
+          coordinator.fail(entry.actorId, entry.operationId, error instanceof Error ? error.message : "The local performer failed.");
+      }
+    });
+  }
+}
 
 function idleActor(actorId: string): ActorIdentity {
   return {
@@ -58,27 +88,30 @@ function idleActor(actorId: string): ActorIdentity {
   };
 }
 
-/** One artifact-level body per followed actor. Server awareness still owns
+/** One artifact-level body per actor. Server awareness still owns
  * durable beats; this performer is the client queue so two envelopes cannot
  * put one actor in two places (ARCHITECTURE-AI §3). */
 export function artifactPerformerFor(actorId: string): AiPerformer {
-  if (!artifactPerformer) {
-    artifactPerformer = new AiPerformer(idleActor(actorId), () => {
+  let performer = artifactPerformers.get(actorId);
+  if (!performer) {
+    performer = new AiPerformer(idleActor(actorId), () => {
       // Artifact beats already publish through collaboration awareness.
       // The performer exists to serialize client envelopes without a second
       // visible body. Publishing here would duplicate the server frames.
     });
-  } else {
-    artifactPerformer.setActor(idleActor(actorId));
+    artifactPerformers.set(actorId, performer);
   }
-  return artifactPerformer;
+  return performer;
 }
 
 export function getAppChoreographyCoordinator(): AppChoreographyCoordinator {
   return coordinator;
 }
 
-export function currentViewportSnapshot(actorId?: string): AppViewportSnapshot {
+export function currentViewportSnapshot(
+  actorId?: string,
+  target?: Pick<AppChoreographyRequest, "target" | "targetKey">,
+): AppViewportSnapshot {
   const pathname =
     typeof window === "undefined" ? "/workspace" : window.location.pathname;
   const surface = appSurfaceFromPathname(pathname);
@@ -95,83 +128,56 @@ export function currentViewportSnapshot(actorId?: string): AppViewportSnapshot {
     followingActor: isFollowingAi(),
     followedActorId: getFollowedAiActorId(),
     ...(actorId ? { actorId } : {}),
+    ...(target ? { targetVisible: visible.includes(target.target) && isAppTargetVisible(target.targetKey) } : {}),
   };
 }
 
-function settleMs(): number {
-  return getSpectraMotionSnapshot().reduced ? 0 : APP_CHOREOGRAPHY_SETTLE_MS;
+function isAppTargetVisible(targetKey?: string): boolean {
+  if (!targetKey || typeof document === "undefined") return false;
+  const candidates = document.querySelectorAll<HTMLElement>(
+    "[data-spectra-ai-target], [data-spectra-target], [data-ai-region], [data-node-id], [data-calendar-item-id]",
+  );
+  for (const element of candidates) {
+    if (![element.dataset.spectraAiTarget, element.dataset.spectraTarget, element.dataset.aiRegion,
+      element.dataset.nodeId, element.dataset.calendarItemId].includes(targetKey)) continue;
+    const rect = element.getBoundingClientRect();
+    let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+    let right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
+    let hidden = false;
+    for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
+      const style = window.getComputedStyle(parent);
+      if (parent.hidden || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+        hidden = true;
+        break;
+      }
+      if (parent === element) continue;
+      const clip = parent.getBoundingClientRect();
+      if (/(hidden|clip|auto|scroll)/.test(style.overflowX || style.overflow)) {
+        left = Math.max(left, clip.left); right = Math.min(right, clip.right);
+      }
+      if (/(hidden|clip|auto|scroll)/.test(style.overflowY || style.overflow)) {
+        top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
+      }
+    }
+    if (!hidden && right > left && bottom > top) return true;
+  }
+  return false;
 }
 
-function completeLater(actorId: string, operationId: string): void {
-  const previous = settleTimers.get(actorId);
-  if (previous !== undefined && typeof window !== "undefined") {
-    window.clearTimeout(previous);
-  }
-  const delay = settleMs();
-  const finish = () => {
-    settleTimers.delete(actorId);
-    coordinator.complete(actorId, operationId);
-  };
-  if (typeof window === "undefined" || delay <= 0) {
-    finish();
-    return;
-  }
-  settleTimers.set(actorId, window.setTimeout(finish, delay));
-}
-
+/** Execute a prepared local performance. Completion acknowledges this callback,
+ * not a canonical write. The callback must honor cancellation at control
+ * boundaries; server authority and durable receipts remain independent. */
 export function performAppChoreography(
   request: AppChoreographyRequest,
+  execute: PendingPerformance["execute"],
 ): ReturnType<AppChoreographyCoordinator["enqueue"]> {
-  coordinator.expireClaims();
-  const decision = arbitrateAppSurface(
-    request.target,
-    currentViewportSnapshot(request.actorId),
-  );
   const entry = coordinator.enqueue(request);
-  if (decision.navigate || decision.animate) {
-    completeLater(request.actorId, request.operationId);
-  } else {
-    coordinator.complete(request.actorId, request.operationId);
+  const key = performanceKey(request);
+  if (!pendingPerformances.has(key)) {
+    pendingPerformances.set(key, { entry, execute, abort: new AbortController(), started: false });
+    reconcilePerformances();
   }
   return entry;
-}
-
-export function performAppUiEvent(event: {
-  key: string;
-  runId?: string;
-  payload?: Record<string, unknown>;
-}): void {
-  const actorId = event.runId?.trim();
-  if (!actorId) return;
-  const capabilityId = UI_EVENT_CAPABILITY[event.key];
-  // Progress and authority messages are semantic run metadata, not user
-  // actions. Do not turn an unregistered event into the generic workspace
-  // target: that could steal the viewport when Follow AI is enabled.
-  if (!capabilityId && event.key !== "navigate" && event.key !== "navigate_spectra") return;
-  artifactPerformerFor(actorId);
-  const primitive = capabilityId
-    ? capabilityById(capabilityId)?.choreography
-    : undefined;
-  const destination =
-    typeof event.payload?.destination === "string"
-      ? event.payload.destination
-      : undefined;
-  const fromNav = destination ? appSurfaceForNavigation(destination) : null;
-  const target: AppSurface =
-    fromNav ??
-    (primitive ? appSurfaceFromChoreographyTarget(primitive.target) : "workspace");
-  const targetKey =
-    (typeof event.payload?.targetId === "string" && event.payload.targetId) ||
-    primitive?.region ||
-    event.key;
-  performAppChoreography({
-    actorId,
-    operationId: `${event.key}:${event.runId ?? "run"}`,
-    target,
-    targetKey,
-    summary:
-      typeof event.payload?.note === "string" ? event.payload.note : event.key,
-  });
 }
 
 export function isFollowControlEvent(event: Event): boolean {
@@ -184,6 +190,7 @@ export function isFollowControlEvent(event: Event): boolean {
 
 export function startAppChoreographyMaintenance(): () => void {
   if (typeof window === "undefined") return () => undefined;
+  let stopped = false;
   if (claimTicker !== null) window.clearInterval(claimTicker);
   claimTicker = window.setInterval(() => {
     coordinator.expireClaims();
@@ -224,6 +231,8 @@ export function startAppChoreographyMaintenance(): () => void {
     passive: true,
   });
   return () => {
+    if (stopped) return;
+    stopped = true;
     if (claimTicker !== null) {
       window.clearInterval(claimTicker);
       claimTicker = null;
@@ -232,20 +241,26 @@ export function startAppChoreographyMaintenance(): () => void {
     window.removeEventListener("keydown", onInput, true);
     window.removeEventListener("wheel", onInput, true);
     removeStopFollowing();
-    for (const timer of settleTimers.values()) window.clearTimeout(timer);
-    settleTimers.clear();
+    cancelLocalPerformances();
   };
 }
 
 /** Test-only reset. */
 export function __resetAppChoreographyHost(): void {
-  for (const timer of settleTimers.values()) {
-    if (typeof window !== "undefined") window.clearTimeout(timer);
-  }
-  settleTimers.clear();
-  artifactPerformer?.dispose();
-  artifactPerformer = null;
+  cancelLocalPerformances();
+  stopObservingCoordinator();
   coordinator = new AppChoreographyCoordinator();
+  stopObservingCoordinator = coordinator.subscribe(reconcilePerformances);
+}
+
+function cancelLocalPerformances(): void {
+  // Abort all callbacks first, so cancelling one actor cannot start another
+  // queued callback during teardown. This never stops durable server work.
+  for (const pending of pendingPerformances.values()) pending.abort.abort();
+  pendingPerformances.clear();
+  for (const actorId of new Set(coordinator.snapshot().map((entry) => entry.actorId))) coordinator.cancel(actorId);
+  for (const performer of artifactPerformers.values()) performer.dispose();
+  artifactPerformers.clear();
 }
 
 export function AppChoreographyMount() {

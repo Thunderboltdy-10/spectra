@@ -99,7 +99,7 @@ describe("AI UI events", () => {
     });
   });
 
-  it("enqueues app choreography when a run id is present", async () => {
+  it("remembers a saved outcome without replaying a fictitious control action", async () => {
     const { getAppChoreographyCoordinator, __resetAppChoreographyHost } =
       await import("../collaboration/app-choreography-host");
     __resetAppChoreographyHost();
@@ -109,13 +109,8 @@ describe("AI UI events", () => {
       runId: "run-wired",
       payload: { targetId: "folder-1", note: "Created Sources" },
     });
-    expect(getAppChoreographyCoordinator().snapshot()).toContainEqual(
-      expect.objectContaining({
-        actorId: "run-wired",
-        target: "library",
-        status: "performing",
-      }),
-    );
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+    expect(getAiSurfaceLocation()).toMatchObject({ target: "folder-1", note: "Created Sources" });
     __resetAppChoreographyHost();
   });
 

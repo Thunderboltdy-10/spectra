@@ -1,5 +1,4 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
-import { performAppUiEvent } from "./app-choreography-host";
 import { spectraBus } from "../events";
 
 export type SpectraAiUiEvent = {
@@ -196,10 +195,9 @@ function rememberEvent(event: SpectraAiUiEvent): void {
   });
 }
 
-/** Convert durable semantic UI events into the single Follow AI controller
- * and the app choreography coordinator. Non-followed actors update remembered
- * location without moving the user. */
+/** Remember durable outcomes without replaying actions that already happened.
+ * Non-followed actors update location without moving the user. Prepared local
+ * performances use app-choreography-host before execution, never this feed. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
   rememberEvent(event);
-  if (event.runId) performAppUiEvent(event);
 }

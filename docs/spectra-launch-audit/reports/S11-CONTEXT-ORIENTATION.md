@@ -8,6 +8,8 @@ Status: **source reviewed; tests and lint unrun under the shared dependency hold
 
 The new `spectraContext.getArtifact` and `getWorkspace` queries authorize exact references through the existing authority helpers. Artifact metadata uses the current summary read model; a legacy/missing summary reads one canonical artifact row as a compatibility fallback. Output contains bounded title/summary metadata and an explicit `contentAvailable: false`. Missing title metadata remains visibly incomplete. Read permission is checked at each request, including inherited workspace access. A metadata response is not a write grant.
 
+Follow-up source review removed an additional local same-school condition: the central authority policy deliberately permits existing cross-school direct account invitations. Exact metadata must preserve that authority while still denying cross-school inheritance. A direct regression fixture covers both sides; it remains unrun with the other fixtures.
+
 Gather deduplicates same-request artifact metadata reads, preserves explicitly selected/attached IDs and existing choice continuation, and uses thread summaries for attached noncurrent threads. Current conversation loading remains unchanged. `gatherResolvedArtifactContext` continues to read permitted full content and live state at execution demand.
 
 ## Activation dependency

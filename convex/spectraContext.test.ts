@@ -95,6 +95,25 @@ describe("exact-reference context orientation", () => {
     expect(await f.reader.query(artifactQuery, { artifactId: f.artifactId })).toBeNull();
   });
 
+  it("preserves centralized cross-school direct-grant authority without inheriting it", async () => {
+    const f = await fixture();
+    await f.t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "External collaborators", slug: crypto.randomUUID(), verifiedDomains: [], status: "active",
+        timezone: "UTC", policyVersion: 1, createdAt: now, updatedAt: now,
+      });
+      const membership = await ctx.db.query("schoolMemberships").filter((q) => q.eq(q.field("accountId"), f.readerId)).unique();
+      await ctx.db.patch(membership!._id, { schoolId });
+    });
+    // Cross-school workspace access is an exact direct invitation, but cannot
+    // project that grant to the workspace's artifacts.
+    expect(await f.reader.query(workspaceQuery, { workspaceId: f.workspaceId })).not.toBeNull();
+    expect(await f.reader.query(artifactQuery, { artifactId: f.artifactId })).toBeNull();
+    await f.t.run((ctx) => ctx.db.patch(f.grantId, { resourceType: "artifact", resourceId: f.artifactId }));
+    expect(await f.reader.query(artifactQuery, { artifactId: f.artifactId })).toMatchObject({ _id: f.artifactId });
+  });
+
   it("keeps database row bytes independent of a large editor body", async () => {
     const f = await fixture();
     const measure = () => f.reader.run(async (ctx) => {

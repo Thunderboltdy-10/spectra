@@ -12,6 +12,7 @@ import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { memoryEmbedding } from "./memoryEmbedding";
+import { getReadableManagebacSourceRecord } from "./managebacVisibility";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
@@ -21,7 +22,6 @@ const EVIDENCE_WINDOW = 12;
 const AUTHORED_EVIDENCE_TYPES = [
   "user_statement",
   "correction",
-  "product_event",
 ] as const;
 
 const vScope = v.union(
@@ -329,12 +329,13 @@ async function evidenceIsCurrentlyAvailable(
   if (evidence.accessStatus !== "available") return false;
   if (
     evidence.sourceType === "user_statement" ||
-    evidence.sourceType === "product_event" ||
     evidence.sourceType === "correction"
   )
     return true;
   if (evidence.sourceType === "managebac")
-    return evidence.schoolId === actor.schoolId;
+    return evidence.sourceId
+      ? Boolean(await getReadableManagebacSourceRecord(ctx, actor, evidence.sourceId))
+      : false;
   if (evidence.sourceType === "thread") {
     const id = evidence.sourceId
       ? ctx.db.normalizeId("spectraThreads", evidence.sourceId)
@@ -954,6 +955,8 @@ export const remember = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
+    if (args.sourceType === "product_event")
+      throw new Error("MEMORY_SOURCE_UNSUPPORTED: This product-event source cannot be verified. Save a direct statement instead.");
     return upsertClaim(ctx, actor, {
       proposition: args.proposition,
       scope: args.scope,

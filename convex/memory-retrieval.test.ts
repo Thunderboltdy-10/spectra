@@ -86,6 +86,102 @@ async function visibleMemory(f: Fixture) {
   return { list: list.claims, exported: exported.claims, context: context.selectedClaimIds };
 }
 
+async function managebacMemory(f: Fixture) {
+  const source = await f.t.run(async (ctx) => {
+    const now = Date.now();
+    const integrationId = await ctx.db.insert("schoolIntegrations", {
+      schoolId: f.schoolId, provider: "managebac", baseUrl: "https://memory.example.test", authHeaderName: "X-API-Key",
+      authScheme: "raw", status: "connected", tokenMode: "read_only", secretPurpose: "test",
+      manifestVersion: 1, capabilityCoverage: { discovered: 1, verifiedReadable: 1, unverified: 0, failed: 0, quarantined: 0 },
+      syncPolicy: { frequencyMinutes: 60, autoCreateClasses: false, autoImportTasks: true, autoApplySafeUpdates: true, conflictMode: "review" },
+      freshnessSlaMinutes: 60, requestBudgetPerMinute: 30, bootstrapVersion: 1,
+      createdByAccountId: f.readerId, updatedByAccountId: f.readerId, createdAt: now, updatedAt: now,
+    });
+    const mappingId = await ctx.db.insert("externalIdentityMappings", {
+      integrationId, schoolId: f.schoolId, accountId: f.readerId, providerUserId: "reader", verifiedEmailHash: "fixture",
+      status: "verified", matchCount: 1, createdAt: now, updatedAt: now,
+    });
+    const membershipId = await ctx.db.insert("externalRecords", {
+      integrationId, schoolId: f.schoolId, providerRecordId: "class", providerRecordKey: "class:class",
+      recordType: "membership", classification: "personal", audienceScope: "mapped_user", mappedAccountId: f.readerId,
+      providerClassId: "class", academicPeriodKey: "2026", normalized: { title: "My class" },
+      payloadVersion: "1", sourceHash: "member", tombstone: false, sourceState: "available", fetchedAt: now, createdAt: now, updatedAt: now,
+    });
+    const selectionId = await ctx.db.insert("managebacClassSelections", {
+      integrationId, schoolId: f.schoolId, accountId: f.readerId, providerClassId: "class", providerRecordKey: "class:class",
+      academicPeriodKey: "2026", selected: true, retention: "keep_in_spectra", selectionRevision: 1, createdAt: now, updatedAt: now,
+    });
+    const recordId = await ctx.db.insert("externalRecords", {
+      integrationId, schoolId: f.schoolId, providerRecordId: "reading", providerRecordKey: "resource:reading",
+      recordType: "class_resource", classification: "class", audienceScope: "class_members",
+      providerClassId: "class", academicPeriodKey: "2026", normalized: { title: "Heliostat reading" },
+      payloadVersion: "1", sourceHash: "resource", tombstone: false, sourceState: "available", fetchedAt: now, createdAt: now, updatedAt: now,
+    });
+    return { integrationId, mappingId, membershipId, selectionId, recordId };
+  });
+  const { claimId } = await derivedMemory(f);
+  const evidenceId = await f.t.run(async (ctx) => {
+    const evidence = (await ctx.db.query("memoryEvidence").withIndex("by_claim_created", (q) => q.eq("claimId", claimId)).first())!;
+    await ctx.db.patch(evidence._id, { sourceType: "managebac", sourceId: `managebac:${source.recordId}` });
+    return evidence._id;
+  });
+  return { ...source, claimId, evidenceId };
+}
+
+describe("current ManageBac source authority in memory", () => {
+  it("retains inherited class memory and removes it on deselection without deleting the claim", async () => {
+    const f = await fixture();
+    const source = await managebacMemory(f);
+    expect((await visibleMemory(f)).context).toEqual([source.claimId]);
+    await f.t.run((ctx) => ctx.db.patch(source.selectionId, { selected: false }));
+    expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+    expect((await f.t.run((ctx) => ctx.db.get(source.claimId)))?.status).toBe("active");
+    await f.t.run((ctx) => ctx.db.patch(source.selectionId, { selected: true }));
+    const restored = await visibleMemory(f);
+    expect(restored.context).toEqual([source.claimId]);
+    expect(restored.list).toHaveLength(1);
+    expect(restored.exported).toHaveLength(1);
+  });
+
+  it.each(["mapping", "membership", "integration", "period", "tombstone", "other user"])(
+    "does not treat same-school provenance as authority after %s changes", async (change) => {
+      const f = await fixture();
+      const source = await managebacMemory(f);
+      await f.t.run(async (ctx) => {
+        if (change === "mapping") await ctx.db.patch(source.mappingId, { status: "revoked" });
+        if (change === "membership") await ctx.db.patch(source.membershipId, { tombstone: true });
+        if (change === "integration") await ctx.db.patch(source.integrationId, { status: "revoked" });
+        if (change === "period") await ctx.db.patch(source.membershipId, { academicPeriodKey: "2025" });
+        if (change === "tombstone") await ctx.db.patch(source.recordId, { tombstone: true });
+        if (change === "other user") await ctx.db.patch(source.recordId, { audienceScope: "mapped_user", mappedAccountId: f.authorId });
+      });
+      expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+    },
+  );
+
+  it.each([undefined, "managebac:legacy-provider-key", "managebac:a:b", "not-a-record"])(
+    "rejects unresolvable provenance %s without breaking memory reads", async (sourceId) => {
+      const f = await fixture();
+      const source = await managebacMemory(f);
+      await f.t.run((ctx) => ctx.db.patch(source.evidenceId, { sourceId }));
+      expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+    },
+  );
+
+  it("keeps separately authored memory while omitting a revoked ManageBac preview", async () => {
+    const f = await fixture();
+    const source = await managebacMemory(f);
+    await f.reader.mutation(api.memory.remember, {
+      proposition: "The heliostat experiment uses a silver reflector.", scope: "private_global", claimType: "declared_fact",
+    });
+    await f.t.run((ctx) => ctx.db.patch(source.mappingId, { status: "revoked" }));
+    const visible = await visibleMemory(f);
+    expect(visible.context).toEqual([source.claimId]);
+    expect(visible.list[0]?.evidence.map((row) => row.sourceType)).toEqual(["user_statement"]);
+    expect(JSON.stringify(visible)).not.toContain(`managebac:${source.recordId}`);
+  });
+});
+
 describe("memory source authority across retrieval and user projections", () => {
   it("hides source-derived content immediately on revocation and recovers on regrant", async () => {
     const f = await fixture();
@@ -308,12 +404,15 @@ describe("memory source authority across retrieval and user projections", () => 
     expect((await f.reader.query(api.memory.listMine, {})).claims).toEqual([]);
   });
 
-  it.each(["user_statement", "product_event"] as const)("cannot use %s provenance to bypass shared-scope write authority", async (sourceType) => {
+  it.each([
+    { sourceType: "user_statement", error: "MEMORY_SCOPE_FORBIDDEN" },
+    { sourceType: "product_event", error: "MEMORY_SOURCE_UNSUPPORTED" },
+  ] as const)("cannot use $sourceType provenance to bypass shared-scope write authority", async ({ sourceType, error }) => {
     const f = await fixture();
     await expect(f.reader.mutation(api.memory.remember, {
       proposition: "This heliostat claim must not be published to the workspace.",
       scope: "workspace", workspaceId: f.workspaceId, claimType: "declared_fact", sourceType,
-    })).rejects.toThrow("MEMORY_SCOPE_FORBIDDEN");
+    })).rejects.toThrow(error);
     expect((await f.reader.query(api.memory.listMine, {})).claims).toEqual([]);
   });
 
@@ -348,5 +447,34 @@ describe("memory source authority across retrieval and user projections", () => 
       estimatedTokens: 10,
     })).rejects.toThrow("MEMORY_RETRIEVAL_STALE");
     expect(await f.t.run((ctx) => ctx.db.query("memoryRetrievalEvents").collect())).toEqual([]);
+  });
+});
+
+describe("unverifiable product-event provenance", () => {
+  it("rejects new public event provenance even in the author's own memory", async () => {
+    const f = await fixture();
+    await expect(f.reader.mutation(api.memory.remember, {
+      proposition: "The heliostat experiment uses a silver reflector.", scope: "private_global",
+      claimType: "declared_fact", sourceType: "product_event", sourceId: f.artifactId,
+    })).rejects.toThrow("MEMORY_SOURCE_UNSUPPORTED");
+    expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+  });
+
+  it("hides historical event-only claims without deleting them and preserves explicit authorship", async () => {
+    const f = await fixture();
+    const { claimId } = await derivedMemory(f);
+    await f.t.run(async (ctx) => {
+      const evidence = (await ctx.db.query("memoryEvidence").withIndex("by_claim_created", (q) => q.eq("claimId", claimId)).first())!;
+      await ctx.db.patch(evidence._id, { sourceType: "product_event", sourceId: "unverifiable-event" });
+    });
+    expect(await visibleMemory(f)).toEqual({ list: [], exported: [], context: [] });
+    expect((await f.t.run((ctx) => ctx.db.get(claimId)))?.status).toBe("active");
+    await f.reader.mutation(api.memory.remember, {
+      proposition: "The heliostat experiment uses a silver reflector.", scope: "private_global", claimType: "declared_fact",
+    });
+    const visible = await visibleMemory(f);
+    expect(visible.context).toEqual([claimId]);
+    expect(visible.list[0]?.evidence.map((row) => row.sourceType)).toEqual(["user_statement"]);
+    expect(JSON.stringify(visible)).not.toContain("unverifiable-event");
   });
 });

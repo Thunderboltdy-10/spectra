@@ -16,6 +16,8 @@ The first eight-test reproduction on unmodified production code had **7 failures
 
 ## Design and security boundary
 
+The ManageBac and `product_event` portions of this first-unit analysis are superseded by [the source-authority follow-up](S11-CONTEXT-SOURCE-FOLLOWUP.md). The original validation figures below belong to `450e4df8`.
+
 - `listMine` and `exportMine` authorize the claim first, then retrieve currently readable evidence. A source-backed claim with no available evidence is not projected. `contextForRunBase` retains its existing permission and lifecycle checks.
 - The twelve-recent-evidence window remains bounded. If it is full and lacks available authored evidence, three exact indexed lookups find at most one available `user_statement`, `correction`, and `product_event`. An older explicit statement therefore survives many newer source confirmations. There are no evidence-history scans or new persistent capsule/cache formats.
 - These authored types reflect **the saved claim author's own input**, not proof that a referenced external object is readable. `remember` accepts user-provided propositions; `insertEvidence` assigns the authenticated actor; `requireScopeWrite` enforces shared destination authority. `correct` checks control and read access to the original claim before creating authored correction evidence. A supplied provenance label never grants access to source contents or shared write authority. Tests verify that a read-only workspace member cannot publish a claim using either `user_statement` or `product_event` labels. This does not make user-authored claims factually authoritative.

@@ -1,9 +1,10 @@
-import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
+import { Document, Paragraph, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, XmlElement, XmlText } from "@ariadng/office/xml";
 import { wordNoteIdSchema, type WordNoteContent, type WordTextAnchor } from "./docx-academic-schema";
 
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
 const CONTENT = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
+type WordRunFormatting = { bold: boolean; italic: boolean; underline: boolean };
 
 export function wordElements(root: XmlElement): XmlElement[] {
   return [root, ...root.elements().flatMap(wordElements)];
@@ -48,20 +49,36 @@ export function hasUnmodeledRunToggles(root: XmlElement) {
     : ["b", "i"].includes(element.localName) && ![undefined, "0", "false", "off", "1", "true", "on"].includes(wordAttr(element, "val")));
 }
 
-export function noteContent(root: XmlElement): WordNoteContent | undefined {
+export function wordRunFormats(paragraph: XmlElement, document?: Document) {
+  const runs = document
+    ? Paragraph._wrap(document, paragraph).runs().map((run) => ({ element: run.element, format: run.format() }))
+    : wordElements(paragraph).filter((run) => run.localName === "r").map((run) => ({ element: run, format: undefined }));
+  return new Map(runs.map(({ element, format }) => {
+    const props = element.find(WML_NAMESPACE, "rPr");
+    return [element, {
+      bold: format?.bold ?? wordRunPropertyEnabled(props?.find(WML_NAMESPACE, "b")),
+      italic: format?.italic ?? wordRunPropertyEnabled(props?.find(WML_NAMESPACE, "i")),
+      underline: format ? Boolean(format.underline) : wordRunPropertyEnabled(props?.find(WML_NAMESPACE, "u")),
+    }] as const;
+  }));
+}
+
+export function noteContent(root: XmlElement, document?: Document): WordNoteContent | undefined {
   const allowed = new Set(["footnote", "endnote", "p", "pPr", "pStyle", "r", "rPr", "rStyle", "t", "tab", "br", "cr", "b", "i", "u", "footnoteRef", "endnoteRef"]);
   if (wordElements(root).some((element) => element.namespaceUri() !== WML_NAMESPACE || !allowed.has(element.localName))) return undefined;
   if (hasUnmodeledRunToggles(root)) return undefined;
   if (wordElements(root).some((element) => element.localName === "r" && wordText(element) && element.find(WML_NAMESPACE, "rPr")?.find(WML_NAMESPACE, "rStyle"))) return undefined;
   const paragraphs = root.elements().filter((element) => element.localName === "p");
   if (!paragraphs.length) return undefined;
-  return paragraphs.map((paragraph) => paragraph.elements().filter((element) => element.localName === "r").flatMap((run) => {
-    const text = wordText(run);
-    if (!text) return [];
-    const props = run.find(WML_NAMESPACE, "rPr");
-    const enabled = (name: string) => wordRunPropertyEnabled(props?.find(WML_NAMESPACE, name));
-    return [{ text, ...(enabled("b") ? { bold: true } : {}), ...(enabled("i") ? { italic: true } : {}), ...(enabled("u") ? { underline: true } : {}) }];
-  }));
+  return paragraphs.map((paragraph) => {
+    const formats = wordRunFormats(paragraph, document);
+    return paragraph.elements().filter((element) => element.localName === "r").flatMap((run) => {
+      const text = wordText(run);
+      if (!text) return [];
+      const format = formats.get(run);
+      return [{ text, ...(format?.bold ? { bold: true } : {}), ...(format?.italic ? { italic: true } : {}), ...(format?.underline ? { underline: true } : {}) }];
+    });
+  });
 }
 
 export function noteContentText(content: WordNoteContent) {
@@ -141,26 +158,22 @@ function writeRunText(run: XmlElement, text: string) {
   }
 }
 
-function writeRunFormat(run: XmlElement, item: WordNoteContent[number][number]) {
+function writeRunFormat(run: XmlElement, item: WordNoteContent[number][number], effective?: WordRunFormatting) {
   for (const [key, name] of [["bold", "b"], ["italic", "i"], ["underline", "u"]] as const) {
     let props = run.find(WML_NAMESPACE, "rPr");
     const existing = props?.findAll(WML_NAMESPACE, name) ?? [];
-    if (item[key]) {
-      if (!props) { props = wordElement("rPr"); run.insertBefore(props, run.children[0] ?? null); }
-      if (!existing.length) {
-        const node = wordElement(name, props);
-        if (name === "u") node.setAttributeNs(WML_NAMESPACE, "val", "single");
-      }
-      for (const node of existing) if (!wordRunPropertyEnabled(node)) node.setAttributeNs(WML_NAMESPACE, "val", name === "u" ? "single" : "1");
-    } else for (const node of existing) {
-      // Existing explicit off values can suppress a native style. Keep them
-      // through unrelated text/format edits instead of exposing that style.
-      if (wordRunPropertyEnabled(node)) props!.removeChild(node);
-    }
+    const enabled = Boolean(item[key]);
+    const current = effective?.[key] ?? wordRunPropertyEnabled(existing[0]);
+    // Keep inherited formatting inherited on a text-only edit. Explicit false
+    // or a true-to-false change needs an override, including against pStyle.
+    if (current === enabled && (existing.length || item[key] !== false)) continue;
+    if (!props) { props = wordElement("rPr"); run.insertBefore(props, run.children[0] ?? null); }
+    const nodes = existing.length ? existing : [wordElement(name, props)];
+    for (const node of nodes) node.setAttributeNs(WML_NAMESPACE, "val", name === "u" ? enabled ? "single" : "none" : enabled ? "1" : "0");
   }
 }
 
-export function writeStoryContent(root: XmlElement, content: WordNoteContent, noteType?: "footnote" | "endnote", preserveFormatting = false) {
+export function writeStoryContent(root: XmlElement, content: WordNoteContent, noteType?: "footnote" | "endnote", preserveFormatting = false, document?: Document) {
   const paragraphs = root.elements().filter((node) => node.localName === "p");
   content.forEach((items, index) => {
     const paragraph = paragraphs[index] ?? wordElement("p", root);
@@ -169,6 +182,8 @@ export function writeStoryContent(root: XmlElement, content: WordNoteContent, no
       if (properties) paragraph.appendChild(properties.clone());
     }
     const nativeRuns = paragraph.elements().filter((node) => node.localName === "r" && wordText(node));
+    const formats = wordRunFormats(paragraph, document);
+    let newRunFormat: WordRunFormatting | undefined;
     const before = nativeRuns.map(wordText).join("");
     const after = items.map((item) => item.text).join("");
     const boundary = remapTextBoundary(before, after);
@@ -192,7 +207,10 @@ export function writeStoryContent(root: XmlElement, content: WordNoteContent, no
         if (span?.used) for (const node of run.elements().filter((node) => ["footnoteRef", "endnoteRef", "annotationRef"].includes(node.localName))) run.removeChild(node);
         if (span) span.used = true;
         writeRunText(run, after.slice(start, stop));
-        if (!preserveFormatting) writeRunFormat(run, item);
+        if (!preserveFormatting) {
+          const format = span ? formats.get(span.run) : newRunFormat ??= wordRunFormats(paragraph, document).get(run);
+          writeRunFormat(run, item, format);
+        }
       }
       position = end;
     }
@@ -211,12 +229,12 @@ export async function upsertNativeNote(document: Document, item: { noteType: "fo
   const existing = await nativeNote(document, item.noteType, item.noteId);
   const content = item.content ?? item.text.split("\n").map((text) => [{ text }]);
   if (noteContentText(content) !== item.text) throw new Error("DOCX_UNSUPPORTED_EDIT: Note text and rich content disagree.");
-  if (existing && storyText(existing.note) === item.text && (!item.content || JSON.stringify(noteContent(existing.note)) === JSON.stringify(content))) return;
-  if (existing && !noteContent(existing.note)) throw new Error("DOCX_REGION_READ_ONLY: This note has a table, field, drawing, revision, or unmodeled formatting. Edit its body in Word; its reference and neighboring text remain separate.");
+  if (existing && storyText(existing.note) === item.text && (!item.content || JSON.stringify(noteContent(existing.note, document)) === JSON.stringify(content))) return;
+  if (existing && !noteContent(existing.note, document)) throw new Error("DOCX_REGION_READ_ONLY: This note has a table, field, drawing, revision, or unmodeled formatting. Edit its body in Word; its reference and neighboring text remain separate.");
   const part = existing ?? (await notesPart(document, item.noteType, true))!;
   const note = existing?.note ?? wordElement(item.noteType, part.root);
   note.setAttributeNs(WML_NAMESPACE, "id", item.noteId);
-  writeStoryContent(note, content, item.noteType);
+  writeStoryContent(note, content, item.noteType, !item.content, document);
   document.office.markDirty(part.partName);
 }
 

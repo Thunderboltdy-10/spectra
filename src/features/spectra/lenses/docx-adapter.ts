@@ -416,7 +416,7 @@ async function appendInlineContent(
   for (const node of content) {
     if (["wordRevision", "wordCommentBoundary", "spectraCitation"].includes(node.type ?? "") && node.attrs?.native) {
       const item = docxRichInlineSchema.parse(node.attrs.native);
-      if (item.kind === "revision") appendRevision(paragraph, item);
+      if (item.kind === "revision") appendRevision(paragraph, item, undefined, document);
       if (item.kind === "commentBoundary") { if (item.comment) await upsertNativeComment(document, item.commentId, item.comment); appendCommentBoundary(paragraph, item.commentId, item.boundary); }
       if (item.kind === "citation") await appendWordCitation(document, paragraph, item);
       if (item.kind === "bibliography") await appendWordBibliography(document, paragraph, item);

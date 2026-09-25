@@ -1,7 +1,7 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, XmlElement } from "@ariadng/office/xml";
 import type { WordCommentData, WordRevisionInline } from "./docx-academic-schema";
-import { hasUnmodeledRunToggles, relatedWordPart, storyText, wordAttr, wordElement, wordElements, wordRunPropertyEnabled, wordText, writeStoryContent } from "./docx-academic";
+import { hasUnmodeledRunToggles, relatedWordPart, storyText, wordAttr, wordElement, wordElements, wordRunFormats, wordText, writeStoryContent } from "./docx-academic";
 
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
 
@@ -16,17 +16,17 @@ export function nativeCommentReadOnlyReason(document: Document, comment: XmlElem
   return undefined;
 }
 
-export function supportedRevision(element: XmlElement): WordRevisionInline | undefined {
+export function supportedRevision(element: XmlElement, document?: Document): WordRevisionInline | undefined {
   if (!["ins", "del"].includes(element.localName) || element.parent?.localName !== "p" || !/^\d+$/.test(wordAttr(element, "id") ?? "")) return undefined;
   // Only modeled run formatting may be reviewed through the shared reducer.
   // Other formatting, moves and nested structures remain exact regional carry.
   const allowed = new Set([element.localName, "r", "rPr", "t", "delText", "b", "i", "u"]);
   if (!element.elements().length || element.elements().some((node) => node.localName !== "r") || wordElements(element).some((node) => node.namespaceUri() !== WML_NAMESPACE || !allowed.has(node.localName))) return undefined;
   if (hasUnmodeledRunToggles(element)) return undefined;
+  const formats = wordRunFormats(element.parent!, document);
   const content = element.elements().map((run) => {
-    const props = run.find(WML_NAMESPACE, "rPr");
-    const enabled = (name: string) => wordRunPropertyEnabled(props?.find(WML_NAMESPACE, name));
-    return { text: wordText(run), ...(enabled("b") ? { bold: true } : {}), ...(enabled("i") ? { italic: true } : {}), ...(enabled("u") ? { underline: true } : {}) };
+    const format = formats.get(run);
+    return { text: wordText(run), ...(format?.bold ? { bold: true } : {}), ...(format?.italic ? { italic: true } : {}), ...(format?.underline ? { underline: true } : {}) };
   });
   return {
     kind: "revision", revisionId: wordAttr(element, "id")!, revisionKind: element.localName as "ins" | "del",
@@ -39,10 +39,10 @@ export function hasUnsupportedRevision(root: XmlElement) {
   return wordElements(root).some((node) => ["ins", "del"].includes(node.localName) && !supportedRevision(node));
 }
 
-export function appendRevision(parent: XmlElement, revision: WordRevisionInline, retained?: XmlElement) {
+export function appendRevision(parent: XmlElement, revision: WordRevisionInline, retained?: XmlElement, document?: Document) {
   if (revision.content && revision.content.map((run) => run.text).join("") !== revision.text) throw new Error("DOCX_UNSUPPORTED_EDIT: Revision text and formatted runs disagree.");
   // Retain native formatting exactly when the authored identity and text agree.
-  if (retained && JSON.stringify(supportedRevision(retained)) === JSON.stringify(revision)) {
+  if (retained && JSON.stringify(supportedRevision(retained, document)) === JSON.stringify(revision)) {
     parent.appendChild(retained);
     return;
   }
@@ -55,9 +55,11 @@ export function appendRevision(parent: XmlElement, revision: WordRevisionInline,
   else wrapper.removeAttributeNs(WML_NAMESPACE, "date");
   const story = parseXml(`<w:comment xmlns:w="${WML_NAMESPACE}"/>`).root;
   const paragraph = wordElement("p", story);
+  const properties = parent.find(WML_NAMESPACE, "pPr");
+  if (properties) paragraph.appendChild(properties.clone());
   if (retained) for (const run of retained.elements()) paragraph.appendChild(run.clone());
-  writeStoryContent(story, [revision.content ?? [{ text: revision.text }]], undefined, !revision.content);
-  for (const run of [...story.elements()[0]!.elements()]) {
+  writeStoryContent(story, [revision.content ?? [{ text: revision.text }]], undefined, !revision.content, document);
+  for (const run of story.elements()[0]!.elements().filter((node) => node.localName === "r")) {
     wrapper.appendChild(run);
     for (const text of wordElements(run).filter((node) => ["t", "delText"].includes(node.localName))) renameWordText(text, revision.revisionKind === "del" ? "delText" : "t");
   }

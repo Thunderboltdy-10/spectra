@@ -123,7 +123,7 @@ async function loadNotesFromPart(
       continue;
     const id = wmlAttr(element, "id");
     if (!id) continue;
-    const content = noteContent(element);
+    const content = noteContent(element, document);
     notes.push({
       id,
       type,

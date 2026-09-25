@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
+import { Document, Paragraph, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, serializeNode } from "@ariadng/office/xml";
 import { strFromU8, unzipSync } from "fflate";
 import { citationMappings, collectWordSources, upsertWordSource, writeCitationMapping } from "../lenses/docx-citations";
@@ -21,6 +21,44 @@ function mapping(document: Document, name: string, body: string) {
 }
 
 describe("DOCX academic identity and native properties", () => {
+  it.each([false, true])("disables inherited paragraph-style formatting with direct overrides (existing direct properties: %s)", async (direct) => {
+    const document = Document.create(); document.addParagraph("Claim");
+    const empty = await docxLens.open(await document.save());
+    const block = empty.projection.blocks[0]!;
+    const inserted = await docxLens.mutate(empty.preservedCarry, { kind: "insert-note", noteType: "footnote", noteId: "1", content: [[{ text: "Evidence" }]], anchor: { regionId: block.id, expectedText: block.text, start: 0, end: 0 } });
+    const native = await Document.open(inserted);
+    const styles = native._internal().ensureStyles();
+    styles.doc.root.appendChild(parseXml(`<w:style xmlns:w="${WML_NAMESPACE}" w:type="paragraph" w:styleId="AcademicEmphasis"><w:name w:val="Academic emphasis"/><w:rPr><w:b/><w:i/><w:u w:val="single"/></w:rPr></w:style>`).root);
+    native._internal().markDirty(styles);
+    const note = (await nativeNote(native, "footnote", "1"))!;
+    const paragraph = note.note.elements()[0]!;
+    paragraph.insertBefore(parseXml(`<w:pPr xmlns:w="${WML_NAMESPACE}"><w:pStyle w:val="AcademicEmphasis"/></w:pPr>`).root, paragraph.children[0] ?? null);
+    if (direct) {
+      const run = paragraph.elements().find((node) => node.localName === "r" && node.find(WML_NAMESPACE, "t"))!;
+      run.insertBefore(parseXml(`<w:rPr xmlns:w="${WML_NAMESPACE}"><w:b/><w:i/><w:u w:val="single" w:color="FF0000"/></w:rPr>`).root, run.children[0] ?? null);
+    }
+    native.office.markDirty(note.partName);
+    const base = await docxLens.open(await native.save());
+    expect(base.projection.nativeBinding.wordNotes?.[0]?.content).toEqual([[{ text: "Evidence", bold: true, italic: true, underline: true }]]);
+    const desired = docxProjectionFromContent(applyDocumentAcademicOperations(base.projection, [{ kind: "edit-note", noteType: "footnote", noteId: "1", expectedText: "Evidence", content: [[{ text: "Evidence", bold: false, italic: false, underline: false }]] }]), base.projection).projection;
+    const output = await docxLens.materialize({ carry: base.preservedCarry, projection: desired });
+    const reopened = await docxLens.open(output);
+    expect(await docxProjectionReadbackDigest(reopened.projection, desired)).toBe(await docxProjectionSemanticDigest(desired));
+    const result = await Document.open(output);
+    const actualNote = (await nativeNote(result, "footnote", "1"))!;
+    const runs = Paragraph._wrap(result, actualNote.note.elements()[0]!).runs().filter((run) => run.text());
+    expect(runs[0]!.format()).toMatchObject({ bold: false, italic: false, underline: null });
+    const outputXml = strFromU8(unzipSync(output)["word/footnotes.xml"]!);
+    for (const token of ['w:pStyle w:val="AcademicEmphasis"', 'w:b w:val="0"', 'w:i w:val="0"', 'w:u w:val="none"']) expect(outputXml).toContain(token);
+    if (direct) expect(outputXml).toContain('w:color="FF0000"');
+
+    const textOnly = docxProjectionFromContent(applyDocumentAcademicOperations(base.projection, [{ kind: "edit-note", noteType: "footnote", noteId: "1", expectedText: "Evidence", content: [[{ text: "Changed evidence", bold: true, italic: true, underline: true }]] }]), base.projection).projection;
+    const textOutput = await docxLens.materialize({ carry: base.preservedCarry, projection: textOnly });
+    const noteXml = strFromU8(unzipSync(textOutput)["word/footnotes.xml"]!);
+    if (!direct) expect(noteXml).not.toContain("<w:b");
+    expect(unzipSync(textOutput)["word/styles.xml"]).toEqual(unzipSync(base.preservedCarry.payload)["word/styles.xml"]);
+  });
+
   it.each(["0", "false", "off"])("materializes explicit %s note toggles as on without losing native property attributes", async (off) => {
     const document = Document.create(); document.addParagraph("Claim"); document.addParagraph("Neighbor");
     const empty = await docxLens.open(await document.save());
@@ -65,6 +103,31 @@ describe("DOCX academic identity and native properties", () => {
     const xml = strFromU8(unzipSync(output)["word/document.xml"]!);
     expect(xml).toContain('w:color="FF0000"');
     expect(xml).toContain('v:stamp="bold"');
+  });
+
+  it("projects inherited revision formatting and suppresses it without changing its paragraph style", async () => {
+    const document = Document.create();
+    const styles = document._internal().ensureStyles();
+    styles.doc.root.appendChild(parseXml(`<w:style xmlns:w="${WML_NAMESPACE}" w:type="paragraph" w:styleId="RevisionEmphasis"><w:name w:val="Revision emphasis"/><w:rPr><w:b/><w:i/><w:u w:val="single"/></w:rPr></w:style>`).root);
+    document._internal().markDirty(styles);
+    document.addParagraph("", { style: "RevisionEmphasis" }).element.appendChild(parseXml(`<w:ins xmlns:w="${WML_NAMESPACE}" w:id="8" w:author="Author"><w:r><w:t>Reviewed</w:t></w:r></w:ins>`).root);
+    document.addParagraph("Neighbor");
+    const base = await docxLens.open(await document.save());
+    expect(base.projection.blocks[0]?.inlineContent?.find((item) => item.kind === "revision")).toMatchObject({ content: [{ text: "Reviewed", bold: true, italic: true, underline: true }] });
+    const desired = { ...base.projection, blocks: base.projection.blocks.map((block) => ({ ...block, inlineContent: block.inlineContent?.map((inline) => inline.kind === "revision" ? { ...inline, content: [{ text: inline.text, bold: false, italic: false, underline: false }] } : inline) })) };
+    const output = await docxLens.materialize({ carry: base.preservedCarry, projection: desired });
+    const reopened = await docxLens.open(output);
+    expect(await docxProjectionReadbackDigest(reopened.projection, desired)).toBe(await docxProjectionSemanticDigest(desired));
+    const native = await Document.open(output);
+    expect(native.paragraphs()[0]?.styleId()).toBe("RevisionEmphasis");
+    expect(native.paragraphs()[0]?.runs()[0]?.format()).toMatchObject({ bold: false, italic: false, underline: null });
+    expect(unzipSync(output)["word/styles.xml"]).toEqual(unzipSync(base.preservedCarry.payload)["word/styles.xml"]);
+    const neighborEdit = { ...base.projection, blocks: base.projection.blocks.map((block, index) => index === 1 ? { ...block, text: "Changed neighbor", inlineContent: [{ kind: "text" as const, text: "Changed neighbor" }] } : block) };
+    const neighborOutput = await docxLens.materialize({ carry: base.preservedCarry, projection: neighborEdit });
+    const neighborNative = await Document.open(neighborOutput);
+    expect(neighborNative.paragraphs()[0]?.styleId()).toBe("RevisionEmphasis");
+    expect(neighborNative.paragraphs()[0]?.runs()[0]?.format()).toMatchObject({ bold: true, italic: true, underline: "single" });
+    expect(serializeNode(neighborNative.paragraphs()[0]!.element)).not.toContain("<w:b");
   });
 
   it("preserves source field and author extensions when known source values change", async () => {
@@ -150,7 +213,8 @@ describe("DOCX academic identity and native properties", () => {
     expect(wordElements(note).filter((node) => node.localName === "footnoteRef")).toHaveLength(1);
     writeStoryContent(note, [[{ text: "Red blue!", underline: false }]], "footnote");
     xml = serializeNode(note);
-    expect(xml).not.toContain("<w:u");
+    expect(xml).toContain('w:u w:val="none"');
+    expect(noteContent(note)).toEqual([[{ text: "Red" }, { text: " blue!" }]]);
     expect(xml).toContain('v:text="kept"');
   });
 

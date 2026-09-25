@@ -796,7 +796,7 @@ function projectedRichContent(
       return;
     }
     if (namespace === WML_NAMESPACE) {
-      const revision = supportedRevision(element);
+      const revision = supportedRevision(element, document);
       if (revision) { content.push(revision); return; }
       if (["commentRangeStart", "commentRangeEnd", "commentReference"].includes(element.localName)) {
         const commentId = wordAttr(element, "id");
@@ -2258,7 +2258,7 @@ async function replaceParagraphRich(
       if (item.comment) await upsertNativeComment(document, item.commentId, item.comment);
       appendCommentBoundary(paragraph.element, item.commentId, item.boundary);
     } else if (item.kind === "revision") {
-      appendRevision(paragraph.element, item, revisions.get(`${item.revisionKind}:${item.revisionId}`));
+      appendRevision(paragraph.element, item, revisions.get(`${item.revisionKind}:${item.revisionId}`), document);
     } else if (item.kind === "citation") {
       await appendWordCitation(document, paragraph.element, item);
     } else if (item.kind === "bibliography") {

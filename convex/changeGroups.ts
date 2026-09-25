@@ -320,7 +320,7 @@ function commitSnapshotPlan(typeKey: string, before: unknown, after: unknown) {
 export async function commitChangeGroup(
   ctx: MutationCtx,
   groupId: Id<"changeGroups">,
-  options: { source?: VersionSource; summary?: string; name?: string } = {},
+  options: { source?: VersionSource; summary?: string; name?: string; provenance?: Record<string, unknown> } = {},
 ) {
   const group = await ctx.db.get(groupId);
   if (!group || group.status !== "open")
@@ -411,6 +411,7 @@ export async function commitChangeGroup(
     summary,
     name: options.name?.trim().slice(0, 180),
     provenance: {
+      ...options.provenance,
       regionIds: group.regionIds,
       clientId: group.clientId,
       source: group.source,
@@ -432,6 +433,7 @@ export async function commitHumanCheckpoint(
   ctx: MutationCtx,
   artifactId: Id<"spectraArtifacts">,
   summary: string,
+  options: { kind?: "pre_ai_checkpoint" | "pre_native_checkpoint" } = {},
 ) {
   const groups = await ctx.db
     .query("changeGroups")
@@ -458,7 +460,9 @@ export async function commitHumanCheckpoint(
     : (humanGroups.sort((left, right) => left.openedAt - right.openedAt)[0]
         ?.baseSnapshot ?? after);
   const now = Date.now();
-  if (JSON.stringify(before) === JSON.stringify(after)) {
+  const comparableBefore = before && typeof before === "object"
+    ? Object.fromEntries(Object.entries(before).filter(([key]) => key !== "nativeSources")) : before;
+  if (JSON.stringify(comparableBefore) === JSON.stringify(after)) {
     await Promise.all(
       humanGroups.map((group) =>
         ctx.db.patch(group._id, { status: "abandoned", committedAt: now }),
@@ -498,7 +502,7 @@ export async function commitHumanCheckpoint(
     before: inline ? before : undefined,
     after: inline ? after : undefined,
     summary,
-    provenance: { regionIds, source: "human", kind: "pre_ai_checkpoint" },
+    provenance: { regionIds, source: "human", kind: options.kind ?? "pre_ai_checkpoint" },
     createdAt: now,
   });
   await Promise.all(
@@ -513,6 +517,66 @@ export async function commitHumanCheckpoint(
   );
   await ctx.db.patch(artifact._id, { currentVersionId: versionId });
   return [{ status: "committed" as const, versionId }];
+}
+
+/** A native package revision is a history boundary even when its visible
+ * projection is unchanged. Native source hashes are part of the retained
+ * snapshots, resolved through the still-current replica bindings by the
+ * existing version ownership trigger before those replicas advance. */
+export async function commitNativeReconciliationVersion(
+  ctx: MutationCtx,
+  input: {
+    artifactId: Id<"spectraArtifacts">;
+    actorAccountId: Id<"accounts">;
+    syncOperationId: Id<"syncOperations">;
+    changeGroupId?: Id<"changeGroups">;
+    before: { title: string; summary?: string; content: unknown; tags: string[] };
+    beforeNativeHashes: string[];
+    afterNativeHash: string;
+    regionIds: string[];
+    nativeFormat: string;
+  },
+) {
+  const artifact = await ctx.db.get(input.artifactId);
+  if (!artifact) throw new Error("ARTIFACT_NOT_FOUND");
+  const before = {
+    ...input.before,
+    nativeSources: [...new Set(input.beforeNativeHashes)].map(sourcePayloadHash => ({ sourcePayloadHash })),
+  };
+  const after = {
+    title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags,
+    nativeSources: [{ sourcePayloadHash: input.afterNativeHash }],
+  };
+  // The server action must spill each large body through immutable content
+  // storage. Never replace this precise native boundary with a later head.
+  if (isOmittedChangeGroupSnapshot(before) || isOmittedChangeGroupSnapshot(after) ||
+      new TextEncoder().encode(JSON.stringify({ before, after })).byteLength > 850_000)
+    throw new Error("NATIVE_RECONCILIATION_SNAPSHOT_REQUIRED");
+  const now = Date.now();
+  const summary = `Imported changes from ${input.nativeFormat.toUpperCase()}`;
+  let groupId = input.changeGroupId;
+  if (groupId) {
+    const group = await ctx.db.get(groupId);
+    if (!group || group.artifactId !== artifact._id || group.actorAccountId !== input.actorAccountId || group.status !== "open")
+      throw new Error("NATIVE_RECONCILIATION_GROUP_INVALID");
+    await ctx.db.patch(groupId, { source: "import", baseSnapshot: before, finalSnapshot: after, summary });
+  } else {
+    groupId = await ctx.db.insert("changeGroups", {
+      artifactId: artifact._id, schoolId: artifact.schoolId, source: "import",
+      actorAccountId: input.actorAccountId, operationIds: [], regionIds: input.regionIds,
+      baseStateVectorHash: `native:${input.syncOperationId}`, baseVersionId: artifact.currentVersionId,
+      baseSnapshot: before, finalSnapshot: after, finalStateVectorHash: artifact.liveStateVectorHash,
+      finalIntegrityHash: artifact.contentHash, summary, status: "open", openedAt: now, lastActivityAt: now,
+    });
+  }
+  const committed = await commitChangeGroup(ctx, groupId, {
+    source: "import", summary,
+    provenance: { kind: "native_reconciliation", syncOperationId: input.syncOperationId,
+      nativeFormat: input.nativeFormat, nativeBefore: input.beforeNativeHashes, nativeAfter: input.afterNativeHash },
+  });
+  if (committed.status !== "committed" || !committed.versionId)
+    throw new Error("NATIVE_RECONCILIATION_VERSION_REQUIRED");
+  return committed.versionId;
 }
 
 export async function commitDirectHumanChange(

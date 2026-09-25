@@ -3,6 +3,7 @@
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Id } from "./_generated/dataModel";
 import { MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS } from "../shared/collaboration-bridge";
@@ -20,6 +21,7 @@ const operation = v.union(
   v.literal("recover"),
   v.literal("bootstrap"),
   v.literal("append"),
+  v.literal("nativeReconcile"),
   v.literal("checkpoint"),
   v.literal("snapshot"),
   v.literal("storeDurablePayload"),
@@ -422,6 +424,35 @@ export const exchange = action({
           ),
         },
       );
+    }
+
+    if (args.operation === "nativeReconcile") {
+      const append = payload.append;
+      if (!append || typeof append !== "object" || Array.isArray(append))
+        throw new Error("NATIVE_RECONCILIATION_ENVELOPE_INVALID");
+      const envelope = append as Record<string, unknown>;
+      if (envelope.artifactId !== artifactId || envelope.partitionKey !== partitionKey ||
+          envelope.accountId !== payload.accountId || envelope.policyVersion !== payload.policyVersion)
+        throw new Error("NATIVE_RECONCILIATION_ENVELOPE_INVALID");
+      const encoded = typeof envelope.update === "string" ? envelope.update : "";
+      if (encoded.length > 1_400_000) throw new Error("COLLABORATION_BRIDGE_UPDATE_INVALID");
+      const update = Buffer.from(encoded, "base64");
+      // The native mutation's complete validator checks the nested append and
+      // operation arguments. This dynamic reference also avoids an API type
+      // cycle between the shared appender and its transactional native wrapper.
+      return ctx.runMutation(makeFunctionReference<"mutation">("nativeReconciliation:commit"), {
+        append: { ...envelope, update: update.buffer.slice(update.byteOffset, update.byteOffset + update.byteLength) },
+        external: payload.external,
+        operationId: payload.operationId,
+        expectedArtifactUpdatedAt: payload.expectedArtifactUpdatedAt,
+        expectedContentHash: payload.expectedContentHash,
+        expectedVersionId: payload.expectedVersionId,
+        expectedNativeBaseRevision: payload.expectedNativeBaseRevision,
+        expectedCloudRevision: payload.expectedCloudRevision,
+        nativeBasePayloadHash: payload.nativeBasePayloadHash,
+        beforeProjectionJson: payload.beforeProjectionJson,
+        beforeProjectionHash: payload.beforeProjectionHash,
+      });
     }
 
     if (args.operation === "append") {

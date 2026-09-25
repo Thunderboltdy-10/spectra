@@ -261,6 +261,7 @@ export function useArtifactNativeSync({
       .then(async (response) => {
         const result = (await response.json().catch(() => null)) as {
           state?: string;
+          durableNative?: boolean;
           receipt?: NativeSaveReceipt;
           content?: unknown;
           projection?: unknown;
@@ -282,6 +283,19 @@ export function useArtifactNativeSync({
                 result.conflict?.message ??
                 `${nativeOfficeApplication} and Spectra changed the same work region.`,
             });
+            return;
+          }
+          if (result?.durableNative) {
+            // The native delta and version already committed to the shared
+            // log. Its room catch-up delivers the causal update, preserving
+            // any local pending branch; replaying this response as a new full
+            // projection would manufacture a second, potentially stale edit.
+            nativeProjectionOverrideRef.current = undefined;
+            nativeProjectionArtifactRef.current = artifactId;
+            pendingNativeProjectionRef.current = undefined;
+            setNativeLensProjection(undefined);
+            setNativeProjectionReady(false);
+            setNativeAttribution(`Edited in ${nativeOfficeApplication}`);
             return;
           }
           const projection = result?.content ?? result?.projection;
@@ -605,6 +619,7 @@ export function useArtifactNativeSync({
       );
       const result = (await response.json().catch(() => null)) as {
         state?: string;
+        durableNative?: boolean;
         projection?: unknown;
         attribution?: string;
         status?: string;
@@ -620,7 +635,15 @@ export function useArtifactNativeSync({
           result?.message ??
             `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
-      if (result?.state === "applied" && result.projection) {
+      if (result?.state === "applied" && result.durableNative) {
+        nativeProjectionOverrideRef.current = undefined;
+        nativeProjectionArtifactRef.current = artifactId;
+        pendingNativeProjectionRef.current = undefined;
+        setNativeLensProjection(undefined);
+        setNativeProjectionReady(false);
+        setNativeAttribution(result.attribution ?? `Edited in ${nativeOfficeApplication}`);
+        setNativeConflict(null);
+      } else if (result?.state === "applied" && result.projection) {
         await applyExternalProjection(
           result.projection,
           result.attribution ?? `Edited in ${nativeOfficeApplication}`,

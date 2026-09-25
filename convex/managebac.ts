@@ -23,6 +23,7 @@ import {
   defaultArtifactSchemaVersion,
 } from "./spectraShared";
 import { upsertSourceCalendarItem } from "./calendarShared";
+import { refreshPlannerSourceContent } from "../shared/planner-source.mjs";
 
 const EMPTY_COUNTS = {
   fetched: 0,
@@ -2521,6 +2522,7 @@ async function safelyRefreshProjection(
   previousSourceHash: string,
   source: Doc<"externalRecords">,
   force = false,
+  previousNormalized?: unknown,
 ) {
   const normalized = record(source.normalized);
   if (projection.projectionType === "planner_task") {
@@ -2529,7 +2531,8 @@ async function safelyRefreshProjection(
       projection.projectionId,
     );
     const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-    if (!artifact || artifact.blueprintKey !== "planner_task") return false;
+    if (!artifact || artifact.blueprintKey !== "planner_task" ||
+      artifact.ownerAccountId !== projection.accountId || artifact.schoolId !== projection.schoolId) return false;
     const content = record(artifact.content);
     const sourceState = record(content.source);
     if (!force && sourceState.hash !== previousSourceHash) return false;
@@ -2538,28 +2541,37 @@ async function safelyRefreshProjection(
       240,
       artifact.title,
     );
-    const nextContent = {
-      ...content,
-      taskTitle: title,
+    const previous = previousNormalized !== undefined && sourceState.hash === previousSourceHash
+      ? record(previousNormalized) : undefined;
+    const previousText = previous ? {
+      title: text(previous.title ?? previous.name, 240, "ManageBac task"),
+      description: plainText(previous.description, 20_000),
+    } : undefined;
+    const nextContent = refreshPlannerSourceContent(content, {
+      title,
       description: plainText(normalized.description, 20_000),
-      dueAt: timestampValue(normalized.dueAt) ?? null,
+      dueAt: timestampValue(normalized.dueAt),
       source: {
         ...sourceState,
+        provider: "managebac",
         externalId: source.providerRecordId,
         version: source.payloadVersion,
         hash: source.sourceHash,
         status: "active",
         lockedFields: ["taskTitle", "description", "dueAt", "source"],
       },
-    };
+    }, previousText);
+    const nextTitle = previousText && artifact.title === previousText.title ? title : artifact.title;
+    const nextSummary = previous && artifact.summary === plainText(previous.description, 600)
+      ? plainText(normalized.description, 600, artifact.summary ?? "") : artifact.summary;
     const now = Date.now();
     await ctx.db.patch(artifact._id, {
-      title,
-      summary: plainText(normalized.description, 600, artifact.summary ?? ""),
+      title: nextTitle,
+      summary: nextSummary,
       content: nextContent,
       textIndex: buildArtifactTextIndex({
-        title,
-        summary: plainText(normalized.description, 600, artifact.summary ?? ""),
+        title: nextTitle,
+        summary: nextSummary,
         content: nextContent,
         tags: artifact.tags,
       }),
@@ -2987,6 +2999,8 @@ export const commitNormalizedPage = mutation({
               projection,
               existing.sourceHash,
               source,
+              false,
+              previousNormalized,
             );
             if (!refreshed) projectionRefreshFailed = true;
           }
@@ -3812,6 +3826,7 @@ export const resolveConflict = mutation({
           projection.sourceHash,
           source,
           true,
+          conflict.oldSource,
         );
         if (!refreshed)
           throw new Error(

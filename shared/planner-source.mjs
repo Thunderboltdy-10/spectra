@@ -96,6 +96,7 @@ export function assertPlannerSourceEdit(currentValue, proposedValue) {
       protectedTasks.set(task.id, { reference: task.officialDeadlineRef, dueAt: date(task.dueAt) });
   }
   if (binding) protectedTasks.set(binding.taskId, binding);
+  const protectedReferences = new Set([...protectedTasks.values()].map(entry => entry.reference));
   const seen = new Set();
   for (const task of nextTasks) {
     if (typeof task.id !== "string") continue;
@@ -105,8 +106,7 @@ export function assertPlannerSourceEdit(currentValue, proposedValue) {
         throw new Error("PLANNER_SOURCE_METADATA_LOCKED");
       if (date(task.dueAt) !== prior.dueAt) throw new Error("PLANNER_OFFICIAL_DEADLINE_LOCKED");
       seen.add(task.id);
-    } else if (typeof task.officialDeadlineRef === "string" &&
-      [...protectedTasks.values()].some(entry => entry.reference === task.officialDeadlineRef)) {
+    } else if (typeof task.officialDeadlineRef === "string" && protectedReferences.has(task.officialDeadlineRef)) {
       throw new Error("PLANNER_SOURCE_METADATA_LOCKED");
     }
   }

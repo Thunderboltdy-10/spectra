@@ -2,6 +2,7 @@ import {
   normalizeMinutesBeforeReminders,
   type MinutesBeforeReminder,
 } from "../reminders/minutes-before";
+import { bindPlannerSourceTask, plannerSourceMetadata } from "../../../../shared/planner-source.mjs";
 
 export type PlanStatus = "backlog" | "todo" | "doing" | "blocked" | "done";
 
@@ -31,6 +32,11 @@ export type PlanTask = {
 
 export type PlanContent = {
   version: 4;
+  source?: Record<string, unknown>;
+  sourceRefs?: string[];
+  taskTitle?: string;
+  dueAt?: number | null;
+  officialDeadlineRef?: string;
   title?: string;
   description: string;
   sections: Array<{ id: string; title: string; order: number }>;
@@ -67,6 +73,7 @@ export function normalizePlanContent(value: unknown): PlanContent {
   const row = object(value);
   if (Array.isArray(row.tasks)) {
     return {
+      ...plannerSourceMetadata(row),
       version: 4,
       title: typeof row.title === "string" ? row.title : undefined,
       description: typeof row.description === "string" ? row.description : "",
@@ -97,7 +104,9 @@ export function normalizePlanContent(value: unknown): PlanContent {
             };
           })
         : [],
-      tasks: row.tasks.map((candidate, index) => normalizePlanTask(candidate, index)),
+      tasks: row.tasks.map((candidate, index) => normalizePlanTask(bindPlannerSourceTask(row, {
+        ...object(candidate), id: String(object(candidate).id ?? `task-${index + 1}`),
+      }), index)),
       views: Array.isArray(row.views)
         ? row.views.map((candidate, index) => {
             const view = object(candidate);
@@ -122,6 +131,7 @@ export function normalizePlanContent(value: unknown): PlanContent {
       ? row.taskTitle.trim()
       : "First task";
   return {
+    ...plannerSourceMetadata(row),
     version: 4,
     title: typeof row.title === "string" ? row.title : undefined,
     description: typeof row.description === "string" ? row.description : "",
@@ -129,18 +139,19 @@ export function normalizePlanContent(value: unknown): PlanContent {
     milestones: [],
     tasks: [
       normalizePlanTask(
-        {
+        bindPlannerSourceTask(row, {
           id: "task-1",
           title,
           description: row.description,
           status: row.status,
           estimateMinutes: row.estimateMinutes,
           dueAt: row.dueAt,
+          officialDeadlineRef: row.officialDeadlineRef,
           referenceIds: row.linkedArtifactIds,
           sourceRefs: row.sourceRefs,
           reminders: row.reminders,
           checklist: row.subtasks,
-        },
+        }),
         0,
       ),
     ],
@@ -156,6 +167,7 @@ function normalizePlanTask(value: unknown, index: number): PlanTask {
     row.status === "blocked" ||
     row.status === "done"
       ? row.status
+      : row.status === "completed" ? "done"
       : "todo";
   return {
     id: String(row.id ?? `task-${index + 1}`),

@@ -34,8 +34,12 @@ describe("planner source write guard", () => {
   });
 
   it.each(["legacy", "root", "task"] as const)("rejects changed official date in %s form", mode => {
-    const next = mode === "legacy" ? { ...legacy } : migrated();
-    if (mode === "task" && "tasks" in next) next.tasks[0].dueAt = 12346;
+    if (mode === "legacy") {
+      expect(() => assertPlannerSourceEdit(legacy, { ...legacy, dueAt: 12346 })).toThrow("PLANNER_OFFICIAL_DEADLINE_LOCKED");
+      return;
+    }
+    const next = migrated();
+    if (mode === "task") next.tasks[0].dueAt = 12346;
     else next.dueAt = 12346;
     expect(() => assertPlannerSourceEdit(legacy, next)).toThrow("PLANNER_OFFICIAL_DEADLINE_LOCKED");
   });

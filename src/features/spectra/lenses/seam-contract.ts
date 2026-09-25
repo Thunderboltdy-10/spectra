@@ -1,7 +1,7 @@
 import { comparePackages } from "@ariadng/office/preservation";
 import { contentProjection } from "@/app/api/spectra/lenses/docx/route";
 import { contentToPptx } from "@/app/api/spectra/lenses/office/route";
-import { assertPreservationKept } from "../commands/office/preservation-guard";
+import { assertNativePreservationKept } from "./preservation-proof";
 import { docxProjectionFromContent } from "./document-projection";
 import { docxLens, type DocxProjection } from "./docx-lens";
 import {
@@ -98,12 +98,13 @@ export async function runDocxProductionSeam(
         operations: update.operations,
       })
     : bytes;
-  const comparison = await comparePackages(bytes, output);
-  assertPreservationKept({
+  const [comparison, reopened] = await Promise.all([comparePackages(bytes, output), docxLens.open(output, "strict-native")]);
+  await assertNativePreservationKept({
     entries: opened.fidelityMap.entries,
     parts: comparison.parts,
+    before: opened.preservedCarry.safePayload ?? bytes, after: reopened.preservedCarry.safePayload ?? output,
+    intent: { format: "docx", projection: opened.projection, operations: update.operations },
   });
-  const reopened = await docxLens.open(output, "strict-native");
   return {
     opened,
     afterYjs,
@@ -140,12 +141,13 @@ export async function runXlsxProductionSeam(
         operations: update.operations,
       })
     : bytes;
-  const comparison = await comparePackages(bytes, output);
-  assertPreservationKept({
+  const [comparison, reopened] = await Promise.all([comparePackages(bytes, output), xlsxLens.open(output)]);
+  await assertNativePreservationKept({
     entries: opened.fidelityMap.entries,
     parts: comparison.parts,
+    before: opened.preservedCarry.safePayload ?? bytes, after: reopened.preservedCarry.safePayload ?? output,
+    intent: { format: "xlsx", projection: opened.projection, operations: update.operations },
   });
-  const reopened = await xlsxLens.open(output);
   return {
     opened,
     afterYjs,
@@ -183,12 +185,13 @@ export async function runPptxProductionSeam(
         operations: update.operations,
       })
     : bytes;
-  const comparison = await comparePackages(bytes, output);
-  assertPreservationKept({
+  const [comparison, reopened] = await Promise.all([comparePackages(bytes, output), pptxLens.open(output)]);
+  await assertNativePreservationKept({
     entries: opened.fidelityMap.entries,
     parts: comparison.parts,
+    before: opened.preservedCarry.safePayload ?? bytes, after: reopened.preservedCarry.safePayload ?? output,
+    intent: { format: "pptx", projection: opened.projection, operations: update.operations },
   });
-  const reopened = await pptxLens.open(output);
   return {
     opened,
     afterYjs,

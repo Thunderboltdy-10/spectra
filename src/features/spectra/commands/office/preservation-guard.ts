@@ -18,18 +18,16 @@ import type { FidelityRegionKey } from "../types";
  * wrong part all surface here, before the payload is queued for the Bridge, and
  * they surface with the same sentence the greyed-out button shows.
  *
- * Two verdicts are deliberately not violations:
+ * Byte-identical and semantically equivalent parts keep the promise. A bounded
+ * diagnostic diff does not prove a protected subtree unchanged: callers supply
+ * complete subtree comparisons for changed shared XML parts. Removal needs
+ * explicit, package-verified ownership proof, including for unclassified parts.
  *
  *   `equivalent`  The part was reserialized but is L1-equal — the same XML, in
  *                 different bytes. "Preserved" is a promise about content, and a
  *                 binary part (a macro project, a picture) has no L1 form, so it
  *                 gets byte equality automatically and this exemption cannot
  *                 quietly widen to the parts that matter most.
- *   presence      A part that exists on only one side was added or removed, not
- *                 rewritten. Deleting a slide legitimately orphans its notes
- *                 part, and refusing that would make removal impossible; what
- *                 must never happen is a preserved part surviving with different
- *                 content, which is what this catches.
  */
 
 /** Enough of a comparison row to judge it. Structurally `PackagePartComparison`. */
@@ -46,6 +44,7 @@ export type PreservationEntry = {
   class?: unknown;
   partName?: unknown;
   pathPattern?: unknown;
+  namespaceUri?: unknown;
   readOnly?: unknown;
   reason?: unknown;
 };
@@ -59,8 +58,22 @@ export type PreservationViolation = {
   reason: string;
 };
 
-/** Notes `comparePackages` uses for a part that exists on only one side. */
-const PRESENCE_NOTES = new Set(["only in expected package", "only in actual package"]);
+/** Evidence computed from both packages, never from caller-supplied JSON. */
+export type PreservationProof = {
+  removedParts: readonly string[];
+  scopes: readonly {
+    partName: string;
+    pathPattern: string;
+    namespaceUri?: string;
+    unchanged: boolean;
+  }[];
+};
+
+export type PreservationInput = {
+  entries: readonly PreservationEntry[];
+  parts: readonly ComparedPart[];
+  proof?: PreservationProof;
+};
 
 const normalize = (name: string) => (name.startsWith("/") ? name : `/${name}`);
 
@@ -68,10 +81,7 @@ const normalize = (name: string) => (name.startsWith("/") ? name : `/${name}`);
  * Every part the lens promised to preserve that came back with different
  * content. An empty array is the promise kept.
  */
-export function preservationViolations(input: {
-  entries: readonly PreservationEntry[];
-  parts: readonly ComparedPart[];
-}): PreservationViolation[] {
+export function preservationViolations(input: PreservationInput): PreservationViolation[] {
   const nativeParts = new Set<string>();
   for (const entry of input.entries) {
     if (
@@ -84,7 +94,7 @@ export function preservationViolations(input: {
     }
   }
 
-  const claimed = new Map<string, { feature: string; pathPattern?: string }>();
+  const claimed = new Map<string, { feature: string; pathPattern?: string; namespaceUri?: string }[]>();
   for (const entry of input.entries) {
     const preserved = entry.class === "PRESERVED" || entry.readOnly === true;
     if (!preserved || typeof entry.partName !== "string" || !entry.partName) continue;
@@ -98,33 +108,36 @@ export function preservationViolations(input: {
     // paragraph or cell write. A pathPattern still catches a rewrite of the
     // preserved element itself.
     if (nativeParts.has(key) && !pathPattern) continue;
-    // First claim wins, so the message names one feature rather than a list. Any
-    // of them is enough to explain why the part must not change.
-    if (!claimed.has(key)) {
-      claimed.set(key, {
-        feature: typeof entry.feature === "string" ? entry.feature : "",
-        ...(pathPattern ? { pathPattern } : {}),
-      });
-    }
+    const claims = claimed.get(key) ?? [];
+    claims.push({
+      feature: typeof entry.feature === "string" ? entry.feature : "",
+      ...(pathPattern ? { pathPattern } : {}),
+      ...(typeof entry.namespaceUri === "string" ? { namespaceUri: entry.namespaceUri } : {}),
+    });
+    claimed.set(key, claims);
   }
 
   const violations: PreservationViolation[] = [];
+  const removedParts = new Set(input.proof?.removedParts.map(normalize));
   for (const part of input.parts) {
+    // ZIP directory entries are transport metadata, not OPC package parts.
+    if (part.name.endsWith("/")) continue;
     if (part.verdict !== "different") continue;
-    if (part.note && PRESENCE_NOTES.has(part.note)) continue;
+    if (part.note === "only in actual package") continue;
     const key = normalize(part.name);
-    const claim = claimed.get(key);
-    if (claim === undefined) continue;
-    if (
-      claim.pathPattern &&
-      !(part.diffs ?? []).some((diff) =>
-        diff.path.split("/").some((segment) => {
-          const localName = segment.replace(/\[\d+\]$/, "").split(":").pop();
-          return localName === claim.pathPattern;
-        }),
-      )
-    )
-      continue;
+    const removed = part.note === "only in expected package";
+    if (removed && removedParts.has(key)) continue;
+    // All claims participate. Report one reason per part after finding a failed
+    // claim, so declaration order cannot turn a failed save into a successful one.
+    const claim = removed
+      ? claimed.get(key)?.[0] ?? { feature: "native-part" }
+      : claimed.get(key)?.find((candidate) => !candidate.pathPattern ||
+        !input.proof?.scopes.some((scope) =>
+          normalize(scope.partName) === key &&
+          scope.pathPattern === candidate.pathPattern &&
+          scope.namespaceUri === candidate.namespaceUri && scope.unchanged,
+        ));
+    if (!claim) continue;
     const feature = claim.feature;
     const region = regionsForLensFeature(feature)[0];
     violations.push({
@@ -166,10 +179,7 @@ export class PreservationViolationError extends Error {
 }
 
 /** Throws when a write would change something the lens promised to preserve. */
-export function assertPreservationKept(input: {
-  entries: readonly PreservationEntry[];
-  parts: readonly ComparedPart[];
-}) {
+export function assertPreservationKept(input: PreservationInput) {
   const violations = preservationViolations(input);
   if (violations.length) throw new PreservationViolationError(violations);
 }

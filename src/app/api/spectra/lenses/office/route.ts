@@ -2,7 +2,7 @@ import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-pa
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
-import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
+import { assertNativePreservationKept } from "@/features/spectra/lenses/preservation-proof";
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
@@ -398,9 +398,14 @@ async function materializeOfficeArtifactAttempt(
    * person's edit and the assistant's edit go through. So the two cannot diverge
    * by caller, and neither can be preserved-safe merely by accident.
    */
-  assertPreservationKept({
+  await assertNativePreservationKept({
     entries: baseOpened.fidelityMap.entries,
     parts: comparison.parts,
+    before: baseOpened.preservedCarry.safePayload ?? materializationPayload,
+    after: next.preservedCarry.safePayload ?? output,
+    intent: isSheet
+      ? { format: "xlsx", projection: baseProjection as XlsxProjection, operations: update.operations as XlsxOperation[] }
+      : { format: "pptx", projection: baseProjection as PptxProjection, operations: update.operations as PptxOperation[] },
   });
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",

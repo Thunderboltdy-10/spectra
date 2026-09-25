@@ -3,7 +3,7 @@ import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
 import { z } from "zod";
-import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
+import { assertNativePreservationKept } from "@/features/spectra/lenses/preservation-proof";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
 import {
@@ -20,6 +20,7 @@ import {
   bindDocxProjectionSource,
   compactDocxProjectionForStorage,
   docxProjectionFromContent,
+  docxOperationsBetween,
 } from "@/features/spectra/lenses/document-projection";
 import {
   fetchVerifiedNativePayload,
@@ -233,7 +234,10 @@ async function materializeDocxArtifactAttempt(
   );
   if (readbackDigest !== requestedDigest)
     throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
-  assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
+  await assertNativePreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts,
+    before: opened.preservedCarry.safePayload ?? payload, after: next.preservedCarry.safePayload ?? output,
+    intent: { format: "docx", projection: opened.projection, operations },
+  });
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
   );
@@ -453,7 +457,10 @@ export async function POST(request: Request) {
       ]);
       if (await docxProjectionReadbackDigest(reopened.projection, projection) !== await docxProjectionSemanticDigest(projection))
         throw new DocxLensError("DOCX_READBACK_MISMATCH", "The downloaded Word copy did not match the saved document.");
-      assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
+      await assertNativePreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts,
+        before: opened.preservedCarry.safePayload ?? cloud.payload, after: reopened.preservedCarry.safePayload ?? output,
+        intent: { format: "docx", projection: opened.projection, operations },
+      });
       const fileName = `${(artifact.title || "Spectra document").replace(/\.docx$/i, "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")}.docx`;
       return new NextResponse(Buffer.from(output), { headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -704,7 +711,10 @@ export async function POST(request: Request) {
       );
       if (readbackDigest !== requestedDigest)
         throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
-      assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
+      await assertNativePreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts,
+        before: externalOpened.preservedCarry.safePayload ?? local.payload, after: next.preservedCarry.safePayload ?? output,
+        intent: { format: "docx", projection: externalOpened.projection, operations: docxOperationsBetween(externalOpened.projection, resolved.projection) },
+      });
       const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<
         {

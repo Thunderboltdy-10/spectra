@@ -262,7 +262,9 @@ describe("ManageBac task refresh preserves personal work", () => {
           const original = Reflect.get(target, key);
           if (key === "query") return (...args: unknown[]) => {
             measured.queries++;
-            const query = Reflect.apply(original, target, args);
+            const query = Reflect.apply(original, target, args) as {
+              withIndex(...indexArgs: unknown[]): { unique(): Promise<unknown> };
+            };
             return { withIndex: (...indexArgs: unknown[]) => {
               const indexed = query.withIndex(...indexArgs);
               return { unique: async () => {

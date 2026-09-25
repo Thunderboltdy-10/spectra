@@ -3135,10 +3135,12 @@ export async function executeAgentReadTool(
       return artifact && typeof artifact === "object"
         ? {
             ok: true,
-            artifact: boundedArtifactRead(summarizeArtifact(
-              artifact as Record<string, unknown>,
-              true,
-            ), {
+            artifact: boundedArtifactRead({
+              ...summarizeArtifact(artifact as Record<string, unknown>, true),
+              currentVersionId: (artifact as Record<string, unknown>).currentVersionId,
+              contentHash: (artifact as Record<string, unknown>).contentHash,
+              liveStateVectorHash: (artifact as Record<string, unknown>).liveStateVectorHash,
+            }, {
               cellAddresses: Array.isArray(args.cellAddresses) ? args.cellAddresses.filter((value): value is string => typeof value === "string") : undefined,
               sheetId: typeof args.sheetId === "string" ? args.sheetId : undefined,
               blockIds: Array.isArray(args.blockIds) ? args.blockIds.filter((value): value is string => typeof value === "string") : undefined,
@@ -3500,7 +3502,14 @@ export async function executeAgentReadTool(
         },
       },
     )
-    .then((result) => {
+    .then((execution) => {
+      // The registry envelope reports executor success, not read success. Keep
+      // the inner permission/not-found result authoritative for cache/progress
+      // decisions, and expose the artifact/source fields to existing consumers.
+      if (!execution.ok) return execution;
+      const result = execution.data && typeof execution.data === "object" && !Array.isArray(execution.data)
+        ? { ...(execution.data as Record<string, unknown>), telemetry: execution.telemetry }
+        : { ok: true, data: execution.data, telemetry: execution.telemetry };
       if (
         pendingNotice &&
         result &&

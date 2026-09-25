@@ -14,8 +14,14 @@ export type LensFidelityEntry = {
   feature: string;
   class: LensFidelityClass;
   partName?: string;
-  /** Optional XML element name that scopes a package-part preservation claim. */
+  /**
+   * All matching feature subtrees, in document order, under a fixed structural
+   * owner (currently slide/worksheet root). Not a selector for movable records
+   * in repeated containers; those require an explicit stable owner identity.
+   */
   pathPattern?: string;
+  /** Resolved namespace of the scoped element; prefixes are not identity. */
+  namespaceUri?: string;
   readOnly?: boolean;
   reason?: string;
 };

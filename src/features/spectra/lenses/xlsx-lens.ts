@@ -329,8 +329,8 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     ["unknown-extension", /unknown|future|extension/i],
   ];
   for (const [feature, pattern] of preserved) {
-    const partName = partNames.find((name) => pattern.test(name));
-    if (partName) entries.push({ regionId: `xlsx:feature:${feature}`, feature, class: "PRESERVED", partName, readOnly: true });
+    for (const [index, partName] of partNames.filter((name) => pattern.test(name)).entries())
+      entries.push({ regionId: `xlsx:feature:${feature}${index ? `:${partName}` : ""}`, feature, class: "PRESERVED", partName, readOnly: true });
   }
   for (const sheet of workbook.sheets()) {
     const doc = await workbook.office.xml(sheet.partName);
@@ -345,6 +345,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
         class: hasEditableConditionalFormats ? "NATIVE" : "PRESERVED",
         partName: sheet.partName,
         pathPattern: "conditionalFormatting",
+        namespaceUri: SML,
         ...(hasEditableConditionalFormats ? {} : { readOnly: true }),
       });
     }

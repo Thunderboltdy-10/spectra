@@ -70,10 +70,10 @@ describe("native preservation guard", () => {
     })).toEqual([]);
   });
 
-  it("lets a preserved part be removed with the thing that owned it", () => {
+  it("requires package-verified ownership before removing a preserved part", () => {
     // Deleting a slide orphans its notes part. Refusing that would make slide
-    // removal impossible; what must never happen is a preserved part surviving
-    // with different content, which the first test covers.
+    // removal impossible. The proof builder checks original relationships,
+    // explicit intent and surviving references; a presence note proves none.
     expect(preservationViolations({
       entries: [{ feature: "notes", class: "PRESERVED", partName: "/ppt/notesSlides/notesSlide4.xml", readOnly: true }],
       parts: [{
@@ -81,6 +81,7 @@ describe("native preservation guard", () => {
         verdict: "different",
         note: "only in expected package",
       }],
+      proof: { removedParts: ["/ppt/notesSlides/notesSlide4.xml"], scopes: [] },
     })).toEqual([]);
 
     // And a newly added part is not a rewrite of a preserved one either.
@@ -150,6 +151,7 @@ describe("native preservation guard", () => {
     expect(
       preservationViolations({
         entries: [entry],
+        proof: { removedParts: [], scopes: [{ partName: entry.partName, pathPattern: entry.pathPattern, unchanged: true }] },
         parts: [
           {
             name: "xl/worksheets/sheet1.xml",
@@ -171,6 +173,27 @@ describe("native preservation guard", () => {
         ],
       }),
     ).toHaveLength(1);
+  });
+
+  it("never uses absent diagnostic paths as proof of preservation", () => {
+    const entries = [
+      { feature: "transition", class: "PRESERVED", partName: "/ppt/slides/slide1.xml", pathPattern: "transition" },
+      { feature: "animation", class: "PRESERVED", partName: "/ppt/slides/slide1.xml", pathPattern: "timing" },
+    ];
+    for (const claims of [entries, [...entries].reverse()]) {
+      expect(preservationViolations({ entries: claims, parts: [{ name: "ppt/slides/slide1.xml", verdict: "different", diffs: [] }],
+        proof: { removedParts: [], scopes: [{ partName: entries[0]!.partName, pathPattern: "transition", unchanged: true }] },
+      })).toMatchObject([{ feature: "animation" }]);
+    }
+  });
+
+  it("rejects unowned losses even when a part was native or unclassified", () => {
+    for (const entries of [[], [macroEntry], [{ feature: "body", class: "NATIVE", partName: macroEntry.partName }]])
+      expect(preservationViolations({ entries, parts: [{ name: macroEntry.partName, verdict: "different", note: "only in expected package" }] })).toHaveLength(1);
+  });
+
+  it("does not confuse ZIP directory metadata with removed native content", () => {
+    expect(preservationViolations({ entries: [], parts: [{ name: "word/", verdict: "different", note: "only in expected package" }] })).toEqual([]);
   });
 
   it("does not freeze a shared native part because a preserved feature also lives there", () => {

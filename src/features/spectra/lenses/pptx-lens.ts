@@ -395,8 +395,8 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const title = titleShape(root);
     const id = `pptx:slide:${slide.partName}`;
     entries.push({ regionId: id, feature: "slide", class: "NATIVE", partName: slide.partName });
-    if (transition) entries.push({ regionId: `${id}:transition`, feature: "transition", class: "PRESERVED", partName: slide.partName, readOnly: true, reason: "This PowerPoint transition is preserved. Editing it requires an exact native equivalent." });
-    if (timing) entries.push({ regionId: `${id}:animation`, feature: "animation", class: "PRESERVED", partName: slide.partName, readOnly: true });
+    if (transition) entries.push({ regionId: `${id}:transition`, feature: "transition", class: "PRESERVED", partName: slide.partName, pathPattern: "transition", namespaceUri: PML_NAMESPACE, readOnly: true, reason: "This PowerPoint transition is preserved. Editing it requires an exact native equivalent." });
+    if (timing) entries.push({ regionId: `${id}:animation`, feature: "animation", class: "PRESERVED", partName: slide.partName, pathPattern: "timing", namespaceUri: PML_NAMESPACE, readOnly: true });
     const layoutRoot = slide.layoutPartName ? (await deck.office.xml(slide.layoutPartName)).root : undefined;
     const notesPartName = notesPartNameFor(deck, slide.partName);
     const speakerNotes = notesPartName ? notesText((await deck.office.xml(notesPartName)).root) : "";
@@ -406,9 +406,9 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
-  for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
-    const partName = partNames.find((name) => pattern.test(name));
-    if (partName) entries.push({ regionId: `pptx:feature:${feature}`, feature, class: feature === "notes" ? "EQUIVALENT" : "PRESERVED", partName, ...(feature === "notes" ? {} : { readOnly: true }) });
+  for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["ole", /\/embeddings\//i], ["macro", /\/vbaProject\.bin$/i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
+    for (const [index, partName] of partNames.filter((name) => pattern.test(name)).entries())
+      entries.push({ regionId: `pptx:feature:${feature}${index ? `:${partName}` : ""}`, feature, class: feature === "notes" ? "EQUIVALENT" : "PRESERVED", partName, ...(feature === "notes" ? {} : { readOnly: true }) });
   }
   const fidelityMap: LensFidelityMap = { version: 1, profile, entries };
   // A second pass, keyed the way the command registry keys its `touches`

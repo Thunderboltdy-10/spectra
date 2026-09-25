@@ -3408,9 +3408,9 @@ async function projectDocument(
     match: (name: string) => boolean,
     reason?: string,
   ) => {
-    const partName = partNames.find(match);
-    if (partName)
+    for (const [index, partName] of partNames.filter(match).entries())
       fidelityFeature(fidelityEntries, feature, partName, {
+        ...(index ? { regionId: `docx:feature:${feature}:${partName}` } : {}),
         readOnly: true,
         ...(reason ? { reason } : {}),
       });

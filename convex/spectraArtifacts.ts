@@ -853,6 +853,40 @@ async function latestPublishedAgentRelease(
     .sort((left, right) => right.releaseNumber - left.releaseNumber)[0];
 }
 
+/** One release-bound evaluation row; never expose case output to invokers. */
+async function releaseRoutingEvaluation(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  release: Doc<"agentReleases">,
+  version: Doc<"spectraArtifactVersions">,
+) {
+  if (!release.evalRunId || !release.contentHash ||
+    version._id !== release.versionId || version.artifactId !== release.agentId ||
+    version.schoolId !== release.schoolId) return null;
+  const evaluation = await ctx.db.get(release.evalRunId);
+  if (!evaluation || evaluation.agentId !== release.agentId ||
+    evaluation.schoolId !== release.schoolId || evaluation.contentHash !== release.contentHash) return null;
+  const strength = evaluation.verificationStrength;
+  return {
+    releaseId: release._id,
+    versionId: version._id,
+    contentHash: release.contentHash,
+    status: evaluation.status,
+    verificationStrength: strength === "strong" || strength === "moderate" || strength === "weak"
+      ? strength : "unverified",
+    caseCount: evaluation.caseCount,
+    passedCount: evaluation.passedCount,
+  };
+}
+
+function enabledReleaseToolKeys(content: Record<string, unknown>) {
+  return Array.isArray(content.tools) ? content.tools.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const tool = value as Record<string, unknown>;
+    return tool.enabled === true && typeof tool.key === "string" && allowedAgentToolKeys.has(tool.key)
+      ? [tool.key] : [];
+  }).slice(0, 60) : [];
+}
+
 function publicAgentProjection(
   snapshot: unknown,
   fallback: Doc<"spectraArtifacts">,
@@ -1627,7 +1661,7 @@ export const listAgentRoutingDescriptors = query({
       );
       if (!release) continue;
       const version = await ctx.db.get(release.versionId);
-      if (!version) continue;
+      if (!version || version.artifactId !== artifact._id || version.schoolId !== artifact.schoolId) continue;
       const snapshot = await loadVersionAfter(ctx, version);
       const releaseState =
         snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
@@ -1674,6 +1708,8 @@ export const listAgentRoutingDescriptors = query({
         // Compiled competence for competence-aware routing (§10.11). Carried
         // as published-release data so a draft edit cannot change routing.
         foundry: content.foundry ?? null,
+        evaluation: await releaseRoutingEvaluation(ctx, release, version),
+        availableToolKeys: enabledReleaseToolKeys(content),
         updatedAt: release.publishedAt,
       });
     }
@@ -1702,7 +1738,8 @@ export const getAgentRuntime = query({
     );
     if (!release) throw new Error("Agent has no published release");
     const version = await ctx.db.get(release.versionId);
-    if (!version) throw new Error("Published agent release is unavailable");
+    if (!version || version.artifactId !== artifact._id || version.schoolId !== artifact.schoolId)
+      throw new Error("Published agent release is unavailable");
     const snapshot = await loadVersionAfter(ctx, version);
     const releaseState =
       snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
@@ -1895,6 +1932,7 @@ export const getAgentRuntime = query({
           ? content.runtimeBudget
           : undefined,
       routing: {
+        enabled: routing.enabled === true,
         description:
           typeof routing.description === "string" ? routing.description : "",
         examples: Array.isArray(routing.examples) ? routing.examples : [],
@@ -1906,6 +1944,7 @@ export const getAgentRuntime = query({
       // evidence and contracts one request activates (§10.14), rather than
       // flattening the whole agent into a prompt.
       foundry: content.foundry ?? null,
+      evaluation: await releaseRoutingEvaluation(ctx, release, version),
     };
   },
 });

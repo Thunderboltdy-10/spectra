@@ -28,13 +28,10 @@ import {
   shouldRecoverNativeRoom,
 } from "../../../../scripts/collaboration-room-state.mjs";
 import {
-  appendBaseStateVectorHash,
   durableHeadKey,
   isRebaseablePersistenceFailure,
   isTransientCollaborationFailure,
   permanentPersistenceFailure,
-  rebaseAppendPayload,
-  resolveRebaseHead,
   samePersistenceBatch,
   chainPersistThenCompact,
   collaborationFailureMessage,
@@ -383,48 +380,7 @@ describe("P5.I2 gateway production helpers", () => {
         ),
       ),
     ).toBe(true);
-    expect(
-      appendBaseStateVectorHash({
-        lastPersistedHash: "b".repeat(43),
-        capturedBaseHash: "a".repeat(43),
-      }),
-    ).toBe("b".repeat(43));
-    expect(
-      appendBaseStateVectorHash({
-        lastPersistedHash: null,
-        capturedBaseHash: "a".repeat(43),
-      }),
-    ).toBe("a".repeat(43));
-    expect(
-      rebaseAppendPayload(
-        { baseStateVectorHash: "a".repeat(43), stateVectorHash: "c".repeat(43) },
-        "b".repeat(43),
-      ),
-    ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
-    expect(durableHeadKey({ artifactId: "art", partitionKey: "root" })).toBe(
-      "art:root",
-    );
-    expect(
-      resolveRebaseHead({
-        lastPersistedHash: "a".repeat(43),
-        storedLiveHash: "b".repeat(43),
-      }),
-    ).toBe("b".repeat(43));
-    expect(
-      resolveRebaseHead({
-        lastPersistedHash: "a".repeat(43),
-        storedLiveHash: null,
-      }),
-    ).toBe("a".repeat(43));
-    expect(
-      rebaseAppendPayload(
-        { baseStateVectorHash: "a".repeat(43), stateVectorHash: "c".repeat(43) },
-        resolveRebaseHead({
-          lastPersistedHash: "a".repeat(43),
-          storedLiveHash: "b".repeat(43),
-        }),
-      ),
-    ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
+    expect(durableHeadKey({ artifactId: "art", partitionKey: "root" })).toBe("art:root");
   });
 
   it("treats Convex 1s function timeouts as transient so soft-reauth can keep the tab alive", () => {

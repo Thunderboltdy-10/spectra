@@ -25,6 +25,7 @@ function harness(persist = vi.fn(async () => undefined)) {
   const release = vi.fn();
   const reject = vi.fn();
   const confirmDeps = { flushPersistence: handlers.flushPersistence, reauthorize: vi.fn(async () => undefined),
+    documentFrontierHash: () => "fixture-frontier",
     acquireDocumentMessage: vi.fn(async () => undefined), releaseDocumentMessage: release,
     sendGatewayState: sent, rejectPeerUpdate: reject, collaborationFailureMessage: String };
   const confirm = new Function(...Object.keys(confirmDeps), `return ({${confirmCode}}).onStateless;`)(...Object.values(confirmDeps));
@@ -103,7 +104,7 @@ it("allows a read-only no-op handshake but rejects an authored update before app
   const rejected = vi.fn();
   const projection = vi.fn(() => null);
   const deps = { Y, createHash, canonicalDurableUpdate, samePersistenceBatch,
-    reauthorize: async () => undefined, extractYjsUpdate: frame => frame,
+    reauthorize: async () => undefined, catchUpCanonicalRoom: async () => undefined, extractYjsUpdate: frame => frame,
     acquireDocumentMessage: async () => undefined, releaseDocumentMessage: vi.fn(),
     isNativeArtifactDocument: () => true, nativeArtifactProjection: projection,
     artifactModelState: () => ({}), documentStateVectorHash: () => "hash",

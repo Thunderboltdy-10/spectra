@@ -1,6 +1,6 @@
 import { internalQuery } from "./_generated/server";
 import { internalMutation } from "./orgNodeMutation";
-import { v } from "convex/values";
+import { v, type ObjectType } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
@@ -127,7 +127,7 @@ async function syncListingAfterProjection(
   await syncSourceNodes(ctx, "work", artifact._id, listingTitle);
 }
 
-async function parseGatewayProjection(
+export async function parseGatewayProjection(
   ctx: MutationCtx,
   projectionJson: string | undefined,
   projectionHash: string | undefined,
@@ -230,6 +230,8 @@ export const policy = internalQuery({
       available: true as const,
       policyVersion: room.policyVersion,
       roomStatus: room.status,
+      roomId: room._id,
+      nextSequence: room.nextSequence,
     };
   },
 });
@@ -827,8 +829,7 @@ export const bootstrapNative = internalMutation({
   },
 });
 
-export const append = internalMutation({
-  args: {
+export const appendRoomUpdateArgs = {
     accountId: v.id("accounts"),
     actorKind: v.union(v.literal("human"), v.literal("ai")),
     artifactId: v.id("spectraArtifacts"),
@@ -838,6 +839,9 @@ export const append = internalMutation({
     idempotencyKey: v.string(),
     update: v.bytes(),
     baseStateVectorHash: v.string(),
+    expectedRoomId: v.id("collaborationRooms"),
+    expectedNextSequence: v.number(),
+    claimBaseStateVectorHash: v.optional(v.string()),
     stateVectorHash: v.string(),
     regionIds: v.array(v.string()),
     nativeInitialization: v.optional(v.boolean()),
@@ -850,8 +854,9 @@ export const append = internalMutation({
     projectionPayloadRef: v.optional(v.string()),
     projectionPayloadDigest: v.optional(v.string()),
     projectionHotStub: v.optional(v.any()),
-  },
-  handler: async (ctx, args) => {
+};
+
+export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof appendRoomUpdateArgs>) {
     const [actor, artifact, room] = await Promise.all([
       getActorForAccountId(ctx, args.accountId),
       ctx.db.get(args.artifactId),
@@ -936,11 +941,14 @@ export const append = internalMutation({
       )
       .unique();
     if (duplicate) {
+      const duplicateDigest = receipt?.digest ?? ("update" in duplicate
+        ? duplicate.payloadDigest ?? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", duplicate.update)), byte => byte.toString(16).padStart(2, "0")).join("")
+        : null);
       if (
+        room._id !== args.expectedRoomId ||
         duplicate.actorAccountId !== actor.accountId ||
         duplicate.clientId !== clientId ||
-        duplicate.stateVectorHash !== args.stateVectorHash ||
-        (receipt && receipt.digest !== updateDigest) ||
+        duplicateDigest !== updateDigest ||
         duplicate.byteLength !== effectiveByteLength
       )
         throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
@@ -948,6 +956,7 @@ export const append = internalMutation({
         sequence: duplicate.sequence,
         duplicate: true,
         projected: false,
+        stateVectorHash: duplicate.stateVectorHash,
       };
     }
     // Receipts survive log compaction and body GC; require old bytes only for
@@ -958,13 +967,13 @@ export const append = internalMutation({
         payloadRef: args.payloadRef!, digest: args.payloadDigest ?? "", byteLength: effectiveByteLength, kind: "yjs-update",
       });
     }
-    // Overlapping Yjs writers capture `baseStateVectorHash` at apply time, then
-    // Convex appends later. A later CAS-lose is a CRDT rebase, not a dead
-    // socket: the update already lives in the gateway document and must join
-    // the durable log against the current live head.
-    const rebased =
-      Boolean(artifact.liveStateVectorHash) &&
-      artifact.liveStateVectorHash !== args.baseStateVectorHash;
+    // Sequence fences deletes as well as inserts; room ID fences a reset.
+    // A changed base requires actual replay and projection recomputation.
+    if (room._id !== args.expectedRoomId ||
+        !Number.isSafeInteger(args.expectedNextSequence) || args.expectedNextSequence < 1 ||
+        room.nextSequence !== args.expectedNextSequence ||
+        (artifact.liveStateVectorHash && artifact.liveStateVectorHash !== args.baseStateVectorHash))
+      throw new Error("COLLABORATION_BASE_STATE_STALE");
     const projection = await parseGatewayProjection(
       ctx,
       args.projectionJson,
@@ -988,7 +997,7 @@ export const append = internalMutation({
         actorAccountId: actor.accountId,
         actorKind: args.actorKind,
         clientId,
-        baseStateVectorHash: args.baseStateVectorHash,
+        baseStateVectorHash: args.claimBaseStateVectorHash ?? args.baseStateVectorHash,
         now,
       }),
     );
@@ -1067,7 +1076,7 @@ export const append = internalMutation({
       ]);
       await ctx.db.insert("collaborationReceipts", { roomId: room._id, idempotencyKey, clientId, actorAccountId: actor.accountId,
         sequence, stateVectorHash: args.stateVectorHash, digest: updateDigest, byteLength: effectiveByteLength, createdAt: now });
-      return { sequence, duplicate: false, rebased, regionIds: [] };
+      return { sequence, duplicate: false, stateVectorHash: args.stateVectorHash, regionIds: [] };
     }
     if (regionIds.length === 0 || regionIds.length > 128)
       throw new Error("COLLABORATION_REGION_CLAIM_REQUIRED");
@@ -1338,12 +1347,14 @@ export const append = internalMutation({
     return {
       sequence,
       duplicate: false,
-      rebased,
+      stateVectorHash: args.stateVectorHash,
+      changeGroupId: changeGroup?._id,
       regionIds,
       projected: Boolean(projection),
     };
-  },
-});
+}
+
+export const append = internalMutation({ args: appendRoomUpdateArgs, handler: appendRoomUpdate });
 
 export const checkpoint = internalMutation({
   args: {

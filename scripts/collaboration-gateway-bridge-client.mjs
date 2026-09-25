@@ -136,7 +136,7 @@ export function createCollaborationGatewayBridgeClient({
         result.updates.push(...next.updates);
         page = next;
       }
-      let sequence = result.snapshot?.throughSequence ?? 0;
+      let sequence = Math.max(payload.afterSequence ?? 0, result.snapshot?.throughSequence ?? 0);
       for (const update of result.updates) {
         if (update.sequence !== ++sequence) throw new Error("COLLABORATION_REPLAY_GENERATION_CHANGED");
       }

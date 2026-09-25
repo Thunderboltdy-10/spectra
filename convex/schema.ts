@@ -1418,6 +1418,8 @@ export default defineSchema({
       "kind",
       "sourceRecordId",
     ])
+    .index("by_account_source_kind", ["ownerAccountId", "sourceRecordId", "kind"])
+    .index("by_account_task_status", ["ownerAccountId", "taskItemId", "status"])
     .index("by_account_status_kind_updated_item", [
       "ownerAccountId",
       "status",

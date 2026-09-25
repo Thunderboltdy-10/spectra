@@ -1,117 +1,12 @@
 /// <reference types="vite/client" />
-import { createHash, createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { convexTest } from "convex-test";
-import aggregateTest from "@convex-dev/aggregate/test";
-import { makeFunctionReference } from "convex/server";
-import { v } from "convex/values";
 import { api } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { upsertSourceCalendarItem } from "./calendarShared";
-import schema from "./schema";
+import { bridgeKey, calendarFixture, initialSource } from "../scripts/test-fixtures/managebac-calendar";
 
 const modules = import.meta.glob("./**/*.ts");
-const bridgeKey = "school-calendar-disposable-fixture-key-1234567890";
-const identity = { subject: "school-calendar-student", email: "student@example.test", emailVerified: true };
-const initialSource = {
-  title: "Official essay",
-  description: "Explain the evidence.",
-  dueAt: "2026-10-24T09:00:00+02:00",
-  timezone: "Europe/Madrid",
-  classId: "class-1",
-};
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
-}
-
-// All identities, source records and bridge signatures are disposable. The real
-// signed mutation and projection triggers run; no provider/server is contacted.
-async function fixture(role: "student" | "school_admin" = "student") {
-  const t = convexTest(schema, {
-    ...modules,
-    "./schoolCalendarFixture.ts": async () => {
-      const { mutation } = await import("./orgNodeMutation");
-      return { editTask: mutation({
-        args: { itemId: v.id("calendarItems"), patch: v.any() },
-        handler: async (ctx, args) => { await ctx.db.patch(args.itemId, args.patch); },
-      }) };
-    },
-  });
-  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"])
-    aggregateTest.register(t, name);
-  const seed = await t.run(async ctx => {
-    const now = Date.now();
-    const schoolId = await ctx.db.insert("schools", {
-      name: "Disposable Calendar school", slug: "school-calendar-fixture", verifiedDomains: [],
-      status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now,
-    });
-    const accountId = await ctx.db.insert("accounts", {
-      clerkId: identity.subject, email: identity.email, emailVerified: true,
-      name: "Student", status: "active", createdAt: now, updatedAt: now,
-    });
-    await ctx.db.insert("schoolMemberships", {
-      schoolId, accountId, role, status: "active", joinedAt: now, createdAt: now, updatedAt: now,
-    });
-    const integrationId = await ctx.db.insert("schoolIntegrations", {
-      schoolId, provider: "managebac", baseUrl: "https://provider.example.test", authHeaderName: "X-API-Key",
-      authScheme: "raw", status: "connected", tokenMode: "read_only", secretPurpose: "fixture", manifestVersion: 1,
-      capabilityCoverage: { discovered: 1, verifiedReadable: 1, unverified: 0, failed: 0, quarantined: 0 },
-      syncPolicy: { frequencyMinutes: 60, autoCreateClasses: false, autoImportTasks: true, autoApplySafeUpdates: true, conflictMode: "review" },
-      freshnessSlaMinutes: 60, requestBudgetPerMinute: 30, bootstrapVersion: 1,
-      createdByAccountId: accountId, updatedByAccountId: accountId, createdAt: now, updatedAt: now,
-    });
-    const capabilityId = await ctx.db.insert("integrationCapabilities", {
-      integrationId, schoolId, category: "assignments", name: "Assignments", recordType: "assignment",
-      method: "GET", path: "/assignments", purpose: "Fixture assignments", scope: "personal", minimumRole: "student",
-      pagination: "page", changeStrategy: "full_reconciliation", freshnessSlaMinutes: 60, contractVersion: "fixture-v1",
-      permissionState: "read_only", verificationStatus: "verified", routeSource: "manual_verified", normalization: {},
-      lastVerifiedAt: now, lastSuccessAt: now, createdAt: now, updatedAt: now,
-    });
-    const syncRunId = await ctx.db.insert("externalSyncRuns", {
-      integrationId, schoolId, accountId, kind: "manual", status: "running", trigger: "user", stage: "ingesting",
-      capabilityIds: [capabilityId], counts: { fetched: 0, created: 0, updated: 0, unchanged: 0, tombstoned: 0, projected: 0, skipped: 0, quarantined: 0, conflicts: 0, errors: 0 },
-      attemptCount: 1, nextAttemptAt: now, startedAt: now, createdAt: now, updatedAt: now,
-    });
-    const selectionId = await ctx.db.insert("managebacClassSelections", {
-      integrationId, schoolId, accountId, providerClassId: "class-1", providerRecordKey: "class:1",
-      academicPeriodKey: "2026-27", selected: true, retention: "keep_in_spectra", selectionRevision: 1,
-      createdAt: now, updatedAt: now,
-    });
-    return { schoolId, accountId, integrationId, capabilityId, syncRunId, selectionId };
-  });
-  const user = t.withIdentity(identity);
-  const editTask = (itemId: Id<"calendarItems">, patch: Partial<Doc<"calendarItems">>) =>
-    t.mutation(makeFunctionReference<"mutation">("schoolCalendarFixture:editTask"), { itemId, patch });
-  let sequence = 0;
-  const sync = async (normalized = initialSource, sourceHash = "v1", academicPeriodKey = "2026-27") => {
-    const records = [{
-      providerRecordId: "assignment-1", providerRecordKey: "assignment:1", providerClassId: "class-1",
-      academicPeriodKey, classification: "personal" as const, audienceScope: "mapped_user" as const,
-      normalized, payloadVersion: "fixture-v1", sourceHash, provenanceUrl: "https://provider.example.test/assignment/1",
-    }];
-    const timestamp = Date.now();
-    const nonce = `calendar-fixture-${++sequence}`;
-    const payloadDigest = createHash("sha256").update(canonicalJson({ capabilityId: seed.capabilityId, records, pageNumber: sequence })).digest("base64url");
-    const signature = createHmac("sha256", bridgeKey).update([
-      "sync-page", identity.subject, seed.integrationId, seed.syncRunId, timestamp, nonce, payloadDigest,
-    ].join("|")).digest("base64url");
-    return user.mutation(api.managebac.commitNormalizedPage, {
-      integrationId: seed.integrationId, syncRunId: seed.syncRunId, capabilityId: seed.capabilityId,
-      records, pageNumber: sequence, timestamp, nonce, payloadDigest, signature,
-    });
-  };
-  const items = () => t.run(async ctx => {
-    const rows = await ctx.db.query("calendarItems").withIndex("by_account_kind", q => q.eq("ownerAccountId", seed.accountId)).collect();
-    const official = rows.find(row => row.kind === "official_deadline")!;
-    const task = rows.find(row => row.kind === "task")!;
-    return { rows, official, task };
-  });
-  return { t, user, seed, sync, items, editTask };
-}
+const fixture = (role: "student" | "school_admin" = "student") => calendarFixture(modules, role);
 
 beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
 afterEach(() => vi.unstubAllEnvs());

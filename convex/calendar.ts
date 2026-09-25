@@ -13,6 +13,7 @@ import {
   calendarItemWire,
   createCalendarReadMetrics,
   plannerTaskCandidates,
+  sourceRecordForPlanner,
   upsertCalendarItemReadModel,
   syncCalendarMigrationReadModel,
   syncPlannerTaskReadModels,
@@ -288,6 +289,26 @@ async function readUnscheduledTasks(
   };
 }
 
+function plannerGroupWire(rows: readonly Doc<"calendarPlanTaskReadModels">[]) {
+  const first = rows[0]!;
+  return {
+    id: `plan:${first.planArtifactId}`,
+    kind: "task" as const,
+    title: first.planTitle || first.title,
+    notes: rows.length > 1 ? `${rows.length} unscheduled` : undefined,
+    allDay: false,
+    timezone: "UTC",
+    timePrecision: "unknown" as const,
+    status: "active" as const,
+    sourceLocked: false,
+    planArtifactId: first.planArtifactId,
+    planTaskId: first.taskId,
+    linkedWorkIds: [first.planArtifactId],
+    revision: 0,
+    dueAt: first.dueAt,
+  };
+}
+
 async function readPlannerTasks(
   ctx: QueryCtx,
   accountId: Id<"accounts">,
@@ -338,50 +359,55 @@ async function readPlannerTasks(
     group.last = row;
     grouped.set(String(row.planArtifactId), group);
   }
-  const representedPlans = new Set<string>();
+  const selectedGroups: Array<{
+    last: (typeof page)[number];
+    wire: ReturnType<typeof calendarItemWire> | ReturnType<typeof plannerGroupWire>;
+  }> = [];
+  let examinedGroups = 0;
   for (const group of grouped.values()) {
-    const sourceRecordId = group.rows[0]?.sourceRecordId;
-    if (!sourceRecordId) continue;
-    metrics.compactQueries += 1;
-    const sourceTasks = await ctx.db
-      .query("calendarItemReadModels")
-      .withIndex("by_account_status_source", (q) =>
-        q
-          .eq("ownerAccountId", accountId)
-          .eq("status", "active")
-          .eq("kind", "task")
-          .eq("sourceRecordId", sourceRecordId),
-      )
-      .take(1);
-    if (sourceTasks.length)
-      representedPlans.add(String(group.rows[0]!.planArtifactId));
+    examinedGroups++;
+    let eligible = group.rows;
+    let sourceWire: ReturnType<typeof calendarItemWire> | undefined;
+    // ManageBac's single-root projection has the stable task-1 identity.
+    // Extra personal tasks in that planner do not inherit its lifecycle.
+    const root = eligible.find(row => row.taskId === "task-1" && row.sourceRecordId);
+    if (root?.sourceRecordId) {
+      metrics.compactQueries += 1;
+      const sourceTask = await ctx.db.query("calendarItemReadModels")
+        .withIndex("by_account_source_kind", q => q.eq("ownerAccountId", accountId)
+          .eq("sourceRecordId", root.sourceRecordId).eq("kind", "task"))
+        .unique();
+      if (sourceTask && sourceTask.schoolId === root.schoolId) {
+        let scheduled = false;
+        if (sourceTask.status === "active" && sourceTask.startAt === undefined) {
+          metrics.compactQueries += 1;
+          const blocks = await ctx.db.query("calendarItemReadModels")
+            .withIndex("by_account_task_status", q => q.eq("ownerAccountId", accountId)
+              .eq("taskItemId", sourceTask.itemId).eq("status", "active"))
+            .take(1);
+          scheduled = blocks.length > 0;
+        }
+        if (sourceTask.status !== "active" || sourceTask.startAt !== undefined || scheduled) {
+          eligible = eligible.filter(row => row !== root);
+        } else {
+          sourceWire = {
+            ...calendarReadModelWire(sourceTask)!,
+            planArtifactId: root.planArtifactId,
+            planTaskId: root.taskId,
+            linkedWorkIds: [...new Set([...sourceTask.linkedArtifactIds, root.planArtifactId])],
+          };
+        }
+      } else eligible = eligible.filter(row => row !== root);
+    }
+    const first = eligible[0];
+    if (!first) continue;
+    selectedGroups.push({ last: group.last, wire: sourceWire ?? plannerGroupWire(eligible) });
+    if (selectedGroups.length === limit) break;
   }
-  const selectedGroups = [...grouped.entries()]
-    .filter(([planId]) => !representedPlans.has(planId))
-    .slice(0, limit);
-  const plans = selectedGroups.map(([, group]) => {
-    const first = group.rows[0]!;
-    return {
-      id: `plan:${first.planArtifactId}`,
-      kind: "task" as const,
-      title: first.planTitle || first.title,
-      notes:
-        group.rows.length > 1 ? `${group.rows.length} unscheduled` : undefined,
-      allDay: false,
-      timezone: "UTC",
-      timePrecision: "unknown" as const,
-      status: "active" as const,
-      sourceLocked: false,
-      planArtifactId: first.planArtifactId,
-      planTaskId: first.taskId,
-      linkedWorkIds: [first.planArtifactId],
-      revision: 0,
-      dueAt: first.dueAt,
-    };
-  });
+  const plans = selectedGroups.map(group => group.wire);
   const cursorRow =
-    grouped.size > selectedGroups.length && selectedGroups.length >= limit
-      ? selectedGroups.at(-1)?.[1].last
+    examinedGroups < grouped.size
+      ? selectedGroups.at(-1)?.last
       : page.length > pageSize
         ? candidates.at(-1)
         : undefined;
@@ -762,23 +788,81 @@ export const scheduleTask = mutation({
       throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
     let plannerArtifact: Doc<"spectraArtifacts"> | null = null;
     let plannerTask: { id: string; title: string } | undefined;
-    if (args.planArtifactId && !args.taskItemId) {
+    let taskItem = args.taskItemId ? await ctx.db.get(args.taskItemId) : null;
+    const assertTaskAvailable = (task: Doc<"calendarItems"> | null) => {
+      if (!task || task.ownerAccountId !== actor.accountId ||
+        task.schoolId !== actor.schoolId || task.kind !== "task")
+        throw new Error("CALENDAR_TASK_NOT_FOUND");
+      if (task.status !== "active") throw new Error("CALENDAR_TASK_UNAVAILABLE");
+    };
+    if (args.taskItemId) assertTaskAvailable(taskItem);
+    if (args.planTaskId && !args.planArtifactId)
+      throw new Error("CALENDAR_PLAN_NOT_FOUND");
+    if (args.planArtifactId) {
       plannerArtifact = await ctx.db.get(args.planArtifactId);
       if (
         !plannerArtifact ||
         plannerArtifact.ownerAccountId !== actor.accountId ||
-        plannerArtifact.blueprintKey !== "planner_task"
+        (plannerArtifact.schoolId !== undefined && plannerArtifact.schoolId !== actor.schoolId) ||
+        plannerArtifact.blueprintKey !== "planner_task" ||
+        plannerArtifact.status !== "active"
       )
         throw new Error("CALENDAR_PLAN_NOT_FOUND");
       const availableTasks = planTasks(plannerArtifact);
+      const content = object(plannerArtifact.content);
+      const legacySubtask = !Array.isArray(content.tasks) && Array.isArray(content.subtasks) &&
+        content.subtasks.some(candidate => object(candidate).id === args.planTaskId);
       plannerTask =
         availableTasks.find((candidate) => candidate.id === args.planTaskId) ??
-        // A single-root planner has one canonical Calendar task even if the
-        // editor/model surfaced a visual subtask id.
-        (availableTasks.length === 1 ? availableTasks[0] : undefined);
+        // Retain the historical visual-subtask alias only when that subtask
+        // actually belongs to the single-root plan, never for arbitrary IDs.
+        (legacySubtask && availableTasks.length === 1 ? availableTasks[0] : undefined);
       if (!plannerTask) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
+      const planRow = await ctx.db.query("calendarPlanTaskReadModels")
+        .withIndex("by_plan_task", q => q.eq("planArtifactId", plannerArtifact!._id)
+          .eq("taskId", plannerTask!.id)).unique();
+      // Read models accelerate discovery; only the persisted source projection
+      // may authorize the association between a planner and an imported task.
+      const sourceRecordId = await sourceRecordForPlanner(ctx, plannerArtifact._id, actor.accountId);
+      if (planRow && (planRow.ownerAccountId !== actor.accountId ||
+        planRow.schoolId !== plannerArtifact.schoolId || planRow.sourceRecordId !== sourceRecordId))
+        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+      const sourceRootRecordId = plannerTask.id === "task-1" ? sourceRecordId : undefined;
+      if (sourceRootRecordId) {
+        if (!planRow) throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+        const sourceModel = await ctx.db.query("calendarItemReadModels")
+          .withIndex("by_account_source_kind", q => q.eq("ownerAccountId", actor.accountId)
+            .eq("sourceRecordId", sourceRootRecordId).eq("kind", "task")).unique();
+        if (sourceModel) {
+          const sourceTask = await ctx.db.get(sourceModel.itemId);
+          assertTaskAvailable(sourceTask);
+          if (sourceTask!.sourceRecordId !== sourceRootRecordId ||
+            (taskItem && taskItem._id !== sourceTask!._id))
+            throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+          taskItem = sourceTask;
+        } else throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+      }
+      if (taskItem) {
+        const linkedDirectly = taskItem.planArtifactId === plannerArtifact._id &&
+          taskItem.planTaskId === plannerTask.id;
+        const linkedBySource = Boolean(sourceRootRecordId && taskItem.sourceRecordId === sourceRootRecordId);
+        if (!linkedDirectly && !linkedBySource)
+          throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+      } else if (plannerTask.id === "task-1" && object(content.source).provider === "managebac") {
+        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: Refresh school data before scheduling this imported task.");
+      }
     }
     const resolvedPlanTaskId = plannerTask?.id ?? args.planTaskId;
+    const resolvedTaskItemId = taskItem?._id;
+    let officialDeadlineItemId = taskItem?.officialDeadlineItemId;
+    if (officialDeadlineItemId) {
+      const official = await ctx.db.get(officialDeadlineItemId);
+      if (!official || official.ownerAccountId !== actor.accountId ||
+        official.schoolId !== actor.schoolId || official.kind !== "official_deadline" ||
+        !official.sourceLocked || official.sourceRecordId !== taskItem?.sourceRecordId)
+        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+      officialDeadlineItemId = official._id;
+    }
     const existingByKey = idempotencyKey
       ? await ctx.db
           .query("calendarItems")
@@ -791,15 +875,16 @@ export const scheduleTask = mutation({
       : null;
     if (existingByKey) {
       const sameTask =
-        String(existingByKey.taskItemId ?? "") ===
-          String(args.taskItemId ?? "") &&
+        (String(existingByKey.taskItemId ?? "") === String(resolvedTaskItemId ?? "") ||
+          (!args.taskItemId && !existingByKey.taskItemId)) &&
         String(existingByKey.planArtifactId ?? "") ===
           String(args.planArtifactId ?? "") &&
         String(existingByKey.planTaskId ?? "") ===
           String(resolvedPlanTaskId ?? "") &&
         existingByKey.startAt === args.startAt &&
         existingByKey.endAt === args.endAt &&
-        existingByKey.timezone === args.timezone;
+        existingByKey.timezone === args.timezone &&
+        existingByKey.schoolId === actor.schoolId;
       if (!sameTask)
         throw new Error(
           "CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling key was already used for another block.",
@@ -810,23 +895,7 @@ export const scheduleTask = mutation({
         );
       return itemWire(existingByKey);
     }
-    let title = "Scheduled work";
-    let officialDeadlineItemId: Id<"calendarItems"> | undefined;
-    if (args.taskItemId) {
-      const task = await ctx.db.get(args.taskItemId);
-      if (
-        !task ||
-        task.ownerAccountId !== actor.accountId ||
-        task.kind !== "task"
-      )
-        throw new Error("CALENDAR_TASK_NOT_FOUND");
-      title = task.title;
-      officialDeadlineItemId = task.officialDeadlineItemId;
-    } else if (args.planArtifactId) {
-      const task = plannerTask;
-      if (!task) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
-      title = task.title;
-    }
+    const title = taskItem?.title ?? plannerTask?.title ?? "Scheduled work";
     const now = Date.now();
     const itemId = await ctx.db.insert("calendarItems", {
       ownerAccountId: actor.accountId,
@@ -840,7 +909,7 @@ export const scheduleTask = mutation({
       timePrecision: "exact",
       status: "active",
       sourceLocked: false,
-      taskItemId: args.taskItemId,
+      taskItemId: resolvedTaskItemId,
       planArtifactId: args.planArtifactId,
       planTaskId: resolvedPlanTaskId,
       officialDeadlineItemId,

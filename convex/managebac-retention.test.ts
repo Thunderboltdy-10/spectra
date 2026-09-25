@@ -21,6 +21,15 @@ describe("ManageBac Keep lifecycle", () => {
   it("keeps one account's shared projection while other accounts still receive updates and removals", async () => {
     const t = setupTest();
     const f = await seedFixture(t);
+    const classId = await t.run(ctx => ctx.db.insert("externalRecords", {
+      integrationId: f.integrationId, schoolId: f.schoolId, providerRecordId: "class-current",
+      providerRecordKey: "class:current", recordType: "class", classification: "personal",
+      audienceScope: "mapped_user", mappedAccountId: f.aliceId, providerClassId: "class-current",
+      normalized: { title: "Current class" }, payloadVersion: "fixture-v1", sourceHash: "class-current",
+      tombstone: false, fetchedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
+    }));
+    const selection = await t.withIdentity(alice).mutation(api.managebac.setSelectedClasses, { recordIds: [classId] });
+    expect(selection.selectedRecordIds).toEqual([classId]);
     const first = await insertTimetableRun(t, f, f.aliceId);
     await commitTimetablePage(
       t,
@@ -71,18 +80,23 @@ describe("ManageBac Keep lifecycle", () => {
         [f.aliceId, false],
         [f.bobId, true],
       ] as const) {
-        await ctx.db.insert("managebacClassSelections", {
+        const existing = await ctx.db.query("managebacClassSelections")
+          .withIndex("by_integration_account_class", q => q.eq("integrationId", f.integrationId)
+            .eq("accountId", accountId).eq("providerClassId", "class-current")).unique();
+        const value = {
           accountId,
           integrationId: f.integrationId,
           schoolId: f.schoolId,
           providerClassId: "class-current",
           providerRecordKey: "class:current",
           selected,
-          retention: "keep_in_spectra",
+          retention: "keep_in_spectra" as const,
           selectionRevision: 1,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-        });
+        };
+        if (existing) await ctx.db.patch(existing._id, value);
+        else await ctx.db.insert("managebacClassSelections", value);
       }
       return { itemId, bobItemId, sourceId: source._id };
     });

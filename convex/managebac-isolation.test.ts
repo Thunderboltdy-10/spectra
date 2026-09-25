@@ -245,6 +245,26 @@ async function insertSyncRun(
   });
 }
 
+// These lifecycle fixtures act as a class member who explicitly opted in.
+// Use the public selection mutation; do not restore implicit class following.
+async function selectFixtureClass(
+  t: ReturnType<typeof setupTest>,
+  fixture: Awaited<ReturnType<typeof seedFixture>>,
+  providerClassId: string,
+) {
+  const recordId = await t.run(ctx => ctx.db.insert("externalRecords", {
+    integrationId: fixture.integrationId, schoolId: fixture.schoolId,
+    providerRecordId: providerClassId, providerRecordKey: `class:${providerClassId}`,
+    recordType: "class", classification: "personal", audienceScope: "mapped_user",
+    mappedAccountId: fixture.aliceId, providerClassId, normalized: { title: providerClassId },
+    payloadVersion: "fixture-v1", sourceHash: `class-${providerClassId}`, tombstone: false,
+    fetchedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
+  }));
+  const selection = await t.withIdentity(alice).mutation(api.managebac.setSelectedClasses, { recordIds: [recordId] });
+  expect(selection.selectedRecordIds).toEqual([recordId]);
+  return recordId;
+}
+
 async function commitPage(
   t: ReturnType<typeof setupTest>,
   fixture: Awaited<ReturnType<typeof seedFixture>>,
@@ -877,9 +897,26 @@ describe("ManageBac account isolation", () => {
     expect(state.selections[0]?.retention).toBe("keep_in_spectra");
   });
 
+  it("follows class-scoped data only after that member explicitly selects the class", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const run = await insertTimetableRun(t, fixture, fixture.aliceId);
+    await commitTimetablePage(t, fixture, run, "Not selected", "v1", "selection-before");
+    expect(await t.run(ctx => ctx.db.query("calendarItems").collect())).toEqual([]);
+    await selectFixtureClass(t, fixture, "class-current");
+    await commitTimetablePage(t, fixture, run, "Selected", "v2", "selection-after");
+    const selected = await t.run(ctx => ctx.db.query("calendarItems").collect());
+    expect(selected).toHaveLength(1);
+    expect(selected[0].title).toBe("Selected");
+    await t.withIdentity(alice).mutation(api.managebac.setSelectedClasses, { recordIds: [] });
+    await commitTimetablePage(t, fixture, run, "No longer followed", "v3", "selection-removed");
+    expect((await t.run(ctx => ctx.db.get(selected[0]._id)))?.title).toBe("Selected");
+  });
+
   it("refreshes a calendarItems timetable projection and removes it without duplicates", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
+    await selectFixtureClass(t, fixture, "class-current");
     const firstRun = await insertTimetableRun(t, fixture, fixture.aliceId);
 
     await commitTimetablePage(
@@ -1094,6 +1131,7 @@ describe("ManageBac account isolation", () => {
   it("refreshes a legacy timetable projection in place before upgrading its id", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
+    await selectFixtureClass(t, fixture, "class-current");
     const seeded = await t.run(async (ctx) => {
       const now = Date.now();
       const sourceId = await ctx.db.insert("externalRecords", {
@@ -1594,6 +1632,7 @@ describe("ManageBac account isolation", () => {
   it("keeps personal overlay notes when a deadline source hash refreshes", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
+    await selectFixtureClass(t, fixture, "class-notes");
     const now = Date.now();
     const seeded = await t.run(async (ctx) => {
       const recordId = await ctx.db.insert("externalRecords", {

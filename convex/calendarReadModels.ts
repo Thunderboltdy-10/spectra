@@ -361,7 +361,7 @@ export function plannerTaskCandidates(artifact: Doc<"spectraArtifacts">) {
   ];
 }
 
-async function sourceRecordForPlanner(
+export async function sourceRecordForPlanner(
   ctx: CalendarWriteCtx,
   artifactId: Id<"spectraArtifacts">,
   accountId: Id<"accounts">,
@@ -375,8 +375,10 @@ async function sourceRecordForPlanner(
         .eq("projectionId", String(artifactId)),
     )
     .collect();
-  return projections.find((projection) => projection.accountId === accountId)
-    ?.recordId;
+  const owned = projections.filter(projection => projection.accountId === accountId);
+  if (new Set(owned.map(projection => projection.recordId)).size > 1)
+    throw new Error("CALENDAR_SOURCE_LINK_AMBIGUOUS");
+  return owned[0]?.recordId;
 }
 
 export async function syncPlannerTaskReadModels(

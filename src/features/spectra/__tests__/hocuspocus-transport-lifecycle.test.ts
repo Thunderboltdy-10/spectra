@@ -374,7 +374,9 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
       event: { code: 4403, reason: "Access or permissions changed" },
     });
     expect(transport.getSyncSnapshot().state).toBe("reconnecting");
-    expect(transport.getSyncSnapshot().level).toBe("modify");
+    expect(transport.getSyncSnapshot().level).toBeNull();
+    hocuspocus.callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.permission_changed" }) });
+    await vi.waitFor(() => expect(transport.getSyncSnapshot().level).toBe("modify"));
     transport.destroy();
   });
 

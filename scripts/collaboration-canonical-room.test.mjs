@@ -1,14 +1,66 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, stateVectorHash, durableFrontierHash, nativeOverlap } from "./collaboration-canonical-room.mjs";
 import { createCollaborationGatewayBridgeClient } from "./collaboration-gateway-bridge-client.mjs";
-import { initializeNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds } from "./collaboration-native-projection.mjs";
-import { isRebaseablePersistenceFailure } from "./collaboration-persist.mjs";
+import { initializeNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds, isNativeArtifactDocument, NATIVE_PROJECTION_REGION } from "./collaboration-native-projection.mjs";
+import { isRebaseablePersistenceFailure, samePersistenceBatch } from "./collaboration-persist.mjs";
+import { planMergedUpdatePersist } from "./collaboration-durable-capacity.mjs";
+import { MAX_DURABLE_UPDATE_BYTES } from "./collaboration-update-envelope.mjs";
 
 const projection = doc => JSON.stringify(nativeArtifactProjection(doc, 4));
 const regions = (before, after) => nativeChangedRegionIds(JSON.parse(before), JSON.parse(after));
 const clone = doc => { const result = new Y.Doc(); Y.applyUpdate(result, Y.encodeStateAsUpdate(doc)); return result; };
+
+it("commits a disjoint group without erasing a later native-conflicting draft", async () => {
+  const base = new Y.Doc();
+  initializeNativeArtifactDocument(base, { title: "Base", typeKey: "sheets", schemaVersion: 4, tags: [], content: { sheets: [] } });
+  const live = clone(base), native = clone(base);
+  const initial = Y.encodeStateAsUpdate(base), initialVector = Y.encodeStateVector(base);
+  const firstBefore = nativeArtifactProjection(live, 4);
+  live.getMap("spectra:work-v2:live-meta").set("summary", "disjoint");
+  const firstDelta = Y.encodeStateAsUpdate(live, initialVector);
+  const firstAfter = nativeArtifactProjection(live, 4), secondVector = Y.encodeStateVector(live);
+  live.getMap("spectra:work-v2:live-meta").set("title", "pending conflict");
+  const secondDelta = Y.encodeStateAsUpdate(live, secondVector), secondAfter = nativeArtifactProjection(live, 4);
+  native.getMap("spectra:work-v2:live-meta").set("title", "Native title");
+  let nextSequence = 3, liveStateVectorHash = stateVectorHash(native);
+  const room = createCanonicalRoom({ expectedRoomId: "room", load: async after => ({ roomId: "room", nextSequence, liveStateVectorHash,
+    updates: after === 0 ? [{ sequence: 1, update: initial }, { sequence: 2,
+      update: Y.encodeStateAsUpdate(native, initialVector), regionIds: ["metadata:title"], nativeReconciliationOperationId: "native-op" }] : [] }) });
+  const appended = vi.fn(async prepare => {
+    const prepared = await prepare();
+    const sequence = nextSequence++;
+    liveStateVectorHash = prepared.payload.stateVectorHash;
+    return { ...prepared, result: { sequence, duplicate: false } };
+  });
+  const sent = vi.fn();
+  const deps = { Y, createHash, samePersistenceBatch, planMergedUpdatePersist, MAX_DURABLE_UPDATE_BYTES,
+    canonicalRoom: () => room, nativeChangedRegionIds, nativeOverlap, isNativeArtifactDocument, NATIVE_PROJECTION_REGION,
+    prepareCanonicalAppend, artifactProjection: projection, mergeCanonicalIntoLive, appendWithRetry: appended,
+    documentPersistenceQueues: new WeakMap(), openDocuments: new Map(), sendGatewayState: sent,
+    documentFrontierHash: durableFrontierHash, documentStateVectorHash: stateVectorHash,
+    checkpointScheduler: () => ({ note: vi.fn() }) };
+  const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+  const code = source.slice(source.indexOf("async function persistAcceptedMessages("), source.indexOf("function schedulePersistence("));
+  const persist = new Function(...Object.keys(deps), `${code}; return persistAcceptedMessages;`)(...Object.values(deps));
+  const context = { artifactId: "a", partitionKey: "root", schemaVersion: 4, actorKind: "human", policyVersion: 0, roomId: "room" };
+  live.broadcastStateless = vi.fn();
+  await expect(persist(live, [
+    { context: { ...context, accountId: "one", clientId: "one" }, connection: "one", baseSequence: 2, documentUpdate: firstDelta,
+      nativeProjectionBefore: firstBefore, nativeProjectionAfter: firstAfter, messageId: "first" },
+    { context: { ...context, accountId: "two", clientId: "two" }, connection: "two", baseSequence: 2, documentUpdate: secondDelta,
+      nativeProjectionBefore: firstAfter, nativeProjectionAfter: secondAfter, messageId: "second" },
+  ])).rejects.toThrow("COLLABORATION_NATIVE_OVERLAP");
+  expect(appended).toHaveBeenCalledTimes(2); // second preparation rejects before append
+  expect(nextSequence).toBe(4);
+  expect(nativeArtifactProjection(live, 4)).toMatchObject({ title: "pending conflict", summary: "disjoint" });
+  expect(sent.mock.calls).toContainEqual(["one", { type: "spectra.durable_ack", updateIds: ["first"] }]);
+  expect(sent.mock.calls.some(([, value]) => value.type === "spectra.durable_ack" && value.updateIds?.includes("second"))).toBe(false);
+  expect(sent.mock.calls.some(([, value]) => value.code === "COLLABORATION_NATIVE_OVERLAP" && value.nativeOperationId === "native-op")).toBe(true);
+  await room.dispose(); base.destroy(); live.destroy(); native.destroy();
+});
 
 it("identifies native overlap since the authored base while allowing disjoint regions", () => {
   const nativeRegions = new Map([["metadata:title", { regionId: "metadata:title", sequence: 7, operationId: "native-op" }]]);

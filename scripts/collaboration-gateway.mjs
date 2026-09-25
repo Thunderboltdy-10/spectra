@@ -283,6 +283,8 @@ async function catchUpCanonicalRoom(document, context) {
   await flushPersistence(document);
   return canonicalRoom(document, context).run(async session => {
     const { document: canonical, stored } = await session.refresh();
+    const pending = documentPersistenceQueues.get(document);
+    if (pending?.pending.length || pending?.flushing) return stored.nextSequence;
     mergeCanonicalIntoLive(canonical, document);
     const frontierHash = documentFrontierHash(canonical);
     if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
@@ -567,9 +569,14 @@ async function persistAcceptedMessages(document, entries) {
         session.invalidate();
         canonical = (await session.refresh()).document;
       } else session.commit(accepted.result.sequence);
-      mergeCanonicalIntoLive(canonical, document);
-      const open = openDocuments.get(durableHeadKey(context));
-      if (open?.document === document) open.nextSequence = Math.max(open.nextSequence, accepted.result.sequence + 1);
+      // Do not let native LWW state erase a later speculative branch before
+      // that branch's native-overlap check. Publish only after the whole
+      // captured batch drains and no newer batch is pending.
+      if (index === entries.length && !documentPersistenceQueues.get(document)?.pending.length) {
+        mergeCanonicalIntoLive(canonical, document);
+        const open = openDocuments.get(durableHeadKey(context));
+        if (open?.document === document) open.nextSequence = Math.max(open.nextSequence, accepted.result.sequence + 1);
+      }
       for (const entry of group) sendGatewayState(entry.connection, {
         type: "spectra.durable_ack", updateIds: [entry.messageId],
       });
@@ -1332,7 +1339,8 @@ const server = new Server({
           const vector = Y.encodeStateVector(canonical);
           if (vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
             throw new Error("COLLABORATION_RECOVERY_VECTOR_SIZE");
-          mergeCanonicalIntoLive(canonical, document);
+          const pending = documentPersistenceQueues.get(document);
+          if (!pending?.pending.length && !pending?.flushing) mergeCanonicalIntoLive(canonical, document);
           sendGatewayState(connection, {
             type: "spectra.recovery_vector", confirmationId: request.confirmationId,
             stateVector: Buffer.from(vector).toString("base64"),

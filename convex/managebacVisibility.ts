@@ -16,86 +16,113 @@ function sourceAvailable(source: Doc<"externalRecords">) {
  * response. Call inside the transaction that returns/uses the source content.
  * A selected class is a planning choice, never proof of class membership.
  */
-export async function canReadManagebacRecord(
-  ctx: Ctx,
-  actor: Actor,
-  record: Doc<"externalRecords">,
-): Promise<boolean> {
+async function currentAuthority(ctx: Ctx, actor: Actor) {
   const currentActor = await getActorForAccountId(ctx, actor.accountId);
-  if (!currentActor || currentActor.schoolId !== actor.schoolId) return false;
-
-  // Re-read both the record and the current connector. An old row/snapshot or
-  // an old integration ID must not become authority after replacement/revocation.
-  const source = await ctx.db.get(record._id);
-  if (!source || source.schoolId !== currentActor.schoolId || !sourceAvailable(source)) return false;
+  if (!currentActor || currentActor.schoolId !== actor.schoolId) return null;
   const integrations = await ctx.db.query("schoolIntegrations")
     .withIndex("by_school_provider", q => q.eq("schoolId", currentActor.schoolId).eq("provider", "managebac"))
     .take(2);
   const integration = integrations.length === 1 ? integrations[0] : undefined;
-  if (!integration || integration._id !== source.integrationId ||
-      (integration.status !== "connected" && integration.status !== "degraded")) return false;
+  if (!integration || (integration.status !== "connected" && integration.status !== "degraded")) return null;
   const mappings = await ctx.db.query("externalIdentityMappings")
     .withIndex("by_integration_account", q => q.eq("integrationId", integration._id).eq("accountId", currentActor.accountId))
     .take(2);
   const mapping = mappings.length === 1 ? mappings[0] : undefined;
   if (!mapping || mapping.schoolId !== currentActor.schoolId || mapping.status !== "verified" ||
-      mapping.revokedAt !== undefined || mapping.matchCount !== 1 || !mapping.providerUserId?.trim()) return false;
+      mapping.revokedAt !== undefined || mapping.matchCount !== 1 || !mapping.providerUserId?.trim()) return null;
+  return { currentActor, integration };
+}
 
-  // Missing periods only match other missing periods. They are not a wildcard
-  // for another year's use of the same provider class ID.
-  const period = source.academicPeriodKey;
-  if (period !== undefined && (!period.trim() || period !== period.trim())) return false;
-  const classId = source.providerClassId;
-  if (classId !== undefined && !classId.trim()) return false;
-  if (source.mappedAccountId !== undefined) {
-    if (source.mappedAccountId !== currentActor.accountId || source.audienceScope !== "mapped_user") return false;
-  } else if (source.audienceScope === "mapped_user") {
-    return false;
-  } else if (source.audienceScope === "authorized_staff") {
-    if (currentActor.schoolRole !== "teacher" && currentActor.schoolRole !== "school_admin") return false;
-  } else if (source.audienceScope === "class_members") {
-    if (!classId) return false;
-    let member = false;
-    for (const recordType of membershipTypes) {
-      // Filter before first(): no arbitrary 500-row list can admit or suppress
-      // an otherwise exact membership. The existing index scopes the account/type.
-      const membership = await ctx.db.query("externalRecords")
-        .withIndex("by_account_type", q => q.eq("mappedAccountId", currentActor.accountId).eq("recordType", recordType))
-        .filter(q => q.and(
-          q.eq(q.field("integrationId"), integration._id),
-          q.eq(q.field("schoolId"), currentActor.schoolId),
-          q.eq(q.field("audienceScope"), "mapped_user"),
-          q.eq(q.field("providerClassId"), classId),
-          q.eq(q.field("academicPeriodKey"), period),
-          q.eq(q.field("tombstone"), false),
-          q.or(q.eq(q.field("sourceState"), undefined), q.eq(q.field("sourceState"), "available"), q.eq(q.field("sourceState"), "changed")),
-        ))
-        .first();
-      if (membership) { member = true; break; }
+/**
+ * Instantiate once per query/unchanged-authority transaction, never globally.
+ * Do not reuse this reader after writing membership, integration or selection
+ * state in the same mutation; use a fresh wrapper/reader for the later check.
+ */
+export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
+  let authority: ReturnType<typeof currentAuthority> | undefined;
+  const memberships = new Map<string, Promise<boolean>>();
+  const selections = new Map<string, Promise<boolean>>();
+  const canReadRecord = async (record: Doc<"externalRecords">): Promise<boolean> => {
+    const current = await (authority ??= currentAuthority(ctx, actor));
+    if (!current) return false;
+    const { currentActor, integration } = current;
+    // Source snapshots are never memoized: callers may hold an earlier row.
+    const source = await ctx.db.get(record._id);
+    if (!source || source.schoolId !== currentActor.schoolId || source.integrationId !== integration._id || !sourceAvailable(source)) return false;
+
+    // Missing periods only match other missing periods. They are not a wildcard
+    // for another year's use of the same provider class ID.
+    const period = source.academicPeriodKey;
+    if (period !== undefined && (!period.trim() || period !== period.trim())) return false;
+    const classId = source.providerClassId;
+    if (classId !== undefined && !classId.trim()) return false;
+    if (source.mappedAccountId !== undefined) {
+      if (source.mappedAccountId !== currentActor.accountId || source.audienceScope !== "mapped_user") return false;
+    } else if (source.audienceScope === "mapped_user") {
+      return false;
+    } else if (source.audienceScope === "authorized_staff") {
+      if (currentActor.schoolRole !== "teacher" && currentActor.schoolRole !== "school_admin") return false;
+    } else if (source.audienceScope === "class_members") {
+      if (!classId) return false;
+      const key = JSON.stringify([classId, period ?? null]);
+      let membership = memberships.get(key);
+      if (!membership) {
+        membership = (async () => {
+          for (const recordType of membershipTypes) {
+            const match = await ctx.db.query("externalRecords")
+              .withIndex("by_visibility_membership", q => q.eq("integrationId", integration._id)
+                .eq("providerClassId", classId).eq("academicPeriodKey", period)
+                .eq("mappedAccountId", currentActor.accountId).eq("recordType", recordType))
+              .filter(q => q.and(
+                q.eq(q.field("schoolId"), currentActor.schoolId),
+                q.eq(q.field("audienceScope"), "mapped_user"),
+                q.eq(q.field("tombstone"), false),
+                q.or(q.eq(q.field("sourceState"), undefined), q.eq(q.field("sourceState"), "available"), q.eq(q.field("sourceState"), "changed")),
+              ))
+              .first();
+            if (match) return true;
+          }
+          return false;
+        })();
+        memberships.set(key, membership);
+      }
+      if (!await membership) return false;
+    } else if (source.audienceScope !== "school") {
+      return false;
     }
-    if (!member) return false;
-  } else if (source.audienceScope !== "school") {
-    return false;
-  }
 
-  // Class discovery must work before selection. Actual class material follows
-  // the user's explicit selection for this same class and academic period.
-  if (!classId || membershipTypes.some(type => type === source.recordType)) return true;
-  const selection = await ctx.db.query("managebacClassSelections")
-    .withIndex("by_integration_account_class", q => q.eq("integrationId", integration._id).eq("accountId", currentActor.accountId).eq("providerClassId", classId))
-    .filter(q => q.and(
-      q.eq(q.field("schoolId"), currentActor.schoolId),
-      q.eq(q.field("academicPeriodKey"), period),
-      q.eq(q.field("selected"), true),
-    ))
-    .first();
-  return selection !== null;
+    // Class discovery must work before selection. Actual class material follows
+    // the user's explicit selection for this same class and academic period.
+    if (!classId || membershipTypes.some(type => type === source.recordType)) return true;
+    const key = JSON.stringify([classId, period ?? null]);
+    let selected = selections.get(key);
+    if (!selected) {
+      selected = ctx.db.query("managebacClassSelections")
+        .withIndex("by_integration_account_class", q => q.eq("integrationId", integration._id).eq("accountId", currentActor.accountId).eq("providerClassId", classId))
+        .filter(q => q.and(
+          q.eq(q.field("schoolId"), currentActor.schoolId),
+          q.eq(q.field("academicPeriodKey"), period),
+          q.eq(q.field("selected"), true),
+        ))
+        .first().then(selection => selection !== null);
+      selections.set(key, selected);
+    }
+    return selected;
+  };
+  const readSource = async (sourceId: string) => {
+    const match = /^managebac:([^:]+)$/.exec(sourceId);
+    const id = match ? ctx.db.normalizeId("externalRecords", match[1]) : null;
+    const record = id ? await ctx.db.get(id) : null;
+    return record && await canReadRecord(record) ? record : null;
+  };
+  return { canReadRecord, readSource };
+}
+
+export async function canReadManagebacRecord(ctx: Ctx, actor: Actor, record: Doc<"externalRecords">) {
+  return createManagebacVisibilityReader(ctx, actor).canReadRecord(record);
 }
 
 /** Actual imported memory provenance is managebac:<externalRecords ID>. */
 export async function getReadableManagebacSourceRecord(ctx: Ctx, actor: Actor, sourceId: string) {
-  const match = /^managebac:([^:]+)$/.exec(sourceId);
-  const id = match ? ctx.db.normalizeId("externalRecords", match[1]) : null;
-  const record = id ? await ctx.db.get(id) : null;
-  return record && await canReadManagebacRecord(ctx, actor, record) ? record : null;
+  return createManagebacVisibilityReader(ctx, actor).readSource(sourceId);
 }

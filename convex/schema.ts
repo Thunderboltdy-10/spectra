@@ -2598,6 +2598,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_claim_created", ["claimId", "createdAt"])
+    .index("by_claim_source_access_created", ["claimId", "sourceType", "accessStatus", "createdAt"])
     .index("by_account_created", ["accountId", "createdAt"])
     .index("by_source", ["sourceType", "sourceId"]),
 

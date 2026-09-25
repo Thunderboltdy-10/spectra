@@ -1,0 +1,78 @@
+# S11 CONTEXT — memory source authorization
+
+Date: 2026-09-25. Task: `01a0d846-74aa-79d0-98a9-6c8793e99591`.
+Coordinator: `01a0d83f-92fb-7b80-9ea4-99fcecef20aa`.
+Starting revision: `d9aabfb5735bdcd8a620af8a7bdaa85aba08d150`.
+Branch: `codex/s11-context-retrieval`. Worktree: `<local-workspace>`.
+Effective Astra/xhigh/danger-full-access/approval-never independently confirmed by coordinator.
+
+## Delivered finite unit
+
+Memory lists and exports now apply the same current source-access boundary as AI context retrieval. A claim derived only from an inaccessible artifact, workspace or private thread is omitted. A claim supported by an explicit user statement or correction remains available, but inaccessible supporting source previews and identifiers are omitted. No memory rows are destroyed by a read; restored access makes the source-derived memory available again without rebuilding embeddings or waiting for maintenance.
+
+Owned changes are `convex/memory.ts`, `convex/memory-retrieval.test.ts`, this report, and the coordinator-approved single additive `memoryEvidence.by_claim_source_access_created` index in `convex/schema.ts`. No model, prompt, UI, agent-routing, gather-loop, embedding-format, or storage-provider changes. Shared services and saved user data were not touched. Dependency installation was owned by RUNTIME; this worktree uses a junction to the primary `node_modules`.
+
+The first eight-test reproduction on unmodified production code had **7 failures and 1 pass**. The failures demonstrated revoked/deleted/expired source-derived memory still appearing in lists and exports, private evidence previews appearing through a shared workspace claim, stale evidence remaining beside a valid authored claim, and an older authored statement falling out of AI context behind twelve newer unavailable sources.
+
+## Design and security boundary
+
+- `listMine` and `exportMine` authorize the claim first, then retrieve currently readable evidence. A source-backed claim with no available evidence is not projected. `contextForRunBase` retains its existing permission and lifecycle checks.
+- The twelve-recent-evidence window remains bounded. If it is full and lacks available authored evidence, three exact indexed lookups find at most one available `user_statement`, `correction`, and `product_event`. An older explicit statement therefore survives many newer source confirmations. There are no evidence-history scans or new persistent capsule/cache formats.
+- These authored types reflect **the saved claim author's own input**, not proof that a referenced external object is readable. `remember` accepts user-provided propositions; `insertEvidence` assigns the authenticated actor; `requireScopeWrite` enforces shared destination authority. `correct` checks control and read access to the original claim before creating authored correction evidence. A supplied provenance label never grants access to source contents or shared write authority. Tests verify that a read-only workspace member cannot publish a claim using either `user_statement` or `product_event` labels. This does not make user-authored claims factually authoritative.
+- Source-access results are cached only inside one authenticated database invocation. Evidence `accessStatus` is checked before a cache hit, and cache identity includes source type, source ID and school. No cache survives a query or a permission change. Revoke/regrant and inherited-placement removal tests prove that later reads recheck authority.
+- Malformed workspace source IDs now fail closed as unavailable evidence without breaking the whole memory read.
+- Retrieval-event recording rejects non-active or expired claims. This closes a late-recording case exposed by the authored-evidence fallback: `forget` marks only the recent evidence window immediately, so an older authored record must not validate a receipt after the claim is forgotten. The regression first reproduced an incorrectly accepted receipt, then passed after the lifecycle check.
+
+The index is additive and requires no field migration or custom backfill. Runtime publication must include the schema index and function changes together after coordinator integration; no backend publication occurred here.
+
+## Decision review and actual call paths
+
+| Source decision/evidence | Original implementation and finding | Current call-path evidence | Verdict and consequences | Validation / residual |
+| --- | --- | --- | --- | --- |
+| `0a69bf80` (`convex/memory.ts` last changed before this unit); its diff adds vector candidate retrieval and permission-filtered context evidence | Live AI memory rechecks source access, but memory-management projections return raw evidence | `src/app/api/spectra/route.ts` actions `memory` / `memoryExport` → `memory.listMine` / `exportMine`; `gather.ts` → `memory.contextForRun` → `contextForRunBase` | **Keep** claim/source authorization; **replace** inconsistent list/export projection. This defect predates S9 and is not attributed to S9 without evidence | Real Convex fixtures reproduce the leak and establish corrected behavior across all three projections |
+| Same memory implementation, newest-12 evidence selection | Older direct user statements can become unreachable after newer evidence; blindly filtering all projections would worsen that behavior | `evidenceForClaim` → claim availability / projections / capsule maintenance | **Replace** candidate selection with a bounded indexed authored fallback; keep source evidence revocable | 21 and 221 evidence records return the same authorized claim and identical database read ledger |
+| Same memory retrieval-event validation | `recordRetrieval` checked claim access and evidence, but not active status or expiry | `gather.ts` capture → `memory.recordRetrieval` | **Replace** receipt validation with lifecycle check in addition to current authority | Late receipt after forgetting a claim with older authored evidence now rejects atomically |
+| `0a69bf80`, `memoryEmbedding.ts` and semantic ranking | Local 256-dimensional hash/stem/concept fingerprint; not a learned artifact/thread embedding model. All authorized candidates can fill the context budget even without a relevance signal | `contextForRun` vector search → `contextForRunBase`: `retrievalSignal >= 0.12` limits graph roots only, not final selection | **Needs repair/evaluation**, outside this finite source-authority unit. Preserve cheap local operation and permission filtering; do not claim useful general semantic retrieval from the class name | Static call-path finding. A direct fingerprint check gave cosine 0.294 for “Why is the sky blue?” vs the unrelated heliostat claim, and 0.459 vs a relevant sky explanation; thresholds need a held-out corpus, not an arbitrary bump |
+| S9-AI task `01a0be89-5e1d-7c71-917e-c1dadcf34c88`, turn `01a0beb2-e1ce-7c90-b160-22c7b12d2755`; S10 final AI task `01a0d3b1-e48a-7292-b2eb-051452e961ae`, messages `msg_00d4ff6c9d451e6c016ab59d6247d087d2a013145f1c84ef5c` and `msg_00d4ff6c9d451e6c016ab5a088f27887d293ecbc532cafdb8f` | Historical work preserved whole-request operation scope and carried exact positively named targets through continuation; later repeated retrieve/inspect/plan loops remained in live evidence | `gather.ts` explicit target permission reads and durable choice continuation; `d9aabfb5` current implementation | **Keep** exact target/continuation authorization; **replace broad initial discovery** as a separate AI-REVIEW-coordinated unit. Reducing reads must not replace positively named targets with stale focus | Conversations read directly, alongside current code. Existing live failures are historical leads, not a new live result from this task |
+| `d9aabfb5` initial context selection | Greeting regex only disables some work; artifact catalog and workspace map are unconditionally enabled | `gather.ts:231–232`, plus focused artifact/thread reads; memory retrieval for non-greetings | **Replace** with demand-driven context at the shared AI seam. Do not add more intent keyword rules or mandatory embeddings | Static proof; shared loop left untouched. Sent to AI-REVIEW |
+| Current thread/history and context packet contracts; S10 source continuation tests | Thread storage has paginated history, but model context receives only latest pages. `originInstructions` uses first two user messages **within the latest 32**, not necessarily the original goal | `spectraThreads.get` initial 32 → `gather.ts` latest 24 → `context-builder.ts` default 16. `read_thread` tool returns latest 24 only. `agent-loop.ts` throws after a >250k prompt usage report | **Needs implementation**: this is fixed truncation, **not 256k compaction**. Existing choice identity binding should remain authoritative | No 256k AI compaction/capsule code found. Current orientation test supplies an already-built active goal; it does not prove original-goal preservation across long histories |
+| Foundry routing implementation and current intake adapter | Evidence/evaluation/type bonuses can produce a decision with weak task fit; the adapter maps medium to 0.66, describes it as continuation-only, while caller auto-selects >=0.64. Adapter does not forward evaluation or exclusions/degradation | `agents/foundry/routing.ts` → `intake.ts` `foundryRoutingConfidence` → `selectAgentRuntime` | **Needs repair**, coordinated `intake.ts` seam. Quality of training cannot substitute for request suitability; explicit user selection should still work | Static finding, not a validated live routing failure. No routing edits in this unit |
+| `context/index/semantic-index.ts` versus real callers | Permission-aware class implements in-memory lexical matching and optional embedding references | Repository search finds this class used by tests, not the active AI gather/retrieval path | **Keep as existing scaffold pending architecture decision**, do not patch it and claim production retrieval is repaired | Current code search; artifact/thread semantic indexing remains unproved |
+
+Historical sources were read as evidence, not instructions. The S9 integration task `01a0cb47-5362-7f51-83b1-0a2b0775fe3d` returned no substantive agent messages in the inspected turn. The independently reviewed memory code and commit ancestry are the direct source for this repair.
+
+## Validation and measurements
+
+Final focused run: **23/23 tests passed across 2 files** (16 new memory tests and 7 existing authority tests), one worker and no file parallelism. Scoped ESLint and `git diff --check` passed. Git emitted only line-ending notices.
+
+Reproduce from this worktree after centralized dependencies are available:
+
+```powershell
+node node_modules/vitest/vitest.mjs run convex/memory-retrieval.test.ts convex/authority-shared.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose
+node node_modules/eslint/bin/eslint.js convex/memory.ts convex/memory-retrieval.test.ts convex/schema.ts --max-warnings=0
+git diff --check
+```
+
+The tests exercise real registered Convex queries/mutations and identity/grant state. They cover direct revoke/regrant, deletion, expired grants, mixed public/private supporting evidence, explicit statements and corrections, older authored evidence, malformed IDs, inherited access removal, private thread evidence, scope reclassification, source-label write-authority bypass attempts, stale vector candidates after forgetting, and late retrieval receipts. No mocked permission decisions or production fixtures.
+
+Private evidence: `.spectra-local/launch-s11/context/memory-before.log`, `memory-scope-after.log`, `memory-after.log`, `memory-after-cache.log`, `receipt-before.log`, and `memory-final-tests.log`. Logs are ignored and are not committed.
+
+| Isolated fixture | DB API calls | Returned documents | UTF-8 serialized returned row bytes | Result |
+| --- | ---: | ---: | ---: | --- |
+| Source reauthorization before request-local access reuse, 21 evidence rows | 78 | 55 | 26,006 | Authorized statement retained; revoked source hidden |
+| Final reauthorization, 21 evidence rows | 23 | 22 | 13,628 | Same privacy behavior |
+| Final reauthorization, 221 evidence rows | 23 | 22 | 13,628 | Exactly same result and read ledger within the test |
+
+The final evidence query portion returns 12 recent rows (5,102 bytes) plus one authored row (507 bytes) from three exact fallback lookups. The test uses the existing `scripts/perf-read-ledger.ts` observer. These are **returned database documents/JSON bytes**, not physical reads, engine scan counts, network bytes, cache-hit rates, billing, or production latency. Across separate test executions timestamp encodings can change a few bytes. No end-to-end cold/warm latency or browser memory claim is made.
+
+Full typecheck/build/full suite and served browser/backend acceptance were not run: they require shared scheduling/integration. The new schema index has only been validated in the in-memory Convex schema, not published. This is an integration candidate, not a launch verdict.
+
+## Remaining bounded units, in priority order
+
+1. **Demand-driven retrieval and relevance eligibility:** coordinate `gather.ts`/`intake.ts`/`plan.ts` with AI-REVIEW. Greetings and ordinary factual questions still load workspace catalogs; non-greetings still invoke memory. Separate applicable preferences/conventions from unrelated factual claims, evaluate lexical/fingerprint/relationship relevance on held-out requests, and avoid forcing retrieval or specialist selection on every request. Current ranking/embedding algorithms are unchanged by this commit.
+2. **Durable continuation and ~256k compaction:** preserve original goal, compatible steering, source handles/attachments, selected choices, approval scope, committed receipts and pending operations as explicit durable execution state. Summaries are context, never authority. Compaction must occur before provider overflow, preserve task/tool-result identity, and have interrupted/resumed tests. Restore access to older paginated thread content through tools. Do not confuse a 28k-character packet cap with this contract.
+3. **Trained-agent selection:** fix the medium/automatic threshold mismatch and propagate relevant exclusions, prerequisites and task suitability through the actual intake caller. A rejected Foundry candidate should not become eligible via lexical fallback. Test useful specialization, unrelated facts/greetings, revoked evidence, missing tools and explicit/continued selection separately.
+4. **Thread/workspace/relationship retrieval:** thread placement and context IDs exist, but the active `search_objects` tool searches artifacts and `read_thread` only reads recent messages. Demonstrate useful retrieval of older relevant workspace conversations, reclassification/deletion handling, and artifact connections before claiming a production semantic index. Preserve current permission-aware read APIs.
+5. **Additional memory lifecycle/data work:** source version IDs are not currently used to validate semantic staleness; an editable source may change meaning while remaining readable. The recent source-evidence window can still conservatively omit an older readable **source-derived** record (the new fallback guarantees authored records only). `listMine` candidate caps and export's full owned-claim collection remain unchanged. Capsule/source-event maintenance and the dormant ManageBac evidence type need separate caller-specific review; its availability branch currently checks school only, but the public `remember` source-type validator does not expose that type. No live ManageBac leak is claimed here.
+
+The next unit should be allocated explicitly at the shared loop seam; this repair intentionally stops at the reproduced source-access invariant.

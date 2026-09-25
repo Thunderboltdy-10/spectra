@@ -723,25 +723,39 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
   it("dissolves a crowded shelf across bounded batches without deleting early", async () => {
     const biology = await seedWorkspace(db, accountId, "Biology");
     const workspaceNode = await ensureWorkspaceNode(ctx, biology as never);
+    const originalChildIds: string[] = [];
     for (let index = 0; index < 25; index += 1) {
       const artifactId = await seedArtifact(db, accountId, `Note ${index}`);
-      await placeWork(artifactId, { parentId: workspaceNode._id });
+      const child = await placeWork(artifactId, { parentId: workspaceNode._id });
+      originalChildIds.push(child._id);
     }
+    const sourceChildren = () => listChildNodes(ctx, id(accountId), workspaceNode._id, {
+      includeTrashed: true,
+    });
     const first = await dissolveWorkspaceNode(ctx, biology as never, {
       limit: 10,
     });
-    expect(first.remaining).toBe(15);
+    // The bounded helper returns a continuation flag. Count actual children
+    // independently so the test still proves the exact batch transitions.
+    expect(first.moved).toBe(10);
+    expect(first.remaining).toBe(1);
+    expect(await sourceChildren()).toHaveLength(15);
     expect(first.purged).toBe(0);
     expect(await nodesFor("workspace", biology._id)).toHaveLength(1);
     const second = await dissolveWorkspaceNode(ctx, biology as never, {
       limit: 10,
     });
-    expect(second.remaining).toBe(5);
+    expect(second.moved).toBe(10);
+    expect(second.remaining).toBe(1);
+    expect(await sourceChildren()).toHaveLength(5);
     expect(second.purged).toBe(0);
+    expect(await nodesFor("workspace", biology._id)).toHaveLength(1);
     const third = await dissolveWorkspaceNode(ctx, biology as never, {
       limit: 10,
     });
+    expect(third.moved).toBe(5);
     expect(third.remaining).toBe(0);
+    expect(await sourceChildren()).toHaveLength(0);
     expect(third.purged).toBe(1);
     expect(await nodesFor("workspace", biology._id)).toHaveLength(0);
     const general = db
@@ -753,8 +767,8 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
       "workspace",
       general._id as string,
     );
-    expect(
-      await listChildNodes(ctx, id(accountId), generalNode!._id),
-    ).toHaveLength(25);
+    const retained = await listChildNodes(ctx, id(accountId), generalNode!._id);
+    expect(retained).toHaveLength(25);
+    expect(retained.map(node => node._id).sort()).toEqual(originalChildIds.sort());
   });
 });

@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
@@ -7,6 +7,7 @@ import { api, internal } from "./_generated/api";
 import { upsertArtifactSummary } from "./orgTreeShared";
 
 const modules = import.meta.glob("./**/*.ts");
+afterEach(() => vi.useRealTimers());
 const identity = {
   subject: "clerk_p9_summary_writer",
   email: "p9-summary-writer@example.test",
@@ -408,6 +409,7 @@ describe("P9.I3 summary-writer integration", () => {
   });
 
   it("detaches deleted-workspace provenance from the bounded projection", async () => {
+    vi.useFakeTimers();
     const t = setupTest();
     const actor = await seedActor(t);
     const asUser = t.withIdentity(identity);
@@ -438,12 +440,19 @@ describe("P9.I3 summary-writer integration", () => {
       workspaceId,
     });
 
-    await asUser.mutation(api.spectraWorkspaces.permanentlyDelete, {
+    const deletion = await asUser.mutation(api.spectraWorkspaces.permanentlyDelete, {
       workspaceId,
       confirmation: "Remove Temporary project permanently",
     });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await t.run(ctx => ctx.db.get(deletion.jobId))).toMatchObject({
+      phase: "complete", detachedArtifactCount: 1,
+    });
+    expect(await t.run(ctx => ctx.db.get(workspaceId))).toBeNull();
 
     const state = await summaryState(t, artifactId);
+    expect(state.artifact).not.toBeNull();
+    expect(state.summary).not.toBeNull();
     expect(state.artifact?.createdFrom?.workspaceId).toBeUndefined();
     expect(state.summary?.projection.createdFrom?.workspaceId).toBeUndefined();
   });

@@ -164,3 +164,18 @@ node node_modules/vitest/vitest.mjs run convex/s11-catalog-discovery.test.ts con
 ```
 
 The private scoped checker resolves imports but checks syntactic and semantic diagnostics only for `catalogPages.ts`, `spectraWorkspaces.ts`, the four test files above, `convex/p9-summary-writer-integration.test.ts` and `src/features/spectra/__tests__/org-tree-invariants.test.ts`. `git diff --check` passed. Full repository typecheck, suites, served revisions and launch acceptance remain coordinator/RUNTIME work. No shared service, backend or production deployment was started or published, and no original file or school data was mutated.
+
+## Separate baseline test-contract corrections
+
+The finite catalog unit is commit `b5e295af91877969ad6536128380092fb591d11c`. After that unit, coordinator explicitly assigned two existing failing tests for a separate test-only correction. The failures were read from RUNTIME's restored guarded baseline at `<local-workspace>`. No new product change or relaxed preservation invariant was needed.
+
+- **P9 provenance:** `convex/p9-summary-writer-integration.test.ts` checked `createdFrom.workspaceId` immediately after starting an asynchronous workspace deletion. The baseline returned the still-present workspace ID instead of `undefined`. The corrected test advances the actual scheduled functions, asserts the persisted job is complete with one artifact detached and the workspace is absent, verifies both artifact and summary still exist, then retains both original provenance assertions.
+- **Crowded shelf:** `src/features/spectra/__tests__/org-tree-invariants.test.ts` expected `remaining` to report 15 and 5, while the bounded helper at starting HEAD already returned a 0/1 continuation flag after reading `limit + 1` children. The corrected test checks that flag independently of exact source-child counts **15 / 5 / 0** and moved counts **10 / 10 / 5**. It still prevents early workspace-node deletion and now compares all **25 original child IDs** with the retained children in General. This helper test is synchronous; it must not be confused with waiting for a deletion job.
+
+With the same mandatory filesystem guard shown above, the two complete test files passed **37/37 in 2.72 seconds**:
+
+```powershell
+node node_modules/vitest/vitest.mjs run convex/p9-summary-writer-integration.test.ts src/features/spectra/__tests__/org-tree-invariants.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+Scoped TypeScript and ESLint then passed across all eight owned TypeScript files, including these two. No full suite is claimed; the second validation slot was explicitly released immediately after the executable checks.

@@ -37,7 +37,7 @@ function fixture(overrides: Partial<AgentRoutingDescriptor> = {}) {
   return { descriptor, runtime };
 }
 
-beforeEach(() => query.mockReset());
+beforeEach(() => { query.mockReset(); });
 
 describe("specialist routing through runtime intake", () => {
   it("selects a relevant evaluated specialist through the real adapter", async () => {

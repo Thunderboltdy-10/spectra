@@ -1,6 +1,6 @@
 # S11 specialist routing source candidate
 
-Status: **source implementation and regression fixtures; tests/lint unrun under the dependency hold**. No backend publication or live selection acceptance.
+Status: **31/31 focused tests passed and scoped ESLint passed** under the RUNTIME filesystem guard and assigned slot. No backend publication or live selection acceptance.
 
 ## Problem and change
 
@@ -25,13 +25,15 @@ Foundry's current evidence UI pastes source text and stores its extraction as pu
 - After listing, intake retrieves and reevaluates the actual runtime's release, evaluation, tools, routing-enabled setting, exclusions and prerequisites. Revocation or an incompatible new release falls back to ordinary Spectra.
 - The call remains optional at the runtime seam. This unit does not change when ENGINE invokes selection and does not eliminate descriptor discovery on each invocation.
 
-## Pending validation
+## Focused validation
 
 `intake-routing.test.ts` calls the actual adapter and selector with mocked backend responses. It covers relevant selection, unrelated greetings/facts/document work despite training/type bonuses, untriggered verified skills, negative examples, absent/failed/old evaluation, unavailable tools/evidence, medium retention, publication/access races, and explicit choice. `agent-publish.test.ts` adds real Convex fixtures for bounded evaluation projection, private case-output omission, current release versus draft, mismatched/missing evaluation, unevaluated internal releases, and a granted reader/revocation boundary.
+
+The 18 routing, five existing intake, and eight backend publishing tests passed. The initial routing run had 17 fixture-hook errors: `beforeEach` returned the mock function, which Vitest invoked as cleanup with no arguments. Making that hook return void resolved all errors; the affected 18-test file was rerun successfully. No product-source change was needed during validation. Logs: `.spectra-local/launch-s11/context/context-guarded-tests.log`, `routing-guarded-retest.log`, and `context-guarded-lint.log`.
 
 ```powershell
 node node_modules/vitest/vitest.mjs run src/app/api/spectra/run/loop/intake-routing.test.ts src/app/api/spectra/run/loop/intake.test.ts convex/agent-publish.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose
 node node_modules/eslint/bin/eslint.js convex/spectraArtifacts.ts convex/agent-publish.test.ts src/features/spectra/agents/foundry/routing.ts src/features/spectra/agents/foundry/skills.ts src/app/api/spectra/run/loop/intake.ts src/app/api/spectra/run/loop/intake-routing.test.ts --max-warnings=0
 ```
 
-Run only after RUNTIME clears the dependency hold and supplies its guarded test procedure. Backend projections and the intake adapter need coordinated publication; without the new evaluation projection Foundry automatic routing conservatively stays disabled. True semantic suitability, paraphrase recall and demand-driven specialist discovery remain separate work.
+Use RUNTIME's guarded test procedure for reproduction. Backend projections and the intake adapter need coordinated publication; without the new evaluation projection Foundry automatic routing conservatively stays disabled. True semantic suitability, paraphrase recall and demand-driven specialist discovery remain separate work. No full typecheck/build or provider-driven automatic-selection acceptance was performed.

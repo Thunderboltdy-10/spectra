@@ -20,6 +20,7 @@ import { workspacePage } from "./catalogPages";
 import {
   createFolderNode,
   createLinkNode,
+  DISSOLVE_CHILD_BATCH,
   dissolveWorkspaceNode,
   ensureWorkspaceNode,
   findPrimaryNode,

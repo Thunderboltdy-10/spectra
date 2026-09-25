@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
+import type { FunctionArgs, FunctionReference, FunctionReturnType } from "convex/server";
 import schema from "./schema";
 import type { QueryCtx } from "./_generated/server";
 import { api } from "./_generated/api";
@@ -12,6 +13,15 @@ import { observeDatabase, serializedBytes } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "perf-pages", email: "perf-pages@example.test", emailVerified: true };
+function queryHandler<Reference extends FunctionReference<"query">>(registered: object) {
+  return Reflect.get(registered, "_handler") as (
+    ctx: QueryCtx, args: FunctionArgs<Reference>,
+  ) => Promise<FunctionReturnType<Reference>>;
+}
+const listChildrenHandler = queryHandler<typeof api.orgTree.listChildren>(listChildren);
+const containersPageHandler = queryHandler<typeof api.orgTree.containersPage>(containersPage);
+const searchPageHandler = queryHandler<typeof api.orgTree.searchPage>(searchPage);
+const quickViewPageHandler = queryHandler<typeof api.orgTree.quickViewPage>(quickViewPage);
 async function fixture() {
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => {
@@ -40,11 +50,11 @@ describe("PERF independent actor-scoped pagination", () => {
         kind: "folder", name: `Needle owned ${i}`, orderKey: String(i), activityAt: ids.now - i, createdAt: ids.now, updatedAt: ids.now });
     });
     const options = { cursor: null, numItems: 2 };
-    const handlers = {
-      folder: (ctx: QueryCtx) => listChildren._handler(ctx, { parentId: ids.folderId, paginationOpts: options }),
-      containers: (ctx: QueryCtx) => containersPage._handler(ctx, { parentId: ids.folderId, paginationOpts: options }),
-      search: (ctx: QueryCtx) => searchPage._handler(ctx, { term: "Needle", scopeNodeId: ids.folderId, paginationOpts: options }),
-      recent: (ctx: QueryCtx) => quickViewPage._handler(ctx, { view: "recent", scopeNodeId: ids.folderId, paginationOpts: options }),
+    const handlers: Record<string, (ctx: QueryCtx) => Promise<{ page: unknown[] }>> = {
+      folder: (ctx) => listChildrenHandler(ctx, { parentId: ids.folderId, paginationOpts: options }),
+      containers: (ctx) => containersPageHandler(ctx, { parentId: ids.folderId, paginationOpts: options }),
+      search: (ctx) => searchPageHandler(ctx, { term: "Needle", scopeNodeId: ids.folderId, paginationOpts: options }),
+      recent: (ctx) => quickViewPageHandler(ctx, { view: "recent", scopeNodeId: ids.folderId, paginationOpts: options }),
     };
     const before = Object.fromEntries(await Promise.all(Object.entries(handlers).map(async ([key, handler]) => [key, await measure(handler)])));
     await t.run(async (ctx) => {

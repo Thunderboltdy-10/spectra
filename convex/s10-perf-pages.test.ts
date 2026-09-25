@@ -56,12 +56,16 @@ describe("PERF independent actor-scoped pagination", () => {
       search: (ctx) => searchPageHandler(ctx, { term: "Needle", scopeNodeId: ids.folderId, paginationOpts: options }),
       recent: (ctx) => quickViewPageHandler(ctx, { view: "recent", scopeNodeId: ids.folderId, paginationOpts: options }),
     };
-    const before = Object.fromEntries(await Promise.all(Object.entries(handlers).map(async ([key, handler]) => [key, await measure(handler)])));
+    type PageMeasurement = Awaited<ReturnType<typeof measure<{ page: unknown[] }>>>;
+    const readPages = async (): Promise<Record<string, PageMeasurement>> => Object.fromEntries(
+      await Promise.all(Object.entries(handlers).map(async ([key, handler]) => [key, await measure(handler)] as const)),
+    );
+    const before = await readPages();
     await t.run(async (ctx) => {
       for (let i = 0; i < 2_000; i++) await ctx.db.insert("orgNodes", { accountId: ids.ownerId, schoolId: ids.schoolId, parentId: null,
         kind: "folder", name: `Needle unrelated ${i}`, orderKey: String(i), activityAt: ids.now + i, createdAt: ids.now, updatedAt: ids.now });
     });
-    const after = Object.fromEntries(await Promise.all(Object.entries(handlers).map(async ([key, handler]) => [key, await measure(handler)])));
+    const after = await readPages();
     for (const key of Object.keys(handlers)) {
       const small = before[key]!;
       const large = after[key]!;

@@ -151,6 +151,7 @@ export async function artifactPage(ctx: QueryCtx, args: ArtifactArgs) {
   let after = cursor.pending?.key ?? cursor.after;
   let pending: Cursor["pending"];
   let consumed = 0;
+  let placementReadsRemaining = CATALOG_PLACEMENTS;
   const workspaceProofs = new Map<
     string,
     Promise<{
@@ -191,6 +192,7 @@ export async function artifactPage(ctx: QueryCtx, args: ArtifactArgs) {
       updatedAt: row.updatedAt,
       artifactId: row.artifactId,
     };
+    const previousAfter = after;
     consumed++;
     after = key;
     const owned = row.ownerAccountId === actor.accountId;
@@ -260,50 +262,71 @@ export async function artifactPage(ctx: QueryCtx, args: ArtifactArgs) {
           )
           .unique();
     if (!direct && override?.effect === "deny") continue;
-    // Only one candidate may expand placements per request. Native keyset
-    // continuation handles equal timestamps without ever carrying an allow bit.
-    const nodes = await ctx.db
+    const placements = () => ctx.db
       .query("orgNodes")
       .withIndex("by_kind_source_live", (q) =>
         q
           .eq("kind", "work")
           .eq("sourceId", row.artifactId)
           .eq("deletedAt", undefined),
-      )
-      .paginate({
-        numItems: CATALOG_PLACEMENTS,
-        cursor: cursor.pending?.nodes ?? null,
-      });
-    let resolved = false;
-    for (const node of nodes.page) {
-      if (!node.workspaceContextId) continue;
-      const proof = await workspaceProof(node.workspaceContextId);
-      if (!proof?.visible) continue;
-      if (placement === "inbox") {
-        resolved = true;
+      );
+    const inspectPlacements = async (nodes: Doc<"orgNodes">[]) => {
+      for (const node of nodes) {
+        if (!node.workspaceContextId) continue;
+        const proof = await workspaceProof(node.workspaceContextId);
+        if (!proof?.visible) continue;
+        if (placement === "inbox") return true;
+        const inherited =
+          override?.effect !== "deny" &&
+          proof.projects &&
+          (node.accessProjection === true ||
+            (node.accessProjection === undefined &&
+              row.ownerAccountId === proof.workspace.ownerAccountId));
+        if (direct || inherited) {
+          emit({
+            workspaceId: proof.workspace._id,
+            workspaceTitle: proof.workspace.title.slice(0, 200),
+            nodeId: node._id,
+            pinned: node.pinned === true,
+          });
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!cursor.pending) {
+      // A two-row prefix proves an empty/single-placement set is complete
+      // without consuming the query's one native pagination call. Charge all
+      // returned rows, including probes, to the same global placement budget.
+      if (placementReadsRemaining < 2) {
+        consumed--;
+        after = previousAfter;
         break;
       }
-      const inherited =
-        override?.effect !== "deny" &&
-        proof.projects &&
-        (node.accessProjection === true ||
-          (node.accessProjection === undefined &&
-            row.ownerAccountId === proof.workspace.ownerAccountId));
-      if (direct || inherited) {
-        emit({
-          workspaceId: proof.workspace._id,
-          workspaceTitle: proof.workspace.title.slice(0, 200),
-          nodeId: node._id,
-          pinned: node.pinned === true,
-        });
-        resolved = true;
+      const prefix = await placements().take(2);
+      placementReadsRemaining -= prefix.length;
+      if (await inspectPlacements(prefix)) continue;
+      if (prefix.length < 2) {
+        if (direct && placement === "inbox") emit();
+        continue;
+      }
+      if (placementReadsRemaining === 0) {
+        pending = { key, nodes: null };
         break;
       }
     }
+    // A genuinely larger placement set uses the remaining budget and retains
+    // the native cursor (including tied creation times). The prefix may be
+    // reread here; those repeated reads are included in the eight-row budget.
+    const nodes = await placements().paginate({
+      numItems: placementReadsRemaining,
+      cursor: cursor.pending?.nodes ?? null,
+    });
+    const resolved = await inspectPlacements(nodes.page);
     if (!resolved && !nodes.isDone)
       pending = { key, nodes: nodes.continueCursor };
     else if (!resolved && direct && placement === "inbox") emit();
-    // Do not issue a second database paginate call or multiply workspace fanout.
+    // Do not issue a second database paginate call.
     break;
   }
   const isDone = !pending && done && consumed === candidates.length;

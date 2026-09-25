@@ -97,3 +97,70 @@ This inventory distinguishes source findings from newly measured behavior. Exclu
 5. **Live cost attribution (RUNTIME/PERFORMANCE).** Observe cold/warm open, repeated Library/Board navigation, idle subscriptions and engine completion fields on coordinator-confirmed revisions. Keep missing engine data unknown and separate concurrent Bridge/AI/cron traffic.
 
 No alternative storage provider is recommended. This repair reduces unnecessary database reads using an already-maintained index, with no extra stored rows or writer maintenance. A provider move lacks measured total economics for storage, requests, egress, authorization, migration and operations. Backend publication and any later rollout belong to coordinator/RUNTIME; this unit needs no backfill.
+
+## Second unit — sparse catalog traversal
+
+Coordinator approved bounded option A: `catalogPages.ts`, a complete-traversal regression, adaptation of the historical S10 density assertion, and this report. Coordinator also approved the deletion-continuation fixture and typed PERF fixture correction below. The schema, authority helpers, cursor format and API scope contract stay intact. Shared dependency corruption caused a test hold while source and fixtures were prepared; no result from that contaminated baseline is used here. All measurements below come from the later guarded slot after RUNTIME restored dependencies.
+
+The old artifact page reads up to 25 summaries but stops unconditionally after the first candidate requiring placement discovery. The repair uses the minimal two-row indexed prefix that can prove a placement set empty or singular. All returned prefix rows count against the existing eight-placement-row budget. Larger unresolved sets use the remaining budget for one native pagination call; repeated prefix rows also count. Exhausting the budget before a candidate leaves the prior key intact, and exhausting it on an unresolved prefix retains a pending cursor with no permission result. Current grants, overrides, workspace lifecycle and source metadata are checked on every request. This supersedes the one-candidate behavior recorded in the earlier historical inventory.
+
+The new fixture traverses 128 and 1,024 newer private artifacts plus an older private tail, visiting every page to `isDone`. Each private artifact has one inaccessible placement; the newer timestamps deliberately tie. It requires owned unplaced work, an inherited share in the eighteenth placement and an unplaced direct share, in that order, exactly once. It records actual first-visible request/time, complete request count, returned rows/bytes, response bytes and maximum placement rows/native pagination calls. A second case covers replay, grant revocation while pending, source deletion and actor deactivation.
+
+### Executed baseline and repaired traversal
+
+The original `catalogPages.ts` was temporarily restored in this disposable worker checkout for the baseline run, with the repaired source restored in `finally`. Both baseline traversals completed and retained all three results. The regression then failed the intended first-visible request budget: **expected 129 to be less than 64**. The repaired source passed that budget and the complete-traversal budget for both sizes. This is a real failed baseline, not a request-count extrapolation from a prefix.
+
+| Newer private / older private tail | Metric | Before | After |
+| --- | --- | ---: | ---: |
+| 128 / 16 | First visible request | 129 | 19 |
+| 128 / 16 | Complete traversal requests | 147 | 24 |
+| 128 / 16 | Database API read calls | 1,850 | 896 |
+| 128 / 16 | Returned documents, including repeated reads | 4,257 | 803 |
+| 128 / 16 | Returned-row UTF-8 JSON bytes | 2,464,500 | 436,974 |
+| 128 / 16 | Serialized response bytes, summed across pages | 60,378 | 11,079 |
+| 128 / 16 | First visible elapsed milliseconds | 316.39 | 103.05 |
+| 128 / 16 | Complete traversal elapsed milliseconds | 358.49 | 122.01 |
+| 1,024 / 128 | First visible request | 1,025 | 147 |
+| 1,024 / 128 | Complete traversal requests | 1,155 | 168 |
+| 1,024 / 128 | Database API read calls | 13,955 | 6,514 |
+| 1,024 / 128 | Returned documents, including repeated reads | 35,489 | 6,132 |
+| 1,024 / 128 | Returned-row UTF-8 JSON bytes | 20,696,025 | 3,412,635 |
+| 1,024 / 128 | Serialized response bytes, summed across pages | 464,361 | 68,791 |
+| 1,024 / 128 | First visible elapsed milliseconds | 11,767.77 | 4,837.40 |
+| 1,024 / 128 | Complete traversal elapsed milliseconds | 13,062.00 | 5,473.29 |
+
+Every sample returned exactly three legitimate results in order, with a maximum of **eight returned placement rows and one native pagination call per request**, and zero query writes. At the larger size, total requests fell 85.45% and returned-row bytes fell 83.51%. The S10 density fixture now checks that a request processes multiple placement rows within the existing eight-row budget; its obsolete derived 10,001-request claim was removed.
+
+These are actual handlers in synthetic `convex-test` fixtures using the existing database observer. API calls, returned documents and serialized bytes are not physical index scans, hosted billing, network traffic or browser latency. Timings are single local observations under shared machine load, not repeated benchmarks or an SLA. No hosted engine scan count is available, and none is inferred from the request reduction.
+
+Private evidence remains in this worker's ignored `.spectra-local/launch-s11/data/`:
+
+- `catalog-traversal-before.json`: measured source SHA-256 `5f43b429d75faf6ae1e9dff66d06bc36834075e41d5ff0600127a0a2b448f747`.
+- `catalog-traversal-after.json`: measured source SHA-256 `782cce128693106fdb87dbbe2829224964cc75f89dd150130078cd46a43f2682`.
+- `catalogPages.before.ts` and `catalogPages.after.ts`: exact measured source backups. Git may normalize line endings independently of these working-file hashes.
+
+This is a bounded reduction of rereads and requests, **not** independence from school density. **147 requests to the first visible result is still not launch-efficient school-wide initial discovery.** Two-or-more-placement private candidates can still require native continuations. A subsequent actor-owned/direct-grant/shared-workspace discovery design needs an explicit ordering and completeness contract; simply substituting owned scope would hide legitimate shares. This unit adds no stored projection, backfill, writer maintenance or schema change.
+
+Caller inventory confirms this unit does not switch frontend defaults: legacy `getSpectraArtifacts` is used by Agent Library, `getSpectraWorkspaces` by Agent Library, the app shell and the conversation workspace picker, and `/api/spectra` search/overview still call the old arrays. AI `gather.ts` and `plan.ts` have their own list calls owned by CONTEXT/AI. Library organization already uses actor-scoped tree pages. A complete caller migration remains separate work; no live user-interface speedup is inferred from the new endpoint fixture.
+
+### Isolated baseline corrections
+
+Commit `67e4b644` imports the already-exported `DISSOLVE_CHILD_BATCH = 20` into `spectraWorkspaces.ts`, fixing the unresolved identifier in the scheduled `move_children` branch without changing its cap. It also types the real handler adapters and common page result in `s10-perf-pages.test.ts`; the observer and every assertion remain unchanged, with no blanket `any` or suppression. These two paths were committed separately for coordinator typecheck integration during the test hold. The final PERF correction uses a typed `readPages` map and tuple entries so `Object.fromEntries` retains each measurement's page result type; the coordinator's two remaining DATA unknown-result/rest diagnostics no longer appear in the scoped check.
+
+The new `s11-workspace-delete.test.ts` drives the actual persisted job across 21 child folders, including a repeated original delete request, the first 20-child move, scheduled completion and a repeated completed dispatch. It checks that every child identity survives in General. The earlier P9 provenance test only checked state immediately after the now-asynchronous start call and did not exercise this scheduled branch.
+
+### Guarded validation
+
+After dependency recovery, **20/20 tests passed in four files in 14.01 seconds**, using one worker and no file parallelism: the complete catalog traversal, current authority/cursor cases, scheduled workspace deletion, historical catalog suite and PERF page suite. The deletion fixture exercises the previously unresolved constant at runtime. The initial scoped TypeScript check found seven cascading diagnostics from that fixture's untyped child array; its final type-only correction uses the actual `createFolder` mutation return type. The guarded recheck passed with **zero diagnostics across eight owned files**, covering this unit and the two separately committed baseline test corrections. Scoped ESLint on those same eight paths passed. No runtime assertions were removed or weakened. The two approved baseline test files also passed **37/37 in 2.72 seconds**; their correction is recorded separately below.
+
+RUNTIME's filesystem guard was mandatory for every Node verification command in the restored slot:
+
+```powershell
+$env:S11_SHARED_DEPS = '<local-workspace>
+$env:S11_PRIVATE_DEPS = '<local-workspace>
+$env:NODE_OPTIONS = '--require=<local-workspace>
+$env:SPECTRA_S11_CATALOG_EVIDENCE = 'after'
+node node_modules/vitest/vitest.mjs run convex/s11-catalog-discovery.test.ts convex/s11-workspace-delete.test.ts convex/s10-catalog.test.ts convex/s10-perf-pages.test.ts --maxWorkers=1 --no-file-parallelism
+```
+
+The private scoped checker resolves imports but checks syntactic and semantic diagnostics only for `catalogPages.ts`, `spectraWorkspaces.ts`, the four test files above, `convex/p9-summary-writer-integration.test.ts` and `src/features/spectra/__tests__/org-tree-invariants.test.ts`. `git diff --check` passed. Full repository typecheck, suites, served revisions and launch acceptance remain coordinator/RUNTIME work. No shared service, backend or production deployment was started or published, and no original file or school data was mutated.

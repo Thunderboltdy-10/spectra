@@ -412,7 +412,8 @@ describe("S10 bounded resumable catalog pages", () => {
       )) as { after: { artifactId: string; updatedAt: number } };
       expect(decoded.after.updatedAt).toBe(1_000_000);
       consumedKeys.add(decoded.after.artifactId);
-      expect(measurement.rows.orgNodes).toBe(1);
+      expect(measurement.rows.orgNodes).toBeGreaterThan(1);
+      expect(measurement.rows.orgNodes).toBeLessThanOrEqual(CATALOG_PLACEMENTS);
       expect(measurement.rows.spectraArtifactSummaries).toBe(25);
     }
     expect(consumedKeys.size).toBe(3);
@@ -461,8 +462,7 @@ describe("S10 bounded resumable catalog pages", () => {
             note: "Complete authenticated owned-scope page, including 12 owned artifacts without placement nodes.",
           },
           measurements,
-          derivedRequestsBeforeFirstOwned: 10_001,
-          note: "Three actual prefix pages; total derives from exactly one private candidate consumed per page, not a completed 10001-request run. Timings are convex-test, not served Convex.",
+          note: "Three actual prefix pages, not a completed traversal. S11 measures first-visible and complete traversal separately. Timings are convex-test, not served Convex.",
         },
         null,
         2,

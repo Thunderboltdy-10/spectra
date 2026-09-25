@@ -89,6 +89,16 @@ describe("S11 explicit fresh reads", () => {
     expect(returned(messages[3]!, "r3").status).toBe(1);
   });
 
+  it("retains source revision metadata when a large artifact read has partial coverage", async () => {
+    seams.readQuery.mockResolvedValue({ ok: true, value: {
+      ...artifact(9), liveStateVectorHash: "live-9", content: { text: "large ".repeat(15_000) },
+    } });
+    expect(await executeAgentReadTool("actor", read("large", true))).toMatchObject({
+      ok: true, artifact: { currentVersionId: "version-9", contentHash: "hash-9",
+        liveStateVectorHash: "live-9", contentCoverage: { complete: false } },
+    });
+  });
+
   it("bounds endless explicit refreshes when only fetch bookkeeping changes", async () => {
     let reads = 0;
     const executeTool = vi.fn(async () => ({ ok: true, artifact: { ...artifact(1), updatedAt: reads },

@@ -67,15 +67,19 @@ import {
   streamCard,
 } from "./loop/report";
 import {
+  canUndoRunWithEffects,
+  interruptedEffectActions,
+  interruptedEffectSummary,
+  reconcileInterruptedEffects,
+  retainOutcomeThenVerify,
+} from "./loop/receipt-report";
+import {
   ownedReferences,
   promptExplicitlyTargetsFocusedArtifact,
   reconcileExplicitDocumentRegions,
   resolveAndValidatePlan,
 } from "./loop/resolve";
-import {
-  committedCreatesAreUsable,
-  verifyCommittedOutcomes,
-} from "./loop/verify";
+import { verifyCommittedOutcomes } from "./loop/verify";
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
@@ -255,7 +259,11 @@ async function runAttempt(
   let card = await latestCard(params.actorClerkId, params.runId);
   recordPhase("claim_and_initial_card");
   let commitStarted = false;
+  let verificationIncomplete = false;
+  let unacknowledgedOperationId: string | undefined;
   const operationOutcomes: Array<{
+    operationId?: string;
+    acknowledged?: boolean;
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }> = [];
@@ -1873,6 +1881,7 @@ async function runAttempt(
           summary: effectProgress?.detail ?? lastPhase,
         });
       }
+      let lastApplyAcknowledged = false;
       try {
         commitStarted = true;
         const executeContext = {
@@ -2000,6 +2009,7 @@ async function runAttempt(
         };
         let affected: Array<{ type: string; id: string }> = [];
         try {
+          unacknowledgedOperationId = operationId;
           affected = await executeOperation(
             params.actorClerkId,
             params.runId,
@@ -2007,6 +2017,8 @@ async function runAttempt(
             operation,
             executeContext,
           );
+          lastApplyAcknowledged = true;
+          unacknowledgedOperationId = undefined;
         } catch (firstApplyError) {
           // One quiet encouragement pass on schema/apply slips. Do not surface
           // the first miss — normalize creatable content and retry once.
@@ -2102,71 +2114,86 @@ async function runAttempt(
                 preclaimed: true,
               },
             );
+            lastApplyAcknowledged = true;
+            unacknowledgedOperationId = undefined;
           }
         }
-        if (operation.type === "artifact.update") {
-          const outcome = { operation, affected };
-          try {
-            await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-              ...verificationOptions,
-            });
-          } catch (firstVerifyError) {
-            if (!isQuietRetryableApplyFailure(firstVerifyError))
-              throw firstVerifyError;
-            // A projection can briefly lag the Yjs commit. Check once after a
-            // short settle window; if the durable value is still wrong,
-            // resume this exact operation against the artifact's current
-            // state. Never restart planning or replay earlier operations.
-            await new Promise((resolve) => setTimeout(resolve, 400));
+        const retainedOutcome = { operationId, operation, affected, acknowledged: lastApplyAcknowledged };
+        await retainOutcomeThenVerify(operationOutcomes, retainedOutcome, async () => {
+          if (operation.type === "artifact.update") {
+            verificationIncomplete = true;
+            const outcome = { operation, affected };
             try {
               await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
                 ...verificationOptions,
               });
-            } catch (secondVerifyError) {
-              if (!isQuietRetryableApplyFailure(secondVerifyError))
-                throw secondVerifyError;
-              console.warn("[spectra.operation.current_state_retry]", {
-                operationId,
-                type: operation.type,
-                error: publicError(secondVerifyError),
-              });
-              publishNativeProgress({
-                title: "Finishing this edit",
-                detail: "Continuing from the current saved state",
-                activity: "edit",
-                operationIndex: index,
-                artifactType: operation.input.blueprintKey,
-              });
-              await mutate("spectraRuns:patchResultCard", {
-                actorClerkId: params.actorClerkId,
-                resultCardId: params.resultCardId,
-                executionId: params.executionId,
-                title: "Finishing this edit",
-                summary: "Continuing from the current saved state",
-              }).catch(() => null);
-              await mutate("spectraOperations:reopenForCurrentStateRetry", {
-                actorClerkId: params.actorClerkId,
-                operationId,
-                executionId: params.executionId,
-              });
-              affected = await executeOperation(
-                params.actorClerkId,
-                params.runId,
-                operationId,
-                operation,
-                {
-                  ...executeContext,
-                  preclaimed: true,
-                },
-              );
-              await verifyCommittedOutcomes(
-                params.actorClerkId,
-                [{ operation, affected }],
-                verificationOptions,
-              );
+            } catch (firstVerifyError) {
+              if (!isQuietRetryableApplyFailure(firstVerifyError))
+                throw firstVerifyError;
+              // A projection can briefly lag the Yjs commit. Check once after a
+              // short settle window; if the durable value is still wrong,
+              // resume this exact operation against the artifact's current
+              // state. Never restart planning or replay earlier operations.
+              await new Promise((resolve) => setTimeout(resolve, 400));
+              try {
+                await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
+                  ...verificationOptions,
+                });
+              } catch (secondVerifyError) {
+                if (!isQuietRetryableApplyFailure(secondVerifyError))
+                  throw secondVerifyError;
+                console.warn("[spectra.operation.current_state_retry]", {
+                  operationId,
+                  type: operation.type,
+                  error: publicError(secondVerifyError),
+                });
+                publishNativeProgress({
+                  title: "Finishing this edit",
+                  detail: "Continuing from the current saved state",
+                  activity: "edit",
+                  operationIndex: index,
+                  artifactType: operation.input.blueprintKey,
+                });
+                await mutate("spectraRuns:patchResultCard", {
+                  actorClerkId: params.actorClerkId,
+                  resultCardId: params.resultCardId,
+                  executionId: params.executionId,
+                  title: "Finishing this edit",
+                  summary: "Continuing from the current saved state",
+                }).catch(() => null);
+                await mutate("spectraOperations:reopenForCurrentStateRetry", {
+                  actorClerkId: params.actorClerkId,
+                  operationId,
+                  executionId: params.executionId,
+                });
+                lastApplyAcknowledged = false;
+                verificationIncomplete = false;
+                unacknowledgedOperationId = operationId;
+                affected = await executeOperation(
+                  params.actorClerkId,
+                  params.runId,
+                  operationId,
+                  operation,
+                  {
+                    ...executeContext,
+                    preclaimed: true,
+                  },
+                );
+                lastApplyAcknowledged = true;
+                unacknowledgedOperationId = undefined;
+                retainedOutcome.acknowledged = true;
+                retainedOutcome.affected = affected;
+                verificationIncomplete = true;
+                await verifyCommittedOutcomes(
+                  params.actorClerkId,
+                  [{ operation, affected }],
+                  verificationOptions,
+                );
+              }
             }
           }
-        }
+          verificationIncomplete = false;
+        });
         allAffected.push(...affected);
         if (operation.type === "artifact.create") {
           const artifactId = affected.find(
@@ -2174,7 +2201,6 @@ async function runAttempt(
           )?.id;
           if (artifactId) createdArtifactIds.set(index, artifactId);
         }
-        operationOutcomes.push({ operation, affected });
         // A commit event is a durable fact, not an instruction to begin.
         // Publishing it before executeOperation made every client ledger claim
         // success while the native collaborator had only just acquired the
@@ -2284,12 +2310,14 @@ async function runAttempt(
             executionId: params.executionId,
             state: "failed",
           }).catch(() => null);
-        await mutate("spectraOperations:markFailed", {
-          actorClerkId: params.actorClerkId,
-          operationId,
-          executionId: params.executionId,
-          error: publicError(error),
-        }).catch(() => null);
+        if (!lastApplyAcknowledged) {
+          await mutate("spectraOperations:markFailed", {
+            actorClerkId: params.actorClerkId,
+            operationId,
+            executionId: params.executionId,
+            error: publicError(error, { explanationOnly: true }),
+          }).catch(() => null);
+        }
         throw error;
       }
     }
@@ -2299,6 +2327,7 @@ async function runAttempt(
       message: "Checking the saved result · Verifying the requested objects",
     });
     loop.enter("verify");
+    verificationIncomplete = true;
     try {
       await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes, {
         ...verificationOptions,
@@ -2306,29 +2335,8 @@ async function runAttempt(
     } catch (firstVerifyError) {
       // Projection/Yjs races can fail verify once after a successful apply.
       // Keep the strip streaming and retry once before any failed publish.
-      const softCompleteCreates = async (error: unknown) => {
-        if (
-          !(await committedCreatesAreUsable(
-            params.actorClerkId,
-            operationOutcomes,
-            verificationOptions,
-          ))
-        )
-          return false;
-        console.warn("[spectra.verify.soft_complete]", {
-          error: publicError(error),
-          creates: operationOutcomes.filter(
-            (outcome) => outcome.operation.type === "artifact.create",
-          ).length,
-        });
-        return true;
-      };
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
-        if (await softCompleteCreates(firstVerifyError)) {
-          // Content is already committed and usable — settle completed.
-        } else {
-          throw firstVerifyError;
-        }
+        throw firstVerifyError;
       } else {
         console.warn("[spectra.verify.encouragement_retry]", {
           error: publicError(firstVerifyError),
@@ -2346,18 +2354,14 @@ async function runAttempt(
           summary: "Keeping your request in focus",
         }).catch(() => null);
         await new Promise((resolve) => setTimeout(resolve, 400));
-        try {
-          await verifyCommittedOutcomes(
-            params.actorClerkId,
-            operationOutcomes,
-            verificationOptions,
-          );
-        } catch (secondVerifyError) {
-          if (!(await softCompleteCreates(secondVerifyError)))
-            throw secondVerifyError;
-        }
+        await verifyCommittedOutcomes(
+          params.actorClerkId,
+          operationOutcomes,
+          verificationOptions,
+        );
       }
     }
+    verificationIncomplete = false;
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -2515,6 +2519,14 @@ async function runAttempt(
       executionId: params.executionId,
       workerId: params.workerId,
     });
+    const effects = reconcileInterruptedEffects({
+      executionId: params.executionId,
+      acknowledged: operationOutcomes,
+      operations: latestAttempt?.operations,
+      run: latestAttempt?.run,
+      attemptedEffect: commitStarted,
+      unacknowledgedOperationId,
+    });
     if (abortDisposition === "user_stopped") {
       advanceProtocolState("cancelled", "run_cancelled");
       await mutate("spectraOperations:cancelPending", {
@@ -2552,9 +2564,7 @@ async function runAttempt(
         Boolean(publicText.trim()),
         false,
       );
-      const durableArtifactWrite = durableArtifactWritesFromOutcomes(
-        operationOutcomes,
-      );
+      const durableArtifactWrite = effects.undoAvailable;
       // Stop API's spectraRuns:stopRun may already have armed retry/continue and
       // revert from durable executed ops. Only replace resultActions when this
       // worker still holds outcome evidence; otherwise preserve stopRun's card
@@ -2565,12 +2575,11 @@ async function runAttempt(
         executionId: params.executionId,
         status: "cancelled",
         resultTitle: "Stopped",
-        resultSummary: recovery.retryable
-            ? stoppedWithVisibleWork
-              ? "Stopped by you. The partial response remains available, and you can retry when ready."
-              : "Stopped before the response began. You can retry when ready."
-            : "Stopped by you. Some work may already be visible — review it before continuing.",
-        ...(durableArtifactWrite
+        resultSummary: interruptedEffectSummary(effects,
+          recovery.retryable ? "You can retry the remaining request." : "Continue in this conversation for the remaining work.",
+          { stopped: true, verificationFailed: verificationIncomplete }),
+        outcome: effects.outcome,
+        ...(durableArtifactWrite || effects.committedCount
           ? {
               resultActions: [
                 ...(recovery.retryable
@@ -2592,7 +2601,7 @@ async function runAttempt(
                         },
                       ]
                     : []),
-                revertRunResultAction(params.runId),
+                ...interruptedEffectActions(effects, params.runId),
               ],
             }
           : {}),
@@ -2622,9 +2631,7 @@ async function runAttempt(
       await flushEvents();
       return;
     }
-    const preservedOutcome = operationOutcomes.some(({ affected }) =>
-      affected.some((item) => item.id),
-    );
+    const preservedOutcome = effects.committedCount > 0;
     const recovery = recoveryForAttempt(
       commitStarted ? [preservedOutcome ? "executed" : "executing"] : [],
       Boolean(publicText.trim()),
@@ -2638,7 +2645,7 @@ async function runAttempt(
           ? "unrecoverable_run_failure"
           : "run_failed_after_commit_boundary",
     );
-    const message = publicError(error);
+    const message = publicError(error, { explanationOnly: true });
     await mutate("spectraOperations:cancelPending", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
@@ -2667,21 +2674,25 @@ async function runAttempt(
       executionId: params.executionId,
       outcome: "failed",
     }).catch(() => null);
-    const resultSummary = recovery.retryable
-        ? message
-        : `${message} Review any affected work before submitting a follow-up command.`;
+    const resultSummary = interruptedEffectSummary(effects, message,
+      { verificationFailed: verificationIncomplete });
     await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
       status: "failed",
+      phase: preservedOutcome ? "partial" : "failed",
+      outcome: effects.outcome,
       error: message,
-      resultTitle: preservedOutcome
-        ? "Completed with limits"
-        : recovery.retryable
-          ? "Paused"
-          : "Needs review",
+      finalSummary: resultSummary,
+      resultTitle: verificationIncomplete && effects.saved
+        ? "Saved; verification incomplete"
+        : preservedOutcome
+          ? "Partially completed"
+          : recovery.retryable
+            ? "Paused"
+            : "Needs review",
       resultSummary,
       resultVariant: "status",
       resultActions: [
@@ -2704,9 +2715,7 @@ async function runAttempt(
                 },
               ]
             : []),
-        ...(durableArtifactWritesFromOutcomes(operationOutcomes)
-          ? [revertRunResultAction(params.runId)]
-          : []),
+        ...interruptedEffectActions(effects, params.runId),
       ],
       recoveryState: recovery.recoveryState,
       retryable: recovery.retryable,
@@ -2719,7 +2728,7 @@ async function runAttempt(
     publish({
       type: "error",
       runId: params.runId,
-      message,
+      message: resultSummary,
       card: card ? streamCard(card) : undefined,
     });
     await flushEvents();
@@ -2986,6 +2995,7 @@ async function resumeOperationsAttempt(params: {
     if (artifactId) createdArtifactIds.set(index, artifactId);
   }
   const outcomes: Array<{
+    operationId?: string;
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }> = operations.flatMap((row) => {
@@ -2993,6 +3003,7 @@ async function resumeOperationsAttempt(params: {
     try {
       return [
         {
+          operationId: row._id,
           operation: resolveCreatedArtifactDependencies(
             parseModelOperation({ type: row.type, input: row.input }),
             createdArtifactIds,
@@ -3005,6 +3016,9 @@ async function resumeOperationsAttempt(params: {
     }
   });
   const applicationSummaries: string[] = [];
+  let verificationIncomplete = false;
+  let attemptedEffect = false;
+  let unacknowledgedOperationId: string | undefined;
   const allAffected = operations.flatMap(
     (operation) => operation.affected ?? [],
   );
@@ -3161,6 +3175,8 @@ async function resumeOperationsAttempt(params: {
         };
         let affected: Array<{ type: string; id: string }> = [];
         try {
+          attemptedEffect = true;
+          unacknowledgedOperationId = row._id;
           affected = await executeOperation(
             params.actorClerkId,
             params.runId,
@@ -3213,7 +3229,8 @@ async function resumeOperationsAttempt(params: {
         // markExecuted here races the already-executed row and turns a durable
         // workspace/artifact save into a false failed run.
         allAffected.push(...affected);
-        outcomes.push({ operation, affected });
+        outcomes.push({ operationId: row._id, operation, affected });
+        unacknowledgedOperationId = undefined;
         if (operation.type === "artifact.create") {
           const artifactId = affected.find(
             (item) => item.type === "artifact",
@@ -3271,12 +3288,14 @@ async function resumeOperationsAttempt(params: {
           loop.enter("report", "region conflict paused the mutation path");
           return;
         }
-        await mutate("spectraOperations:markFailed", {
-          actorClerkId: params.actorClerkId,
-          operationId: row._id,
-          executionId: params.executionId,
-          error: publicError(error),
-        }).catch(() => null);
+        if (!outcomes.some((outcome) => outcome.operationId === row._id)) {
+          await mutate("spectraOperations:markFailed", {
+            actorClerkId: params.actorClerkId,
+            operationId: row._id,
+            executionId: params.executionId,
+            error: publicError(error, { explanationOnly: true }),
+          }).catch(() => null);
+        }
         throw error;
       }
     }
@@ -3286,26 +3305,14 @@ async function resumeOperationsAttempt(params: {
     );
     const verificationOptions = { requireResearchEvidence, prompt: state.run.userPrompt,
       numericSourceRequired: state.run.contextSnapshot?.qualityRequirements?.numericSourceRequired === true };
+    verificationIncomplete = true;
     try {
       await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
         ...verificationOptions,
       });
     } catch (firstVerifyError) {
-      const softCompleteCreates = async (error: unknown) => {
-        if (
-          !(await committedCreatesAreUsable(params.actorClerkId, outcomes, {
-            ...verificationOptions,
-          }))
-        )
-          return false;
-        console.warn("[spectra.resume.verify.soft_complete]", {
-          error: publicError(error),
-        });
-        return true;
-      };
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
-        if (!(await softCompleteCreates(firstVerifyError)))
-          throw firstVerifyError;
+        throw firstVerifyError;
       } else {
         console.warn("[spectra.resume.verify.encouragement_retry]", {
           error: publicError(firstVerifyError),
@@ -3331,16 +3338,12 @@ async function resumeOperationsAttempt(params: {
           summary: "Keeping your request in focus",
         }).catch(() => null);
         await new Promise((resolve) => setTimeout(resolve, 400));
-        try {
-          await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
-            ...verificationOptions,
-          });
-        } catch (secondVerifyError) {
-          if (!(await softCompleteCreates(secondVerifyError)))
-            throw secondVerifyError;
-        }
+        await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
+          ...verificationOptions,
+        });
       }
     }
+    verificationIncomplete = false;
     await Promise.all([
       mutate("spectraArtifacts:settleStagedForRun", {
         actorClerkId: params.actorClerkId,
@@ -3415,7 +3418,22 @@ async function resumeOperationsAttempt(params: {
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "resumed run failed before later stages completed");
-    const message = publicError(error);
+    const message = publicError(error, { explanationOnly: true });
+    const latestAttempt = await query<{ actorClerkId: string; runId: string }, RunDetail>(
+      "spectraRuns:get", { actorClerkId: params.actorClerkId, runId: params.runId },
+    ).catch(() => null);
+    const abortDisposition = classifyRunAttemptAbort({
+      current: latestAttempt?.run ?? null,
+      executionId: params.executionId, workerId: params.workerId,
+    });
+    if (abortDisposition === "already_settled" || abortDisposition === "ownership_lost" || abortDisposition === "state_unavailable")
+      return;
+    const stopped = abortDisposition === "user_stopped";
+    const effects = reconcileInterruptedEffects({
+      executionId: params.executionId, acknowledged: outcomes,
+      operations: latestAttempt?.operations, run: latestAttempt?.run, attemptedEffect,
+      unacknowledgedOperationId,
+    });
     // A resumed approval can fail after one operation has committed and before
     // later proposed rows are consumed. Clear the unconsumed operation/shell
     // state before settling staged work, otherwise a failed continuation can
@@ -3445,25 +3463,28 @@ async function resumeOperationsAttempt(params: {
         outcome: "failed",
       }).catch(() => null),
     ]);
-    const partial = allAffected.length > 0;
-    const summary = partial
-      ? `${message} Earlier authorized changes remain in history; no later operation was silently replayed.`
-      : message;
+    const partial = effects.committedCount > 0;
+    const summary = interruptedEffectSummary(effects, stopped ? "Continue in this conversation for the remaining work." : message,
+      { stopped, verificationFailed: verificationIncomplete });
     await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
-      status: "failed",
-      phase: partial ? "partial" : "failed",
-      error: message,
+      status: stopped ? "cancelled" : "failed",
+      phase: stopped ? "stopped" : partial ? "partial" : "failed",
+      outcome: effects.outcome,
+      error: stopped ? undefined : message,
       finalSummary: summary,
-      resultTitle: partial ? "Partially completed" : "Run failed",
+      resultTitle: stopped ? "Stopped" : verificationIncomplete && effects.saved ? "Saved; verification incomplete" : partial ? "Partially completed" : "Run failed",
       resultSummary: summary,
       resultVariant: "error",
-      resultActions: [],
-      recoveryState: partial ? "partial" : "interrupted",
+      resultActions: [
+        ...(state.run.threadId ? [{ key: "continue", label: "Continue in thread", targetType: "thread", targetId: state.run.threadId }] : []),
+        ...interruptedEffectActions(effects, params.runId),
+      ],
+      recoveryState: partial || effects.ambiguous ? "partial" : "interrupted",
       retryable: false,
-      preservedPartial: partial,
+      preservedPartial: partial || effects.ambiguous,
     }).catch(() => null);
     stopHeartbeat();
     await Promise.all([
@@ -3474,17 +3495,17 @@ async function resumeOperationsAttempt(params: {
         executionId: params.executionId,
         content: summary,
         decision: state.run.decision,
-        affected: allAffected,
+        affected: effects.affected,
       }).catch(() => undefined),
       mutate("spectraRuns:appendEvent", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        type: "error",
-        payload: { type: "error", runId: params.runId, message },
+        type: stopped ? "stopped" : "error",
+        payload: { type: stopped ? "stopped" : "error", runId: params.runId, message: summary },
       }).catch(() => null),
     ]);
-    throw error;
+    if (!stopped) throw error;
   } finally {
     clearInterval(heartbeat);
   }
@@ -4226,7 +4247,11 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       { actorClerkId: string; runId: string },
       RunDetail
     >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    if (state.run.status !== "completed" && state.run.status !== "cancelled")
+    const effects = reconcileInterruptedEffects({
+      executionId: state.run.executionId ?? "", acknowledged: [],
+      operations: state.operations, run: state.run,
+    });
+    if (!canUndoRunWithEffects(state.run.status, effects))
       return new Response(
         "Undo is available after Spectra finishes this run.",
         { status: 409 },

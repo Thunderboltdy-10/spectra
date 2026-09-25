@@ -140,19 +140,27 @@ export function formatZodPlanPublicError(error: ZodError) {
     : "Spectra paused after its recovery passes. Your work is unchanged; retry when ready.";
 }
 
-export function formatPlanApplicationPublicError(error: unknown) {
-  if (error instanceof ZodError) return formatZodPlanPublicError(error);
+export function formatPlanApplicationPublicError(error: unknown, options?: { explanationOnly?: boolean }) {
+  const explanationOnly = options?.explanationOnly === true;
+  if (error instanceof ZodError) return explanationOnly
+    ? "The response did not pass validation."
+    : formatZodPlanPublicError(error);
   if (error instanceof SyntaxError)
-    return "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
+    return explanationOnly ? "The response could not be parsed."
+      : "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
   if (error instanceof TypeError)
-    return "Spectra paused after its recovery passes. Your saved work is safe, and this run can be retried.";
+    return explanationOnly ? "The run could not finish its remaining steps."
+      : "Spectra paused after its recovery passes. Your saved work is safe, and this run can be retried.";
   const message =
     error instanceof Error ? error.message : "Spectra run failed.";
   if (/PRESENTATION_CITATION_EVIDENCE_REQUIRED/i.test(message)) {
-    return "This presentation needs verified citations on its narrative slides. Keep the cited sources in this conversation and ask Spectra to restore the citations; no change was saved.";
+    return explanationOnly
+      ? "This presentation needs verified citations on its narrative slides. Keep the cited sources in this conversation for the citation repair."
+      : "This presentation needs verified citations on its narrative slides. Keep the cited sources in this conversation and ask Spectra to restore the citations; no change was saved.";
   }
   if (/AI_ARTIFACT_REGION_BUSY/i.test(message)) {
-    return "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
+    return explanationOnly ? "That control is still being edited. Finish the active edit before continuing."
+      : "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
   }
   // Convex ArgumentValidationError "Path: .operationId" and REGION_CLAIM_* are
   // apply machinery, not a missing selected object. Mapping those to targeting
@@ -170,7 +178,8 @@ export function formatPlanApplicationPublicError(error: unknown) {
     return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
   }
   if (isApplyMachinery) {
-    return "Spectra could not apply that change. Your saved work is unchanged; retry when ready.";
+    return explanationOnly ? "The change could not be fully processed."
+      : "Spectra could not apply that change. Your saved work is unchanged; retry when ready.";
   }
   if (
     /unrelated to the interpreted request|does not match the interpreted request|more visible artifacts/i.test(
@@ -180,23 +189,29 @@ export function formatPlanApplicationPublicError(error: unknown) {
     return "Spectra's draft did not match the selected object or request. Open the intended artifact or workspace and try a more specific prompt.";
   }
   if (/hollow\/incomplete|no scheduled events|empty <main>/i.test(message)) {
-    return "Spectra's draft was empty or incomplete, so nothing was saved. Try again with a clearer request.";
+    return explanationOnly ? "The result did not pass its completeness check."
+      : "Spectra's draft was empty or incomplete, so nothing was saved. Try again with a clearer request.";
   }
   if (
     /\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound\b/i.test(
       message,
     )
   ) {
-    return "Spectra paused after trying to repair the response. Your saved work is unchanged; retry when ready.";
+    return explanationOnly ? "The response did not pass its operation or format checks."
+      : "Spectra paused after trying to repair the response. Your saved work is unchanged; retry when ready.";
   }
   if (
     /\b(OpenRouter|provider|network|fetch failed|connection|stream failed|no meaningful stream data)\b/i.test(
       message,
     )
   ) {
-    return "Spectra lost its model connection before the run could finish. Your saved context is intact; retry when the connection is stable.";
+    return explanationOnly ? "The model connection ended before the run could finish."
+      : "Spectra lost its model connection before the run could finish. Your saved context is intact; retry when the connection is stable.";
   }
-  return humanizePublicFailure(message);
+  // The general Bridge map also asserts save/native outcomes from error codes.
+  // Failure reporting supplies those facts separately from durable receipts.
+  return explanationOnly ? "The remaining step could not be completed."
+    : humanizePublicFailure(message);
 }
 
 /** Prompt context and top-level reply fields are not part of strict intent. */

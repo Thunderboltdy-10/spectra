@@ -39,6 +39,8 @@ export function boundedArtifactRead(
   return {
     id: artifact.id ?? artifact._id, blueprintKey: artifact.blueprintKey ?? artifact.type,
     title: snapshot.title, summary: snapshot.summary, updatedAt: artifact.updatedAt,
+    currentVersionId: artifact.currentVersionId, contentHash: artifact.contentHash,
+    liveStateVectorHash: artifact.liveStateVectorHash,
     content: partial,
     contentCoverage: { complete: false, totalBytes: bytes(content), instruction: "Only the returned regions were read. Use targeted contentPatch operations; do not replace this partial content. read_artifact accepts cellAddresses/sheetId or blockIds for further regions." },
   };

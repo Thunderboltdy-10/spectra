@@ -1,6 +1,7 @@
 "use client";
 
 import { Tooltip } from "@/components/ui/tooltip";
+import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -5897,17 +5898,20 @@ function ArtifactStudioEditor({
       dirty &&
       (live.state === "reconnecting" || live.state === "unsynchronized") ? (
         <div className="relative z-dropdown h-0 shrink-0">
-          <div
-            role="status"
+          <DismissibleArtifactNotice
+            artifactId={artifact._id}
+            identity="reconnecting"
             className="spectra-collaboration-notice absolute right-3 top-2"
           >
             Connection interrupted. Reconnecting while keeping your draft.
-          </div>
+          </DismissibleArtifactNotice>
         </div>
       ) : null}
       {isCollaborativeArtifact && liveConflict && dirty ? (
         <div className="relative z-dropdown h-0 shrink-0">
-          <div
+          <DismissibleArtifactNotice
+            artifactId={artifact._id}
+            identity={`${liveConflict.regionId ?? ""}:${liveConflict.message}`}
             role="alert"
             className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
           >
@@ -5932,25 +5936,19 @@ function ArtifactStudioEditor({
             >
               Use latest
             </button>
-            <button
-              type="button"
-              className="grid size-7 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              aria-label="Dismiss"
-              onClick={() => setLiveConflict(null)}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          </DismissibleArtifactNotice>
         </div>
       ) : null}
       {nativeConflict ? (
-        <div
+        <DismissibleArtifactNotice
+          artifactId={artifact._id}
+          identity={JSON.stringify(nativeConflict)}
           role="alert"
           className="shrink-0 border-y border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-5 py-2.5"
         >
           <div className="flex flex-wrap items-start gap-2 text-caption text-[var(--text-secondary)]">
             <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" />
-            <div className="min-w-[240px] flex-1">
+            <div className="min-w-0 flex-1 basis-60">
               <p>{nativeConflict.message}</p>
               {nativeConflict.previews?.length ? (
                 <div className="mt-1.5 grid gap-1 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -6008,9 +6006,11 @@ function ArtifactStudioEditor({
               Keep {nativeOfficeApplication} version
             </button>
           </div>
-        </div>
+        </DismissibleArtifactNotice>
       ) : nativeWriteError ? (
-        <div
+        <DismissibleArtifactNotice
+          artifactId={artifact._id}
+          identity={`native-write:${nativeWriteError}`}
           role="alert"
           className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
@@ -6026,9 +6026,11 @@ function ArtifactStudioEditor({
           >
             Try again
           </button>
-        </div>
+        </DismissibleArtifactNotice>
       ) : nativeRecoveryError ? (
-        <div
+        <DismissibleArtifactNotice
+          artifactId={artifact._id}
+          identity={`native-recovery:${nativeRecoveryError}`}
           role="alert"
           className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
@@ -6044,7 +6046,7 @@ function ArtifactStudioEditor({
               Open Spectra Settings
             </NextLink>
           ) : null}
-        </div>
+        </DismissibleArtifactNotice>
       ) : null}
       {isCollaborativeArtifact &&
       (live.initializationError ||
@@ -6053,8 +6055,9 @@ function ArtifactStudioEditor({
         // screen ("Invalid input: expected number, received undefined"). A
         // person cannot act on that. They get the sentence and a reference they
         // can quote; the raw text stays in the console outside production.
-        <div
-          role="status"
+        <DismissibleArtifactNotice
+          artifactId={artifact._id}
+          identity={`live-recovery:${liveRecovery.reference}:${liveRecovery.message}`}
           className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--accent-gold)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--accent-gold)]" />
@@ -6062,10 +6065,14 @@ function ArtifactStudioEditor({
           <span className="shrink-0 font-mono text-micro text-[var(--text-tertiary)]">
             {liveRecovery.reference}
           </span>
-        </div>
+        </DismissibleArtifactNotice>
       ) : null}
       {remoteConflict ? (
-        <div className="shrink-0 border-b border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_7%,var(--bg-primary))] px-5 py-2.5">
+        <DismissibleArtifactNotice
+          artifactId={artifact._id}
+          identity={remoteConflict}
+          className="shrink-0 border-b border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_7%,var(--bg-primary))] px-5 py-2.5"
+        >
           <div className="flex flex-wrap items-center gap-2 text-caption text-[var(--text-secondary)]">
             <AlertCircle className="h-4 w-4 shrink-0 text-[var(--accent-gold)]" />
             <span className="min-w-0 flex-1">
@@ -6087,7 +6094,7 @@ function ArtifactStudioEditor({
               Reload latest
             </button>
           </div>
-        </div>
+        </DismissibleArtifactNotice>
       ) : null}
       <section
         aria-label="Work surface"

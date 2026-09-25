@@ -48,6 +48,25 @@ Relations are expanded only through already-authorized candidates, with a bounde
 
 These results are **candidate evidence**. The existing main-model tool loop decides applicability and may use none. Retrieval receipts must distinguish returned candidates from actually used claims. The measured cutoff is not installed as a universal gate. Any change to receipt/use reporting belongs to a coordinated tool adapter hunk, rather than pretending every returned candidate was used.
 
+## Source-checked implementation boundaries
+
+The existing source adds several requirements to the design above. These are proposal details, not additional implemented behavior.
+
+| Existing behavior | Required implementation boundary |
+| --- | --- |
+| `canReadClaim` allows account-owned `private_global` and `system` claims without requiring their creation school to match the current school. | Partition those scopes by account and scope, without a blanket current-school filter. `private_school` remains account/current-school scoped. Workspace/artifact partitions use the exact destination and claim scope; do not constrain their author account to the reader. Reapply the existing `scopeSchoolId`, destination authority and source checks to every result. Index filters narrow candidates; they do not redefine authority. |
+| `retrievalIdentity` currently returns identity without checking memory preferences. | Check enabled preferences before provider submission. A disabled-memory call returns without a query embedding. Cache lookup does not substitute for this current check. |
+| `maintain` deletes completed `memoryJobs` after 30 days. | Before enqueueing, compare the claim's committed `embeddingVersion` and `embeddingInputHash` with the expected identity. Queue idempotency alone cannot prevent unchanged claims being embedded again after job retention expires. A merged near-duplicate uses the actual retained proposition, not the incoming paraphrase, for this comparison. |
+| The current maintainer selects all job kinds through `by_status_available`. | Move non-embedding selection to bounded kind-specific queries using the proposed index as well as giving embeddings a separate dispatch quota. Filtering `embed` rows after a 20-row `take` would let an embedding backlog starve capture/delete work. Preserve a finite aggregate non-embedding processing bound. |
+| Every currently processed job adds its account to `touchedAccounts`, whose capsule rebuild reads all active claims. | Embedding dispatch/completion must not enter that branch or invalidate capsules. A vector update changes neither proposition text nor semantic confirmation time. Reusing the job table must not introduce a full-account read for every embedded claim. |
+| The proposal's Node action cannot be imported into Convex mutation modules. | Keep identity constants and SHA-256 calculation in a small runtime-neutral helper if shared. Use the repository's existing Web Crypto digest pattern in mutations; the Node action performs provider I/O only through internal action references. Generated API updates remain coordinated with RUNTIME. |
+
+The embedding action must validate successful response identity, exact 256-element finite vector shape, and finite values before commit. A provider success with a malformed or mismatched response is a failure, never a learned-vector write. Provider error text retained in the queue must be bounded and sanitized; it must not persist credentials, headers, or the submitted proposition.
+
+Lease acquisition and completion are separate internal mutations. The lease token identifies one attempt, expires on a bounded schedule, and is checked again at completion. The final mutation re-reads the claim, preferences and evidence, recomputes the exact stored-input hash, and verifies current lifecycle/scope authority. It cannot rely on the earlier action-read result. An unchanged proposition may retain its vector across harmless metadata updates; correction, deletion, or an authority change that now denies the source rejects the completion.
+
+Additional deterministic acceptance cases follow directly: unchanged confirmation after completed-job retention schedules no request; retained near-duplicate text supplies the embedding identity; an embedding-only batch triggers no capsule rebuild; a saturated embedding queue leaves capture/delete admission available; disabled memory sends no provider request; global memory survives a school change where its source remains allowed; and readable shared claims authored by another account remain discoverable without admitting private claims from that account.
+
 ## Proposed owned files and acceptance
 
 - `convex/memory.ts`: enqueue/dispatch, bounded candidate union, source checks, token accounting and internal CAS seams.

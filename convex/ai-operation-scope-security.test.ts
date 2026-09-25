@@ -34,8 +34,7 @@ async function fixture() {
     }
     const runId = await ctx.db.insert("spectraAiRuns", {
       ownerAccountId: accounts[0], schoolId, sourceSurface: "workspace", userPrompt: "Use compact appearance",
-      status: "awaiting_confirmation", phase: "approval", executionId: "scope-attempt-1",
-      approval: { executionId: "scope-attempt-1", status: "pending", reasons: ["Change account preferences"], requestedAt: now },
+      status: "running", phase: "planning", executionId: "scope-attempt-1",
       createdAt: now, updatedAt: now,
     });
     const operationId = await ctx.db.insert("spectraOperations", {
@@ -52,9 +51,16 @@ async function fixture() {
 }
 
 async function startExecution(f: Awaited<ReturnType<typeof fixture>>, approve = true) {
-  if (approve) await f.actor.mutation(api.spectraRuns.claimConfirmation, {
-    runId: f.ids.runId, executionId: f.args.executionId,
-  });
+  if (approve) {
+    const run = await f.t.run(ctx => ctx.db.get(f.ids.runId));
+    if (run?.approval?.status !== "pending") await f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Change account preferences"],
+    });
+    await f.actor.mutation(api.spectraRuns.claimConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    });
+  }
   await f.t.run(async ctx => {
     await ctx.db.patch(f.ids.runId, { status: "running", phase: "applying" });
     await ctx.db.patch(f.ids.operationId, { status: "executing" });
@@ -62,6 +68,223 @@ async function startExecution(f: Awaited<ReturnType<typeof fixture>>, approve = 
 }
 
 describe("Independent AI operation and approval scope security", () => {
+  async function deletionFixture() {
+    const f = await fixture();
+    const root = await f.actor.mutation(api.orgTree.createFolder, { name: "Approved folder" });
+    const child = await f.actor.mutation(api.orgTree.createFolder, { name: "Approved child", parentId: root.nodeId });
+    const targetArgs = { targetIds: [root.nodeId], localFileCount: 0 };
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.operationId, { input: { command: "delete_library_items", args: targetArgs } });
+      await ctx.db.patch(f.ids.runId, { status: "running", approval: undefined });
+    });
+    await f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Delete the approved folder and its child"],
+    });
+    return { ...f, root, child, deletionArgs: { ...f.args, expectedCommand: "delete_library_items", expectedArgs: { targetIds: [root.nodeId] } } };
+  }
+
+  it("does not accept a folder deletion after an unseen child arrives in the pending preview", async () => {
+    const f = await deletionFixture();
+    const unseen = await f.actor.mutation(api.orgTree.createFolder, { name: "Unseen child", parentId: f.root.nodeId });
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_CHANGED");
+    expect(await f.t.run(ctx => ctx.db.get(unseen.nodeId))).not.toHaveProperty("deletedAt");
+  });
+
+  it("does not delete a child substituted after acceptance even when counts stay equal", async () => {
+    const f = await deletionFixture();
+    await startExecution(f);
+    await f.actor.mutation(api.orgTree.move, { nodeIds: [f.child.nodeId], parentId: null });
+    const unseen = await f.actor.mutation(api.orgTree.createFolder, { name: "Substituted child", parentId: f.root.nodeId });
+    await expect(f.actor.mutation(execute, f.deletionArgs)).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
+    for (const id of [f.root.nodeId, f.child.nodeId, unseen.nodeId])
+      expect(await f.t.run(ctx => ctx.db.get(id))).not.toHaveProperty("deletedAt");
+  });
+
+  it("cannot renew an unseen subtree through a repeated pending status update", async () => {
+    const f = await deletionFixture();
+    await f.actor.mutation(api.orgTree.createFolder, { name: "Unseen child", parentId: f.root.nodeId });
+    await f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Delete the approved folder and its child"],
+    });
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_CHANGED");
+  });
+
+  it("deletes exactly the approved subtree and recovers its receipt after a lost reply", async () => {
+    const f = await deletionFixture();
+    await startExecution(f);
+    const result = await f.actor.mutation(execute, f.deletionArgs);
+    expect(result).toMatchObject({ trashed: [{ trashed: 2 }] });
+    await f.actor.mutation(api.spectraOperations.markFailed, {
+      operationId: f.ids.operationId, executionId: f.args.executionId, error: "Reply lost",
+    });
+    await f.actor.mutation(api.orgTree.restore, { nodeIds: [f.root.nodeId] });
+    expect(await f.actor.mutation(execute, f.deletionArgs)).toEqual(result);
+    for (const id of [f.root.nodeId, f.child.nodeId])
+      expect(await f.t.run(ctx => ctx.db.get(id))).not.toHaveProperty("deletedAt");
+  });
+
+  it("does not approve replacement command arguments added after the preview", async () => {
+    const f = await fixture();
+    await f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Use compact appearance"],
+    });
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, {
+      input: { command, args: { patch: { appearance: { density: "comfortable" } } } },
+    }));
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_CHANGED");
+    expect(await f.preferences()).toEqual([]);
+  });
+
+  it("cannot copy approval to a second concurrent run of the same user", async () => {
+    const f = await fixture();
+    await startExecution(f);
+    const other = await f.t.run(async ctx => {
+      const run = (await ctx.db.get(f.ids.runId))!;
+      const operation = (await ctx.db.get(f.ids.operationId))!;
+      const runId = await ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: run.ownerAccountId, schoolId: run.schoolId, sourceSurface: run.sourceSurface,
+        userPrompt: run.userPrompt, status: run.status, executionId: run.executionId,
+        approval: run.approval, createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      const operationId = await ctx.db.insert("spectraOperations", {
+        runId, executionId: operation.executionId, actorType: "ai", type: operation.type,
+        status: "executing", input: operation.input, output: operation.output,
+        affected: [], requiresConfirmation: true, createdAt: Date.now(),
+      });
+      return { runId, operationId };
+    });
+    await expect(f.actor.mutation(execute, { ...f.args, ...other }))
+      .rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
+    expect(await f.preferences()).toEqual([]);
+    expect(await f.actor.mutation(execute, f.args)).toEqual(expect.any(String));
+  });
+
+  it("requires a fresh preview for legacy unbound pending approvals", async () => {
+    const f = await fixture();
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, {
+      status: "awaiting_confirmation",
+      approval: { executionId: f.args.executionId, status: "pending", reasons: ["Change settings"], requestedAt: Date.now() },
+    }));
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_CHANGED");
+    expect(await f.preferences()).toEqual([]);
+  });
+
+  it("approves a corrected plan without reviving cancelled operations from the same attempt", async () => {
+    const f = await fixture();
+    await f.actor.mutation(api.spectraOperations.cancelPending, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    });
+    const { operationIds } = await f.actor.mutation(api.spectraOperations.recordPlan, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      operations: [{ type: "app.command", input: { command, args: commandArgs }, requiresConfirmation: true }],
+    });
+    const corrected = { ...f, ids: { ...f.ids, operationId: operationIds[0] }, args: { ...f.args, operationId: operationIds[0] } };
+    await startExecution(corrected);
+    expect(await f.actor.mutation(execute, corrected.args)).toEqual(expect.any(String));
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.operationId)))?.status).toBe("cancelled");
+    expect(await f.preferences()).toHaveLength(1);
+  });
+
+  it("rejects a substituted connected-file path even when the replica count is unchanged", async () => {
+    const f = await fixture();
+    const root = await f.actor.mutation(api.orgTree.createFolder, { name: "Connected subtree" });
+    const replicaId = await f.t.run(async ctx => {
+      const now = Date.now();
+      const workId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: f.ids.accountId, schoolId: f.ids.schoolId, blueprintKey: "document",
+        title: "Connected fixture", content: {}, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert("orgNodes", {
+        accountId: f.ids.accountId, schoolId: f.ids.schoolId, parentId: root.nodeId,
+        kind: "work", sourceId: workId, name: "Connected fixture", orderKey: "a", createdAt: now, updatedAt: now,
+      });
+      const replicaId = await ctx.db.insert("workReplicas", {
+        workId, accountId: f.ids.accountId, kind: "local", localResourceId: "original-file",
+        relativePath: "disposable/original.docx", nativeFormat: "docx", revision: "fixture-v1", state: "current", updatedAt: now,
+      });
+      await ctx.db.patch(f.ids.operationId, {
+        input: { command: "delete_library_items", args: { targetIds: [root.nodeId], localFileCount: 1 } },
+      });
+      return replicaId;
+    });
+    await startExecution(f);
+    await f.t.run(ctx => ctx.db.patch(replicaId, { localResourceId: "other-file", relativePath: "disposable/other.docx" }));
+    await expect(f.actor.mutation(execute, {
+      ...f.args, expectedCommand: "delete_library_items", expectedArgs: { targetIds: [root.nodeId] },
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
+    expect(await f.t.run(ctx => ctx.db.get(root.nodeId))).not.toHaveProperty("deletedAt");
+    expect(await f.t.run(ctx => ctx.db.query("bridgeFsRequests").collect())).toEqual([]);
+  });
+
+  it("does not show approval with a stale understated local-file consequence", async () => {
+    const f = await fixture();
+    const root = await f.actor.mutation(api.orgTree.createFolder, { name: "New connection" });
+    await f.t.run(async ctx => {
+      const now = Date.now();
+      const workId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: f.ids.accountId, schoolId: f.ids.schoolId, blueprintKey: "document", title: "New connection",
+        content: {}, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert("orgNodes", {
+        accountId: f.ids.accountId, schoolId: f.ids.schoolId, parentId: root.nodeId,
+        kind: "work", sourceId: workId, name: "New connection", orderKey: "a", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert("workReplicas", {
+        workId, accountId: f.ids.accountId, kind: "local", relativePath: "disposable/new.docx",
+        nativeFormat: "docx", revision: "fixture-v1", state: "current", updatedAt: now,
+      });
+      await ctx.db.patch(f.ids.operationId, {
+        input: { command: "delete_library_items", args: { targetIds: [root.nodeId], localFileCount: 0 } },
+      });
+    });
+    await expect(f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Delete zero local files"],
+    })).rejects.toThrow("AI_APPLICATION_LOCAL_EFFECT_CHANGED");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.approval).toBeUndefined();
+  });
+
+  it("leaves all targets intact after rejecting the scoped deletion", async () => {
+    const f = await deletionFixture();
+    await f.actor.mutation(api.spectraRuns.rejectConfirmation, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+    });
+    await expect(f.actor.mutation(execute, f.deletionArgs)).rejects.toThrow("AI_APPLICATION_OPERATION_NOT_ACTIVE");
+    for (const id of [f.root.nodeId, f.child.nodeId])
+      expect(await f.t.run(ctx => ctx.db.get(id))).not.toHaveProperty("deletedAt");
+  });
+
+  it("rejects a subtree beyond the approval bound instead of binding a truncated list", async () => {
+    const f = await fixture();
+    const root = await f.actor.mutation(api.orgTree.createFolder, { name: "Large subtree" });
+    await f.t.run(async ctx => {
+      for (let i = 0; i < 1_000; i += 1) await ctx.db.insert("orgNodes", {
+        accountId: f.ids.accountId, schoolId: f.ids.schoolId, parentId: root.nodeId,
+        kind: "folder", name: `Child ${i}`, orderKey: String(i), createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await ctx.db.patch(f.ids.operationId, {
+        input: { command: "delete_library_items", args: { targetIds: [root.nodeId], localFileCount: 0 } },
+      });
+    });
+    await expect(f.actor.mutation(api.spectraRuns.updateStatus, {
+      runId: f.ids.runId, executionId: f.args.executionId,
+      status: "awaiting_confirmation", approvalReasons: ["Delete large subtree"],
+    })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_TOO_LARGE");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.approval).toBeUndefined();
+    expect(await f.t.run(ctx => ctx.db.query("orgNodes").filter(q => q.neq(q.field("deletedAt"), undefined)).collect())).toEqual([]);
+  });
+
   it("executes the exact confirmed operation and persists an atomic receipt", async () => {
     const f = await fixture();
     await startExecution(f);

@@ -92,6 +92,25 @@ describe("initial context orientation", () => {
     expect(act).not.toHaveBeenCalled();
   });
 
+  it("references the full restored user request instead of overriding it with an old goal excerpt", async () => {
+    const originalRequest = `Prepare a revision pack. ${"Keep the useful research. ".repeat(180)}END: preserve the existing diagrams.`;
+    const response = `Use the biology guide. ${"Retain editable content. ".repeat(70)}END: do not change the appendix.`;
+    const context = await buildContext("actor", {
+      threadId: "current-thread", clarificationId: "question", choiceMessageId: "message",
+      choiceKey: artifactId, clarificationExecutionId: "attempt",
+    }, `${originalRequest}\n\nClarification answer:\n${response}`, {
+      mode: "orientation", restoredGoal: { originalRequest, clarificationResponses: [response] },
+    });
+    expect(context.packet.activeGoal).toMatchObject({
+      source: "restored_run", requestLocation: "current_user_request", clarificationResponseCount: 1,
+    });
+    expect(context.packet.activeGoal).not.toHaveProperty("request");
+    expect(context.packet.activeGoal).not.toHaveProperty("userResponse");
+    expect(JSON.stringify(context.packet.activeGoal)).not.toContain("preserve the practice questions");
+    expect(JSON.stringify(context.packet.activeGoal).length).toBeLessThan(500);
+    expect(context.focusedArtifact).toMatchObject({ id: artifactId });
+  });
+
   it("keeps explicitly attached workspace and thread identities without loading their contents", async () => {
     const context = await buildContext("actor", {
       explicitContextObjects: [

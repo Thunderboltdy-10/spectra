@@ -285,7 +285,9 @@ export function SandboxedArtifactRuntime({
           className="block w-full border-0 bg-[var(--bg-primary)] transition-[height] duration-300 motion-reduce:transition-none"
           style={{ height }}
         />
-      ) : null}
+      ) : (
+        <div aria-hidden="true" style={{ height }} />
+      )}
       {status === "loading" ? (
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-0 ${toolbar ? "top-8" : "top-0"} flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)]`}

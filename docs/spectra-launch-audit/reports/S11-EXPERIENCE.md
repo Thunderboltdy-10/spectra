@@ -52,6 +52,8 @@ Validation is currently pending the coordinator's dependency hold. The shared pr
 
 At the coordinator's request the bounded theme source is being committed for review before its scheduled test execution. Scoped ESLint, JavaScript syntax checking and `git diff --check` pass; the Impeccable detector returns `[]` for the changed sandbox host. These checks are not substitutes for the pending runtime tests. The coordinator separately reported 137 integrated focused tests passing and identified the panel's nullable-value guard as the remaining production type error.
 
+Coordinator source review found a hydration layout shift in that candidate: delaying the iframe also omitted its initial height. A matching, inert placeholder now reserves 220px compact, 420px expanded, or the caller's explicit viewport height until the single iframe mounts. The existing loading overlay and optional toolbar remain in place. Three SSR-to-hydration cases check the reserved height, its replacement by exactly one iframe, actual initial theme, and absence of recoverable hydration errors. These cases are added but still await the scheduled test slot; scoped ESLint and diff checks pass.
+
 ## Architecture and independent decision ledger
 
 Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb47-5362-7f51-83b1-0a2b0775fe3d`, turn `01a0cb47-a868-7672-9b1b-a8eac6a69b5a`; final live S9/S10-AI `01a0d3b1-e48a-7292-b2eb-051452e961ae`, turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`. The latter explicitly deferred ownership, chat/side-panel and theme-consistent embeds; its successful contract counts were not authenticated embed acceptance. Relevant ancestry inspected: `f683c055`, `b63daf0c`, with current callers read on `d9aabfb5`.

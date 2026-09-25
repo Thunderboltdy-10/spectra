@@ -43,16 +43,46 @@ afterEach(() => {
 });
 
 describe("sandbox host theme and presentation updates", () => {
-  it("waits until hydration to run a frame with actual host tokens", () => {
-    document.documentElement.classList.add("dark");
-    const server = renderToString(
-      <SandboxedArtifactRuntime title="Vectors" files={files} compact />,
-    );
-    expect(server).not.toContain("<iframe");
-    render(<SandboxedArtifactRuntime title="Vectors" files={files} compact />);
-    const { frame } = ready();
-    expect(frame.srcdoc).toContain('"theme":"dark"');
-  });
+  it.each([
+    { compact: true, toolbar: true, viewportHeight: undefined, expected: 220 },
+    { compact: false, toolbar: true, viewportHeight: undefined, expected: 420 },
+    { compact: true, toolbar: false, viewportHeight: 560, expected: 560 },
+  ])(
+    "reserves $expected px before hydrating a frame with actual host tokens",
+    (props) => {
+      document.documentElement.classList.add("dark");
+      const ui = (
+        <SandboxedArtifactRuntime
+          title="Vectors"
+          files={files}
+          compact={props.compact}
+          toolbar={props.toolbar}
+          viewportHeight={props.viewportHeight}
+        />
+      );
+      const server = renderToString(ui);
+      expect(server).not.toContain("<iframe");
+      const container = document.createElement("div");
+      container.innerHTML = server;
+      document.body.append(container);
+      const placeholder = container.querySelector<HTMLDivElement>(
+        'section > div[aria-hidden="true"]',
+      );
+      expect(placeholder?.style.height).toBe(`${props.expected}px`);
+      const recoverableError = vi.fn();
+      render(ui, {
+        container,
+        hydrate: true,
+        onRecoverableError: recoverableError,
+      });
+      const frame = container.querySelector("iframe")!;
+      expect(container.querySelectorAll("iframe")).toHaveLength(1);
+      expect(container.contains(placeholder)).toBe(false);
+      expect(frame.style.height).toBe(`${props.expected}px`);
+      expect(frame.srcdoc).toContain('"theme":"dark"');
+      expect(recoverableError).not.toHaveBeenCalled();
+    },
+  );
   it("updates an existing preview from actual theme tokens without restarting the frame", async () => {
     document.documentElement.style.setProperty("--bg-primary", "#fbfaf8");
     document.documentElement.style.setProperty("--text-primary", "#211f1c");

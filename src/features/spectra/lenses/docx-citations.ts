@@ -9,7 +9,10 @@ const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
 const META = "urn:spectra:academic:v1";
 const FIELDS = { title: "Title", year: "Year", city: "City", publisher: "Publisher", journal: "JournalName", volume: "Volume", issue: "Issue", pages: "Pages", url: "URL", doi: "DOI" } as const;
 
-function sourceValue(element: XmlElement, name: string) { return element.find(BIB, name)?.text(); }
+function sourceValue(element: XmlElement, name: string) {
+  const node = element.find(BIB, name);
+  return node ? mappingText(node) : undefined;
+}
 
 function readSource(element: XmlElement) {
   const author = element.find(BIB, "Author")?.find(BIB, "Author");
@@ -35,7 +38,7 @@ export async function collectWordSources(document: Document) {
 }
 
 function bibElement(parent: XmlElement, name: string, text?: string) {
-  const node = new XmlElement(name, "b");
+  const node = new XmlElement(name, parent.lookupPrefix(BIB) ?? null);
   parent.appendChild(node);
   if (text !== undefined) node.appendChild(new XmlText(text));
   return node;
@@ -58,26 +61,30 @@ export async function upsertWordSource(document: Document, source: WordSource) {
     return { partName: name, root: xml.root };
   })();
   const element = matches[0]?.element ?? bibElement(part.root, "Source");
-  const replace = (name: string, value?: string) => {
-    for (const previous of element.findAll(BIB, name)) element.removeChild(previous);
-    if (value !== undefined) bibElement(element, name, value);
+  const previousSource = readSource(element);
+  const replace = (parent: XmlElement, name: string, value?: string) => {
+    const previous = parent.findAll(BIB, name);
+    if (previous.length > 1) throw new Error("DOCX_IDENTITY_AMBIGUOUS: A Word source field is duplicated.");
+    if (value === undefined) { if (previous[0]) parent.removeChild(previous[0]); return; }
+    const node = previous[0] ?? bibElement(parent, name);
+    if (mappingText(node) === value) return;
+    for (const child of [...node.children]) if (child instanceof XmlText) node.removeChild(child);
+    node.insertBefore(new XmlText(value), node.children[0] ?? null);
   };
-  replace("Tag", source.tag); replace("SourceType", source.sourceType);
-  for (const [key, name] of Object.entries(FIELDS)) replace(name, source[key as keyof typeof FIELDS]);
-  const authorContainer = element.find(BIB, "Author");
-  const oldAuthor = authorContainer?.find(BIB, "Author");
-  if (oldAuthor) authorContainer!.removeChild(oldAuthor);
-  if (source.authors?.length || source.corporate) {
-    const author = bibElement(authorContainer ?? bibElement(element, "Author"), "Author");
-    if (source.corporate) bibElement(author, "Corporate", source.corporate);
-    else {
-      const names = bibElement(author, "NameList");
-      for (const person of source.authors ?? []) {
-        const node = bibElement(names, "Person");
-        bibElement(node, "Last", person.last);
-        if (person.first) bibElement(node, "First", person.first);
-        if (person.middle) bibElement(node, "Middle", person.middle);
+  replace(element, "Tag", source.tag); replace(element, "SourceType", source.sourceType);
+  for (const [key, name] of Object.entries(FIELDS)) replace(element, name, source[key as keyof typeof FIELDS]);
+  if (JSON.stringify(previousSource?.authors) !== JSON.stringify(source.authors) || previousSource?.corporate !== source.corporate) {
+    const authorContainer = element.find(BIB, "Author") ?? bibElement(element, "Author");
+    const author = authorContainer.find(BIB, "Author") ?? bibElement(authorContainer, "Author");
+    replace(author, "Corporate", source.corporate);
+    const names = author.find(BIB, "NameList") ?? (source.authors?.length ? bibElement(author, "NameList") : undefined);
+    if (names) {
+      const people = names.findAll(BIB, "Person");
+      for (const [index, person] of (source.authors ?? []).entries()) {
+        const node = people[index] ?? bibElement(names, "Person");
+        replace(node, "Last", person.last); replace(node, "First", person.first); replace(node, "Middle", person.middle);
       }
+      for (const person of people.slice(source.authors?.length ?? 0)) names.removeChild(person);
     }
   }
   document.office.markDirty(part.partName);
@@ -108,38 +115,74 @@ function citationIdentity(element: XmlElement, fallback: string) {
 }
 
 export async function citationMappings(document: Document) {
-  const part = document.office.package.getPart("/customXml/spectraAcademic.xml");
   const result = new Map<string, WordCitationInline["sourceRef"]>();
-  if (!part) return result;
-  const root = (await document.office.xml(part.name)).root;
-  if (root.namespaceUri() !== META) return result;
-  for (const item of root.elements()) {
-    try { const value = wordSourceReferenceSchema.safeParse(JSON.parse(item.text())); if (value.success && item.getAttribute("id")) result.set(item.getAttribute("id")!, value.data); } catch { /* Unknown extension entries remain carried. */ }
+  const entries = (await academicMappingParts(document)).flatMap(({ root }) => mappingEntries(root));
+  const counts = new Map<string, number>();
+  for (const item of entries) counts.set(item.getAttribute("id")!, (counts.get(item.getAttribute("id")!) ?? 0) + 1);
+  for (const item of entries) {
+    const id = item.getAttribute("id")!;
+    // A damaged identity must not attach someone else's evidence or prevent
+    // the document and its unambiguous neighboring citations from opening.
+    if (counts.get(id) !== 1) continue;
+    try { const value = wordSourceReferenceSchema.safeParse(JSON.parse(mappingText(item))); if (value.success) result.set(id, value.data); } catch { /* Unknown extension entries remain carried. */ }
   }
   return result;
 }
 
+export async function academicMappingParts(document: Document) {
+  const found = new Map<string, { partName: string; root: XmlElement }>();
+  for (const relationship of document.office.mainPart.relationships().byType(`${REL}customXml`)) {
+    const part = document.office.package.relatedPart(document.office.mainPart, relationship.id);
+    if (!part || found.has(part.name)) continue;
+    try {
+      const root = (await document.office.xml(part.name)).root;
+      if (root.namespaceUri() === META && root.localName === "academic") found.set(part.name, { partName: part.name, root });
+    } catch { /* An unrelated unreadable custom part remains opaque carry. */ }
+  }
+  return [...found.values()];
+}
+
+function mappingEntries(root: XmlElement) {
+  return root.elements().filter((node) => node.namespaceUri() === META && node.localName === "citation" && node.getAttribute("id"));
+}
+
+function mappingText(node: XmlElement) {
+  const copy = node.clone();
+  for (const child of copy.elements()) copy.removeChild(child);
+  return copy.text();
+}
+
 export async function writeCitationMapping(document: Document, item: WordCitationInline) {
-  let part = document.office.package.getPart("/customXml/spectraAcademic.xml");
-  if (!part && !item.sourceRef) return;
+  const parts = await academicMappingParts(document);
+  const matches = parts.flatMap((part) => mappingEntries(part.root).filter((node) => node.getAttribute("id") === item.citationId).map((node) => ({ ...part, node })));
+  if (matches.length > 1) throw new Error("DOCX_IDENTITY_AMBIGUOUS: This citation mapping ID is duplicated.");
+  let part = matches[0] ?? parts[0];
+  if (!matches.length && !item.sourceRef) return;
   if (!part) {
     const xml = parseXml(`<s:academic xmlns:s="${META}"/>`);
-    part = document.office.package.addPart("/customXml/spectraAcademic.xml", "application/xml", new TextEncoder().encode(serializeNode(xml.root)));
-    document.office._primeXml(part.name, xml);
-    document.office.mainPart.relationships().add({ type: `${REL}customXml`, target: `..${part.name}` });
+    const name = document.office.package.getPart("/customXml/spectraAcademic.xml")
+      ? document._internal().freePartName("/customXml/item", "xml") : "/customXml/spectraAcademic.xml";
+    document.office.package.addPart(name, "application/xml", new TextEncoder().encode(serializeNode(xml.root)));
+    document.office._primeXml(name, xml);
+    document.office.mainPart.relationships().add({ type: `${REL}customXml`, target: `..${name}` });
+    part = { partName: name, root: xml.root };
   }
-  const root = (await document.office.xml(part.name)).root;
-  if (root.namespaceUri() !== META) throw new Error("DOCX_IDENTITY_AMBIGUOUS: An unrelated custom XML part owns the academic mapping path.");
-  const existing = root.elements().find((node) => node.getAttribute("id") === item.citationId);
+  const { root, partName } = part;
+  const existing = matches[0]?.node;
   if (!item.sourceRef) {
-    if (existing) { root.removeChild(existing); document.office.markDirty(part.name); }
+    if (existing) { root.removeChild(existing); document.office.markDirty(partName); }
     return;
   }
-  if (existing?.text() === JSON.stringify(item.sourceRef)) return;
-  if (existing) root.removeChild(existing);
-  const node = new XmlElement("citation", "s"); root.appendChild(node);
-  node.setAttribute("id", item.citationId); node.appendChild(new XmlText(JSON.stringify(item.sourceRef)));
-  document.office.markDirty(part.name);
+  if (existing && mappingText(existing) === JSON.stringify(item.sourceRef)) return;
+  const node = existing ?? new XmlElement("citation", root.lookupPrefix(META) ?? null);
+  if (!existing) root.appendChild(node);
+  node.setAttribute("id", item.citationId);
+  // The JSON text is ours; attributes, extension children and their ordering
+  // belong to the native author and survive updates of this record.
+  const textNodes = node.children.filter((child) => child instanceof XmlText);
+  node.insertBefore(new XmlText(JSON.stringify(item.sourceRef)), textNodes[0] ?? node.children[0] ?? null);
+  for (const text of textNodes) node.removeChild(text);
+  document.office.markDirty(partName);
 }
 
 export function projectAcademicFields(root: XmlElement, regionId: string, sources: WordSource[], mappings: Map<string, WordCitationInline["sourceRef"]>, bibliographySources = sources) {

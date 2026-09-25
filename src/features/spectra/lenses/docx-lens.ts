@@ -10,7 +10,7 @@ import { firstNativeFontFamily } from "../office-fonts";
 import { appendNoteReference, nativeNote, noteReferences, removeNativeNote, storyText, upsertNativeNote, wordElements, wordAttr } from "./docx-academic";
 import { appendCommentBoundary, appendRevision, deleteNativeComment, hasUnsupportedRevision, nativeComment, supportedRevision, upsertNativeComment } from "./docx-academic-review";
 import type { WordCommentData } from "./docx-academic-schema";
-import { appendWordBibliography, appendWordCitation, bibliographyContainer, citationMappings, collectWordSources, projectAcademicFields, wordSourceParts, writeCitationMapping } from "./docx-citations";
+import { academicMappingParts, appendWordBibliography, appendWordCitation, bibliographyContainer, citationMappings, collectWordSources, projectAcademicFields, wordSourceParts, writeCitationMapping } from "./docx-citations";
 import type { WordSource, WordCitationInline } from "./docx-citation-schema";
 import { applyDocumentAcademicOperations } from "../commands/office/document-academic-operations";
 import { latexToEquation } from "./equation-interchange";
@@ -3439,7 +3439,7 @@ async function projectDocument(
     // sibling story content, so a part-level carry marker must not freeze it.
     ...partNames.filter((name) => /\/word\/(?:footnotes|endnotes|comments[^/]*)\.xml$/i.test(name)),
     ...(await wordSourceParts(document)).map((part) => part.partName),
-    ...(document.office.package.getPart("/customXml/spectraAcademic.xml") ? ["/customXml/spectraAcademic.xml"] : []),
+    ...(await academicMappingParts(document)).map((part) => part.partName),
   ])) fidelityEntries.push({ regionId: `docx:academic:${partName}`, feature: "academic-content", class: "NATIVE", partName });
   partRule("headers", (name) => /\/word\/header\d+\.xml$/i.test(name));
   partRule("footers", (name) => /\/word\/footer\d+\.xml$/i.test(name));

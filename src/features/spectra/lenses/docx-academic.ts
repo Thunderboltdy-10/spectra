@@ -95,32 +95,103 @@ export async function nativeNote(document: Document, type: "footnote" | "endnote
   return notes[0] && part ? { ...part, note: notes[0] } : undefined;
 }
 
-export function writeStoryContent(root: XmlElement, content: WordNoteContent, noteType?: "footnote" | "endnote") {
-  const paragraphProperties = root.elements().filter((node) => node.localName === "p").map((node) => node.find(WML_NAMESPACE, "pPr")?.clone());
-  for (const child of [...root.children]) root.removeChild(child);
-  content.forEach((runs, index) => {
-    const paragraph = wordElement("p", root);
-    const properties = paragraphProperties[index] ?? paragraphProperties.at(-1)?.clone();
-    if (properties) paragraph.appendChild(properties);
-    if (noteType && index === 0) wordElement(`${noteType}Ref`, wordElement("r", paragraph));
-    for (const item of runs) {
-      const run = wordElement("r", paragraph);
-      if (item.bold || item.italic || item.underline) {
-        const props = wordElement("rPr", run);
-        if (item.bold) wordElement("b", props);
-        if (item.italic) wordElement("i", props);
-        if (item.underline) wordElement("u", props).setAttributeNs(WML_NAMESPACE, "val", "single");
+/** Keep native boundaries in unchanged prefixes/suffixes. Replacement text
+ * inherits the formatting spans it replaces, including invisible attributes. */
+function remapTextBoundary(before: string, after: string) {
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
+  return (offset: number) => {
+    let mapped = offset <= prefix ? offset : offset >= before.length - suffix
+      ? after.length - (before.length - offset)
+      : prefix + Math.round((offset - prefix) * (after.length - prefix - suffix) / (before.length - prefix - suffix));
+    if (mapped > 0 && /[\uD800-\uDBFF]/u.test(after[mapped - 1]!) && /[\uDC00-\uDFFF]/u.test(after[mapped] ?? "")) mapped++;
+    return mapped;
+  };
+}
+
+function writeRunText(run: XmlElement, text: string) {
+  if (wordText(run) === text) return;
+  const nodes = run.elements().filter((node) => ["t", "delText", "tab", "br", "cr"].includes(node.localName));
+  const before = nodes.map(wordText).join("");
+  const boundary = remapTextBoundary(before, text);
+  let position = 0;
+  const pieces = nodes.length ? nodes : [undefined];
+  for (const [index, previous] of pieces.entries()) {
+    const start = index === 0 ? 0 : boundary(position);
+    position += previous ? wordText(previous).length : 0;
+    const end = index === pieces.length - 1 ? text.length : boundary(position);
+    const value = text.slice(start, end);
+    if (previous && wordText(previous) === value) continue;
+    for (const chunk of value.split(/([\t\n])/).filter(Boolean)) {
+      const name = chunk === "\t" ? "tab" : chunk === "\n" ? "br" : "t";
+      const node = previous && (previous.localName === name || name === "t" && previous.localName === "delText") ? previous.clone() : wordElement(name);
+      for (const child of [...node.children]) node.removeChild(child);
+      if (name === "t") { node.setAttribute("xml:space", "preserve"); node.appendChild(new XmlText(chunk)); }
+      run.insertBefore(node, previous ?? null);
+    }
+    if (previous) run.removeChild(previous);
+  }
+}
+
+function writeRunFormat(run: XmlElement, item: WordNoteContent[number][number]) {
+  for (const [key, name] of [["bold", "b"], ["italic", "i"], ["underline", "u"]] as const) {
+    let props = run.find(WML_NAMESPACE, "rPr");
+    const existing = props?.findAll(WML_NAMESPACE, name) ?? [];
+    if (item[key]) {
+      if (!props) { props = wordElement("rPr"); run.insertBefore(props, run.children[0] ?? null); }
+      if (!existing.length) {
+        const node = wordElement(name, props);
+        if (name === "u") node.setAttributeNs(WML_NAMESPACE, "val", "single");
       }
-      item.text.split(/([\t\n])/).forEach((text) => {
-        if (text === "\t" || text === "\n") wordElement(text === "\t" ? "tab" : "br", run);
-        else if (text) {
-          const node = wordElement("t", run);
-          node.setAttribute("xml:space", "preserve");
-          node.appendChild(new XmlText(text));
-        }
-      });
+    } else for (const node of existing) props!.removeChild(node);
+  }
+}
+
+export function writeStoryContent(root: XmlElement, content: WordNoteContent, noteType?: "footnote" | "endnote", preserveFormatting = false) {
+  const paragraphs = root.elements().filter((node) => node.localName === "p");
+  content.forEach((items, index) => {
+    const paragraph = paragraphs[index] ?? wordElement("p", root);
+    if (!paragraphs[index]) {
+      const properties = paragraphs.at(-1)?.find(WML_NAMESPACE, "pPr");
+      if (properties) paragraph.appendChild(properties.clone());
+    }
+    const nativeRuns = paragraph.elements().filter((node) => node.localName === "r" && wordText(node));
+    const before = nativeRuns.map(wordText).join("");
+    const after = items.map((item) => item.text).join("");
+    const boundary = remapTextBoundary(before, after);
+    let nativePosition = 0;
+    const spans = nativeRuns.map((run, runIndex) => {
+      const start = runIndex ? boundary(nativePosition) : 0;
+      nativePosition += wordText(run).length;
+      return { run, start, end: runIndex === nativeRuns.length - 1 ? after.length : boundary(nativePosition), used: false };
+    });
+    const anchor = nativeRuns[0] ?? null;
+    let position = 0;
+    for (const item of items) {
+      const end = position + item.text.length;
+      const overlaps = spans.filter((span) => span.start < end && span.end > position);
+      for (const span of overlaps.length ? overlaps : [spans[0]]) {
+        const start = span ? Math.max(position, span.start) : position;
+        const stop = span ? Math.min(end, span.end) : end;
+        const run = span?.run.clone() ?? wordElement("r");
+        paragraph.insertBefore(run, anchor);
+        // A split run may carry a native reference marker only once.
+        if (span?.used) for (const node of run.elements().filter((node) => ["footnoteRef", "endnoteRef", "annotationRef"].includes(node.localName))) run.removeChild(node);
+        if (span) span.used = true;
+        writeRunText(run, after.slice(start, stop));
+        if (!preserveFormatting) writeRunFormat(run, item);
+      }
+      position = end;
+    }
+    for (const run of nativeRuns) paragraph.removeChild(run);
+    if (noteType && index === 0 && !wordElements(paragraph).some((node) => node.localName === `${noteType}Ref`)) {
+      const run = wordElement("r"); wordElement(`${noteType}Ref`, run);
+      paragraph.insertBefore(run, paragraph.elements().find((node) => node.localName !== "pPr") ?? null);
     }
   });
+  for (const paragraph of paragraphs.slice(content.length)) root.removeChild(paragraph);
 }
 
 /** Exact unchanged rich stories remain untouched, including vendor extensions. */

@@ -11,7 +11,7 @@ function hasModernComments(document: Document) {
 
 export function nativeCommentReadOnlyReason(document: Document, comment: XmlElement) {
   if (hasModernComments(document)) return "This native thread uses modern Word comment extensions. Edit or delete it in Word.";
-  const allowed = new Set(["comment", "p", "pPr", "pStyle", "r", "rPr", "rStyle", "annotationRef", "t", "tab", "br", "cr"]);
+  const allowed = new Set(["comment", "p", "pPr", "pStyle", "r", "rPr", "rStyle", "b", "i", "u", "annotationRef", "t", "tab", "br", "cr"]);
   if (wordElements(comment).some((node) => node.namespaceUri() !== WML_NAMESPACE || !allowed.has(node.localName))) return "This comment contains rich or unmodeled native content. Edit its body in Word.";
   return undefined;
 }
@@ -50,22 +50,30 @@ export function appendRevision(parent: XmlElement, revision: WordRevisionInline,
     parent.appendChild(retained);
     return;
   }
-  const wrapper = wordElement(revision.revisionKind, parent);
+  const wrapper = retained?.clone() ?? wordElement(revision.revisionKind);
+  parent.appendChild(wrapper);
+  for (const child of [...wrapper.children]) wrapper.removeChild(child);
   wrapper.setAttributeNs(WML_NAMESPACE, "id", revision.revisionId);
   wrapper.setAttributeNs(WML_NAMESPACE, "author", revision.author);
   if (revision.date) wrapper.setAttributeNs(WML_NAMESPACE, "date", revision.date);
+  else wrapper.removeAttributeNs(WML_NAMESPACE, "date");
   const story = parseXml(`<w:comment xmlns:w="${WML_NAMESPACE}"/>`).root;
-  writeStoryContent(story, [revision.content ?? [{ text: revision.text }]]);
+  const paragraph = wordElement("p", story);
+  if (retained) for (const run of retained.elements()) paragraph.appendChild(run.clone());
+  writeStoryContent(story, [revision.content ?? [{ text: revision.text }]], undefined, !revision.content);
   for (const run of [...story.elements()[0]!.elements()]) {
     wrapper.appendChild(run);
-    if (revision.revisionKind === "del") for (const text of wordElements(run).filter((node) => node.localName === "t")) {
-      const deleted = wordElement("delText");
-      deleted.setAttribute("xml:space", "preserve");
-      for (const child of [...text.children]) deleted.appendChild(child);
-      text.parent!.insertBefore(deleted, text);
-      text.parent!.removeChild(text);
-    }
+    for (const text of wordElements(run).filter((node) => ["t", "delText"].includes(node.localName))) renameWordText(text, revision.revisionKind === "del" ? "delText" : "t");
   }
+}
+
+function renameWordText(text: XmlElement, name: "t" | "delText") {
+  if (text.localName === name) return;
+  const renamed = wordElement(name);
+  for (const attr of text.attributes) renamed.setAttribute(attr.prefix ? `${attr.prefix}:${attr.localName}` : attr.localName, attr.value);
+  for (const child of [...text.children]) renamed.appendChild(child);
+  text.parent!.insertBefore(renamed, text);
+  text.parent!.removeChild(text);
 }
 
 export function reviewRevision(element: XmlElement, decision: "accept" | "reject") {
@@ -75,11 +83,7 @@ export function reviewRevision(element: XmlElement, decision: "accept" | "reject
   const keep = revision.revisionKind === "ins" ? decision === "accept" : decision === "reject";
   if (keep) for (const child of [...element.elements()]) {
     if (revision.revisionKind === "del") for (const text of wordElements(child).filter((node) => node.localName === "delText")) {
-      const restored = wordElement("t");
-      restored.setAttribute("xml:space", "preserve");
-      for (const node of [...text.children]) restored.appendChild(node);
-      text.parent!.insertBefore(restored, text);
-      text.parent!.removeChild(text);
+      renameWordText(text, "t");
     }
     parent.insertBefore(child, element);
   }
@@ -112,7 +116,7 @@ export async function upsertNativeComment(document: Document, id: string, data: 
   comment.setAttributeNs(WML_NAMESPACE, "author", data.author);
   if (data.initials) comment.setAttributeNs(WML_NAMESPACE, "initials", data.initials);
   if (data.date) comment.setAttributeNs(WML_NAMESPACE, "date", data.date);
-  writeStoryContent(comment, data.text.split("\n").map((text) => [{ text }]));
+  writeStoryContent(comment, data.text.split("\n").map((text) => [{ text }]), undefined, true);
   document.office.markDirty(part.partName);
 }
 

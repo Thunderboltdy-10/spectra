@@ -71,7 +71,7 @@ export function streamCard(card: Card) {
   };
 }
 
-export function publicError(error: unknown) {
+export function publicError(error: unknown, options?: { explanationOnly?: boolean }) {
   if (error instanceof ZodError) {
     const issue = error.issues[0];
     const path = issue?.path.join(".") ?? "";
@@ -101,7 +101,7 @@ export function publicError(error: unknown) {
       `[spectra.plan.application] ${JSON.stringify({ error: String(error).slice(0, 400) })}`,
     );
   }
-  return formatPlanApplicationPublicError(error);
+  return formatPlanApplicationPublicError(error, options);
 }
 
 export async function latestCard(actorClerkId: string, runId: string) {

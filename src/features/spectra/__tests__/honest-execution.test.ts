@@ -154,25 +154,22 @@ describe("P4.I3 honest execution and authority", () => {
     expect(runtime).toContain("durableArtifactWritesFromOutcomes");
     // Stop mid-run must still expose revert when creates already landed.
     const stopArm = runtime.slice(
-      runtime.indexOf("const durableArtifactWrite = durableArtifactWritesFromOutcomes"),
+      runtime.indexOf("const durableArtifactWrite = effects.undoAvailable"),
       runtime.indexOf('publish({\n        type: "stopped"'),
     );
-    expect(stopArm).toContain("revertRunResultAction(params.runId)");
+    expect(stopArm).toContain("interruptedEffectActions(effects, params.runId)");
     // Empty worker outcomes must not replace stopRun card actions (would strip Undo).
     expect(stopArm).toContain("...(durableArtifactWrite");
     expect(stopArm).toContain("resultActions:");
-    expect(runtime).toContain(
-      "durableArtifactWritesFromOutcomes(operationOutcomes)",
-    );
     const errorPublish = runtime.indexOf('type: "error"');
     const failedBlock = runtime.slice(
       Math.max(0, errorPublish - 1200),
       errorPublish,
     );
-    expect(failedBlock).toContain("revertRunResultAction(params.runId)");
-    expect(failedBlock).toContain(
-      "durableArtifactWritesFromOutcomes(operationOutcomes)",
-    );
+    // The receipt helper is also exercised with actual saved/failed/ambiguous
+    // inputs in s11-review-ai-receipt-report.test.ts, including Undo admission.
+    expect(failedBlock).toContain("interruptedEffectActions(effects, params.runId)");
+    expect(runtime).toContain("acknowledged: operationOutcomes");
     const stopRun = read("convex/spectraRuns.ts");
     expect(stopRun).toContain("function durableArtifactWritesArmRunUndo");
     expect(stopRun).toContain('operation.type === "artifact.create"');

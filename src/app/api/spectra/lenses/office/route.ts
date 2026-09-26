@@ -190,7 +190,7 @@ export function projectionFor(
 ) {
   return isSheet
     ? xlsxProjectionFromContent(content, base as XlsxProjection)
-    : pptxProjectionFromContent(content, base as PptxProjection);
+    : pptxProjectionFromContent(content, base as PptxProjection, { objectLists: "complete" });
 }
 
 /** Queue one verified XLSX/PPTX payload for the Bridge. AI and human edits
@@ -565,6 +565,8 @@ async function commitOfficeNative(
   partNames: string[],
   isSheet: boolean,
   nativeBasePayloadHash: string,
+  cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>,
+  initialContent: unknown,
   keepLocal = false,
 ) {
   return reconcileNativeRevision({ workId, localReplicaId: local.truth.replicaId as Id<"workReplicas">,
@@ -572,6 +574,7 @@ async function commitOfficeNative(
     typeKey: isSheet ? "sheets" : "presentation", fidelityMap: convexSafeFidelityMap(fidelityMap), partNames,
     nativeBaseRevision: local.truth.projectionBaseRevision ?? local.truth.baseRevision ?? null,
     nativeBasePayloadHash,
+    initialContent, cloudSource: cloud.truth,
     ...(keepLocal ? { resolution: "local" as const } : {}),
     merge: currentContent => {
       const current = projectionFor(currentContent, base, isSheet);
@@ -648,7 +651,8 @@ export async function POST(request: Request) {
             : await pptxLens.diffExternal(ancestorOpened.preservedCarry.payload, local.payload);
           const recorded = await commitOfficeNative(workId, local, ancestorOpened.projection as OfficeProjection,
             externalOpened.projection as OfficeProjection, externalOpened.fidelityMap, diff.preservedPartChanges, isSheet,
-            await sha256Payload(ancestorOpened.preservedCarry.payload));
+            await sha256Payload(ancestorOpened.preservedCarry.payload), cloud,
+            contentFor(baseOpened.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: cloud.truth.hash }));
           return NextResponse.json({ state: recorded.state === "applied" ? "opened" : "conflicted",
             durableNative: true, receipt: recorded.receipt,
             ...(recorded.state === "applied" ? { content: recorded.content,
@@ -807,7 +811,9 @@ export async function POST(request: Request) {
     }
 
     const recorded = await commitOfficeNative(workId, local, baseProjection, externalProjection,
-      externalOpened.fidelityMap, diff.preservedPartChanges, isSheet, await sha256Payload(basePayload), input.resolution === "local");
+      externalOpened.fidelityMap, diff.preservedPartChanges, isSheet, await sha256Payload(basePayload), cloud,
+      contentFor(baseOpened.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: cloud.truth.hash }),
+      input.resolution === "local");
     return NextResponse.json({ state: recorded.state, durableNative: true, receipt: recorded.receipt,
       ...(recorded.state === "applied" ? { projection: recorded.content, attribution: `Edited in ${application}` } : {
         conflict: { regionIds: recorded.conflictRegionIds, previews: recorded.previews,

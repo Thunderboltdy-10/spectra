@@ -35,6 +35,7 @@ function setup(document: Y.Doc) {
     policyVersion: 0, schemaVersion: 2, operationId: "operation", receipt: null,
     artifact: { ...readNativeArtifactYjsDocument(document, "document"), blueprintKey: "document", schemaVersion: 2,
       updatedAt: 1, contentHash: "canonical", currentVersionId: "prior" }, nativeBaseRevision: "native-base", cloudRevision: "native-base",
+    cloudPayloadRef: "cloud-payload", cloudPayloadHash: "cloud-hash",
   });
   calls.store.mockImplementation(async (_artifactId: string, value: unknown) => value);
   calls.mutation.mockResolvedValue({});
@@ -154,5 +155,33 @@ describe("native server durable-state reconstruction", () => {
       expect(JSON.parse(request.append.projectionJson).content.spectraContentRef.payloadRef).toBe("blob-projection");
       expect(Buffer.byteLength(JSON.stringify({ payloadJson: JSON.stringify(request) }))).toBeLessThan(1400 * 1024);
     } finally { document.destroy(); }
+  });
+
+  it("prepares native first activation from current cloud content while the canonical resource is empty", async () => {
+    const initialContent = content("cloud C", "before");
+    calls.query.mockResolvedValue({ accountId: "owner", operationId: "operation", receipt: null,
+      roomId: "room", nextSequence: 1, schemaVersion: 1, policyVersion: 0,
+      nativeBaseRevision: "native-base", cloudRevision: "cloud-C",
+      cloudPayloadRef: "cloud-payload", cloudPayloadHash: "cloud-hash",
+      artifact: { blueprintKey: "resource", content: null, title: "Fixture", tags: [], schemaVersion: 1, updatedAt: 1 } });
+    calls.store.mockImplementation(async (_id: string, value: unknown) => value);
+    calls.bridge.mockImplementation(async (operation: string) => operation === "load"
+      ? { roomId: "room", nextSequence: 1, updates: [] } : { state: "applied", receipt });
+    const merge = vi.fn(current => ({ content: current, regionIds: [], conflictRegionIds: [] }));
+    await reconcileNativeRevision(identity, { typeKey: "document", fidelityMap: {}, partNames: [],
+      nativeBaseRevision: "native-base", nativeBasePayloadHash: "base-hash", initialContent,
+      cloudSource: { payloadRef: "cloud-payload", hash: "cloud-hash", revision: "cloud-C" }, merge });
+    expect(merge).toHaveBeenCalledWith(initialContent);
+    expect(calls.bridge.mock.calls.find(call => call[0] === "nativeReconcile")?.[1].activation)
+      .toEqual({ typeKey: "document", schemaVersion: 2 });
+    const request = calls.bridge.mock.calls.find(call => call[0] === "nativeReconcile")![1];
+    const replay = new Y.Doc();
+    try {
+      expect(request.append.baseStateVectorHash).toBe(createHash("sha256").update(Y.encodeStateVector(replay)).digest("base64url"));
+      Y.applyUpdate(replay, Buffer.from(request.append.update, "base64"));
+      expect(readNativeArtifactYjsDocument(replay, "document")?.content).toEqual(JSON.parse(request.append.projectionJson).content);
+      expect(readNativeArtifactYjsDocument(replay, "document")?.content).toMatchObject(initialContent);
+      expect(JSON.parse(request.beforeProjectionJson).content).toEqual(initialContent);
+    } finally { replay.destroy(); }
   });
 });

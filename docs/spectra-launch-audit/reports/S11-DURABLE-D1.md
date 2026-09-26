@@ -1,6 +1,6 @@
 # S11 D1 native reconciliation candidate
 
-Source candidate, 2026-09-25, worktree 222b. **Not validated or launch-ready.** RUNTIME has restored the shared dependencies and proved its filesystem guard; this lane's guarded focused-test slot is queued after SECURITY. No implementation tests have run yet. This unit depends on COLLAB's shared appender extraction and sequence fence in `b3a951d2`, followed by native tail/overlap handling in `1c4ec6ff`. The coordinator authorized incorporating those exact dependencies in this worktree only after this finite owned source commit. Integration uses the original COLLAB commits independently.
+Updated 2026-09-26, worktree 222b. **Focused tests passed; live and integration gates remain.** D1 source `0e34c3f6` is followed by the reviewed ancestor/activation repairs below. Local dependency-only integration includes COLLAB `b3a951d2`, `1c4ec6ff`, `db476139`, `228ee02c`, and OFFICE-MODELS `a9ef82ea` (local `8cf006c8`). The latter's modify/delete conflict kept the absent `s11-office-review.test.ts` absent. The coordinator integrates original dependency commits separately.
 
 ## Implemented boundary
 
@@ -18,20 +18,26 @@ Completed receipts return before room reconstruction, even after the original ro
 
 ## Cross-review and remaining gates
 
+PRESERVATION found and independently re-reviewed two repaired defects. The exact native ancestor is `projectionBaseRevision ?? baseRevision`; fallback bytes are hashed before reuse. The commit requires the prepared ancestor hash to equal that recorded revision and remain source-bound. Current cloud payload reference/hash/revision are fenced separately, and history retains A, C, and B when these differ.
+
+An external save before the first lens open now activates only an empty resource with no semantic content/version and no room updates/snapshots. The same transaction retires the resource room, creates the typed room (document2/sheets4/presentation1), updates resourceClass to artifact, and commits the complete first Yjs update, projection, history and receipt. The first update replays independently on an empty document. Format/type mismatch and nonempty/concurrently edited resources are refused; append failure rolls back retirement and activation. Resource-to-typed Hocuspocus names differ by type. Room CAS rejects old durable writes; this is not immediate revocation of old-channel tokens, and COLLAB owns the authorization-refresh generation check.
+
 HISTORY reviewed the source hash retention path and requested correct preceding-human provenance and exact reconstructed state-vector metadata; both were incorporated. Snapshot-only nativeSources is excluded when deciding whether a preceding human semantic checkpoint changed content. These references retain the native package, but the separate restore unit must use them to restore native-only data: this candidate does not claim the existing history UI already does so.
 
 COLLAB owns actual durable rebase/catch-up of an open room, with compact head checks in the existing policy sweep and refresh at persistence flush. Its gateway must merge disjoint pending changes and explicitly reject native overlap while preserving the existing IndexedDB draft. It must not compact from a stale room or acknowledge an overlap dropped by Y.Map conflict resolution. No new syncConflicts projection fields were authorized. Integration requires the tail to carry native operation identity and existing semantic region IDs.
 
 SECURITY confirmed externally authored user Office edits carry no AI approval permit, including an intentional user clear. The external native path rejects AI/run provenance. AI promotion remains a separate sink: explicit server-owned run/execution/operation scope must be checked before queue/materialization first effect, not inferred from artifact ownership. That sink is outside this D1 unit.
 
-## Prepared verification
+## Executed verification
 
-The original four independent native invariants from `c705dbce` now target the new internal commit surface. Nine additional backend cases cover retained native ownership, actual replay of a delete-only Yjs update, exact sequence refusal, overlap preserving both native references without effect, the closed legacy bypass, transaction rollback on append refusal, changed ancestry, revoked actor, and receipt replay after room retirement. Five server tests use actual native Yjs documents to verify reload/remerge after a concurrent disjoint edit, rejection of a stale explicit conflict choice, completed receipt without room I/O, duplicate receipt on the final retry, and large delta/projection spills. These 18 cases are prepared, not yet passed.
+All commands used RUNTIME's fs-guard with shared/private dependency paths and Vitest `--maxWorkers=1 --no-file-parallelism`. Slot2 was released explicitly to the coordinator after the finite run.
 
-Prepared focused command, **not run until the guarded lane slot is released** (use RUNTIME's prescribed `NODE_OPTIONS` filesystem guard):
+- D1: 22 backend, six server, three exact-ancestor helper cases passed. Final run also includes four W7 cleanup cases: **35/35**, `.spectra-local/launch-s11/durable-review/d1-final.log`.
+- Affected native retention/property cases: **24/24**, `retention-final.log`.
+- DOCX lens and Office route neighbors: **63/63** in `d1-neighbors.log`. That original run had one separate W7 final-unpin failure (90/91 total); its production repair and final pass are documented in `S11-DURABLE-RETENTION.md`. Total distinct passing cases across these runs: **122**.
+- Scoped ESLint passed before and after the last fixes (`d1-lint.log`, `d1-final-lint.log`). `git diff --check` passed.
+- Full guarded `tsc --noEmit --incremental false` reported **17 errors** (`d1-typecheck.log`): 15 in unrelated existing files, plus an untyped version ID in a new test and a missing durable-manifest mediaType. The two owned issues were corrected and final tests/lint passed; the expensive full typecheck was not rerun. Integration type verification remains required.
 
-```text
-node node_modules/vitest/vitest.mjs run convex/s11-native-history-boundaries.test.ts src/lib/native-reconciliation-server.test.ts --maxWorkers=1 --no-file-parallelism
-```
+Preserved red logs document fixture repairs (Convex ArrayBuffer transport and original contentHash identity) separately from genuine A/C/B and resource-activation failures: `d1-first-run.log`, `d1-review-regressions.log`, `d1-valid-fixtures-red.log`. No failure evidence was overwritten.
 
-After shared integration: run those tests, affected route/native promotion tests, native retention/authority controls with corrected retained-state fixtures, and relevant collaboration tests; typecheck the integration and review the generated API. Then use disposable live native/canonical fixtures for lost ack, browser termination, no live gateway, delete-only changes, disjoint/overlap pending drafts, retained before/after package readback, and bounded retries. No current browser/Office proof, memory/cost measurement, typecheck result or test pass is claimed. `git diff --check` is the only completed source validation for this implementation candidate.
+Still required: integration type/API verification and disposable live lost-ack/browser-close/Office readback proof, native-only restore, actual cold/warm byte and latency measurement, and COLLAB's real offline-provider admission fix. The first reconnect can otherwise sync an offline draft before its native conflict admission; mocked onSynced tests do not close D2. No launch-ready claim.

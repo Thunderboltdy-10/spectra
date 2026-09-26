@@ -15,6 +15,7 @@ import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "@/
 import type { Id } from "../../convex/_generated/dataModel";
 
 type NativeType = "document" | "sheets" | "presentation";
+const nativeSchemas = { document: 2, sheets: 4, presentation: 1 } as const;
 type Preview = { regionId: string; spectra: string; external: string };
 export type NativeMerge = {
   content: unknown;
@@ -35,12 +36,13 @@ type NativeReceipt = {
 };
 type NativeHead = {
   accountId: string;
-  artifact: ArtifactLiveValue & { blueprintKey: NativeType; schemaVersion?: number; updatedAt: number;
+  artifact: ArtifactLiveValue & { blueprintKey: NativeType | "resource"; schemaVersion?: number; updatedAt: number;
     contentHash?: string; currentVersionId?: string; liveStateVectorHash?: string };
   operationId: string;
 } & ({ receipt: NativeReceipt } | { receipt: null; roomId: null } | {
   receipt: null; roomId: string; policyVersion: number; nextSequence: number; schemaVersion: number;
   nativeBaseRevision: string | null; cloudRevision: string | null;
+  cloudPayloadRef: string | null; cloudPayloadHash: string | null;
 });
 export type NativeReconciliationResult = NativeMerge & {
   state: "applied" | "conflicted";
@@ -82,6 +84,8 @@ export async function reconcileNativeRevision(
     partNames: string[];
     nativeBaseRevision: string | null;
     nativeBasePayloadHash: string;
+    initialContent?: unknown;
+    cloudSource?: { payloadRef: string; hash: string; revision: string };
     resolution?: "local" | "merged";
     merge: (currentContent: unknown) => NativeMerge | Promise<NativeMerge>;
   },
@@ -92,7 +96,6 @@ export async function reconcileNativeRevision(
     let document: Y.Doc | undefined;
     try {
       let head = await convexQuery<NativeIdentity, NativeHead>("nativeReconciliation:head", identity);
-      if (head.artifact.blueprintKey !== options.typeKey) throw new Error("NATIVE_RECONCILIATION_TYPE_MISMATCH");
       if (head.receipt) return { state: "applied", durableNative: true, duplicate: true,
         receipt: head.receipt, content: undefined, regionIds: [], conflictRegionIds: [] };
       if (head.roomId === null) {
@@ -104,6 +107,15 @@ export async function reconcileNativeRevision(
           receipt: head.receipt, content: undefined, regionIds: [], conflictRegionIds: [] };
         if (head.roomId === null) throw new Error("NATIVE_RECONCILIATION_STALE");
       }
+      const activation = head.artifact.blueprintKey === "resource"
+        ? { typeKey: options.typeKey, schemaVersion: nativeSchemas[options.typeKey] } : undefined;
+      if (!activation && head.artifact.blueprintKey !== options.typeKey) throw new Error("NATIVE_RECONCILIATION_TYPE_MISMATCH");
+      if (activation && (head.artifact.content != null || head.artifact.currentVersionId || head.nextSequence !== 1 ||
+          options.initialContent == null || !options.cloudSource))
+        throw new Error("NATIVE_RECONCILIATION_ACTIVATION_NOT_EMPTY");
+      if (options.cloudSource && (head.cloudRevision !== options.cloudSource.revision ||
+          head.cloudPayloadRef !== options.cloudSource.payloadRef || head.cloudPayloadHash !== options.cloudSource.hash))
+        throw new Error("EXTERNAL_NATIVE_BASE_CHANGED");
       const activeBridge = bridge ??= createCollaborationGatewayBridgeClient({
         convexUrl: getConvexUrl(), bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY!,
       });
@@ -114,9 +126,12 @@ export async function reconcileNativeRevision(
         throw new Error("NATIVE_RECONCILIATION_STALE");
       document = applyStoredRoomUpdates(Y, stored);
       if (!document || !encodeDurableFrontier(Y, document)) throw new Error("NATIVE_RECONCILIATION_CAUSAL_BASE_INCOMPLETE");
+      if (activation && Y.encodeStateAsUpdate(document).some((byte: number) => byte !== 0))
+        throw new Error("NATIVE_RECONCILIATION_ACTIVATION_NOT_EMPTY");
       const projected = readNativeArtifactYjsDocument(document, options.typeKey) ?? readArtifactYjsDocument(document, options.typeKey);
       if (!projected && head.nextSequence > 1) throw new Error("NATIVE_RECONCILIATION_CAUSAL_BASE_INCOMPLETE");
-      const current = projected ?? { title: head.artifact.title, summary: head.artifact.summary, tags: head.artifact.tags, content: head.artifact.content };
+      const current = projected ?? { title: head.artifact.title, summary: head.artifact.summary, tags: head.artifact.tags,
+        content: activation ? options.initialContent : head.artifact.content };
       if (head.nativeBaseRevision !== options.nativeBaseRevision) throw new Error("EXTERNAL_NATIVE_BASE_CHANGED");
       if (options.resolution) {
         const currentIdentity = digest(JSON.stringify(current));
@@ -124,7 +139,8 @@ export async function reconcileNativeRevision(
         resolutionBase = currentIdentity;
       }
       const merged = await options.merge(current.content);
-      const beforeProjection = { ...current, typeKey: options.typeKey, schemaVersion: head.schemaVersion };
+      const schemaVersion = activation?.schemaVersion ?? head.schemaVersion;
+      const beforeProjection = { ...current, typeKey: options.typeKey, schemaVersion };
       const baseStateVectorHash = digest(Y.encodeStateVector(document));
       const nativeActor = { kind: "human" as const, accountId: head.accountId, clientId: `native:${head.operationId}` };
       const plan = planNativeArtifactYjsMutation(document, options.typeKey, { ...current, content: merged.content }, nativeActor);
@@ -136,7 +152,7 @@ export async function reconcileNativeRevision(
       } finally { document.off("update", capture); }
       const after = merged.conflictRegionIds.length ? current : readNativeArtifactYjsDocument(document, options.typeKey);
       if (!after || !encodeDurableFrontier(Y, document)) throw new Error("NATIVE_RECONCILIATION_PROJECTION_INVALID");
-      const afterProjection = { ...after, typeKey: options.typeKey, schemaVersion: head.schemaVersion };
+      const afterProjection = { ...after, typeKey: options.typeKey, schemaVersion };
       // Spill both immutable bodies before the effect transaction. Failed/CAS
       // attempts are unowned objects handled by the existing release policy.
       const [beforeContent, afterContent] = await Promise.all([
@@ -150,7 +166,8 @@ export async function reconcileNativeRevision(
         const uploaded = await activeBridge("storeDurablePayload", { ...context, kind: "yjs-update", digest: updateDigest,
           mediaType: "application/vnd.spectra.yjs-update", bytesBase64: Buffer.from(update).toString("base64") });
         updatePayload = { update: "", payloadRef: uploaded.payloadRef, payloadDigest: updateDigest, byteLength: update.byteLength,
-          payloadManifest: createDurablePayloadManifest({ kind: "yjs-update", bytes: update, payloadRef: uploaded.payloadRef }) };
+          payloadManifest: createDurablePayloadManifest({ kind: "yjs-update", bytes: update, payloadRef: uploaded.payloadRef,
+            mediaType: "application/vnd.spectra.yjs-update" }) };
       };
       if (update.byteLength > 760 * 1024) await spillUpdate();
       const request = {
@@ -167,6 +184,8 @@ export async function reconcileNativeRevision(
         expectedArtifactUpdatedAt: head.artifact.updatedAt, expectedContentHash: head.artifact.contentHash ?? null,
         expectedVersionId: head.artifact.currentVersionId ?? null, expectedNativeBaseRevision: head.nativeBaseRevision,
         expectedCloudRevision: head.cloudRevision,
+        expectedCloudPayloadRef: head.cloudPayloadRef, expectedCloudPayloadHash: head.cloudPayloadHash,
+        ...(activation ? { activation } : {}),
         nativeBasePayloadHash: options.nativeBasePayloadHash,
         beforeProjectionJson: JSON.stringify({ ...beforeProjection, content: beforeContent }),
         beforeProjectionHash: digest(JSON.stringify(beforeProjection)),

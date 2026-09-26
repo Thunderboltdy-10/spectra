@@ -7,7 +7,9 @@ import * as Y from "yjs";
 import { makeFunctionReference } from "convex/server";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { loadVersionAfter, loadVersionBefore } from "./artifactSnapshots";
+import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "../src/features/spectra/work/models/yjs/native-artifact-model";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "s11-history", email: "s11-history@example.test", emailVerified: true };
@@ -65,8 +67,8 @@ async function fixture() {
       byteLength: baseUpdate.byteLength, stateVectorHash: baseStateVectorHash, actorAccountId: accountId,
       clientId: "fixture", idempotencyKey: "fixture-base", regionIds: ["native", "human"], createdAt: now });
     await ctx.db.patch(workId, { liveStateVectorHash: baseStateVectorHash });
-    return { accountId, workId, localId, cloudId, operationId, before, localRevision, baseRevision,
-      localPayloadRef: String(payloads[1]), basePayloadRef: String(payloads[0]), roomId, baseUpdate, baseStateVectorHash, now };
+    return { accountId, workId, localId, cloudId, operationId, before, contentHash: hash(JSON.stringify(before)), localRevision, baseRevision,
+      localPayloadRef: String(payloads[1]), basePayloadRef: String(payloads[0]), roomId, baseUpdate: baseUpdate.buffer as ArrayBuffer, baseStateVectorHash, now };
   });
   const user = t.withIdentity(identity);
   const external = (projection = content("edited in Word", "original human")) => ({
@@ -76,7 +78,7 @@ async function fixture() {
   });
   const prepare = (projection = content("edited in Word", "original human")) => {
     const document = new Y.Doc();
-    Y.applyUpdate(document, ids.baseUpdate);
+    Y.applyUpdate(document, new Uint8Array(ids.baseUpdate));
     const updates: Uint8Array[] = [];
     document.on("update", update => updates.push(update));
     document.transact(() => {
@@ -94,8 +96,9 @@ async function fixture() {
         baseStateVectorHash: ids.baseStateVectorHash, stateVectorHash: wireHash(Y.encodeStateVector(document)),
         regionIds: ["native"], projectionJson: projectionJson(projection), projectionHash: wireHash(projectionJson(projection)) },
       external: external(projection), operationId: ids.operationId, expectedArtifactUpdatedAt: ids.now,
-      expectedContentHash: hash(JSON.stringify(ids.before)), expectedVersionId: null,
+      expectedContentHash: ids.contentHash, expectedVersionId: null,
       expectedNativeBaseRevision: ids.baseRevision, expectedCloudRevision: ids.baseRevision,
+      expectedCloudPayloadRef: ids.basePayloadRef, expectedCloudPayloadHash: ids.baseRevision,
       nativeBasePayloadHash: ids.baseRevision,
       beforeProjectionJson: projectionJson(ids.before), beforeProjectionHash: wireHash(projectionJson(ids.before)),
     };
@@ -106,6 +109,32 @@ async function fixture() {
   const reconcile = (projection = content("edited in Word", "original human")) => commit(prepare(projection));
   const legacyReconcile = () => user.mutation(api.replicas.recordExternalReconciliation, external());
   return { t, user, ids, reconcile, prepare, commit, legacyReconcile };
+}
+
+async function firstOpenFixture() {
+  const f = await fixture();
+  const { t, ids, prepare } = f;
+  await t.run(async ctx => {
+    for (const row of await ctx.db.query("collaborationUpdates").collect()) await ctx.db.delete(row._id);
+    await ctx.db.patch(ids.roomId, { typeKey: "resource", schemaVersion: 1, nextSequence: 1, uncompactedBytes: 0 });
+    await ctx.db.patch(ids.workId, { blueprintKey: "resource", resourceClass: "resource", content: null, nativeFormat: "docx", schemaVersion: 1,
+      contentHash: ids.baseRevision, liveStateVectorHash: undefined });
+  });
+  const args = prepare();
+  const document = new Y.Doc();
+  try {
+    args.append.baseStateVectorHash = wireHash(Y.encodeStateVector(document));
+    document.transact(planNativeArtifactYjsMutation(document, "document", { title: "S11 native history", tags: [],
+      content: content("edited before first open", "original human") }, { kind: "human", clientId: "fixture" }).apply);
+    args.append.update = Y.encodeStateAsUpdate(document).buffer as ArrayBuffer;
+    args.append.stateVectorHash = wireHash(Y.encodeStateVector(document));
+    args.append.expectedNextSequence = 1;
+    const after = { ...readNativeArtifactYjsDocument(document, "document")!, typeKey: "document", schemaVersion: 2 };
+    args.append.projectionJson = JSON.stringify(after);
+    args.append.projectionHash = wireHash(args.append.projectionJson);
+    args.expectedContentHash = ids.baseRevision;
+    return { ...f, after, args: { ...args, activation: { typeKey: "document" as const, schemaVersion: 2 } } };
+  } finally { document.destroy(); }
 }
 
 describe("S11 independent native/canonical/history boundaries", () => {
@@ -247,5 +276,127 @@ describe("S11 independent native/canonical/history boundaries", () => {
       workId: ids.workId, localReplicaId: ids.localId, localPayloadRef: ids.localPayloadRef, localRevision: ids.localRevision,
     });
     expect(head.receipt).toEqual(result.receipt);
+  });
+
+  it("resolves all Keep Office conflicts for the committed revision while preserving unrelated revisions", async () => {
+    const { t, ids, prepare, commit } = await fixture();
+    const conflictIds = await t.run(async ctx => {
+      const conflicts = [];
+      for (const localRevision of [ids.localRevision, "other-native-revision"]) {
+        conflicts.push(await ctx.db.insert("syncConflicts", { accountId: ids.accountId, workId: ids.workId,
+          replicaIds: [ids.localId, ids.cloudId], localRevision, spectraRevision: ids.baseRevision,
+          regionIds: ["native", "another-conflicting-region"], partNames: [],
+          localPayloadRef: ids.localPayloadRef, spectraPayloadRef: ids.basePayloadRef,
+          state: "open", createdAt: ids.now, updatedAt: ids.now }));
+      }
+      return conflicts;
+    });
+    const prepared = prepare();
+    const external = { ...prepared.external, resolution: "local" as const };
+    const result = await commit({ ...prepared, external });
+    expect(result.state).toBe("applied");
+    expect((await t.run(ctx => ctx.db.get(conflictIds[0])))?.state).toBe("resolved-local");
+    expect((await t.run(ctx => ctx.db.get(conflictIds[1])))?.state).toBe("open");
+    expect((await t.run(ctx => ctx.db.get(ids.operationId)))?.reconciliationReceipt).toBeDefined();
+  });
+
+  it("rejects cloud C as the merge ancestor of external B when the retained native base is A", async () => {
+    const { t, ids, prepare, commit } = await fixture();
+    const cloudHash = hash("newer cloud C");
+    const cloudPayloadId = await t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob(["newer cloud C"]));
+      const cloudPayloadId = await ctx.db.insert("payloadObjects", { accountId: ids.accountId, hash: cloudHash,
+        storageId, bytes: 13, mediaType: "application/test", refCount: 1, state: "active", createdAt: ids.now, verifiedAt: ids.now });
+      await ctx.db.patch(ids.cloudId, { payloadRef: String(cloudPayloadId), revision: cloudHash, contentHash: cloudHash });
+      return cloudPayloadId;
+    });
+    const args = prepare();
+    args.expectedCloudRevision = cloudHash;
+    args.expectedCloudPayloadRef = String(cloudPayloadId);
+    args.expectedCloudPayloadHash = cloudHash;
+    args.nativeBasePayloadHash = cloudHash;
+    await expect(commit(args)).rejects.toThrow("EXTERNAL_NATIVE_BASE_CHANGED");
+    expect((await t.run(ctx => ctx.db.get(ids.roomId)))?.nextSequence).toBe(2);
+    expect((await t.run(ctx => ctx.db.get(ids.operationId)))?.reconciliationReceipt).toBeUndefined();
+  });
+
+  it("atomically activates an empty resource room when Office changed before the first lens open", async () => {
+    const { t, ids, args, after, commit } = await firstOpenFixture();
+    const result = await commit(args);
+    expect(result.state).toBe("applied");
+    expect(result.receipt.roomId).not.toBe(ids.roomId);
+    expect(await t.run(ctx => ctx.db.get(ids.roomId))).toMatchObject({ status: "closed" });
+    expect(await t.run(ctx => ctx.db.get(result.receipt.roomId))).toMatchObject({ typeKey: "document", schemaVersion: 2, nextSequence: 2 });
+    expect(await t.run(ctx => ctx.db.get(ids.workId))).toMatchObject({ blueprintKey: "document", resourceClass: "artifact", content: after.content });
+    const rows = await t.run(ctx => ctx.db.query("collaborationUpdates")
+      .withIndex("by_room_sequence", q => q.eq("roomId", result.receipt.roomId)).collect());
+    const replay = new Y.Doc();
+    try {
+      expect(rows).toHaveLength(1);
+      Y.applyUpdate(replay, new Uint8Array(rows[0].update));
+      expect(readNativeArtifactYjsDocument(replay, "document")?.content).toEqual(after.content);
+    } finally { replay.destroy(); }
+    await expect(t.mutation(makeFunctionReference<"mutation">("collaborationGatewayStore:append"), {
+      ...args.append, clientId: "old-resource-session", idempotencyKey: "old-resource-session",
+    })).rejects.toThrow("COLLABORATION_BASE_STATE_STALE");
+  });
+
+  it.each(["update", "snapshot", "content"])("refuses resource activation with an existing %s", async kind => {
+    const { t, ids, args, commit } = await firstOpenFixture();
+    await t.run(async ctx => {
+      if (kind === "content") await ctx.db.patch(ids.workId, { content: { saved: true } });
+      if (kind === "update") await ctx.db.insert("collaborationUpdates", { roomId: ids.roomId,
+        sequence: 1, update: ids.baseUpdate, byteLength: ids.baseUpdate.byteLength, stateVectorHash: ids.baseStateVectorHash,
+        actorAccountId: ids.accountId, clientId: "concurrent", idempotencyKey: "concurrent", regionIds: [], createdAt: ids.now });
+      if (kind === "snapshot") await ctx.db.insert("collaborationSnapshots", { roomId: ids.roomId, artifactId: ids.workId,
+        throughSequence: 0, update: ids.baseUpdate, stateVector: new ArrayBuffer(0), contentHash: ids.contentHash,
+        schemaVersion: 1, status: "verified", createdBy: "migration", createdAt: ids.now });
+    });
+    await expect(commit(args)).rejects.toThrow("NATIVE_RECONCILIATION_ACTIVATION_NOT_EMPTY");
+    expect(await t.run(ctx => ctx.db.get(ids.roomId))).toMatchObject({ status: "active", partitionKey: "root" });
+    expect((await t.run(ctx => ctx.db.get(ids.operationId)))?.reconciliationReceipt).toBeUndefined();
+  });
+
+  it("rolls back room retirement and type activation when append validation fails", async () => {
+    const { t, ids, args, commit } = await firstOpenFixture();
+    args.append.projectionJson = "{}";
+    await expect(commit(args)).rejects.toThrow("COLLABORATION_PROJECTION_INVALID");
+    expect(await t.run(ctx => ctx.db.get(ids.workId))).toMatchObject({ blueprintKey: "resource", content: null });
+    expect(await t.run(ctx => ctx.db.query("collaborationRooms").collect())).toEqual([
+      expect.objectContaining({ _id: ids.roomId, status: "active", partitionKey: "root" }),
+    ]);
+    expect(await t.run(ctx => ctx.db.query("spectraArtifactVersions").collect())).toEqual([]);
+  });
+
+  it("refuses first activation into a type unrelated to the verified native format", async () => {
+    const { t, ids, args, commit } = await firstOpenFixture();
+    await t.run(ctx => ctx.db.patch(ids.localId, { nativeFormat: "xlsx" }));
+    await expect(commit(args)).rejects.toThrow("NATIVE_RECONCILIATION_TYPE_MISMATCH");
+    expect(await t.run(ctx => ctx.db.get(ids.workId))).toMatchObject({ blueprintKey: "resource", content: null });
+  });
+
+  it("retains A and cloud C before advancing first activation to external B", async () => {
+    const { t, ids, args, commit } = await firstOpenFixture();
+    const cloudHash = hash("cloud C");
+    const cloudRef = await t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob(["cloud C"]));
+      const ref = await ctx.db.insert("payloadObjects", { accountId: ids.accountId, hash: cloudHash, storageId,
+        bytes: 7, mediaType: "application/test", refCount: 1, state: "active", createdAt: ids.now, verifiedAt: ids.now });
+      await ctx.db.patch(ids.cloudId, { payloadRef: String(ref), revision: cloudHash, contentHash: cloudHash });
+      return String(ref);
+    });
+    args.expectedCloudRevision = cloudHash;
+    args.expectedCloudPayloadRef = cloudRef;
+    args.expectedCloudPayloadHash = cloudHash;
+    args.beforeProjectionJson = JSON.stringify({ title: "S11 native history", tags: [], typeKey: "document", schemaVersion: 2,
+      content: content("cloud C", "original human") });
+    args.beforeProjectionHash = wireHash(args.beforeProjectionJson);
+    const result = await commit(args);
+    const version = await t.run(ctx => ctx.db.get(result.receipt.versionId as Id<"spectraArtifactVersions">));
+    expect(await t.run(ctx => loadVersionBefore(ctx, version!))).toMatchObject({ content: content("cloud C", "original human") });
+    const owners = await t.run(ctx => ctx.db.query("collaborationPayloadOwners")
+      .withIndex("by_owner", q => q.eq("ownerId", String(result.receipt.versionId))).collect());
+    expect(owners.filter(owner => owner.ownerTable === "spectraArtifactVersions:native").map(owner => owner.payloadRef))
+      .toEqual(expect.arrayContaining([ids.basePayloadRef, cloudRef, ids.localPayloadRef]));
   });
 });

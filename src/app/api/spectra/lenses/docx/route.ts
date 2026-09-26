@@ -65,6 +65,7 @@ type WorkTruth = {
 };
 
 type ArtifactTruth = {
+  blueprintKey: string;
   content: unknown;
   title: string;
   summary?: string;
@@ -423,6 +424,8 @@ async function commitDocxNative(
   base: Awaited<ReturnType<typeof docxLens.open>>,
   external: Awaited<ReturnType<typeof docxLens.open>>,
   partNames: string[],
+  cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>,
+  initialContent?: unknown,
   keepWord = false,
 ) {
   return reconcileNativeRevision({ workId, localReplicaId: local.truth.replicaId as Id<"workReplicas">,
@@ -430,6 +433,7 @@ async function commitDocxNative(
     typeKey: "document", fidelityMap: external.fidelityMap, partNames,
     nativeBaseRevision: local.truth.projectionBaseRevision ?? local.truth.baseRevision ?? null,
     nativeBasePayloadHash: await sha256Payload(base.preservedCarry.payload),
+    initialContent, cloudSource: cloud.truth,
     ...(keepWord ? { resolution: "local" as const } : {}),
     merge: currentContent => {
       const current = contentProjection(currentContent, base.projection);
@@ -552,7 +556,8 @@ export async function POST(request: Request) {
           const externalOpened = await docxLens.open(local.payload, "strict-native");
           const baseOpened = await storedDocxBase(workId, local.truth, cloud.payload);
           const diff = await docxLens.diffExternal(baseOpened.preservedCarry.payload, local.payload);
-          const recorded = await commitDocxNative(workId, local, baseOpened, externalOpened, diff.preservedPartChanges);
+          const recorded = await commitDocxNative(workId, local, baseOpened, externalOpened, diff.preservedPartChanges,
+            cloud, compactDocxProjectionForStorage(opened.projection));
           return NextResponse.json({
             state: recorded.state === "applied" ? "opened" : "conflicted",
             durableNative: true, receipt: recorded.receipt,
@@ -711,7 +716,9 @@ export async function POST(request: Request) {
       });
     }
     const recorded = await commitDocxNative(workId, local, baseOpened, externalOpened,
-      diff.preservedPartChanges, input.resolution === "word");
+      diff.preservedPartChanges, cloud, artifact.blueprintKey === "resource"
+        ? compactDocxProjectionForStorage((await docxLens.open(cloud.payload, "strict-native")).projection) : undefined,
+      input.resolution === "word");
     return NextResponse.json({ state: recorded.state, durableNative: true, receipt: recorded.receipt,
       ...(recorded.state === "applied" ? { projection: recorded.content, attribution: "Edited in Word" } : {
         conflict: { regionIds: recorded.conflictRegionIds, previews: recorded.previews,

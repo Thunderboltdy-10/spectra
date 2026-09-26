@@ -8,6 +8,14 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import { appendRoomUpdate, appendRoomUpdateArgs, parseGatewayProjection } from "./collaborationGatewayStore";
 import { commitHumanCheckpoint, commitNativeReconciliationVersion } from "./changeGroups";
 
+const nativeSchemas = { document: 2, sheets: 4, presentation: 1 } as const;
+function nativeType(format: string | undefined) {
+  if (/^(docx|docm|dotx|dotm)$/.test(format ?? "")) return "document";
+  if (/^(xlsx|xlsm|xltx|xltm|xlam)$/.test(format ?? "")) return "sheets";
+  if (/^(pptx|pptm|potx|potm|ppsx|ppsm|ppam)$/.test(format ?? "")) return "presentation";
+  return null;
+}
+
 export const externalReconciliationArgs = {
   workId: v.id("spectraArtifacts"),
   localReplicaId: v.optional(v.id("workReplicas")),
@@ -99,7 +107,8 @@ export const head = query({
     return { accountId: actor.accountId, artifact, operationId: operation._id, receipt,
       roomId: room._id, policyVersion: room.policyVersion, nextSequence: room.nextSequence, schemaVersion: room.schemaVersion,
       nativeBaseRevision: replicas.local.projectionBaseRevision ?? replicas.local.baseRevision ?? null,
-      cloudRevision: replicas.cloud.revision ?? null };
+      cloudRevision: replicas.cloud.revision ?? null, cloudPayloadRef: replicas.cloud.payloadRef ?? null,
+      cloudPayloadHash: replicas.cloud.contentHash ?? null };
   },
 });
 
@@ -159,12 +168,16 @@ export const commit = internalMutation({
     expectedVersionId: v.union(v.id("spectraArtifactVersions"), v.null()),
     expectedNativeBaseRevision: v.union(v.string(), v.null()),
     expectedCloudRevision: v.union(v.string(), v.null()),
+    expectedCloudPayloadRef: v.union(v.string(), v.null()),
+    expectedCloudPayloadHash: v.union(v.string(), v.null()),
+    activation: v.optional(v.object({ typeKey: v.union(v.literal("document"), v.literal("sheets"), v.literal("presentation")),
+      schemaVersion: v.number() })),
     nativeBasePayloadHash: v.string(),
     beforeProjectionJson: v.string(), beforeProjectionHash: v.string(),
   },
   handler: async (ctx, args) => {
     const input = args.external;
-    const append = args.append;
+    let append = args.append;
     const { artifact, actor } = await authorizedArtifact(ctx, input.workId, append.accountId);
     if (append.artifactId !== input.workId || append.partitionKey !== "root" || append.actorKind !== "human" ||
         append.clientId !== `native:${args.operationId}` || append.idempotencyKey !== `native:${args.operationId}`)
@@ -174,18 +187,34 @@ export const commit = internalMutation({
     if (receipt) return { state: "applied" as const, duplicate: true, receipt };
     if (!["pending", "applied", "conflicted"].includes(operation.state)) throw new Error("EXTERNAL_RECEIPT_MISSING");
     const { local, cloud, payload } = await nativeReplicas(ctx, actor.accountId, input);
-    const room = await ctx.db.query("collaborationRooms")
+    let room = await ctx.db.query("collaborationRooms")
       .withIndex("by_artifact_partition", q => q.eq("artifactId", input.workId).eq("partitionKey", "root")).unique();
     if (!room || room._id !== append.expectedRoomId || room.nextSequence !== append.expectedNextSequence ||
         !["active", "compacting"].includes(room.status) || room.policyVersion !== append.policyVersion ||
         artifact.updatedAt !== args.expectedArtifactUpdatedAt || (artifact.contentHash ?? null) !== args.expectedContentHash ||
         (artifact.currentVersionId ?? null) !== args.expectedVersionId ||
         (local.projectionBaseRevision ?? local.baseRevision ?? null) !== args.expectedNativeBaseRevision ||
-        (cloud.revision ?? null) !== args.expectedCloudRevision)
+        (cloud.revision ?? null) !== args.expectedCloudRevision ||
+        (cloud.payloadRef ?? null) !== args.expectedCloudPayloadRef ||
+        (cloud.contentHash ?? null) !== args.expectedCloudPayloadHash)
       throw new Error("NATIVE_RECONCILIATION_STALE");
+    const targetType = args.activation?.typeKey ?? artifact.blueprintKey;
+    if (nativeType(local.nativeFormat) !== targetType || nativeType(cloud.nativeFormat) !== targetType)
+      throw new Error("NATIVE_RECONCILIATION_TYPE_MISMATCH");
+    if (args.activation) {
+      const [update, snapshot] = await Promise.all([
+        ctx.db.query("collaborationUpdates").withIndex("by_room_sequence", q => q.eq("roomId", room!._id)).first(),
+        ctx.db.query("collaborationSnapshots").withIndex("by_room_sequence", q => q.eq("roomId", room!._id)).first(),
+      ]);
+      if (artifact.blueprintKey !== "resource" || artifact.content != null || artifact.currentVersionId ||
+          room.typeKey !== "resource" || room.schemaVersion !== 1 || room.nextSequence !== 1 ||
+          room.snapshotSequence !== 0 || update || snapshot ||
+          args.activation.schemaVersion !== nativeSchemas[args.activation.typeKey])
+        throw new Error("NATIVE_RECONCILIATION_ACTIVATION_NOT_EMPTY");
+    }
     if (input.conflictRegionIds.length) return recordConflict(ctx, actor.accountId, operation, local, cloud, input);
     const beforeProjection = await parseGatewayProjection(ctx, args.beforeProjectionJson, args.beforeProjectionHash,
-      artifact, { accountId: actor.accountId, policyVersion: append.policyVersion });
+      { ...artifact, blueprintKey: targetType }, { accountId: actor.accountId, policyVersion: append.policyVersion });
     if (!beforeProjection) throw new Error("NATIVE_RECONCILIATION_BASE_REQUIRED");
     const before = { title: beforeProjection.title, summary: beforeProjection.summary,
       content: beforeProjection.content, tags: beforeProjection.tags };
@@ -193,11 +222,27 @@ export const commit = internalMutation({
     for (const ref of new Set([cloud.payloadRef, local.projectionBasePayloadRef].filter((ref): ref is string => Boolean(ref)))) {
       const id = ctx.db.normalizeId("payloadObjects", ref);
       const source = id ? await ctx.db.get(id) : null;
-      if (!source || source.state !== "active" || source.accountId !== actor.accountId)
+      if (!source || source.state !== "active" || source.accountId !== actor.accountId ||
+          (ref === cloud.payloadRef && source.hash !== args.expectedCloudPayloadHash))
         throw new Error("EXTERNAL_BASE_PAYLOAD_UNAVAILABLE");
       beforeNativeHashes.push(source.hash);
     }
-    if (!beforeNativeHashes.includes(args.nativeBasePayloadHash)) throw new Error("EXTERNAL_NATIVE_BASE_CHANGED");
+    if (!args.expectedNativeBaseRevision || args.nativeBasePayloadHash !== args.expectedNativeBaseRevision ||
+        !beforeNativeHashes.includes(args.nativeBasePayloadHash)) throw new Error("EXTERNAL_NATIVE_BASE_CHANGED");
+    if (args.activation) {
+      // A resource room must be empty in this effect transaction. The first
+      // admitted update initializes the typed document from an empty Y.Doc.
+      const now = Date.now();
+      await ctx.db.patch(room._id, { status: "closed", partitionKey: `__retired__:${room._id}`, updatedAt: now });
+      const roomId = await ctx.db.insert("collaborationRooms", { artifactId: artifact._id, schoolId: room.schoolId,
+        typeKey: args.activation.typeKey, provider: room.provider, partitionKey: "root",
+        schemaVersion: args.activation.schemaVersion, policyVersion: room.policyVersion, status: "active",
+        nextSequence: 1, snapshotSequence: 0, uncompactedBytes: 0, createdAt: now, updatedAt: now });
+      room = (await ctx.db.get(roomId))!;
+      append = { ...append, expectedRoomId: roomId };
+      await ctx.db.patch(artifact._id, { blueprintKey: args.activation.typeKey, schemaVersion: args.activation.schemaVersion,
+        resourceClass: "artifact" });
+    }
     // Canonical projection may lag acknowledged human deltas. Materialize the
     // exact fenced before head and close its human history before appending the
     // native operation, all in this transaction (no observable partial phase).

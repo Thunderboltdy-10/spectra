@@ -86,8 +86,9 @@ export async function fetchStoredNativeBase(
   truth: NativePayloadTruth,
   fallback: Uint8Array,
 ) {
-  const hash = truth.projectionBaseRevision;
-  if (!hash || hash === truth.hash) return fallback;
+  const hash = truth.projectionBaseRevision ?? truth.baseRevision;
+  if (!hash) throw new Error("EXTERNAL_NATIVE_BASE_UNAVAILABLE");
+  if (await sha256Payload(fallback) === hash) return fallback;
   return (await fetchVerifiedNativePayloadByHash(hash, workId)).payload;
 }
 

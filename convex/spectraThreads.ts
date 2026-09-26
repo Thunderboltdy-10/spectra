@@ -1270,6 +1270,80 @@ export const listMessages = query({
   },
 });
 
+async function messageContentRevision(content: string) {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+type MessageSearchCursor = {
+  version: 1;
+  kind: "thread-search";
+  threadId: string;
+  accountId: string;
+  schoolId: string;
+  queryHash: string;
+  cursor: string;
+};
+
+/** Search indexed history without loading the conversation's entire recent or older window. */
+export const searchMessages = query({
+  args: { threadId: v.id("spectraThreads"), query: v.string(), cursor: v.optional(v.string()), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    const search = args.query.trim();
+    if (!search || search.length > 500) throw new Error("THREAD_QUERY_REQUIRED: Supply a complete query of 1–500 characters.");
+    if (args.cursor && args.cursor.length > 8_192) throw new Error("THREAD_CURSOR_INVALID");
+    const queryHash = await messageContentRevision(search);
+    const cursor = args.cursor ? requireCursor<MessageSearchCursor>(args.cursor, "thread search") : null;
+    if (cursor && (cursor.version !== 1 || cursor.kind !== "thread-search" || cursor.threadId !== String(thread._id) ||
+      cursor.accountId !== String(actor._id) || cursor.schoolId !== String(actor.schoolId) || cursor.queryHash !== queryHash || typeof cursor.cursor !== "string"))
+      throw new Error("THREAD_CURSOR_MISMATCH: Continue the same query in the same conversation.");
+    const limit = Math.max(1, Math.min(16, Math.round(Number.isFinite(args.limit) ? args.limit! : 8)));
+    const page = await ctx.db.query("spectraMessages").withSearchIndex("search_content", (q) => q.search("content", search).eq("threadId", thread._id))
+      .paginate({ cursor: cursor?.cursor ?? null, numItems: limit });
+    const results = await Promise.all(page.page.filter((message) => !message.schoolId || message.schoolId === actor.schoolId).map(async (message) => {
+      const positions = search.split(/\s+/).filter(Boolean).map((term) =>
+        message.content.search(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu")),
+      ).filter((position) => position >= 0);
+      const start = Math.max(0, (positions.length ? Math.min(...positions) : 0) - 160);
+      const excerpt = message.content.slice(start, start + 800);
+      return {
+        messageId: message._id, threadId: thread._id, role: message.role, createdAt: message.createdAt,
+        revision: await messageContentRevision(message.content), excerpt, start,
+        nextOffset: start + excerpt.length < message.content.length ? start + excerpt.length : null,
+        totalCharacters: message.content.length, partial: start > 0 || excerpt.length < message.content.length,
+      };
+    }));
+    return {
+      thread: { _id: thread._id, title: thread.title, workspaceId: thread.workspaceId }, results,
+      nextCursor: page.isDone ? null : encodeCursor({ version: 1, kind: "thread-search", threadId: String(thread._id),
+        accountId: String(actor._id), schoolId: String(actor.schoolId), queryHash, cursor: page.continueCursor } satisfies MessageSearchCursor),
+      complete: page.isDone,
+    };
+  },
+});
+
+/** Exact text chunks preserve message identity and reject a mix of two assistant revisions. */
+export const readMessage = query({
+  args: { threadId: v.id("spectraThreads"), messageId: v.id("spectraMessages"), offset: v.optional(v.number()), revision: v.optional(v.string()), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.threadId !== thread._id || (message.schoolId && message.schoolId !== actor.schoolId)) throw new Error("Message not found");
+    const revision = await messageContentRevision(message.content);
+    if (args.revision && args.revision !== revision) return { ok: false as const, code: "message_changed", messageId: message._id, revision };
+    const offset = args.offset ?? 0;
+    if (!Number.isInteger(offset) || offset < 0 || offset > message.content.length) throw new Error("MESSAGE_OFFSET_INVALID");
+    if (offset > 0 && !args.revision) throw new Error("MESSAGE_REVISION_REQUIRED: Continue with the revision from the previous chunk or search hit.");
+    const limit = Math.max(1, Math.min(6_000, Math.round(Number.isFinite(args.limit) ? args.limit! : 3_000)));
+    const content = message.content.slice(offset, offset + limit);
+    const nextOffset = offset + content.length < message.content.length ? offset + content.length : null;
+    return { ok: true as const, messageId: message._id, threadId: thread._id, role: message.role, createdAt: message.createdAt,
+      revision, content, offset, nextOffset, totalCharacters: message.content.length, complete: nextOffset === null,
+      partial: offset > 0 || nextOffset !== null };
+  },
+});
+
 export const getRunTrace = query({
   args: {
     threadId: v.id("spectraThreads"),

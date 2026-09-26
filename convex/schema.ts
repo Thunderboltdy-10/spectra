@@ -3971,7 +3971,11 @@ export default defineSchema({
     .index("by_thread_created", ["threadId", "createdAt"])
     .index("by_thread_ordinal", ["threadId", "ordinal"])
     .index("by_thread_client", ["threadId", "clientMessageId"])
-    .index("by_run", ["runId"]),
+    .index("by_run", ["runId"])
+    .searchIndex("search_content", {
+      searchField: "content",
+      filterFields: ["threadId"],
+    }),
 
   spectraAiRuns: defineTable({
     ownerAccountId: v.id("accounts"),

@@ -5,6 +5,12 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
+import {
+  assertNativePreparationIdentity,
+  preparedNativeMaterialization,
+  type NativeMaterializationOptions,
+} from "@/features/spectra/lenses/native-materialization-options";
+import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../../../convex/replicaMaterialization";
 import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
 import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
 import {
@@ -197,8 +203,9 @@ export function projectionFor(
 export async function materializeOfficeArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
-  options?: { promotionMode?: "verified-first" | "immediate-projection" },
+  options?: NativeMaterializationOptions,
 ) {
+  assertNativePreparationIdentity(options);
   return materializeOfficeArtifactAttempt(workId, content, 0, options);
 }
 
@@ -206,7 +213,7 @@ async function materializeOfficeArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
-  options?: { promotionMode?: "verified-first" | "immediate-projection" },
+  options?: NativeMaterializationOptions,
 ) {
   let cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"];
   let cloudPayload: Uint8Array;
@@ -223,6 +230,7 @@ async function materializeOfficeArtifactAttempt(
   } catch (error) {
     // Library import commits projection/stub without a cloud replica payload URL.
     if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+      if (options?.prepareOnly) throw error;
       return {
         state: "deferred_native" as const,
         status:
@@ -246,6 +254,7 @@ async function materializeOfficeArtifactAttempt(
     : pptxProjectionUpdateFromContent(
         materializationContent,
         baseProjection as PptxProjection,
+        { objectLists: "complete" },
       );
   if (attempt > 0) {
     const local = await fetchVerifiedNativePayload(workId, "local-latest");
@@ -261,6 +270,7 @@ async function materializeOfficeArtifactAttempt(
       : pptxProjectionFromContent(
           materializationContent,
           ancestor.projection as PptxProjection,
+          { objectLists: "complete" },
         );
     const rebased = isSheet
       ? mergeOfficeProjection(
@@ -316,6 +326,7 @@ async function materializeOfficeArtifactAttempt(
       : pptxProjectionUpdateFromContent(
           rebased.projection,
           latest.projection as PptxProjection,
+          { objectLists: "complete" },
         );
   }
   const projection = update.projection as OfficeProjection;
@@ -355,7 +366,7 @@ async function materializeOfficeArtifactAttempt(
         )));
     if (readbackDigest !== requestedDigest)
       throw new Error("OFFICE_READBACK_MISMATCH");
-    return {
+    const unchanged = {
       state: "unchanged" as const,
       hash,
       projectionContent: contentForStorage(baseProjection, isSheet, {
@@ -377,6 +388,19 @@ async function materializeOfficeArtifactAttempt(
         state: "unchanged" as const,
       } satisfies NativeSaveReceipt,
     };
+    if (options?.prepareOnly)
+      return preparedNativeMaterialization(materializationTruth, {
+        destination: "none",
+        unchanged: {
+          sourcePayloadRef: materializationTruth.payloadRef,
+          sourceHash: materializationTruth.hash,
+          resultPayloadRef: materializationTruth.payloadRef,
+          resultHash: hash,
+          readbackProjectionHash: readbackDigest,
+          preservationEvidence: unchanged.receipt,
+        },
+      }, unchanged.projectionContent, hash);
+    return unchanged;
   }
   const [next, comparison] = await Promise.all([
     isSheet ? xlsxLens.open(output) : pptxLens.open(output),
@@ -420,59 +444,44 @@ async function materializeOfficeArtifactAttempt(
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };
-  const stored = await uploadNativePayload(
-    workId,
-    output,
-    hash,
-    materializationTruth.nativeFormat,
-  );
-  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", {
-    workId, payloadRef: stored.payloadRef, contentHash: hash,
-    baseRevision: materializationTruth.revision,
-    projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
-    projectionContentHash: readbackDigest, fidelityMap: convexSafeFidelityMap(next.fidelityMap), nativeReceipt,
+  const stored = await uploadNativePayload(workId, output, hash, materializationTruth.nativeFormat);
+  const projectionContent = contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash });
+  const cloudArgs: CloudMaterializationArgs = {
+    workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: materializationTruth.revision,
+    projectionContent, projectionContentHash: readbackDigest,
+    fidelityMap: convexSafeFidelityMap(next.fidelityMap), nativeReceipt,
+  };
+  const queueArgs = (): QueueMaterializationArgs => ({
+    workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: materializationTruth.revision,
+    fidelityMap: convexSafeFidelityMap(next.fidelityMap), regionIds, partNames: changedPartNames,
+    localReplicaId: local?._id as Id<"workReplicas"> | undefined,
+    baseContent: contentForStorage(baseProjection, isSheet, { artifactId: String(workId), payloadHash: materializationTruth.hash }),
+    baseContentHash: baseProjection.nativeBinding.semanticDigest,
+    projectionContent, projectionContentHash: readbackDigest,
+    nativeReceipt,
+    ...(options?.promotionMode ? { promotionMode: options.promotionMode } : {}),
   });
+  if (options?.prepareOnly)
+    return preparedNativeMaterialization(materializationTruth,
+      local ? { destination: "bridge", queue: queueArgs() } : { destination: "cloud", cloud: cloudArgs },
+      projectionContent, hash);
+  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", cloudArgs);
   if (!local) {
     await saveCloud();
     return {
       state: "cloud_saved" as const,
       hash,
-      projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),
+      projectionContent,
       receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
     };
   }
-  let queued: { state: string; requestId: string };
+  let queued: { requestId: string; state: string };
   try {
-    queued = await convexMutation("replicas:queueMaterialization", {
-      workId,
-      payloadRef: stored.payloadRef,
-      contentHash: hash,
-      baseRevision: materializationTruth.revision,
-      fidelityMap: convexSafeFidelityMap(next.fidelityMap),
-      regionIds,
-      partNames: comparison.parts
-        .filter((part) => part.verdict !== "identical")
-        .map((part) => `/${part.name}`),
-      localReplicaId: local._id as Id<"workReplicas">,
-      baseContent: contentForStorage(baseProjection, isSheet, {
-        artifactId: String(workId),
-        payloadHash: materializationTruth.hash,
-      }),
-      baseContentHash: baseProjection.nativeBinding.semanticDigest,
-      projectionContent: contentForStorage(
-        next.projection as OfficeProjection,
-        isSheet,
-        { artifactId: String(workId), payloadHash: hash },
-      ),
-      projectionContentHash: (next.projection as OfficeProjection).nativeBinding
-        .semanticDigest,
-      nativeReceipt,
-      ...(options?.promotionMode
-        ? { promotionMode: options.promotionMode }
-        : {}),
-    });
+    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
+      "replicas:queueMaterialization", queueArgs(),
+    );
   } catch (error) {
     if (
       attempt === 0 &&

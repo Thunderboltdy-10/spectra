@@ -68,6 +68,20 @@ async function startExecution(f: Awaited<ReturnType<typeof fixture>>, approve = 
 }
 
 describe("Independent AI operation and approval scope security", () => {
+  it("cannot reopen an acknowledged operation for another write", async () => {
+    const f = await fixture();
+    await startExecution(f);
+    await f.actor.mutation(execute, f.args);
+    await f.actor.mutation(api.spectraOperations.markExecuted, {
+      operationId: f.ids.operationId, executionId: f.args.executionId, affected: [], output: { summary: "Saved" },
+    });
+    const before = await f.t.run(ctx => ctx.db.get(f.ids.operationId));
+    await expect(f.actor.mutation(api.spectraOperations.reopenForCurrentStateRetry, {
+      operationId: f.ids.operationId, executionId: f.args.executionId,
+    })).rejects.toThrow("AI_OPERATION_ALREADY_EXECUTED");
+    expect(await f.t.run(ctx => ctx.db.get(f.ids.operationId))).toEqual(before);
+  });
+
   async function deletionFixture() {
     const f = await fixture();
     const root = await f.actor.mutation(api.orgTree.createFolder, { name: "Approved folder" });

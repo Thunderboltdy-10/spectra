@@ -16,6 +16,7 @@ import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
   pptxProjectionSchema,
+  presentationObjectProjectionSchema,
   xlsxProjectionSchema,
   type PptxOperation,
   type PptxProjection,
@@ -930,6 +931,8 @@ const xlsxEditorContentSchema = z
           mergedRanges: z.array(z.string()).optional(),
           frozenRows: z.number().int().nonnegative().optional(),
           frozenColumns: z.number().int().nonnegative().optional(),
+          rowCount: z.number().int().positive().optional(),
+          columnCount: z.number().int().positive().optional(),
         })
         .passthrough(),
     ),
@@ -1022,22 +1025,16 @@ export function xlsxProjectionFromContent(
       const previousByRef = new Map(
         sheet.cells.map((cell) => [cell.ref, cell]),
       );
-      let rowCount = Math.max(
-        sheet.rowCount ?? 0,
-        typeof nextRecord.rowCount === "number" ? nextRecord.rowCount : 0,
-      );
-      let columnCount = Math.max(
-        sheet.columnCount ?? 0,
-        typeof nextRecord.columnCount === "number" ? nextRecord.columnCount : 0,
-      );
+      let rowCount = next.rowCount ?? sheet.rowCount;
+      let columnCount = next.columnCount ?? sheet.columnCount;
       const cellCoordinates = new Map<string, { row: number; column: number }>();
       const cells = Object.entries(next.cells).map(([rawRef, value]) => {
         const ref = rawRef.toUpperCase();
         const coordinate = parseAddress(ref);
         if (coordinate) {
           cellCoordinates.set(ref, coordinate);
-          rowCount = Math.max(rowCount, coordinate.row + 1);
-          columnCount = Math.max(columnCount, coordinate.column + 1);
+          if (rowCount !== undefined) rowCount = Math.max(rowCount, coordinate.row + 1);
+          if (columnCount !== undefined) columnCount = Math.max(columnCount, coordinate.column + 1);
         }
         const previous = previousByRef.get(ref);
         const nextValue =
@@ -1155,8 +1152,10 @@ export function xlsxProjectionFromContent(
         // Editors can add a valid cell beyond the imported worksheet's <dimension>.
         // Keep the semantic extent in step with those cells so native readback
         // verifies the same range that the user's edit created.
-        rowCount,
-        columnCount,
+        // An omitted extent is not an authored dimension change. Native cell
+        // writes maintain their own bounds; never invent zero for an empty sheet.
+        ...(rowCount !== undefined ? { rowCount } : {}),
+        ...(columnCount !== undefined ? { columnCount } : {}),
         merges: next.mergedRanges ?? sheet.merges,
         frozenRows: next.frozenRows ?? sheet.frozenRows,
         frozenColumns: next.frozenColumns ?? sheet.frozenColumns,
@@ -1502,10 +1501,16 @@ function editorObject(value: Record<string, unknown>, fallbackId: string) {
   };
 }
 
+export type PptxContentProjectionOptions = {
+  /** Only callers holding a complete hydrated editor model may authorize removal. */
+  objectLists?: "complete";
+};
+
 /** The one Presentation editor-model -> PPTX projection transform. */
 export function pptxProjectionFromContent(
   content: unknown,
   base: PptxProjection,
+  options?: PptxContentProjectionOptions,
 ): PptxProjection {
   if (content == null) return base;
   const raw = pptxEditorContentSchema.parse(content);
@@ -1547,32 +1552,47 @@ export function pptxProjectionFromContent(
           ...(next.hidden ? { hidden: true } : {}),
           speakerNotes: next.speakerNotes ?? "",
         };
-      const incomingById = new Map(
-        incomingObjects.map((object) => [object.id, object]),
-      );
-      const objects = slide.objects.map((object) => {
-        const incoming = incomingById.get(object.id);
-        incomingById.delete(object.id);
-        return incoming
-          ? {
-              ...object,
-              ...incoming,
-              content: incoming.content ?? object.content,
-            }
-          : object;
+      // Completeness is caller authority, never inferred from binding metadata.
+      // Even an authorized whole-model caller may omit this property to carry it.
+      const completeObjects = options?.objectLists === "complete" && next.objects !== undefined;
+      if (completeObjects) z.array(presentationObjectProjectionSchema).parse(next.objects);
+      const previousById = new Map(slide.objects.map((object) => [object.id, object]));
+      const incomingIds = new Set<string>();
+      const occupiedIds = new Set([...previousById.keys(), ...incomingObjects.flatMap((object) => object.id ? [object.id] : [])]);
+      const resolvedObjects = incomingObjects.map((incoming, objectIndex) => {
+        if (incoming.id && incomingIds.has(incoming.id))
+          throw codedOfficeContentError("PPTX_DUPLICATE_OBJECT_ID", "A slide contains duplicate object identities.");
+        if (incoming.id) incomingIds.add(incoming.id);
+        const previous = previousById.get(incoming.id);
+        if (previous) {
+          // A sparse content patch must not erase native shape/media locators.
+          const content = !completeObjects && incoming.content && typeof incoming.content === "object" && !Array.isArray(incoming.content)
+            ? { ...record(previous.content), ...record(incoming.content) }
+            : incoming.content ?? previous.content;
+          return { ...previous, ...incoming, content };
+        }
+        let suffix = objectIndex + 1;
+        while (occupiedIds.has(`${next.id}:spectra:${suffix}`)) suffix += 1;
+        const fallbackId = `${next.id}:spectra:${suffix}`;
+        occupiedIds.add(fallbackId);
+        return editorObject(incoming, fallbackId);
       });
-      objects.push(
-        ...[...incomingById.values()].map((object, objectIndex) =>
-          editorObject(object, `${next.id}:spectra:${objectIndex + 1}`),
-        ),
-      );
+      const resolvedById = new Map(resolvedObjects.map((object) => [object.id, object]));
+      const objects = completeObjects
+        ? resolvedObjects
+        : [
+            ...slide.objects.map((object) => resolvedById.get(object.id) ?? object),
+            ...resolvedObjects.filter((object) => !previousById.has(object.id)),
+          ];
       return {
         ...slide,
         index,
         title: next.title ?? slide.title,
-        hidden: next.hidden === true || undefined,
+        hidden: Object.prototype.hasOwnProperty.call(next, "hidden") || completeObjects
+          ? next.hidden === true || undefined
+          : slide.hidden,
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
-        text: text.length ? text : slide.text,
+        text: completeObjects ? objects.filter((object) => object.type === "text").map((object) => presentationObjectText(object as PresentationObject)) : text.length ? text : slide.text,
         objects,
       };
     }),
@@ -1881,7 +1901,8 @@ export function pptxOperationsBetween(
 export function pptxProjectionUpdateFromContent(
   content: unknown,
   base: PptxProjection,
+  options?: PptxContentProjectionOptions,
 ) {
-  const projection = pptxProjectionFromContent(content, base);
+  const projection = pptxProjectionFromContent(content, base, options);
   return { projection, operations: pptxOperationsBetween(base, projection) };
 }

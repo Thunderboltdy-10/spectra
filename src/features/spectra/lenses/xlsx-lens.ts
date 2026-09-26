@@ -294,30 +294,25 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     : "automatic" as const;
   const activeTab = Number(workbookRoot.find(NATIVE_SML, "bookViews")?.find(NATIVE_SML, "workbookView")?.getAttribute("activeTab") ?? 0);
   const activeSheetId = sheets[activeTab]?.id ?? sheets[0]?.id;
-  const hasTables = sheets.some((sheet) => Boolean(sheet.tables?.length));
-  const hasCharts = sheets.some((sheet) => Boolean(sheet.charts?.length));
-  const hasSheetStructure = sheets.length > 1 || sheets.some((sheet) => sheet.hidden === true);
-  const hasDimensions = sheets.some((sheet) => Object.keys(sheet.columnWidths ?? {}).length || Object.keys(sheet.rowHeights ?? {}).length || sheet.hiddenRows?.length || sheet.hiddenColumns?.length);
-  const hasViews = sheets.some((sheet) => sheet.showGridlines !== undefined || sheet.showHeadings !== undefined);
+  const hasValidations = sheets.some((sheet) => Boolean(sheet.validations?.length));
+  const hasConditionalFormats = sheets.some((sheet) => Boolean(sheet.conditionalFormats?.length));
   const hasEditableValidations = sheets.some((sheet) => (sheet.validations ?? []).some((rule) => ["list", "whole", "decimal", "date", "time"].includes(String(rule.type))));
   const hasEditableConditionalFormats = sheets.some((sheet) => (sheet.conditionalFormats ?? []).some((group) => Array.isArray(group.rules) && group.rules.some((rule) => (rule.type === "cellIs" && rule.operator !== "notBetween") || rule.type === "containsText" || (rule.type === "colorScale" && Array.isArray((rule.colorScale as Record<string, unknown> | undefined)?.colors) && ((rule.colorScale as Record<string, unknown>).colors as unknown[]).length === 2))));
   const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
   const regionEntries: ReadonlyArray<[string, LensFidelityEntry["class"], string?]> = [
     ["cells", "NATIVE"], ["formulas", "NATIVE"], ["styles", "NATIVE"],
     ["numberFormats", "NATIVE"], ["merges", "NATIVE"], ["freezePanes", "NATIVE"],
-    ["charts", hasCharts ? "NATIVE" : "PRESERVED", hasCharts ? undefined : "Excel chart parts are preserved until a chart is present for native editing."],
-    ["tables", hasTables ? "NATIVE" : "PRESERVED", hasTables ? undefined : "Excel table definitions are preserved until a table is present for native editing."],
-    ["validation", hasEditableValidations ? "NATIVE" : "PRESERVED", hasEditableValidations ? undefined : "Unsupported Excel validation types remain preserved for Excel."],
-    ["conditionalFormat", hasEditableConditionalFormats ? "NATIVE" : "PRESERVED", hasEditableConditionalFormats ? undefined : "Unsupported Excel conditional-format types remain preserved for Excel."],
-    ["namedRanges", definedNames.length ? "NATIVE" : "PRESERVED", definedNames.length ? undefined : "Workbook names are preserved until a native name is present."],
+    // Authoring support does not depend on a feature already being present.
+    // Detected unsupported structures retain their separate preservation rows.
+    ["charts", "NATIVE"], ["tables", "NATIVE"],
+    ["validation", !hasValidations || hasEditableValidations ? "NATIVE" : "PRESERVED", !hasValidations || hasEditableValidations ? undefined : "Unsupported Excel validation types remain preserved for Excel."],
+    ["conditionalFormat", !hasConditionalFormats || hasEditableConditionalFormats ? "NATIVE" : "PRESERVED", !hasConditionalFormats || hasEditableConditionalFormats ? undefined : "Unsupported Excel conditional-format types remain preserved for Excel."],
+    ["namedRanges", "NATIVE"],
     ["pivotTables", "PRESERVED", "Pivot tables remain owned by Excel."],
     ["comments", "PRESERVED", "Cell comments and notes remain owned by Excel."],
-    ["sheetStructure", hasSheetStructure ? "NATIVE" : "PRESERVED", hasSheetStructure ? undefined : "Worksheet lifecycle and row or column topology are native when the workbook exposes stable worksheet parts."],
-    ["dimensions", hasDimensions ? "NATIVE" : "PRESERVED", hasDimensions ? undefined : "Row and column dimensions remain unchanged until a dimension is present for native editing."],
-    ["sheetViews", hasViews ? "NATIVE" : "PRESERVED", hasViews ? undefined : "Gridline and heading view settings are preserved as Excel wrote them."],
-    ["sheetMetadata", hasSheetStructure ? "NATIVE" : "PRESERVED", hasSheetStructure ? undefined : "Worksheet tab and visibility metadata are preserved as Excel wrote them."],
-    ["calculationSettings", calculationMode === "manual" ? "NATIVE" : "PRESERVED", calculationMode === "manual" ? undefined : "Workbook calculation settings remain unchanged unless the editor explicitly changes them."],
-    ["sortFilter", hasTables ? "NATIVE" : "PRESERVED", hasTables ? undefined : "Excel filter state is preserved until a table is present for native editing."],
+    ["sheetStructure", "NATIVE"], ["dimensions", "NATIVE"],
+    ["sheetViews", "NATIVE"], ["sheetMetadata", "NATIVE"],
+    ["calculationSettings", "NATIVE"], ["sortFilter", "NATIVE"],
   ];
   for (const [feature, fidelityClass, reason] of regionEntries)
     entries.push({

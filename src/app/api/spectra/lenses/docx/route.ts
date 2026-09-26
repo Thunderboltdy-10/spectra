@@ -35,6 +35,12 @@ import {
 import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../shared/native-office-contract";
+import {
+  assertNativePreparationIdentity,
+  preparedNativeMaterialization,
+  type NativeMaterializationOptions,
+} from "@/features/spectra/lenses/native-materialization-options";
+import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../../../convex/replicaMaterialization";
 
 export const runtime = "nodejs";
 
@@ -113,8 +119,9 @@ const nativeWriteOptions: DocxWriteOptions = {
 export async function materializeDocxArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
-  options?: { promotionMode?: "verified-first" | "immediate-projection" },
+  options?: NativeMaterializationOptions,
 ) {
+  assertNativePreparationIdentity(options);
   return materializeDocxArtifactAttempt(workId, content, 0, options);
 }
 
@@ -122,7 +129,7 @@ async function materializeDocxArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
-  options?: { promotionMode?: "verified-first" | "immediate-projection" },
+  options?: NativeMaterializationOptions,
 ) {
   let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
   let workTruth: WorkTruth;
@@ -138,6 +145,7 @@ async function materializeDocxArtifactAttempt(
     // Library import commits projection without a cloud replica payload URL.
     // Spectra already saved the edit — do not toast a false Word writeback failure.
     if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
+      if (options?.prepareOnly) throw error;
       return {
         state: "deferred_native" as const,
         status:
@@ -201,7 +209,7 @@ async function materializeDocxArtifactAttempt(
         "DOCX_READBACK_MISMATCH",
         "Word readback did not match the requested text, image, page, or header/footer edit.",
       );
-    return {
+    const unchanged = {
       state: "unchanged" as const,
       hash,
       projectionContent: compactDocxProjectionForStorage(opened.projection),
@@ -220,6 +228,19 @@ async function materializeDocxArtifactAttempt(
         state: "unchanged" as const,
       } satisfies NativeSaveReceipt,
     };
+    if (options?.prepareOnly)
+      return preparedNativeMaterialization(truth, {
+        destination: "none",
+        unchanged: {
+          sourcePayloadRef: truth.payloadRef,
+          sourceHash: truth.hash,
+          resultPayloadRef: truth.payloadRef,
+          resultHash: hash,
+          readbackProjectionHash: readbackDigest,
+          preservationEvidence: unchanged.receipt,
+        },
+      }, unchanged.projectionContent, hash);
+    return unchanged;
   }
   const [next, comparison] = await Promise.all([
     docxLens.open(output, "strict-native"),
@@ -259,17 +280,35 @@ async function materializeDocxArtifactAttempt(
     state: local ? "pending" : "cloud_saved",
   };
   const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
-  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", {
+  const projectionContent = compactDocxProjectionForStorage(nextProjection);
+  const cloudArgs: CloudMaterializationArgs = {
     workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: truth.revision,
-    projectionContent: compactDocxProjectionForStorage(nextProjection),
-    projectionContentHash: nextProjection.nativeBinding.semanticDigest, fidelityMap: next.fidelityMap, nativeReceipt,
+    projectionContent, projectionContentHash: nextProjection.nativeBinding.semanticDigest,
+    fidelityMap: next.fidelityMap, nativeReceipt,
+  };
+  const queueArgs = (): QueueMaterializationArgs => ({
+    workId, payloadRef: stored.payloadRef, contentHash: hash, baseRevision: truth.revision,
+    fidelityMap: next.fidelityMap, regionIds, partNames: changedPartNames,
+    localReplicaId: local?._id as Id<"workReplicas"> | undefined,
+    baseContent: compactDocxProjectionForStorage(opened.projection),
+    baseContentHash: opened.projection.nativeBinding.semanticDigest,
+    projectionContent, projectionContentHash: nextProjection.nativeBinding.semanticDigest,
+    baseTextIndex: opened.projection.blocks.map(block => block.text).join("\n").slice(0, 200_000),
+    projectionTextIndex: nextProjection.blocks.map(block => block.text).join("\n").slice(0, 200_000),
+    nativeReceipt,
+    ...(options?.promotionMode ? { promotionMode: options.promotionMode } : {}),
   });
+  if (options?.prepareOnly)
+    return preparedNativeMaterialization(truth,
+      local ? { destination: "bridge", queue: queueArgs() } : { destination: "cloud", cloud: cloudArgs },
+      projectionContent, hash);
+  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", cloudArgs);
   if (!local) {
     await saveCloud();
     return {
       state: "cloud_saved" as const,
       hash,
-      projectionContent: compactDocxProjectionForStorage(nextProjection),
+      projectionContent,
       receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
@@ -277,54 +316,9 @@ async function materializeDocxArtifactAttempt(
   }
   let queued: { requestId: string; state: string };
   try {
-    queued = await convexMutation<
-    {
-      workId: Id<"spectraArtifacts">;
-      payloadRef: string;
-      contentHash: string;
-      baseRevision: string;
-      fidelityMap: unknown;
-      regionIds: string[];
-      partNames: string[];
-      localReplicaId?: Id<"workReplicas">;
-      baseContent?: unknown;
-      baseContentHash?: string;
-      baseTextIndex?: string;
-      projectionContent?: unknown;
-      projectionContentHash?: string;
-      projectionTextIndex?: string;
-      nativeReceipt?: NativeSaveReceipt;
-      promotionMode?: "verified-first" | "immediate-projection";
-    },
-    { requestId: string; state: string }
-    >("replicas:queueMaterialization", {
-      workId,
-      payloadRef: stored.payloadRef,
-      contentHash: hash,
-      baseRevision: truth.revision,
-      fidelityMap: next.fidelityMap,
-      regionIds,
-      partNames: comparison.parts
-        .filter((part) => part.verdict !== "identical")
-        .map((part) => `/${part.name}`),
-      nativeReceipt,
-      localReplicaId: local._id as Id<"workReplicas">,
-      baseContent: compactDocxProjectionForStorage(opened.projection),
-      baseContentHash: opened.projection.nativeBinding.semanticDigest,
-      baseTextIndex: opened.projection.blocks
-        .map((block) => block.text)
-        .join("\n")
-        .slice(0, 200_000),
-      projectionContent: compactDocxProjectionForStorage(nextProjection),
-      projectionContentHash: nextProjection.nativeBinding.semanticDigest,
-      projectionTextIndex: nextProjection.blocks
-        .map((block) => block.text)
-        .join("\n")
-        .slice(0, 200_000),
-      ...(options?.promotionMode
-        ? { promotionMode: options.promotionMode }
-        : {}),
-    });
+    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
+      "replicas:queueMaterialization", queueArgs(),
+    );
   } catch (error) {
     if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
       return materializeDocxArtifactAttempt(workId, content, attempt + 1, options);

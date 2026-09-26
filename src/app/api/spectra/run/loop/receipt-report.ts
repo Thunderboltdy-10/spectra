@@ -123,7 +123,7 @@ export function interruptedEffectSummary(
       ? "Completed action receipts are preserved."
       : effects.ambiguous
         ? "The last action's save could not be confirmed; review it before continuing."
-        : "No saved changes are recorded for this attempt.";
+        : "";
   const native = effects.outcome === "native_pending"
     ? " The local file write is still pending."
     : effects.outcome === "native_verified"

@@ -112,7 +112,7 @@ describe("S11 receipt truth after verification, interruption and acknowledgement
   it("distinguishes a pre-effect failure from an unacknowledged attempted write", () => {
     const before = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [], operations: [stored({ status: "proposed", affected: [] })] });
     const unknown = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [], operations: null, attemptedEffect: true });
-    expect(interruptedEffectSummary(before, "The draft needs repair.")).toContain("No saved changes are recorded");
+    expect(interruptedEffectSummary(before, "The draft needs repair.")).toBe("The draft needs repair.");
     expect(interruptedEffectSummary(unknown, "Review the current work.")).toContain("save could not be confirmed");
     expect(unknown.outcome).toBeUndefined();
   });

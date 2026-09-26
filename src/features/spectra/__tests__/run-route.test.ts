@@ -1677,7 +1677,7 @@ describe("Spectra run route", () => {
         },
       }],
     };
-    setup(invalidPlan);
+    const { convexMutation } = setup(invalidPlan);
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
@@ -1688,6 +1688,9 @@ describe("Spectra run route", () => {
 
     expect(error?.message).toBe("Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.");
     expect(error?.message).not.toMatch(/artifactId|workspaceId|threadId|schema|JSON|Convex/i);
+    const { applyAiArtifactMutation } = await import("@/features/spectra/ai/yjs-artifact-operation");
+    expect(applyAiArtifactMutation).not.toHaveBeenCalled();
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:markExecuted"))).toBe(false);
   });
 
   it("routes the target-disambiguation tool into the durable required-input choices", async () => {

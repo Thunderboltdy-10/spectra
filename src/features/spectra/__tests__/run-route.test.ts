@@ -475,6 +475,90 @@ function setup(
 }
 
 describe("Spectra run route", () => {
+  it.each([
+    ["sync acknowledgement", new Error("AI_ARTIFACT_SYNC_TIMEOUT: The write was not durably acknowledged.")],
+    ["unhumanized sync acknowledgement", new Error("The live artifact has not finished synchronizing.")],
+    ["schema", new Error("AI_ARTIFACT_SCHEMA_INVALID: Late projection validation failed.")],
+    ["TypeError", new TypeError("Cannot read properties of undefined after applying")],
+  ])("does not replay or attribute a write after an ambiguous %s error", async (_label, error) => {
+    const plan = {
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
+      finalResponse: "Updated the memory cue.",
+      operations: [{ type: "artifact.update", input: {
+        artifactId: "artifact-real", blueprintKey: "flashcard_deck",
+        title: null, summary: null, tags: null, content: null,
+        contentPatch: { changes: [{ op: "replace", path: "/cards/5/hint", value: "Electron energy drives the proton gradient." }] },
+      } }],
+    };
+    const { convexMutation, getSavedArtifact } = setup(plan);
+    const yjs = await import("@/features/spectra/ai/yjs-artifact-operation");
+    const apply = vi.mocked(yjs.applyAiArtifactMutation);
+    const applyOnce = apply.getMockImplementation()!;
+    apply.mockImplementation(async (params) => {
+      await applyOnce(params);
+      throw error;
+    });
+    vi.mocked(yjs.readLiveArtifactValue).mockImplementation(async () => ({
+      title: String(getSavedArtifact().title), content: getSavedArtifact().content,
+      tags: getSavedArtifact().tags as string[],
+    }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", artifactId: "artifact-real", prompt: "Improve only card six's memory cue." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string });
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect((getSavedArtifact().content as { cards: Array<{ hint: string }> }).cards[5]?.hint).toBe("Electron energy drives the proton gradient.");
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:markExecuted"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(false);
+    expect(events.some((event) => ["operation_commit", "operation_result", "operation_committed"].includes(event.type))).toBe(false);
+    const failure = convexMutation.mock.calls.findLast(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "failed");
+    expect(failure?.[1].resultSummary).toContain("save could not be confirmed");
+  });
+
+  it("does not replay an ambiguous write after confirmation", async () => {
+    const plan = {
+      decision: "operate",
+      intent: { mode: "mixed", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
+      finalResponse: "I can update the deck and archive it after confirmation.",
+      operations: [
+        { type: "artifact.update", input: {
+          artifactId: "artifact-real", blueprintKey: "flashcard_deck", title: null,
+          summary: "Archived study deck with completed memory cues.", tags: null, content: null, contentPatch: null,
+        } },
+        { type: "artifact.archive", input: { artifactId: "artifact-real" } },
+      ],
+    };
+    const { convexMutation, getSavedArtifact } = setup(plan);
+    const yjs = await import("@/features/spectra/ai/yjs-artifact-operation");
+    const apply = vi.mocked(yjs.applyAiArtifactMutation);
+    const applyOnce = apply.getMockImplementation()!;
+    apply.mockImplementation(async (params) => {
+      await applyOnce(params);
+      throw new TypeError("Cannot read properties of undefined after applying");
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", artifactId: "artifact-real", prompt: "Update this deck's summary and then archive the deck." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string });
+    expect(events.some((event) => event.type === "confirmation_required")).toBe(true);
+    expect(apply).not.toHaveBeenCalled();
+    const confirmed = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "confirm", runId: "run-real", executionId: "execution-1" }),
+    }));
+    await confirmed.text();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(getSavedArtifact().summary).toBe("Archived study deck with completed memory cues.");
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:markExecuted"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:archive"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(false);
+    const failure = convexMutation.mock.calls.findLast(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "failed");
+    expect(failure?.[1].resultSummary).toContain("save could not be confirmed");
+  });
+
   it("uses one ordinary model response for a factual answer without proposing work", async () => {
     const { fetchMock, convexMutation } = setup({});
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({

@@ -11,6 +11,9 @@ import { canonicalizeSheetsPatchChange } from "@/features/spectra/ai/sheets-cont
 import { canonicalizeWhiteboardPatchChange } from "@/features/spectra/ai/whiteboard-content-patch";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { validateBlueprintContent } from "@/features/spectra/artifacts/blueprint-catalog";
+import { canonicalJsonEqual } from "@/features/spectra/collaboration/artifact-yjs-model";
+import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
+import type { PresentationContent } from "@/features/spectra/presentation/model";
 import {
   hollowCreateFailureMessage,
   isHollowCreateContent,
@@ -366,9 +369,33 @@ export async function verifyCommittedOutcomes(
         throw new Error(
           "The saved artifact topics did not match the requested change.",
         );
-      const matchesPatch = (content: unknown) => {
+      const changes = operation.input.contentPatch?.changes ?? [];
+      const replacesContent = !operation.input.documentOperations &&
+        changes.length === 0 && operation.input.content !== null;
+      let expectedContent: unknown;
+      if (replacesContent) {
+        const expected = validateBlueprintContent(
+          operation.input.blueprintKey,
+          normalizeArtifactContent(operation.input.blueprintKey, operation.input.content),
+        );
+        if (!expected.success) throw expected.error;
+        expectedContent = operation.input.blueprintKey === "presentation"
+          ? enforceAiPresentationContentPolicy(expected.data as PresentationContent, options.prompt ?? "")
+          : expected.data;
+      }
+      const matchesContent = (content: unknown) => {
         if (operation.input.documentOperations) return documentAcademicOperationsLanded(content, operation.input.documentOperations);
-        const changes = operation.input.contentPatch?.changes ?? [];
+        if (replacesContent) {
+          const observed = validateBlueprintContent(
+            operation.input.blueprintKey,
+            normalizeArtifactContent(operation.input.blueprintKey, content),
+          );
+          // Compare complete normalized values: subset/substring matching loses
+          // deletions and extra keys. Repair policy applies only to the request;
+          // repairing observed content could hide missing saved work. Add no
+          // exclusions for generated Foundry dates or native binding metadata.
+          return observed.success && canonicalJsonEqual(expectedContent, observed.data);
+        }
         if (changes.length === 0) return true;
         let matched = 0;
         for (const change of changes) {
@@ -398,7 +425,7 @@ export async function verifyCommittedOutcomes(
         }
         return matched === changes.length;
       };
-      if (matchesPatch(artifact.content)) {
+      if (matchesContent(artifact.content)) {
         if (artifactHasNativeBacking(artifact))
           await assertNativeReplicaHonest(artifactId);
         continue;
@@ -416,7 +443,7 @@ export async function verifyCommittedOutcomes(
         });
         return null;
       });
-      if (live && matchesPatch(live.content)) {
+      if (live && matchesContent(live.content)) {
         if (artifactHasNativeBacking(artifact))
           await assertNativeReplicaHonest(artifactId);
         continue;
@@ -441,7 +468,7 @@ export async function verifyCommittedOutcomes(
       while (Date.now() < projectionDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 350));
         artifact = await loadSaved();
-        if (matchesPatch(artifact.content)) {
+        if (matchesContent(artifact.content)) {
           matched = true;
           break;
         }

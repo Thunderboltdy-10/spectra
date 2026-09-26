@@ -1,6 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getActorForAccountId, type AuthenticatedActor } from "./identityShared";
+import { evaluateCurrentPinnedArtifactPlacement } from "./artifactEmbedPlacement";
 import {
   ARTIFACT_SUMMARY_READ_MODEL_VERSION,
   artifactSummaryFor,
@@ -294,6 +295,9 @@ async function evaluateLoadedResourceAccess(
   resourceType: ResourceType,
   resourceId: string,
   loaded: LoadedResource | null,
+  // Private: only evaluateRetainedPinAccess may request this, after proving
+  // the exact current placement. Public live/history evaluators never pass it.
+  retainedPinRead = false,
 ) {
   if (!loaded) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   // The only preloaded-resource caller is server-side workspace hydration,
@@ -316,7 +320,7 @@ async function evaluateLoadedResourceAccess(
     (resourceType === "agent" && artifactResource?.blueprintKey !== "agent")
   )
     return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
-  if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
+  if (loaded.lifecycle === "deleted" && !retainedPinRead) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
 
   // Same-school ownership needs no grant scan. Keep cross-school ownership
   // behind the explicit account-grant check below, and lifecycle/type checks
@@ -365,6 +369,80 @@ async function evaluateLoadedResourceAccess(
   const level = direct.level && inheritedLevel ? combineLevel(direct.level, inheritedLevel) : direct.level ?? inheritedLevel;
   if (!level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "private" as const, sources: [] };
   return { allowed: true as const, level, capabilities: capabilitiesForLevel(level), actor, loaded, reason: direct.level ? "grant" as const : "workspace_inheritance" as const, sources: [...direct.sources, ...inherited.sources] };
+}
+
+export type RetainedPinAccess = {
+  allowed: false;
+  reason: "placement_unavailable";
+  placementRefreshKey?: string;
+} | {
+  allowed: false;
+  reason: "host_unavailable" | "source_forbidden" | "version_unavailable";
+} | {
+  allowed: true;
+  embed: Doc<"artifactEmbeds">;
+  source: Doc<"spectraArtifacts">;
+  version: Doc<"spectraArtifactVersions">;
+  /** Used only for existing quiz learner redaction, never write authority. */
+  sourceLevel: AccessLevel;
+  capabilities: readonly ["read"];
+};
+
+/** Exact retained-pin authority. Host access never creates source access.
+ * Kept beside the private grant core so no generic deleted-source option is
+ * exported to live, history, restoration or modification callers. */
+export async function evaluateRetainedPinAccess(
+  ctx: AuthorityCtx,
+  actor: AuthenticatedActor,
+  embedId: Id<"artifactEmbeds">,
+): Promise<RetainedPinAccess> {
+  const current = await getActorForAccountId(ctx, actor.accountId);
+  if (!current || current.schoolId !== actor.schoolId)
+    return { allowed: false, reason: "source_forbidden" };
+  const embed = await ctx.db.get(embedId);
+  if (!embed || embed.removedAt !== undefined || embed.placementState === "removed" || embed.versionPolicy !== "pinned" || !embed.pinnedVersionId)
+    return { allowed: false, reason: "placement_unavailable" };
+  if (embed.schoolId !== undefined && embed.schoolId !== current.schoolId)
+    return { allowed: false, reason: "host_unavailable" };
+  const source = await ctx.db.get(embed.sourceArtifactId);
+  if (!source) return { allowed: false, reason: "source_forbidden" };
+  const version = await ctx.db.get(embed.pinnedVersionId);
+  if (!version || version.artifactId !== source._id ||
+      (version.schoolId !== undefined && version.schoolId !== source.schoolId))
+    return { allowed: false, reason: "version_unavailable" };
+
+  if (embed.containerType === "thread") {
+    const threadId = ctx.db.normalizeId("spectraThreads", embed.containerId);
+    const host = threadId ? await ctx.db.get(threadId) : null;
+    if (!host || host.status === "deleted" || host.ownerAccountId !== current.accountId || host.schoolId !== current.schoolId)
+      return { allowed: false, reason: "host_unavailable" };
+    // The thread row is the placement; there is no second editor save.
+    if (embed.placementState !== "confirmed" ||
+        (embed.placementExpiresAt !== undefined && embed.placementExpiresAt <= Date.now()))
+      return { allowed: false, reason: "placement_unavailable" };
+  } else {
+    const hostId = ctx.db.normalizeId("spectraArtifacts", embed.containerId);
+    const host = hostId ? await ctx.db.get(hostId) : null;
+    if (!host || (host.status !== "active" && host.status !== "draft") || host.schoolId !== current.schoolId)
+      return { allowed: false, reason: "host_unavailable" };
+    const hostAccess = await evaluateLoadedResourceAccess(ctx, current,
+      host.blueprintKey === "agent" ? "agent" : "artifact", host._id,
+      { resource: host, ownerAccountId: host.ownerAccountId, schoolId: host.schoolId, lifecycle: host.status });
+    if (!hostAccess.allowed || !hostAccess.capabilities.includes("read"))
+      return { allowed: false, reason: "host_unavailable" };
+    // HISTORY owns canonical/legacy/offload/room-head proof. A state flag or
+    // old insertion receipt alone never proves a surviving current placement.
+    const placement = await evaluateCurrentPinnedArtifactPlacement(ctx, { embed, host });
+    if (!placement.present)
+      return { allowed: false, reason: "placement_unavailable", ...(placement.headHash ? { placementRefreshKey: placement.headHash } : {}) };
+  }
+
+  const sourceAccess = await evaluateLoadedResourceAccess(ctx, current,
+    source.blueprintKey === "agent" ? "agent" : "artifact", source._id,
+    { resource: source, ownerAccountId: source.ownerAccountId, schoolId: source.schoolId, lifecycle: source.status }, true);
+  if (!sourceAccess.allowed || !sourceAccess.level || !sourceAccess.capabilities.includes("read"))
+    return { allowed: false, reason: "source_forbidden" };
+  return { allowed: true, embed, source, version, sourceLevel: sourceAccess.level, capabilities: ["read"] };
 }
 
 export async function evaluateAccessForActor(

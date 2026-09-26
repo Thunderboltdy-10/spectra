@@ -6,10 +6,8 @@ import { writeAuditEvent } from "./auditShared";
 import { recordMeterEvent } from "./metering";
 import { requireArtifactCapability } from "./spectraShared";
 import { getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";
-import { evaluateAccessForActor } from "./authorityShared";
-import { loadVersionAfter } from "./artifactSnapshots";
+import { canReadPinnedContent } from "./retainedContentAccess";
 import { isDurableContentRef } from "../shared/durable-content";
-import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestation";
 import type { IntakeAttestation } from "../shared/intake-attestation";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -41,60 +39,16 @@ function snapshotContainsAsset(value: unknown, assetId: string, depth = 0): bool
 
 /**
  * A pinned document owns its durable image after the source is tombstoned.
- * Keep the asset URL usable for readers of that surviving container, while
- * requiring both a live pinned snapshot reference and container authorization.
+ * Reads require independent current source authority and an authorized exact
+ * placement. Retention ownership is separate and is never changed here.
  */
 async function canReadRetainedPinnedAsset(
   ctx: QueryCtx,
   actor: AuthenticatedActor,
   asset: Doc<"artifactAssets">,
 ) {
-  const embeds = await ctx.db
-    .query("artifactEmbeds")
-    .withIndex("by_source", (q) => q.eq("sourceArtifactId", asset.artifactId))
-    .collect();
-  for (const embed of embeds) {
-    if (!isSurvivingPinnedEmbed(embed) || embed.schoolId !== actor.schoolId)
-      continue;
-    const version = await ctx.db.get(embed.pinnedVersionId!);
-    if (!version || version.artifactId !== asset.artifactId) continue;
-    let snapshot: unknown;
-    try {
-      snapshot = await loadVersionAfter(ctx, version);
-    } catch {
-      continue;
-    }
-    if (!snapshotContainsAsset(snapshot, String(asset._id))) continue;
-
-    if (embed.containerType === "thread") {
-      const threadId = ctx.db.normalizeId("spectraThreads", embed.containerId);
-      const thread = threadId ? await ctx.db.get(threadId) : null;
-      if (
-        thread &&
-        thread.status !== "deleted" &&
-        thread.ownerAccountId === actor.accountId &&
-        thread.schoolId === actor.schoolId
-      )
-        return true;
-      continue;
-    }
-
-    const containerId = ctx.db.normalizeId(
-      "spectraArtifacts",
-      embed.containerId,
-    );
-    const container = containerId ? await ctx.db.get(containerId) : null;
-    if (!container || container.status !== "active" || container.schoolId !== actor.schoolId)
-      continue;
-    const decision = await evaluateAccessForActor(
-      ctx,
-      actor,
-      container.blueprintKey === "agent" ? "agent" : "artifact",
-      container._id,
-    );
-    if (decision.allowed && decision.capabilities.includes("read")) return true;
-  }
-  return false;
+  return canReadPinnedContent(ctx, actor, asset.artifactId,
+    snapshot => snapshotContainsAsset(snapshot, String(asset._id)));
 }
 
 function cleanPath(value: string) {

@@ -1,8 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import type { AuthenticatedActor } from "./identityShared";
-import { evaluateAccessForActor } from "./authorityShared";
-import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
+import { evaluateRetainedPinAccess } from "./retainedPinAccess";
 import { loadVersionAfter } from "./artifactSnapshots";
 import { isDurableContentRef } from "../shared/durable-content";
 import { NATIVE_VERSION_OWNER_TABLE } from "./durablePayloadOwnership";
@@ -12,24 +11,12 @@ import { NATIVE_VERSION_OWNER_TABLE } from "./durablePayloadOwnership";
 export async function canReadPinnedContent(ctx: QueryCtx, actor: AuthenticatedActor, artifactId: Id<"spectraArtifacts">, contains: (snapshot: unknown, version: Doc<"spectraArtifactVersions">) => boolean | Promise<boolean>) {
   const pins = await ctx.db.query("artifactEmbeds").withIndex("by_source", q => q.eq("sourceArtifactId", artifactId)).collect();
   for (const pin of pins) {
-    if (!isSurvivingPinnedEmbed(pin) || pin.schoolId !== actor.schoolId) continue;
-    let allowed = false;
-    if (pin.containerType === "thread") {
-      const id = ctx.db.normalizeId("spectraThreads", pin.containerId);
-      const thread = id ? await ctx.db.get(id) : null;
-      allowed = Boolean(thread && thread.status !== "deleted" && thread.ownerAccountId === actor.accountId && thread.schoolId === actor.schoolId);
-    } else {
-      const id = ctx.db.normalizeId("spectraArtifacts", pin.containerId);
-      const container = id ? await ctx.db.get(id) : null;
-      if (container?.status === "active" && container.schoolId === actor.schoolId) {
-        const access = await evaluateAccessForActor(ctx, actor, container.blueprintKey === "agent" ? "agent" : "artifact", container._id);
-        allowed = access.allowed && access.capabilities.includes("read");
-      }
-    }
-    if (!allowed) continue;
-    const version = await ctx.db.get(pin.pinnedVersionId!);
-    if (!version || version.artifactId !== artifactId) continue;
-    if (await contains(await loadVersionAfter(ctx, version), version)) return true;
+    const access = await evaluateRetainedPinAccess(ctx, actor, pin._id);
+    if (!access.allowed || access.source._id !== artifactId) continue;
+    let snapshot: unknown;
+    try { snapshot = await loadVersionAfter(ctx, access.version); }
+    catch { continue; }
+    if (await contains(snapshot, access.version)) return true;
   }
   return false;
 }

@@ -2,9 +2,9 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
-import { canReadPinnedContent, nativeReferencesForPinnedVersion, snapshotReferencesNative } from "./retainedContentAccess";
+import { canReadPinnedContent, nativeReferencesForPinnedVersion } from "./retainedContentAccess";
 import { storageHasOtherBinding } from "./durableStorageBindings";
 import { normalizeSha256 } from "../shared/intake-integrity";
 
@@ -18,17 +18,27 @@ async function payloadForWork(
   workId: Id<"spectraArtifacts">,
   hash: string,
 ) {
-  let retained = false;
-  const pinnedRefs = new Set<string>();
   try { await requireActorArtifactCapability(ctx, actor, workId, "read"); }
   catch (error) {
-    retained = await canReadPinnedContent(ctx, actor, workId, async (snapshot, version) => {
-      if (!snapshotReferencesNative(snapshot, hash)) return false;
+    let authorizedPin = false;
+    let retainedPayload: Doc<"payloadObjects"> | null = null;
+    await canReadPinnedContent(ctx, actor, workId, async (snapshot, version) => {
+      authorizedPin = true;
       const refs = await nativeReferencesForPinnedVersion(ctx, workId, version._id, snapshot);
-      for (const ref of refs) pinnedRefs.add(ref);
-      return true;
+      for (const reference of refs) {
+        const id = ctx.db.normalizeId("payloadObjects", reference);
+        const payload = id ? await ctx.db.get(id) : null;
+        if (payload?.state === "active" && payload.hash === hash) {
+          retainedPayload = payload;
+          return true;
+        }
+      }
+      return false;
     });
-    if (!retained) throw error;
+    // A retained read ends at exact version-owned native references. Neither
+    // a current replica nor a source-wide import is a historical capability.
+    if (!authorizedPin) throw error;
+    return retainedPayload;
   }
   const work = await ctx.db.get(workId);
   if (!work) return null;
@@ -36,7 +46,7 @@ async function payloadForWork(
     .query("workReplicas")
     .withIndex("by_work", (q) => q.eq("workId", workId))
     .take(20);
-  const references = retained ? [...pinnedRefs] : [
+  const references = [
     work.pendingPayloadRef,
     ...replicas.flatMap((replica) => [
       replica.payloadRef,

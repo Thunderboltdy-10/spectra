@@ -3373,7 +3373,7 @@ async function applyDelta(
       const current = await projectDocument(document, carry.profile, identity.identityStable);
       const resolved = { ...operation,
         ...("anchor" in operation ? { anchor: { ...operation.anchor, regionId: resolveRegionId(operation.anchor.regionId) } } : {}),
-        ...("regionId" in operation ? { regionId: resolveRegionId(operation.regionId) } : {}),
+        ...("regionId" in operation && typeof operation.regionId === "string" ? { regionId: resolveRegionId(operation.regionId) } : {}),
       };
       const desired = applyDocumentAcademicOperations(current.projection, [resolved]);
       const next = docxProjectionSchema.parse({ ...current.projection, blocks: desired.blocks });

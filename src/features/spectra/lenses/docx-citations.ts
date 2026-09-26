@@ -160,7 +160,7 @@ export async function writeCitationMapping(document: Document, item: WordCitatio
   const parts = await academicMappingParts(document);
   const matches = parts.flatMap((part) => mappingEntries(part.root).filter((node) => node.getAttribute("id") === item.citationId).map((node) => ({ ...part, node })));
   if (matches.length > 1) throw new Error("DOCX_IDENTITY_AMBIGUOUS: This citation mapping ID is duplicated.");
-  let part = matches[0] ?? parts[0];
+  let part: { partName: string; root: XmlElement } | undefined = matches[0] ?? parts[0];
   if (!matches.length && !item.sourceRef) return;
   if (!part) {
     const xml = parseXml(`<s:academic xmlns:s="${META}"/>`);

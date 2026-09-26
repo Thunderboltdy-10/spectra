@@ -42,6 +42,7 @@ function syncEqual(
     left.unsynchronizedChanges === right.unsynchronizedChanges &&
     left.error === right.error
     && left.recoveryConflict === right.recoveryConflict
+    && left.durableAnchor === right.durableAnchor
   );
 }
 
@@ -179,6 +180,7 @@ export class ScopedCollaborationSnapshots {
   apply(patch: Partial<CollaborationTransportSnapshot>) {
     const nextSync: CollaborationSyncSnapshot = {
       recoveryConflict: patch.recoveryConflict ?? this.sync.recoveryConflict,
+      durableAnchor: "durableAnchor" in patch ? patch.durableAnchor : this.sync.durableAnchor,
       state: patch.state ?? this.sync.state,
       level: patch.level !== undefined ? patch.level : this.sync.level,
       unsynchronizedChanges:
@@ -241,6 +243,8 @@ export class ScopedCollaborationSnapshots {
       level: this.sync.level,
       unsynchronizedChanges: this.sync.unsynchronizedChanges,
       presence: this.presence,
+      ...(this.sync.recoveryConflict ? { recoveryConflict: this.sync.recoveryConflict } : {}),
+      ...(this.sync.durableAnchor ? { durableAnchor: this.sync.durableAnchor } : {}),
       ...(this.sync.accountId ? { accountId: this.sync.accountId } : {}),
       ...(this.sync.displayName ? { displayName: this.sync.displayName } : {}),
       ...(this.sync.error ? { error: this.sync.error } : {}),

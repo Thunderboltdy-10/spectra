@@ -91,8 +91,13 @@ export function useArtifactCollaboration(
       modelVersion: schemaVersion,
     });
     const unsubscribeRecovery = next.subscribeSync(() => {
-      const conflict = next.getSyncSnapshot().recoveryConflict;
+      const sync = next.getSyncSnapshot();
+      const conflict = sync.recoveryConflict;
       if (conflict) persistence.preserveConflict(conflict);
+      // Capture the exact acknowledged generation synchronously. A later
+      // React effect can otherwise attach this anchor to a newer dirty draft.
+      if (sync.state === "synchronized" && sync.unsynchronizedChanges === 0)
+        persistence.markRemoteDurable(sync.durableAnchor);
     });
     let cancelled = false;
     // Restore the bounded local Yjs state before joining the room. The room's
@@ -105,7 +110,9 @@ export function useArtifactCollaboration(
         if (durability.state === "error")
           throw new Error("LOCAL_COLLABORATION_RESTORE_FAILED");
         if (durability?.pendingRemoteSync)
-          next.markLocalRecoveryPending?.(durability.recoveryConflict);
+          next.markLocalRecoveryPending?.(durability.recoveryConflict, {
+            recoveryAnchor: durability.recoveryAnchor, authoredRegionIds: durability.authoredRegionIds,
+          });
         setTransport(next);
         setLocalPersistence(persistence);
       })
@@ -154,13 +161,6 @@ export function useArtifactCollaboration(
         reason: event.reason,
       });
     }), [transport]);
-  useEffect(() => {
-    if (
-      snapshot.state === "synchronized" &&
-      snapshot.unsynchronizedChanges === 0
-    )
-      localPersistence?.markRemoteDurable();
-  }, [localPersistence, snapshot.state, snapshot.unsynchronizedChanges]);
   useEffect(() => {
     if (
       snapshot.unsynchronizedChanges === 0 &&

@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import { syncRetryDelayMs } from "../../../../../shared/sync-retry-policy";
 import { encodeDurableFrontier } from "../../../../../shared/collaboration-durable-frontier.mjs";
 import type { NativeRecoveryConflict } from "../../collaboration/types";
+import { mergeRecoveryAncestry, readDurableRoomAnchor, recoveryRegionIds, type DurableRoomAnchor } from "../../../../../shared/collaboration-recovery.mjs";
 
 // room-v1 begins with the server-authored native baseline protocol. Earlier
 // caches may
@@ -36,6 +37,9 @@ export type LocalYjsRecord = {
   baseUpdate?: Uint8Array;
   baseByteLength?: number;
   recoveryConflict?: NativeRecoveryConflict;
+  recoveryAnchor?: DurableRoomAnchor;
+  authoredRegionIds?: string[];
+  recoveryGeneration?: number;
 };
 
 export type LocalYjsMeta = {
@@ -85,10 +89,17 @@ export function mergeLocalYjsRecord(previous: LocalYjsRecord | null, incoming: L
   }
   const merged = previousState && !same ? Y.mergeUpdates([previousState, incomingState]) : incomingState;
   const update = baseUpdate && !sameBase ? Y.diffUpdate(merged, Y.encodeStateVectorFromUpdate(baseUpdate)) : merged;
-  const journalBytes = update.byteLength + (incoming.durableFrontier?.byteLength ?? 0);
+  const ancestry = mergeRecoveryAncestry(previous, incoming, covered && !incoming.pendingRemoteSync);
+  const fromPrevious = ancestry.recoveryAnchor && previous?.recoveryAnchor &&
+    ancestry.recoveryAnchor.roomId === previous.recoveryAnchor.roomId &&
+    ancestry.recoveryAnchor.nextSequence === previous.recoveryAnchor.nextSequence &&
+    ancestry.recoveryAnchor.frontierHash === previous.recoveryAnchor.frontierHash;
+  const durableFrontier = fromPrevious ? previous.durableFrontier : incoming.durableFrontier;
+  const journalBytes = update.byteLength + (durableFrontier?.byteLength ?? 0);
   if (journalBytes > maxBytes) throw new Error("LOCAL_YJS_QUOTA_RESERVED_FOR_PENDING_CHANGES");
   Y.decodeUpdate(update);
   return { ...incoming, baseId, baseByteLength: baseUpdate?.byteLength, update, bytes: journalBytes + (baseUpdate?.byteLength ?? 0),
+    ...ancestry, durableFrontier,
     recoveryConflict: incoming.recoveryConflict ?? (covered && !incoming.pendingRemoteSync ? undefined : previous?.recoveryConflict),
     pendingRemoteSync: incoming.pendingRemoteSync || Boolean(previous?.pendingRemoteSync && !covered) };
 }
@@ -100,6 +111,8 @@ export type LocalDurabilitySnapshot = {
   error?: string;
   retryExhausted?: boolean;
   recoveryConflict?: NativeRecoveryConflict;
+  recoveryAnchor?: DurableRoomAnchor;
+  authoredRegionIds?: string[];
 };
 
 const UNSUPPORTED: LocalDurabilitySnapshot = {
@@ -391,9 +404,11 @@ export class BoundedYjsLocalPersistence {
   private persistAttempts = 0;
   private durableFrontier: Uint8Array | null = null;
   private localBase: { id: string; update: Uint8Array } | null = null;
+  private recoveryAnchor: DurableRoomAnchor | undefined;
+  private authoredRegionIds: string[] = [];
   private closePromise: Promise<void> | null = null;
   private snapshot: LocalDurabilitySnapshot;
-  private readonly onUpdate: (update: Uint8Array, origin: unknown) => void;
+  private readonly onUpdate: (update: Uint8Array, origin: unknown, document: Y.Doc, transaction: Y.Transaction) => void;
 
   constructor(private readonly options: BoundedYjsPersistenceOptions) {
     this.persistAttempts = failedWrites.get(options.key) ?? 0;
@@ -408,9 +423,14 @@ export class BoundedYjsLocalPersistence {
     this.snapshot = this.store
       ? { state: "loading", bytes: 0, pendingRemoteSync: false, restored: false }
       : UNSUPPORTED;
-    this.onUpdate = (_update, origin) => {
+    this.onUpdate = (_update, origin, _document, transaction) => {
       if (!this.initialized || origin === LOCAL_PERSISTENCE_ORIGIN) return;
       this.documentPendingRemoteSync = true;
+      if (transaction.local) {
+        const regionId = origin && typeof origin === "object" ? (origin as { regionId?: unknown }).regionId : undefined;
+        this.authoredRegionIds = recoveryRegionIds([...this.authoredRegionIds,
+          ...(typeof regionId === "string" ? regionId.split(",") : ["artifact:structure"])]);
+      }
       this.changeVersion += 1;
       this.dirty = true;
       if (this.persistAttempts >= LOCAL_PERSISTENCE_MAX_ATTEMPTS) {
@@ -451,6 +471,8 @@ export class BoundedYjsLocalPersistence {
         Y.applyUpdate(this.options.document, record.baseUpdate ? Y.mergeUpdates([record.baseUpdate, record.update]) : record.update, LOCAL_PERSISTENCE_ORIGIN);
         this.localBase = record.baseId && record.baseUpdate ? { id: record.baseId, update: record.baseUpdate } : null;
         this.durableFrontier = record.durableFrontier ?? null;
+        this.recoveryAnchor = readDurableRoomAnchor(record.recoveryAnchor) ?? undefined;
+        this.authoredRegionIds = recoveryRegionIds(record.authoredRegionIds ?? (record.pendingRemoteSync ? ["artifact:structure"] : []));
         this.documentPendingRemoteSync = record.pendingRemoteSync;
         this.snapshot = {
           state: record.pendingRemoteSync ? "local_only" : "ready",
@@ -458,6 +480,8 @@ export class BoundedYjsLocalPersistence {
           pendingRemoteSync: record.pendingRemoteSync,
           restored: true,
           recoveryConflict: record.recoveryConflict,
+          recoveryAnchor: this.recoveryAnchor,
+          authoredRegionIds: this.authoredRegionIds,
         };
       } else {
         this.snapshot = {
@@ -480,15 +504,20 @@ export class BoundedYjsLocalPersistence {
     }
   }
 
-  markRemoteDurable() {
+  markRemoteDurable(anchor?: DurableRoomAnchor) {
     if (this.snapshot.recoveryConflict) return;
-    if (!this.store || !this.initialized || !this.snapshot.pendingRemoteSync) return;
+    if (!this.store || !this.initialized) return;
+    if (!this.snapshot.pendingRemoteSync && (!anchor ||
+        (anchor.roomId === this.recoveryAnchor?.roomId && anchor.nextSequence === this.recoveryAnchor.nextSequence &&
+          anchor.frontierHash === this.recoveryAnchor.frontierHash))) return;
     this.changeVersion += 1;
     const frontier = encodeDurableFrontier(Y, this.options.document);
     // Unresolved branches cannot be acknowledged by a vector or saved as a
     // durable base. Their bytes remain reserved until dependencies arrive.
     if (!frontier) return;
     this.durableFrontier = frontier;
+    this.recoveryAnchor = anchor;
+    this.authoredRegionIds = [];
     this.documentPendingRemoteSync = false;
     this.patch({ state: "ready", pendingRemoteSync: false });
     this.dirty = true;
@@ -562,6 +591,8 @@ export class BoundedYjsLocalPersistence {
     this.documentPendingRemoteSync = false;
     this.durableFrontier = null;
     this.localBase = null;
+    this.recoveryAnchor = undefined;
+    this.authoredRegionIds = [];
     this.patch({ state: "ready", bytes: 0, pendingRemoteSync: false, restored: false });
   }
 
@@ -609,7 +640,7 @@ export class BoundedYjsLocalPersistence {
     version: number,
     pendingRemoteSync: boolean,
     closing: boolean,
-    recovery: Pick<LocalYjsRecord, "recoveryMode" | "durableFrontier" | "baseId" | "baseUpdate"> = {},
+    recovery: Pick<LocalYjsRecord, "recoveryMode" | "durableFrontier" | "baseId" | "baseUpdate" | "recoveryAnchor" | "authoredRegionIds" | "recoveryGeneration"> = {},
   ) {
     if (!this.store) return;
     if (update.byteLength > this.perWorkBytes) {
@@ -632,7 +663,7 @@ export class BoundedYjsLocalPersistence {
         pendingRemoteSync,
         modelVersion: this.options.modelVersion,
         recoveryConflict: this.snapshot.recoveryConflict,
-        ...(recovery.recoveryMode ? recovery : {}),
+        ...recovery,
       }, { perWorkBytes: this.perWorkBytes, totalBytes: this.totalBytes, maxWorks: this.maxWorks });
       this.persistAttempts = 0;
       failedWrites.delete(this.options.key);
@@ -651,6 +682,8 @@ export class BoundedYjsLocalPersistence {
           error: undefined,
           retryExhausted: false,
           recoveryConflict: committed.recoveryConflict,
+          recoveryAnchor: committed.recoveryAnchor,
+          authoredRegionIds: committed.authoredRegionIds,
         });
     } catch (error) {
       this.dirty = true;
@@ -704,7 +737,7 @@ export class BoundedYjsLocalPersistence {
     this.emit();
   }
 
-  private captureRecovery(): Pick<LocalYjsRecord, "update" | "recoveryMode" | "durableFrontier" | "baseId" | "baseUpdate"> {
+  private captureRecovery(): Pick<LocalYjsRecord, "update" | "recoveryMode" | "durableFrontier" | "baseId" | "baseUpdate" | "recoveryAnchor" | "authoredRegionIds" | "recoveryGeneration"> {
     let update = this.localBase
       ? Y.encodeStateAsUpdate(this.options.document, Y.encodeStateVectorFromUpdate(this.localBase.update))
       : Y.encodeStateAsUpdate(this.options.document);
@@ -715,8 +748,9 @@ export class BoundedYjsLocalPersistence {
       this.localBase = { id: crypto.randomUUID(), update: this.localBase ? Y.encodeStateAsUpdate(this.options.document) : update };
       update = Y.encodeStateAsUpdate(this.options.document, Y.encodeStateVectorFromUpdate(this.localBase.update));
     }
-    return this.localBase ? { update, recoveryMode: "delta", durableFrontier: this.durableFrontier?.slice(),
-      baseId: this.localBase.id, baseUpdate: this.localBase.update } : { update };
+    return { update, recoveryAnchor: this.recoveryAnchor, authoredRegionIds: [...this.authoredRegionIds],
+      recoveryGeneration: this.changeVersion, durableFrontier: this.durableFrontier?.slice(),
+      ...(this.localBase ? { recoveryMode: "delta" as const, baseId: this.localBase.id, baseUpdate: this.localBase.update } : {}) };
   }
 
   async retry() {

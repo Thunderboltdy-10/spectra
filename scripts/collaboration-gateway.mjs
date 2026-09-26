@@ -120,6 +120,7 @@ const unappliedDocumentMessages = new WeakSet();
 const documentPersistenceQueues = new WeakMap();
 const documentCheckpointSchedulers = new WeakMap();
 const canonicalRooms = new WeakMap();
+const documentDurableAnchors = new WeakMap();
 const openDocuments = new Map();
 const checkpointSchedulers = new Set();
 let policySweepRunning = false;
@@ -289,7 +290,11 @@ async function catchUpCanonicalRoom(document, context) {
     if (pending?.pending.length || pending?.flushing || unappliedDocumentMessages.has(document)) return stored.nextSequence;
     mergeCanonicalIntoLive(canonical, document);
     const frontierHash = documentFrontierHash(canonical);
-    if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
+    if (frontierHash) {
+      const durableAnchor = { roomId: stored.roomId, nextSequence: stored.nextSequence, frontierHash };
+      documentDurableAnchors.set(document, durableAnchor);
+      document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash, durableAnchor }));
+    }
     const open = openDocuments.get(durableHeadKey(context));
     if (open?.document === document) open.nextSequence = stored.nextSequence;
     return stored.nextSequence;
@@ -565,11 +570,14 @@ async function persistAcceptedMessages(document, entries) {
           },
         };
       }, group);
+      let nextSequence = accepted.result.sequence + 1;
       if (accepted.result.duplicate) {
         // A prior process may have committed this delta before losing its ack.
         // Read its current descendants instead of advancing from our attempt.
         session.invalidate();
-        canonical = (await session.refresh()).document;
+        const refreshed = await session.refresh();
+        canonical = refreshed.document;
+        nextSequence = refreshed.stored.nextSequence;
       } else session.commit(accepted.result.sequence);
       // Do not let native LWW state erase a later speculative branch before
       // that branch's native-overlap check. Publish only after the whole
@@ -584,7 +592,11 @@ async function persistAcceptedMessages(document, entries) {
         type: "spectra.durable_ack", updateIds: [entry.messageId],
       });
       const frontierHash = documentFrontierHash(canonical);
-      if (frontierHash) document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash }));
+      if (frontierHash) {
+        const durableAnchor = { roomId: context.roomId, nextSequence, frontierHash };
+        documentDurableAnchors.set(document, durableAnchor);
+        document.broadcastStateless(JSON.stringify({ type: "spectra.durable_frontier", frontierHash, durableAnchor }));
+      }
       checkpointScheduler(document).note({
         artifactId: context.artifactId, partitionKey: context.partitionKey,
         accountId: context.accountId, clientId: context.clientId,
@@ -1356,10 +1368,12 @@ const server = new Server({
         });
         return;
       }
+      const durableAnchor = documentDurableAnchors.get(document);
       sendGatewayState(connection, {
         type: "spectra.durable_ack",
         confirmationId: request.confirmationId,
         frontierHash,
+        ...(durableAnchor?.frontierHash === frontierHash ? { durableAnchor } : {}),
         updateIds: [],
       });
     } catch (error) {

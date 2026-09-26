@@ -4,11 +4,13 @@ import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/pro
 import * as Y from "yjs";
 import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import { encodeDurableFrontier } from "../../../../shared/collaboration-durable-frontier.mjs";
+import { readDurableRoomAnchor, type DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
 import type {
   ArtifactCollaborationTransport,
   CollaborationPresence,
   CollaborationSyncState,
   CollaborationTransportSnapshot,
+  LocalRecoveryAncestry,
 } from "./types";
 import { readInteractionState } from "./interaction-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
@@ -283,6 +285,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private recoveryConfirmationSequence = 0;
   private recoveryVectorRequest: string | null = null;
   private nativeConflict: CollaborationTransportSnapshot["recoveryConflict"];
+  private durableAnchor: DurableRoomAnchor | undefined;
   private localChangeVersion = 0;
   private documentChangeVersion = 0;
   private durabilityEpoch = 0;
@@ -339,12 +342,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   subscribePresence = this.snapshots.subscribePresence;
   subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
-  markLocalRecoveryPending(conflict?: CollaborationTransportSnapshot["recoveryConflict"]) {
+  markLocalRecoveryPending(conflict?: CollaborationTransportSnapshot["recoveryConflict"], ancestry?: LocalRecoveryAncestry) {
     if (this.destroyed || this.localRecoveryPending) return;
     // Restored IndexedDB work is authored state even though its Yjs update
     // origin is LOCAL_PERSISTENCE_ORIGIN. Keep it pending until the gateway
     // confirms the complete merged document hash, never just socket sync.
     this.localRecoveryPending = true;
+    this.durableAnchor = readDurableRoomAnchor(ancestry?.recoveryAnchor) ?? undefined;
     this.localDurabilityPending = true;
     if (conflict) {
       this.nativeConflict = conflict;
@@ -416,7 +420,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.provider.sendStateless(JSON.stringify({ type: "spectra.durable_confirm", confirmationId: confirmation.id }));
   }
 
-  private confirmDurableFrontier(confirmedHash: string) {
+  private confirmDurableFrontier(confirmedHash: string, candidateAnchor?: unknown) {
     if (this.nativeConflict) return;
     if (!/^[a-f0-9]{64}$/.test(confirmedHash)) return;
     const frontier = encodeDurableFrontier(Y, this.document);
@@ -426,6 +430,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     void crypto.subtle.digest("SHA-256", new Uint8Array(frontier)).then(digest => {
       const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
       if (this.destroyed || epoch !== this.durabilityEpoch || version !== this.documentChangeVersion || hash !== confirmedHash) return;
+      const anchor = readDurableRoomAnchor(candidateAnchor);
+      if (anchor?.frontierHash === hash && (!this.durableAnchor || anchor.roomId !== this.durableAnchor.roomId ||
+          anchor.nextSequence >= this.durableAnchor.nextSequence)) this.durableAnchor = anchor;
       this.durablePendingUpdateIds.clear();
       this.localDurabilityPending = false;
       this.localRecoveryPending = false;
@@ -446,6 +453,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if ("error" in next) this.error = next.error;
     this.snapshots.apply({
       ...(this.nativeConflict ? { recoveryConflict: this.nativeConflict } : {}),
+      ...(this.durableAnchor ? { durableAnchor: this.durableAnchor } : {}),
       state: this.state,
       level: this.level,
       ...(this.accountId ? { accountId: this.accountId } : {}),
@@ -847,6 +855,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               documentHash?: unknown;
               confirmationId?: unknown;
               frontierHash?: unknown;
+              durableAnchor?: unknown;
               stateVector?: unknown;
               code?: unknown;
               regionIds?: unknown;
@@ -923,7 +932,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 )
               : [];
             if (message.type === "spectra.durable_frontier") {
-              if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash);
+              if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
               return;
             }
             if (message.type === "spectra.durable_pending") {
@@ -937,7 +946,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 const confirmation = this.recoveryConfirmation;
                 if (!confirmation || confirmation.id !== message.confirmationId || this.destroyed) return;
                 this.recoveryConfirmation = null;
-                if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash);
+                if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
                 this.updateSynchronizationState();
                 return;
               }

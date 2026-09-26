@@ -1,5 +1,7 @@
 import type * as Y from "yjs";
 import type { InteractionState } from "./interaction-model";
+import type { DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
+export type { DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
 
 export type CollaborationSyncState =
   | "connecting"
@@ -140,6 +142,7 @@ export type CollaborationCursor = {
 };
 
 export type NativeRecoveryConflict = { regionIds: string[]; nativeOperationId: string | null };
+export type LocalRecoveryAncestry = { recoveryAnchor?: DurableRoomAnchor; authoredRegionIds?: string[] };
 
 export type CollaborationTransportSnapshot = {
   state: CollaborationSyncState;
@@ -150,6 +153,7 @@ export type CollaborationTransportSnapshot = {
   presence: CollaborationPresence[];
   error?: string;
   recoveryConflict?: NativeRecoveryConflict;
+  durableAnchor?: DurableRoomAnchor;
 };
 
 export type CollaborationSyncSnapshot = {
@@ -160,6 +164,7 @@ export type CollaborationSyncSnapshot = {
   unsynchronizedChanges: number;
   error?: string;
   recoveryConflict?: NativeRecoveryConflict;
+  durableAnchor?: DurableRoomAnchor;
 };
 
 export type PresencePreviewSnapshot = {
@@ -238,7 +243,7 @@ export type ArtifactCollaborationTransport = {
    * remote durable acknowledgement. Providers that already queue the restored
    * update during document hydration may implement this as a no-op.
    */
-  markLocalRecoveryPending?(conflict?: NativeRecoveryConflict): void;
+  markLocalRecoveryPending?(conflict?: NativeRecoveryConflict, ancestry?: LocalRecoveryAncestry): void;
   retry(): Promise<void>;
   disconnect(): void;
   destroy(): void;

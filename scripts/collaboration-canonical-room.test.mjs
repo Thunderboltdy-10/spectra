@@ -39,7 +39,7 @@ it("commits a disjoint group without erasing a later native-conflicting draft", 
   const deps = { Y, createHash, samePersistenceBatch, planMergedUpdatePersist, MAX_DURABLE_UPDATE_BYTES,
     canonicalRoom: () => room, nativeChangedRegionIds, nativeOverlap, isNativeArtifactDocument, NATIVE_PROJECTION_REGION,
     prepareCanonicalAppend, artifactProjection: projection, mergeCanonicalIntoLive, appendWithRetry: appended,
-    documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages: new WeakSet(), openDocuments: new Map(), sendGatewayState: sent,
+    documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages: new WeakSet(), documentDurableAnchors: new WeakMap(), openDocuments: new Map(), sendGatewayState: sent,
     documentFrontierHash: durableFrontierHash, documentStateVectorHash: stateVectorHash,
     checkpointScheduler: () => ({ note: vi.fn() }) };
   const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
@@ -80,7 +80,7 @@ it("defers idle canonical publication while a captured frame is awaiting apply",
   live.broadcastStateless = broadcast;
   const deps = { flushPersistence: async () => undefined,
     canonicalRoom: () => ({ run: work => work({ refresh: async () => ({ document: canonical, stored: { nextSequence: 3 } }) }) }),
-    documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages, mergeCanonicalIntoLive,
+    documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages, documentDurableAnchors: new WeakMap(), mergeCanonicalIntoLive,
     documentFrontierHash: durableFrontierHash, openDocuments: new Map(), durableHeadKey: () => "room" };
   const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
   const code = source.slice(source.indexOf("async function catchUpCanonicalRoom("), source.indexOf("const compactionState ="));

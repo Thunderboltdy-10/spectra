@@ -27,6 +27,7 @@ function harness(persist = vi.fn(async () => undefined)) {
   const reject = vi.fn();
   const confirmDeps = { flushPersistence: handlers.flushPersistence, reauthorize: vi.fn(async () => undefined),
     documentFrontierHash: () => "fixture-frontier",
+    documentDurableAnchors: new WeakMap(),
     acquireDocumentMessage: vi.fn(async () => undefined), releaseDocumentMessage: release,
     sendGatewayState: sent, rejectPeerUpdate: reject, collaborationFailureMessage: String };
   const confirm = new Function(...Object.keys(confirmDeps), `return ({${confirmCode}}).onStateless;`)(...Object.values(confirmDeps));

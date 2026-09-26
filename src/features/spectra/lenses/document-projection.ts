@@ -701,7 +701,7 @@ export function docxOperationsBetween(
             ? richTextWithoutImages(previousInline)
             : oldRows[rowIndex]?.[columnIndex] ?? "";
           const nonImageRichChanged = authoredRichContentChanged(
-            previousInline,
+            previousInline ?? [],
             inlineContent ?? [],
           );
           operations.push(...deletedImages);

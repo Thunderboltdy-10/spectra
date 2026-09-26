@@ -25,7 +25,6 @@ import type {
 import {
   docxProjectionSchema,
   docxProjectionBlockSchema,
-  type DocxOperation,
   type DocxParagraphFormat,
   type DocxProjection,
   type DocxProjectionBlock,
@@ -3295,16 +3294,32 @@ export async function docxProjectionReadbackDigest(
     const attrs = intent.attrs ? { ...(block.attrs ?? {}) } : undefined;
     if (!intent.attrs?.paragraphFormat && attrs?.paragraphFormat)
       delete attrs.paragraphFormat;
+    else if (attrs?.paragraphFormat) {
+      const requestedFormat = intent.attrs?.paragraphFormat as Record<string, unknown>;
+      const paragraphFormat = { ...(attrs.paragraphFormat as Record<string, unknown>) };
+      // Sparse authored paragraph properties reopen with Word's defaults. Only
+      // remove omitted defaults; requested values and unexpected changes stay.
+      const defaults = { alignment: "left", lineSpacing: 1, spacingAfterPoints: 0, indentLevel: 0, border: null, shading: null };
+      for (const [key, value] of Object.entries(defaults)) {
+        if (!(key in requestedFormat) && paragraphFormat[key] === value) delete paragraphFormat[key];
+      }
+      attrs.paragraphFormat = paragraphFormat;
+    }
     const inlineContent = block.inlineContent;
     const semanticInline = inlineContent?.map(
       (item) => authoredSemanticValue(item) as Record<string, unknown>,
     );
-    const mirroredPlainText =
+    const requestedRunFormat = (authoredSemanticValue({ format: intent.attrs?.format ?? {} }) as { format?: Record<string, unknown> }).format ?? {};
+    const mirroredText =
       !intent.inlineContent &&
       semanticInline?.every(
-        (item) =>
-          item.kind === "text" &&
-          Object.keys(item).every((key) => key === "kind" || key === "text"),
+        (item) => {
+          const format = (item.format ?? {}) as Record<string, unknown>;
+          return item.kind === "text" &&
+            Object.keys(item).every((key) => key === "kind" || key === "text" || key === "format") &&
+            Object.keys(format).length === Object.keys(requestedRunFormat).length &&
+            Object.entries(format).every(([key, value]) => value === requestedRunFormat[key]);
+        },
       ) &&
       semanticInline
         .map((item) => (typeof item.text === "string" ? item.text : ""))
@@ -3318,7 +3333,7 @@ export async function docxProjectionReadbackDigest(
     return {
       ...semanticBlock,
       ...(attrs && Object.keys(attrs).length ? { attrs } : {}),
-      ...(!mirroredPlainText && inlineContent ? { inlineContent } : {}),
+      ...(!mirroredText && inlineContent ? { inlineContent } : {}),
     };
   });
   return docxProjectionSemanticDigest({ ...readback, blocks });

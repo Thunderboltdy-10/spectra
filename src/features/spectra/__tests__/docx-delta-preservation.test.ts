@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { Document } from "@ariadng/office/docx";
+import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
+import { parseXml } from "@ariadng/office/xml";
 import { strFromU8, unzipSync } from "fflate";
 import { docxLens, docxProjectionReadbackDigest, docxProjectionSemanticDigest } from "../lenses/docx-lens";
 import { docxOperationsBetween } from "../lenses/document-projection";
 import type { DocxProjection } from "../lenses/projection-contracts";
 
-async function blank() {
+async function blank(headingStyle = false) {
   const document = Document.create();
+  if (headingStyle) {
+    const styles = document._internal().ensureStyles();
+    styles.doc.root.appendChild(parseXml(`<w:style xmlns:w="${WML_NAMESPACE}" w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/></w:rPr></w:style>`).root);
+    document._internal().markDirty(styles);
+  }
   document.addParagraph("Original first"); document.addParagraph("Original second");
   return docxLens.open(await document.save());
 }
@@ -29,6 +35,25 @@ describe("Shared DOCX delta and insertion policy", () => {
     expect(materialized.projection.blocks[1]?.attrs?.paragraphFormat).toMatchObject({ alignment: "center", spacingAfterPoints: 12 });
     expect(await docxProjectionReadbackDigest(materialized.projection, desired)).toBe(await docxProjectionSemanticDigest(desired));
     expect(await docxProjectionSemanticDigest(explicit.projection)).toBe(await docxProjectionSemanticDigest(materialized.projection));
+    const expectedDigest = await docxProjectionSemanticDigest(desired);
+    const centered = materialized.projection.blocks[1]!;
+    for (const inlineContent of [
+      [{ kind: "text" as const, text: "Centered", format: { color: "FF0000" } }],
+      [{ kind: "text" as const, text: "Centered", format: { bold: true, color: "000000" } }],
+      [{ kind: "text" as const, text: "Centered", format: { bold: true, color: "FF0000", italic: true } }],
+      [{ kind: "text" as const, text: "Centered", format: { bold: true, color: "FF0000" }, href: "https://example.com" }],
+    ]) {
+      const corrupted = { ...materialized.projection, blocks: materialized.projection.blocks.map((block, index) => index === 1 ? { ...block, inlineContent } : block) };
+      expect(await docxProjectionReadbackDigest(corrupted, desired)).not.toBe(expectedDigest);
+    }
+    for (const paragraphFormat of [
+      { alignment: "left", spacingAfterPoints: 12 },
+      { alignment: "center", spacingAfterPoints: 0 },
+      { alignment: "center", spacingAfterPoints: 12, lineSpacing: 2 },
+    ]) {
+      const corrupted = { ...materialized.projection, blocks: materialized.projection.blocks.map((block, index) => index === 1 ? { ...centered, attrs: { ...centered.attrs, paragraphFormat } } : block) };
+      expect(await docxProjectionReadbackDigest(corrupted, desired)).not.toBe(expectedDigest);
+    }
   });
 
   it("resolves caller IDs for academic and format operations following an insertion", async () => {
@@ -45,15 +70,18 @@ describe("Shared DOCX delta and insertion policy", () => {
   });
 
   it("keeps native style inheritance on a text edit and writes only explicitly changed formatting", async () => {
-    const base = await blank();
+    const base = await blank(true);
     const styled = await docxLens.open(await docxLens.mutate(base.preservedCarry, { kind: "apply-style", regionId: base.projection.blocks[0]!.id, style: "Heading1" }));
+    expect(styled.projection.blocks[0]?.attrs?.format).toMatchObject({ bold: true });
     const desired: DocxProjection = { ...styled.projection, blocks: styled.projection.blocks.map((block, index) => index ? block : { ...block, text: "Changed heading", inlineContent: undefined }) };
     const operations = docxOperationsBetween(styled.projection, desired);
     expect(operations.some((operation) => operation.kind === "format-runs")).toBe(false);
     const output = await docxLens.materialize({ carry: styled.preservedCarry, projection: desired });
     const xml = strFromU8(unzipSync(output)["word/document.xml"]!);
     expect(xml).toContain("Changed heading");
-    expect(xml).not.toContain("<w:b");
+    expect(xml).not.toMatch(/<w:b(?:\s|\/|>)/u);
+    expect((await docxLens.open(output)).projection.blocks[0]?.attrs?.format).toMatchObject({ bold: true });
+    expect(unzipSync(output)["word/styles.xml"]).toEqual(unzipSync(styled.preservedCarry.payload)["word/styles.xml"]);
     const missingAttrs: DocxProjection = { ...styled.projection, blocks: styled.projection.blocks.map(({ attrs: _attrs, ...block }) => block) };
     expect(docxOperationsBetween(styled.projection, missingAttrs)).toEqual([]);
   });

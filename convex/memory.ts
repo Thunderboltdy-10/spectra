@@ -6,12 +6,17 @@ import {
   query,
 } from "./_generated/server";
 import { v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { memoryEmbedding } from "./memoryEmbedding";
+import {
+  MEMORY_EMBEDDING_VERSION, MEMORY_EMBEDDING_LEASE_MS, MEMORY_EMBEDDING_MAX_ATTEMPTS,
+  memoryInputHash, memoryEmbeddingPartition, memoryQueryFitsBytes, validMemoryVector,
+  type MemoryEmbeddingResult,
+} from "./memoryEmbeddingPolicy";
 import { createManagebacVisibilityReader } from "./managebacVisibility";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
@@ -19,6 +24,8 @@ const MAX_TARGET_TOKENS = 4_000;
 const MAX_CLAIMS_PER_CONTEXT = 24;
 const MAX_LIST = 300;
 const EVIDENCE_WINDOW = 12;
+const embeddingGenerate = makeFunctionReference<"action", { jobId: Id<"memoryJobs">; leaseOwner: string }, void>("memoryEmbeddings:generate");
+const embeddingQuery = makeFunctionReference<"action", { accountId: Id<"accounts">; queryText: string }, MemoryEmbeddingResult>("memoryEmbeddings:queryVector");
 const AUTHORED_EVIDENCE_TYPES = [
   "user_statement",
   "correction",
@@ -565,6 +572,165 @@ async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
     await ctx.db.patch(capsule._id, { stale: true, updatedAt: now });
 }
 
+async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims">, retryFailed = false, wake = true): Promise<boolean> {
+  if (!(await canEmbedClaim(ctx, claim))) return false;
+  const inputHash = await memoryInputHash(claim.proposition);
+  const partition = memoryEmbeddingPartition(claim);
+  if (!partition) return false;
+  if (claim.embeddingVersion === MEMORY_EMBEDDING_VERSION && claim.embeddingInputHash === inputHash &&
+    validMemoryVector(claim.embedding)) {
+    // Retention may have removed the completed job; the committed identity remains authoritative.
+    if (claim.embeddingPartition !== partition) await ctx.db.patch(claim._id, { embeddingPartition: partition });
+    return false;
+  }
+  const idempotencyKey = `embed:${claim._id}:${MEMORY_EMBEDDING_VERSION}:${inputHash}`;
+  const existing = await ctx.db.query("memoryJobs")
+    .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
+  const now = Date.now();
+  if (existing) {
+    if (!retryFailed || existing.status !== "failed") return false;
+    await ctx.db.patch(existing._id, {
+      status: "queued", attemptCount: 0, availableAt: now, updatedAt: now,
+      leaseOwner: undefined, leaseExpiresAt: undefined, error: undefined,
+      payload: { claimId: claim._id, inputHash, embeddingVersion: MEMORY_EMBEDDING_VERSION, partition },
+    });
+  } else await ctx.db.insert("memoryJobs", {
+    accountId: claim.accountId, schoolId: claim.schoolId, kind: "embed", idempotencyKey,
+    payload: { claimId: claim._id, inputHash, embeddingVersion: MEMORY_EMBEDDING_VERSION, partition },
+    status: "queued", attemptCount: 0, availableAt: now, createdAt: now, updatedAt: now,
+  });
+  if (wake) await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+  return true;
+}
+
+function embeddingJobPayload(ctx: MemoryCtx, job: Doc<"memoryJobs">) {
+  const payload = job.payload as { claimId?: unknown; inputHash?: unknown; embeddingVersion?: unknown; partition?: unknown } | null;
+  const claimId = typeof payload?.claimId === "string" ? ctx.db.normalizeId("memoryClaims", payload.claimId) : null;
+  return claimId && typeof payload?.inputHash === "string" && typeof payload.partition === "string" &&
+    payload.embeddingVersion === MEMORY_EMBEDDING_VERSION
+    ? { claimId, inputHash: payload.inputHash, partition: payload.partition } : null;
+}
+
+async function permittedEmbeddingClaim(ctx: MemoryCtx, job: Doc<"memoryJobs">) {
+  const payload = embeddingJobPayload(ctx, job);
+  if (!payload || job.kind !== "embed") return null;
+  const claim = await ctx.db.get(payload.claimId);
+  if (!claim || claim.accountId !== job.accountId || claim.status !== "active" ||
+    (claim.expiresAt !== undefined && claim.expiresAt <= Date.now()) ||
+    memoryEmbeddingPartition(claim) !== payload.partition ||
+    await memoryInputHash(claim.proposition) !== payload.inputHash) return null;
+  return await canEmbedClaim(ctx, claim) ? claim : null;
+}
+
+async function canEmbedClaim(ctx: MemoryCtx, claim: Doc<"memoryClaims">) {
+  if (claim.status !== "active" || (claim.expiresAt !== undefined && claim.expiresAt <= Date.now())) return false;
+  const actor = await getActorForAccountId(ctx, claim.accountId);
+  if (!actor) return null;
+  const preferences = preferenceProjection(await preferencesFor(ctx, actor), actor);
+  if (!preferences.enabled || !preferences.categoryControls[categoryForClaim(claim.claimType)] ||
+    !(await canReadClaim(ctx, actor, claim)) || !(await claimHasCurrentEvidence(ctx, actor, claim._id))) return false;
+  return true;
+}
+
+/** Global concurrency is two. Enqueue, completion and retry wake this dispatcher; cron only recovers loss. */
+export const dispatchEmbeddings = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ dispatched: number }> => {
+    const now = Date.now();
+    const running = await ctx.db.query("memoryJobs").withIndex("by_kind_status_available", (q) =>
+      q.eq("kind", "embed").eq("status", "leased").gt("availableAt", now)).take(2);
+    const capacity = 2 - running.length;
+    if (!capacity) return { dispatched: 0 };
+    const queued = await ctx.db.query("memoryJobs").withIndex("by_kind_status_available", (q) =>
+      q.eq("kind", "embed").eq("status", "queued").lte("availableAt", now)).take(capacity);
+    const expired = await ctx.db.query("memoryJobs").withIndex("by_kind_status_available", (q) =>
+      q.eq("kind", "embed").eq("status", "leased").lte("availableAt", now)).take(capacity);
+    const jobs = [...queued, ...expired].sort((a, b) => a.availableAt - b.availableAt).slice(0, capacity);
+    let dispatched = 0;
+    for (const job of jobs) {
+      if (job.attemptCount >= MEMORY_EMBEDDING_MAX_ATTEMPTS) {
+        await ctx.db.patch(job._id, { status: "failed", error: "attempts_exhausted", leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: now });
+        continue;
+      }
+      const leaseOwner = `embed:${job._id}:${crypto.randomUUID()}`;
+      await ctx.db.patch(job._id, {
+        status: "leased", leaseOwner, attemptCount: job.attemptCount + 1,
+        availableAt: now + MEMORY_EMBEDDING_LEASE_MS, leaseExpiresAt: now + MEMORY_EMBEDDING_LEASE_MS, updatedAt: now,
+      });
+      await ctx.scheduler.runAfter(0, embeddingGenerate, { jobId: job._id, leaseOwner });
+      dispatched += 1;
+    }
+    if (jobs.length && !dispatched) await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+    return { dispatched };
+  },
+});
+
+export const embeddingInput = internalQuery({
+  args: { jobId: v.id("memoryJobs"), leaseOwner: v.string() },
+  handler: async (ctx, args): Promise<{ proposition: string } | null> => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.status !== "leased" || job.leaseOwner !== args.leaseOwner ||
+      (job.leaseExpiresAt ?? 0) <= Date.now()) return null;
+    const claim = await permittedEmbeddingClaim(ctx, job);
+    return claim ? { proposition: claim.proposition } : null;
+  },
+});
+
+export const completeEmbedding = internalMutation({
+  args: {
+    jobId: v.id("memoryJobs"), leaseOwner: v.string(), vector: v.optional(v.array(v.float64())),
+    error: v.optional(v.string()), retryable: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<{ committed: boolean }> => {
+    const job = await ctx.db.get(args.jobId);
+    const now = Date.now();
+    if (!job || job.kind !== "embed" || job.status !== "leased" || job.leaseOwner !== args.leaseOwner ||
+      (job.leaseExpiresAt ?? 0) <= now) return { committed: false };
+    const claim = await permittedEmbeddingClaim(ctx, job);
+    if (claim && validMemoryVector(args.vector)) {
+      const payload = embeddingJobPayload(ctx, job)!;
+      await ctx.db.patch(claim._id, {
+        embedding: args.vector, embeddingVersion: MEMORY_EMBEDDING_VERSION,
+        embeddingInputHash: payload.inputHash, embeddingUpdatedAt: now, embeddingPartition: payload.partition,
+      });
+      await ctx.db.patch(job._id, { status: "completed", completedAt: now, updatedAt: now, error: undefined, leaseOwner: undefined, leaseExpiresAt: undefined });
+      await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+      return { committed: true };
+    }
+    const retry = Boolean(claim && args.retryable && job.attemptCount < MEMORY_EMBEDDING_MAX_ATTEMPTS);
+    const delay = retry ? 2 ** (job.attemptCount - 1) * 5_000 : 0;
+    // Persist only fixed status codes, never provider response text or input.
+    const codes = ["missing_key", "query_too_large", "timeout", "network", "rate_limited", "provider_unavailable", "provider_rejected", "invalid_response"];
+    const error = !claim ? "source_unavailable" : codes.includes(args.error ?? "") ? args.error : "invalid_response";
+    if (!claim) {
+      const payload = embeddingJobPayload(ctx, job);
+      const current = payload ? await ctx.db.get(payload.claimId) : null;
+      if (current && current.embeddingPartition === payload?.partition && current.embeddingInputHash === payload.inputHash)
+        await ctx.db.patch(current._id, { embeddingPartition: undefined });
+    }
+    await ctx.db.patch(job._id, {
+      status: retry ? "queued" : "failed", error, availableAt: now + delay,
+      leaseOwner: undefined, leaseExpiresAt: undefined, updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+    if (retry) await ctx.scheduler.runAfter(delay, internal.memory.dispatchEmbeddings, {});
+    return { committed: false };
+  },
+});
+
+/** Explicit, bounded backfill only. No request-time legacy catalog scan or automatic recursive backfill. */
+export const backfillEmbeddings = internalMutation({
+  args: { cursor: v.optional(v.string()), limit: v.optional(v.number()), retryFailed: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("memoryClaims").withIndex("by_status_updated", (q) => q.eq("status", "active"))
+      .paginate({ cursor: args.cursor ?? null, numItems: Math.max(1, Math.min(40, Math.round(Number.isFinite(args.limit) ? args.limit! : 20))) });
+    let enqueued = 0;
+    for (const claim of page.page) if (await enqueueClaimEmbedding(ctx, claim, args.retryFailed, false)) enqueued += 1;
+    if (enqueued) await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+    return { enqueued, scanned: page.page.length, isDone: page.isDone, cursor: page.continueCursor };
+  },
+});
+
 async function enqueueClaimDeletion(
   ctx: MutationCtx,
   claim: Doc<"memoryClaims">,
@@ -709,12 +875,12 @@ async function upsertClaim(
   if (duplicate) {
     await ctx.db.patch(duplicate._id, {
       confidence: Math.max(duplicate.confidence, input.confidence),
-      embedding: duplicate.embedding ?? memoryEmbedding(proposition),
       lastConfirmedAt:
         input.assertion === "asserted" ? now : duplicate.lastConfirmedAt,
       updatedAt: now,
     });
     await insertEvidence(ctx, actor, duplicate._id, input.evidence);
+    await enqueueClaimEmbedding(ctx, (await ctx.db.get(duplicate._id))!);
     await invalidateCapsules(ctx, actor.accountId);
     return { claimId: duplicate._id, merged: true };
   }
@@ -745,7 +911,6 @@ async function upsertClaim(
     proposition,
     normalizedProposition: normalized,
     propositionHash,
-    embedding: memoryEmbedding(proposition),
     assertion: input.assertion,
     confidence: Math.max(0, Math.min(1, input.confidence)),
     sensitivity: "standard",
@@ -758,6 +923,7 @@ async function upsertClaim(
     updatedAt: now,
   });
   await insertEvidence(ctx, actor, claimId, input.evidence);
+  await enqueueClaimEmbedding(ctx, (await ctx.db.get(claimId))!);
   const relatedCandidates = await ctx.db
     .query("memoryClaims")
     .withIndex("by_account_status_updated", (q) =>
@@ -1025,6 +1191,7 @@ export const correct = mutation({
       const now = Date.now();
       await ctx.db.patch(original._id, {
         status: "superseded",
+        embeddingPartition: undefined,
         supersededById: result.claimId,
         updatedAt: now,
       });
@@ -1060,10 +1227,12 @@ export const setDisputed = mutation({
     const now = Date.now();
     await ctx.db.patch(claim._id, {
       status: args.disputed ? "disputed" : "active",
+      embeddingPartition: undefined,
       lastConfirmedAt: args.disputed ? claim.lastConfirmedAt : now,
       updatedAt: now,
     });
     await invalidateCapsules(ctx, actor.accountId);
+    if (!args.disputed) await enqueueClaimEmbedding(ctx, (await ctx.db.get(claim._id))!);
     return {
       claimId: claim._id,
       status: args.disputed ? "disputed" : "active",
@@ -1081,6 +1250,11 @@ export const forget = mutation({
     const now = Date.now();
     await ctx.db.patch(claim._id, {
       status: "deleted",
+      embedding: undefined,
+      embeddingVersion: undefined,
+      embeddingInputHash: undefined,
+      embeddingUpdatedAt: undefined,
+      embeddingPartition: undefined,
       deletionRequestedAt: now,
       proposition: "[forgotten]",
       normalizedProposition: "",
@@ -1132,6 +1306,11 @@ export const clearAll = mutation({
     for (const claim of privateClaims) {
       await ctx.db.patch(claim._id, {
         status: "deleted",
+        embedding: undefined,
+        embeddingVersion: undefined,
+        embeddingInputHash: undefined,
+        embeddingUpdatedAt: undefined,
+        embeddingPartition: undefined,
         deletionRequestedAt: now,
         proposition: "[forgotten]",
         normalizedProposition: "",
@@ -1194,11 +1373,39 @@ export const exportMine = query({
   },
 });
 
+type RetrievalDestination = { workspaceId?: Id<"spectraWorkspaces">; artifactId?: Id<"spectraArtifacts"> };
+type RetrievalPartition = RetrievalDestination & { scope: Scope; accountId?: Id<"accounts">; schoolId?: Id<"schools">; key: string };
+
+async function authorizedMemoryPartitions(ctx: MemoryCtx, actor: Actor, destination: RetrievalDestination) {
+  const partitions: RetrievalPartition[] = (["private_global", "private_school", "system"] as const).map((scope) => ({
+    scope, accountId: actor.accountId, schoolId: scope === "private_school" ? actor.schoolId : undefined,
+    key: memoryEmbeddingPartition({ scope, accountId: actor.accountId, schoolId: actor.schoolId })!,
+  }));
+  if (destination.workspaceId) {
+    const access = await evaluateAccessForActor(ctx, actor, "workspace", destination.workspaceId);
+    if (access.allowed && access.capabilities.includes("read")) partitions.push({
+      scope: "workspace", workspaceId: destination.workspaceId,
+      key: memoryEmbeddingPartition({ scope: "workspace", accountId: actor.accountId, schoolId: actor.schoolId, workspaceId: destination.workspaceId })!,
+    });
+  }
+  if (destination.artifactId) {
+    const artifact = await ctx.db.get(destination.artifactId);
+    const access = await evaluateAccessForActor(ctx, actor, artifact?.blueprintKey === "agent" ? "agent" : "artifact", destination.artifactId);
+    if (access.allowed && access.capabilities.includes("read")) partitions.push({
+      scope: "shared_artifact", artifactId: destination.artifactId,
+      key: memoryEmbeddingPartition({ scope: "shared_artifact", accountId: actor.accountId, schoolId: actor.schoolId, artifactId: destination.artifactId })!,
+    });
+  }
+  return partitions;
+}
+
 export const retrievalIdentity = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: { workspaceId: v.optional(v.id("spectraWorkspaces")), artifactId: v.optional(v.id("spectraArtifacts")) },
+  handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
-    return { accountId: actor.accountId, schoolId: actor.schoolId };
+    const preferences = preferenceProjection(await preferencesFor(ctx, actor), actor);
+    return { accountId: actor.accountId, enabled: preferences.enabled,
+      partitions: preferences.enabled ? await authorizedMemoryPartitions(ctx, actor, args) : [] };
   },
 });
 
@@ -1208,6 +1415,8 @@ export const contextForRunBase = internalQuery({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     targetTokens: v.optional(v.number()),
+    claimIds: v.optional(v.array(v.id("memoryClaims"))),
+    retrievalStatus: v.optional(v.string()),
     semanticMatches: v.optional(
       v.array(
         v.object({
@@ -1228,6 +1437,7 @@ export const contextForRunBase = internalQuery({
         enabled: false,
         text: "",
         selectedClaimIds: [],
+        returnedClaimIds: [],
         candidateClaimIds: [],
         exclusions: {
           scope: 0,
@@ -1237,58 +1447,51 @@ export const contextForRunBase = internalQuery({
           budget: 0,
         },
         estimatedTokens: 0,
+        retrieval: { status: "disabled", truncated: false, candidateEvidence: true },
       };
     const target = Math.max(
-      250,
+      1,
       Math.min(
         MAX_TARGET_TOKENS,
-        Math.round(args.targetTokens ?? preferences.capsuleTargetTokens),
+        Math.round(Number.isFinite(args.targetTokens) ? args.targetTokens! : preferences.capsuleTargetTokens),
       ),
     );
-    const ownedClaims = await ctx.db
-      .query("memoryClaims")
-      .withIndex("by_account_status_updated", (q) =>
-        q.eq("accountId", actor.accountId).eq("status", "active"),
-      )
-      .order("desc")
-      .take(500);
-    const workspaceClaims = args.workspaceId
-      ? await ctx.db
-          .query("memoryClaims")
-          .withIndex("by_workspace_status", (q) =>
-            q.eq("workspaceId", args.workspaceId).eq("status", "active"),
-          )
-          .take(200)
-      : [];
-    const artifactClaims = args.artifactId
-      ? await ctx.db
-          .query("memoryClaims")
-          .withIndex("by_artifact_status", (q) =>
-            q.eq("artifactId", args.artifactId).eq("status", "active"),
-          )
-          .take(200)
-      : [];
-    const semanticClaims = (
-      await Promise.all(
-        (args.semanticMatches ?? [])
-          .slice(0, 80)
-          .map((match) => ctx.db.get(match.claimId)),
-      )
-    ).filter((claim): claim is Doc<"memoryClaims"> => Boolean(claim));
-    const claims = [
-      ...ownedClaims,
-      ...workspaceClaims,
-      ...artifactClaims,
-      ...semanticClaims,
-    ].filter(
-      (claim, index, all) =>
-        all.findIndex((candidate) => candidate._id === claim._id) === index,
-    );
+    const partitions = await authorizedMemoryPartitions(ctx, actor, args);
+    const queryTooLarge = !memoryQueryFitsBytes(args.queryText) || args.retrievalStatus === "query_too_large";
+    const literalText = queryTooLarge ? "" : normalizeProposition(args.queryText);
+    let literalUnavailable = false;
+    let truncated = (args.claimIds?.length ?? 0) > 8;
+    const literalClaims: Doc<"memoryClaims">[] = [];
+    // Use the whole normalized query. An oversized query is reported, never silently shortened.
+    if (literalText) {
+      const perPartition = Math.floor(20 / partitions.length);
+      for (const partition of partitions) {
+        try {
+          const rows = await ctx.db.query("memoryClaims").withSearchIndex("search_normalized_proposition", (q) => {
+            let search = q.search("normalizedProposition", literalText).eq("status", "active").eq("scope", partition.scope);
+            if (partition.accountId) search = search.eq("accountId", partition.accountId);
+            if (partition.schoolId) search = search.eq("schoolId", partition.schoolId);
+            if (partition.workspaceId) search = search.eq("workspaceId", partition.workspaceId);
+            if (partition.artifactId) search = search.eq("artifactId", partition.artifactId);
+            return search;
+          }).take(perPartition);
+          literalClaims.push(...rows);
+          if (rows.length === perPartition) truncated = true;
+        } catch { literalUnavailable = true; }
+      }
+    }
+    const exactIds = (args.claimIds ?? []).slice(0, 8);
+    const semanticMatches = queryTooLarge ? [] : (args.semanticMatches ?? []).slice(0, 80);
+    const identities = [...new Set([...exactIds, ...literalClaims.map((claim) => claim._id), ...semanticMatches.map((match) => match.claimId)])];
+    if (identities.length > 80 || semanticMatches.length === 80) truncated = true;
+    const literalById = new Map(literalClaims.map((claim) => [String(claim._id), claim]));
+    const claims = (await Promise.all(identities.slice(0, 80).map((id) => literalById.get(String(id)) ?? ctx.db.get(id))))
+      .filter((claim): claim is Doc<"memoryClaims"> => Boolean(claim));
     const queryTerms = terms(args.queryText);
     const semanticScores = new Map(
-      (args.semanticMatches ?? []).map((match) => [
+      semanticMatches.filter((match) => Number.isFinite(match.score)).map((match) => [
         String(match.claimId),
-        Math.max(0, Math.min(1, match.score)),
+        Math.max(-1, Math.min(1, match.score)),
       ]),
     );
     const exclusions = {
@@ -1301,7 +1504,6 @@ export const contextForRunBase = internalQuery({
     const ranked: Array<{
       claim: Doc<"memoryClaims">;
       score: number;
-      retrievalSignal: number;
     }> = [];
     const accessCache = newEvidenceAccessCache();
     for (const claim of claims) {
@@ -1310,6 +1512,13 @@ export const contextForRunBase = internalQuery({
         else exclusions.stale += 1;
         continue;
       }
+      const semanticValid = semanticScores.has(String(claim._id)) &&
+        claim.embeddingVersion === MEMORY_EMBEDDING_VERSION &&
+        claim.embeddingPartition === memoryEmbeddingPartition(claim) &&
+        partitions.some((partition) => partition.key === claim.embeddingPartition) &&
+        claim.embeddingInputHash === await memoryInputHash(claim.proposition);
+      if (!semanticValid) semanticScores.delete(String(claim._id));
+      if (!semanticValid && !literalById.has(String(claim._id)) && !exactIds.includes(claim._id)) continue;
       if (!preferences.categoryControls[categoryForClaim(claim.claimType)]) {
         exclusions.scope += 1;
         continue;
@@ -1342,29 +1551,15 @@ export const contextForRunBase = internalQuery({
       }
       const lexical = overlapScore(queryTerms, claim.proposition);
       const semantic = semanticScores.get(String(claim._id)) ?? 0;
-      const correctionBoost = claim.claimType === "correction" ? 0.3 : 0;
-      const assertedBoost = claim.assertion === "asserted" ? 0.18 : 0;
-      const recency = Math.max(
-        0,
-        1 - (Date.now() - claim.updatedAt) / 31_536_000_000,
-      );
       ranked.push({
         claim,
-        retrievalSignal: lexical + semantic,
-        score:
-          lexical * 1.8 +
-          semantic * 1.35 +
-          claim.confidence * 0.65 +
-          correctionBoost +
-          assertedBoost +
-          recency * 0.12,
+        score: (exactIds.includes(claim._id) ? 2 : 0) + lexical + semantic,
       });
     }
     const rankedById = new Map(
       ranked.map((item) => [String(item.claim._id), item]),
     );
     let frontier = ranked
-      .filter((item) => item.retrievalSignal >= 0.12)
       .sort((left, right) => right.score - left.score)
       .slice(0, 12)
       .map((item) => item.claim._id);
@@ -1377,26 +1572,27 @@ export const contextForRunBase = internalQuery({
             ...(await ctx.db
               .query("memoryRelations")
               .withIndex("by_from_claim", (q) => q.eq("fromClaimId", claimId))
-              .collect()),
+              .take(8)),
             ...(await ctx.db
               .query("memoryRelations")
               .withIndex("by_to_claim", (q) => q.eq("toClaimId", claimId))
-              .collect()),
+              .take(8)),
           ],
         })),
       );
       const next: Id<"memoryClaims">[] = [];
       for (const { claimId, relations } of relationSets)
         for (const relation of relations) {
-          if (relation.accountId !== actor.accountId) continue;
+          if (relation.accountId !== actor.accountId || relation.schoolId !== actor.schoolId) continue;
           const neighborId =
             relation.fromClaimId === claimId
               ? relation.toClaimId
               : relation.fromClaimId;
           if (!neighborId) continue;
           const item = rankedById.get(String(neighborId));
-          if (item)
-            item.score +=
+          // Never traverse through an unreadable intermediary or hydrate an unbounded frontier.
+          if (!item) continue;
+          item.score +=
               Math.max(0, Math.min(1, relation.confidence)) *
               (depth === 0 ? 0.22 : 0.1);
           if (!traversed.has(String(neighborId))) {
@@ -1410,15 +1606,16 @@ export const contextForRunBase = internalQuery({
       (a, b) => b.score - a.score || b.claim.updatedAt - a.claim.updatedAt,
     );
     const selected: Array<Doc<"memoryClaims">> = [];
-    let used = 0;
+    const rendered: string[] = [];
     for (const item of ranked) {
-      const cost = tokenEstimate(item.claim.proposition) + 12;
-      if (selected.length >= MAX_CLAIMS_PER_CONTEXT || used + cost > target) {
+      const claim = item.claim;
+      const line = `[M${selected.length + 1}] ${claim.proposition} (${claim.scope.replaceAll("_", " ")}; ${claim.assertion}; confidence ${Math.round(claim.confidence * 100)}%)`;
+      if (selected.length >= MAX_CLAIMS_PER_CONTEXT || tokenEstimate([...rendered, line].join("\n")) > target) {
         exclusions.budget += 1;
         continue;
       }
       selected.push(item.claim);
-      used += cost;
+      rendered.push(line);
     }
     const contextClaims = await Promise.all(
       selected.map(async (claim, index) => {
@@ -1440,21 +1637,23 @@ export const contextForRunBase = internalQuery({
         };
       }),
     );
-    const text = contextClaims
-      .map(
-        (claim) =>
-          `[${claim.citation}] ${claim.proposition} (${claim.scope.replaceAll("_", " ")}; ${claim.assertion}; confidence ${Math.round(claim.confidence * 100)}%)`,
-      )
-      .join("\n");
+    const text = rendered.join("\n");
     return {
       enabled: true,
       text,
       claims: contextClaims,
       selectedClaimIds: selected.map((claim) => claim._id),
+      returnedClaimIds: selected.map((claim) => claim._id),
       candidateClaimIds: ranked.map((item) => item.claim._id).slice(0, 80),
       exclusions,
-      estimatedTokens: tokenEstimate(text),
+      estimatedTokens: text ? tokenEstimate(text) : 0,
       targetTokens: target,
+      retrieval: {
+        status: queryTooLarge ? "query_too_large" : args.retrievalStatus ?? "literal_only",
+        literalUnavailable, truncated: truncated || exclusions.budget > 0, candidateEvidence: true,
+        guidance: queryTooLarge ? "Use a more specific complete query within 8192 UTF-8 bytes and 2048 tokens; the query was not shortened." :
+          "These are candidate memories. Use only evidence relevant to the current request; none may be applicable.",
+      },
     };
   },
 });
@@ -1465,24 +1664,30 @@ export const contextForRun = action({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     targetTokens: v.optional(v.number()),
+    claimIds: v.optional(v.array(v.id("memoryClaims"))),
   },
   handler: async (ctx, args): Promise<unknown> => {
-    const identity = await ctx.runQuery(internal.memory.retrievalIdentity, {});
-    const queryText = compact(args.queryText, 4_000);
-    const semanticMatches = queryText
-      ? await ctx.vectorSearch("memoryClaims", "by_embedding", {
-          vector: memoryEmbedding(queryText),
-          limit: 80,
-          filter: (q) => q.eq("accountId", identity.accountId),
-        })
-      : [];
+    const identity = await ctx.runQuery(internal.memory.retrievalIdentity, { workspaceId: args.workspaceId, artifactId: args.artifactId });
+    const queryText = args.queryText;
+    let retrievalStatus = memoryQueryFitsBytes(queryText) ? "exact_only" : "query_too_large";
+    let semanticMatches: { claimId: Id<"memoryClaims">; score: number }[] = [];
+    if (identity.enabled && retrievalStatus !== "query_too_large" && queryText.trim()) {
+      try {
+        const result = await ctx.runAction(embeddingQuery, { accountId: identity.accountId, queryText });
+        if (result.ok) {
+          const matches = await ctx.vectorSearch("memoryClaims", "by_embedding", {
+            vector: result.vector, limit: 80,
+            filter: (q) => q.or(...identity.partitions.map((partition) => q.eq("embeddingPartition", partition.key))),
+          });
+          semanticMatches = matches.map((match) => ({ claimId: match._id, score: match._score }));
+          retrievalStatus = "semantic_and_literal";
+        } else retrievalStatus = result.code;
+      } catch { retrievalStatus = "semantic_unavailable"; }
+    }
     return ctx.runQuery(internal.memory.contextForRunBase, {
       ...args,
       queryText,
-      semanticMatches: semanticMatches.map((match) => ({
-        claimId: match._id,
-        score: match._score,
-      })),
+      semanticMatches, retrievalStatus,
     });
   },
 });
@@ -1781,31 +1986,17 @@ export const maintain = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const unembedded = await ctx.db
-      .query("memoryClaims")
-      .withIndex("by_status_updated", (q) => q.eq("status", "active"))
-      .filter((q) => q.eq(q.field("embedding"), undefined))
-      .take(80);
-    await Promise.all(
-      unembedded.map((claim) =>
-        ctx.db.patch(claim._id, {
-          embedding: memoryEmbedding(claim.proposition),
-          updatedAt: claim.updatedAt,
-        }),
-      ),
-    );
-    const queued = await ctx.db
-      .query("memoryJobs")
-      .withIndex("by_status_available", (q) =>
-        q.eq("status", "queued").lte("availableAt", now),
-      )
-      .take(20);
-    const staleLeases = await ctx.db
-      .query("memoryJobs")
-      .withIndex("by_status_available", (q) =>
-        q.eq("status", "leased").lte("availableAt", now),
-      )
-      .take(20);
+    await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
+    // Embedding backlog never consumes capture/delete admission. Bounded per-kind reads,
+    // followed by the original 20 queued / 20 expired-lease aggregate quotas.
+    const otherKinds = ["capture", "consolidate", "regenerate_capsule", "expire", "delete"] as const;
+    const queued = (await Promise.all(otherKinds.map((kind) => ctx.db.query("memoryJobs")
+      .withIndex("by_kind_status_available", (q) => q.eq("kind", kind).eq("status", "queued").lte("availableAt", now)).take(20))))
+      .flat().sort((a, b) => a.availableAt - b.availableAt).slice(0, 20);
+    const staleLeases = (await Promise.all(otherKinds.map((kind) => ctx.db.query("memoryJobs")
+      .withIndex("by_kind_status_available", (q) => q.eq("kind", kind).eq("status", "leased").lte("availableAt", now)).take(20))))
+      .flat().filter((job) => (job.leaseExpiresAt ?? 0) <= now)
+      .sort((a, b) => a.availableAt - b.availableAt).slice(0, 20);
     const jobs = [
       ...queued,
       ...staleLeases.filter((job) => (job.leaseExpiresAt ?? 0) <= now),
@@ -1953,6 +2144,7 @@ export const maintain = internalMutation({
         continue;
       await ctx.db.patch(claim._id, {
         status: "expired",
+        embeddingPartition: undefined,
         expiresAt: now,
         updatedAt: now,
       });
@@ -1967,6 +2159,7 @@ export const maintain = internalMutation({
     for (const claim of rejectedCandidates) {
       await ctx.db.patch(claim._id, {
         status: "expired",
+        embeddingPartition: undefined,
         expiresAt: now,
         updatedAt: now,
       });

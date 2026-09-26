@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -10,6 +10,9 @@ import { listMine } from "./memory";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
+// These are source-authority tests; embedding jobs run under their own controlled tests.
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 const listMineHandler = Reflect.get(listMine, "_handler") as (
   ctx: QueryCtx, args: Record<string, never>,
 ) => Promise<FunctionReturnType<typeof api.memory.listMine>>;

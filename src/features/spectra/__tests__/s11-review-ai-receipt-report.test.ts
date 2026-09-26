@@ -17,6 +17,37 @@ const stored = (overrides: Partial<StoredOperation> = {}): StoredOperation => ({
 });
 
 describe("S11 receipt truth after verification, interruption and acknowledgement loss", () => {
+  it.each(["no effects", "acknowledged save", "unknown apply"] as const)(
+    "sanitizes a target error without losing the %s receipt policy",
+    (scenario) => {
+      const effects = reconcileInterruptedEffects({
+        executionId: "attempt-1",
+        acknowledged: scenario === "acknowledged save" ? [acknowledged] : [],
+        attemptedEffect: scenario !== "no effects",
+        unacknowledgedOperationId: scenario === "unknown apply" ? "operation-unknown" : undefined,
+        operations: [],
+      });
+      const explanation = formatPlanApplicationPublicError(
+        new Error("artifactId missing-artifact-private failed an internal Convex schema lookup"),
+        { explanationOnly: true },
+      );
+      const sanitized = "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
+      expect(explanation).toBe(sanitized);
+      const summary = interruptedEffectSummary(effects, explanation);
+      if (scenario === "no effects") {
+        expect(summary).toBe(sanitized);
+        expect(effects).toMatchObject({ saved: false, ambiguous: false, committedCount: 0 });
+      } else if (scenario === "acknowledged save") {
+        expect(summary).toBe(`Earlier changes were saved and their receipts are preserved. ${sanitized}`);
+        expect(effects).toMatchObject({ saved: true, ambiguous: false, committedCount: 1, outcome: "canonical_saved" });
+      } else {
+        expect(summary).toBe(`The last action's save could not be confirmed; review it before continuing. ${sanitized}`);
+        expect(effects).toMatchObject({ saved: false, ambiguous: true, committedCount: 0, outcome: undefined });
+      }
+      expect(summary).not.toMatch(/artifactId|missing-artifact-private|schema|Convex|JSON/i);
+    },
+  );
+
   it("does not turn a saved citation-verification failure into a no-change claim", () => {
     const error = new Error("PRESENTATION_CITATION_EVIDENCE_REQUIRED");
     const effects = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [acknowledged], operations: [] });

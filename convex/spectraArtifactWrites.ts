@@ -158,6 +158,7 @@ export const archive = mutation({
     const receipt = artifactWriteReceipt(operation.output);
     if (receipt) {
       if (receipt.scope !== operationDigest) throw new Error("AI_ARTIFACT_RECEIPT_SCOPE_MISMATCH");
+      await requireActorArtifactCapability(ctx, actor, args.artifactId, "delete");
       return receipt.result;
     }
     if (run.status !== "running" || operation.status !== "executing") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");

@@ -81,7 +81,6 @@ import {
 } from "./loop/resolve";
 import { verifyCommittedOutcomes } from "./loop/verify";
 import { createRunItem } from "@/features/spectra/actions/protocol";
-import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
 import {
   getSpectraAttachmentStrategy,
@@ -1550,7 +1549,6 @@ async function runAttempt(
     ]);
     recordPhase("plan_recorded");
     const pendingArtifacts = new Map<string, string>();
-    const quietApplyRetryIds = new Set<string>();
     for (let index = 0; index < stored.operationIds.length; index += 1) {
       const operationId = stored.operationIds[index]!;
       const operation = plan.operations[index];
@@ -1848,7 +1846,7 @@ async function runAttempt(
     const allAffected: Array<{ type: string; id: string }> = [];
     const createdArtifactIds = new Map<number, string>();
     for (let index = 0; index < plan.operations.length; index += 1) {
-      let operation = resolveCreatedArtifactDependencies(
+      const operation = resolveCreatedArtifactDependencies(
         plan.operations[index]!,
         createdArtifactIds,
       );
@@ -2007,117 +2005,19 @@ async function runAttempt(
               });
           },
         };
-        let affected: Array<{ type: string; id: string }> = [];
-        try {
-          unacknowledgedOperationId = operationId;
-          affected = await executeOperation(
-            params.actorClerkId,
-            params.runId,
-            operationId,
-            operation,
-            executeContext,
-          );
-          lastApplyAcknowledged = true;
-          unacknowledgedOperationId = undefined;
-        } catch (firstApplyError) {
-          // One quiet encouragement pass on schema/apply slips. Do not surface
-          // the first miss — normalize creatable content and retry once.
-          const canQuietRetry =
-            !quietApplyRetryIds.has(operationId) &&
-            isQuietRetryableApplyFailure(firstApplyError) &&
-            (operation.type === "artifact.create" ||
-              operation.type === "artifact.update");
-          if (!canQuietRetry) throw firstApplyError;
-          quietApplyRetryIds.add(operationId);
-          let recoveredFromLive = false;
-          if (
-            operation.type === "artifact.update" &&
-            typeof operation.input.artifactId === "string" &&
-            /AI_ARTIFACT_(?:SYNC|CONNECTION)|has not finished synchronizing|durably acknowledged|collaboration room did not confirm/i.test(
-              publicError(firstApplyError),
-            )
-          ) {
-            try {
-              const alreadyLanded = [
-                { type: "artifact", id: operation.input.artifactId },
-              ];
-              await verifyCommittedOutcomes(
-                params.actorClerkId,
-                [{ operation, affected: alreadyLanded }],
-                verificationOptions,
-              );
-              affected = alreadyLanded;
-              recoveredFromLive = true;
-            } catch {
-              // Live value still diverges — fall through to a quiet retry.
-            }
-          }
-          if (!recoveredFromLive) {
-            console.warn("[spectra.apply.encouragement_retry]", {
-              operationId,
-              type: operation.type,
-              error: publicError(firstApplyError),
-            });
-            publishNativeProgress({
-              title: "Taking another careful pass",
-              detail: "Keeping your request in focus",
-              activity: "edit",
-              operationIndex: index,
-              artifactType:
-                operation.type === "artifact.create" ||
-                operation.type === "artifact.update"
-                  ? operation.input.blueprintKey
-                  : undefined,
-            });
-            await mutate("spectraRuns:patchResultCard", {
-              actorClerkId: params.actorClerkId,
-              resultCardId: params.resultCardId,
-              executionId: params.executionId,
-              title: "Taking another careful pass",
-              summary: "Keeping your request in focus",
-            }).catch(() => null);
-            if (operation.type === "artifact.create") {
-              operation = {
-                ...operation,
-                input: {
-                  ...operation.input,
-                  content: normalizeArtifactContent(
-                    operation.input.blueprintKey,
-                    operation.input.content,
-                  ) as never,
-                },
-              };
-            } else if (
-              operation.type === "artifact.update" &&
-              operation.input.content
-            ) {
-              operation = {
-                ...operation,
-                input: {
-                  ...operation.input,
-                  content: normalizeArtifactContent(
-                    operation.input.blueprintKey,
-                    operation.input.content,
-                  ) as never,
-                },
-              };
-            }
-            affected = await executeOperation(
-              params.actorClerkId,
-              params.runId,
-              operationId,
-              operation,
-              {
-                ...executeContext,
-                // The first attempt already moved the op to executing. Re-claim
-                // would false-fail a recoverable sync/schema miss.
-                preclaimed: true,
-              },
-            );
-            lastApplyAcknowledged = true;
-            unacknowledgedOperationId = undefined;
-          }
-        }
+        // A thrown apply may follow a committed write. Content equality and
+        // generic error wording cannot acknowledge this operation or authorize
+        // replay. Leave ambiguous outcomes to exact-attempt journal reconciliation.
+        unacknowledgedOperationId = operationId;
+        let affected = await executeOperation(
+          params.actorClerkId,
+          params.runId,
+          operationId,
+          operation,
+          executeContext,
+        );
+        lastApplyAcknowledged = true;
+        unacknowledgedOperationId = undefined;
         const retainedOutcome = { operationId, operation, affected, acknowledged: lastApplyAcknowledged };
         await retainOutcomeThenVerify(operationOutcomes, retainedOutcome, async () => {
           if (operation.type === "artifact.update") {
@@ -3173,57 +3073,16 @@ async function resumeOperationsAttempt(params: {
             if (summary) applicationSummaries.push(summary);
           },
         };
-        let affected: Array<{ type: string; id: string }> = [];
-        try {
-          attemptedEffect = true;
-          unacknowledgedOperationId = row._id;
-          affected = await executeOperation(
-            params.actorClerkId,
-            params.runId,
-            row._id,
-            operation,
-            resumeExecuteContext,
-          );
-        } catch (firstApplyError) {
-          const canQuietRetry =
-            isQuietRetryableApplyFailure(firstApplyError) &&
-            (operation.type === "artifact.create" ||
-              operation.type === "artifact.update");
-          if (!canQuietRetry) throw firstApplyError;
-          console.warn("[spectra.resume.apply.encouragement_retry]", {
-            operationId: row._id,
-            type: operation.type,
-            error: publicError(firstApplyError),
-          });
-          await mutate("spectraRuns:appendEvent", {
-            actorClerkId: params.actorClerkId,
-            runId: params.runId,
-            executionId: params.executionId,
-            type: "progress",
-            payload: {
-              type: "progress",
-              runId: params.runId,
-              title: "Taking another careful pass",
-              detail: "Keeping your request in focus",
-              activity: "edit",
-              operationIndex: index,
-            },
-          }).catch(() => null);
-          await mutate("spectraRuns:patchResultCard", {
-            actorClerkId: params.actorClerkId,
-            resultCardId: params.resultCardId,
-            executionId: params.executionId,
-            title: "Taking another careful pass",
-            summary: "Keeping your request in focus",
-          }).catch(() => null);
-          affected = await executeOperation(
-            params.actorClerkId,
-            params.runId,
-            row._id,
-            operation,
-            { ...resumeExecuteContext, preclaimed: true },
-          );
-        }
+        // Confirmation does not make an unacknowledged write replayable.
+        attemptedEffect = true;
+        unacknowledgedOperationId = row._id;
+        const affected = await executeOperation(
+          params.actorClerkId,
+          params.runId,
+          row._id,
+          operation,
+          resumeExecuteContext,
+        );
         // executeOperation owns the claim -> apply -> executed transition for
         // every operation, including confirmation continuations. A second
         // markExecuted here races the already-executed row and turns a durable

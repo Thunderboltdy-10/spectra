@@ -314,6 +314,7 @@ export function normalizeQuizContent(value: unknown) {
     if (
       options.length &&
       typeof question.correctAnswer === "string" &&
+      question.correctAnswer.trim().length > 0 &&
       !options.includes(question.correctAnswer)
     ) {
       const answerIndex = Number(question.correctAnswer);

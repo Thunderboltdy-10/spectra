@@ -220,7 +220,6 @@ function normalizeSection(value: unknown, index: number): FoundrySection | null 
   if (typeof source.facet !== "string" || !facets.includes(source.facet))
     return null;
 
-  const now = Date.now();
   return {
     id: text(source.id, 180, `section-${index + 1}`) || `section-${index + 1}`,
     kind: source.kind as FoundrySection["kind"],
@@ -252,8 +251,9 @@ function normalizeSection(value: unknown, index: number): FoundrySection | null 
       source.status === "answered" || source.status === "dismissed"
         ? source.status
         : "open",
-    createdAt: typeof source.createdAt === "number" ? source.createdAt : now,
-    updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : now,
+    // Missing historical timestamps are unknown, not the time of this read.
+    createdAt: typeof source.createdAt === "number" ? source.createdAt : 0,
+    updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : 0,
     order: typeof source.order === "number" ? source.order : index,
   };
 }
@@ -373,7 +373,7 @@ export function normalizeFoundryContent(value: unknown): AgentFoundryContent {
             return [
               {
                 id: entry.id.slice(0, 180),
-                at: typeof entry.at === "number" ? entry.at : Date.now(),
+                at: typeof entry.at === "number" ? entry.at : 0,
                 actor:
                   entry.actor === "user"
                     ? "user"

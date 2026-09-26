@@ -8,6 +8,7 @@ import { MAX_ATTACHMENT_BYTES } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
+import { currentArtifactApprovalScope } from "./spectraArtifactWriteScope";
 import {
   ensureThreadWorkspacePlacement,
   requireArtifactCapability,
@@ -1298,8 +1299,20 @@ export const updateStatus = mutation({
       const operations = await ctx.db.query("spectraOperations")
         .withIndex("by_run", q => q.eq("runId", run._id)).collect();
       for (const operation of operations) {
-        if (operation.executionId !== args.executionId || operation.status !== "proposed" ||
-            operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+        if (operation.executionId !== args.executionId || operation.status !== "proposed" || !operation.requiresConfirmation) continue;
+        if (operation.type === "artifact.update" || operation.type === "artifact.archive") {
+          if (operation.type === "artifact.update" && /^@created:\d+$/.test(String(operation.input?.artifactId))) continue;
+          const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
+          await ctx.db.patch(operation._id, {
+            output: {
+              ...(operation.output && typeof operation.output === "object" ? operation.output : {}),
+              pendingArtifactScope: digest,
+              approvedArtifactScope: undefined,
+            },
+          });
+          continue;
+        }
+        if (operation.type !== "app.command") continue;
         await ctx.db.patch(operation._id, {
           output: {
             ...(operation.output && typeof operation.output === "object" ? operation.output : {}),
@@ -2440,8 +2453,17 @@ export const claimConfirmation = mutation({
     // The scope was frozen when the approval was presented. Never approve a
     // newly expanded subtree or changed operation just because Apply was clicked.
     for (const operation of currentOperations) {
-      if (operation.status !== "proposed" || operation.type !== "app.command" || !operation.requiresConfirmation) continue;
+      if (operation.status !== "proposed" || !operation.requiresConfirmation) continue;
       const output = operation.output && typeof operation.output === "object" ? operation.output : {};
+      if (operation.type === "artifact.update" || operation.type === "artifact.archive") {
+        if (operation.type === "artifact.update" && /^@created:\d+$/.test(String(operation.input?.artifactId))) continue;
+        const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
+        if (output.pendingArtifactScope !== digest)
+          throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Prepare a new approval.");
+        await ctx.db.patch(operation._id, { output: { ...output, approvedArtifactScope: digest } });
+        continue;
+      }
+      if (operation.type !== "app.command") continue;
       const scope = await applicationApprovalScope(ctx, operation, run);
       if (output.pendingApplicationScope !== scope)
         throw new Error("AI_APPLICATION_APPROVAL_SCOPE_CHANGED: The proposed targets changed. Ask Spectra to prepare a new approval.");

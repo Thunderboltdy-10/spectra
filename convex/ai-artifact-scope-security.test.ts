@@ -1,0 +1,317 @@
+/// <reference types="vite/client" />
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
+import { makeFunctionReference } from "convex/server";
+import schema from "./schema";
+import { api } from "./_generated/api";
+import { artifactOperationDigest, artifactSourceIdentity, assertAiArtifactWriteAdmission } from "./spectraArtifactWriteScope";
+import { canonicalArtifactWriteContent, normalizeAiArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
+
+const modules = import.meta.glob("./**/*.ts");
+const prepare = makeFunctionReference<"action">("spectraArtifactWrites:preparePlan");
+const archive = makeFunctionReference<"mutation">("spectraArtifactWrites:archive");
+const commitPreparation = makeFunctionReference<"mutation">("spectraArtifactWrites:commitPreparation");
+const body = (text: string) => ({ blocks: [{ id: "body", type: "paragraph", text }] });
+
+async function fixture(type: "artifact.archive" | "artifact.update" = "artifact.archive", content = body("Authored explanation")) {
+  const t = convexTest(schema, modules);
+  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
+  const ids = await t.run(async ctx => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", {
+      name: "Artifact approval", slug: "artifact-approval", verifiedDomains: [], status: "active",
+      timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now,
+    });
+    const accounts = [];
+    for (const name of ["artifact-owner", "artifact-other"]) {
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: name, email: `${name}@example.test`, emailVerified: true, name, status: "active", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert("schoolMemberships", {
+        accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now,
+      });
+      accounts.push(accountId);
+    }
+    const artifactId = await ctx.db.insert("spectraArtifacts", {
+      ownerAccountId: accounts[0], schoolId, blueprintKey: "document", title: "Approved artifact",
+      content, textIndex: "Authored explanation", tags: [], status: "active", createdAt: now, updatedAt: now,
+    });
+    const runId = await ctx.db.insert("spectraAiRuns", {
+      ownerAccountId: accounts[0], schoolId, sourceSurface: "workspace", userPrompt: "Clear the selected work",
+      executionId: "artifact-attempt-1", status: "running", phase: "planning", createdAt: now, updatedAt: now,
+    });
+    const operationId = await ctx.db.insert("spectraOperations", {
+      runId, executionId: "artifact-attempt-1", actorType: "ai", type, status: "proposed",
+      input: type === "artifact.archive" ? { artifactId } : { artifactId, blueprintKey: "document", content: body("") },
+      affected: [], requiresConfirmation: false, createdAt: now,
+    });
+    return { artifactId, runId, operationId, accountId: accounts[0], otherAccountId: accounts[1], schoolId };
+  });
+  const actor = t.withIdentity({ subject: "artifact-owner", email: "artifact-owner@example.test", emailVerified: true });
+  const other = t.withIdentity({ subject: "artifact-other", email: "artifact-other@example.test", emailVerified: true });
+  const attempt = { runId: ids.runId, executionId: "artifact-attempt-1" };
+  const args = { ...attempt, operationId: ids.operationId, artifactId: ids.artifactId };
+  const operation = () => t.run(ctx => ctx.db.get(ids.operationId));
+  const artifact = () => t.run(ctx => ctx.db.get(ids.artifactId));
+  const pending = async () => {
+    await actor.action(prepare, attempt);
+    await actor.mutation(api.spectraRuns.updateStatus, { ...attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected work"] });
+  };
+  const executing = async () => t.run(async ctx => {
+    await ctx.db.patch(ids.runId, { status: "running", phase: "applying" });
+    await ctx.db.patch(ids.operationId, { status: "executing" });
+  });
+  const approved = async () => {
+    await pending();
+    await actor.mutation(api.spectraRuns.claimConfirmation, attempt);
+    await executing();
+  };
+  return { t, actor, other, ids, attempt, args, operation, artifact, pending, executing, approved };
+}
+
+describe("artifact preparation and archive approval boundary", () => {
+  it("derives mandatory archive approval despite a false model flag", async () => {
+    const f = await fixture();
+    expect(await f.actor.action(prepare, f.attempt)).toMatchObject({ approvalReasons: ["Archive the selected artifact"] });
+    expect(await f.operation()).toMatchObject({ requiresConfirmation: true, output: { artifactWriteScope: { kind: "archive" } } });
+    await f.executing();
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow("APPROVAL_SCOPE_REQUIRED");
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("archives the exact accepted target and replays a lost result after human restoration", async () => {
+    const f = await fixture();
+    await f.approved();
+    const result = await f.actor.mutation(archive, f.args);
+    expect(result).toEqual({ artifactId: f.ids.artifactId });
+    expect(await f.artifact()).toMatchObject({ status: "archived" });
+    await f.actor.mutation(api.spectraOperations.markFailed, { operationId: f.ids.operationId, executionId: f.attempt.executionId, error: "Reply lost" });
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { status: "active" }));
+    expect(await f.actor.mutation(archive, f.args)).toEqual(result);
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("does not accept content changed after the preview", async () => {
+    const f = await fixture();
+    await f.pending();
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("New human work") }));
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, f.attempt)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+    expect(await f.artifact()).toMatchObject({ status: "active", content: body("New human work") });
+  });
+
+  it("cannot refresh pending scope with a repeated awaiting-confirmation update", async () => {
+    const f = await fixture();
+    await f.pending();
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("Unseen revision") }));
+    await f.actor.mutation(api.spectraRuns.updateStatus, { ...f.attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected work"] });
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, f.attempt)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+  });
+
+  it("does not archive content or operation input changed after acceptance", async () => {
+    const f = await fixture();
+    await f.approved();
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { title: "Newly named human work" }));
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("rejects a changed operation even if its target remains the same", async () => {
+    const f = await fixture();
+    await f.pending();
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, reason: "Unseen input" } }));
+    await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, f.attempt)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+  });
+
+  it("denies foreign actors and stale attempts at prepare and effect", async () => {
+    const f = await fixture();
+    await expect(f.other.action(prepare, f.attempt)).rejects.toThrow("NOT_OWNED");
+    await f.approved();
+    await expect(f.other.mutation(archive, f.args)).rejects.toThrow("NOT_OWNED");
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, { executionId: "new-attempt" }));
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow("SUPERSEDED");
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("denies current target authority revoked after acceptance", async () => {
+    const f = await fixture();
+    await f.approved();
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { ownerAccountId: f.ids.otherAccountId }));
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow();
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it.each(["cancelled", "failed", "completed"] as const)("prevents a first effect after run becomes %s", async status => {
+    const f = await fixture();
+    await f.approved();
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, { status }));
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow("NOT_ACTIVE");
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("leaves the artifact intact after actual approval rejection", async () => {
+    const f = await fixture();
+    await f.pending();
+    await f.actor.mutation(api.spectraRuns.rejectConfirmation, f.attempt);
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow("NOT_ACTIVE");
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
+  it("classifies a full-content patch from persisted base before any plan operation runs", async () => {
+    const f = await fixture("artifact.update");
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, {
+      input: { artifactId: f.ids.artifactId, blueprintKey: "document", contentPatch: { changes: [{ path: "/blocks/id:body/text", value: "" }] } },
+    }));
+    expect(await f.actor.action(prepare, f.attempt)).toMatchObject({ approvalReasons: ["Clear all authored artifact content"] });
+    expect(await f.operation()).toMatchObject({ status: "proposed", requiresConfirmation: true, output: { artifactWriteScope: { kind: "full_content_delete" } } });
+    expect(await f.artifact()).toMatchObject({ content: body("Authored explanation") });
+  });
+
+  it("allows a substantive replacement without deletion approval", async () => {
+    const f = await fixture("artifact.update");
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document", content: body("New explanation") } }));
+    expect(await f.actor.action(prepare, f.attempt)).toEqual({ approvalReasons: [] });
+    expect(await f.operation()).toMatchObject({ requiresConfirmation: false, output: { artifactWriteScope: { kind: "update" } } });
+  });
+
+  it("detects a cumulative wipe by two same-target patches before either has effects", async () => {
+    const initial = { blocks: [{ id: "a", type: "paragraph", text: "A" }, { id: "b", type: "paragraph", text: "B" }] };
+    const f = await fixture("artifact.update", initial);
+    const secondId = await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document", contentPatch: { changes: [{ path: "/blocks/id:a/text", value: "" }] } } });
+      return ctx.db.insert("spectraOperations", {
+        runId: f.ids.runId, executionId: f.attempt.executionId, actorType: "ai", type: "artifact.update", status: "proposed",
+        input: { artifactId: f.ids.artifactId, blueprintKey: "document", contentPatch: { changes: [{ path: "/blocks/id:b/text", value: "" }] } },
+        affected: [], requiresConfirmation: false, createdAt: Date.now(),
+      });
+    });
+    expect(await f.actor.action(prepare, f.attempt)).toMatchObject({ approvalReasons: ["Clear all authored artifact content"] });
+    expect(await f.operation()).toMatchObject({ status: "proposed", requiresConfirmation: false });
+    expect(await f.t.run(ctx => ctx.db.get(secondId))).toMatchObject({ status: "proposed", requiresConfirmation: true,
+      output: { artifactWriteScope: { kind: "full_content_delete", baseProducerOperationId: f.ids.operationId } } });
+    expect(await f.artifact()).toMatchObject({ content: initial });
+  });
+
+  it("archives after an exact preceding update receipt, never before it or after a subsequent human edit", async () => {
+    const f = await fixture("artifact.update");
+    const next = body("Approved replacement");
+    const archiveId = await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document", content: next } });
+      return ctx.db.insert("spectraOperations", {
+        runId: f.ids.runId, executionId: f.attempt.executionId, actorType: "ai", type: "artifact.archive", status: "proposed",
+        input: { artifactId: f.ids.artifactId }, affected: [], requiresConfirmation: false, createdAt: Date.now(),
+      });
+    });
+    await f.approved();
+    await f.t.run(ctx => ctx.db.patch(archiveId, { status: "executing" }));
+    const args = { ...f.args, operationId: archiveId };
+    await expect(f.actor.mutation(archive, args)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.artifactId, { content: next });
+      const artifact = (await ctx.db.get(f.ids.artifactId))!;
+      const operation = (await ctx.db.get(f.ids.operationId))!;
+      await ctx.db.patch(operation._id, { output: { ...operation.output, artifactWriteReceipt: {
+        scope: await artifactOperationDigest(operation), result: { artifactId: artifact._id },
+        sourceContentIdentity: await artifactSourceIdentity(artifact),
+        resultContentDigest: operation.output.artifactWriteScope.resultContentDigest,
+      } } });
+    });
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("Intervening human work") }));
+    await expect(f.actor.mutation(archive, args)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: next }));
+    expect(await f.actor.mutation(archive, args)).toEqual({ artifactId: f.ids.artifactId });
+    expect(await f.artifact()).toMatchObject({ status: "archived" });
+  });
+
+  it("hydrates integrity-checked offloaded content before classifying and rejects a changed base at commit", async () => {
+    const f = await fixture("artifact.update");
+    const json = JSON.stringify({ content: body("Storage-backed authored work") });
+    await f.t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob([json]));
+      const digest = createHash("sha256").update(json).digest("hex");
+      const payloadRef = await ctx.db.insert("collaborationDurablePayloads", {
+        artifactId: f.ids.artifactId, accountId: f.ids.accountId, storageId, kind: "projection", digest,
+        byteLength: Buffer.byteLength(json), mediaType: "application/json", manifestVersion: 1, policyVersion: 0, status: "active", createdAt: Date.now(),
+      });
+      await ctx.db.patch(f.ids.artifactId, { content: { spectraContentRef: { version: 1, artifactId: f.ids.artifactId,
+        payloadRef, digest, byteLength: Buffer.byteLength(json), path: "content" } } });
+    });
+    expect(await f.actor.action(prepare, f.attempt)).toMatchObject({ approvalReasons: ["Clear all authored artifact content"] });
+    const scope = (await f.operation())!.output.artifactWriteScope;
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("New physical source") }));
+    await expect(f.actor.mutation(commitPreparation, { ...f.attempt, prepared: [{ operationId: f.ids.operationId, scope }] })).rejects.toThrow("PREPARATION_CHANGED");
+  });
+
+  it("does not allow completion output to forge or replace authority or effect receipts", async () => {
+    const f = await fixture();
+    await f.approved();
+    const existing = (await f.operation())!.output;
+    await f.actor.mutation(api.spectraOperations.markExecuted, {
+      operationId: f.ids.operationId, executionId: f.attempt.executionId, affected: [],
+      output: { applicationWriteReceipt: { scope: "forged", result: true }, artifactWriteReceipt: { scope: "forged", result: true },
+        artifactWriteScope: { kind: "update" }, approvedArtifactScope: "forged", clarificationDraft: { version: 1 }, summary: "Reported" },
+    });
+    const result = (await f.operation())!.output;
+    expect(result.artifactWriteScope).toEqual(existing.artifactWriteScope);
+    expect(result.approvedArtifactScope).toEqual(existing.approvedArtifactScope);
+    expect(result).not.toHaveProperty("artifactWriteReceipt");
+    expect(result).not.toHaveProperty("applicationWriteReceipt");
+    expect(result).not.toHaveProperty("clarificationDraft");
+    expect(result.summary).toBe("Reported");
+  });
+
+  it("cannot mark a parked clarification draft as executed or failed", async () => {
+    const f = await fixture();
+    await f.executing();
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { output: { clarificationDraft: { version: 1 } } }));
+    await expect(f.actor.mutation(api.spectraOperations.markExecuted, {
+      operationId: f.ids.operationId, executionId: f.attempt.executionId, affected: [],
+    })).rejects.toThrow("CLARIFICATION_DRAFT_NOT_EXECUTABLE");
+    await expect(f.actor.mutation(api.spectraOperations.markFailed, {
+      operationId: f.ids.operationId, executionId: f.attempt.executionId, error: "late report",
+    })).rejects.toThrow("CLARIFICATION_DRAFT_NOT_EXECUTABLE");
+  });
+
+  it("admits exactly the approved content wipe through the shared sink guard", async () => {
+    const f = await fixture("artifact.update");
+    await f.approved();
+    const result = await f.t.run(ctx => assertAiArtifactWriteAdmission(ctx, {
+      actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
+      aiOperation: { ...f.attempt, operationId: f.ids.operationId },
+      beforeContent: body("Authored explanation"),
+      afterContent: canonicalArtifactWriteContent("document", normalizeAiArtifactWriteContent("document", body(""), "Clear the selected work")),
+    }));
+    expect(result.scope.kind).toBe("full_content_delete");
+    expect(result.resultContentDigest).toBe(result.scope.resultContentDigest);
+  });
+
+  it("denies an unapproved wipe and a substituted result at the shared sink guard", async () => {
+    const f = await fixture("artifact.update");
+    await f.actor.action(prepare, f.attempt);
+    await f.executing();
+    const check = (afterContent: unknown) => f.t.run(ctx => assertAiArtifactWriteAdmission(ctx, {
+      actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
+      aiOperation: { ...f.attempt, operationId: f.ids.operationId },
+      beforeContent: body("Authored explanation"), afterContent,
+    }));
+    await expect(check(body(""))).rejects.toThrow("APPROVAL_SCOPE_REQUIRED");
+    await expect(check(body("Unrecorded change"))).rejects.toThrow("RESULT_SCOPE_MISMATCH");
+  });
+
+  it("requires new approval when a previously partial patch becomes a complete wipe after concurrent editing", async () => {
+    const initial = { blocks: [{ id: "a", type: "paragraph", text: "A" }, { id: "b", type: "paragraph", text: "B" }] };
+    const f = await fixture("artifact.update", initial);
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document",
+      contentPatch: { changes: [{ path: "/blocks/id:a/text", value: "" }] } } }));
+    expect(await f.actor.action(prepare, f.attempt)).toEqual({ approvalReasons: [] });
+    await f.executing();
+    const concurrent = { blocks: [{ id: "a", type: "paragraph", text: "A" }, { id: "b", type: "paragraph", text: "" }] };
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: concurrent }));
+    await expect(f.t.run(ctx => assertAiArtifactWriteAdmission(ctx, {
+      actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
+      aiOperation: { ...f.attempt, operationId: f.ids.operationId }, beforeContent: concurrent,
+      afterContent: { blocks: [{ id: "a", type: "paragraph", text: "" }, { id: "b", type: "paragraph", text: "" }] },
+    }))).rejects.toThrow("APPROVAL_SCOPE_REQUIRED");
+  });
+});

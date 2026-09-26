@@ -140,3 +140,17 @@ export function refreshPlannerSourceContent(value, next, previous) {
     }),
   };
 }
+
+/** Same fieldwise merge for direct imports and a reconstructed canonical room. */
+export function refreshPlannerSourceProjection(current, input) {
+  const content = object(current.content);
+  const matchesBaseline = object(content.source).hash === input.previousSourceHash;
+  if (!input.force && !matchesBaseline) return null;
+  const previous = matchesBaseline ? input.previous : undefined;
+  return {
+    ...current,
+    title: previous?.title !== undefined && current.title === previous.title ? input.next.title : current.title,
+    summary: previous?.summary !== undefined && current.summary === previous.summary ? input.next.summary : current.summary,
+    content: refreshPlannerSourceContent(content, input.next, previous),
+  };
+}

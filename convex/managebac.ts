@@ -23,7 +23,7 @@ import {
   defaultArtifactSchemaVersion,
 } from "./spectraShared";
 import { upsertSourceCalendarItem } from "./calendarShared";
-import { refreshPlannerSourceContent } from "../shared/planner-source.mjs";
+import { refreshPlannerSourceProjection } from "../shared/planner-source.mjs";
 
 const EMPTY_COUNTS = {
   fetched: 0,
@@ -2535,21 +2535,21 @@ async function safelyRefreshProjection(
       artifact.ownerAccountId !== projection.accountId || artifact.schoolId !== projection.schoolId) return false;
     const content = record(artifact.content);
     const sourceState = record(content.source);
-    if (!force && sourceState.hash !== previousSourceHash) return false;
     const title = text(
       normalized.title ?? normalized.name,
       240,
       artifact.title,
     );
-    const previous = previousNormalized !== undefined && sourceState.hash === previousSourceHash
-      ? record(previousNormalized) : undefined;
+    const previous = previousNormalized !== undefined ? record(previousNormalized) : undefined;
     const previousText = previous ? {
-      title: text(previous.title ?? previous.name, 240, "ManageBac task"),
-      description: plainText(previous.description, 20_000),
+      title: typeof (previous.title ?? previous.name) === "string" ? text(previous.title ?? previous.name, 240) : undefined,
+      description: typeof previous.description === "string" ? plainText(previous.description, 20_000) : undefined,
+      summary: typeof previous.description === "string" ? plainText(previous.description, 600) : undefined,
     } : undefined;
-    const nextContent = refreshPlannerSourceContent(content, {
+    const next = refreshPlannerSourceProjection(artifact, { previousSourceHash, previous: previousText, force, next: {
       title,
       description: plainText(normalized.description, 20_000),
+      summary: plainText(normalized.description, 600),
       dueAt: timestampValue(normalized.dueAt),
       source: {
         ...sourceState,
@@ -2560,19 +2560,17 @@ async function safelyRefreshProjection(
         status: "active",
         lockedFields: ["taskTitle", "description", "dueAt", "source"],
       },
-    }, previousText);
-    const nextTitle = previousText && artifact.title === previousText.title ? title : artifact.title;
-    const nextSummary = previous && artifact.summary === plainText(previous.description, 600)
-      ? plainText(normalized.description, 600, artifact.summary ?? "") : artifact.summary;
+    } });
+    if (!next) return false;
     const now = Date.now();
     await ctx.db.patch(artifact._id, {
-      title: nextTitle,
-      summary: nextSummary,
-      content: nextContent,
+      title: next.title,
+      summary: next.summary,
+      content: next.content,
       textIndex: buildArtifactTextIndex({
-        title: nextTitle,
-        summary: nextSummary,
-        content: nextContent,
+        title: next.title,
+        summary: next.summary,
+        content: next.content,
         tags: artifact.tags,
       }),
       updatedAt: now,

@@ -42,11 +42,11 @@ Live cases C1–C8 have not run in this unit. The focused regression `presentati
 
 ## Paired prompt comparison for the skills unit
 
-`capture-s11-craft-prompts.ts` captures the exact exported workspace core and artifact-worker/quality sections for four briefs: a simple answer, a short letter, a consistent comparison handout, and mixed document/presentation work. It uses `o200k_base` to count actual tokens. It does not call a provider or generate fake gold outputs. Run only in a RUNTIME-approved guarded slot:
+`capture-s11-craft-prompts.ts` captures the exact exported workspace core and artifact-worker/quality sections for five briefs: a simple answer, a short letter, a consistent comparison handout, a workbook, and mixed document/presentation work. It uses `o200k_base` to count actual tokens and records LF-normalized source hashes. The `before` label rejects source that differs from `00523e2a` at any of the recorded prompt source files. It does not call a provider or generate fake gold outputs. Run only in a coordinator-approved guarded slot, with RUNTIME's inherited filesystem guard and dependency paths:
 
 ```powershell
-node node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts before
-node node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts after
+node --conditions=react-server node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts before
+node --conditions=react-server node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts after
 ```
 
 Capture `before` at `00523e2a` and `after` at the candidate revision. Outputs go to `.spectra-local/launch-s11/craft/prompt-corpus/{before,after}`. They explicitly exclude routing additions, tool schemas, orientation, attachments and conversation; they must not be described as a captured live request. The mixed case records the ordinary core and the two assigned worker prompts separately, not a new monolithic all-skills system prompt. The comparison confirms prompt contents and token cost only. Live saved-output judgments use the independent rubric above; these paired briefs are regression cases, not held-out proof.

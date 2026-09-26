@@ -1,5 +1,7 @@
 /** Offline prompt capture only: no model calls, effects or self-scoring. */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { getEncoding } from "js-tiktoken";
 import { WORKSPACE_ASSISTANT_PROMPT, workspaceSystemPrompt } from "../../../src/features/spectra/ai/workspace-assistant-prompt";
@@ -9,6 +11,22 @@ import { artifactQualityPromptSection } from "../../../src/features/spectra/qual
 async function main() {
   const label = process.argv[2];
   if (label !== "before" && label !== "after") throw new Error("Supply before or after.");
+  const sourcePaths = [
+    "src/features/spectra/ai/workspace-assistant-prompt.ts",
+    "src/features/spectra/ai/tool-contract.ts",
+    "src/app/api/spectra/run/loop/plan.ts",
+    "src/features/spectra/quality/rubrics.ts",
+    ...["document", "presentation", "sheets"].map((type) => `src/features/spectra/artifacts/skills/${type}.ts`),
+    ...(label === "after" ? ["src/features/spectra/artifacts/skills/artifact-design.ts"] : []),
+  ];
+  const sourceHashes = Object.fromEntries(sourcePaths.map((sourcePath) => {
+    const source = readFileSync(sourcePath, "utf8").replace(/\r\n/g, "\n");
+    if (label === "before") {
+      const baseline = execFileSync("git", ["show", `00523e2a:${sourcePath}`], { encoding: "utf8" }).replace(/\r\n/g, "\n");
+      if (source !== baseline) throw new Error(`Before capture requires the 00523e2a source for ${sourcePath}.`);
+    }
+    return [sourcePath, createHash("sha256").update(source).digest("hex")];
+  }));
   const encoding = getEncoding("o200k_base");
   const output = path.resolve(".spectra-local/launch-s11/craft/prompt-corpus", label);
   mkdirSync(output, { recursive: true });
@@ -35,7 +53,11 @@ async function main() {
       scope: "Exact exported workspace core and assigned artifact worker sections, captured offline. Excludes agentSystemPrompt routing, dynamic orientation, tool schemas, attachments and conversation. No model response or saved-artifact quality claim.",
     }, null, 2));
   }
-  writeFileSync(path.join(output, "token-counts.json"), JSON.stringify({ encoding: "o200k_base", counts }, null, 2));
+  writeFileSync(path.join(output, "token-counts.json"), JSON.stringify({
+    encoding: "o200k_base", counts, sourceHashes, sourceHashNewlines: "LF",
+    checkoutHead: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    sourceNote: "Hashes describe the prompt source actually loaded, including any temporary baseline source. HEAD alone is not proof of working-tree contents.",
+  }, null, 2));
   process.stdout.write(JSON.stringify({ label, output, encoding: "o200k_base", counts }));
 }
 

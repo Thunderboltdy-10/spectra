@@ -33,7 +33,7 @@ The previous live conversation explicitly reported repeated retrieve/inspect/pla
 - After replacing a raw fixture colour with Spectra tokens, the two directly affected policy/native suites pass **9/9**, and scoped ESLint passes with zero warnings. `git diff --check` passes (Git reports only normal CRLF conversion notices).
 - No full suite, full typecheck or build was run; those require a shared heavy-check slot. This report does not establish repository-wide health.
 
-Reproduce focused verification from this checkout:
+Historical first-unit invocation is recorded below. Any current rerun requires the coordinator's explicit executable slot, RUNTIME's inherited filesystem guard/dependency environment, the private cache wrapper, `--maxWorkers=1 --no-file-parallelism`; the command below alone is not current authorization:
 
 ```powershell
 $env:SPECTRA_CRAFT_CAPTURE = '1'
@@ -97,3 +97,5 @@ SECURITY confirmed its concurrent `model.ts` change only replaces the empty-deck
 The copied Apache license matches SHA-256 `0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594`. The 12-slide sparse-input regression now asserts full body-copy and notes preservation. Offline capture includes a workbook case; assigning a `before` label does not itself restore baseline source, so paired counts must record the actual source used. No model/provider changes or cache-hit, latency, native-render or launch-acceptance claims. Official [prompt caching guidance](https://developers.openai.com/api/docs/guides/prompt-caching#gotchas) distinguishes a shared prefix from an observed cached prefix; this unit only preserves the common base and changes demand-loaded skill text.
 
 Source validation: `git diff --check` passed. Guarded tests, lint and prompt/token capture are still queued at this checkpoint. The earlier 86-test result belongs to the first unit and must not be reused as evidence for this unit.
+
+Source candidate: `40356d79fa490adb35c6fb5b308ac46e24f87305`. SECURITY's independent empty-deck fallback is `dce9bf0d`. RUNTIME-R supplied the exact shared/private dependency roots and guard preload; these settings are configuration, not a slot release. The follow-up capture helper verifies baseline source against `00523e2a` before writing paired output and records loaded source hashes, including the new craft guidance for the candidate. Guarded execution remains pending coordinator slot 2.

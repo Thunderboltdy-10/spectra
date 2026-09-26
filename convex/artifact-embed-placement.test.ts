@@ -1,18 +1,20 @@
 /// <reference types="vite/client" />
 import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
-import { makeFunctionReference, type FunctionReturnType } from "convex/server";
+import { makeFunctionReference, type FunctionArgs, type FunctionReturnType } from "convex/server";
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement, type loadHead, type recordProof } from "./artifactEmbedPlacement";
+import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement, loadRoomPage, type loadHead, type recordProof } from "./artifactEmbedPlacement";
 import type { refresh } from "./artifactEmbedPlacementActions";
 import { containsPinnedArtifactPlacement } from "../shared/artifact-embed-placement";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { releaseVersionIfUnpinned } from "./artifactSnapshots";
 import { initializeNativeArtifactDocument } from "../scripts/collaboration-native-projection.mjs";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "placement-owner", email: "placement@example.test", emailVerified: true };
@@ -21,6 +23,9 @@ const headRef = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }
 const recordRef = makeFunctionReference<"mutation", { embedId: Id<"artifactEmbeds">; headHash: string }, FunctionReturnType<typeof recordProof>>("artifactEmbedPlacement:recordProof");
 const buffer = (value: Uint8Array) => Uint8Array.from(value).buffer;
 const vectorHash = (document: Y.Doc) => createHash("sha256").update(Y.encodeStateVector(document)).digest("base64url");
+const pageHandler = (loadRoomPage as unknown as {
+  _handler: (ctx: QueryCtx, args: FunctionArgs<typeof loadRoomPage>) => Promise<FunctionReturnType<typeof loadRoomPage>>;
+})._handler;
 
 async function fixture(typeKey = "document") {
   const t = convexTest(schema, modules);
@@ -222,13 +227,34 @@ describe("server-observed offloaded and collaboration placement", () => {
     try {
       const bytes = Y.encodeStateAsUpdate(f.document);
       const stored = await f.payload(bytes, "yjs-snapshot");
+      const snapshot = { roomId: f.roomId, artifactId: f.ids.hostId, throughSequence: 3, update: new ArrayBuffer(0), stateVector: buffer(Y.encodeStateVector(f.document)), contentHash: createHash("sha256").update(bytes).digest("base64url"), schemaVersion: 1, payloadRef: String(stored.payloadId), payloadDigest: stored.digest, byteLength: stored.byteLength, createdBy: "compactor" as const, createdAt: f.ids.now };
       await f.t.run(async ctx => {
         for (const update of await ctx.db.query("collaborationUpdates").withIndex("by_room_sequence", q => q.eq("roomId", f.roomId)).collect()) await ctx.db.delete(update._id);
-        const snapshot = { roomId: f.roomId, artifactId: f.ids.hostId, throughSequence: 3, update: new ArrayBuffer(0), stateVector: buffer(Y.encodeStateVector(f.document)), contentHash: createHash("sha256").update(bytes).digest("base64url"), schemaVersion: 1, payloadRef: String(stored.payloadId), payloadDigest: stored.digest, byteLength: stored.byteLength, createdBy: "compactor" as const, createdAt: f.ids.now };
         await ctx.db.insert("collaborationSnapshots", { ...snapshot, status: "verified" });
-        for (let i = 0; i < 150; i++) await ctx.db.insert("collaborationSnapshots", { ...snapshot, status: "corrupt", createdAt: f.ids.now + i + 1 });
         await ctx.db.patch(f.roomId, { snapshotSequence: 3 });
       });
+      const head = await f.actor.query(headRef, { embedId: f.ids.embedId });
+      const measure = () => f.actor.run(async ctx => {
+        const observer = observeDatabase(ctx.db);
+        await pageHandler({ ...ctx, db: observer.db }, { embedId: f.ids.embedId, headHash: head!.headHash });
+        return observer.snapshot();
+      });
+      const before = await measure();
+      await f.t.run(async ctx => {
+        for (let i = 0; i < 150; i++) await ctx.db.insert("collaborationSnapshots", { ...snapshot, status: "corrupt", createdAt: f.ids.now + i + 1 });
+      });
+      const after = await measure();
+      expect(after).toEqual(before);
+      expect(after.reads.filter(read => read.table === "collaborationSnapshots").reduce((sum, read) => sum + read.documentsReturned, 0)).toBe(1);
+      expect(after.writes).toBe(0);
+      if (process.env.SPECTRA_PERF_EVIDENCE === "1") {
+        const directory = ".spectra-local/launch-s11/history";
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(`${directory}/placement-read-cost.json`, JSON.stringify({
+          evidence: "Actual loadRoomPage handler; returned rows and JSON bytes, not physical I/O/billing. ArrayBuffer bytes are not represented by JSON serialization.",
+          beforeStoredSnapshots: 1, afterStoredSnapshots: 151, before, after,
+        }, null, 2));
+      }
       expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "proven" });
       await f.patchEmbed({ placementProof: undefined });
       await f.t.run(ctx => ctx.storage.delete(stored.storageId));

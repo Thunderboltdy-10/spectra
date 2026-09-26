@@ -1131,8 +1131,11 @@ export async function executeOperation(
       });
     affected = [{ type: "artifact", id: input.artifactId }];
   } else if (operation.type === "artifact.archive") {
-    output = (await mutate("spectraArtifacts:archive", {
+    output = (await mutate("spectraArtifactWrites:archive", {
       actorClerkId,
+      runId,
+      executionId: context.executionId,
+      operationId,
       artifactId: operation.input.artifactId,
     })) as Record<string, unknown>;
     affected = [{ type: "artifact", id: operation.input.artifactId }];

@@ -7,6 +7,8 @@ import { applicationApprovalScope, applicationOperationScope, applicationWriteRe
 import { mapOperationArtifactReferences } from "../src/features/spectra/operations/dependencies";
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
+import { vUiObservationFence } from "./spectraUiObservationSchema";
+import { assertUiObservationFence } from "./spectraUiObservation";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -97,7 +99,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
 }
 
 export const execute = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations"), expectedCommand: v.string(), expectedArgs: v.any() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations"), expectedCommand: v.string(), expectedArgs: v.any(), uiObservation: v.optional(vUiObservationFence) },
   handler: async (ctx, args): Promise<unknown> => {
     const actor = await getAuthenticatedActor(ctx);
     const run = await ctx.db.get(args.runId);
@@ -154,6 +156,7 @@ export const execute = mutation({
     if (needsConfirmation && (run.approval?.status !== "accepted" || run.approval.executionId !== args.executionId ||
         row(operation.output).approvedApplicationScope !== await applicationApprovalScope(ctx, operation, run)))
       throw new Error("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
+    await assertUiObservationFence(operation, args.uiObservation, Date.now());
     const snapshot = row(run.contextSnapshot);
     const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined);
     // MutationCtx.runMutation executes inside this transaction. Its permission

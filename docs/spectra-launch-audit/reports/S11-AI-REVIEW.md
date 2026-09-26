@@ -121,3 +121,21 @@ The coordinator then allocated a bounded `recoveredFromLive` source review with 
 Recommended bounded correction, sent to ENGINE, SECURITY and the coordinator: do not infer saves or replay uncertain applies from matching content. Reuse the existing outer failure read for same-attempt journal reconciliation, with no additional successful-path query. A richer recovery should carry acknowledgement identity and phase from the actual provider durability boundary through post-ack failures, then use authoritative durable artifact-update receipts for lost process acknowledgements. The provider presently waits for its durable acknowledgement before releasing claims and returning; release/presence cleanup and `act.ts` projection/evidence/UI work can still throw before `markExecuted`. Preserve that durability boundary rather than substituting a content read. SECURITY's inspected receipt implementation is archive-only, so an update receipt cannot be assumed. Full replacement verification separately needs comparison through the same normalization/semantic rules used by the write path.
 
 These follow-up findings are source-only. No live failure was injected and no new test, typecheck, lint, build or service process was started for this review. ENGINE owns the recovery implementation; no second production path was added here.
+
+## Guarded receipt validation — 2026-09-26
+
+The coordinator explicitly allocated slot 2 after the user resumed this worker. The receipt production candidate `49954e6edf62fe9caf09b8cc6a2a55f41ac661ee`, with doc-only HEAD `76d6f8ea64af65169a58c6aa9ff878891512b91d`, passed the following focused checks. This supersedes the earlier unrun status for these receipt/neighbor suites only.
+
+| Check | Result |
+| --- | --- |
+| `s11-review-ai-receipt-report.test.ts` | 17 passed |
+| `plan-diagnostics.test.ts` | 26 passed |
+| `honest-execution.test.ts` | 12 passed |
+| `run-settle-honesty.test.ts` | 4 passed |
+| Combined Vitest run | 4 files, 59 passed, 3.69 seconds reported by Vitest |
+| ESLint on the six changed TypeScript files | Passed with zero warnings |
+| TypeScript syntax/semantic diagnostics on the same six source/test entry files | Zero diagnostics; not a full-project typecheck |
+
+Vitest ran directly with `--maxWorkers=1 --no-file-parallelism`. All executable checks inherited RUNTIME's exact `fs-guard.cjs` through `NODE_OPTIONS`, with `S11_SHARED_DEPS` and `S11_PRIVATE_DEPS` set to the approved shared/private dependency directories. The existing junction was reused. Local evidence is under `.spectra-local/launch-s11/ai-review/`: `receipt-tests.json`, `receipt-tests.log`, `receipt-lint.log`, `receipt-types.log`, and the explicit scoped `check-types.cjs` runner. No dependency install, service start/restart, backend publication, browser/native mutation or live fault injection occurred. Slot 2 was explicitly released immediately after these checks, before report editing.
+
+ENGINE was sent the exact receipt bookkeeping boundaries to preserve while removing ambiguous retries from both primary and confirmed-resume execution. A further source check found baseline synchronization can precede desired-content validation inside `applyAiArtifactMutation`; even a schema/path error therefore does not prove that no write began. Keep explicit region-conflict handling and require typed phase evidence for any future safe prewrite retry. ENGINE's verification/recovery repair remains a separate implementation and acceptance item. The original 14 independent continuation/loop regression cases were not rerun as part of this receipt-focused allocation.

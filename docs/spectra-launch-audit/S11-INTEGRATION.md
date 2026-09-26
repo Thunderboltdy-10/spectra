@@ -1,6 +1,6 @@
 # S11 coordinator review and integration ledger
 
-Updated 2026-09-25. Product baseline d9aabfb5. Integration branch codex/launch-integration; main unchanged. Candidate pass counts below are scoped observations before shared dependency loss, not integrated or release acceptance.
+Updated 2026-09-26. Product baseline d9aabfb5. Integration branch codex/launch-integration; main unchanged. Candidate pass counts are scoped observations, not integrated or release acceptance; post-restoration guarded results are distinguished below.
 
 | Unit | Candidate | Integration | Coordinator verdict and proof boundary |
 | --- | --- | --- | --- |
@@ -21,6 +21,9 @@ Updated 2026-09-25. Product baseline d9aabfb5. Integration branch codex/launch-i
 | Trained-agent routing eligibility | 266cdc60 | 9ff8ab85 | Quality/type bonuses cannot activate an unrelated agent; current published evaluation/tools rechecked, explicit selection retained. Candidate routing/intake/publication tests passed. Current matching remains heuristic; demand-driven discovery is a separate needed change. |
 | Memory provider provenance | b9436145,c5849585 | 5d4bde73,f2e1593e | Current source reader reused within request; unverified product_event provenance rejected, historical rows retained but do not independently grant availability. 31 candidate memory tests passed. |
 | Context validation/measurement | 6f8167ab,658c505a | 10748851,03e5d0e6 | 121 unique tests across 8 files passed after a test-hook return correction; scoped lint passed. Real 256-dimensional embeddings outperformed fingerprints on a small synthetic corpus; no production model/schema migration yet. |
+| Imported task discovery/source metadata | 3b8f9e05,115ad267,aa8c79a1,363e027a | 5810c4e2,e597d3cb,779e6001,45076d2b | Coordinator reviewed canonical task links, root deadline binding and personal-field preservation. 124 guarded candidate tests and scoped lint pass. AI/gateway enforcement and provider refresh versus active room are separate unfinished units. |
+| Sparse catalog traversal | b5e295af,b14e30ed | 603824e8,f405c09b | Two-row placement probes share the total eight-row budget; exact continuation/authority retained. 20 catalog plus37 test-correction checks pass; scoped type/lint clean. 1024 unrelated private rows:1155 to168 requests,20.7MB to3.4MB returned rowbytes. Still too costly; actor-graph prototype and actual caller migration required. |
+| Complete native preservation proof | bf891b0b | d7e88046 | All scoped claims compare complete attached XML subtrees; original ownership/shared references prove intentional deletion; narrow derived calcChain disposal. 28 own,2 original review,94 neighbors pass. Three spreadsheet projection failures reproduced baseline and assigned OFFICE-MODELS. Live round-trip remains pending. |
 
 ## Cross-system decisions
 
@@ -32,6 +35,10 @@ Choreography extends existing semantic action/command/run-event identity. Actual
 
 Initial AI context is compact authorized orientation; model chooses retrieval/skills. No keyword greeting dispatch, mandatory planning/obligation JSON, or fixed vocabulary gate masquerading as semantic recall. Structured writes and all authorization/receipt checks remain. Completion must account for the whole compatible request and staged effects across recovery/clarification.
 
+September26 atomic AI/native direction: prepare/readback/upload immutable package only; one signed internal mutation appends exact readback-normalized Yjs, history, native outbox/cloud advancement and receipt. Never create a claimable native request before canonical admission. Origin consumes exact admitted bytes without a second authored append. Shared owner contract is in DURABLE's S11-DURABLE-AI-NATIVE-CONTRACT.md; implementation and tests remain pending. Independent review also found D1 wrong-ancestor fallback and first-open resource-to-typed gaps; DURABLE is repairing before claiming its candidate green.
+
+Five confirmed provider-resource-error tasks were replaced into their existing checkouts, with model/effort/Full Access independently verified. No healthy task was replaced. All18active owners received the new routing. See S11-FLEET.md; originals have no ownership even though archive cleanup failed. Performance/efficiency includes real latency/heap, read/write/returned-byte costs, sync traffic and AI cache behavior; source and synthetic results alone do not fulfill it.
+
 ## Acceptance still required
 
 At integration84828047 after controlled dependency restoration, all14discovered changed focused test files passed (137tests,20.88s). Integrated typecheck returned5diagnostics: two fixture unknown-type sites (three errors), a converter preservation assertion property type, and the existing embed nullable value. Owners are repairing these; tests are not a launch verdict. RUNTIME's guarded private full baseline runs separately. Raw logs are under ignored `.spectra-local/launch-s11/integrated-*84828047.log`.
@@ -40,6 +47,6 @@ The isolated original-baseline run completed after 405.828 seconds at 12:17:21 U
 
 Coordinator reread actual final S9-AI conversation `01a0d3b1-e48a-7292-b2eb-051452e961ae` turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`: saved deck version3 retained evidence handles but lacked citation arrays, subsequent runs repeated retrieval/planning and failed without writes, and a prior saved update was marked failed. This supports separate loop, citation preservation and receipt-truth repairs, not just shorter timeouts. S9-OFFICE latest turn `01a0d1e8-ce98-7163-b19e-d803314cc8e7` explicitly left live multiplayer unverified after a page-load failure. S9-DURABLE turn `01a0cb5f-951a-7fc0-9b43-051d18da2904` recorded 161 focused passes but excluded live actor revocation and final physical cleanup; those exclusions remain acceptance work.
 
-Test scheduling now has two controlled single-worker lanes: RUNTIME slot1 (PRESERVATION, DOCX, EXPERIENCE, HISTORY, PERFORMANCE, CHOREO, BRIDGE), coordinator slot2 (DATA completed, CONTEXT completed, SCHOOL active, then short DATA typing check, ENGINE, SECURITY, DURABLE/COLLAB, AI-REVIEW, CRAFT). Every test uses the inherited filesystem guard. New managed worktree creation, installs and unguarded suites remain held. Source-only candidate commits do not become acceptance claims.
+Post-restoration candidate checks completed: SCHOOL124, DATA20+37, ENGINE81, AI receipt59, SECURITY170unique. These overlap neighboring suites and must not be summed into a unique integrated count. Current lanes: RUNTIME-R slot1 EXPERIENCE→HISTORY→PERFORMANCE→CHOREO→BRIDGE→DOCXtable→OFFICE-MODELS; coordinator slot2 DURABLE→COLLAB→ENGINEfollow-up→CONTEXT→CRAFT. Every run uses inherited filesystem guard and one worker. New managed worktree creation, installs and unguarded suites remain held; local recovery tasks may reuse existing checkouts. Latest combined integration checks remain pending.
 
 Restore a stable exact-lock test environment and rerun integrated affected checks. Publish only one frozen local backend/frontend revision through RUNTIME, then Profile A visible/invisible/Follow AI, multi-actor/tab editing, native disposable-file crash/retry/round-trip/history, source revocation, embed lifecycle, and cold/warm latency/memory/row-byte/traffic measurements. No production or launch-ready claim has been made.

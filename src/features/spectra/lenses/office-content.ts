@@ -27,6 +27,7 @@ import { xlsxFormulaSupport } from "./xlsx-formula-support";
 import { parseAddress, columnName } from "../sheets/model";
 import { quoteSheetPrefix } from "../sheets/formula-refs";
 import { normalizeNativeFontFamily } from "../office-fonts";
+import { normalizePptxProjectionForReadback, pptxTitleFromObjects } from "./pptx-readback";
 
 function codedOfficeContentError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -1489,7 +1490,6 @@ const pptxEditorContentSchema = z
 
 function editorObject(value: Record<string, unknown>, fallbackId: string) {
   return {
-    id: typeof value.id === "string" && value.id ? value.id : fallbackId,
     type: value.type as PptxProjection["slides"][number]["objects"][number]["type"],
     x: typeof value.x === "number" ? value.x : 80,
     y: typeof value.y === "number" ? value.y : 300,
@@ -1498,6 +1498,7 @@ function editorObject(value: Record<string, unknown>, fallbackId: string) {
     rotation: typeof value.rotation === "number" ? value.rotation : 0,
     content: value.content ?? { text: "" },
     ...value,
+    id: typeof value.id === "string" && value.id ? value.id : fallbackId,
   };
 }
 
@@ -1516,13 +1517,24 @@ export function pptxProjectionFromContent(
   const raw = pptxEditorContentSchema.parse(content);
   const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
   if (!raw.slides.length) return base;
-  return pptxProjectionSchema.parse({
+  const projection = pptxProjectionSchema.parse({
     ...base,
     slides: raw.slides.map((next, index) => {
       const slide = baseById.get(next.id);
       const incomingRawObjects = (next.objects ?? []).map(
         (object) => object as Record<string, unknown>,
       );
+      // Completeness is caller authority, never inferred from binding metadata.
+      // Omission carries even for whole-model callers; a supplied list is strict.
+      const completeObjects = options?.objectLists === "complete" && next.objects !== undefined;
+      if (completeObjects) z.array(presentationObjectProjectionSchema).parse(next.objects);
+      const incomingIds = new Set<string>();
+      for (const incoming of incomingRawObjects) {
+        if (typeof incoming.id !== "string" || !incoming.id) continue;
+        if (incomingIds.has(incoming.id))
+          throw codedOfficeContentError("PPTX_DUPLICATE_OBJECT_ID", "A slide contains duplicate object identities.");
+        incomingIds.add(incoming.id);
+      }
       const incomingObjects = (
         slide
           ? incomingRawObjects
@@ -1552,17 +1564,9 @@ export function pptxProjectionFromContent(
           ...(next.hidden ? { hidden: true } : {}),
           speakerNotes: next.speakerNotes ?? "",
         };
-      // Completeness is caller authority, never inferred from binding metadata.
-      // Even an authorized whole-model caller may omit this property to carry it.
-      const completeObjects = options?.objectLists === "complete" && next.objects !== undefined;
-      if (completeObjects) z.array(presentationObjectProjectionSchema).parse(next.objects);
       const previousById = new Map(slide.objects.map((object) => [object.id, object]));
-      const incomingIds = new Set<string>();
       const occupiedIds = new Set([...previousById.keys(), ...incomingObjects.flatMap((object) => object.id ? [object.id] : [])]);
       const resolvedObjects = incomingObjects.map((incoming, objectIndex) => {
-        if (incoming.id && incomingIds.has(incoming.id))
-          throw codedOfficeContentError("PPTX_DUPLICATE_OBJECT_ID", "A slide contains duplicate object identities.");
-        if (incoming.id) incomingIds.add(incoming.id);
         const previous = previousById.get(incoming.id);
         if (previous) {
           // A sparse content patch must not erase native shape/media locators.
@@ -1592,11 +1596,12 @@ export function pptxProjectionFromContent(
           ? next.hidden === true || undefined
           : slide.hidden,
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
-        text: completeObjects ? objects.filter((object) => object.type === "text").map((object) => presentationObjectText(object as PresentationObject)) : text.length ? text : slide.text,
+        text: completeObjects ? slide.text : text.length ? text : slide.text,
         objects,
       };
     }),
   });
+  return options?.objectLists === "complete" ? normalizePptxProjectionForReadback(projection, base) : projection;
 }
 
 export function pptxOperationsBetween(
@@ -1720,7 +1725,9 @@ export function pptxOperationsBetween(
         });
       return;
     }
-    if (slide.title !== old.title)
+    const derivesTitleFromChangedObjects = pptxTitleFromObjects(old.objects) === old.title
+      && pptxTitleFromObjects(slide.objects) === slide.title;
+    if (slide.title !== old.title && !derivesTitleFromChangedObjects)
       operations.push({
         kind: "set-title",
         slideId: slide.id,
@@ -1742,6 +1749,9 @@ export function pptxOperationsBetween(
       old.objects.map((object) => [object.id, object]),
     );
     const keptObjects = new Set(slide.objects.map((object) => object.id));
+    const retainedOrder = old.objects.filter((candidate) => keptObjects.has(candidate.id)).map((candidate) => candidate.id);
+    const desiredRetainedOrder = slide.objects.filter((candidate) => oldObjects.has(candidate.id)).map((candidate) => candidate.id);
+    const inheritedRemovalOrder = keptObjects.size < old.objects.length && equal(retainedOrder, desiredRetainedOrder);
     for (const oldObject of old.objects) {
       if (!keptObjects.has(oldObject.id)) {
         const id = nativeId(oldObject);
@@ -1879,8 +1889,9 @@ export function pptxOperationsBetween(
         if (!equal(crop, previousCrop) && crop)
           operations.push({ kind: "set-image-crop", slideId: slide.id, shapeId: nativeShapeId, crop: { left: Number(crop.left ?? 0), top: Number(crop.top ?? 0), right: Number(crop.right ?? 0), bottom: Number(crop.bottom ?? 0) } });
       }
-      if (object.hidden !== previousObject.hidden || object.readingOrder !== previousObject.readingOrder || object.parentId !== previousObject.parentId) {
-        operations.push({ kind: "set-object-state", slideId: slide.id, shapeId: nativeShapeId, ...(object.hidden !== undefined ? { hidden: object.hidden } : {}), ...(object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}), ...(object.parentId !== undefined ? { parentId: object.parentId ?? null } : {}) });
+      const orderChanged = object.readingOrder !== previousObject.readingOrder && !inheritedRemovalOrder;
+      if (object.hidden !== previousObject.hidden || orderChanged || object.parentId !== previousObject.parentId) {
+        operations.push({ kind: "set-object-state", slideId: slide.id, shapeId: nativeShapeId, ...(object.hidden !== undefined ? { hidden: object.hidden } : {}), ...(orderChanged && object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}), ...(object.parentId !== undefined ? { parentId: object.parentId ?? null } : {}) });
       }
     }
   });

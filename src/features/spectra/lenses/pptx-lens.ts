@@ -16,10 +16,16 @@ import { sha256Payload } from "./docx-lens";
 import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
+import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
 
 export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
 export class PptxLensError extends Error { constructor(public readonly code: string, message: string) { super(message); this.name = "PptxLensError"; } }
+
+export function pptxProjectionSemanticDigest(projection: PptxProjection, before?: PptxProjection) {
+  const requested = before ? normalizePptxProjectionForReadback(projection, before) : projection;
+  return sha256Payload(new TextEncoder().encode(JSON.stringify(pptxSemanticContent(requested))));
+}
 
 function descendants(root: XmlElement): XmlElement[] { const result: XmlElement[] = []; const pending = [...root.elements()].reverse(); while (pending.length) { const child = pending.pop()!; result.push(child); const nested = child.elements(); for (let index = nested.length - 1; index >= 0; index -= 1) pending.push(nested[index]!); } return result; }
 function semanticNode(root: XmlElement, localName: string) { return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === localName); }
@@ -435,7 +441,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   for (const [feature, cls, reason] of regionClasses) {
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })))));
+  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(pptxSemanticContent({ slides }))));
   const themeFonts = await presentationThemeFonts(deck);
   const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
   return { projection, fidelityMap };

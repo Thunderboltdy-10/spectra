@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import { Workbook } from "@ariadng/office/xlsx";
 import { strFromU8, unzipSync } from "fflate";
 import { fidelityRegionMap } from "../commands/office/fidelity-regions";
-import { pptxLens } from "../lenses/pptx-lens";
-import { xlsxLens } from "../lenses/xlsx-lens";
+import { pptxLens, pptxProjectionSemanticDigest } from "../lenses/pptx-lens";
+import { xlsxLens, xlsxSemanticDigest } from "../lenses/xlsx-lens";
 import {
   pptxArtifactContent, pptxProjectionUpdateFromContent,
   xlsxArtifactContent, xlsxProjectionUpdateFromContent,
@@ -31,6 +31,7 @@ describe("S11 Office model boundaries", () => {
       const reopened = await pptxLens.open(bytes);
       expect(reopened.projection.slides.map((item) => item.objects.map((object) => object.id)))
         .toEqual(desired.slides.map((item) => item.objects.map((object) => object.id)));
+      expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reopened.projection.nativeBinding.semanticDigest);
       const beforeParts = unzipSync(opened.preservedCarry.payload);
       const afterParts = unzipSync(bytes);
       const carried = Object.keys(beforeParts).filter((name) => /^ppt\/(charts|media|embeddings|notesSlides)\//.test(name));
@@ -48,6 +49,7 @@ describe("S11 Office model boundaries", () => {
     expect(update.projection.slides.find((item) => item.id === slide.id)!.objects).toEqual([]);
     const reopened = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.objects).toEqual([]);
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reopened.projection.nativeBinding.semanticDigest);
     // The exact same theme and binding cannot grant removal authority.
     expect(pptxProjectionUpdateFromContent(complete, opened.projection).projection.slides.find((item) => item.id === slide.id)!.objects).toEqual(slide.objects);
     for (const patch of [{ id: slide.id }, { id: slide.id, objects: [] }]) {
@@ -75,7 +77,11 @@ describe("S11 Office model boundaries", () => {
     const slide = content.slides.find((item) => item.objects.length > 1)!;
     const reversed = [...slide.objects].reverse();
     const desired = { ...content, slides: content.slides.map((item) => item.id === slide.id ? { ...item, objects: reversed } : item) };
-    expect(pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" }).projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    const update = pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" });
+    expect(update.projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    const reordered = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
+    expect(reordered.projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reordered.projection.nativeBinding.semanticDigest);
     expect(() => pptxProjectionUpdateFromContent({ ...content, slides: [{ ...slide, objects: [slide.objects[0]!, slide.objects[0]!] }] }, opened.projection, { objectLists: "complete" })).toThrow(/duplicate object identities/);
     const incomplete = { id: slide.id, objects: [{ id: slide.objects[0]!.id, type: slide.objects[0]!.type }] };
     expect(() => pptxProjectionUpdateFromContent({ ...content, slides: [incomplete] }, opened.projection, { objectLists: "complete" })).toThrow();
@@ -111,6 +117,7 @@ describe("S11 Office model boundaries", () => {
     expect(sheet).toMatchObject({ showGridlines: false, showHeadings: false, rowHeights: { "1": 36 } });
     expect(sheet.columnWidths!["0"]).toBeCloseTo(148, 0);
     expect(sheet.tabColor).toMatch(/112233/);
+    expect(await xlsxSemanticDigest({ ...reopened.projection, sheets: [{ ...sheet, tabColor: "#FF0000" }, ...reopened.projection.sheets.slice(1)] })).not.toBe(reopened.projection.nativeBinding.semanticDigest);
     expect(sheet.tables).toEqual([expect.objectContaining({ name: "FirstTable", range: "A1:B2" })]);
     expect(sheet.charts).toEqual([expect.objectContaining({ title: "First chart", type: "column" })]);
     expect(sheet.validations).toEqual([expect.objectContaining({ type: "whole", sqref: "B2", formula1: "0", formula2: "10" })]);
@@ -140,5 +147,23 @@ describe("S11 Office model boundaries", () => {
     const reopened = await pptxLens.open(bytes);
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.title).toBe("Title with preserved transition");
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.hasTransition).toBe(true);
+  });
+
+  it("removes a modeled picture while retaining the original native media bytes", async () => {
+    const opened = await deck("media-preservation");
+    const content = pptxArtifactContent(opened.projection);
+    const slide = content.slides.find((item) => item.objects.some((object) => object.type === "image"))!;
+    const picture = slide.objects.find((object) => object.type === "image")!;
+    const desired = { ...content, slides: content.slides.map((item) => item.id === slide.id ? { ...item, objects: item.objects.filter((object) => object.id !== picture.id) } : item) };
+    const update = pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" });
+    const bytes = await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection });
+    const actual = await pptxLens.open(bytes);
+    expect(actual.projection.slides.find((item) => item.id === slide.id)!.objects.some((object) => object.id === picture.id)).toBe(false);
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(actual.projection.nativeBinding.semanticDigest);
+    const beforeParts = unzipSync(opened.preservedCarry.payload);
+    const afterParts = unzipSync(bytes);
+    const media = Object.keys(beforeParts).filter((name) => name.startsWith("ppt/media/"));
+    expect(media.length).toBeGreaterThan(0);
+    for (const name of media) expect(afterParts[name], name).toEqual(beforeParts[name]);
   });
 });

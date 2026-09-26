@@ -300,7 +300,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.table",
     "Insert a table at the caret.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.tableStructure,
+      delta: "insert-table",
       touches: ["tableStructure"],
       manifest: "create_table",
     },

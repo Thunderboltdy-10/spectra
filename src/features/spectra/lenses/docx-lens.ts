@@ -25,6 +25,7 @@ import type {
 import {
   docxProjectionSchema,
   docxProjectionBlockSchema,
+  docxInsertTableOperationSchema,
   type DocxParagraphFormat,
   type DocxProjection,
   type DocxProjectionBlock,
@@ -1097,13 +1098,12 @@ function movableCarrier(document: Document, region: NativeRegion) {
   return region.carrier;
 }
 
-function insertedParagraphId(document: Document, regionId: string | undefined) {
+function insertedRegionId(document: Document, regionId: string | undefined) {
   const seed = regionId ?? crypto.randomUUID();
-  const native = regionId?.match(/^docx:paragraph:([a-f0-9]{8})$/i)?.[1];
+  const native = regionId?.match(/^docx:(?:paragraph|table):([a-f0-9]{8})$/i)?.[1];
   const usedIds = new Set(
-    nativeRegions(document).flatMap((region) => {
-      const anchor = region.paragraph?.element ?? (region.table ? tableAnchor(region.table) : undefined);
-      const id = anchor?.getAttributeNs(W14_NAMESPACE, "paraId");
+    descendants(document.body()).flatMap((element) => {
+      const id = element.getAttributeNs(W14_NAMESPACE, "paraId");
       return id ? [id.toUpperCase()] : [];
     }),
   );
@@ -1116,12 +1116,26 @@ function insertedParagraphId(document: Document, regionId: string | undefined) {
   return id;
 }
 
+function placeInsertedRegion(document: Document, element: XmlElement, afterRegionId?: string | null) {
+  if (afterRegionId === undefined) return;
+  const body = document.body();
+  const reference = afterRegionId === null
+    ? nativeRegions(document).find((region) => region.element !== element)?.carrier ?? body.find(WML_NAMESPACE, "sectPr")
+    : (() => {
+        const after = uniqueRegionById(document, afterRegionId);
+        const carrier = movableCarrier(document, after);
+        const position = body.children.indexOf(carrier);
+        return body.children[position + 1] ?? null;
+      })();
+  if (reference !== element) body.insertBefore(element, reference ?? null);
+  document._markMainDirty();
+}
+
 async function insertParagraph(
   document: Document,
   operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
   options?: DocxWriteOptions,
 ) {
-  const body = document.body();
   const paragraph = document.addParagraph(operation.text, {
     ...(operation.style
       ? { style: await resolveParagraphStyleId(document, operation.style) }
@@ -1133,22 +1147,39 @@ async function insertParagraph(
   // Pick a deterministic unused ID before the later delete/reorder operations
   // resolve that old region, so the temporary package never has ambiguous
   // native anchors.
-  const paraId = insertedParagraphId(document, operation.regionId);
+  const paraId = insertedRegionId(document, operation.regionId);
   paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
-  const afterRegionId = operation.afterRegionId;
-  if (afterRegionId === undefined) return `docx:paragraph:${paraId.toLowerCase()}`;
-  const reference = afterRegionId === null
-    ? nativeRegions(document).find((region) => region.element !== paragraph.element)?.carrier
-    : (() => {
-        const after = uniqueRegionById(document, afterRegionId);
-        const carrier = movableCarrier(document, after);
-        const position = body.children.indexOf(carrier);
-        return body.children[position + 1] ?? null;
-      })();
-  if (reference !== paragraph.element)
-    body.insertBefore(paragraph.element, reference ?? null);
-  document._markMainDirty();
+  placeInsertedRegion(document, paragraph.element, operation.afterRegionId);
   return `docx:paragraph:${paraId.toLowerCase()}`;
+}
+
+async function insertTable(
+  document: Document,
+  input: Extract<DocxSemanticDelta, { kind: "insert-table" }>,
+  options?: DocxWriteOptions,
+) {
+  const operation = docxInsertTableOperationSchema.parse(input);
+  const paraId = insertedRegionId(document, operation.regionId);
+  const table = document.addTable(operation.rows.length, operation.rows[0]!.length);
+  for (const [rowIndex, row] of table.rows().entries()) {
+    for (const [columnIndex, cell] of row.cells().entries()) {
+      const rich = operation.richRows?.[rowIndex]?.[columnIndex];
+      if (rich) await replaceTableCellRich(document, cell, rich, options);
+      else await replaceTableCellText(document, cell, operation.rows[rowIndex]![columnIndex]!);
+    }
+  }
+  if (operation.headerRow !== undefined) {
+    const row = tableRows(table)[0]!;
+    const properties = new XmlElement("trPr", row.prefix);
+    row.insertBefore(properties, row.children[0] ?? null);
+    const header = new XmlElement("tblHeader", row.prefix);
+    properties.appendChild(header);
+    header.setAttributeNs(WML_NAMESPACE, "val", operation.headerRow ? "1" : "0");
+  }
+  tableAnchor(table)!.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
+  placeInsertedRegion(document, table.element, operation.afterRegionId);
+  document._markMainDirty();
+  return `docx:table:${paraId.toLowerCase()}`;
 }
 
 function safeStyleId(value: string) {
@@ -2794,7 +2825,7 @@ const REGION_FIDELITY: ReadonlyArray<{
     region: "tableStructure",
     class: "EQUIVALENT",
     reason:
-      "Word table row and column edits use the native table lens; merges and advanced grid geometry remain preserved.",
+      "Ordinary Word table insertion and row/column edits use the native table lens; merges and advanced grid geometry remain preserved.",
   },
   {
     region: "hyperlinks",
@@ -3061,6 +3092,10 @@ async function projectDocument(
             nativePath: path,
             rowCount: table.rowCount(),
             columnCount: table.columnCount(),
+            headerRow: (() => {
+              const header = tableRows(table)[0]?.find(WML_NAMESPACE, "trPr")?.find(WML_NAMESPACE, "tblHeader");
+              return Boolean(header && !["0", "false", "off"].includes(header.getAttributeNs(WML_NAMESPACE, "val") ?? "1"));
+            })(),
             ...(readOnly ? { nativeReadOnly: true } : {}),
           },
         });
@@ -3261,12 +3296,30 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
   // loss on readback. Word can also preserve terminal ASCII padding spaces on
   // a run even though the editor projection exposes the visible paragraph
   // text without them; ignore those spaces in paragraph meaning only.
-  const semanticBlocks = projection.blocks.map(({ id: _regionId, ...block }) => ({
-    ...block,
-    ...((block.type === "paragraph" || block.type === "heading")
-      ? { text: block.text.replace(/ +$/u, "") }
-      : {}),
-  }));
+  const semanticBlocks = projection.blocks.map(({ id: _regionId, ...block }) => {
+    if (block.type === "table" && block.richRows) {
+      // Word can expose plain cells as default-formatted runs and empty cells
+      // as no runs. Compare those with their text mirrors, retaining every
+      // non-default mark/object and checking the complete rectangular shape.
+      const richRows = block.richRows.map((row) => row.map((cell) => cell.filter((item) => {
+        const value = authoredSemanticValue(item) as Record<string, unknown>;
+        return value.kind !== "text" || value.text !== "" || Object.keys(value).some((key) => key !== "kind" && key !== "text");
+      })));
+      const plain = richRows.length === block.rows?.length && richRows.every((row, r) => row.length === block.rows?.[r]?.length && row.every((cell, c) =>
+        cell.every((item) => {
+          const value = authoredSemanticValue(item) as Record<string, unknown>;
+          return value.kind === "text" && Object.keys(value).every((key) => key === "kind" || key === "text");
+        }) && cell.map((item) => item.kind === "text" ? item.text : "").join("") === block.rows?.[r]?.[c]));
+      const { richRows: _richRows, ...rest } = block;
+      return { ...rest, ...(plain ? {} : { richRows }) };
+    }
+    return {
+      ...block,
+      ...((block.type === "paragraph" || block.type === "heading")
+        ? { text: block.text.replace(/ +$/u, "") }
+        : {}),
+    };
+  });
   return sha256Payload(
     new TextEncoder().encode(
       JSON.stringify({
@@ -3291,7 +3344,13 @@ export async function docxProjectionReadbackDigest(
   const blocks = readback.blocks.map((block, index) => {
     const intent = requested.blocks[index];
     if (!intent) return block;
-    const attrs = intent.attrs ? { ...(block.attrs ?? {}) } : undefined;
+    const attrs = intent.attrs || block.type === "table" ? { ...(block.attrs ?? {}) } : undefined;
+    if (block.type === "table" && attrs) {
+      delete attrs.nativePath;
+      if (intent.attrs?.headerRow === undefined && attrs.headerRow === false) delete attrs.headerRow;
+      if (intent.attrs?.rowCount === undefined && attrs.rowCount === block.rows?.length) delete attrs.rowCount;
+      if (intent.attrs?.columnCount === undefined && attrs.columnCount === block.rows?.[0]?.length) delete attrs.columnCount;
+    }
     if (!intent.attrs?.paragraphFormat && attrs?.paragraphFormat)
       delete attrs.paragraphFormat;
     else if (attrs?.paragraphFormat) {
@@ -3389,13 +3448,16 @@ async function applyDelta(
       await updateHeaderFooter(document, operation);
       continue;
     }
-    if (operation.kind === "insert-paragraph") {
-      const inserted = await insertParagraph(document, {
+    if (operation.kind === "insert-paragraph" || operation.kind === "insert-table") {
+      const resolved = {
         ...operation,
         ...(operation.afterRegionId
           ? { afterRegionId: resolveRegionId(operation.afterRegionId) }
           : {}),
-      }, options);
+      };
+      const inserted = resolved.kind === "insert-table"
+        ? await insertTable(document, resolved, options)
+        : await insertParagraph(document, resolved, options);
       if (operation.regionId) born.set(operation.regionId, inserted);
       // Later operations may target the caller's new ID. Resolve both its
       // native locator and its fidelity/block entry against the current XML.
@@ -3508,10 +3570,17 @@ async function applyDelta(
     ) {
       if (!region.table)
         throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} is not a table.`);
+      const anchor = tableAnchor(region.table);
+      const anchorId = anchor?.getAttributeNs(W14_NAMESPACE, "paraId");
       if (operation.kind === "insert-table-row") insertTableRow(document, region.table, operation.row);
       if (operation.kind === "delete-table-row") deleteTableRow(document, region.table, operation.row);
       if (operation.kind === "insert-table-column") insertTableColumn(document, region.table, operation.column);
       if (operation.kind === "delete-table-column") deleteTableColumn(document, region.table, operation.column);
+      const nextAnchor = tableAnchor(region.table);
+      if (anchorId && nextAnchor && nextAnchor !== anchor) {
+        anchor?.removeAttributeNs(W14_NAMESPACE, "paraId");
+        nextAnchor.setAttributeNs(W14_NAMESPACE, "paraId", anchorId);
+      }
     } else if (operation.kind === "update-image") {
       updateImage(document, region, operation);
     } else if (operation.kind === "insert-image") {
@@ -3605,9 +3674,6 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
   },
 
   async materialize({ projection, carry, options }) {
-    const existing = new Set(carry.projection.blocks.map((block) => block.id));
-    if (projection.blocks.some((block) => block.type === "table" && !existing.has(block.id)))
-      throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "Adding a new table to a mounted Word file is unavailable in strict native mode.");
     const operations = docxOperationsBetween(carry.projection, projection);
     if (!operations.length) return carry.payload;
     return applyDelta(carry, { kind: "ai-edit", operations }, options as DocxWriteOptions | undefined);

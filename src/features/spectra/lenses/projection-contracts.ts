@@ -236,6 +236,22 @@ export type DocxRichInline = z.infer<typeof docxRichInlineSchema>;
 export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 
+/** Ordinary Word tables only; keep allocation and topology bounded at ingress. */
+export const docxInsertTableOperationSchema = z.object({
+  kind: z.literal("insert-table"),
+  regionId: z.string().min(1).max(300).optional(),
+  afterRegionId: z.string().nullable().optional(),
+  rows: z.array(z.array(z.string().max(250_000)).min(1).max(63)).min(1).max(1_000),
+  richRows: z.array(z.array(z.array(docxRichInlineSchema).max(10_000)).min(1).max(63)).min(1).max(1_000).optional(),
+  headerRow: z.boolean().optional(),
+}).strict().superRefine((value, context) => {
+  const columns = value.rows[0]?.length ?? 0;
+  if (value.rows.some((row) => row.length !== columns) || value.rows.length * columns > 10_000)
+    context.addIssue({ code: "custom", message: "A new Word table must be rectangular and contain at most 10,000 cells." });
+  if (value.richRows && (value.richRows.length !== value.rows.length || value.richRows.some((row) => row.length !== columns)))
+    context.addIssue({ code: "custom", message: "Rich Word table cells must match the requested row and column dimensions." });
+});
+
 export const docxOperationSchema = z.discriminatedUnion("kind", [
   ...wordNoteOperationSchemas,
   ...wordReviewOperationSchemas,
@@ -243,6 +259,7 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  docxInsertTableOperationSchema,
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({
     kind: z.literal("delete-image"),

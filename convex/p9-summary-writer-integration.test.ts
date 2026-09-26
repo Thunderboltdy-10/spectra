@@ -296,8 +296,10 @@ describe("P9.I3 summary-writer integration", () => {
         projectionType: "planner_task",
         projectionId: String(artifactId),
         kind: "customization_overlap",
-        oldSource: { title: "Physics report" },
-        newSource: { title: "Revised physics report" },
+        // Production conflicts retain the normalized provider baseline. Rebase
+        // can advance copied text only when its previous value is known.
+        oldSource: { title: "Physics report", description: "Use the old rubric." },
+        newSource: { title: "Revised physics report", description: "Use the revised rubric." },
         affectedLinks: [String(artifactId)],
         suggestedActions: ["rebase"],
         status: "open",

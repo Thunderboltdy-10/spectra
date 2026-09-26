@@ -33,9 +33,10 @@ export const preparationContext = internalQuery({
   handler: async (ctx, args) => {
     const { actor, run } = await ownedAttempt(ctx, args);
     if (run.status !== "running") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
-    const operations = (await ctx.db.query("spectraOperations").withIndex("by_run", q => q.eq("runId", run._id)).collect())
-      .filter(operation => operation.executionId === args.executionId && operation.status === "proposed" &&
-        (operation.type === "artifact.update" || operation.type === "artifact.archive"));
+    const operations = await ctx.db.query("spectraOperations")
+      .withIndex("by_run_execution_status", q => q.eq("runId", run._id).eq("executionId", args.executionId).eq("status", "proposed"))
+      .filter(q => q.or(q.eq(q.field("type"), "artifact.update"), q.eq(q.field("type"), "artifact.archive")))
+      .collect();
     const targets = [];
     const seen = new Set<string>();
     for (const operation of operations) {

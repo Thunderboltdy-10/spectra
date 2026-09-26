@@ -8,6 +8,8 @@ import schema from "./schema";
 import { api } from "./_generated/api";
 import { artifactOperationDigest, artifactSourceIdentity, assertAiArtifactWriteAdmission } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent, normalizeAiArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
+import { preparationContext } from "./spectraArtifactWrites";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const prepare = makeFunctionReference<"action">("spectraArtifactWrites:preparePlan");
@@ -72,6 +74,37 @@ async function fixture(type: "artifact.archive" | "artifact.update" = "artifact.
 }
 
 describe("artifact preparation and archive approval boundary", () => {
+  it("keeps current-plan order and returned row bytes independent of large past attempts", async () => {
+    const f = await fixture("artifact.update");
+    const archiveId = await f.t.run(ctx => ctx.db.insert("spectraOperations", {
+      runId: f.ids.runId, executionId: f.attempt.executionId, actorType: "ai", type: "artifact.archive", status: "proposed",
+      input: { artifactId: f.ids.artifactId }, affected: [], createdAt: Date.now(),
+    }));
+    const measure = () => f.actor.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const result = await preparationContext._handler({ ...ctx, db: observer.db }, f.attempt);
+      return { ids: result.operations.map(operation => operation._id), ...observer.snapshot() };
+    });
+    const before = await measure();
+    await f.t.run(async ctx => {
+      for (let i = 0; i < 64; i++) await ctx.db.insert("spectraOperations", {
+        runId: f.ids.runId, executionId: i % 2 ? `past-attempt-${i}` : f.attempt.executionId,
+        actorType: "ai", type: "artifact.update", status: i % 2 ? "proposed" : "cancelled",
+        input: { artifactId: f.ids.artifactId, blueprintKey: "document", content: body("Historical payload ".repeat(1_000)) },
+        affected: [], createdAt: Date.now(),
+      });
+    });
+    const after = await measure();
+    expect(after.ids).toEqual([f.ids.operationId, archiveId]);
+    expect(after.documentsReturned).toBe(before.documentsReturned);
+    expect(after.serializedDocumentBytes).toBe(before.serializedDocumentBytes);
+    expect(after.calls).toBe(before.calls);
+    expect(after.writes).toBe(0);
+    expect(after.reads.filter(read => read.table === "spectraOperations")).toEqual([
+      expect.objectContaining({ index: "by_run_execution_status", operation: "collect", documentsReturned: 2, postIndexFilter: true }),
+    ]);
+  });
+
   it("derives mandatory archive approval despite a false model flag", async () => {
     const f = await fixture();
     expect(await f.actor.action(prepare, f.attempt)).toMatchObject({ approvalReasons: ["Archive the selected artifact"] });

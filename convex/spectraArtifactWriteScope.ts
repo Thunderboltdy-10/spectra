@@ -134,20 +134,19 @@ async function artifactAdmissionContext(ctx: MutationCtx, args: AdmissionIdentit
     throw new Error("AI_ARTIFACT_OPERATION_NOT_OWNED");
   if (run.status !== "running" || operation.status !== "executing" || artifactOutput(operation.output).clarificationDraft !== undefined)
     throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
-  await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
-  const artifact = (await ctx.db.get(args.artifactId))!;
+  const access = await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
+  const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
   const scope = preparedArtifactScope(operation);
   const input = artifactOutput(operation.input);
   if (!scope || operation.type !== "artifact.update" || input.artifactId !== args.artifactId ||
       scope.artifactId !== args.artifactId || scope.runId !== run._id || scope.executionId !== run.executionId ||
       scope.operationId !== operation._id || scope.operationDigest !== await artifactOperationDigest(operation))
     throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
-  return { run, operation, artifact, scope, input };
+  return { run, operation, artifact, scope, input, sourceIdentity: await artifactSourceIdentity(artifact) };
 }
 
 async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<ReturnType<typeof artifactAdmissionContext>>, evidence: AiArtifactContentEvidence) {
-  const { run, operation, artifact, scope } = admission;
-  const sourceIdentity = await artifactSourceIdentity(artifact);
+  const { run, operation, scope, sourceIdentity } = admission;
   if (evidence.version !== 1 || evidence.operationDigest !== scope.operationDigest || evidence.sourceContentIdentity !== sourceIdentity)
     throw new Error("AI_ARTIFACT_EVIDENCE_SCOPE_CHANGED");
   const beforeDigest = evidence.baseContentDigest;
@@ -179,7 +178,7 @@ export async function assertAiArtifactWriteAdmission(ctx: MutationCtx, args: Adm
   const afterDigest = await artifactScopeDigest(after);
   if (afterDigest !== await artifactScopeDigest(expected.content)) throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
   return assertAdmissionEvidence(ctx, admission, {
-    version: 1, operationDigest: scope.operationDigest, sourceContentIdentity: await artifactSourceIdentity(artifact),
+    version: 1, operationDigest: scope.operationDigest, sourceContentIdentity: admission.sourceIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,
     fullContentDeletion: classifyArtifactContentWipe(type, before, expected.resolvedContent).fullContentDeletion,
   });

@@ -539,6 +539,14 @@ export const presentationObjectProjectionSchema = z
       .optional(),
   })
   .passthrough();
+export const pptxTransitionSchema = z.object({
+  kind: z.enum(["none", "fade", "push", "dissolve"]),
+  durationMs: z.number().int().min(0).max(4_294_967_295).optional(),
+}).strict().refine((transition) => transition.kind !== "none" || transition.durationMs === undefined, {
+  message: "A transition duration requires an effect.",
+});
+export type PptxTransition = z.infer<typeof pptxTransitionSchema>;
+
 export const pptxSlideProjectionSchema = z
   .object({
     id: z.string(),
@@ -548,6 +556,7 @@ export const pptxSlideProjectionSchema = z
     objects: z.array(presentationObjectProjectionSchema),
     layoutPartName: z.string().optional(),
     hasTransition: z.boolean(),
+    transition: pptxTransitionSchema.optional(),
     hasTiming: z.boolean(),
     hidden: z.boolean().optional(),
     speakerNotes: z.string(),
@@ -578,6 +587,7 @@ export type PptxSlideProjection = z.infer<typeof pptxSlideProjectionSchema>;
 export type PptxProjection = z.infer<typeof pptxProjectionSchema>;
 
 export const pptxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-transition"), slideId: z.string(), transition: pptxTransitionSchema }).strict(),
   z.object({ kind: z.literal("set-title"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),
   z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string(), hyperlink: z.union([

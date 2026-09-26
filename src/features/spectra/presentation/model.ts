@@ -775,12 +775,10 @@ export function normalizePresentationContent(
                 kind: transition.kind,
                 ...(typeof transition.durationMs === "number"
                   ? {
-                      durationMs: bounded(
-                        transition.durationMs,
-                        350,
-                        0,
-                        10_000,
-                      ),
+                      // Native p14:dur is an unsigned 32-bit millisecond value.
+                      // Preserve long imported transitions instead of clipping
+                      // them to the studio's usual animation preset range.
+                      durationMs: Math.max(0, Math.min(4_294_967_295, Math.round(finite(transition.durationMs, 350)))),
                     }
                   : {}),
               },

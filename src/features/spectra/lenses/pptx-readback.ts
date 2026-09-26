@@ -78,7 +78,7 @@ export function normalizePptxProjectionForReadback(requested: PptxProjection, be
   }) };
 }
 
-/** Kept byte-for-byte compatible with the native digest's existing field order. */
+/** Shared native readback content; transition is a primary authored field. */
 export function pptxSemanticContent(projection: Pick<PptxProjection, "slides">) {
-  return projection.slides.map(({ id, title, text, objects, hidden, speakerNotes }: PptxSlideProjection) => ({ id, title, text, objects, hidden, speakerNotes }));
+  return projection.slides.map(({ id, title, text, objects, hidden, speakerNotes, transition }: PptxSlideProjection) => ({ id, title, text, objects, hidden, speakerNotes, ...(transition ? { transition } : {}) }));
 }

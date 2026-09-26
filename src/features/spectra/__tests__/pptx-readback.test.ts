@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { normalizePptxProjectionForReadback, pptxTextFromObjects, pptxTitleFromObjects, pptxSemanticContent } from "../lenses/pptx-readback";
 import type { PptxProjection } from "../lenses/projection-contracts";
 import type { PresentationObject } from "../presentation/model";
+import { pptxOperationsBetween } from "../lenses/office-content";
 
 const content = (text: string) => ({ text, paragraphs: [{ runs: [{ text, bold: true }] }] });
 const object = (id: string, type: PresentationObject["type"], value: unknown, readingOrder: number): PresentationObject => ({ id, type, x: 10, y: 20, width: 300, height: 80, rotation: 0, content: value, readingOrder });
@@ -20,6 +21,15 @@ function fixture(): PptxProjection {
 const signature = (projection: PptxProjection) => JSON.stringify(pptxSemanticContent(projection));
 
 describe("PPTX readback checks", () => {
+  it("keeps first-match duplicate semantics across a batch of added slides", () => {
+    const base = fixture();
+    base.slides.push({ ...base.slides[0]!, id: "second-identical", index: 1 });
+    const after = { ...base, slides: [...base.slides, { ...base.slides[0]!, id: "copy-a", index: 2 }, { ...base.slides[0]!, id: "copy-b", index: 3 }] };
+    expect(pptxOperationsBetween(base, after).filter((operation) => operation.kind === "duplicate-slide")).toEqual([
+      { kind: "duplicate-slide", slideId: "slide", newSlideId: "copy-a" },
+      { kind: "duplicate-slide", slideId: "slide", newSlideId: "copy-b" },
+    ]);
+  });
   it("derives all table/group paragraphs and keeps the actual primary object graph", () => {
     const base = fixture();
     expect(pptxTextFromObjects(base.slides[0]!.objects)).toEqual(base.slides[0]!.text);

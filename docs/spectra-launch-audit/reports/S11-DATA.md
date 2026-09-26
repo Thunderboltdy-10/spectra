@@ -179,3 +179,52 @@ node node_modules/vitest/vitest.mjs run convex/p9-summary-writer-integration.tes
 ```
 
 Scoped TypeScript and ESLint then passed across all eight owned TypeScript files, including these two. No full suite is claimed; the second validation slot was explicitly released immediately after the executable checks.
+
+## Actor-graph prototype — recovery DATA-R, 2026-09-26
+
+Recovery task `01a0dd89-8c59-7591-8826-2f90b3d41537` continues the same clean `6505` checkout and `codex/s11-data-analytics` branch from `b14e30ed`. The earlier two candidates are already integrated as `603824e8`/`f405c09b`; they are not repeated. Read the original DATA task's actual earlier and final turns, the exact private `discovery-proposal.md`, current authority/discovery/schema code, the coordinator's actual user brief and current charter/fleet/integration ledger. The coordinator accepted the following candidate-union proof before implementation, including omission of the redundant personal-placement stream and keeping public-agent discovery separate.
+
+This unit adds `convex/catalogGraph.ts` and `convex/s11-catalog-graph.test.ts`. It is an **unregistered prototype**, with no endpoint, caller, schema, storage, dependency or service change. Source review and `git diff --check` are complete. **Executable validation and measurements are pending an explicitly allocated guarded slot.** None of the prior pass counts or cost tables certify this new source.
+
+### Candidate-union proof
+
+| Current authority path | Bounded candidate source | Current proof and exclusion |
+| --- | --- | --- |
+| Same-school artifact ownership | Summary `by_account_status_updated_id` | Current owner/school/type/status and summary version; cross-school nominal ownership alone is insufficient. |
+| Explicit artifact or agent invitation | Both account and current-school `accessGrants.by_principal_resource_source`, `source=direct` | Correct actual blueprint resource type, current principal, no truthy revocation, absent/zero/future expiry. Foreign-school source requires the account principal. Current authority permits school-less sources through direct grants. |
+| Workspace inheritance | Account/school direct workspace grants, then only that active same-school workspace's `orgNodes.by_workspace_context_live_kind_activity` live work nodes | Current grant/workspace/node/source; `accessProjection=true` or legacy source-owner/workspace-owner equality; indexed per-artifact override. Deny removes inheritance; restrict/read preserves read. A separate direct grant remains independent. |
+| Personal placement | No additional stream required | Placement alone is not authority. Every eligible personal candidate is already in the ownership/direct/granted-workspace union. Owning a workspace alone does not grant another owner's artifact. Negative regression covers this. |
+| Public | No ordinary-catalog path | `directAccess`, `hasDirectReadGrant`, inherited authority and ordinary catalog do not accept public principals. Legitimate `listPublicAgents` uses policy, live link/domain and published release checks in its separate endpoint, preserved unchanged. |
+| Workspace picker | Account-owned workspace indexes plus account/school direct workspace grant streams | Same-school ownership or current direct grant, status/search; explicit account grant can expose a foreign workspace, which is never expanded for artifact inheritance. |
+| Invitations / cached inherited grants | No independent path | Pending/accepted invitation metadata and `source=workspace_inheritance` rows are not current direct authority. |
+
+Source anchors: `authorityShared.ts` direct/inherited/evaluateLoadedArtifactAuthority rules; `spectraArtifacts.ts` ordinary `list` and separate `listPublicAgents`; `catalogPages.ts` current compact page; `identityShared.ts` verified account and active membership; indexes in `schema.ts`. Deleted artifacts are not emitted by this authority-based prototype. Summary migration is mandatory; no canonical-body fallback is hidden in discovery.
+
+### Continuation, ordering and budget
+
+The cursor binds version, actor, active membership, school, resource kind, limit and every supported filter. It holds the previous emitted `(updatedAt, artifactId)` or `(lastActivityAt, workspaceId)` boundary, current source/native continuation, at most one nested workspace continuation and at most `limit+1` distinct candidate IDs with proof references and compact authority fingerprints. It contains no projection, body or cached allow decision. Existing authenticated encryption keeps un-emitted private candidate IDs confidential; encoded cursors above the existing 16,384-character limit fail explicitly.
+
+Grant order and placement activity are not artifact update order. Every applicable unsorted stream therefore finishes before emission. The owned-artifact index can stop after `limit+1` qualifying rows; its index has the exact final sort. The owned-workspace index's implicit creation-time ties differ from workspace-ID ties, so that stream is also completed before emission. Top-K deduplicates canonical IDs across grants and placements without an unbounded seen-ID set. Search is applied throughout traversal, including late matches; shared quiz answers and timetable internal search text remain excluded.
+
+Each request calls at most one native `paginate`, with an explicit `maximumRowsRead` and at most eight requested rows (one outer workspace grant while nesting). Every database call reserves its worst-case returned-row count before execution, including empty/negative proofs, account, exact indexed membership-invariant detection via `take(2)`, school, migration, summary, grant, workspace, placement and override. The total reservation ceiling is 256 rows; this is a conservative **row/call ceiling, not a byte or billing ceiling**. Variable-size summaries/workspaces remain a cost to measure. No full audience or body helper is called.
+
+Responses expose `scanning`, `revalidating`, `restarted` or `ready`. Progress pages are empty and nonfinal. Before an ordered page is emitted, every retained candidate including the lookahead is hydrated and reauthorized in one current query snapshot. Changed keys/proofs restart assembly from the last emitted boundary; after three restarts the caller must explicitly refresh rather than loop forever. Replaying an unchanged cursor is idempotent. This is stable-corpus complete keyset traversal, **not a cross-request snapshot**: insertions/updates above an already emitted/scanned boundary require refresh, and ongoing mutation can require restart.
+
+### Authored regression and cost harness — not yet executed
+
+The harness invokes the real prototype against `convex-test` and observes every database API read/write using the existing ledger. Its authority oracle runs separately and is never hidden inside measured request cost. It checks:
+
+- Fixed reachable graph while unrelated private artifacts grow through **0 / 128 / 1,024 / 10,000**; exact ordered IDs, complete traversal, first visibility, row bytes, calls, response bytes and cursor/row-budget maxima.
+- Current authority across ownership, account/school/public principals, real agent/artifact type, zero timestamps, revoke/expiry, no-school/foreign-school sources, eighteenth-placement inheritance, legacy projection, personal placements, deny/restrict, archived workspaces and cached inherited grant rows.
+- Unsorted/tied streams, duplicate placements, complete late search, workspace ties and cross-school direct workspace discovery.
+- Current proof revalidation after grant revoke/expiry, workspace archive, projection removal, override deny and source deletion; mutated recency, replay/tampering, actor deactivation, school changes, multiple active memberships and bounded repeated restarts.
+- Separately scaled live direct grants, revoked history, visible workspaces, duplicate workspace grants and result page count. Duplicate workspace grants deliberately reveal repeated node scans rather than hiding them behind an unbounded dedupe cache.
+- Actual existing `syncSourceNodes` maintenance with 0/32/128 grants and 0/8/32 placements plus two links per placement. A separate labeled estimate adds hypothetical recency/status fields to existing direct grant documents; it counts extra grant writes/backfill rows and serialized field bytes, without claiming actual index storage or an implemented mirror.
+
+Current `syncSourceNodes` reads every source placement and link, stamps node/link activity with `Date.now()`, and does not update direct grants. A mirrored recency design would add source-update fanout over applicable direct grant rows, indexes and backfill, plus restore/regrant maintenance. Async propagation cannot guarantee exact-current ordering without a pending/restart contract. No new index/store is proposed for integration until the graph-scaling evidence justifies that tradeoff.
+
+### Remaining acceptance and migration boundaries
+
+Guarded focused Vitest, scoped TypeScript and ESLint are queued; no Node command has run in this recovery unit. Evidence will be written privately to `graph-density.json`, `graph-scaling.json` and `graph-maintenance.json` under `.spectra-local/launch-s11/data/` only during an allocated run. No current number is claimed before those files exist.
+
+The prototype supports ordinary artifact `all`/`shared` and workspace discovery. Artifact `inbox`/`workspace` filters require complete negative placement proof and are explicitly unsupported here. Public/installed agent discovery, owner/release/placement action fields, the eight-second/focus polling lifecycle and complete filter metadata remain separate caller work. The first accepted migration remains workspace API cache → app-shell and conversation workspace refresh, preserving selected workspace hydration and continuing empty nonfinal pages. CONTEXT owns AI gather/plan. No UI speed, hosted billing, live backend or launch acceptance is inferred from source completion.

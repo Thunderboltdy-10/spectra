@@ -73,6 +73,13 @@ afterEach(() => {
 });
 
 describe("S11 settings observer through the existing event feed", () => {
+  it("ignores a prepared notification without a run or action", async () => {
+    handleSettingsObservationEvent({ key: "settings_toggle_prepared", payload: { phase: "waiting" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport).not.toHaveBeenCalled();
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+  });
+
   it("uses one validation read and one readiness ACK, and waits for the matching canonical result", async () => {
     const { element, refresh } = mountedControl();
     const value = offer();
@@ -124,6 +131,59 @@ describe("S11 settings observer through the existing event feed", () => {
     await vi.advanceTimersByTimeAsync(180);
     expect(JSON.parse(transport.mock.calls[1]![1].body).payload.outcome).toBe("invisible");
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { preference: "reduced", osReduced: false },
+    { preference: "none", osReduced: false },
+    { preference: "full", osReduced: true },
+  ])("skips the approach delay for $preference motion with OS reduction $osReduced", async ({ preference, osReduced }) => {
+    document.documentElement.dataset.spectraMotion = preference;
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: osReduced })));
+    mountedControl();
+    const value = offer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(transport.mock.calls[1]![1].body).payload.outcome).toBe("target_ready");
+    save(value);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it("skips ordinary work when the tab becomes hidden during the approach", async () => {
+    document.documentElement.dataset.spectraMotion = "full";
+    const { refresh } = mountedControl();
+    offer();
+    await vi.advanceTimersByTimeAsync(0);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    await vi.advanceTimersByTimeAsync(180);
+    expect(JSON.parse(transport.mock.calls[1]![1].body).payload.outcome).toBe("invisible");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue a validation response arriving after the run stops", async () => {
+    let completeRead!: (response: unknown) => void;
+    transport.mockImplementationOnce(() => new Promise(resolve => { completeRead = resolve; }));
+    mountedControl();
+    offer();
+    stopObservingUiRun("run");
+    completeRead({ ok: true, json: async () => snapshots.get("run") });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+  });
+
+  it("removes an expired queued action before the other actor releases the control", async () => {
+    const { refresh } = mountedControl();
+    const first = offer();
+    offer({ ...action("other"), expiresAt: Date.now() + 1_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getAppChoreographyCoordinator().snapshot().map(entry => entry.status)).toEqual(["performing", "blocked"]);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(getAppChoreographyCoordinator().snapshot()).toMatchObject([{ actorId: "run", status: "performing" }]);
+    save(first);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
   });
 
   it("does not replay duplicate offers or a completed operation after reconnect", async () => {

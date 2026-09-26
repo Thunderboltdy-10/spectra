@@ -5,7 +5,8 @@ import {
   observedActionIdentitySchema, uiObservationSnapshotSchema,
   type SettingsToggleAction, type UiObservationSnapshot,
 } from "../actions/protocol/semantic-action";
-import { currentViewportSnapshot, performAppChoreography, presentAppControl } from "./app-choreography-host";
+import { currentViewportSnapshot, getAppChoreographyCoordinator, performAppChoreography, presentAppControl } from "./app-choreography-host";
+import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import { settingsToggleControls } from "./settings-toggle-control";
 import { disengageFollowAi, getFollowedAiActorId, isFollowingAi, noteAiSurface, subscribeFollowAi } from "./follow-ai";
 
@@ -13,7 +14,7 @@ let clientId: string | undefined;
 const runs = new Map<string, string>();
 type Pending = { action: SettingsToggleAction; mode: "ordinary" | "follow"; confirmed: boolean; recovering: boolean; resolve: () => void; reject: (error: Error) => void };
 const pending = new Map<string, Pending>();
-const delivered = new Map<string, string>();
+const delivered = new Map<string, { key: string }>();
 const currentActions = new Map<string, SettingsToggleAction>();
 const interestRequests = new Map<string, Promise<unknown>>();
 const identityKey = (action: SettingsToggleAction) => JSON.stringify([action.runId, action.executionId, action.operationId, action.epoch]);
@@ -142,11 +143,13 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
   const offered = snapshot.action;
   if (!offered || snapshot.phase !== "waiting") return;
   const key = identityKey(offered);
-  if (delivered.get(offered.runId) === key || pending.has(key)) return;
-  delivered.set(offered.runId, key);
+  if (delivered.get(offered.runId)?.key === key || pending.has(key)) return;
+  const delivery = { key };
+  delivered.set(offered.runId, delivery);
   // Durable feeds replay. Re-read exactly once before any local action; a saved
   // or expired epoch must never play cosmetic work over its completed write.
   const current = await readOrAck(offered, uiObserverForRun(offered.runId).mode);
+  if (delivered.get(offered.runId) !== delivery) return;
   const action = current.action;
   if (!action || identityKey(action) !== key || current.phase !== "waiting") return;
   const participant = current.participants?.find((entry) => entry.clientId === clientId);
@@ -171,7 +174,19 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
   }, Math.max(1, action.expiresAt - Date.now()));
   const clean = () => { clearTimeout(expiry); if (pending.get(key) === entry) pending.delete(key); };
   const requestId = `${action.executionId}:${action.operationId}:${action.epoch}`;
+  let started = false;
+  const cancel = () => {
+    clean();
+    getAppChoreographyCoordinator().cancel(action.runId, requestId);
+  };
+  // Queued performers have no callback finally block yet. Settle their local
+  // lifetime here so expiry/Stop cannot strand a queue entry or replay a save.
+  void receipt.then(() => {
+    clearTimeout(expiry);
+    if (!started) cancel();
+  }, cancel);
   performAppChoreography({ actorId: action.runId, operationId: requestId, target: "settings", targetKey: action.target, summary: "Updating Smart completion" }, async (context) => {
+    started = true;
     let hidePointer: (() => void) | undefined;
     const abort = () => { if (!entry.recovering && !entry.confirmed) reject(new Error("UI_OBSERVATION_ENDED")); };
     context.signal.addEventListener("abort", abort, { once: true });
@@ -210,7 +225,7 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
           continue;
         }
         hidePointer = presentAppControl(action.runId, requestId, control.element);
-        if (document.documentElement.dataset.spectraMotion !== "reduced") await pause(context.signal, 180);
+        if (!getSpectraMotionSnapshot().reduced) await pause(context.signal, 180);
         // Visibility can change during the approach. Start again at the next
         // boundary; ordinary mode never reveals or steals selection/focus.
         if (!currentViewportSnapshot(action.runId, { target: "settings", targetKey: action.target }, [control.element]).targetVisible) { hidePointer(); hidePointer = undefined; continue; }
@@ -238,7 +253,7 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
 export function handleSettingsObservationEvent(event: { runId?: string; key: string; payload?: Record<string, unknown> }): boolean {
   if (event.key === "settings_toggle_prepared") {
     const snapshot = uiObservationSnapshotSchema.safeParse(event.payload);
-    if (snapshot.success && snapshot.data.action?.runId === event.runId) {
+    if (event.runId && snapshot.success && snapshot.data.action && snapshot.data.action.runId === event.runId) {
       currentActions.set(event.runId, snapshot.data.action);
       void performPrepared(snapshot.data).catch(() => endFollow(event.runId!, "Follow AI could not resume this action. The task continues."));
     }

@@ -193,6 +193,16 @@ function uid(prefix: string) {
   return `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`;
 }
 
+/** Reading the same persisted model must not allocate new identities. */
+function normalizedId(value: unknown, fallback: string, used: Set<string>) {
+  const base = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  let id = base;
+  let suffix = 2;
+  while (used.has(id)) id = `${base}~${suffix++}`;
+  used.add(id);
+  return id;
+}
+
 export function normalizeCodePath(value: string) {
   const normalized = value.replaceAll("\\", "/").replace(/^\/+/, "");
   const parts: string[] = [];
@@ -263,6 +273,7 @@ export function normalizeCodeContent(value: unknown): CodeContent {
       : {};
   const rawFiles = Array.isArray(input.files) ? input.files : [];
   const paths = new Set<string>();
+  const fileIds = new Set<string>();
   const files = rawFiles.flatMap((entry, index): CodeFile[] => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const row = entry as Record<string, unknown>;
@@ -292,7 +303,7 @@ export function normalizeCodeContent(value: unknown): CodeContent {
       row.lineIds.every((id) => typeof id === "string")
         ? (row.lineIds as string[])
         : undefined;
-    const fileId = typeof row.id === "string" && row.id ? row.id : uid("file");
+    const fileId = normalizedId(row.id, `file-${index + 1}`, fileIds);
     return [
       {
         id: fileId,
@@ -314,7 +325,7 @@ export function normalizeCodeContent(value: unknown): CodeContent {
     ];
   });
   if (!files.length) {
-    const fileId = uid("file");
+    const fileId = "file-1";
     files.push({
       id: fileId,
       path: "index.html",
@@ -500,10 +511,7 @@ function normalizeCodeTests(value: unknown, files: CodeFile[]): CodeTest[] {
     const row = candidate as Record<string, unknown>;
     const source = typeof row.source === "string" ? row.source : "";
     if (!source.trim()) continue;
-    let id =
-      typeof row.id === "string" && row.id.trim() ? row.id.trim() : uid("test");
-    while (ids.has(id)) id = uid("test");
-    ids.add(id);
+    const id = normalizedId(row.id, `test-${tests.length + 1}`, ids);
     const fileId =
       typeof row.fileId === "string" && fileIds.has(row.fileId)
         ? row.fileId
@@ -537,12 +545,7 @@ function normalizeResourceBindings(
       row.kind === "sheets_range" || row.kind === "asset" || row.kind === "artifact"
         ? row.kind
         : "artifact";
-    let id =
-      typeof row.id === "string" && row.id.trim()
-        ? row.id.trim()
-        : uid("binding");
-    while (ids.has(id)) id = uid("binding");
-    ids.add(id);
+    const id = normalizedId(row.id, `binding-${bindings.length + 1}`, ids);
     bindings.push({
       id,
       artifactId: row.artifactId.trim().slice(0, 180),
@@ -572,12 +575,7 @@ function normalizeParameters(value: unknown): CodeParameter[] {
     )
       ? (row.type as CodeParameter["type"])
       : "text";
-    let id =
-      typeof row.id === "string" && row.id.trim()
-        ? row.id.trim()
-        : uid("parameter");
-    while (ids.has(id)) id = uid("parameter");
-    ids.add(id);
+    const id = normalizedId(row.id, `parameter-${parameters.length + 1}`, ids);
     const fallbackKey = `parameter_${parameters.length + 1}`;
     let key =
       typeof row.key === "string"

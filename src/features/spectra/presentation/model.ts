@@ -914,7 +914,11 @@ export function normalizePresentationContent(
           }
         : {}),
     },
-    slides: slides.length ? slides : [createPresentationSlide(1)],
+    slides: slides.length ? slides : [{
+      ...createPresentationSlide(1),
+      id: "slide-1",
+      objects: [{ ...createPresentationObject("text", 1), id: "slide-1:object-1" }],
+    }],
     ...(normalizedSections ? { sections: normalizedSections } : {}),
     ...(Array.isArray(input.components)
       ? {

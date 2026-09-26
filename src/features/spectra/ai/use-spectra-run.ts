@@ -27,6 +27,7 @@ import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity
 import { useSpectraPreferences } from "../settings/preference-store";
 import { spectraBus } from "../events";
 import { isRetryableRunStatus } from "./run-lifecycle";
+import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -70,6 +71,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
         event.type !== "confirmation_required"
       ) {
         clearRunFeedActivity(runId);
+        stopObservingUiRun(runId, true);
       }
       break;
     case "operation_preview":
@@ -127,6 +129,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
     case "error":
       recordRunEvent({ type: event.type, runId, message: event.message });
       clearRunFeedActivity(runId);
+      stopObservingUiRun(runId, true);
       break;
     default:
       break;
@@ -531,6 +534,8 @@ export function useSpectraRun({
           });
           tabSnapshot = result.runTabs;
           for (const tab of tabSnapshot) {
+            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(tab.run.status))
+              observeUiRun(tab.runId, tab.run.executionId);
             displayedRunTabs.current.set(tab.runId, tab);
             displayedRunVersions.current.set(tab.runId, {
               executionId: tab.run.executionId,
@@ -1434,11 +1439,13 @@ export function useSpectraRun({
         setActiveRequestCount((count) => count + 1);
         try {
           const version = await resolveDisplayedRunVersion(card.runId);
+          if (actionKey === "confirm") observeUiRun(card.runId, version.executionId, false);
           await consume({
             action: actionKey,
             runId: card.runId,
             executionId: version.executionId,
             attemptId: version.attemptId,
+            ...(actionKey === "confirm" ? { uiObserver: uiObserverForRun(card.runId) } : {}),
           });
         } catch (error) {
           toast.error(

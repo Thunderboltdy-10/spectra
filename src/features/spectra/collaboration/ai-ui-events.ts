@@ -1,5 +1,6 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
 import { spectraBus } from "../events";
+import { handleSettingsObservationEvent } from "./settings-observation-client";
 
 export type SpectraAiUiEvent = {
   key: string;
@@ -199,5 +200,6 @@ function rememberEvent(event: SpectraAiUiEvent): void {
  * Non-followed actors update location without moving the user. Prepared local
  * performances use app-choreography-host before execution, never this feed. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
+  if (handleSettingsObservationEvent(event)) return;
   rememberEvent(event);
 }

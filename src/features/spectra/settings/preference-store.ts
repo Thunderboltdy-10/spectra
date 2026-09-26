@@ -166,6 +166,7 @@ export function useSpectraPreferences({
   const preferencesRef = useRef(preferences);
   const confirmedRef = useRef(DEFAULT_SPECTRA_PREFERENCES);
   const writeGeneration = useRef(0);
+  const externalRefreshGeneration = useRef(0);
   const inflightWrites = useRef(0);
   const refreshLayersRef = useRef<() => void>(() => {});
   preferencesRef.current = preferences;
@@ -385,5 +386,23 @@ export function useSpectraPreferences({
     () => replace(restoreDefaultPreferences(preferencesRef.current)),
     [replace],
   );
-  return { preferences, hydrated, saveError, saving, update, replace, reset };
+
+  /** Refresh after an external, receipted settings operation. The caller cannot
+   * inject an accepted value or issue another write through this seam. */
+  const refreshConfirmedPreferences = useCallback(async () => {
+    if (!convex || !signedIn || !currentDeviceId)
+      throw new Error("SETTINGS_SESSION_UNAVAILABLE");
+    const generation = writeGeneration.current;
+    const refreshGeneration = ++externalRefreshGeneration.current;
+    const layers = await convex.query(api.accountPreferences.layers, {
+      deviceId: currentDeviceId, workspaceId, workType,
+    });
+    // A human write that started during this read owns the local optimistic
+    // value. Its existing completion refresh will reconcile server state.
+    if (generation !== writeGeneration.current ||
+      refreshGeneration !== externalRefreshGeneration.current || inflightWrites.current > 0) return;
+    setRemoteLayers(layers);
+  }, [convex, signedIn, currentDeviceId, workspaceId, workType]);
+
+  return { preferences, hydrated, saveError, saving, update, replace, reset, refreshConfirmedPreferences };
 }

@@ -25,11 +25,28 @@ import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 import { getRunLedger } from "./run-ledger";
+import { startSettingsObservationClient } from "./settings-observation-client";
 
 let coordinator = new AppChoreographyCoordinator();
 const artifactPerformers = new Map<string, AiPerformer>();
 const MAX_IDLE_ARTIFACT_PERFORMERS = 24;
 let claimTicker: number | null = null;
+type ControlPresentation = { actorId: string; operationId: string; element: HTMLElement };
+const controlPresentations = new Map<string, ControlPresentation>();
+const controlPresentationListeners = new Set<() => void>();
+
+/** A pointer is attached only while the registered control performs its action.
+ * It cannot navigate, focus, mutate the control, or acknowledge a save. */
+export function presentAppControl(actorId: string, operationId: string, element: HTMLElement): () => void {
+  const presentation = { actorId, operationId, element };
+  controlPresentations.set(actorId, presentation);
+  for (const listener of controlPresentationListeners) listener();
+  return () => {
+    if (controlPresentations.get(actorId) !== presentation) return;
+    controlPresentations.delete(actorId);
+    for (const listener of controlPresentationListeners) listener();
+  };
+}
 
 export type AppPerformanceContext = {
   signal: AbortSignal;
@@ -343,6 +360,8 @@ function cancelLocalPerformances(): void {
   for (const actorId of new Set(coordinator.snapshot().map((entry) => entry.actorId))) coordinator.cancel(actorId);
   for (const performer of artifactPerformers.values()) performer.dispose();
   artifactPerformers.clear();
+  controlPresentations.clear();
+  for (const listener of controlPresentationListeners) listener();
 }
 
 /** Release one terminal run without cancelling another actor or durable work. */
@@ -356,12 +375,45 @@ export function releaseChoreographyActor(actorId: string): void {
   coordinator.cancel(actorId);
   artifactPerformers.get(actorId)?.dispose();
   artifactPerformers.delete(actorId);
+  controlPresentations.delete(actorId);
+  for (const listener of controlPresentationListeners) listener();
 }
 
 export function AppChoreographyMount() {
   const follow = useFollowAi();
   const [cursor, setCursor] = useState<{ left: number; top: number } | null>(null);
+  const [controlPointers, setControlPointers] = useState<Array<{ actorId: string; left: number; top: number }>>([]);
   useEffect(() => startAppChoreographyMaintenance(), []);
+  useEffect(() => startSettingsObservationClient(), []);
+  useEffect(() => {
+    let observing = false;
+    const observer = new MutationObserver(() => update());
+    const update = () => {
+      if (!controlPresentations.size) { observer.disconnect(); observing = false; }
+      else if (!observing) {
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "style", "class"] });
+        observing = true;
+      }
+      const next = [...controlPresentations.values()].flatMap(({ actorId, element }) => {
+        if (!isAppTargetVisible(element.dataset.spectraAiTarget, [element])) return [];
+        const rect = element.getBoundingClientRect();
+        return [{ actorId, left: rect.left + rect.width / 2, top: rect.top + rect.height / 2 }];
+      });
+      setControlPointers((current) => current.length === next.length && current.every((pointer, index) =>
+        pointer.actorId === next[index]!.actorId && pointer.left === next[index]!.left && pointer.top === next[index]!.top,
+      ) ? current : next);
+    };
+    controlPresentationListeners.add(update);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    update();
+    return () => {
+      controlPresentationListeners.delete(update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      observer.disconnect();
+    };
+  }, []);
   useEffect(() => {
     if (!follow.following || typeof window === "undefined") {
       setCursor(null);
@@ -431,7 +483,7 @@ export function AppChoreographyMount() {
     follow.location,
     follow.surfaceLocation,
   ]);
-  if (!follow.following) return null;
+  if (!follow.following && !controlPointers.length) return null;
   const activity = follow.location?.note ?? follow.surfaceLocation?.note ?? "Watching the current Spectra task";
   const surfaceName = follow.location
     ? "Artifact"
@@ -441,7 +493,7 @@ export function AppChoreographyMount() {
   return createElement(
     Fragment,
     null,
-    createElement(
+    follow.following ? createElement(
       "div",
       {
         className: "spectra-follow-ai-status",
@@ -451,8 +503,17 @@ export function AppChoreographyMount() {
       },
       createElement("span", null, `${surfaceName} · Spectra AI`),
       createElement("strong", null, activity),
-    ),
-    cursor
+    ) : null,
+    ...controlPointers.map((pointer) => createElement("svg", {
+      key: pointer.actorId,
+      "aria-hidden": true,
+      className: "spectra-follow-ai-cursor",
+      "data-spectra-control-cursor": "true",
+      "data-spectra-actor": pointer.actorId,
+      style: { left: pointer.left, top: pointer.top },
+      viewBox: "0 0 24 30", width: 24, height: 30,
+    }, createElement("path", { d: "M2 1.8v21.1l5.8-5.4 4.1 9.4 3.8-1.7-4.2-9.1h8.1L2 1.8Z" }))),
+    follow.following && cursor && !controlPointers.some((pointer) => pointer.actorId === follow.followedActorId)
       ? createElement(
           "svg",
           {

@@ -63,6 +63,20 @@ describe("S11 persisted settings observation", () => {
     expect(await f.ack("tab-1", "ordinary", "invisible")).toMatchObject({ phase: "headless" });
   });
 
+  it("lets a second Follow join before seal without extending the deadline, then rejects preemption after seal", async () => {
+    const f = await fixture();
+    const offered = await f.prepare();
+    const join = { ...f.ids, clientId: "tab-new", mode: "follow" as const };
+    const joined = await f.actor.mutation(api.spectraOperations.setUiObserverInterest, join);
+    expect(joined.observation).toMatchObject({ phase: "waiting", action: { expiresAt: offered.action!.expiresAt, epoch: 1 } });
+    expect(await f.ack("tab-0", "follow", "target_ready")).toMatchObject({ phase: "waiting" });
+    expect(await f.ack("tab-new", "follow", "target_ready")).toMatchObject({ phase: "sealed" });
+    const late = await f.actor.mutation(api.spectraOperations.setUiObserverInterest, { ...join, clientId: "tab-late" });
+    expect(late.observation).toMatchObject({ phase: "sealed", action: { epoch: 1 } });
+    const current = uiObservationSnapshotSchema.parse(late.observation);
+    expect(current.participants?.map(entry => entry.clientId)).toEqual(["tab-0", "tab-new"]);
+  });
+
   it("expires a clamped/crashed Follow once, removes its interest, and journals ending before later outcomes", async () => {
     vi.useFakeTimers();
     const f = await fixture();

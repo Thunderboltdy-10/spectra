@@ -6,6 +6,28 @@ Base: `d9aabfb5735bdcd8a620af8a7bdaa85aba08d150`.
 Checkout: `<local-workspace>`; branch `codex/s11-choreography`.
 Coordinator independently verified GPT-6 Astra / xhigh / danger-full-access / approval never.
 
+## September 26 continuation — finite settings slice (not yet verified)
+
+The coordinator approved exact settings observer persistence after reviewing traffic/liveness. Persistence dependency `534ac386` adds bounded observer interest on the existing run and one observation epoch on the existing operation, without another table, broker, or renewable observer heartbeat. Runtime/frontend source now connects the exact account-scoped `writing.smartCompletion` change to the mounted existing Switch. The final `spectraApplicationWrites:execute` pacing fence remains SECURITY-owned and pending; this dependency must land coherently before the feature can be considered wired safely. No backend publication or browser run has occurred.
+
+The only adapted command is an exact normalized `{writing:{smartCompletion:boolean}}` patch. Compound patches retain their existing application path rather than silently discard effects. The registered Switch never invokes the human preference mutation on behalf of AI and never changes its value from a proposed UI event. It requests its authenticated action point, then reads authoritative preference layers after the canonical write response/receipt. Rejection leaves its value and cache unchanged. Human edits made during that read retain their optimistic state until the existing save refresh reconciles them. A terminal event sharing the receipt's feed batch must not suppress this accepted-state refresh.
+
+Observer interest is sent once on discovery/confirmation and on actual Follow or visibility changes. There are at most eight participants per run; ordinary mode selects one owner, while captured Follow participants prepare for the same single effect. The action has one absolute 15-second deadline. A new Follow may join before sealing without extending that deadline; a late join after sealing observes the current/next action and cannot reopen the step. ACK mode cannot downgrade a captured Follow participant. Only explicit release ends its participation. Lost/expired observers are removed from interest, their end event is journaled before the durable result, and approved work can then recover after checking its existing receipt. One crashed tab cannot impose the same delay on every later action.
+
+The worker uses the existing five-second run heartbeat for an optional point read of its awaited operation. A same-process wake is a latency optimization after a persisted ACK; it is not the owner of durable state. A worker on another instance may wait up to five seconds for readiness, which is explicitly unsuitable for general choreography. A short-lived authenticated subscription/wake over the existing store remains an alternative to measure before generalizing. Stop cancels the bounded wait, while the writer still independently rejects a superseded run. The client uses the existing run event feed and POST endpoint; it installs no permanent observer poll.
+
+Source-derived incremental request budget, pending executable measurement:
+
+| Path | Incremental calls beyond the existing application effect/receipt |
+| --- | --- |
+| Headless | One read-only prepare transaction; no observation stored, no UI wait. |
+| Normal one-tab observed action | One prepare transaction, one client validation read to reject replay, one readiness ACK, one authoritative preference-layer query after save. Confirmation interest piggybacks its existing transaction. |
+| Two captured Follow tabs | One additional validation read, readiness ACK, and local preference refresh; still one effect and one durable owner. |
+| Separate worker instance | No new poll requests; at most three awaited-operation point reads piggyback on existing heartbeats during the 15-second bound. |
+| Expiry or uncertain acknowledgement | One expiry transaction or bounded receipt read as applicable; no timeout is reported as saved. |
+
+New source fixtures cover persisted ownership/mode/epoch checks, pre-/post-seal joins, expiry removing stale interest, receipt replay, mounted-control rejection and human-edit preservation, exact visibility at the action point, duplicate event recovery, two actors sharing a control, lost saved-event recovery, and same-instance versus simulated distributed wake timing/call counts. These tests and the earlier `3ac6883a` follow-up remain **UNRUN**. `git diff --check` is the only check completed for this slice so far. New RUNTIME owner `01a0dd80-9b7e-7db3-b1a5-5ccb5beb8fba` schedules the guarded lane and Profile A; the earlier RUNTIME task is historical only.
+
 ## Result and limits
 
 The first unit replaces time-based local completion with explicit performer acknowledgement, repairs lost blocked entries, and isolates actors. Existing saved-result notifications still update Follow AI locations and reference receipts, but no longer pretend to execute a control after the write. The existing Follow AI status/cursor UI and artifact awareness rendering are preserved.

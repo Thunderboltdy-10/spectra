@@ -241,18 +241,10 @@ export const reopenForCurrentStateRetry = mutation({
       throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "executed")
       throw new Error("Only a committed operation can resume from current state");
-    await ctx.db.patch(args.operationId, {
-      status: "executing",
-      output: {
-        ...(operation.output &&
-        typeof operation.output === "object" &&
-        !Array.isArray(operation.output)
-          ? operation.output
-          : {}),
-        currentStateRetryStartedAt: Date.now(),
-      },
-    });
-    return { operationId: args.operationId };
+    // Keep stale clients on an explicit denial during the runtime migration.
+    // A completed edit can be followed by a new operation, never reopened over
+    // a subsequent human edit under its old approval and receipt identity.
+    throw new Error("AI_OPERATION_ALREADY_EXECUTED: Prepare a new operation to edit the current content.");
   },
 });
 

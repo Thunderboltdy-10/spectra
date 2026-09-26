@@ -2019,7 +2019,7 @@ async function runAttempt(
         // generic error wording cannot acknowledge this operation or authorize
         // replay. Leave ambiguous outcomes to exact-attempt journal reconciliation.
         unacknowledgedOperationId = operationId;
-        let affected = await executeOperation(
+        const affected = await executeOperation(
           params.actorClerkId,
           params.runId,
           operationId,
@@ -2040,66 +2040,13 @@ async function runAttempt(
             } catch (firstVerifyError) {
               if (!isQuietRetryableApplyFailure(firstVerifyError))
                 throw firstVerifyError;
-              // A projection can briefly lag the Yjs commit. Check once after a
-              // short settle window; if the durable value is still wrong,
-              // resume this exact operation against the artifact's current
-              // state. Never restart planning or replay earlier operations.
+              // An acknowledged edit may already have been changed by a
+              // collaborator. Retry readback only; a verification mismatch
+              // cannot authorize overwriting newer state or replaying inserts.
               await new Promise((resolve) => setTimeout(resolve, 400));
-              try {
-                await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-                  ...verificationOptions,
-                });
-              } catch (secondVerifyError) {
-                if (!isQuietRetryableApplyFailure(secondVerifyError))
-                  throw secondVerifyError;
-                console.warn("[spectra.operation.current_state_retry]", {
-                  operationId,
-                  type: operation.type,
-                  error: publicError(secondVerifyError),
-                });
-                publishNativeProgress({
-                  title: "Finishing this edit",
-                  detail: "Continuing from the current saved state",
-                  activity: "edit",
-                  operationIndex: index,
-                  artifactType: operation.input.blueprintKey,
-                });
-                await mutate("spectraRuns:patchResultCard", {
-                  actorClerkId: params.actorClerkId,
-                  resultCardId: params.resultCardId,
-                  executionId: params.executionId,
-                  title: "Finishing this edit",
-                  summary: "Continuing from the current saved state",
-                }).catch(() => null);
-                await mutate("spectraOperations:reopenForCurrentStateRetry", {
-                  actorClerkId: params.actorClerkId,
-                  operationId,
-                  executionId: params.executionId,
-                });
-                lastApplyAcknowledged = false;
-                verificationIncomplete = false;
-                unacknowledgedOperationId = operationId;
-                affected = await executeOperation(
-                  params.actorClerkId,
-                  params.runId,
-                  operationId,
-                  operation,
-                  {
-                    ...executeContext,
-                    preclaimed: true,
-                  },
-                );
-                lastApplyAcknowledged = true;
-                unacknowledgedOperationId = undefined;
-                retainedOutcome.acknowledged = true;
-                retainedOutcome.affected = affected;
-                verificationIncomplete = true;
-                await verifyCommittedOutcomes(
-                  params.actorClerkId,
-                  [{ operation, affected }],
-                  verificationOptions,
-                );
-              }
+              await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
+                ...verificationOptions,
+              });
             }
           }
           verificationIncomplete = false;

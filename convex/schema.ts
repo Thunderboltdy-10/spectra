@@ -1309,6 +1309,12 @@ export default defineSchema({
     legacyEventId: v.optional(v.string()),
     /** Caller-owned identity for retrying one scheduled work-block request. */
     idempotencyKey: v.optional(v.string()),
+    /** Original request and source identity; canonical targets remain on the block. */
+    scheduleScope: v.optional(v.object({
+      requestTaskItemId: v.optional(v.id("calendarItems")),
+      requestPlanTaskId: v.optional(v.string()),
+      sourceRecordId: v.optional(v.id("externalRecords")),
+    })),
     revision: v.number(),
     createdBy: v.union(
       v.literal("human"),

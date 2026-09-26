@@ -10,7 +10,7 @@ import { applicationWriteReceipt } from "./spectraApplicationWriteScope";
 import { vUiObserverInterest, vUiObservationFence } from "./spectraUiObservationSchema";
 import {
   mergeUiObserverInterest, prepareUiObservation, acknowledgeUiObservation,
-  expireUiObservation, uiObservationSnapshot,
+  expireUiObservation, uiObservationSnapshot, changeUiObservationInterest,
 } from "./spectraUiObservation";
 
 const uiOperationArgs = { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations") };
@@ -27,7 +27,7 @@ async function requireUiOperation(ctx: Parameters<typeof requireOwnedRun>[0], ar
 }
 
 export const setUiObserverInterest = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), clientId: v.string(), mode: v.union(v.literal("ordinary"), v.literal("follow"), v.literal("released")) },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), clientId: v.string(), mode: v.union(v.literal("ordinary"), v.literal("follow"), v.literal("released")), operationId: v.optional(v.id("spectraOperations")), releaseCurrent: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const run = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId || !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status))
@@ -35,7 +35,10 @@ export const setUiObserverInterest = mutation({
     const next = mergeUiObserverInterest(run, args.executionId, args);
     if (JSON.stringify(next) !== JSON.stringify(run.uiObserverInterests))
       await ctx.db.patch(run._id, { uiObserverInterests: next });
-    return { registered: args.mode !== "released" };
+    const operation = args.operationId ? await ctx.db.get(args.operationId) : null;
+    if (operation && (operation.runId !== run._id || operation.executionId !== args.executionId || operation.actorType !== "ai")) throw new Error("UI_OBSERVATION_STALE");
+    const observation = operation ? await changeUiObservationInterest(ctx, run, operation, args.releaseCurrent ? { clientId: args.clientId, mode: "released" } : args) : undefined;
+    return { registered: next.clients.some((entry) => entry.clientId === args.clientId), ...(observation ? { observation } : {}) };
   },
 });
 

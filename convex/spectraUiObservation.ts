@@ -105,6 +105,33 @@ function sealIfReady(observation: Observation): Observation {
   return { ...observation, phase: "headless", ownerClientId: undefined };
 }
 
+/** Actual Follow transitions may join the current unsealed boundary. Its
+ * absolute deadline never moves; a sealed action is immutable to newcomers. */
+export async function changeUiObservationInterest(ctx: MutationCtx, run: Run, operation: Operation, interest: Interest | { clientId: string; mode: "released" }) {
+  const observation = operation.uiObservation;
+  if (!observation || observation.phase !== "waiting" || observation.expiresAt <= Date.now() || applicationWriteReceipt(operation.output))
+    return uiObservationSnapshot(run, operation);
+  const existing = observation.participants.find((entry) => entry.clientId === interest.clientId);
+  if (interest.mode === "released" && existing) {
+    const next = sealIfReady({ ...observation, participants: observation.participants.map((entry) =>
+      entry.clientId === interest.clientId ? { ...entry, outcome: "released" } : entry,
+    ) });
+    await ctx.db.patch(operation._id, { uiObservation: next });
+    await appendObservationEvent(ctx, run, operation, "settings_observer_ended", {
+      operationId: String(operation._id), executionId: operation.executionId, epoch: observation.epoch,
+      clientIds: [interest.clientId], reason: "Follow AI ended for this action. The task continues.",
+    });
+    return uiObservationSnapshot(run, { ...operation, uiObservation: next });
+  }
+  if (interest.mode !== "follow" || existing) return uiObservationSnapshot(run, operation);
+  if (observation.participants.length >= MAX_UI_OBSERVERS) throw new Error("UI_OBSERVER_CAPACITY");
+  const next = { ...observation, participants: [...observation.participants, interest] };
+  await ctx.db.patch(operation._id, { uiObservation: next });
+  const snapshot = uiObservationSnapshot(run, { ...operation, uiObservation: next });
+  await appendObservationEvent(ctx, run, operation, "settings_toggle_prepared", snapshot);
+  return snapshot;
+}
+
 export async function expireUiObservation(ctx: MutationCtx, run: Run, operation: Operation, now: number) {
   const observation = operation.uiObservation;
   if (!observation || observation.phase === "headless" || observation.expiresAt > now || applicationWriteReceipt(operation.output)) return operation;

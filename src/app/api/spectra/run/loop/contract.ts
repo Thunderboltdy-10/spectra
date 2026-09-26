@@ -14,7 +14,10 @@ export type Body = {
     | "revert"
     | "clear_agent"
     | "scheduled_run"
-    | "scheduled_resume";
+    | "scheduled_resume"
+    | "ui_observer"
+    | "ui_observer_ack";
+  uiObserver?: { clientId: string; mode: "ordinary" | "follow" };
   prompt?: string;
   surface?: Surface;
   workspaceId?: string;

@@ -114,6 +114,8 @@ import { RunStateMachine } from "@/features/spectra/runs/state";
 import type { RunProtocolState } from "@/features/spectra/runs/state";
 import { classifyRunAttemptAbort } from "@/features/spectra/ai/run-lifecycle";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
+import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./loop/ui-observation";
+import { handleUiObserverRequest, uiObserverSchema } from "./loop/ui-observer-request";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
 import { withWorkerConvexToken } from "@/lib/convex-worker-context";
@@ -277,13 +279,17 @@ async function runAttempt(
     ? AbortSignal.any([params.signal, leaseController.signal])
     : leaseController.signal;
   const heartbeat = setInterval(() => {
-    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", {
+    const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
+      ...(awaitedOperationId ? { awaitedOperationId } : {}),
     })
       .then((result) => {
-        if (!result.alive) leaseController.abort();
+        if (!result.alive) { leaseController.abort(); cancelUiObservation(params.runId, params.executionId); }
+        if (awaitedOperationId && result.observation)
+          notifyUiObservation({ runId: params.runId, executionId: params.executionId, operationId: awaitedOperationId }, result.observation);
       })
       .catch(() => null);
   }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
@@ -3012,10 +3018,16 @@ async function resumeOperationsAttempt(params: {
     (operation) => operation.affected ?? [],
   );
   const heartbeat = setInterval(() => {
-    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", {
+    const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
+      ...(awaitedOperationId ? { awaitedOperationId } : {}),
+    }).then((result) => {
+      if (!result.alive) cancelUiObservation(params.runId, params.executionId);
+      if (awaitedOperationId && result.observation)
+        notifyUiObservation({ runId: params.runId, executionId: params.executionId, operationId: awaitedOperationId }, result.observation);
     }).catch(() => null);
   }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
@@ -3733,6 +3745,9 @@ export async function handleSpectraRunRequest(request: NextRequest) {
   }
 
   const actor = await requireActor();
+
+  if (action === "ui_observer" || action === "ui_observer_ack")
+    return handleUiObserverRequest(action, body.payload);
 
   if (action === "clear_agent") {
     const runId = body.runId?.trim();
@@ -4548,6 +4563,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           actorClerkId: actor.clerkId,
           runId,
           executionId: approvalExecutionId,
+          ...(body.uiObserver ? { uiObserver: uiObserverSchema.parse(body.uiObserver) } : {}),
         },
       );
       await mutate("spectraRuns:appendEvent", {

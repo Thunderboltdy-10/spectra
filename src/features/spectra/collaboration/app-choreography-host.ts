@@ -227,6 +227,7 @@ function observeAppTargets(targetKey?: string) {
 
 function isAppTargetVisible(targetKey?: string, resolved?: readonly HTMLElement[]): boolean {
   if (!targetKey || typeof document === "undefined") return false;
+  if (document.visibilityState === "hidden") return false;
   const candidates = resolved ?? findAppTargets(targetKey);
   for (const element of candidates) {
     if (!element.isConnected) continue;

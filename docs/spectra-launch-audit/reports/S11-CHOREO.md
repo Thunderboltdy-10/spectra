@@ -30,6 +30,16 @@ New source fixtures cover persisted ownership/mode/epoch checks, pre-/post-seal 
 
 The continuation source review also closes finite client-lifetime gaps: malformed prepared events cannot insert an undefined action; a validation response arriving after Stop cannot enqueue a performer; rejected/expired queued observations cancel their exact local entry without waiting for activation. Receipt settlement before activation cannot replay a completed action. Exact visibility treats a hidden document as invisible, and the approach delay uses the existing effective-motion resolver, including disabled motion and the operating-system reduction preference. Focused fixtures for these paths are prepared but unrun under the same scheduling hold.
 
+Follow-up source commits: `25dfb561` contains those lifecycle/visibility/motion repairs. `d9390e45` preserves the actual settings section from the saved event, so Follow stays on Writing instead of being sent to the generic preferences section after the effect.
+
+### First document seam — source only
+
+`5ec890c0` adds `applyDocumentParagraphTextSplice` in `work/models/yjs/document-text-splice.ts`. It mutates the caller's scratch document in one transaction, retaining the existing top-level paragraph and its unformatted `Y.XmlText`. It checks the exact expected text and valid UTF-16 splice boundaries before changing anything, rejects marks/references/inline atoms and ambiguous targets, and does not rebuild canonical content from block mirrors. Its fixtures cover relative selections, exact scratch deltas, stale human edits, human undo separation, and authored delta bytes with 20 versus 1,000,000 unrelated characters. These fixtures remain **UNRUN**; no measured byte result is claimed yet.
+
+OFFICE confirmed this adjacent helper does not overlap its lens/reference work. COLLAB requested and retains ownership of the scratch builder and `yjs-artifact-operation.ts` consumer. DURABLE confirmed the initial contract: one paragraph splice is one immutable operation, with one final native proof/exact admitted delta after UI readiness and a fresh room/native revision check. If another edit arrives during readiness, revalidate/rebuild before admission. Canonical acceptance and the receipt's native state remain distinct. The helper is not yet wired to the production writer or observed editor. Multiple durable typing steps still require a separate parent/step receipt and history contract; whole-operation proof does not authorize untracked prefixes.
+
+The prepared guarded bundle now contains 12 test files, including SECURITY's seven actual-writer cases and the document seam fixtures. Scoped lint and typecheck inputs are prepared in the ignored CHOREO directory. Execution remains held until RUNTIME explicitly releases the lane after PERFORMANCE; no check process is running in this checkout.
+
 ## Result and limits
 
 The first unit replaces time-based local completion with explicit performer acknowledgement, repairs lost blocked entries, and isolates actors. Existing saved-result notifications still update Follow AI locations and reference receipts, but no longer pretend to execute a control after the write. The existing Follow AI status/cursor UI and artifact awareness rendering are preserved.

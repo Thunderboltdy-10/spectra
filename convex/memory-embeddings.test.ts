@@ -81,7 +81,7 @@ describe("versioned asynchronous memory embeddings", () => {
     expect((await f.t.run((ctx) => ctx.db.get(claimId)))?.proposition).toBe(original);
   });
 
-  it.each(["forget", "correct", "revoke", "disable", "dispute", "reclassify"])("rejects delayed completion after %s", async (change) => {
+  it.each(["forget", "correct", "revoke", "disable", "dispute", "reclassify", "content"])("rejects delayed completion after %s", async (change) => {
     const f = await fixture();
     const { claimId } = await f.reader.mutation(api.memory.remember, { proposition: "The heliostat assembly uses a silver reflector.", scope: "private_global", claimType: "declared_fact", sourceType: "artifact", sourceId: f.artifactId });
     const attempt = await lease(f, claimId);
@@ -92,6 +92,7 @@ describe("versioned asynchronous memory embeddings", () => {
     if (change === "disable") await f.reader.mutation(api.memory.updatePreferences, { enabled: false });
     if (change === "dispute") await f.reader.mutation(api.memory.setDisputed, { claimId, disputed: true });
     if (change === "reclassify") await f.t.run((ctx) => ctx.db.patch(claimId, { scope: "private_school" }));
+    if (change === "content") await f.t.run((ctx) => ctx.db.patch(claimId, { proposition: "The assembly design has changed." }));
     expect(await f.t.query(internal.memory.embeddingInput, attempt)).toBeNull();
     expect(await f.t.mutation(internal.memory.completeEmbedding, { ...attempt, vector })).toEqual({ committed: false });
     expect((await f.t.run((ctx) => ctx.db.get(claimId)))?.embeddingPartition).toBeUndefined();

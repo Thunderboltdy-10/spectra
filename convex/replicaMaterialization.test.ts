@@ -226,6 +226,26 @@ async function invokeCloud(t: ReturnType<typeof convexTest>, f: Fixture) {
 }
 
 describe("Native materialization in the admitting mutation", () => {
+  it("queues a human durable restore without inventing AI identity or projecting canonical content", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seedWork(t);
+    const before = await snapshot(t, f);
+    await t.run(async ctx => {
+      const actor = await getActorForAccountId(ctx, f.accountId);
+      if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+      await queueMaterializationInTransaction(ctx, actor, queueArgs(f), {
+        actorKind: "user", canonicalProjection: "durable",
+      });
+    });
+    const after = await snapshot(t, f);
+    expect(after.work).toEqual(before.work);
+    expect(after.cloud).toEqual(before.cloud);
+    expect(after.requests).toHaveLength(1);
+    expect(after.operations).toHaveLength(1);
+    expect(after.operations[0]?.actorKind).toBe("user");
+    expect(after.operations[0]?.runId).toBeUndefined();
+  });
+
   it("queues AI provenance and readback without an independent canonical projection", async () => {
     const t = convexTest(schema, modules);
     const f = await seedWork(t);

@@ -22,6 +22,7 @@ const operation = v.union(
   v.literal("bootstrap"),
   v.literal("append"),
   v.literal("nativeReconcile"),
+  v.literal("commitAiNative"),
   v.literal("checkpoint"),
   v.literal("snapshot"),
   v.literal("storeDurablePayload"),
@@ -424,6 +425,24 @@ export const exchange = action({
           ),
         },
       );
+    }
+
+    if (args.operation === "commitAiNative") {
+      const value = payload.append;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("AI_NATIVE_ENVELOPE_INVALID");
+      const append = value as Record<string, unknown>;
+      if (append.artifactId !== artifactId || append.accountId !== payload.accountId || append.partitionKey !== "root" ||
+          partitionKey !== "root" || append.policyVersion !== payload.policyVersion || append.actorKind !== "ai")
+        throw new Error("AI_NATIVE_ENVELOPE_INVALID");
+      const encoded = typeof append.update === "string" ? append.update : "";
+      if (encoded.length > 1_400_000) throw new Error("COLLABORATION_BRIDGE_UPDATE_INVALID");
+      const bytes = Buffer.from(encoded, "base64");
+      return ctx.runMutation(makeFunctionReference<"mutation">("nativeAiCommit:commit"), {
+        aiOperation: payload.aiOperation, requestDigest: payload.requestDigest, expected: payload.expected,
+        beforeProjectionJson: payload.beforeProjectionJson, beforeProjectionHash: payload.beforeProjectionHash,
+        append: { ...append, update: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) },
+        evidence: payload.evidence, nativeCandidate: payload.nativeCandidate,
+      });
     }
 
     if (args.operation === "nativeReconcile") {

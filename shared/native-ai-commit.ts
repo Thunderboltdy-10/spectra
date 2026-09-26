@@ -28,6 +28,8 @@ export async function nativeAiUpdateIdentity(append: DigestInput["append"]) {
       throw new Error("AI_NATIVE_UPDATE_INVALID");
     return { updateDigest: append.payloadDigest!, byteLength: append.byteLength! };
   }
+  if (append.payloadDigest !== undefined || append.byteLength !== undefined)
+    throw new Error("AI_NATIVE_UPDATE_INVALID");
   if (!bytes.byteLength) throw new Error("AI_NATIVE_UPDATE_INVALID");
   return { updateDigest: await sha256(bytes), byteLength: bytes.byteLength };
 }

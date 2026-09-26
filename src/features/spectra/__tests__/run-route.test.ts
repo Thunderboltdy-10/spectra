@@ -573,6 +573,8 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(events).toContainEqual(expect.objectContaining({ type: "final", summary: "The Moon reflects sunlight." }));
+    const { convexAction } = await import("@/lib/convex-server");
+    expect(convexAction).not.toHaveBeenCalled();
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
     expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraOperations:recordPlan")))
       .toEqual([expect.arrayContaining([expect.any(String), expect.objectContaining({ operations: [] })])]);
@@ -1060,6 +1062,8 @@ describe("Spectra run route", () => {
     const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:finalizePending"));
     expect(createCall).toBeTruthy();
     expect((getSavedArtifact().content as { cards: unknown[] }).cards).toHaveLength(6);
+    const { convexAction } = await import("@/lib/convex-server");
+    expect(convexAction).not.toHaveBeenCalled();
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("orgTree:removeFromWorkspace"))).toBe(false);
     const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
     expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "workspace", workspaceId: "workspace-real" });
@@ -1787,6 +1791,10 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { convexAction } = await import("@/lib/convex-server");
+    expect(convexAction).toHaveBeenCalledWith("spectraArtifactWrites:preparePlan", {
+      runId: "run-real", executionId: "execution-1",
+    });
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:discardPendingForRun"))).toBe(false);
     expect(events.some((event) => event.type === "final")).toBe(true);

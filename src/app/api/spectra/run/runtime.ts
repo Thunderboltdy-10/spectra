@@ -1549,13 +1549,15 @@ async function runAttempt(
     ]);
     // Derive destructive artifact effects from the stored plan and authorized
     // current content; neither a model flag nor patch syntax grants approval.
-    const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
-      "spectraArtifactWrites:preparePlan",
-      { runId: params.runId, executionId: params.executionId },
-    );
-    if (artifactPolicy.approvalReasons.length > 0) {
-      policy.requiresConfirmation = true;
-      policy.reasons.push(...artifactPolicy.approvalReasons);
+    if (plan.operations.some((operation) => operation.type === "artifact.update" || operation.type === "artifact.archive")) {
+      const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
+        "spectraArtifactWrites:preparePlan",
+        { runId: params.runId, executionId: params.executionId },
+      );
+      if (artifactPolicy.approvalReasons.length > 0) {
+        policy.requiresConfirmation = true;
+        policy.reasons.push(...artifactPolicy.approvalReasons);
+      }
     }
     recordPhase("plan_recorded");
     const pendingArtifacts = new Map<string, string>();

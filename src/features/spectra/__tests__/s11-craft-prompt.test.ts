@@ -42,7 +42,9 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     expect(first.tools).toEqual(second.tools);
     expect(first.messages.at(-1)?.role).toBe("user");
     expect(first.messages.at(-1)?.content).toContain("2026-09-26T10:00:00.123Z");
+    expect(first.messages.at(-1)?.content).toContain('"currentView":"library"');
     expect(second.messages.at(-1)?.content).toContain("2026-09-26T10:00:01.456Z");
+    expect(second.messages.at(-1)?.content).toContain('"currentView":"calendar"');
     expect(first.messages[0]?.content).not.toContain("academic-sources");
     expect(first.tool_choice).toBe("auto");
   });
@@ -63,6 +65,20 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     expect(output.slice(original.length).map((message) => message.role)).toEqual(["system", "user", "system"]);
     expect(output.find((message) => message.content === context)?.role).toBe("user");
     expect(original).toHaveLength(4);
+  });
+
+  it("keeps exact mutation scope present in the outgoing request without putting IDs in the static system", async () => {
+    const packet = await capturePacket("Update the requested document.", {
+      explicitMutationOnly: true,
+      explicitMutationTargetIds: ["synthetic-document-A"],
+      unresolvedExplicitMutationTargetIds: [],
+      focusedArtifact: { id: "synthetic-document-A", blueprintKey: "document", title: "Draft", content: { blocks: [] } },
+    });
+    expect(packet.messages[0]?.content).not.toContain("synthetic-document-A");
+    const scope = packet.messages.find((message, index) => index > 0 && message.role === "system" && String(message.content).includes("Exact update-only scope"));
+    expect(scope?.content).toContain("synthetic-document-A");
+    expect(scope?.content).toContain("Do not create artifacts");
+    expect(packet.messages.at(-1)?.role).toBe("user");
   });
 
   it("omits unrelated specialist bodies and reads only the chosen built-in guide", async () => {

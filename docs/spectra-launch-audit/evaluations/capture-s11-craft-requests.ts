@@ -15,6 +15,7 @@ async function main() {
   const sourceFiles = [
     "src/app/api/spectra/run/loop/plan.ts", "src/features/spectra/ai/workspace-assistant-prompt.ts",
     "src/features/spectra/tools/registry/application-tools.ts", "src/features/spectra/quality/rubrics.ts",
+    ...(label === "after" ? ["src/features/spectra/ai/prompt-messages.ts", "src/features/spectra/artifacts/skill-guidance.ts"] : []),
   ];
   const sourceHashes = Object.fromEntries(sourceFiles.map((file) => {
     const source = readFileSync(file, "utf8").replace(/\r\n/g, "\n");

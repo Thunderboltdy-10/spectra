@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Check, ExternalLink, FileText, Link2, Loader2, X } from "lucide-react";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
@@ -12,6 +18,10 @@ import { isArtifactTypeKey } from "../artifacts/registry";
 import { suggestedEmbedInteraction } from "../capabilities";
 import { workTypeMeta } from "./artifact-card";
 import { useArtifactEmbedContainer } from "./artifact-embed-host";
+
+function pendingKeepKey(threadId: string | undefined, sourceId: string) {
+  return JSON.stringify([threadId ?? "", sourceId]);
+}
 
 function collectMentionedIds(
   content: string | undefined,
@@ -63,18 +73,18 @@ export function ComposerArtifactDock({
     threadId ?? "",
     Boolean(threadId),
   );
-  const [busyArtifactId, setBusyArtifactId] = useState<string | null>(null);
-  const [keptSourceIds, setKeptSourceIds] = useState<ReadonlySet<string>>(
+  const pendingRequests = useRef(new Map<string, object>());
+  const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const activeView = useRef<{
+    threadId: string | undefined;
+    sourceIds: ReadonlySet<string>;
+  } | null>(null);
   const embeddedSourceIds = useMemo(
-    () => {
-      const ids = new Set(keptSourceIds);
-      for (const embed of existing?.embeds ?? [])
-        ids.add(embed.sourceArtifactId);
-      return ids;
-    },
-    [existing?.embeds, keptSourceIds],
+    () =>
+      new Set((existing?.embeds ?? []).map((embed) => embed.sourceArtifactId)),
+    [existing?.embeds],
   );
   const rows = useMemo(() => {
     const byId = new Map(artifacts.map((artifact) => [artifact._id, artifact]));
@@ -97,15 +107,28 @@ export function ComposerArtifactDock({
     });
   }, [artifacts, assistantContent, cards, explicitIds]);
 
+  useEffect(() => {
+    activeView.current = {
+      threadId,
+      sourceIds: new Set(rows.map((artifact) => artifact._id)),
+    };
+    return () => {
+      activeView.current = null;
+    };
+  }, [rows, threadId]);
+
   async function keepInThread(artifact: SpectraArtifact) {
+    const key = pendingKeepKey(threadId, artifact._id);
     if (
       !threadId ||
       !isArtifactTypeKey(artifact.blueprintKey) ||
       embeddedSourceIds.has(artifact._id) ||
-      busyArtifactId
+      pendingRequests.current.has(key)
     )
       return;
-    setBusyArtifactId(artifact._id);
+    const request = { threadId, sourceId: artifact._id };
+    pendingRequests.current.set(key, request);
+    setPendingKeys(new Set(pendingRequests.current.keys()));
     try {
       await createReference({
         containerType: "thread",
@@ -118,15 +141,26 @@ export function ComposerArtifactDock({
         contextPolicy: "summary",
         displayPreferences: { sourceWorkType: artifact.blueprintKey },
       });
-      setKeptSourceIds((current) => new Set(current).add(artifact._id));
+      // Membership comes from the authorized subscription. An acknowledgement
+      // cannot resurrect a removed reference or mark another conversation kept.
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "This work could not be kept in the conversation.",
-      );
+      if (
+        pendingRequests.current.get(key) === request &&
+        activeView.current?.threadId === request.threadId &&
+        activeView.current.sourceIds.has(request.sourceId)
+      ) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "This work could not be kept in the conversation.",
+        );
+      }
     } finally {
-      setBusyArtifactId(null);
+      if (pendingRequests.current.get(key) === request) {
+        pendingRequests.current.delete(key);
+        if (activeView.current)
+          setPendingKeys(new Set(pendingRequests.current.keys()));
+      }
     }
   }
 
@@ -140,6 +174,7 @@ export function ComposerArtifactDock({
       {rows.map((artifact) => {
         const meta = workTypeMeta[artifact.blueprintKey];
         const Icon = meta?.icon ?? FileText;
+        const busy = pendingKeys.has(pendingKeepKey(threadId, artifact._id));
         return (
           <div
             key={artifact._id}
@@ -200,12 +235,12 @@ export function ComposerArtifactDock({
                   <button
                     type="button"
                     onClick={() => void keepInThread(artifact)}
-                    disabled={Boolean(busyArtifactId)}
+                    disabled={busy}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] disabled:opacity-45"
                     aria-label={`Keep ${artifact.title} in this conversation`}
                     title="Keep in conversation"
                   >
-                    {busyArtifactId === artifact._id ? (
+                    {busy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
                     ) : (
                       <Link2 className="h-3.5 w-3.5" />

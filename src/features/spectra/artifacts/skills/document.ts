@@ -1,4 +1,5 @@
 import { defineArtifactSkill } from "../types";
+import { artifactDesignGuidance } from "./artifact-design";
 
 export const documentSkill = defineArtifactSkill({
   typeKey: "document",
@@ -29,9 +30,10 @@ export const documentSkill = defineArtifactSkill({
     "artifact embed",
   ],
   operations: [
+    ...artifactDesignGuidance,
     "For claims based on supplied evidence, put the exact supporting evidence handles in the block's sourceRefs. Spectra creates readable native citation fields and source metadata; do not invent verified sources or duplicate those citations in prose.",
-    "For study material, teach the idea before testing it: explain mechanisms, connect concepts, include a worked example and likely misconception, then add a few retrieval questions with answers. Match depth to the learner and supplied evidence; do not pad with generic introductions.",
-    "Choose a clear reading hierarchy with a specific title, useful headings, short focused paragraphs, and a table or diagram only where it explains a relationship. Keep prose substantive and the result easy to revise or print.",
+    "For study material, teach the idea clearly and choose useful support: a worked example for a procedure, a misconception for a subtle distinction, or retrieval practice when the learner wants to test understanding. Match depth and structure to the brief; a concise explanation need not become a full lesson or quiz.",
+    "Use the reading hierarchy the document needs: focused paragraphs, headings for real sections, and tables or diagrams for relationships. A short memo or letter may need no section headings. Keep prose substantive and easy to revise or print; avoid routine dividers, colour bands or callouts without a purpose.",
     "For a native table, add a labelled header row before every requested data row. A request for five records means all five records remain data rows beneath the header; keep measurements and units in clearly named, separate columns.",
     "For a narrow text edit, use the actual stable block path /blocks/id:<blockId>/text or its supplied index. Rewrite the section body without overwriting its heading or unrelated blocks.",
     "Inspect outline, selected blocks, sources, comments, embeds, and constraints.",

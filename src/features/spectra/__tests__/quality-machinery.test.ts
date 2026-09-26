@@ -371,12 +371,11 @@ describe("P4.I4 quality machinery", () => {
       "structure",
       "layout",
       "density",
-      "pacing",
       "accessibility",
     ]);
   });
 
-  it("raises chart labels to the readable floor and derives missing reading order", () => {
+  it("preserves authored chart label size and derives missing reading order", () => {
     const draft = presentationDraft();
     const chartSlide = draft.slides[3];
     const orderSlide = draft.slides[4];
@@ -403,7 +402,7 @@ describe("P4.I4 quality machinery", () => {
       prompt: "Create a 6-slide presentation for teachers.",
     });
 
-    expect(chart?.style?.fontSize).toBeGreaterThanOrEqual(20);
+    expect(chart?.style?.fontSize).toBe(18);
     expect(content.slides[4]?.accessibility?.readingOrder).toEqual(
       visibleOrderSlide.map((object) => object.id),
     );
@@ -566,7 +565,7 @@ describe("P4.I4 quality machinery", () => {
     expect(isRepairablePlanFailure(thrown)).toBe(true);
   });
 
-  it("rejects long repetitive text-only decks that merely scrape the score", () => {
+  it("accepts readable text-only sequences without inventing visual quotas", () => {
     const content = {
       theme: presentationDraft().theme,
       settings: { aspectRatio: "16:9" },
@@ -589,18 +588,10 @@ describe("P4.I4 quality machinery", () => {
       prompt: "Create a 10-slide presentation for teachers.",
     });
 
-    expect(report.passed).toBe(false);
-    expect(report.findings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          criterionId: "pacing",
-          severity: "blocker",
-        }),
-      ]),
-    );
+    expect(report.passed).toBe(true);
   });
 
-  it("realizes a 12-slide experimental-design brief into a presentable deck", () => {
+  it("fits a sparse 12-slide outline without changing its layout sequence or body copy", () => {
     const outline = [
       ["Experimental design", "A fair test for pendulum period."],
       ["Research question", "How does string length change the period of a pendulum?"],
@@ -626,7 +617,7 @@ describe("P4.I4 quality machinery", () => {
           textObject(`title-${index + 1}`, title),
           textObject(
             `body-${index + 1}`,
-            `${body} Additional classroom detail that would overflow a narrow frame if the template did not fit display copy and park the rest in speaker notes.`,
+            `${body} Keep this supporting classroom detail in the visible body: record the method carefully so the next group can repeat the observation.`,
           ),
         ],
       })),
@@ -639,8 +630,12 @@ describe("P4.I4 quality machinery", () => {
     });
 
     expect(content.slides).toHaveLength(12);
-    expect(new Set(content.slides.map((slide) => slide.layoutId)).size).toBeGreaterThanOrEqual(4);
-    for (const slide of content.slides) {
+    expect(content.slides.every((slide) => slide.layoutId === "title-content")).toBe(true);
+    for (const [index, slide] of content.slides.entries()) {
+      expect(slide.objects[1]?.content).toEqual({
+        text: `${outline[index][1]} Keep this supporting classroom detail in the visible body: record the method carefully so the next group can repeat the observation.`,
+      });
+      expect(slide.speakerNotes ?? "").toBe("");
       const objectIds = new Set(slide.objects.map((object) => object.id));
       expect(slide.accessibility?.readingOrder?.length).toBeGreaterThan(0);
       for (const objectId of slide.accessibility?.readingOrder ?? []) {
@@ -653,7 +648,7 @@ describe("P4.I4 quality machinery", () => {
     );
   });
 
-  it("rewrites reading order after parking extras and accepts stale authored ids in a plan", () => {
+  it("repairs reading order while retaining extra authored objects in a sparse layout", () => {
     const realized = realizeGeneratedPresentation({
       theme: presentationDraft().theme,
       settings: { aspectRatio: "16:9" },
@@ -673,7 +668,7 @@ describe("P4.I4 quality machinery", () => {
     const remaining = new Set(
       realized.slides[0]?.objects.map((object) => object.id),
     );
-    expect(realized.slides[0]?.objects).toHaveLength(1);
+    expect(realized.slides[0]?.objects.map((object) => object.id)).toEqual(["title-1", "body-1"]);
     for (const objectId of realized.slides[0]?.accessibility?.readingOrder ?? []) {
       expect(remaining.has(objectId)).toBe(true);
     }

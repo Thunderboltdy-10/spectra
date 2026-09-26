@@ -39,3 +39,14 @@ Added after AI-ENGINE's approved protocol decision; these cases remain separate 
 ## First-unit status
 
 Live cases C1–C8 have not run in this unit. The focused regression `presentation-citation-policy-persistence.test.ts` saves a synthetic tray-trial Yjs snapshot, reloads it, applies a subsequent notes edit, exports the committed projection, checks real chart values and notes, and reopens the PPTX through the lens. Its fixture is intentionally different from the held-out council pilot. Native app render/visual judgment and end-to-end live model generation remain acceptance work.
+
+## Paired prompt comparison for the skills unit
+
+`capture-s11-craft-prompts.ts` captures the exact exported workspace core and artifact-worker/quality sections for four briefs: a simple answer, a short letter, a consistent comparison handout, and mixed document/presentation work. It uses `o200k_base` to count actual tokens. It does not call a provider or generate fake gold outputs. Run only in a RUNTIME-approved guarded slot:
+
+```powershell
+node node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts before
+node node_modules/tsx/dist/cli.mjs docs/spectra-launch-audit/evaluations/capture-s11-craft-prompts.ts after
+```
+
+Capture `before` at `00523e2a` and `after` at the candidate revision. Outputs go to `.spectra-local/launch-s11/craft/prompt-corpus/{before,after}`. They explicitly exclude routing additions, tool schemas, orientation, attachments and conversation; they must not be described as a captured live request. The mixed case records the ordinary core and the two assigned worker prompts separately, not a new monolithic all-skills system prompt. The comparison confirms prompt contents and token cost only. Live saved-output judgments use the independent rubric above; these paired briefs are regression cases, not held-out proof.

@@ -1,4 +1,5 @@
 import { defineArtifactSkill } from "../types";
+import { artifactDesignGuidance } from "./artifact-design";
 
 export const presentationSkill = defineArtifactSkill({
   typeKey: "presentation",
@@ -25,12 +26,12 @@ export const presentationSkill = defineArtifactSkill({
     "presenter setting",
   ],
   operations: [
-    "Choose one coherent visual direction appropriate to the subject and audience: a restrained palette, deliberate type scale, consistent alignment, and one memorable explanatory visual. Let the content drive variation rather than decorating every slide alike.",
+    ...artifactDesignGuidance,
     "A source's numeric comparison needs a real editable chart or table with checked values, units, categories, and series. For a new chart, author a chart object whose content has chartType, categories, and named numeric series with matching categories and values; put units in the series names and valueAxisTitle. Use a permissioned Sheets chart binding only when a readable source range already exists. Never substitute a labelled shape, diagram, or stock image for data. State the comparison's conclusion without implying causation the source does not establish.",
     "Plan narrative and outline, add or reorder slides, compose layouts, create/rewrite/move/resize objects, apply themes, and write speaker notes.",
     "Use the native layout vocabulary intentionally: title-content for a conventional explanation, title-visual-text for an evidence-led slide, visual-story for a dominant visual with supporting copy, three-ideas for three parallel points, statement for one memorable claim, two-column for comparison, and full-bleed only when the media can carry the slide.",
     "A layout is a starting constraint, not a finished design. After choosing it, adjust object geometry, type scale, crop, whitespace, alignment, and emphasis to fit the actual content; never leave generic placeholders or default cascaded coordinates.",
-    "Keep all visible text at 20px or larger, including chart and table labels. If the content does not fit, simplify or rebalance the slide. On slides with three or more visible objects, set accessibility.readingOrder to every visible object ID exactly once in the intended spoken order.",
+    "Size text for the actual viewing context: projected body copy usually needs at least 20px, while close-reading handouts and secondary labels may be smaller if legible. Preserve explicitly requested sizes. If content does not fit, revise the layout or deliberately edit the copy; do not silently remove it. On slides with three or more visible objects, set accessibility.readingOrder to every visible object ID exactly once in spoken order.",
     "Generate charts from a stable Sheets range when one is already available, otherwise embed the checked source values in the native chart object. Check overflow, contrast, hierarchy, alignment, reading order, sources, and presenter output.",
     "For claims based on supplied evidence, attach exact server-issued evidence handles in the slide's sourceRefs. Spectra supplies readable citation metadata and exports attribution with speaker notes. Use the supporting passage/page; a general source footer alone does not establish support. Creative work, original examples, and ordinary explanations do not need invented citations.",
     "Honor the requested slide count using the actual slide sequence. Add a separate references slide only when the user requests it or the brief's citation convention calls for one; include it in any requested total. Citations can remain on narrative slides without an extra page. No bibliography is added automatically.",
@@ -42,7 +43,7 @@ export const presentationSkill = defineArtifactSkill({
   validation: [
     "Check canvas bounds, text overflow, missing media/fonts, contrast, type scale, alignment, alt text, reading order, citations, and unavailable live sources.",
     "Reject slides that look like documents pasted onto a canvas: keep one clear idea per slide, prefer short display copy, maintain deliberate whitespace, align every edge, and use visuals or diagrams when they improve understanding.",
-    "Inspect the rendered slide at presentation scale after every structural change. Fix collisions, tiny text, accidental empty regions, weak hierarchy, repeated layouts, and low-information decorative shapes before declaring success.",
+    "Inspect the rendered slide at its intended viewing scale when available. Fix collisions, illegible text, accidental empty regions, weak hierarchy and decorative shapes without meaning. Consistent comparison slides and purposeful text-only sequences are valid; do not vary layouts just to meet a quota.",
     "Ensure every slide advances the narrative and remains legible in presenter, embed, exported, narrow review, and reduced-motion states.",
   ],
   approvals: [

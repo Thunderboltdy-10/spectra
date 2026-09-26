@@ -127,6 +127,24 @@ describe("actual current retained-pin placement", () => {
     await f.patchEmbed({ removedAt: Date.now() });
     expect(await f.proven()).toBe(false);
   });
+
+  it.each([false, true])("keeps proof bound to canonical identity across forged label mirrors (full rebuild=%s)", async rebuild => {
+    const f = await fixture();
+    const otherVersion = await f.t.run(ctx => ctx.db.insert("spectraArtifactVersions", {
+      artifactId: f.ids.hostId, ownerAccountId: f.ids.accountId, schoolId: f.ids.schoolId,
+      source: "manual", after: { content: {} }, createdAt: f.ids.now + 1,
+    }));
+    const forged = { ...f.attrs, sourceArtifactId: String(f.ids.hostId), pinnedVersionId: String(otherVersion), placementOperationId: "forged" };
+    await f.patchHost({ content: { ...f.content, blocks: [
+      { id: "reference:one", type: "paragraph", text: "A changed mirror label", reference: forged },
+      ...(rebuild ? [{ id: "new-paragraph", type: "paragraph", text: "New ordinary text" }] : []),
+    ] } });
+    expect(await f.proven()).toBe(true);
+    expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "proven" });
+    await f.patchEmbed({ sourceArtifactId: f.ids.hostId, pinnedVersionId: otherVersion, placementOperationId: "forged" });
+    expect(await f.proven()).toBe(false);
+    expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "unavailable" });
+  });
 });
 
 describe("server-observed offloaded and collaboration placement", () => {

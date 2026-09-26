@@ -4226,6 +4226,7 @@ export default defineSchema({
     executedAt: v.optional(v.number()),
   })
     .index("by_run", ["runId"])
+    .index("by_run_execution_status", ["runId", "executionId", "status"])
     .index("by_type_status", ["type", "status"]),
 
   spectraResultCards: defineTable({

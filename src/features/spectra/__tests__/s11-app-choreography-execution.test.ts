@@ -53,6 +53,23 @@ describe("S11 local choreography execution lifecycle", () => {
     vi.restoreAllMocks();
   });
 
+  it("holds a real pending acknowledgement to a fixed deadline without timer progress or completion", async () => {
+    const gate = deferred();
+    let context!: AppPerformanceContext;
+    performAppChoreography(request("receipt"), (value) => {
+      context = value;
+      expect(context.holdUntil(Date.now() + 99_000)).toBe(true);
+      return gate.promise;
+    });
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(getAppChoreographyCoordinator().snapshot()).toMatchObject([{ status: "performing" }]);
+    expect(context.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(501);
+    expect(context.signal.aborted).toBe(true);
+    expect(context.holdUntil(Date.now() + 20_000)).toBe(false);
+    gate.resolve();
+  });
+
   it.each(["final", "stopped", "error", "interrupted"])("releases only the actor whose run ends with %s", async (type) => {
     const a = artifactPerformerFor("a");
     const b = artifactPerformerFor("b");

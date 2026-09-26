@@ -54,6 +54,8 @@ export type AppPerformanceContext = {
   decision: () => AppChoreographyDecision;
   /** Acknowledge actual progress and renew the local claim before the next step. */
   checkpoint: () => boolean;
+  /** Bound a pending server acknowledgement without pretending it is progress. */
+  holdUntil: (deadline: number) => boolean;
 };
 
 type PendingPerformance = {
@@ -90,6 +92,7 @@ function reconcilePerformances(): void {
           signal: abort.signal,
           decision: () => arbitrateAppSurface(entry.target, currentViewportSnapshot(entry.actorId, entry, pending.targets?.read())),
           checkpoint: () => !abort.signal.aborted && coordinator.renewClaim(entry.actorId, entry.operationId),
+          holdUntil: (deadline) => !abort.signal.aborted && coordinator.holdClaimUntil(entry.actorId, entry.operationId, deadline),
         });
         if (!abort.signal.aborted && pendingPerformances.get(key) === pending)
           coordinator.complete(entry.actorId, entry.operationId);

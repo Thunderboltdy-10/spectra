@@ -12,8 +12,10 @@ import { canonicalizeWhiteboardPatchChange } from "@/features/spectra/ai/whitebo
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { validateBlueprintContent } from "@/features/spectra/artifacts/blueprint-catalog";
 import { canonicalJsonEqual } from "@/features/spectra/collaboration/artifact-yjs-model";
-import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
-import type { PresentationContent } from "@/features/spectra/presentation/model";
+import {
+  normalizeAiArtifactWriteContent,
+  validateAiArtifactWriteContent,
+} from "@/features/spectra/operations/artifact-write-content";
 import {
   hollowCreateFailureMessage,
   isHollowCreateContent,
@@ -372,29 +374,22 @@ export async function verifyCommittedOutcomes(
       const changes = operation.input.contentPatch?.changes ?? [];
       const replacesContent = !operation.input.documentOperations &&
         changes.length === 0 && operation.input.content !== null;
-      let expectedContent: unknown;
-      if (replacesContent) {
-        const expected = validateBlueprintContent(
-          operation.input.blueprintKey,
-          normalizeArtifactContent(operation.input.blueprintKey, operation.input.content),
-        );
-        if (!expected.success) throw expected.error;
-        expectedContent = operation.input.blueprintKey === "presentation"
-          ? enforceAiPresentationContentPolicy(expected.data as PresentationContent, options.prompt ?? "")
-          : expected.data;
-      }
+      const expectedContent = replacesContent ? normalizeAiArtifactWriteContent(
+        operation.input.blueprintKey, operation.input.content, options.prompt ?? "",
+      ) : undefined;
       const matchesContent = (content: unknown) => {
         if (operation.input.documentOperations) return documentAcademicOperationsLanded(content, operation.input.documentOperations);
         if (replacesContent) {
-          const observed = validateBlueprintContent(
-            operation.input.blueprintKey,
-            normalizeArtifactContent(operation.input.blueprintKey, content),
-          );
           // Compare complete normalized values: subset/substring matching loses
           // deletions and extra keys. Repair policy applies only to the request;
           // repairing observed content could hide missing saved work. Add no
           // exclusions for generated Foundry dates or native binding metadata.
-          return observed.success && canonicalJsonEqual(expectedContent, observed.data);
+          try {
+            return canonicalJsonEqual(expectedContent,
+              validateAiArtifactWriteContent(operation.input.blueprintKey, content));
+          } catch {
+            return false;
+          }
         }
         if (changes.length === 0) return true;
         let matched = 0;

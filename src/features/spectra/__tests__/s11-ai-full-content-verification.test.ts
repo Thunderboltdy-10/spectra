@@ -166,7 +166,7 @@ describe("full replacement verification", () => {
     await expectMismatch(update({ blueprintKey: "presentation", content }));
   });
 
-  it("conservatively rejects regenerated Foundry timestamps instead of ignoring metadata", async () => {
+  it("accepts stable Foundry timestamp defaults without ignoring explicit dates", async () => {
     const content = normalizeArtifactContent("agent", {
       profile: { purpose: "A biology study assistant" },
       instructions: { regionId: "instructions", text: "Explain the biology evidence clearly and cite the supplied sources." },
@@ -178,6 +178,10 @@ describe("full replacement verification", () => {
     mocks.query.mockResolvedValue(saved(content, "agent"));
     await verify(update({ blueprintKey: "agent", content }));
     vi.setSystemTime(Date.now() + 1_000);
+    await verify(update({ blueprintKey: "agent", content: withoutDate }));
+    const withDate = structuredClone(content);
+    (withDate.foundry as { state: { history: Array<{ at: number }> } }).state.history[0]!.at = Date.now();
+    mocks.query.mockResolvedValue(saved(withDate, "agent"));
     await expectMismatch(update({ blueprintKey: "agent", content: withoutDate }));
   });
 });

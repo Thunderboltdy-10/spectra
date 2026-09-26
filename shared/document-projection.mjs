@@ -850,6 +850,23 @@ export function documentBlocksFromJson(json) {
   });
 }
 
+function containsCanonicalReference(node) {
+  return node?.type === "spectraReference" || (node?.content ?? []).some(containsCanonicalReference);
+}
+
+function retainCanonicalReference(node, block) {
+  if (node.type === "spectraReference" || !block) return node;
+  // A block mirror cannot describe where an atom belongs inside a list,
+  // callout or table cell. Keep an unchanged canonical subtree, and reject a
+  // mirror-only rewrite that would otherwise flatten its nested references.
+  const current = documentBlocksFromJson({ content: [node] })[0];
+  for (const key of ["type", "text", "rows", "richRows", "inlineContent", "attrs"]) {
+    if (key in block && !authoredSemanticsEqual(block[key], current[key]))
+      throw new Error("DOCUMENT_REFERENCE_STRUCTURE: Edit content around this nested reference in the document editor so its placement remains intact.");
+  }
+  return node;
+}
+
 export function documentContentToProseMirrorJson(contentValue) {
   const content = record(contentValue);
   const existing = record(content.tiptap);
@@ -867,6 +884,7 @@ export function documentContentToProseMirrorJson(contentValue) {
     const existingContent = Array.isArray(existing.content)
       ? existing.content
       : [];
+    const referenceNodes = new Set(existingContent.filter(containsCanonicalReference));
     const existingIds = new Set(
       existingContent.flatMap((node) => {
         const blockId = node?.attrs?.blockId;
@@ -877,12 +895,60 @@ export function documentContentToProseMirrorJson(contentValue) {
       (block) => typeof block.id === "string" && block.id && !existingIds.has(block.id),
     );
     if (missingNativeBlocks) {
+      const existingById = new Map();
+      const idByNode = new Map();
+      const duplicateIds = new Set();
+      // Legacy canonical atoms may predate blockId. Use the same positional
+      // mirror IDs produced by our forward conversion, without changing any
+      // canonical reference attributes or inventing a placement identity.
+      const fallbackIds = [...referenceNodes].some((node) => !node.attrs?.blockId)
+        ? documentBlocksFromJson(existing).map((block) => block.id) : [];
+      for (const [index, node] of existingContent.entries()) {
+        const id = node?.attrs?.blockId || fallbackIds[index];
+        if (typeof id !== "string" || !id) continue;
+        if (existingById.has(id)) duplicateIds.add(id);
+        existingById.set(id, node);
+        idByNode.set(node, id);
+      }
+      for (const node of referenceNodes) {
+        const id = idByNode.get(node);
+        if (typeof id !== "string" || !id || duplicateIds.has(id))
+          throw new Error("DOCUMENT_REFERENCE_IDENTITY: A retained reference needs a unique block identity before this document structure can be rebuilt.");
+      }
+      const requestedIds = new Set(blocks.map((block) => block.id));
+      const emittedReferenceIds = new Set();
+      const rebuilt = blocks.map((block, index) => {
+        const node = existingById.get(block.id);
+        if (!referenceNodes.has(node)) return blockToJson(block, index, content.nativeBinding);
+        if (emittedReferenceIds.has(block.id))
+          throw new Error("DOCUMENT_REFERENCE_IDENTITY: A block mirror cannot duplicate a retained reference.");
+        emittedReferenceIds.add(block.id);
+        return retainCanonicalReference(node, block);
+      });
+      // Mirrors can omit atoms. Only their removal from the canonical TipTap
+      // document removes their identity. Attach omitted references before the
+      // next retained original block, keeping their relative order in O(n).
+      const before = new Map();
+      let anchor = null;
+      for (let index = existingContent.length - 1; index >= 0; index -= 1) {
+        const node = existingContent[index];
+        const id = idByNode.get(node);
+        if (requestedIds.has(id)) anchor = id;
+        else if (referenceNodes.has(node)) {
+          const pending = before.get(anchor) ?? [];
+          pending.push(node);
+          before.set(anchor, pending);
+        }
+      }
+      const rebuiltContent = rebuilt.flatMap((node, index) => {
+        const id = blocks[index].id;
+        const pending = before.get(id) ?? [];
+        before.delete(id);
+        return [...pending.reverse(), node];
+      });
       return {
-        type: "doc",
-        content: (blocks.length
-          ? blocks
-          : [{ id: "intro", type: "paragraph", text: "" }]
-        ).map((block, index) => blockToJson(block, index, content.nativeBinding)),
+        ...existing,
+        content: [...rebuiltContent, ...(before.get(null) ?? []).reverse()],
       };
     }
     return {
@@ -891,6 +957,7 @@ export function documentContentToProseMirrorJson(contentValue) {
         const blockId = node?.attrs?.blockId;
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
+        if (referenceNodes.has(node)) return retainCanonicalReference(node, block);
         const attrs = record(block?.attrs);
         const richNode = block
           ? docxRichBlockToJson(block, content.nativeBinding)

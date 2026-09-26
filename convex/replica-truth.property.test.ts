@@ -108,6 +108,7 @@ async function seedTruthMachine(t: TestHarness) {
     });
     const workId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: accountId,
+      schoolId,
       blueprintKey: "resource",
       resourceClass: "resource",
       nativeFormat: "docx",

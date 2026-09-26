@@ -179,13 +179,14 @@ it("keeps a pinned large body and native base through real deletion coordination
   const drain=async(jobId: typeof deletion.jobId,generation=1)=>{
     for(let i=0;i<100;i++){
       const job=await t.run(ctx=>ctx.db.get(jobId));
-      if(!job || job.phase==="complete") return;
+      if(!job || job.phase==="complete" || job.phase==="retained") return;
       expect(job.phase).not.toBe("failed");
       await t.mutation(internal.spectraArtifactDeletion.process,{jobId,generation});
     }
     throw new Error("deletion did not drain");
   };
   await drain(deletion.jobId);
+  expect(await t.run(ctx=>ctx.db.get(deletion.jobId))).toMatchObject({phase:"retained"});
   const payloadId=await t.run(async ctx=>ctx.db.normalizeId("collaborationDurablePayloads",adopted.payloadRef)!);
   expect(await actor.query(api.artifactContent.read,{artifactId:ids.artifactId,payloadRef:payloadId,digest})).toMatchObject({digest});
   expect(await actor.query(api.payloads.get,{workId:ids.artifactId,hash:nativeHash})).toMatchObject({hash:nativeHash});
@@ -198,6 +199,7 @@ it("keeps a pinned large body and native base through real deletion coordination
   await actor.mutation(api.artifactEmbeds.remove,{embedId:pinId});
   const jobs=await t.run(ctx=>ctx.db.query("artifactDeletionJobs").collect());
   for(const job of jobs) if(job.phase!=="complete") await drain(job._id,job.generation);
+  expect(await t.run(ctx=>ctx.db.get(deletion.jobId))).toMatchObject({phase:"complete"});
   await t.run(async ctx=>{
     for (const object of await ctx.db.query("artifactSnapshotObjects").collect()) if (object.refCount===0) await ctx.db.patch(object._id,{lastReferencedAt:Date.now()-31*86_400_000});
   });

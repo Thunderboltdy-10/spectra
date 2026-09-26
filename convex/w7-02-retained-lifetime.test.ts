@@ -29,7 +29,8 @@ async function drainDeletion(
   const runInternal = (t as unknown as { mutation: (fn: unknown, args: unknown) => Promise<unknown> }).mutation.bind(t);
   for (let i = 0; i < 100; i += 1) {
     const job = await t.run((ctx) => ctx.db.get(jobId));
-    if (!job || job.phase === "complete" || job.phase === "failed") return;
+    if (!job || job.phase === "complete" || job.phase === "retained") return;
+    expect(job.phase).not.toBe("failed");
     await runInternal(process, { jobId, generation });
   }
   throw new Error("deletion did not drain");
@@ -279,6 +280,7 @@ describe("W7-02 retained lifetime and deletion coordinator", () => {
     );
     expect(sourceBeforeDrain?.status).toBe("deleted");
     await drainDeletion(t, deletion.jobId, 1);
+    expect(await t.run(ctx => ctx.db.get(deletion.jobId))).toMatchObject({ phase: "retained" });
 
     const retained = await t.run(async (ctx) => ({
       source: await ctx.db.get(fixture.sourceArtifactId),
@@ -325,8 +327,11 @@ describe("W7-02 retained lifetime and deletion coordinator", () => {
         .order("desc")
         .first(),
     );
-    expect(lastJob?.generation).toBe(2);
-    await drainDeletion(t, lastJob!._id, 2);
+    // Unpin resumes the retained cleanup generation rather than creating a
+    // new tombstone or restarting already completed deletion pages.
+    expect(lastJob?._id).toBe(deletion.jobId);
+    expect(lastJob?.generation).toBe(1);
+    await drainDeletion(t, lastJob!._id, 1);
 
     const released = await t.run(async (ctx) => ({
       source: await ctx.db.get(fixture.sourceArtifactId),
@@ -415,7 +420,7 @@ describe("W7-02 retained lifetime and deletion coordinator", () => {
     expect(result.artifact?.status).toBe("deleted");
     expect(result.asset).toMatchObject({ status: "active", storageId: fixture.storageId, retentionReason: "legacy-reconciliation-required" });
     expect(result.stored).toBe(true);
-    expect(result.job?.phase).toBe("complete");
+    expect(result.job?.phase).toBe("retained");
     expect(result.job?.retainedRows).toBeGreaterThan(0);
   });
 

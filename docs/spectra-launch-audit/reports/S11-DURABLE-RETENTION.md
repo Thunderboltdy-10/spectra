@@ -1,0 +1,7 @@
+# S11 retained cleanup verification
+
+2026-09-26, worktree 222b. Baseline retention tests stopped at obsolete `complete` expectations even though `retained` is the intentional terminal phase while a pin owns native bytes. Fixtures now stop on either terminal phase, assert failure phases, require pinned retention explicitly, and keep all access, readback and last-unpin release assertions. `replica-truth.property.test.ts` now seeds the artifact schoolId already represented by its school/membership fixture.
+
+Reaching the final-unpin checks exposed a real leak. `ensureArtifactDeletionReconciliation` resumed a retained job directly at the final artifact check. Previously retained asset/intake/runtime children were skipped, allowing source deletion while an active asset and its bytes remained. The repair resumes the same generation at the bounded versions/intake/runtime families; completed embeds and placements are not rescanned. Existing scheduling, cursor and generation fences remain in use.
+
+Evidence under `.spectra-local/launch-s11/durable-review/`: `d1-neighbors.log` records the final asset still active (90/91 neighbors passed); `d1-final.log` passes all four W7 tests including retained readback, last-pin asset revocation, exact byte-release receipt, rollback and pagination. `retention-final.log` passes 24 affected native retention/authority/property cases. Scope totals 28 passing retention cases; existing cross-school and revoked-authority checks remain intact. Scoped lint passed. No live data was deleted and no running service was changed.

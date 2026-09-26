@@ -50,11 +50,11 @@ it.each(["current", "advanced", "legacy"] as const)("preserves a %s native base 
   const deletion = await actor.mutation(api.spectraArtifacts.permanentlyDelete, { artifactId });
   for (let step = 0; step < 100; step++) {
     const job = await t.run(ctx => ctx.db.get(deletion.jobId));
-    if (job?.phase === "complete") break;
+    if (job?.phase === "retained" || job?.phase === "complete") break;
     expect(job?.phase).not.toBe("failed");
     await t.mutation(internal.spectraArtifactDeletion.process, { jobId: deletion.jobId, generation: 1 });
   }
-  expect(await t.run(ctx => ctx.db.get(deletion.jobId))).toMatchObject({ phase: "complete" });
+  expect(await t.run(ctx => ctx.db.get(deletion.jobId))).toMatchObject({ phase: "retained" });
   expect(await t.run(ctx => ctx.db.get(version.versionId))).not.toBeNull();
   expect(await t.run(ctx => ctx.db.system.get(storageId))).not.toBeNull();
   expect(await actor.query(api.payloads.get, { workId: artifactId, hash })).toMatchObject({ hash });

@@ -127,7 +127,7 @@ export async function queueDeletionRecovery(
 
 /**
  * Start a bounded reconciliation after the last pinned version is released.
- * An active job is merely nudged; a retained job resumes its final check, and
+ * An active job is merely nudged; a retained job revisits retained children, and
  * a completed/failed job gets a new generation
  * whose cursor starts at the indexed embed family, so this never launches a
  * global unbounded sweep.
@@ -145,10 +145,16 @@ export async function ensureArtifactDeletionReconciliation(
     .first();
   if (existing?.phase === "retained") {
     const now = Date.now();
-    await ctx.db.patch(existing._id, { phase: "artifact", completedAt: undefined, nextAttemptAt: undefined, updatedAt: now });
+    // The previous pass intentionally kept pinned versions, intake bytes and
+    // runtime output. A final artifact-only check would orphan those children
+    // after the last pin disappears. Resume their bounded families in the same
+    // generation; completed embed/placement pages do not need to be repeated.
+    const cursor = encodeBase64Url(JSON.stringify({ version: DELETION_CURSOR_VERSION,
+      artifactId: String(artifactId), generation: existing.generation, family: "versions", cursor: null }));
+    await ctx.db.patch(existing._id, { phase: "children", cursor, completedAt: undefined, nextAttemptAt: undefined, updatedAt: now });
     await queueDeletionDispatch(ctx, existing._id, existing.generation, 0, {
-      phase: "artifact",
-      cursor: existing.cursor,
+      phase: "children",
+      cursor,
     });
     return existing._id;
   }

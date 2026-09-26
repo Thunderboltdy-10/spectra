@@ -39,6 +39,12 @@ function legacyDocumentReference(value: unknown, target: PinnedPlacementTarget):
     record(reference.versionPolicy).pinnedVersionId === target.pinnedVersionId;
 }
 
+const documentBlockContainers = new Set(["doc", "blockquote", "callout", "listItem", "taskItem", "tableCell", "tableHeader"]);
+const documentStructuralChildren: Record<string, ReadonlySet<string>> = {
+  bulletList: new Set(["listItem"]), orderedList: new Set(["listItem"]), taskList: new Set(["taskItem"]),
+  table: new Set(["tableRow"]), tableRow: new Set(["tableCell", "tableHeader"]),
+};
+
 /**
  * Only actual model slots qualify. Metadata, source bundles, mirrored document
  * blocks and arbitrary authored objects cannot manufacture a placement. The
@@ -61,17 +67,23 @@ export function containsPinnedArtifactPlacement(
     let projected: unknown;
     try { projected = documentContentToProseMirrorJson(root); }
     catch { return false; }
-    const stack: Array<{ node: unknown; depth: number }> = [{ node: projected, depth: 0 }];
+    if (record(projected).type !== "doc") return false;
+    const stack: Array<{ node: unknown; depth: number; parentType?: string }> = [{ node: projected, depth: 0 }];
     while (stack.length) {
       const entry = stack.pop()!;
       if (--remaining < 0 || entry.depth > limits.depth) return false;
       const node = record(entry.node);
-      if (node.type === "spectraReference") {
+      if (node.type === "spectraReference" && documentBlockContainers.has(entry.parentType ?? "")) {
         found ||= exactReference(node.attrs, target) || legacyDocumentReference(node.attrs, target);
       }
-      if (Array.isArray(node.content)) {
+      const type = typeof node.type === "string" ? node.type : "";
+      const structuralChildren = documentStructuralChildren[type];
+      if (Array.isArray(node.content) && (documentBlockContainers.has(type) || structuralChildren)) {
         if (node.content.length > remaining) return false;
-        for (const child of node.content) stack.push({ node: child, depth: entry.depth + 1 });
+        for (const child of node.content) {
+          if (structuralChildren && !structuralChildren.has(String(record(child).type))) continue;
+          stack.push({ node: child, depth: entry.depth + 1, parentType: type });
+        }
       }
     }
     return found;

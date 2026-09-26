@@ -110,6 +110,10 @@ describe("actual current retained-pin placement", () => {
     }
     const { placementOperationId: _operation, ...legacySchemaAttrs } = f.attrs;
     expect(containsPinnedArtifactPlacement("document", { tiptap: { type: "doc", content: [{ type: "spectraReference", attrs: legacySchemaAttrs }] } }, f.target)).toBe(true);
+    for (const type of ["paragraph", "unknownAuthoredObject", "tableRow"]) {
+      expect(containsPinnedArtifactPlacement("document", { tiptap: { type: "doc", content: [{ type, content: [{ type: "spectraReference", attrs: f.attrs }] }] } }, f.target)).toBe(false);
+    }
+    expect(containsPinnedArtifactPlacement("document", { tiptap: { type: "doc", content: [{ type: "callout", content: [{ type: "spectraReference", attrs: f.attrs }] }] } }, f.target)).toBe(true);
   });
 
   it("proves actual legacy typed references and omitted embed school without inventing canonical identities", async () => {

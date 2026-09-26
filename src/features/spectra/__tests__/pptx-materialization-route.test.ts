@@ -1,0 +1,85 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFile } from "node:fs/promises";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route";
+import { pptxLens } from "../lenses/pptx-lens";
+import { sha256Payload } from "../lenses/docx-lens";
+import { pptxArtifactContent } from "../lenses/office-content";
+
+const io = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn() }));
+vi.mock("@/lib/convex-server", () => ({ convexQuery: io.query, convexMutation: io.mutation, hydrateContentForWrite: vi.fn(), checkpointArtifactDurableContent: vi.fn() }));
+vi.mock("../lenses/native-payload-server", () => ({ fetchVerifiedNativePayload: io.fetchNative, fetchStoredNativeBase: vi.fn(), uploadNativePayload: io.upload, ensureImportedNativePayload: vi.fn() }));
+const workId = "s11-pptx-route" as Id<"spectraArtifacts">;
+const options = { prepareOnly: true, aiOperation: { runId: "run-s11-pptx", executionId: "attempt-s11-pptx", operationId: "operation-s11-pptx" } };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  io.mutation.mockImplementation(async () => { throw new Error("UNEXPECTED_NATIVE_EFFECT"); });
+  io.upload.mockResolvedValue({ payloadRef: "retained-pptx-result", deduplicated: false });
+});
+afterEach(() => vi.restoreAllMocks());
+
+async function fixture(input?: Uint8Array) {
+  const payload = input ?? new Uint8Array(await readFile("fixtures/office/pptx/typical-preservation.pptx"));
+  const opened = await pptxLens.open(payload);
+  const hash = await sha256Payload(payload);
+  const truth = { replicaId: "cloud-source", payloadRef: "retained-source", hash, revision: hash, bytes: payload.byteLength, nativeFormat: "pptx", replicaKind: "cloud", state: "current", compatibilityProfile: "strict-native", url: "https://example.invalid/unused" };
+  io.fetchNative.mockResolvedValue({ truth, payload });
+  io.query.mockResolvedValue({ replicas: [{ _id: "local-target", kind: "local", revision: hash, state: "current" }] });
+  return { payload, opened, content: pptxArtifactContent(opened.projection) };
+}
+
+describe("PPTX actual materialization route", () => {
+  it.each(["remove", "reorder"] as const)("prepares a verified native %s with complete list authority and no early effect", async (change) => {
+    const { content } = await fixture();
+    const slide = content.slides.find((item) => item.objects.length > 1)!;
+    if (change === "remove") slide.objects = slide.objects.slice(1);
+    else slide.objects = [...slide.objects].reverse();
+    const expectedIds = slide.objects.map((object) => object.id);
+    const result = await materializeOfficeArtifact(workId, content, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared") throw new Error("Expected a prepared PPTX candidate");
+    expect(io.mutation).not.toHaveBeenCalled();
+    expect(io.upload).toHaveBeenCalledTimes(1);
+    const bytes = io.upload.mock.calls[0]![1] as Uint8Array;
+    const readback = await pptxLens.open(bytes);
+    expect(readback.projection.slides.find((item) => item.id === slide.id)!.objects.map((object) => object.id)).toEqual(expectedIds);
+    expect(result.nativeCandidate.destination).toBe("bridge");
+    if (result.nativeCandidate.destination !== "bridge") throw new Error("Expected a bridge candidate");
+    const receipt = result.nativeCandidate.queue.nativeReceipt;
+    expect(receipt.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+    expect(receipt.semantic.readbackDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+  });
+
+  it.each(["fade", "push", "dissolve", "none"] as const)("prepares and verifies a native %s transition through the preservation guard", async (kind) => {
+    const initial = await fixture();
+    const seed = await pptxLens.mutate(initial.opened.preservedCarry, { kind: "set-transition", slideId: initial.content.slides[0]!.id, transition: { kind: "fade", durationMs: 300 } });
+    const { content } = await fixture(seed);
+    if (kind === "none") delete content.slides[0]!.transition;
+    else content.slides[0]!.transition = { kind, durationMs: 550 };
+    const result = await materializeOfficeArtifact(workId, content, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared" || result.nativeCandidate.destination !== "bridge") throw new Error("Expected a prepared bridge candidate");
+    expect(io.mutation).not.toHaveBeenCalled();
+    expect(io.upload).toHaveBeenCalledTimes(1);
+    const readback = await pptxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
+    expect(readback.projection.slides[0]!.transition).toEqual(kind === "none" ? { kind } : { kind, durationMs: 550 });
+    expect(result.nativeCandidate.queue.nativeReceipt.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+  });
+
+  it.each(["text", "transition"] as const)("rejects an actual writer fault that drops requested %s before any candidate upload or effect", async (field) => {
+    const { payload, content } = await fixture();
+    if (field === "transition") content.slides[0]!.transition = { kind: "fade", durationMs: 550 };
+    else {
+      const object = content.slides.flatMap((slide) => slide.objects).find((item) => item.type === "text" && !(item.content as { nativeShapeKind?: string }).nativeShapeKind?.includes("placeholder"))!;
+      const original = object.content as Record<string, unknown>;
+      object.content = { ...original, text: "Requested text that must be saved", paragraphs: [{ runs: [{ text: "Requested text that must be saved" }] }] };
+    }
+    // Positive cases use the real writer. This deliberate single-call fault
+    // returns the original package to prove the route rejects a lost effect.
+    vi.spyOn(pptxLens, "mutate").mockResolvedValueOnce(payload);
+    await expect(materializeOfficeArtifact(workId, content, options)).rejects.toThrow("OFFICE_READBACK_MISMATCH");
+    expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+});

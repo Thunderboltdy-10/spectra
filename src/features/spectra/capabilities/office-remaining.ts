@@ -1733,8 +1733,8 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     "animate.transition",
     "Set the transition for this slide.",
     {
-      params: text,
-      reason: R.transition,
+      params: z.enum(["none", "fade", "push", "dissolve"]),
+      delta: "set-transition",
       touches: ["transitions"],
       field: true,
     },
@@ -1743,8 +1743,8 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     "animate.transitionDuration",
     "Set how long the transition lasts.",
     {
-      params: num,
-      reason: R.transition,
+      params: z.number().int().min(0).max(4_294_967_295),
+      delta: "set-transition",
       touches: ["transitions"],
       field: true,
     },
@@ -1752,7 +1752,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "animate.transitionApplyAll",
     "Apply this transition to every slide.",
-    { reason: R.transition, touches: ["transitions"] },
+    { delta: "set-transition", touches: ["transitions"] },
   ],
   [
     "animate.defaultTransition",

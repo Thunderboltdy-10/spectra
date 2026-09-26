@@ -16,6 +16,7 @@ import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
   pptxProjectionSchema,
+  pptxTransitionSchema,
   presentationObjectProjectionSchema,
   xlsxProjectionSchema,
   type PptxOperation,
@@ -895,10 +896,11 @@ export function pptxArtifactContent(
         // as empty.
         ...(slide.speakerNotes ? { speakerNotes: slide.speakerNotes } : {}),
         objects: slide.objects,
-        ...(slide.hasTransition || slide.hasTiming
+        ...(slide.transition && slide.transition.kind !== "none" ? { transition: slide.transition } : {}),
+        ...((slide.hasTransition && !slide.transition) || slide.hasTiming
           ? {
               nativeCompatibility: {
-                ...(slide.hasTransition
+                ...(slide.hasTransition && !slide.transition
                   ? { transition: "preserved" as const }
                   : {}),
                 ...(slide.hasTiming
@@ -1471,6 +1473,7 @@ const pptxEditorContentSchema = z
           title: z.string().optional(),
           speakerNotes: z.string().optional(),
           hidden: z.boolean().optional(),
+          transition: pptxTransitionSchema.optional(),
           objects: z
             .array(
               z
@@ -1560,6 +1563,7 @@ export function pptxProjectionFromContent(
           text,
           objects: incomingObjects,
           hasTransition: false,
+          transition: next.transition ?? { kind: "none" },
           hasTiming: false,
           ...(next.hidden ? { hidden: true } : {}),
           speakerNotes: next.speakerNotes ?? "",
@@ -1570,9 +1574,16 @@ export function pptxProjectionFromContent(
         const previous = previousById.get(incoming.id);
         if (previous) {
           // A sparse content patch must not erase native shape/media locators.
-          const content = !completeObjects && incoming.content && typeof incoming.content === "object" && !Array.isArray(incoming.content)
+          let content = !completeObjects && incoming.content && typeof incoming.content === "object" && !Array.isArray(incoming.content)
             ? { ...record(previous.content), ...record(incoming.content) }
             : incoming.content ?? previous.content;
+          const originalContent = record(previous.content);
+          if (content && typeof content === "object" && !Array.isArray(content)) {
+            const authored = record(content);
+            if (authored.nativeShapeId !== undefined && authored.nativeShapeId !== originalContent.nativeShapeId)
+              throw codedOfficeContentError("PPTX_OBJECT_IDENTITY_CHANGED", "An existing object cannot change its native shape identity.");
+            content = { ...Object.fromEntries(Object.entries(originalContent).filter(([key]) => key.startsWith("native"))), ...authored };
+          }
           return { ...previous, ...incoming, content };
         }
         let suffix = objectIndex + 1;
@@ -1588,6 +1599,12 @@ export function pptxProjectionFromContent(
             ...slide.objects.map((object) => resolvedById.get(object.id) ?? object),
             ...resolvedObjects.filter((object) => !previousById.has(object.id)),
           ];
+      if (next.transition && slide.hasTransition && !slide.transition)
+        throw codedOfficeContentError("PPTX_TRANSITION_PRESERVED", "This slide's native transition is not fully modeled and cannot be replaced losslessly.");
+      const transition = next.transition
+        ? next.transition.kind === "none" ? { kind: "none" as const }
+          : { ...slide.transition, ...next.transition }
+        : completeObjects && slide.transition ? { kind: "none" as const } : slide.transition;
       return {
         ...slide,
         index,
@@ -1598,6 +1615,7 @@ export function pptxProjectionFromContent(
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
         text: completeObjects ? slide.text : text.length ? text : slide.text,
         objects,
+        ...(transition ? { transition } : {}),
       };
     }),
   });
@@ -1658,10 +1676,12 @@ export function pptxOperationsBetween(
       ...(typeof value.valueAxisTitle === "string" ? { valueAxisTitle: value.valueAxisTitle } : {}),
     };
   };
+  let duplicateSources: Map<string, PptxProjection["slides"][number]> | undefined;
   const duplicateSource = (slide: PptxProjection["slides"][number]) => {
     const signature = (candidate: PptxProjection["slides"][number]) => JSON.stringify({
       title: candidate.title,
       speakerNotes: candidate.speakerNotes,
+      transition: candidate.transition,
       objects: candidate.objects.map((object) => ({
         type: object.type,
         x: object.x,
@@ -1673,7 +1693,17 @@ export function pptxOperationsBetween(
         style: object.style,
       })),
     });
-    return before.slides.find((candidate) => signature(candidate) === signature(slide));
+    // Build only when a slide is added, then reuse for the whole delta. The
+    // previous search reserialized every candidate and the new slide for each
+    // comparison, which made multi-slide additions quadratic in deck size.
+    if (!duplicateSources) {
+      duplicateSources = new Map();
+      for (const candidate of before.slides) {
+        const key = signature(candidate);
+        if (!duplicateSources.has(key)) duplicateSources.set(key, candidate);
+      }
+    }
+    return duplicateSources.get(signature(slide));
   };
   const previous = new Map(before.slides.map((slide) => [slide.id, slide]));
   const operations: PptxOperation[] = [];
@@ -1723,6 +1753,8 @@ export function pptxOperationsBetween(
           slideId: slide.id,
           hidden: true,
         });
+      if (slide.transition && slide.transition.kind !== "none")
+        operations.push({ kind: "set-transition", slideId: slide.id, transition: slide.transition });
       return;
     }
     const derivesTitleFromChangedObjects = pptxTitleFromObjects(old.objects) === old.title
@@ -1739,6 +1771,8 @@ export function pptxOperationsBetween(
         slideId: slide.id,
         text: slide.speakerNotes,
       });
+    if (slide.transition && !equal(slide.transition, old.transition ?? { kind: "none" }))
+      operations.push({ kind: "set-transition", slideId: slide.id, transition: slide.transition });
     if (Boolean(slide.hidden) !== Boolean(old.hidden))
       operations.push({
         kind: "set-slide-hidden",

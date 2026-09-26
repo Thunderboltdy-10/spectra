@@ -407,14 +407,15 @@ describe("presentation command set", () => {
 });
 
 describe("presentation honesty under strict-native", () => {
-  it("refuses a transition rewrite with the transition sentence", () => {
-    const binding = bindings().find((entry) => entry.id === "animate.transition")!;
+  it("refuses an unmodeled native transition while enabling supported native effects", () => {
+    const handlers = presentationStubHandlers();
+    const binding = presentationCommandBindings({ ...handlers, state: { ...handlers.state, transitionPreserved: true } }).find((entry) => entry.id === "animate.transition")!;
     const command = commandForBinding("presentation", binding, 0);
     const availability = command.availability(fullContext("strict-native"));
     expect(availability.state).toBe("disabled");
-    expect(availability.state === "disabled" ? availability.reason : "").toBe(
-      PRESENTATION_STRICT_REASONS.transition,
-    );
+    expect(availability.state === "disabled" ? availability.reason : "").toMatch(/PowerPoint|transition/);
+    const editable = bindings().find((entry) => entry.id === "animate.transition")!;
+    expect(commandForBinding("presentation", editable, 0).availability(fullContext("strict-native")).state).toBe("enabled");
   });
 
   it("keeps the same transition control live in a Spectra-born deck", () => {

@@ -17,6 +17,7 @@ import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
 import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
+import { readPptxTransition, writePptxTransition } from "./pptx-transition";
 
 export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
@@ -391,11 +392,20 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   const slides = await Promise.all(deck.slides().map(async (slide, index) => {
     const root = slide.root();
     const transition = semanticNode(root, "transition");
+    const modeledTransition = transition && transition.parent !== root ? undefined : readPptxTransition(root).transition;
     const timing = semanticNode(root, "timing");
     const title = titleShape(root);
     const id = `pptx:slide:${slide.partName}`;
     entries.push({ regionId: id, feature: "slide", class: "NATIVE", partName: slide.partName });
-    if (transition) entries.push({ regionId: `${id}:transition`, feature: "transition", class: "PRESERVED", partName: slide.partName, pathPattern: "transition", namespaceUri: PML_NAMESPACE, readOnly: true, reason: "This PowerPoint transition is preserved. Editing it requires an exact native equivalent." });
+    if (transition) {
+      const claim = {
+        regionId: `${id}:transition`, feature: "native-transition", class: "PRESERVED" as const,
+        partName: slide.partName, pathPattern: "transition", namespaceUri: PML_NAMESPACE, readOnly: true,
+        ...(modeledTransition ? { scopeMode: "pptx-transition-remainder" as const } : {}),
+        reason: modeledTransition ? "Native advance, sound and extension settings are preserved while the supported effect and duration remain editable." : "This native transition is preserved because its effect is not fully modeled.",
+      };
+      entries.push(claim);
+    }
     if (timing) entries.push({ regionId: `${id}:animation`, feature: "animation", class: "PRESERVED", partName: slide.partName, pathPattern: "timing", namespaceUri: PML_NAMESPACE, readOnly: true });
     const layoutRoot = slide.layoutPartName ? (await deck.office.xml(slide.layoutPartName)).root : undefined;
     const notesPartName = notesPartNameFor(deck, slide.partName);
@@ -403,7 +413,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["ole", /\/embeddings\//i], ["macro", /\/vbaProject\.bin$/i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -425,7 +435,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     ["slides", "NATIVE"],
     ["shapes", "NATIVE"],
     ["speakerNotes", "EQUIVALENT", "Speaker notes are written into native PowerPoint notes pages, creating the page and master when needed."],
-    ["transitions", slides.some((slide) => slide.hasTransition) ? "PRESERVED" : "NATIVE", "PowerPoint saved these transitions and Spectra preserves them exactly."],
+    ["transitions", "NATIVE", "Supported native transitions are editable; unmodeled transitions are protected on their own slides."],
     ["animations", slides.some((slide) => slide.hasTiming) ? "PRESERVED" : "NATIVE", "PowerPoint animation timing is preserved exactly rather than approximated."],
     ["masters", partNames.some((name) => /\/slideMasters\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide masters are preserved exactly as PowerPoint saved them."],
     ["layouts", partNames.some((name) => /\/slideLayouts\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide layouts come from this file's own masters and are preserved."],
@@ -1810,6 +1820,13 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       }
       deck.office.markDirty(slide.partName);
     }
+    else if (operation.kind === "set-transition") {
+      // AlternateContent and other non-direct transition encodings stay opaque.
+      const existing = semanticNode(slide.root(), "transition");
+      if (existing && existing.parent !== slide.root()) throw new PptxLensError("PPTX_TRANSITION_PRESERVED", "This native transition uses an unmodeled compatibility encoding.");
+      writePptxTransition(slide.root(), operation.transition);
+      deck.office.markDirty(slide.partName);
+    }
     else if (operation.kind === "set-notes") {
       // Only the notes part is marked dirty, so the slide itself — with its
       // transition, its timing and everything Spectra does not model — is still
@@ -1916,5 +1933,5 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
     const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: false, reason: hasTransition ? "The native transition is preserved; native transition editing is not implemented yet." : "Native transition authoring is not implemented yet." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
+  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

@@ -88,6 +88,20 @@ describe("S11 Office model boundaries", () => {
     expect(pptxProjectionUpdateFromContent({ ...content, slides: [incomplete] }, opened.projection).projection.slides[0]!.objects).toEqual(slide.objects);
   });
 
+  it("retains omitted native locators in complete records and refuses shape identity redirection", async () => {
+    const opened = await deck("typical-preservation");
+    const content = pptxArtifactContent(opened.projection);
+    const object = content.slides[0]!.objects[0]!;
+    const original = object.content as Record<string, unknown>;
+    object.content = Object.fromEntries(Object.entries(original).filter(([key]) => !key.startsWith("native")));
+    const update = pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" });
+    expect(update.projection.slides[0]!.objects[0]!.content).toEqual(original);
+    expect(update.operations).toEqual([]);
+    object.content = { ...(object.content as object), nativeShapeId: "redirected-native-id" };
+    expect(() => pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" }))
+      .toThrow(/native shape identity/);
+  });
+
   it("allows first native features and verifies their saved values", async () => {
     const workbook = Workbook.create();
     workbook.sheet("Sheet1")!.setCell("A1", "Category");
@@ -135,9 +149,9 @@ describe("S11 Office model boundaries", () => {
     expect(reopened.projection.sheets[0]!.cells).toContainEqual(expect.objectContaining({ ref: "AA101", value: "Beyond original extent" }));
   });
 
-  it("reports native transition editing unavailable and preserves its XML through another edit", async () => {
+  it("reports native transition support and preserves its XML through an unrelated edit", async () => {
     const opened = await deck("transition-law");
-    expect(opened.capabilities.human.find((capability) => capability.id === "edit-native-transition")?.available).toBe(false);
+    expect(opened.capabilities.human.find((capability) => capability.id === "edit-native-transition")?.available).toBe(true);
     const slide = opened.projection.slides.find((item) => item.hasTransition)!;
     const bytes = await pptxLens.mutate(opened.preservedCarry, { kind: "set-title", slideId: slide.id, text: "Title with preserved transition" });
     const part = slide.id.replace(/^pptx:slide:\//, "");

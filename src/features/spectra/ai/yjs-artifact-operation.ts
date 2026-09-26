@@ -35,8 +35,7 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
-import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
-import type { PresentationContent } from "@/features/spectra/presentation/model";
+import { applyAiArtifactContentPolicy, validateAiArtifactWriteContent } from "@/features/spectra/operations/artifact-write-content";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { refreshGeneratedArtifactSummary } from "@/features/spectra/operations/hollow-content";
 import {
@@ -1618,17 +1617,6 @@ export async function readLiveArtifactValue(params: {
  * an exact narrative slide count may instead retain verified citations in
  * native notes/metadata without adding a separate slide.
  */
-function enforceAiContentPolicy(
-  typeKey: ArtifactTypeKey,
-  content: unknown,
-  prompt: string,
-) {
-  if (typeKey !== "presentation") return content;
-  const deck = content as PresentationContent;
-  if (!Array.isArray(deck.slides)) return content;
-  return enforceAiPresentationContentPolicy(deck, prompt);
-}
-
 export async function applyAiArtifactMutation(params: {
   artifactId: string;
   runId: string;
@@ -1854,22 +1842,11 @@ export async function applyAiArtifactMutation(params: {
       base: ArtifactLiveValue,
     ): ArtifactLiveValue => {
       const desired = params.resolveDesired(base);
-      const desiredContent = normalizeArtifactContent(typeKey, desired.content);
-      const validated = validateArtifactContent(typeKey, desiredContent);
-      if (!validated.success) {
-        const issue = validated.error.issues[0];
-        const path = issue?.path?.length ? issue.path.join(".") : "";
-        const detail = issue?.message ?? "The edited artifact is invalid.";
-          throw new Error(
-          path
-            ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
-            : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
-          );
-      }
+      const desiredContent = validateAiArtifactWriteContent(typeKey, desired.content);
       const nextSummary = refreshGeneratedArtifactSummary({
         blueprintKey: typeKey,
         title: desired.title.trim() || "Untitled work",
-        content: validated.data,
+        content: desiredContent,
         currentSummary: base.summary,
         nextSummary: desired.summary,
       });
@@ -1879,9 +1856,9 @@ export async function applyAiArtifactMutation(params: {
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
         ].slice(0, 80),
-        content: enforceAiContentPolicy(
+        content: applyAiArtifactContentPolicy(
           typeKey,
-          validated.data,
+          desiredContent,
           params.prompt ?? "",
         ),
       };

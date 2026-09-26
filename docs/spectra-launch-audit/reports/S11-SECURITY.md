@@ -60,3 +60,9 @@ These caps are an explicit safety tradeoff for exact bounded review. Oversized A
 4. **Memory retrieval authorization candidate.** CONTEXT owns a reported cached-memory evidence permission leak and its repair; independent authority review can follow its candidate. No duplicate edit.
 
 No launch-readiness conclusion follows from this finite repair. Its source and deterministic guarantees require coordinator review/integration and paired served-runtime acceptance.
+
+### Application observation writer fence — source candidate
+
+Consumed CHOREO `534ac386` as `7674f8bf` in SECURITY's checkout. The writer now accepts optional `uiObservation` and invokes `assertUiObservationFence` after receipt replay and all current status/scope/approval checks, immediately before selecting and invoking the nested effect. Omission cannot bypass an observation already stored on the operation. Readiness cannot substitute for approval or revive a cancelled attempt. Receipt replay precedes readiness checks so recovery cannot overwrite a subsequent human setting.
+
+Seven actual writer fixtures cover immediate unobserved work, omitted/waiting fences, exact seal and stale epoch, expiry followed by explicit headless recovery, missing approval, cancellation and receipt-first replay. These fixtures are UNRUN pending CHOREO's allocated guarded slot. Source/whitespace review only; no live choreography claim. CHOREO consumed application approval dependency `43be16b3` and this narrow writer patch; unrelated later SECURITY report sections were not copied into this checkout.

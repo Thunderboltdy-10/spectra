@@ -8,7 +8,7 @@ Actual startup rollout `turn_context` confirms `gpt-6-astra`, `xhigh`, `danger-f
 
 ## Runtime boundary
 
-The initial implementation ran under the global test/build/install hold after loss of the shared dependencies. On September 26 the coordinator announced a controlled queue: HISTORY-R follows EXPERIENCE in lane 1 and must await explicit release from replacement RUNTIME `01a0dd80-9b7e-7db3-b1a5-5ccb5beb8fba`. This worker has not started tests, a build, an install, services, backend publication, or native/file/school mutations. Source inspection is evidence of a call path, not a passed behavior test.
+The initial implementation ran under the global test/build/install hold after loss of the shared dependencies. On September 26 the coordinator explicitly released lane 1 to HISTORY-R and authorized attaching only an absent local dependency junction. Verified the local entry absent and the primary dependency target an ordinary existing directory, then created `5e8e/ai-school/node_modules` pointing to `<local-workspace>`. No install, dependency replacement, service startup, backend publication, or native/file/school mutation occurred. The bounded guarded run below finished and lane 1 was explicitly released to the coordinator and replacement RUNTIME `01a0dd80-9b7e-7db3-b1a5-5ccb5beb8fba`; no further executable checks are allocated.
 
 ## First finite unit
 
@@ -26,15 +26,29 @@ The comparison overlay fetches the first metadata page and selects its first ent
 | Restore revision guard after optimistic write | `artifact-studio.tsx:restoreVersion` closes prior human group, calls `live.synchronize/restoreRegions`, then `changeGroups:commitRestore` labels open groups | Replace architecture before claiming safe restore | `region-controller.ts:editMany` authors Yjs optimistically before durable acknowledgement. A new guard only in `commitRestore` cannot prevent a stale restore effect. Admission must check restore capability and expected room/canonical base before effect; version/receipt and delta commit atomically | Sent to coordinator, DURABLE and SECURITY; no shared admission changes made |
 | Pinned source deletion retention | `spectraArtifactDeletion.ts:processVersionPage/processRuntimePage`, `artifactSnapshots.ts:releaseVersionIfUnpinned`, `artifactEmbedOwnership.ts` | Keep retention; lifecycle access needs decision | Pin retains exact version/build and spill/native dependencies; generic history/detail stays source-authorized. Runtime exception must be host/exact-pin scoped and consistent with retained source grant semantics | `artifactEmbeds.ts:runtimeBuildAccess` rejects deleted source while pin rows survive. EXPERIENCE/SECURITY asked to own access decision; this worker will not remove source guard |
 
-## Prepared focused verification (not executed)
+## Executed focused verification
 
-`convex/history-pagination.test.ts` contains query-level fixtures for 125 versions with equal timestamps/newer concurrent inserts, row/byte observation before and after 200 older entries, snapshot/provenance/ref preservation, missing/corrupt snapshot state, current/expired/deleted authorization, cross-artifact version rejection and quiz/timetable privacy. The observer measures returned database rows and serialized JSON bytes, not physical storage I/O, billing or cache behavior. Its assertions are not measurements until executed.
+`convex/history-pagination.test.ts` contains query-level fixtures for 125 versions with equal timestamps/newer concurrent inserts, row/byte observation before and after 200 older entries, snapshot/provenance/ref preservation, missing/corrupt snapshot state, current/expired/deleted authorization, cross-artifact version rejection and quiz/timetable privacy. All 7 tests passed. The observer measures returned database rows and serialized JSON bytes, not physical storage I/O, billing or cache behavior.
 
-With `SPECTRA_PERF_EVIDENCE=1`, that query test saves the actual 8-row/208-row samples to ignored `.spectra-local/launch-s11/history/history-read-cost.json`, including response bytes separately from returned database document bytes. This export has been prepared but not executed. The September 26 preflight found no local `node_modules` entry; dependency resolution is reserved to RUNTIME.
+With `SPECTRA_PERF_EVIDENCE=1`, the executed query test saved actual 8-row/208-row samples to ignored `.spectra-local/launch-s11/history/history-read-cost.json`. Requesting 4 versions returned the following identical costs as 200 older versions were added:
 
-The history cases in `src/features/spectra/__tests__/api-route.test.ts` cover cursor forwarding, selected-detail routing, and invalid page-size rejection. `workbench-history-pagination.test.tsx` covers manual page loading, failed-page retry without losing metadata, and stale artifact responses even when the mocked reader ignores abort.
+| Measured value | 8 stored versions | 208 stored versions |
+| --- | ---: | ---: |
+| Version rows returned | 4 | 4 |
+| All database documents returned | 8 | 8 |
+| Database read calls | 5 | 5 |
+| Version-row serialized bytes | 177,776 | 177,776 |
+| All returned database document bytes | 178,884 | 178,884 |
+| Response bytes | 776 | 776 |
+| Snapshot-object reads / writes | 0 / 0 | 0 / 0 |
 
-Coordinator review of `15fe9531` identified that the workbench still fetched comments and history together. The follow-up separates their requests, loaded-source markers and error/loading states: opening Comments never fetches history, opening History never fetches comments, and comment create/resolve/reanchor refreshes only comments. Already loaded or pending data is reused when switching tabs. The selected tab is scoped to its artifact so switching artifacts cannot trigger the previous artifact's tab before the reset effect runs. Added unexecuted regression cases verify demand separation, comment-mutation refresh, and completion/pending requests across tab switches. This correction is confined to the workbench, its focused tests and this report.
+These are Convex-test handler returned rows and UTF-8 JSON bytes, not an old-versus-new runtime benchmark or measurements of physical I/O, billing, cache, or latency. Legacy inline snapshot bodies still contribute to version-row bytes. Current authorization and account reads remain outside the pagination budget.
+
+The history cases in `src/features/spectra/__tests__/api-route.test.ts` cover cursor forwarding, selected-detail routing, and invalid page-size rejection; all 16 tests in the file passed. `workbench-history-pagination.test.tsx` covers manual page loading, failed-page retry without losing metadata, and stale artifact responses even when the mocked reader ignores abort; all 5 tests passed.
+
+Coordinator review of `15fe9531` identified that the workbench still fetched comments and history together. The follow-up separates their requests, loaded-source markers and error/loading states: opening Comments never fetches history, opening History never fetches comments, and comment create/resolve/reanchor refreshes only comments. Already loaded or pending data is reused when switching tabs. The selected tab is scoped to its artifact so switching artifacts cannot trigger the previous artifact's tab before the reset effect runs. Passing regression cases verify demand separation, comment-mutation refresh, and completion/pending requests across tab switches. This correction is confined to the workbench, its focused tests and this report.
+
+The authorized run began `2026-09-26T12:10:07.049954Z` (PID 19400), exited 0 in 6.891 seconds, and passed 28/28 tests across 3 files with 0 pending (Vitest duration 5.94 seconds). It used the RUNTIME filesystem guard, a local cache, one worker and no file parallelism. Guard interval 12:10:07–12:10:15Z contained 107 logged deletion calls, all PID 19400, with 0 blocked. Ignored evidence lives under `.spectra-local/launch-s11/history/`: `history-focused-1.json`, `history-focused-1.log`, `history-focused-1-results.json`, and `history-read-cost.json`. `git diff --check` passed. No typecheck, lint, browser, or native acceptance was executed or claimed.
 
 - Paginate newest-to-oldest with finite count/byte budget, equal timestamps, inserted newer versions and no overlap; include more than 100 versions.
 - List responses omit before/after, full provenance, run bodies and spill/native payloads; hydration only on exact selection.
@@ -59,4 +73,4 @@ Coordinator's pinned-source verdict preserves independent source authority. Dele
 
 ## Acceptance status
 
-Pagination/detail implementation and focused regression sources are complete. `git diff --check` passed. Test execution, type checking and live verification remain explicitly held by RUNTIME; no dependencies were installed or linked. Restore first-effect admission is a separate unimplemented unit. This is a source candidate for coordinator review, not launch acceptance.
+Pagination/detail implementation passed its authorized focused run: 28 tests across 3 files, with constant measured page costs as history grew from 8 to 208 rows. `git diff --check` passed. Type checking, lint and live verification remain unexecuted; the authorized dependency junction is present and no dependencies were installed. Restore first-effect admission is a separate unimplemented unit. Retained-pin placement proof is under cross-owner contract design. These results validate the finite history candidate, not launch acceptance.

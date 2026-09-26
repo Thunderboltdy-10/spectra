@@ -5,6 +5,8 @@ import type {
 } from "./registry";
 import { spectraToolRegistry } from "./registry";
 import { preferenceLayerValuesSchema } from "../../settings/schema/preferences";
+import { ARTIFACT_TYPE_KEYS } from "../../artifacts/types";
+import { artifactSkillReadResult } from "../../artifacts/skill-guidance";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
@@ -83,6 +85,21 @@ export function registerApplicationTools() {
     cancellable: true,
     resumable: true,
   };
+  define({
+    ...readDefaults,
+    id: "read_artifact_skill",
+    title: "Read artifact guidance",
+    description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
+    inputSchema: z.object({
+      blueprintKey: z.enum(ARTIFACT_TYPE_KEYS),
+      guideId: z.string().min(1).max(100).optional(),
+    }),
+    execute: async (_context, value) => {
+      const input = value as { blueprintKey: typeof ARTIFACT_TYPE_KEYS[number]; guideId?: string };
+      const { loadArtifactSkill } = await import("../../artifacts/registry");
+      return artifactSkillReadResult(await loadArtifactSkill(input.blueprintKey), input.guideId);
+    },
+  });
   define({
     ...readDefaults,
     id: "search_objects",
@@ -663,5 +680,6 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
+  "read_artifact_skill",
   "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "create_calendar_personal_event", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "setup_bridge", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "add_comment", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

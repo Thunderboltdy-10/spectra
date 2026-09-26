@@ -1089,21 +1089,21 @@ export function artifactQualityPromptSection(
 ) {
   if (!isQualityBlueprintKey(blueprintKey)) return "";
   const rubric = ARTIFACT_QUALITY_RUBRICS[blueprintKey];
-  const intent =
-    blueprintKey === "document"
-      ? `\n- Editing intent for this request: ${classifyDocumentEditIntent(prompt)}.`
-      : "";
-  const documentEvidenceInstructions =
-    blueprintKey === "document" && documentPromptRequiresSources(prompt)
-      ? "\n- For every document block that relies on supplied evidence, set sourceRefs to the exact server-issued evidence IDs shown in context. Do not use filenames or invent handles. Spectra will materialize verified document.sources and native citations from those references; do not author source metadata yourself."
-      : "";
+  const taskInstructions = artifactQualityTaskSection(blueprintKey, prompt);
   const presentationInstructions =
     blueprintKey === "presentation"
       ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested total using the actual slide sequence. Keep citations on supported narrative slides; add a separate bibliography only when requested or appropriate to the brief, and include it in the total. No References pages are added automatically.\n- Choose layouts for the explanation. Consistent comparison slides and purposeful text-only sequences do not need artificial variation.\n- Keep display copy focused and fit it to the intended viewing context. Put delivery cues in speakerNotes deliberately; never rely on normalization to remove or relocate authored content.\n- Choose legible type for the intended use: projected body copy usually needs at least 20px, while close-reading labels may be smaller. Preserve requested sizes and correct overflow deliberately.\n- On each slide with three or more visible objects, include accessibility.readingOrder with every visible object ID exactly once in the intended spoken order.\n- When asked for a chart, author an object with type chart and content containing chartType, categories, and named numeric series whose values and categories align. Put units in the series names and valueAxisTitle; do not simulate a chart with shapes or an image. When asked for a table, author a table object with editable rows and cells.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Use editable visuals, charts or diagrams when they clarify the subject; there is no required visual fraction."
       : "";
-  return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The automated threshold is ${rubric.passScore}/100 with no blocker findings; passing these mechanical checks does not establish visual quality. Inspect actual output when available.${intent}${documentEvidenceInstructions}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
+  return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The automated threshold is ${rubric.passScore}/100 with no blocker findings; passing these mechanical checks does not establish visual quality. Inspect actual output when available.${taskInstructions}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
     presentationInstructions
   }`;
+}
+
+export function artifactQualityTaskSection(blueprintKey: ArtifactTypeKey, prompt: string) {
+  if (blueprintKey !== "document" || !prompt) return "";
+  return `\n- Editing intent for this request: ${classifyDocumentEditIntent(prompt)}.${documentPromptRequiresSources(prompt)
+    ? "\n- For every document block that relies on supplied evidence, set sourceRefs to the exact server-issued evidence IDs shown in context. Do not use filenames or invent handles. Spectra will materialize verified document.sources and native citations from those references; do not author source metadata yourself."
+    : ""}`;
 }
 
 export function presentationQualityDeck(content: unknown): PresentationContent {

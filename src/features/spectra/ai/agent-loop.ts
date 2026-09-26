@@ -189,20 +189,8 @@ export async function runSpectraAgentLoop(input: {
   const enterFinalizationOnly = (reason: string) => {
     finalizationOnly = true;
     if (finalizationNudgeAdded) return;
-    const systemMessage = messages.find((message) => message.role === "system");
     const nudge = `\n\nReliability guardrail: ${reason}. Finish now using the context and tool results already gathered. Do not call any more read or write tools. Give a final response, or use the required terminal tool for an assigned creation or coordination task. Preserve every requested outcome and distinguish staged work from saved results. If the request cannot be completed from existing evidence, say precisely what remains incomplete.`;
-    if (systemMessage) {
-      const index = messages.indexOf(systemMessage);
-      messages[index] = {
-        ...systemMessage,
-        content:
-          typeof systemMessage.content === "string"
-            ? systemMessage.content + nudge
-            : `${String(systemMessage.content)}${nudge}`,
-      };
-    } else {
-      messages.unshift({ role: "system", content: nudge.trim() });
-    }
+    messages.push({ role: "system", content: nudge.trim() });
     finalizationNudgeAdded = true;
   };
 

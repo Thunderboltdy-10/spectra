@@ -2,6 +2,8 @@ import { configDefaults, defineConfig } from "vitest/config";
 import path from "node:path";
 
 export default defineConfig({
+  // Worktrees can share dependencies, but their mutable caches must be local.
+  cacheDir: path.resolve(__dirname, ".spectra-local/vitest-cache"),
   test: {
     environment: "node",
     globals: true,

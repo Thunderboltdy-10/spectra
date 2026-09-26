@@ -625,7 +625,7 @@ async function permittedEmbeddingClaim(ctx: MemoryCtx, job: Doc<"memoryJobs">) {
 async function canEmbedClaim(ctx: MemoryCtx, claim: Doc<"memoryClaims">) {
   if (claim.status !== "active" || (claim.expiresAt !== undefined && claim.expiresAt <= Date.now())) return false;
   const actor = await getActorForAccountId(ctx, claim.accountId);
-  if (!actor) return null;
+  if (!actor) return false;
   const preferences = preferenceProjection(await preferencesFor(ctx, actor), actor);
   if (!preferences.enabled || !preferences.categoryControls[categoryForClaim(claim.claimType)] ||
     !(await canReadClaim(ctx, actor, claim)) || !(await claimHasCurrentEvidence(ctx, actor, claim._id))) return false;
@@ -705,7 +705,7 @@ export const completeEmbedding = internalMutation({
     if (!claim) {
       const payload = embeddingJobPayload(ctx, job);
       const current = payload ? await ctx.db.get(payload.claimId) : null;
-      if (current && current.embeddingPartition === payload?.partition && current.embeddingInputHash === payload.inputHash)
+      if (payload && current && current.embeddingPartition === payload.partition && current.embeddingInputHash === payload.inputHash)
         await ctx.db.patch(current._id, { embeddingPartition: undefined });
     }
     await ctx.db.patch(job._id, {

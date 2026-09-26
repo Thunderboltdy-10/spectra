@@ -577,6 +577,88 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraOperations:recordPlan")))
       .toEqual([expect.arrayContaining([expect.any(String), expect.objectContaining({ operations: [] })])]);
   });
+  it.each(["human edit", "non-idempotent insertion"] as const)(
+    "does not replay an acknowledged operation after %s changes the verification target",
+    async (scenario) => {
+      const authoredHint = "Electron energy drives the proton gradient.";
+      const humanHint = "My teacher's explanation uses a different analogy.";
+      const authoredCard = {
+        id: "ai-photolysis", front: "What splits water in photosynthesis?",
+        back: "Light energy drives photolysis.", hint: "Water supplies electrons.",
+        sourceRefs: [], confidence: "unknown",
+      };
+      const humanCard = { ...authoredCard, id: "human-note", front: "My classroom question", back: "My classroom answer" };
+      const plan = {
+        decision: "operate",
+        intent: { mode: "update", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
+        finalResponse: "Updated the requested deck content.",
+        operations: [{ type: "artifact.update", input: {
+          artifactId: "artifact-real", blueprintKey: "flashcard_deck",
+          title: null, summary: null, tags: null, content: null,
+          contentPatch: { changes: [scenario === "human edit"
+            ? { path: "/cards/5/hint", value: authoredHint }
+            : { path: "/cards/-", value: authoredCard }] },
+        } }],
+      };
+      const { convexMutation, getSavedArtifact } = setup(plan);
+      const originalMutation = convexMutation.getMockImplementation()!;
+      let acknowledgements = 0;
+      convexMutation.mockImplementation(async (name, args) => {
+        // Model the existing backend retry admission, so the old runtime really
+        // reapplies rather than failing merely because this test omitted a mock.
+        if (name.includes("spectraOperations:reopenForCurrentStateRetry")) return {};
+        const result = await originalMutation(name, args);
+        if (name.includes("spectraOperations:markExecuted")) {
+          acknowledgements += 1;
+          if (acknowledgements === 1) {
+            const content = getSavedArtifact().content as { cards: Array<{ id: string; hint: string }> };
+            if (scenario === "human edit") {
+              expect(content.cards[5]!.hint).toBe(authoredHint);
+              content.cards[5]!.hint = humanHint;
+            } else {
+              expect(content.cards.filter((card) => card.id === authoredCard.id)).toHaveLength(1);
+              content.cards.push(humanCard);
+            }
+            // A collaborator edits after the original save is acknowledged by
+            // the backend, before the runtime reads the content for verification.
+            getSavedArtifact().currentVersionId = "version-later-human";
+            getSavedArtifact().liveStateVectorHash = "hash-later-human";
+          }
+        }
+        return result;
+      });
+      const yjs = await import("@/features/spectra/ai/yjs-artifact-operation");
+      vi.mocked(yjs.readLiveArtifactValue).mockImplementation(async () => ({
+        title: String(getSavedArtifact().title), content: getSavedArtifact().content,
+        tags: getSavedArtifact().tags as string[],
+      }));
+      const route = await import("@/app/api/spectra/run/route");
+      const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST", body: JSON.stringify({
+          action: "run", surface: "workspace", workspaceId: "workspace-real", artifactId: "artifact-real",
+          prompt: scenario === "human edit" ? "Improve only card six's memory cue."
+            : "Update this existing deck by appending one photolysis card.",
+        }),
+      }));
+      await response.text();
+      expect(acknowledgements).toBe(1);
+      expect(yjs.applyAiArtifactMutation).toHaveBeenCalledTimes(1);
+      expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:reopenForCurrentStateRetry"))).toBe(false);
+      const finalCards = (getSavedArtifact().content as { cards: Array<{ id: string; hint: string }> }).cards;
+      if (scenario === "human edit") expect(finalCards[5]!.hint).toBe(humanHint);
+      else {
+        expect(finalCards.filter((card) => card.id === authoredCard.id)).toHaveLength(1);
+        expect(finalCards.filter((card) => card.id === humanCard.id)).toHaveLength(1);
+        expect(finalCards.at(-1)!.id).toBe(humanCard.id);
+      }
+      expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(false);
+      const failure = convexMutation.mock.calls.findLast(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "failed");
+      expect(failure?.[1]).toMatchObject({ resultTitle: "Saved; verification incomplete", outcome: "canonical_saved" });
+      expect(failure?.[1].resultSummary).toContain("Changes were saved");
+      expect(failure?.[1].resultSummary).not.toMatch(/nothing was saved|no change was saved/i);
+    },
+    25_000,
+  );
 
   it("fans independent multi-output study packs into typed parallel workers", async () => {
     const { fetchMock } = setup({});

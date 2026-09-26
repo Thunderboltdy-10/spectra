@@ -385,7 +385,7 @@ export function foundryRoutingConfidence(
       negativeExamples: descriptor.negativeExamples ?? [],
     },
     evidence: summarizeEvidence(availableEvidence),
-    latestEvaluation: descriptor.evaluation?.versionId === descriptor.versionId
+    latestEvaluation: descriptor.evaluation && descriptor.evaluation.versionId === descriptor.versionId
       ? descriptor.evaluation : undefined,
     context: {
       request: prompt,

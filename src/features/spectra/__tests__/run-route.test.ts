@@ -211,6 +211,7 @@ function setup(
     if (name.includes("spectraRuns:beginRun")) {
       run.sourceSurface = args.sourceSurface as "workspace" | "chat";
       run.workspaceId = args.workspaceId as string | undefined;
+      run.artifactId = args.artifactId as string | undefined;
       run.userPrompt = args.userPrompt as string;
       run.executionId = args.clarificationId ? "execution-2" : "execution-1";
       return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: run.executionId, created: true };
@@ -521,7 +522,7 @@ describe("Spectra run route", () => {
   it("does not replay an ambiguous write after confirmation", async () => {
     const plan = {
       decision: "operate",
-      intent: { mode: "mixed", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
+      intent: { mode: "mixed", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: "artifact-real", targetWorkspaceId: null },
       finalResponse: "I can update the deck and archive it after confirmation.",
       operations: [
         { type: "artifact.update", input: {
@@ -553,7 +554,7 @@ describe("Spectra run route", () => {
     expect(apply).toHaveBeenCalledTimes(1);
     expect(getSavedArtifact().summary).toBe("Archived study deck with completed memory cues.");
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraOperations:markExecuted"))).toBe(false);
-    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:archive"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifactWrites:archive"))).toBe(false);
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(false);
     const failure = convexMutation.mock.calls.findLast(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "failed");
     expect(failure?.[1].resultSummary).toContain("save could not be confirmed");

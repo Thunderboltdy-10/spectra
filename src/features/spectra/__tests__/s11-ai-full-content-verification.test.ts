@@ -118,7 +118,7 @@ describe("full replacement verification", () => {
   it("keeps patch verification scoped to the requested paths", async () => {
     mocks.query.mockResolvedValue(saved({ blocks: [requested.blocks[0]], extra: "A disjoint collaborator change" }));
     await verify(update({ content: null, contentPatch: { changes: [{
-      op: "replace", path: "/blocks/0/text", value: requested.blocks[0]!.text,
+      path: "/blocks/0/text", value: requested.blocks[0]!.text,
     }] } }));
     expect(mocks.readLive).not.toHaveBeenCalled();
   });

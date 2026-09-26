@@ -55,7 +55,10 @@ function runtime(authoredStyle = "") {
   return { win, message };
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // Let the sandbox's queued observer callbacks finish before JSDOM destroys
+  // its document; closing first would turn valid callbacks into teardown errors.
+  await Promise.resolve();
   for (const dom of documents.splice(0)) dom.window.close();
 });
 
@@ -76,6 +79,8 @@ describe("executed sandbox theme protocol", () => {
   it("updates cached SDK aliases and CSS defaults without replacing interaction state", () => {
     const { win, message } = runtime();
     const main = win.document.querySelector("main");
+    const sheet = win.document.querySelector("#spectra-theme-tokens").sheet;
+    const rule = sheet.cssRules[0];
     message({
       themeTokens: { "--text-primary": "#211f1c", "--bg-primary": "#fbfaf8" },
     });
@@ -84,6 +89,8 @@ describe("executed sandbox theme protocol", () => {
     expect(win.document.documentElement.dataset.spectraTheme).toBe("light");
     expect(win.interactionCount).toBe(7);
     expect(win.document.querySelector("main")).toBe(main);
+    expect(win.document.querySelector("#spectra-theme-tokens").sheet).toBe(sheet);
+    expect(sheet.cssRules[0]).toBe(rule);
     expect(
       win
         .getComputedStyle(win.document.documentElement)
@@ -123,7 +130,7 @@ describe("executed sandbox theme protocol", () => {
     expect(style.getPropertyValue("--text-primary")).toBe("");
     expect(style.getPropertyValue("--bg-primary")).toBe("");
     expect(
-      win.document.querySelector("#spectra-theme-tokens").textContent,
+      win.document.querySelector("#spectra-theme-tokens").sheet.cssRules[0].cssText,
     ).not.toContain("display:none");
   });
 

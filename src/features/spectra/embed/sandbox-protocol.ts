@@ -517,8 +517,13 @@ export function buildSpectraSandboxDocument({
     }
     themeTokenSnapshot = Object.freeze(next);
     // Defaults precede authored CSS, so an intentional visual theme wins.
-    const style = document.getElementById('spectra-theme-tokens');
-    if (style) style.textContent = ':root{color-scheme:' + root.dataset.spectraTheme + ';' + Object.entries(next).map(([name, value]) => name + ':' + value).join(';') + '}';
+    const sheet = document.getElementById('spectra-theme-tokens')?.sheet;
+    if (sheet) {
+      if (!sheet.cssRules.length) sheet.insertRule(':root{}', 0);
+      // Keep the defaults sheet and its rule in place across host updates.
+      // Replacing style text can reorder sheets in DOM-backed renderers.
+      sheet.cssRules[0].style.cssText = 'color-scheme:' + root.dataset.spectraTheme + ';' + Object.entries(next).map(([name, value]) => name + ':' + value).join(';');
+    }
   };
   applyTheme(${safeJson({
     theme: initialTheme?.theme === "dark" ? "dark" : "light",

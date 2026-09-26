@@ -33,8 +33,17 @@ export async function hasCurrentPinnedArtifactPlacement(
   ctx: QueryCtx | MutationCtx,
   input: PlacementInput,
 ): Promise<boolean> {
+  return (await evaluateCurrentPinnedArtifactPlacement(ctx, input)).present;
+}
+
+/** The exact head is also the refresh deduplication key. Compute it once for
+ * callers that need both the placement decision and recovery identity. */
+export async function evaluateCurrentPinnedArtifactPlacement(
+  ctx: QueryCtx | MutationCtx,
+  input: PlacementInput,
+): Promise<{ present: boolean; headHash?: string }> {
   const head = await currentPinnedPlacementHead(ctx, input);
-  return head !== null && hasPlacementAtHead(input, head);
+  return head ? { present: hasPlacementAtHead(input, head), headHash: head.headHash } : { present: false };
 }
 
 /** Request-local evidence identity; callers may use headHash to dedupe refresh. */

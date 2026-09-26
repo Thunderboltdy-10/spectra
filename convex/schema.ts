@@ -3255,6 +3255,7 @@ export default defineSchema({
     policyVersion: v.optional(v.number()),
   })
     .index("by_room_sequence", ["roomId", "throughSequence"])
+    .index("by_room_status_sequence", ["roomId", "status", "throughSequence"])
     .index("by_artifact_created", ["artifactId", "createdAt"])
     .index("by_status", ["status", "createdAt"]),
 
@@ -3488,6 +3489,13 @@ export default defineSchema({
     placementOperationId: v.optional(v.string()),
     placementFingerprint: v.optional(v.string()),
     placementReceipt: v.optional(v.string()),
+    // Server-observed membership at an exact canonical/collaboration head.
+    // This caches placement evidence only; every read rechecks authority.
+    placementProof: v.optional(v.object({
+      version: v.literal(1),
+      headHash: v.string(),
+      observedAt: v.number(),
+    })),
     // A provisional row is only a short-lived intent. The canonical writer
     // clears this when it commits a matching version; a scheduled expiry
     // removes a row whose editor insertion never happened.

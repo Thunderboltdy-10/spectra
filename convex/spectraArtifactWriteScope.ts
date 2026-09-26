@@ -6,6 +6,8 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import { canonicalArtifactWriteContent, resolveArtifactWriteInput } from "../src/features/spectra/operations/artifact-write-content";
 import { classifyArtifactContentWipe } from "../src/features/spectra/operations/artifact-content-wipe";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
+import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
+import { isDurableContentRef } from "../shared/durable-content";
 
 export type ArtifactWriteScope = {
   version: 1;
@@ -196,18 +198,42 @@ async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<Retu
 export async function assertAiArtifactWriteAdmission(ctx: MutationCtx, args: AdmissionIdentity & { beforeContent: unknown; afterContent: unknown }) {
   const admission = await artifactAdmissionContext(ctx, args);
   const { artifact, run, input, scope } = admission;
-  const type = artifact.blueprintKey;
+  const evidence = await buildAiArtifactContentEvidence({
+    blueprintKey: artifact.blueprintKey, input, prompt: run.userPrompt,
+    operationDigest: scope.operationDigest, sourceContentIdentity: admission.sourceIdentity,
+    beforeContent: args.beforeContent, afterContent: args.afterContent,
+  });
+  return assertAdmissionEvidence(ctx, admission, evidence);
+}
+
+/** Shared content calculation for direct admission and the trusted Node signer.
+ * This is data, not authority. The caller supplies verified hydrated bytes and
+ * server-read operation/source identities, then binds the result in its existing
+ * authenticated transport with the exact refs/bytes/room/replica CAS. */
+export async function buildAiArtifactContentEvidence(args: {
+  blueprintKey: string;
+  input: Record<string, unknown>;
+  prompt: string;
+  operationDigest: string;
+  sourceContentIdentity: string;
+  beforeContent: unknown;
+  afterContent: unknown;
+}): Promise<AiArtifactContentEvidence> {
+  const type = args.blueprintKey;
   if (!isArtifactTypeKey(type)) throw new Error("AI_ARTIFACT_BLUEPRINT_MISMATCH");
+  if (isDurableContentRef(args.beforeContent) || isDurableContentRef(args.afterContent))
+    throw new Error("AI_ARTIFACT_CONTENT_NOT_HYDRATED");
+  if (type === "planner_task") assertPlannerSourceEdit(args.beforeContent, args.afterContent);
   const before = canonicalArtifactWriteContent(type, args.beforeContent);
   const after = canonicalArtifactWriteContent(type, args.afterContent);
-  const expected = resolveArtifactWriteInput(type, before, input, run.userPrompt);
+  const expected = resolveArtifactWriteInput(type, before, args.input, args.prompt);
   const afterDigest = await artifactScopeDigest(after);
   if (afterDigest !== await artifactScopeDigest(expected.content)) throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
-  return assertAdmissionEvidence(ctx, admission, {
-    version: 1, operationDigest: scope.operationDigest, sourceContentIdentity: admission.sourceIdentity,
+  return {
+    version: 1, operationDigest: args.operationDigest, sourceContentIdentity: args.sourceContentIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,
     fullContentDeletion: classifyArtifactContentWipe(type, before, expected.resolvedContent).fullContentDeletion,
-  });
+  };
 }
 
 /**

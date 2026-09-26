@@ -218,6 +218,17 @@ export class AppChoreographyCoordinator {
     return true;
   }
 
+  /** Hold an active control while awaiting its bounded server acknowledgement.
+   * This does not report progress or completion, and cannot exceed 20 seconds. */
+  holdClaimUntil(actorId: string, operationId: string, deadline: number): boolean {
+    this.expireClaims();
+    const entry = this.active.get(actorId);
+    const now = this.now();
+    if (!entry || entry.operationId !== operationId || !Number.isFinite(deadline) || deadline <= now) return false;
+    this.expiresAt.set(actorId, Math.min(deadline, now + 20_000));
+    return true;
+  }
+
   /** Drop claims whose TTL elapsed so a crashed performer cannot deadlock a control. */
   expireClaims(now = this.now()): number {
     let released = 0;

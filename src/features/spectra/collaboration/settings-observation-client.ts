@@ -173,7 +173,6 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
   const requestId = `${action.executionId}:${action.operationId}:${action.epoch}`;
   performAppChoreography({ actorId: action.runId, operationId: requestId, target: "settings", targetKey: action.target, summary: "Updating Smart completion" }, async (context) => {
     let hidePointer: (() => void) | undefined;
-    const localLease = setInterval(() => { if (Date.now() < action.expiresAt + 5_000) context.checkpoint(); }, 1_000);
     const abort = () => { if (!entry.recovering && !entry.confirmed) reject(new Error("UI_OBSERVATION_ENDED")); };
     context.signal.addEventListener("abort", abort, { once: true });
     const acknowledge = async (outcome: "target_ready" | "invisible" | "released") => {
@@ -217,7 +216,7 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
         if (!currentViewportSnapshot(action.runId, { target: "settings", targetKey: action.target }, [control.element]).targetVisible) { hidePointer(); hidePointer = undefined; continue; }
         await control.perform({ signal: context.signal, reachActionPoint: async () => {
           if (participant.mode === "follow" && !following(action.runId)) { await acknowledge("released"); throw new Error("UI_OBSERVATION_ENDED"); }
-          if (!context.checkpoint()) throw new Error("UI_OBSERVATION_ENDED");
+          if (!context.checkpoint() || !context.holdUntil(action.expiresAt + 5_000)) throw new Error("UI_OBSERVATION_ENDED");
           await acknowledge("target_ready");
           await receipt;
         } });
@@ -230,7 +229,7 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
       endFollow(action.runId, "Follow AI lost this control. The task continues.");
       await acknowledge("released").catch(() => undefined);
     } finally {
-      clearInterval(localLease); hidePointer?.(); context.signal.removeEventListener("abort", abort); clean();
+      hidePointer?.(); context.signal.removeEventListener("abort", abort); clean();
     }
   });
 }

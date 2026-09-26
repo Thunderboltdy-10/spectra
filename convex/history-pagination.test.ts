@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { convexTest } from "convex-test";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import schema from "./schema";
@@ -113,6 +114,18 @@ describe("bounded history and exact retained detail", () => {
       expect(version).not.toHaveProperty("before");
       expect(version).not.toHaveProperty("after");
       expect(version).not.toHaveProperty("versionNumber");
+    }
+    if (process.env.SPECTRA_PERF_EVIDENCE === "1") {
+      const directory = ".spectra-local/launch-s11/history";
+      mkdirSync(directory, { recursive: true });
+      const sample = ({ result, ...stats }: typeof before) => ({
+        ...stats, responseBytes: serializedBytes(result), visibleVersions: result.versions.length,
+      });
+      writeFileSync(`${directory}/history-read-cost.json`, JSON.stringify({
+        evidence: "Actual listVersions handler in convex-test; returned-row bytes, not physical I/O or billing",
+        requestedVersions: 4, beforeStoredVersions: 8, afterStoredVersions: 208,
+        before: sample(before), after: sample(after),
+      }, null, 2));
     }
   });
 

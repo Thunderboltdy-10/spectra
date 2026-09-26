@@ -8,7 +8,7 @@ Actual startup rollout `turn_context` confirms `gpt-6-astra`, `xhigh`, `danger-f
 
 ## Runtime boundary
 
-All test/build/install starts remain held pending RUNTIME clearance after loss of the shared dependencies. This worker has not started tests, a build, an install, services, backend publication, or native/file/school mutations. Source inspection is evidence of a call path, not a passed behavior test.
+The initial implementation ran under the global test/build/install hold after loss of the shared dependencies. On September 26 the coordinator announced a controlled queue: HISTORY-R follows EXPERIENCE in lane 1 and must await explicit release from replacement RUNTIME `01a0dd80-9b7e-7db3-b1a5-5ccb5beb8fba`. This worker has not started tests, a build, an install, services, backend publication, or native/file/school mutations. Source inspection is evidence of a call path, not a passed behavior test.
 
 ## First finite unit
 
@@ -29,6 +29,8 @@ The comparison overlay fetches the first metadata page and selects its first ent
 ## Prepared focused verification (not executed)
 
 `convex/history-pagination.test.ts` contains query-level fixtures for 125 versions with equal timestamps/newer concurrent inserts, row/byte observation before and after 200 older entries, snapshot/provenance/ref preservation, missing/corrupt snapshot state, current/expired/deleted authorization, cross-artifact version rejection and quiz/timetable privacy. The observer measures returned database rows and serialized JSON bytes, not physical storage I/O, billing or cache behavior. Its assertions are not measurements until executed.
+
+With `SPECTRA_PERF_EVIDENCE=1`, that query test saves the actual 8-row/208-row samples to ignored `.spectra-local/launch-s11/history/history-read-cost.json`, including response bytes separately from returned database document bytes. This export has been prepared but not executed. The September 26 preflight found no local `node_modules` entry; dependency resolution is reserved to RUNTIME.
 
 The history cases in `src/features/spectra/__tests__/api-route.test.ts` cover cursor forwarding, selected-detail routing, and invalid page-size rejection. `workbench-history-pagination.test.tsx` covers manual page loading, failed-page retry without losing metadata, and stale artifact responses even when the mocked reader ignores abort.
 

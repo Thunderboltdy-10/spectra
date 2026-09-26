@@ -1,0 +1,43 @@
+# S11 versioned semantic memory candidate
+
+Status: **source candidate; new tests, lint and typing have not run yet**. Coordinator allocated this implementation on September 25 and confirmed the composite vector partition and dispatcher contracts. Executable checks remain in the guarded slot queue. This report does not claim backend publication, live acceptance, artifact/thread indexing, 256k compaction or launch readiness.
+
+## Behavior and authority
+
+`memory.contextForRun` now requests a learned query vector only when memory retrieval is invoked with enabled preferences and a nonempty bounded query. The provider remains the measured OpenRouter route to OpenAI `text-embedding-3-small`, 256 dimensions; current chat models and fallbacks are unchanged. Query failure retains bounded literal/exact retrieval. Oversized queries are rejected whole with narrowing guidance, without silently discarding a decisive tail.
+
+`contextForRunBase` replaces the unconditional 500 owned + 200 workspace + 200 artifact candidate reads with a deduplicated union of at most 80 identities. Literal reads return at most 20 documents across the authorized scope partitions; explicit references add at most eight identities. Every path reapplies current lifecycle, category, exact scope and source checks. Semantic-only hits additionally require the current model tag, exact partition and SHA-256 of the actual stored proposition. There is no production cosine cutoff derived from the small synthetic corpus.
+
+The vector API in installed Convex 1.45 exposes only `eq` and `or`, not conjunction (`node_modules/convex/src/server/vector_search.ts`, `VectorFilterBuilder`). The approved optional `embeddingPartition` string therefore binds version + active status + scope + partition identity in one equality value. Queries OR exact desired keys. Private global/system keys use account identity without creation-school restriction; private-school keys include the current school. Shared keys use the exact workspace/artifact and exclude the author account. Destination authority is checked before generating shared keys; all hydrated hits are checked again. Existing `scopeSchoolId` rules remain intact.
+
+The text index supports chained equalities on the existing account/school/scope/destination fields, so unembedded legacy claims remain literally searchable without a duplicated partition field. Missing/unavailable search indexes are reported through `literalUnavailable`, with exact references still checked. Search results are candidate evidence, not an assertion of applicability.
+
+Relations read at most eight edges in each direction per authorized frontier item, with two bounded hops. A neighbor must already be a permitted candidate before it can receive a relation score or enter the next frontier. The complete rendered citation, proposition, scope, assertion and confidence text is charged against the requested budget. Token reporting remains a character-based estimate, explicitly not actual model tokenization of the whole tool envelope.
+
+## Queue, provider and identity
+
+Accepted active claims enqueue asynchronous `embed` jobs only when the stored proposition/model identity lacks a valid committed vector. Near-duplicate confirmation uses the retained proposition, not the incoming paraphrase. Committed identity metadata prevents another embedding after completed job retention removes the idempotency row. No fingerprint generation remains on the production memory path; the old helper remains available for historical benchmark comparison.
+
+The dispatcher leases at most two embedding jobs globally in a transaction. Enqueue wakes it; completion starts the next work; retry schedules a wake at its due time. The existing one-minute maintainer provides recovery, not the normal throughput limit. A backfill page schedules one dispatch wake. The sustainable upper bound is approximately `2 / (provider latency + scheduling/transaction overhead)` claims per second. The earlier synthetic measurements of 269–945 ms imply 2.1–7.4 claims/s **before overhead**, not a measured throughput result. Each provider attempt times out after ten seconds; a lease lasts thirty seconds. Three total attempts are allowed, with 5/10-second scheduled retries for transient errors. Explicit bounded backfill may retry a failed job when requested; normal confirmation does not restart terminal failures indefinitely.
+
+Before submission and again in the completion transaction, the job resolves its current account, enabled category, active claim, exact stored-input hash/partition and current source authority. Completion requires its unique lease token and an unexpired lease. A stale reply cannot overwrite a newer attempt. Updating a vector preserves semantic `updatedAt`. Direct forget clears vector metadata; correction, dispute and local expiry clear the searchable partition. An external source revoke may leave a physical index entry, but fresh authorization excludes it from evidence and rejects any in-flight completion. Coordinator accepted bounded cleanup as a separate storage-lifecycle follow-up rather than adding broad reverse-source scans.
+
+Non-embedding maintainer admission now uses the kind/status/availability index. At most 20 queued and 20 expired-lease non-embedding jobs are processed, chosen from bounded per-kind candidate reads; an embedding backlog cannot consume this quota. Embedding completion does not enter `touchedAccounts`, invalidate capsules or trigger the existing full-account capsule rebuild.
+
+Provider inputs are bounded to 8,192 UTF-8 bytes and 2,048 `cl100k_base` tokens. Responses are capped at 32,768 bytes while streaming and must identify OpenAI/the pinned model, one index-zero vector, exactly 256 finite numeric elements and a nonzero vector. Provider errors persist only a fixed status code, never response bodies, prompts or credentials. Query vectors use an optional process-local 128-entry LRU, exact text + model version + account namespace, five-minute expiry, and copied vectors. It stores no claims, permissions or source rows; process reuse is best effort.
+
+## Schema and integration
+
+- `memoryClaims`: optional `embeddingVersion`, `embeddingInputHash`, `embeddingUpdatedAt`, `embeddingPartition`; reuse the existing vector.
+- `by_embedding`: retain existing filters and add `embeddingPartition` only.
+- `search_normalized_proposition`: existing normalized proposition text, filters account/school/status/scope/workspace/artifact.
+- `memoryJobs`: add `embed` kind and `by_kind_status_available`; reuse existing payload/lease/attempt/status fields.
+- New runtime-neutral `memoryEmbeddingPolicy.ts` and Node `memoryEmbeddings.ts`. Typed function references avoid hand-editing generated API files. RUNTIME owns coordinated index readiness, code generation and publication.
+
+The response preserves `text`, `claims`, `selectedClaimIds`, `candidateClaimIds`, exclusions and token estimates. It adds `returnedClaimIds` and `retrieval` status/truncation/candidate-evidence metadata. ENGINE owns exposing this in `retrieve_memory` and distinguishing candidates returned from claims actually used; the historical `selectedClaimIds` name is compatibility, not proof of use. There is no ordinary-answer or greeting dispatcher in this unit. Orientation activation and restored-goal runtime integration remain ENGINE-owned.
+
+## Verification prepared, not yet run
+
+New deterministic tests cover retained-text/retention dedupe; source/claim/preference changes during a lease; stale lease completion; retry limits; two global slots; capture/delete admission; no embedding-only capsule rebuild; explicit bounded backfill; version separation; exact vector OR filters; literal fallback; shared authors and private exclusions; global memory after school change; inaccessible relation intermediaries; empty/oversized/disabled queries; full rendered budget; bounded returned-row measurements; provider identity/shape/response limits/timeouts; and query-cache isolation, expiry and capacity. Existing source-authority tests now freeze timers so their independently tested embedding jobs cannot run accidentally.
+
+The previous 121-test result predates this candidate and must not be represented as its validation. The restored-goal gather regression from `6121ce48` is also still pending. No new live provider experiment has run; `S11-CONTEXT-SEMANTIC.md` remains the earlier tiny synthetic ranking evidence. Expanded frozen-corpus/main-model applicability evaluation, live index readiness, effective tool-result use receipts and artifact/thread retrieval remain explicit acceptance work.

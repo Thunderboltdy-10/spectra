@@ -2531,6 +2531,10 @@ export default defineSchema({
     normalizedProposition: v.string(),
     propositionHash: v.string(),
     embedding: v.optional(v.array(v.float64())),
+    embeddingVersion: v.optional(v.string()),
+    embeddingInputHash: v.optional(v.string()),
+    embeddingUpdatedAt: v.optional(v.number()),
+    embeddingPartition: v.optional(v.string()),
     assertion: v.union(v.literal("asserted"), v.literal("inferred")),
     confidence: v.number(),
     sensitivity: v.union(v.literal("standard"), v.literal("restricted")),
@@ -2566,7 +2570,11 @@ export default defineSchema({
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
       dimensions: 256,
-      filterFields: ["accountId", "schoolId", "status"],
+      filterFields: ["accountId", "schoolId", "status", "embeddingPartition"],
+    })
+    .searchIndex("search_normalized_proposition", {
+      searchField: "normalizedProposition",
+      filterFields: ["accountId", "schoolId", "status", "scope", "workspaceId", "artifactId"],
     }),
 
   memoryEvidence: defineTable({
@@ -2683,6 +2691,7 @@ export default defineSchema({
       v.literal("regenerate_capsule"),
       v.literal("expire"),
       v.literal("delete"),
+      v.literal("embed"),
     ),
     idempotencyKey: v.string(),
     payload: v.any(),
@@ -2701,6 +2710,7 @@ export default defineSchema({
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })
+    .index("by_kind_status_available", ["kind", "status", "availableAt"])
     .index("by_status_available", ["status", "availableAt"])
     .index("by_status_updated", ["status", "updatedAt"])
     .index("by_account_created", ["accountId", "createdAt"])

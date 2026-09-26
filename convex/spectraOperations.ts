@@ -335,6 +335,8 @@ export const markExecuted = mutation({
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
     const run = await requireOwnedRun(ctx, operation.runId);
+    if (operation.output?.clarificationDraft !== undefined)
+      throw new Error("AI_CLARIFICATION_DRAFT_NOT_EXECUTABLE");
     if (
       run.status !== "running" ||
       operation.executionId !== run.executionId ||
@@ -343,11 +345,22 @@ export const markExecuted = mutation({
       throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "executing")
       throw new Error("Operation was not claimed for execution");
+    // Authority and committed receipts originate at server write boundaries.
+    // Completion reporting may neither manufacture nor replace those fields.
+    const authorityKeys = [
+      "pendingApplicationScope", "approvedApplicationScope", "applicationWriteReceipt",
+      "artifactWriteScope", "pendingArtifactScope", "approvedArtifactScope", "artifactWriteReceipt",
+      "clarificationDraft",
+    ];
+    const reported = args.output && typeof args.output === "object" && !Array.isArray(args.output)
+      ? { ...args.output } as Record<string, unknown> : undefined;
+    if (reported) for (const key of authorityKeys) delete reported[key];
+    const stored = operation.output && typeof operation.output === "object" && !Array.isArray(operation.output)
+      ? operation.output as Record<string, unknown> : {};
+    const retained = Object.fromEntries(authorityKeys.filter(key => stored[key] !== undefined).map(key => [key, stored[key]]));
     await ctx.db.patch(args.operationId, {
       status: "executed",
-      output: applicationWriteReceipt(operation.output)
-        ? { ...(args.output && typeof args.output === "object" ? args.output : {}), applicationWriteReceipt: applicationWriteReceipt(operation.output) }
-        : args.output,
+      output: reported || Object.keys(retained).length ? { ...reported, ...retained } : args.output,
       affected: args.affected,
       executedAt: Date.now(),
     });
@@ -365,6 +378,8 @@ export const markFailed = mutation({
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
     const run = await requireOwnedRun(ctx, operation.runId);
+    if (operation.output?.clarificationDraft !== undefined)
+      throw new Error("AI_CLARIFICATION_DRAFT_NOT_EXECUTABLE");
     if (
       operation.executionId !== run.executionId ||
       run.executionId !== args.executionId

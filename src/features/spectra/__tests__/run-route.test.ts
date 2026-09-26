@@ -331,6 +331,10 @@ function setup(
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({
     convexQuery, convexMutation,
+    convexAction: vi.fn(async (name: string) => {
+      if (name === "spectraArtifactWrites:preparePlan") return { approvalReasons: [] };
+      throw new Error(`Unexpected Convex action: ${name}`);
+    }),
     storeArtifactContent: async (_artifactId: string, content: unknown) => content,
   }));
   const materializeDocxArtifact = vi.fn(

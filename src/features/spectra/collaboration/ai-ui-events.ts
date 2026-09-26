@@ -37,10 +37,11 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     return;
   }
   if (event.key === "settings_changed") {
+    const targetId = event.payload?.targetId;
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
       route: "settings",
-      target: "preferences",
+      target: typeof targetId === "string" && targetId ? targetId : "preferences",
       note:
         typeof event.payload?.note === "string"
           ? event.payload.note

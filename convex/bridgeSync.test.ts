@@ -397,6 +397,7 @@ describe("Bridge write acknowledgement after native observation", () => {
       throw new Error("Expected a discovered replica");
     const { replicaId, workId } = registration;
     const projection = { type: "doc", content: [{ type: "paragraph", content: [] }] };
+    const projectionHash = await hash(JSON.stringify(projection));
     const seeded = await t.run(async ctx => {
       const now = Date.now();
       const payloadId = await ctx.db.insert("payloadObjects", {
@@ -425,14 +426,14 @@ describe("Bridge write acknowledgement after native observation", () => {
         kind: "native-office-save", format: "docx", artifactId: String(workId),
         operationId: nativeOperationId(String(workId), baseHash, targetHash),
         basePayloadHash: baseHash, resultPayloadHash: targetHash, baseRevision: baseHash, resultRevision: targetHash,
-        targets: { regionIds: [], partNames: [] }, semantic: { resultDigest: targetHash, readbackDigest: targetHash },
+        targets: { regionIds: [], partNames: [] }, semantic: { resultDigest: projectionHash, readbackDigest: projectionHash },
         preservedPartNames: ["word/vbaProject.bin"], state: "pending",
       };
       const requestId = await ctx.db.insert("bridgeWriteRequests", {
         accountId: fixture.accountId, deviceId: fixture.deviceId, mountId: fixture.mountId,
         workId, replicaId, localResourceId: resource.localResourceId, relativePath: resource.relativePath,
         payloadRef: String(payloadId), baseRevision: baseHash, targetRevision: targetHash, contentHash: targetHash,
-        projectionBaseContent: projection, projectionBaseContentHash: targetHash, projectionBaseTextIndex: "result",
+        projectionBaseContent: projection, projectionBaseContentHash: projectionHash, projectionBaseTextIndex: "result",
         idempotencyKey: "observed-native-write", nativeReceipt: withReceipt ? nativeReceipt : undefined,
         regionIds: [], partNames: [], state: "pending", expiresAt: now + 86_400_000,
         createdAt: now, updatedAt: now,
@@ -459,7 +460,7 @@ describe("Bridge write acknowledgement after native observation", () => {
         mediaType: "application/octet-stream", payloadRef: String(seeded.payloadId),
       });
     };
-    return { t, ...fixture, ...seeded, replicaId, workId, projection, baseHash, targetHash, firstClaim, claim, observe };
+    return { t, ...fixture, ...seeded, replicaId, workId, projection, projectionHash, baseHash, targetHash, firstClaim, claim, observe };
   }
 
   it.each(["upload", "metadata"] as const)("accepts a lost receipt after %s observed its exact native result", async observation => {
@@ -474,6 +475,7 @@ describe("Bridge write acknowledgement after native observation", () => {
     }));
     expect(after.local).toMatchObject({
       revision: f.targetHash, projectionBaseRevision: f.targetHash, projectionBaseContent: f.projection,
+      projectionBaseContentHash: f.projectionHash,
       relativePath: "Essay.docm", nativeFormat: "docm", state: "current",
     });
     expect(after.request?.nativeReceipt).toMatchObject({ basePayloadHash: f.baseHash, state: "applied", preservedPartNames: ["word/vbaProject.bin"] });

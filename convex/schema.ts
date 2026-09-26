@@ -3219,6 +3219,8 @@ export default defineSchema({
     roomId: v.id("collaborationRooms"),
     schoolId: v.optional(v.id("schools")),
     sequence: v.number(),
+    /** Trusted provider import identity, independent of native file operations. */
+    providerSourceOperationId: v.optional(v.string()),
     update: v.bytes(),
     byteLength: v.number(),
     stateVectorHash: v.string(),

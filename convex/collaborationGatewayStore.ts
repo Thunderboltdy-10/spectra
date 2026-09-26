@@ -385,6 +385,7 @@ export const load = internalQuery({
         sequence: update.sequence,
         regionIds: update.regionIds,
         nativeReconciliationOperationId: (update as typeof update & { nativeReconciliationOperationId?: string }).nativeReconciliationOperationId ?? null,
+        providerSourceOperationId: update.providerSourceOperationId ?? null,
         update: update.update,
         byteLength: update.byteLength,
         payloadRef: update.payloadRef ?? null,
@@ -858,7 +859,24 @@ export const appendRoomUpdateArgs = {
     projectionHotStub: v.optional(v.any()),
 };
 
-export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof appendRoomUpdateArgs>) {
+/** Function-only capability supplied by the signed ManageBac domain wrapper.
+ * Public append arguments cannot select an import actor or bypass personal ACLs. */
+export type ProviderAppendContext = {
+  source: "import";
+  operationId: string;
+  authorize: (input: {
+    actor: NonNullable<Awaited<ReturnType<typeof getActorForAccountId>>>;
+    artifact: Doc<"spectraArtifacts">;
+    room: Doc<"collaborationRooms">;
+  }) => Promise<void>;
+  validateProjection: (projection: GatewayProjection) => Promise<void>;
+};
+
+export async function appendRoomUpdate(
+  ctx: MutationCtx,
+  args: ObjectType<typeof appendRoomUpdateArgs>,
+  providerContext?: ProviderAppendContext,
+) {
     const [actor, artifact, room] = await Promise.all([
       getActorForAccountId(ctx, args.accountId),
       ctx.db.get(args.artifactId),
@@ -880,11 +898,18 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
       artifact.schoolId !== actor.schoolId
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    if (providerContext) {
+      if (artifact.blueprintKey !== "planner_task" || args.partitionKey !== "root" ||
+        providerContext.source !== "import" || providerContext.operationId !== args.idempotencyKey ||
+        !providerContext.operationId || providerContext.operationId.length > 180)
+        throw new Error("COLLABORATION_PROVIDER_CONTEXT_INVALID");
+      await providerContext.authorize({ actor, artifact, room });
+    }
     const resourceType =
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
         : ("artifact" as const);
-    const decision = await evaluateAccessForActor(
+    const decision = providerContext ? null : await evaluateAccessForActor(
       ctx,
       actor,
       resourceType,
@@ -899,10 +924,9 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
     const currentPolicyVersion = policy?.version ?? 0;
     const canModify =
       artifact.ownerAccountId === actor.accountId ||
-      decision.capabilities.includes("modify");
+      decision?.capabilities.includes("modify");
     if (
-      !decision.allowed ||
-      !canModify ||
+      (!providerContext && (!decision?.allowed || !canModify)) ||
       currentPolicyVersion !== args.policyVersion ||
       room.policyVersion !== currentPolicyVersion
     )
@@ -983,6 +1007,10 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
       artifact,
       { accountId: args.accountId, policyVersion: args.policyVersion },
     );
+    if (providerContext) {
+      if (!projection) throw new Error("COLLABORATION_PROVIDER_PROJECTION_REQUIRED");
+      await providerContext.validateProjection(projection);
+    }
     const now = Date.now();
     const [activeClaims, releasedClaims] = await Promise.all(
       (["active", "released"] as const).map((status) =>
@@ -1117,11 +1145,11 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
     // committed optimistically. Requiring a separate structure lease put a
     // network round trip in front of basic actions like adding a card or slide.
     // AI writes remain lease-bound for attribution and overlap safety.
-    const claimsRequired = args.actorKind === "ai";
+    const claimsRequired = !providerContext && args.actorKind === "ai";
     if (claimsRequired && uncovered.length > 0)
       throw new Error(`COLLABORATION_REGION_UNCLAIMED: ${uncovered[0]}`);
     const aiClaims = coveringClaims.filter((claim) => claim.actorKind === "ai");
-    const changeSource = args.actorKind;
+    const changeSource = providerContext?.source ?? args.actorKind;
     const aiRunId =
       changeSource === "ai"
         ? aiClaims.find((claim) => claim.runId)?.runId
@@ -1175,13 +1203,13 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
               group.clientId === clientId &&
               group.source === "human",
           )
-        : openGroups.find(
+        : changeSource === "ai" ? openGroups.find(
             (group) =>
               group.actorAccountId === actor.accountId &&
               group.clientId === clientId &&
               group.source === "ai" &&
               group.runId === aiRunId,
-          );
+          ) : undefined;
     if (
       changeGroup &&
       now - changeGroup.lastActivityAt > HUMAN_CHANGE_IDLE_MS
@@ -1260,6 +1288,7 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
       clientId,
       idempotencyKey,
       changeGroupId: changeGroup?._id,
+      providerSourceOperationId: providerContext?.operationId,
       regionIds,
       createdAt: now,
       payloadRef: args.payloadRef,
@@ -1339,7 +1368,7 @@ export async function appendRoomUpdate(ctx: MutationCtx, args: ObjectType<typeof
           source: "ai",
           summary: `Spectra updated ${regionIds.length} ${regionIds.length === 1 ? "region" : "regions"}`,
         });
-      else
+      else if (changeSource === "human")
         await ctx.scheduler.runAfter(
           HUMAN_CHANGE_IDLE_MS,
           internal.changeGroups.commitIdle,

@@ -118,6 +118,32 @@ export type AiArtifactContentEvidence = {
   fullContentDeletion: boolean;
 };
 
+/** Receipt lookup for the already authenticated internal transport. Recheck
+ * present authority and the exact operation, but do not turn a committed
+ * operation into a new effect when its old room/source or status has changed.
+ * The wrapper distinguishes a stored null result from no receipt. */
+export async function lookupVerifiedAiArtifactWriteReplay(
+  ctx: MutationCtx,
+  args: AdmissionIdentity & { evidence: AiArtifactContentEvidence },
+): Promise<{ result: unknown } | null> {
+  const operation = await ctx.db.get(args.aiOperation.operationId);
+  const receipt = operation ? artifactWriteReceipt(operation.output) : undefined;
+  if (!operation || !receipt) return null;
+  const actor = await getActorForAccountId(ctx, args.actorAccountId);
+  const run = await ctx.db.get(args.aiOperation.runId);
+  if (!actor || !run || run.ownerAccountId !== actor.accountId || run.schoolId !== actor.schoolId ||
+      operation.actorType !== "ai" || operation.runId !== run._id ||
+      operation.executionId !== args.aiOperation.executionId || run.executionId !== args.aiOperation.executionId)
+    throw new Error("AI_ARTIFACT_OPERATION_NOT_OWNED");
+  if (operation.type !== "artifact.update" || artifactOutput(operation.input).artifactId !== args.artifactId)
+    throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
+  const digest = await artifactOperationDigest(operation);
+  if (args.evidence.version !== 1 || args.evidence.operationDigest !== digest || receipt.scope !== digest)
+    throw new Error("AI_ARTIFACT_RECEIPT_SCOPE_MISMATCH");
+  await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
+  return { result: receipt.result };
+}
+
 /**
  * Invoke inside the transaction that admits the actual effect, after current
  * room/payload CAS and attribution. Before/after must describe that very

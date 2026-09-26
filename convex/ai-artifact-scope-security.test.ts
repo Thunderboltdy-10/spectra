@@ -6,7 +6,7 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import { makeFunctionReference } from "convex/server";
 import schema from "./schema";
 import { api } from "./_generated/api";
-import { artifactOperationDigest, artifactSourceIdentity, assertAiArtifactWriteAdmission } from "./spectraArtifactWriteScope";
+import { artifactOperationDigest, artifactSourceIdentity, assertAiArtifactWriteAdmission, lookupVerifiedAiArtifactWriteReplay, type AiArtifactContentEvidence } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent, normalizeAiArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { preparationContext } from "./spectraArtifactWrites";
 import { observeDatabase } from "../scripts/perf-read-ledger";
@@ -74,6 +74,76 @@ async function fixture(type: "artifact.archive" | "artifact.update" = "artifact.
 }
 
 describe("artifact preparation and archive approval boundary", () => {
+  it("replays an admitted write after Stop without overwriting later human work", async () => {
+    const f = await fixture("artifact.update");
+    await f.approved();
+    const result = { artifactId: f.ids.artifactId, nativeResult: { revision: "committed-native-revision" } };
+    const evidence = await f.t.run(async ctx => {
+      const admission = await assertAiArtifactWriteAdmission(ctx, {
+        actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
+        aiOperation: { ...f.attempt, operationId: f.ids.operationId },
+        beforeContent: body("Authored explanation"), afterContent: body(""),
+      });
+      await ctx.db.patch(f.ids.artifactId, { content: body("") });
+      await ctx.db.patch(f.ids.operationId, { output: {
+        ...admission.operation.output,
+        artifactWriteReceipt: { scope: admission.operationDigest, result,
+          sourceContentIdentity: await artifactSourceIdentity((await ctx.db.get(f.ids.artifactId))!),
+          resultContentDigest: admission.resultContentDigest },
+      } });
+      return { version: 1, operationDigest: admission.operationDigest,
+        sourceContentIdentity: admission.scope.sourceContentIdentity,
+        baseContentDigest: admission.scope.baseContentDigest,
+        resultContentDigest: admission.resultContentDigest, fullContentDeletion: true } satisfies AiArtifactContentEvidence;
+    });
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.artifactId, { content: body("Later human writing") });
+      await ctx.db.patch(f.ids.runId, { status: "cancelled" });
+      await ctx.db.patch(f.ids.operationId, { status: "cancelled" });
+    });
+    const before = { artifact: await f.artifact(), operation: await f.operation() };
+    const replay = (overrides = {}) => f.t.run(ctx => lookupVerifiedAiArtifactWriteReplay(ctx, {
+      actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
+      aiOperation: { ...f.attempt, operationId: f.ids.operationId }, evidence, ...overrides,
+    }));
+    expect(await replay()).toEqual({ result });
+    expect({ artifact: await f.artifact(), operation: await f.operation() }).toEqual(before);
+    await expect(replay({ actorAccountId: f.ids.otherAccountId })).rejects.toThrow("NOT_OWNED");
+    await expect(replay({ evidence: { ...evidence, operationDigest: "substituted" } })).rejects.toThrow("RECEIPT_SCOPE_MISMATCH");
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { ownerAccountId: f.ids.otherAccountId }));
+    await expect(replay()).rejects.toThrow();
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.artifactId, { ownerAccountId: f.ids.accountId });
+      await ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document", content: body("Changed operation") } });
+    });
+    await expect(replay()).rejects.toThrow("RECEIPT_SCOPE_MISMATCH");
+  });
+
+  it("does not interpret an unstarted cancelled write as a replay or admit its first effect", async () => {
+    const f = await fixture("artifact.update");
+    await f.approved();
+    await f.t.run(ctx => ctx.db.patch(f.ids.runId, { status: "cancelled" }));
+    const scope = (await f.operation())!.output.artifactWriteScope;
+    const identity = { actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId, aiOperation: { ...f.attempt, operationId: f.ids.operationId } };
+    expect(await f.t.run(ctx => lookupVerifiedAiArtifactWriteReplay(ctx, { ...identity,
+      evidence: { version: 1, operationDigest: scope.operationDigest, sourceContentIdentity: scope.sourceContentIdentity,
+        baseContentDigest: scope.baseContentDigest, resultContentDigest: scope.resultContentDigest, fullContentDeletion: true },
+    }))).toBeNull();
+    await expect(f.t.run(ctx => assertAiArtifactWriteAdmission(ctx, { ...identity,
+      beforeContent: body("Authored explanation"), afterContent: body(""),
+    }))).rejects.toThrow("NOT_ACTIVE");
+    expect(await f.artifact()).toMatchObject({ content: body("Authored explanation") });
+  });
+
+  it("rechecks current authority before replaying an archive receipt", async () => {
+    const f = await fixture();
+    await f.approved();
+    await f.actor.mutation(archive, f.args);
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { status: "active", ownerAccountId: f.ids.otherAccountId }));
+    await expect(f.actor.mutation(archive, f.args)).rejects.toThrow();
+    expect(await f.artifact()).toMatchObject({ status: "active" });
+  });
+
   it("keeps current-plan order and returned row bytes independent of large past attempts", async () => {
     const f = await fixture("artifact.update");
     const archiveId = await f.t.run(ctx => ctx.db.insert("spectraOperations", {

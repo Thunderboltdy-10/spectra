@@ -177,7 +177,7 @@ export async function runPptxProductionSeam(
     presentationYjsAdapter.origins(actor).localHuman,
   );
   const afterYjs = presentationYjsAdapter.project(document);
-  const update = pptxProjectionUpdateFromContent(afterYjs, opened.projection);
+  const update = pptxProjectionUpdateFromContent(afterYjs, opened.projection, { objectLists: "complete" });
   const merged = contentToPptx(afterYjs, opened.projection);
   const output = update.operations.length
     ? await pptxLens.mutate(opened.preservedCarry, {

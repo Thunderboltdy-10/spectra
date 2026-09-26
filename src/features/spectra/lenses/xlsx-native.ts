@@ -223,9 +223,9 @@ function worksheetView(root: XmlElement) {
   };
 }
 
-function worksheetTabColor(sheet: Worksheet) {
-  return child(sheetElement(sheet), SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("rgb")?.replace(/^FF/i, "#")
-    ?? child(sheetElement(sheet), SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("indexed")
+function worksheetTabColor(root: XmlElement) {
+  return child(root, SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("rgb")?.replace(/^FF/i, "#")
+    ?? child(root, SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("indexed")
     ?? undefined;
 }
 
@@ -492,7 +492,7 @@ export async function projectXlsxSheet(workbook: Workbook, sheet: Worksheet): Pr
     ...(sheetElement(sheet).getAttribute("state") && sheetElement(sheet).getAttribute("state") !== "visible" ? { hidden: true } : {}),
     ...(view.showGridlines !== undefined ? { showGridlines: view.showGridlines } : {}),
     ...(view.showHeadings !== undefined ? { showHeadings: view.showHeadings } : {}),
-    ...(worksheetTabColor(sheet) ? { tabColor: worksheetTabColor(sheet) } : {}),
+    ...(worksheetTabColor(root) ? { tabColor: worksheetTabColor(root) } : {}),
     ...freeze,
     tables: await projectTables(workbook, sheet),
     charts: await projectCharts(workbook, sheet),

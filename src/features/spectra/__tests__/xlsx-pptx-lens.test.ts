@@ -333,13 +333,13 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(diff.preservedPartChanges).not.toContain("/xl/styles.xml");
   });
 
-  it("refuses unsupported workbook families even when the file does not carry one yet", async () => {
+  it("allows supported workbook authoring when those features are not present yet", async () => {
     const opened = await xlsxLens.open(await workbookFixture());
     const byFeature = new Map(opened.fidelityMap.entries.map((entry) => [entry.feature, entry]));
-    expect(byFeature.get("charts")).toMatchObject({ class: "PRESERVED", readOnly: true });
-    expect(byFeature.get("tables")).toMatchObject({ class: "PRESERVED", readOnly: true });
-    expect(byFeature.get("validation")).toMatchObject({ class: "PRESERVED", readOnly: true });
-    expect(byFeature.get("sheetStructure")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    for (const feature of ["charts", "tables", "validation", "conditionalFormat", "namedRanges", "sheetStructure", "dimensions", "sheetViews", "sheetMetadata", "calculationSettings"])
+      expect(byFeature.get(feature)).toMatchObject({ class: "NATIVE" });
+    expect(byFeature.get("pivotTables")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(byFeature.get("comments")).toMatchObject({ class: "PRESERVED", readOnly: true });
     expect(byFeature.get("styles")).toMatchObject({ class: "NATIVE" });
     expect(byFeature.get("merges")).toMatchObject({ class: "NATIVE" });
     expect(byFeature.get("freezePanes")).toMatchObject({ class: "NATIVE" });

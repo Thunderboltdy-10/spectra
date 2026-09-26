@@ -871,12 +871,18 @@ export type ProviderAppendContext = {
   }) => Promise<void>;
   validateProjection: (projection: GatewayProjection) => Promise<void>;
 };
+export type AppendRoomUpdateOptions = {
+  provider?: ProviderAppendContext;
+  /** The atomic AI wrapper commits history after admitting its native intent. */
+  deferAiHistory?: boolean;
+};
 
 export async function appendRoomUpdate(
   ctx: MutationCtx,
   args: ObjectType<typeof appendRoomUpdateArgs>,
-  providerContext?: ProviderAppendContext,
+  options: AppendRoomUpdateOptions = {},
 ) {
+    const providerContext = options.provider;
     const [actor, artifact, room] = await Promise.all([
       getActorForAccountId(ctx, args.accountId),
       ctx.db.get(args.artifactId),
@@ -1363,7 +1369,7 @@ export async function appendRoomUpdate(
       );
     }
     if (changeGroup) {
-      if (changeSource === "ai")
+      if (changeSource === "ai" && !options.deferAiHistory)
         await commitChangeGroup(ctx, changeGroup._id, {
           source: "ai",
           summary: `Spectra updated ${regionIds.length} ${regionIds.length === 1 ? "region" : "regions"}`,

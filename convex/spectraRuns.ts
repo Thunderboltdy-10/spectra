@@ -1302,8 +1302,7 @@ export const updateStatus = mutation({
         .withIndex("by_run", q => q.eq("runId", run._id)).collect();
       for (const operation of operations) {
         if (operation.executionId !== args.executionId || operation.status !== "proposed" || !operation.requiresConfirmation) continue;
-        if (operation.type === "artifact.update" || operation.type === "artifact.archive") {
-          if (operation.type === "artifact.update" && /^@created:\d+$/.test(String(operation.input?.artifactId))) continue;
+        if (operation.type === "artifact.create" || operation.type === "artifact.update" || operation.type === "artifact.archive") {
           const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
           await ctx.db.patch(operation._id, {
             output: {
@@ -2461,8 +2460,7 @@ export const claimConfirmation = mutation({
     for (const operation of currentOperations) {
       if (operation.status !== "proposed" || !operation.requiresConfirmation) continue;
       const output = operation.output && typeof operation.output === "object" ? operation.output : {};
-      if (operation.type === "artifact.update" || operation.type === "artifact.archive") {
-        if (operation.type === "artifact.update" && /^@created:\d+$/.test(String(operation.input?.artifactId))) continue;
+      if (operation.type === "artifact.create" || operation.type === "artifact.update" || operation.type === "artifact.archive") {
         const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
         if (output.pendingArtifactScope !== digest)
           throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Prepare a new approval.");

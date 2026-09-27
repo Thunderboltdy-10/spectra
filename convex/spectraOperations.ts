@@ -74,6 +74,9 @@ export const expireUiAction = mutation({
     return uiObservationSnapshot(run, await expireUiObservation(ctx, run, operation, Date.now()));
   },
 });
+import { artifactScopeDigest } from "./spectraArtifactWriteScope";
+import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
+import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 
 function artifactSnapshot(artifact: {
   blueprintKey: string;
@@ -127,11 +130,20 @@ export const recordPlan = mutation({
     if (run.status !== "running" || run.executionId !== args.executionId)
       throw new Error("This run attempt is no longer active");
     const now = Date.now();
-    const operationIds = await Promise.all(
-      args.operations.map((operation) =>
+    const first = args.operations[0];
+    if (!first) return { operationIds: [] };
+    const rootId = await ctx.db.insert("spectraOperations", {
+      runId: args.runId, executionId: args.executionId, planIndex: 0,
+      actorType: "ai", type: first.type, status: "proposed", input: first.input,
+      affected: [], requiresConfirmation: first.requiresConfirmation, createdAt: now,
+    });
+    const followingIds = await Promise.all(
+      args.operations.slice(1).map((operation, index) =>
         ctx.db.insert("spectraOperations", {
           runId: args.runId,
           executionId: args.executionId,
+          planRootOperationId: rootId,
+          planIndex: index + 1,
           actorType: "ai",
           type: operation.type,
           status: "proposed",
@@ -142,7 +154,7 @@ export const recordPlan = mutation({
         }),
       ),
     );
-    return { operationIds };
+    return { operationIds: [rootId, ...followingIds] };
   },
 });
 
@@ -198,7 +210,7 @@ export const attachPendingArtifact = mutation({
   },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
-    if (!operation?.runId || operation.status !== "proposed")
+    if (!operation?.runId || !["proposed", "executing"].includes(operation.status) || operation.actorType !== "ai" || operation.type !== "artifact.create")
       throw new Error("Operation is no longer pending");
     const run = await requireOwnedRun(ctx, operation.runId);
     if (
@@ -211,11 +223,20 @@ export const attachPendingArtifact = mutation({
     if (
       !artifact ||
       artifact.ownerAccountId !== run.ownerAccountId ||
+      artifact.schoolId !== run.schoolId ||
+      artifact.blueprintKey !== operation.input?.blueprintKey ||
       artifact.aiRunId !== run._id ||
       artifact.aiExecutionId !== run.executionId ||
-      artifact.aiState !== "creating"
+      artifact.aiState !== "creating" ||
+      artifact.createdFrom?.source !== "ai" || artifact.createdFrom.runId !== run._id ||
+      (artifact.createdFrom.operationId && artifact.createdFrom.operationId !== operation._id) ||
+      (operation.pendingArtifactId && operation.pendingArtifactId !== artifact._id) ||
+      artifact.currentVersionId || !isArtifactTypeKey(artifact.blueprintKey) ||
+      !artifact.createdFrom.allocationContentDigest ||
+      artifact.createdFrom.allocationContentDigest !== await artifactScopeDigest(canonicalArtifactWriteContent(artifact.blueprintKey, artifact.content))
     )
       throw new Error("Pending artifact not found");
+    await ctx.db.patch(artifact._id, { createdFrom: { ...artifact.createdFrom, operationId: operation._id } });
     await ctx.db.patch(args.operationId, {
       pendingArtifactId: args.artifactId,
     });

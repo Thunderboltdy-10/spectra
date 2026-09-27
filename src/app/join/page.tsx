@@ -8,8 +8,11 @@ import { SpectraLogo } from "@/components/spectra-logo";
 import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {
+  authHrefForRedirect,
   clearJoinTokenCookie,
+  invitationFailureText,
   invitationPreviewCanRetry,
+  joinHrefForToken,
   persistJoinTokenCookie,
   resolveJoinToken,
 } from "@/lib/invitation-session";
@@ -18,6 +21,11 @@ function roleLabel(role: string) {
   if (role === "school_admin") return "school administrator";
   if (role === "teacher") return "teacher";
   return "student";
+}
+
+/** The sentence after a machine code; the code itself never reaches the page. */
+function invitationSentence(raw: string) {
+  return raw.replace(/^[A-Z][A-Z0-9_]{3,}:\s*/, "").trim();
 }
 
 type InvitationPreview = {
@@ -62,11 +70,8 @@ function JoinSchoolContent() {
       })
       .catch((nextError) => {
         if (!active) return;
-        const raw = nextError instanceof Error ? nextError.message : "";
+        const raw = invitationFailureText(nextError);
         const retryable = invitationPreviewCanRetry(raw, previewAttempt);
-        const human = raw.match(
-          /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
-        );
         if (
           /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
             raw,
@@ -78,7 +83,7 @@ function JoinSchoolContent() {
         setPreviewRetryable(retryable);
         setStatus("error");
         setError(
-          (human?.[1] ?? raw).trim() ||
+          invitationSentence(raw) ||
             "This invitation could not be checked. Sign in with the invited email and try again.",
         );
       });
@@ -121,19 +126,16 @@ function JoinSchoolContent() {
         router.refresh();
       }, 900);
     } catch (nextError) {
-      const raw = nextError instanceof Error ? nextError.message : "";
+      const raw = invitationFailureText(nextError);
       if (
         /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
           raw,
         )
       )
         clearJoinTokenCookie(document);
-      const human = raw.match(
-        /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
-      );
       setStatus("error");
       setError(
-        (human?.[1] ?? raw).trim() || "The invitation could not be accepted.",
+        invitationSentence(raw) || "The invitation could not be accepted.",
       );
     }
   }
@@ -146,11 +148,17 @@ function JoinSchoolContent() {
         : "Welcome to your school"
       : schoolName
         ? `Join ${schoolName}`
-        : "Accept your school invitation";
+        : token
+          ? "Accept your school invitation"
+          : "Open your invitation link";
+  // Without a token there is nothing to accept. Say where the link comes from
+  // instead of showing a Join button that can never enable.
   const detail =
     status === "accepted"
       ? "Spectra is opening your workspace."
-      : preview?.emailMatches === false
+      : !token
+        ? "You join a school through the invitation link your school emailed you. Open that link on this device. No invitation yet? Ask your teacher or school administrator to invite the email you sign in with."
+        : preview?.emailMatches === false
         ? "Sign in with the invited email, then return to this page."
         : schoolName
           ? `This invitation is for a ${roleLabel(preview?.role ?? "student")} at ${schoolName}.`
@@ -184,7 +192,10 @@ function JoinSchoolContent() {
           {detail}
         </p>
         {status === "error" ? (
-          <div className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]">
+          <div
+            role="alert"
+            className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]"
+          >
             <p>{error}</p>
             {previewRetryable && previewState === "error" ? (
               <button
@@ -197,38 +208,46 @@ function JoinSchoolContent() {
             ) : null}
           </div>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void accept()}
-          disabled={
-            !token ||
-            status === "accepting" ||
-            status === "accepted" ||
-            previewState === "loading" ||
-            previewState === "error" ||
-            preview?.emailMatches === false
-          }
-          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"
-        >
-          {status === "accepting" ? (
-            <LoaderCircle size={15} className="animate-spin" />
-          ) : (
-            <ShieldCheck size={15} />
-          )}
-          {buttonLabel}
-        </button>
-        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
-          If Spectra asks you to sign in, use the invited address and return to
-          this page.{" "}
+        {token ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void accept()}
+              disabled={
+                status === "accepting" ||
+                status === "accepted" ||
+                previewState === "loading" ||
+                previewState === "error" ||
+                preview?.emailMatches === false
+              }
+              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"
+            >
+              {status === "accepting" ? (
+                <LoaderCircle size={15} className="animate-spin" />
+              ) : (
+                <ShieldCheck size={15} />
+              )}
+              {buttonLabel}
+            </button>
+            <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
+              If Spectra asks you to sign in, use the invited address and
+              return to this page.{" "}
+              <Link
+                href={authHrefForRedirect("/sign-in", joinHrefForToken(token))}
+                className="font-medium text-[var(--text-primary)] underline"
+              >
+                Sign in
+              </Link>
+            </div>
+          </>
+        ) : (
           <Link
-            href={`/sign-in?redirect_url=${encodeURIComponent(
-              `/join?token=${token}`,
-            )}`}
-            className="font-medium text-[var(--text-primary)] underline"
+            href="/request-access"
+            className="mt-6 flex h-11 w-full items-center justify-center rounded-control border border-[var(--border-default)] text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           >
-            Sign in
+            How to get an invitation
           </Link>
-        </div>
+        )}
       </section>
     </main>
   );

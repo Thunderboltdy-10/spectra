@@ -3,6 +3,7 @@ import {
   JOIN_TOKEN_COOKIE,
   authHrefForRedirect,
   clearJoinTokenCookie,
+  invitationFailureText,
   invitationPreviewCanRetry,
   joinHrefForToken,
   joinTokenFromSearch,
@@ -46,5 +47,15 @@ describe("invitation cookie recovery", () => {
     expect(invitationPreviewCanRetry("INTEGRATION_UNAVAILABLE: Try again.", 2)).toBe(false);
     expect(invitationPreviewCanRetry("INVITATION_EXPIRED: This invitation has expired.")).toBe(false);
     expect(invitationPreviewCanRetry("INVITATION_INVALID: This invitation is unavailable.")).toBe(false);
+    // Signing in with another account, not retrying, resolves these.
+    expect(invitationPreviewCanRetry("INVITATION_EMAIL_MISMATCH: Sign in with the invited verified email.")).toBe(false);
+    expect(invitationPreviewCanRetry("MEMBERSHIP_SINGLE_SCHOOL: Leave your current school first.")).toBe(false);
+  });
+
+  it("rejoins the route's machine code with its sentence for branching", () => {
+    const error = Object.assign(new Error("This invitation has expired."), { code: "INVITATION_EXPIRED" });
+    expect(invitationFailureText(error)).toBe("INVITATION_EXPIRED: This invitation has expired.");
+    expect(invitationFailureText(new Error("Offline."))).toBe("Offline.");
+    expect(invitationFailureText("nope")).toBe("");
   });
 });

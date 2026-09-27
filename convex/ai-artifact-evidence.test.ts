@@ -27,7 +27,7 @@ describe("shared signed AI content evidence", () => {
 
   it("permits personal planner edits but rejects actual official date or source changes", async () => {
     const before = normalizePlanContent({ taskTitle: "Official essay", status: "todo", dueAt: 1_800_000_000_000,
-      source: { provider: "managebac", externalId: "assignment-1", hash: "v1", status: "active" }, sourceRefs: ["managebac:assignment-1"] });
+      source: { provider: "managebac", externalId: "assignment-1", hash: "v1", status: "active", lockedFields: ["taskTitle", "description", "dueAt", "source"] }, sourceRefs: ["managebac:assignment-1"] });
     const personal = structuredClone(before);
     personal.tasks[0].title = "My personal outline";
     expect(await buildAiArtifactContentEvidence({ ...identity, blueprintKey: "planner_task", input: { content: personal }, beforeContent: before, afterContent: personal })).toMatchObject({ fullContentDeletion: false });

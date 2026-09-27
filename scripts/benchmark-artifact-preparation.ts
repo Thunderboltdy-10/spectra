@@ -12,13 +12,13 @@ if (![10_000, 50_000].includes(cellCount)) throw new Error("Choose a finite fixt
 const cells = Object.fromEntries(Array.from({ length: cellCount }, (_, index) => [
   `A${index + 1}`, index % 10 === 0
     ? { value: index, formula: `=ROW()+${index}` }
-    : { value: index % 7 === 0 ? false : index, format: { numberFormat: "0.00" } },
+    : { value: index % 7 === 0 ? false : index, format: { numberFormat: "number" } },
 ]));
 const content = {
   workbook: { calculationMode: "automatic", locale: "en" }, activeSheetId: "sheet",
   sheets: [{ id: "sheet", name: "Synthetic fixture", cells, tables: [], charts: [] }],
 };
-const input = { blueprintKey: "sheets", contentPatch: { changes: [{ path: "/sheets/id:sheet/cells/A1/value", value: 37 }] } };
+const input = { blueprintKey: "sheets", contentPatch: { changes: [{ path: "/sheets/0/cells/A1/value", value: 37 }] } };
 const bytes = Buffer.byteLength(JSON.stringify(content));
 const samples: Array<Record<string, unknown>> = [];
 

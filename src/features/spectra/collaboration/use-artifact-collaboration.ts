@@ -246,16 +246,6 @@ export function useArtifactCollaboration(
     localDurability.state,
     localDurability.pendingRemoteSync,
   ]);
-  const recoverAuthoritative = useCallback(() => {
-    recoveryAttemptRef.current = 0;
-    void (async () => {
-      await localPersistence?.retry();
-      const local = localPersistence?.getSnapshot();
-      if (!local || !["ready", "local_only"].includes(local.state)) return;
-      transport?.destroy();
-      setGeneration((value) => value + 1);
-    })();
-  }, [transport, localPersistence]);
   // Rebuilds the live session from the local head, e.g. after a recovery
   // adoption committed a new head. Never writes content itself.
   const reopenLiveSession = useCallback(() => {
@@ -274,7 +264,6 @@ export function useArtifactCollaboration(
     presence: EMPTY_PRESENCE,
     localDurability,
     localPersistence,
-    recoverAuthoritative,
     reopenLiveSession,
     // Only hard-lock when access is known read-only or revoked. Connecting,
     // closed, reconnecting, and unsynchronized must not freeze the editor —

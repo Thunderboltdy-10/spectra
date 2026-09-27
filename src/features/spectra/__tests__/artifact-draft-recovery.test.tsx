@@ -96,6 +96,9 @@ function controller(values = [branch()]) {
     reapplyLocalRecovery: vi
       .fn<LocalRecoveryController["reapplyLocalRecovery"]>()
       .mockResolvedValue(undefined),
+    discardLocalRecovery: vi
+      .fn<LocalRecoveryController["discardLocalRecovery"]>()
+      .mockResolvedValue(undefined),
   };
   inspect.mockImplementation(async (id) =>
     inspection(
@@ -420,6 +423,27 @@ describe("retained local draft recovery UI", () => {
     await inspectFirst();
     expect(screen.getByText("LOCAL one")).toBeInTheDocument();
     expect(value.archiveAndAdoptCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes only a retained draft, after explicit confirmation, at its listed generation", async () => {
+    const value = controller([branch(), branch("two")]);
+    render(view(value));
+    await inspectFirst();
+    // The active draft is resolved by adopting the current version, never deleted.
+    expect(screen.queryByRole("button", { name: "Delete draft…" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Earlier local draft/ }));
+    await screen.findByText("LOCAL two");
+    expect(screen.queryByRole("button", { name: "Use current version" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete draft…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep draft" }));
+    expect(value.discardLocalRecovery).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Delete draft…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete draft" }));
+    await screen.findByText("Draft deleted from this device.");
+    expect(value.discardLocalRecovery).toHaveBeenCalledWith(
+      expect.objectContaining({ branchId: "two", expectedGeneration: "generation-two" }),
+    );
+    expect(value.archiveAndAdoptCurrent).not.toHaveBeenCalled();
   });
 
   it("shows finite loading, empty, and inspection failure states without applying anything", async () => {

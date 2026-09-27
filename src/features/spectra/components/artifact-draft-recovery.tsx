@@ -18,7 +18,7 @@ import type {
 import { downloadDocumentBlob } from "./artifact-studio-file-utils";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 
-type Action = "inspect" | "export" | "adopt" | "reapply";
+type Action = "inspect" | "export" | "adopt" | "reapply" | "discard";
 
 function sameAnchor(
   left: RecoveryBranch["currentAnchor"],
@@ -44,6 +44,7 @@ export function describeLocalRecoveryFailure(error: unknown, action: Action) {
     export: "export this draft",
     adopt: "use the current version",
     reapply: "apply the selected changes",
+    discard: "delete this draft",
   }[action];
   return `Could not ${operation}. Your local draft is still available. Try again when you’re ready.`;
 }
@@ -84,6 +85,7 @@ function ArtifactDraftRecoveryView({
   const [error, setError] = useState<string>();
   const [message, setMessage] = useState<string>();
   const [reviewRequired, setReviewRequired] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const mounted = useRef(false);
   const request = useRef<{ action: Action; abort: AbortController } | null>(
     null,
@@ -110,6 +112,7 @@ function ArtifactDraftRecoveryView({
       setError(undefined);
       setMessage(undefined);
       setReviewRequired(false);
+      setConfirmDiscard(false);
     }
   }, [open]);
 
@@ -136,6 +139,7 @@ function ArtifactDraftRecoveryView({
     // render must not let the first request publish into the second branch.
     current.current = { ...current.current, selectedId: branch.id };
     setSelectedId(branch.id);
+    setConfirmDiscard(false);
     setInspection(null);
     setRegionIds([]);
     setBusy("inspect");
@@ -180,8 +184,9 @@ function ArtifactDraftRecoveryView({
       )
     ) return;
     const reviewed = inspection?.branch;
+    if (action === "discard" && branch.id === current.current.recovery.activeBranchId) return;
     if (
-      action !== "export" &&
+      action !== "export" && action !== "discard" &&
       (!reviewed ||
         reviewRequired ||
         reviewed.generation !== branch.generation ||
@@ -204,6 +209,20 @@ function ArtifactDraftRecoveryView({
         });
         if (isCurrent(token, branch))
           downloadDocumentBlob(result.fileName, result.blob);
+      } else if (action === "discard") {
+        // Deletes only the exact listed generation of a retained draft.
+        await controller.discardLocalRecovery({
+          branchId: branch.id,
+          expectedGeneration: branch.generation,
+          signal: token.abort.signal,
+        });
+        if (mounted.current && request.current === token) {
+          current.current = { ...current.current, selectedId: undefined };
+          setSelectedId(undefined);
+          setInspection(null);
+          setConfirmDiscard(false);
+          setMessage("Draft deleted from this device.");
+        }
       } else {
         // Use exactly the witness the user inspected. A stale error requires
         // another deliberate review, never a retry with a newer anchor.
@@ -235,7 +254,8 @@ function ArtifactDraftRecoveryView({
     } catch (cause) {
       if (isCurrent(token, branch)) {
         setError(describeLocalRecoveryFailure(cause, action));
-        if (action !== "export") setReviewRequired(true);
+        if (action !== "export" && action !== "discard") setReviewRequired(true);
+        if (action === "discard") setConfirmDiscard(false);
       }
     } finally {
       if (request.current === token) {
@@ -434,8 +454,46 @@ function ArtifactDraftRecoveryView({
               ))}
             </div>
           ) : null}
-          {selected ? (
+          {selected && confirmDiscard ? (
+            <div
+              role="group"
+              aria-label="Delete draft"
+              className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-subtle)] pt-4 text-caption text-[var(--text-secondary)]"
+            >
+              <span className="min-w-0 flex-1">
+                Delete this draft from this device? This can’t be undone.
+                Export it first if you may need it.
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={Boolean(busy)}
+                onClick={() => setConfirmDiscard(false)}
+              >
+                Keep draft
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={Boolean(busy) || saving}
+                onClick={() => void perform("discard")}
+              >
+                {busy === "discard" ? "Deleting…" : "Delete draft"}
+              </Button>
+            </div>
+          ) : null}
+          {selected && !confirmDiscard ? (
             <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border-subtle)] pt-4">
+              {selected.id !== recovery.activeBranchId ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={Boolean(busy) || saving}
+                  onClick={() => setConfirmDiscard(true)}
+                >
+                  Delete draft…
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 disabled={Boolean(busy) || saving}
@@ -443,15 +501,17 @@ function ArtifactDraftRecoveryView({
               >
                 {busy === "export" ? "Preparing export…" : "Export draft"}
               </Button>
-              <Button
-                size="sm"
-                disabled={Boolean(busy) || saving || !hasCurrentReview}
-                onClick={() => void perform("adopt")}
-              >
-                {busy === "adopt"
-                  ? "Keeping draft and switching…"
-                  : "Use current version"}
-              </Button>
+              {selected.id === recovery.activeBranchId ? (
+                <Button
+                  size="sm"
+                  disabled={Boolean(busy) || saving || !hasCurrentReview}
+                  onClick={() => void perform("adopt")}
+                >
+                  {busy === "adopt"
+                    ? "Keeping draft and switching…"
+                    : "Use current version"}
+                </Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="primary"

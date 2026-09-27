@@ -16,7 +16,11 @@ import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "..
 const injected = vi.hoisted(() => ({ stage: "" }));
 vi.mock("./replicaMaterialization", async importOriginal => {
   const actual = await importOriginal<typeof import("./replicaMaterialization")>();
-  return { ...actual, commitCloudMaterializationInTransaction: async (...args: Parameters<typeof actual.commitCloudMaterializationInTransaction>) => {
+  return { ...actual, queueMaterializationInTransaction: async (...args: Parameters<typeof actual.queueMaterializationInTransaction>) => {
+    const result = await actual.queueMaterializationInTransaction(...args);
+    if (injected.stage === "queue") throw new Error("INJECTED_AFTER_QUEUE_EFFECT");
+    return result;
+  }, commitCloudMaterializationInTransaction: async (...args: Parameters<typeof actual.commitCloudMaterializationInTransaction>) => {
     const result = await actual.commitCloudMaterializationInTransaction(...args);
     if (injected.stage === "native") throw new Error("INJECTED_AFTER_NATIVE_EFFECT");
     return result;
@@ -124,7 +128,80 @@ async function fixture() {
   return { t, ...seeded, commit };
 }
 
+async function bridgeFixture() {
+  const f = await fixture();
+  const source = f.args.expected.nativeSource;
+  const localId = await f.t.run(async ctx => {
+    const now = Date.now();
+    const deviceId = await ctx.db.insert("bridgeDevices", { accountId: f.args.append.accountId,
+      name: "Disposable Bridge", platform: "windows", credentialHash: hash("fixture credential"),
+      protocolVersion: "1", appVersion: "1", pairedAt: now, lastSeenAt: now, state: "active" });
+    const mountId = await ctx.db.insert("bridgeMounts", { accountId: f.args.append.accountId, deviceId,
+      rootLabel: "Disposable", grantId: "grant_native_ai_fixture", state: "active", fileCount: 1,
+      doubleSyncRisk: false, createdAt: now, updatedAt: now });
+    return ctx.db.insert("workReplicas", { accountId: f.args.append.accountId, workId: f.ids.artifactId,
+      kind: "local", deviceId, mountId, localResourceId: "native-ai", relativePath: "Native AI.docx",
+      payloadRef: source.payloadRef, contentHash: source.hash, revision: source.revision, nativeFormat: "docx",
+      state: "current", lastVerifiedAt: now, updatedAt: now });
+  });
+  if (f.args.nativeCandidate.destination !== "cloud") throw new Error("Invalid fixture");
+  const cloud = f.args.nativeCandidate.cloud;
+  f.args.nativeCandidate = { destination: "bridge", queue: { ...cloud, localReplicaId: localId,
+    regionIds: cloud.nativeReceipt.targets.regionIds, partNames: cloud.nativeReceipt.targets.partNames,
+    nativeReceipt: { ...cloud.nativeReceipt, state: "queued" } } };
+  return { ...f, localId };
+}
+
 describe("atomic AI native commit", () => {
+  it("returns the authoritative prompt and original receipt before loading a retired room for preparation", async () => {
+    const f = await fixture();
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    const readHead = () => client.query(makeFunctionReference<"query">("nativeAiCommit:head"), {
+      artifactId: f.ids.artifactId, aiOperation: f.args.aiOperation,
+    });
+    expect(await readHead()).toMatchObject({ prompt: "Replace the paragraph", room: { _id: f.ids.roomId }, committedResult: null });
+    const original = await f.commit();
+    await f.t.run(ctx => ctx.db.patch(f.ids.roomId, { status: "closed" }));
+    expect(await readHead()).toMatchObject({ prompt: "Replace the paragraph", room: null,
+      committedResult: { receipt: original.receipt } });
+  });
+
+  it("queues cloud-prepared bytes for the separately bound local destination without claiming a local save", async () => {
+    const f = await bridgeFixture();
+    const result = await f.commit();
+    expect(result).toMatchObject({ state: "committed", receipt: { sequence: 2, nativeResult: { state: "pending" } } });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.cloudId)))?.payloadRef).toBe(f.ids.sourceRef);
+    expect((await f.t.run(ctx => ctx.db.get(f.localId)))?.payloadRef).toBe(f.ids.sourceRef);
+    const requests = await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect());
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ state: "pending", payloadRef: f.ids.resultRef, replicaId: f.localId });
+    const owners = await f.t.run(ctx => ctx.db.query("collaborationPayloadOwners")
+      .withIndex("by_owner", q => q.eq("ownerId", result.receipt.versionId)).collect());
+    expect(owners.filter(row => row.ownerTable === "spectraArtifactVersions:native").map(row => row.payloadRef))
+      .toEqual(expect.arrayContaining([f.ids.sourceRef, f.ids.resultRef]));
+  });
+
+  it("rolls back the outbox, history, owners and canonical append when queue admission fails after writing", async () => {
+    const f = await bridgeFixture();
+    injected.stage = "queue";
+    await expect(f.commit()).rejects.toThrow("INJECTED_AFTER_QUEUE_EFFECT");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(f.before.content);
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(2);
+    expect(await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+    expect(await f.t.run(ctx => ctx.db.query("syncOperations").collect())).toEqual([]);
+    expect(await f.t.run(ctx => ctx.db.query("spectraArtifactVersions").collect())).toEqual([]);
+    expect(await f.t.run(ctx => ctx.db.query("collaborationPayloadOwners").collect())).toEqual([]);
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.operationId)))?.output.artifactWriteReceipt).toBeUndefined();
+  });
+
+  it.each(["revision", "contentHash"] as const)("refuses a changed local target %s even while the prepared cloud source is current", async key => {
+    const f = await bridgeFixture();
+    await f.t.run(ctx => ctx.db.patch(f.localId, { [key]: "changed-local" }));
+    await expect(f.commit()).rejects.toThrow("AI_NATIVE_DESTINATION_INVALID");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(2);
+    expect(await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+  });
+
   it("admits native cloud, exact Yjs bytes, AI history, both payload owners and the business receipt together", async () => {
     const f = await fixture();
     const result = await f.commit();
@@ -137,6 +214,18 @@ describe("atomic AI native commit", () => {
     expect(owners.filter(row => row.ownerTable === "spectraArtifactVersions:native").map(row => row.payloadRef))
       .toEqual(expect.arrayContaining([f.ids.sourceRef, f.ids.resultRef]));
     expect((await f.t.run(ctx => ctx.db.get(f.ids.operationId)))?.output.artifactWriteReceipt.result.receipt).toEqual(result.receipt);
+    const updates = await f.t.run(ctx => ctx.db.query("collaborationUpdates")
+      .withIndex("by_room_sequence", q => q.eq("roomId", f.ids.roomId)).collect());
+    expect(updates).toHaveLength(2);
+    const replayed = new Y.Doc();
+    try {
+      Y.applyUpdate(replayed, new Uint8Array(updates[0]!.update));
+      if (result.admitted.encoding !== "inline") throw new Error("Expected inline delta");
+      Y.applyUpdate(replayed, Buffer.from(result.admitted.updateBase64, "base64"));
+      expect(readNativeArtifactYjsDocument(replayed, "document")?.content).toEqual(f.after.content);
+    } finally {
+      replayed.destroy();
+    }
   });
 
   it.each(["history", "native"])("rolls back all effects if %s fails after writing", async stage => {

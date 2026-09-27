@@ -33,7 +33,7 @@ export const head = query({
     if (receipt && receipt.scope !== operationDigest) throw new Error("AI_ARTIFACT_RECEIPT_SCOPE_MISMATCH");
     const room = receipt ? null : await ctx.db.query("collaborationRooms")
       .withIndex("by_artifact_partition", q => q.eq("artifactId", artifact._id).eq("partitionKey", "root")).unique();
-    return { accountId: actor.accountId, artifact, operationDigest,
+    return { accountId: actor.accountId, artifact, operationDigest, prompt: run.userPrompt,
       operation: { id: operation._id, type: operation.type, input: operation.input, writeScope: preparedArtifactScope(operation) },
       sourceContentIdentity: await artifactSourceIdentity(artifact), room,
       committedResult: receipt?.result ?? null };
@@ -65,9 +65,14 @@ async function verifyNativeCandidate(ctx: MutationCtx, args: NativeAiCommitArgs)
   const nativeReceipt = materialization?.nativeReceipt ?? (candidate.destination === "none" ? candidate.unchanged.preservationEvidence : undefined);
   if (!nativeReceipt || (materialization && (materialization.workId !== args.append.artifactId ||
       materialization.baseRevision !== source.revision))) throw new Error("AI_NATIVE_CANDIDATE_INVALID");
-  if (destination === "bridge" && (replica.kind !== "local" || candidate.queue.localReplicaId !== source.replicaId))
-    throw new Error("AI_NATIVE_DESTINATION_INVALID");
-  if (destination === "cloud" && replica.kind !== "cloud") throw new Error("AI_NATIVE_DESTINATION_INVALID");
+  if (destination === "bridge") {
+    // The materializer normally reads verified CLOUD bytes and queues them
+    // for a local target. Source provenance and destination identity differ.
+    const target = candidate.queue.localReplicaId ? await ctx.db.get(candidate.queue.localReplicaId) : null;
+    if (!target || target.kind !== "local" || target.accountId !== args.append.accountId ||
+        target.workId !== args.append.artifactId || target.revision !== candidate.queue.baseRevision || target.contentHash !== source.hash)
+      throw new Error("AI_NATIVE_DESTINATION_INVALID");
+  }
   const receipt = validateNativeSaveReceipt(nativeReceipt, { artifactId: String(args.append.artifactId),
     baseRevision: source.revision, basePayloadHash: source.hash, targetRevision: resultHash,
     resultPayloadHash: resultHash, nativeFormat: source.nativeFormat, target: nativeReceipt.targets });

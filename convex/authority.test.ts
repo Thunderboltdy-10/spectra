@@ -371,6 +371,55 @@ describe("ordinary student and peer authority boundaries", () => {
     expect(foreignPublic?.artifact).not.toHaveProperty("relativePath");
   });
 
+  it("closes anonymous public links when the creator leaves or the school is suspended", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const tokenHash = "p".repeat(64);
+    await t.withIdentity(fixture.owner).mutation(api.authority.createPublicLink, {
+      resourceType: "artifact",
+      resourceId: fixture.artifactId,
+      tokenHash,
+    });
+    expect(await t.query(api.authority.publicProjection, { tokenHash })).toMatchObject({
+      artifact: { title: "Authority fixture" },
+    });
+    expect(await t.query(api.authority.resolvePublicLink, { tokenHash })).toMatchObject({
+      resourceId: fixture.artifactId,
+    });
+
+    const membershipId = await t.run(async (ctx) => {
+      const membership = await ctx.db
+        .query("schoolMemberships")
+        .withIndex("by_account_status", (q) =>
+          q.eq("accountId", fixture.ownerAccountId).eq("status", "active"),
+        )
+        .unique();
+      await ctx.db.patch(membership!._id, { status: "ended" });
+      return membership!._id;
+    });
+    expect(await t.query(api.authority.publicProjection, { tokenHash })).toBeNull();
+    expect(await t.query(api.authority.resolvePublicLink, { tokenHash })).toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(membershipId, { status: "active" });
+      await ctx.db.patch(fixture.schoolId, { status: "suspended" });
+    });
+    expect(await t.query(api.authority.publicProjection, { tokenHash })).toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.schoolId, { status: "active" });
+      await ctx.db.patch(fixture.ownerAccountId, { status: "deactivated" });
+    });
+    expect(await t.query(api.authority.publicProjection, { tokenHash })).toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.ownerAccountId, { status: "active" });
+    });
+    expect(await t.query(api.authority.publicProjection, { tokenHash })).toMatchObject({
+      artifact: { title: "Authority fixture" },
+    });
+  });
+
   it("rechecks source authority for live and pinned embeds after a peer grant is revoked", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);

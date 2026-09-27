@@ -7,6 +7,7 @@ import {
   bumpPolicyVersion,
   capabilitiesForLevel,
   evaluateAccess,
+  evaluateAccessForActor,
   getVerifiedViewerDomain,
   loadResource,
   requireCapability,
@@ -54,6 +55,30 @@ async function publicLinkViewerDecision(
   if (!viewer.authenticated) return "sign_in_required";
   if (!viewer.verified || !viewer.domain) return "email_unverified";
   return viewer.domain === domainRestriction ? "allowed" : "domain_restricted";
+}
+
+/**
+ * A public link is live only while its creator could still create it: an
+ * active, verified account with a current membership in an active school that
+ * still holds `publish` on the resource. Removing a student, suspending or
+ * offboarding a school, or revoking a teacher's grant therefore closes every
+ * anonymous link they issued instead of leaving a minor's work public.
+ */
+async function publicLinkCreatorStillPublishes(
+  ctx: QueryCtx,
+  link: Doc<"publicLinks">,
+  loadedSchoolId: Id<"schools"> | undefined,
+) {
+  if (loadedSchoolId !== link.schoolId) return false;
+  const creator = await getActorForAccountId(ctx, link.createdByAccountId);
+  if (!creator || creator.schoolId !== link.schoolId) return false;
+  const decision = await evaluateAccessForActor(
+    ctx,
+    creator,
+    link.resourceType,
+    link.resourceId,
+  );
+  return decision.allowed && decision.capabilities.includes("publish");
 }
 
 async function publicRuntimeBuild(
@@ -1272,6 +1297,8 @@ export const resolvePublicLink = query({
     if (!policy?.publicEnabled) return null;
     const loaded = await loadResource(ctx, link.resourceType, link.resourceId);
     if (!loaded || loaded.lifecycle === "deleted") return null;
+    if (!(await publicLinkCreatorStillPublishes(ctx, link, loaded.schoolId)))
+      return null;
     return {
       resourceType: link.resourceType,
       resourceId: link.resourceId,
@@ -1308,6 +1335,8 @@ export const publicProjection = query({
     if (!policy?.publicEnabled) return null;
     const loaded = await loadResource(ctx, link.resourceType, link.resourceId);
     if (!loaded || loaded.lifecycle === "deleted") return null;
+    if (!(await publicLinkCreatorStillPublishes(ctx, link, loaded.schoolId)))
+      return null;
 
     if (link.resourceType === "workspace") {
       const workspace = loaded.resource;

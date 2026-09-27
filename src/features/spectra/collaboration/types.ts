@@ -269,5 +269,22 @@ export type ArtifactCollaborationTransport = {
   subscribeClaimReleases?(
     listener: (event: CollaborationClaimRelease) => void,
   ): () => void;
+  /**
+   * Consume a delta the server already admitted (history restore) as a
+   * gateway frame: never re-sent as a local authored write. Inline bytes are
+   * applied only when they match the receipt digest; every encoding asks the
+   * gateway to merge its canonical room into the live document.
+   */
+  consumeAdmittedUpdate?(
+    admitted: AdmittedUpdateDescriptor,
+    updateDigest: string,
+    confirmationId: string,
+  ): Promise<void>;
   flush(): Promise<void>;
 };
+
+/** Mirrors the receipt descriptor returned by atomic server admission. */
+export type AdmittedUpdateDescriptor =
+  | { encoding: "inline"; updateBase64: string }
+  | { encoding: "payload"; payloadRef: string; digest: string; byteLength: number }
+  | { encoding: "replay"; roomId: string; throughSequence: number };

@@ -386,7 +386,7 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(
       reopened.fidelityMap.entries.some(
         (entry) =>
-          entry.feature === "transition" && entry.class === "PRESERVED",
+          entry.feature === "native-transition" && entry.class === "PRESERVED",
       ),
     ).toBe(true);
   });

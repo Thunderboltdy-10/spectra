@@ -173,7 +173,10 @@ it("keeps a pinned large body and native base through real deletion coordination
   const version = await actor.mutation(api.changeGroups.createNamedCheckpoint,{artifactId:ids.artifactId,name:"Retained large body"});
   const pinId=await t.run(async ctx=>{
     const artifact=await ctx.db.get(ids.artifactId);
-    return ctx.db.insert("artifactEmbeds",{containerType:"artifact",containerId:String(containerId),containerRegionId:"document:pin",sourceArtifactId:ids.artifactId,schoolId:artifact!.schoolId,mode:"compact",interaction:"read",versionPolicy:"pinned",pinnedVersionId:version.versionId,contextPolicy:"summary",createdByAccountId:ids.accountId,createdAt:Date.now(),updatedAt:Date.now()});
+    const embedId=await ctx.db.insert("artifactEmbeds",{containerType:"artifact",containerId:String(containerId),containerRegionId:"reference:pin",sourceArtifactId:ids.artifactId,schoolId:artifact!.schoolId,mode:"compact",interaction:"read",versionPolicy:"pinned",pinnedVersionId:version.versionId,contextPolicy:"summary",createdByAccountId:ids.accountId,createdAt:Date.now(),updatedAt:Date.now()});
+    // Retained reads require proven canonical placement of the pin in its host.
+    await ctx.db.patch(containerId,{content:{tiptap:{type:"doc",content:[{type:"spectraReference",attrs:{embedId:String(embedId),containerType:"artifact",containerId:String(containerId),containerRegionId:"reference:pin",sourceArtifactId:String(ids.artifactId),versionPolicy:"pinned",pinnedVersionId:String(version.versionId),blockId:"reference:pin"}}]}}});
+    return embedId;
   });
   const deletion=await actor.mutation(api.spectraArtifacts.permanentlyDelete,{artifactId:ids.artifactId});
   const drain=async(jobId: typeof deletion.jobId,generation=1)=>{

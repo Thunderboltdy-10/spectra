@@ -18,6 +18,14 @@ vi.mock("@/lib/convex-server", () => ({
   checkpointArtifactDurableContent,
   hydrateContentForWrite: async (_artifactId:string,content:unknown)=>content,
 }));
+// Human native writes are admitted through the signed gateway transport
+// (nativeMaterialization); the route only hands it the verified candidate.
+const queueHumanNativeMaterialization = vi.fn();
+const commitHumanCloudMaterialization = vi.fn();
+vi.mock("@/lib/native-materialization-server", () => ({
+  queueHumanNativeMaterialization,
+  commitHumanCloudMaterialization,
+}));
 vi.mock("@/features/spectra/lenses/native-payload-server", () => ({
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
@@ -105,6 +113,8 @@ describe("DOCX materialization route", () => {
     });
     checkpointArtifactDurableContent.mockResolvedValue(undefined);
     convexMutation.mockResolvedValue({ requestId: "route-request-1", state: "pending" });
+    queueHumanNativeMaterialization.mockResolvedValue({ requestId: "route-request-1", state: "pending" });
+    commitHumanCloudMaterialization.mockResolvedValue({ state: "cloud_saved" });
     uploadNativePayload.mockImplementation(async (_workId: string, bytes: Uint8Array) => {
       storedPayload = bytes;
       return { payloadRef: "stored-route-ref" };
@@ -178,6 +188,8 @@ describe("DOCX materialization route", () => {
     expect(response.status).toBe(200);
     const result = await response.json();
     expect(result.receipt.semantic.resultDigest).toBe(result.receipt.semantic.readbackDigest);
+    expect(queueHumanNativeMaterialization).toHaveBeenCalledWith(expect.objectContaining({
+      workId: artifactId, localReplicaId: "local-route-replica", payloadRef: "stored-route-ref" }));
     const reopened = await docxLens.open(storedPayload!);
     expect(reopened.projection.blocks.find((entry) => entry.id === block.id)?.inlineContent?.[0]).toMatchObject({
       kind: "text",

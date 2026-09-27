@@ -1,10 +1,11 @@
+/* eslint-disable spectra/no-raw-hex-in-styles -- Native PowerPoint fixture colors, not UI styles. */
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { Workbook } from "@ariadng/office/xlsx";
 import { strFromU8, unzipSync } from "fflate";
 import { fidelityRegionMap } from "../commands/office/fidelity-regions";
-import { pptxLens } from "../lenses/pptx-lens";
-import { xlsxLens } from "../lenses/xlsx-lens";
+import { pptxLens, pptxProjectionSemanticDigest } from "../lenses/pptx-lens";
+import { xlsxLens, xlsxSemanticDigest } from "../lenses/xlsx-lens";
 import {
   pptxArtifactContent, pptxProjectionUpdateFromContent,
   xlsxArtifactContent, xlsxProjectionUpdateFromContent,
@@ -16,6 +17,18 @@ const deck = async (name = "chart-notes-preservation") => pptxLens.open(
 );
 
 describe("S11 Office model boundaries", () => {
+  it("maps a title-only editor intent to the native title run and retains neighboring run formatting", async () => {
+    const initial = await deck("typical-preservation");
+    const title = initial.projection.slides[0]!.objects.find((object) => (object.content as { nativeShapeKind?: string }).nativeShapeKind === "placeholder")!;
+    const opened = await pptxLens.open(await pptxLens.mutate(initial.preservedCarry, { kind: "format-rich-text", slideId: initial.projection.slides[0]!.id, shapeId: (title.content as { nativeShapeId: string }).nativeShapeId, paragraphs: [{ runs: [{ text: "Original title", bold: true }, { text: " retained suffix", italic: true }] }] }));
+    const content = pptxArtifactContent(opened.projection);
+    content.slides[0]!.title = "Edited title";
+    const update = pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" });
+    const actual = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
+    expect(actual.projection.slides[0]!.title).toBe("Edited title");
+    expect(actual.projection.slides[0]!.objects.find((object) => object.id === title.id)!.content).toMatchObject({ paragraphs: [{ runs: [{ text: "Edited title", bold: true }, { text: " retained suffix", italic: true }] }] });
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(actual.projection.nativeBinding.semanticDigest);
+  });
   it("removes an object from a hydrated snapshot and preserves retained identities, order and native assets", async () => {
     const opened = await deck();
     const document = presentationYjsAdapter.createDocument(pptxArtifactContent(opened.projection));
@@ -31,6 +44,7 @@ describe("S11 Office model boundaries", () => {
       const reopened = await pptxLens.open(bytes);
       expect(reopened.projection.slides.map((item) => item.objects.map((object) => object.id)))
         .toEqual(desired.slides.map((item) => item.objects.map((object) => object.id)));
+      expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reopened.projection.nativeBinding.semanticDigest);
       const beforeParts = unzipSync(opened.preservedCarry.payload);
       const afterParts = unzipSync(bytes);
       const carried = Object.keys(beforeParts).filter((name) => /^ppt\/(charts|media|embeddings|notesSlides)\//.test(name));
@@ -48,6 +62,7 @@ describe("S11 Office model boundaries", () => {
     expect(update.projection.slides.find((item) => item.id === slide.id)!.objects).toEqual([]);
     const reopened = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.objects).toEqual([]);
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reopened.projection.nativeBinding.semanticDigest);
     // The exact same theme and binding cannot grant removal authority.
     expect(pptxProjectionUpdateFromContent(complete, opened.projection).projection.slides.find((item) => item.id === slide.id)!.objects).toEqual(slide.objects);
     for (const patch of [{ id: slide.id }, { id: slide.id, objects: [] }]) {
@@ -75,11 +90,29 @@ describe("S11 Office model boundaries", () => {
     const slide = content.slides.find((item) => item.objects.length > 1)!;
     const reversed = [...slide.objects].reverse();
     const desired = { ...content, slides: content.slides.map((item) => item.id === slide.id ? { ...item, objects: reversed } : item) };
-    expect(pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" }).projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    const update = pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" });
+    expect(update.projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    const reordered = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
+    expect(reordered.projection.slides.find((item) => item.id === slide.id)!.objects.map((item) => item.id)).toEqual(reversed.map((item) => item.id));
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(reordered.projection.nativeBinding.semanticDigest);
     expect(() => pptxProjectionUpdateFromContent({ ...content, slides: [{ ...slide, objects: [slide.objects[0]!, slide.objects[0]!] }] }, opened.projection, { objectLists: "complete" })).toThrow(/duplicate object identities/);
     const incomplete = { id: slide.id, objects: [{ id: slide.objects[0]!.id, type: slide.objects[0]!.type }] };
     expect(() => pptxProjectionUpdateFromContent({ ...content, slides: [incomplete] }, opened.projection, { objectLists: "complete" })).toThrow();
     expect(pptxProjectionUpdateFromContent({ ...content, slides: [incomplete] }, opened.projection).projection.slides[0]!.objects).toEqual(slide.objects);
+  });
+
+  it("retains omitted native locators in complete records and refuses shape identity redirection", async () => {
+    const opened = await deck("typical-preservation");
+    const content = pptxArtifactContent(opened.projection);
+    const object = content.slides[0]!.objects[0]!;
+    const original = object.content as Record<string, unknown>;
+    object.content = Object.fromEntries(Object.entries(original).filter(([key]) => !key.startsWith("native")));
+    const update = pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" });
+    expect(update.projection.slides[0]!.objects[0]!.content).toEqual(original);
+    expect(update.operations).toEqual([]);
+    object.content = { ...(object.content as object), nativeShapeId: "redirected-native-id" };
+    expect(() => pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" }))
+      .toThrow(/native shape identity/);
   });
 
   it("allows first native features and verifies their saved values", async () => {
@@ -111,6 +144,7 @@ describe("S11 Office model boundaries", () => {
     expect(sheet).toMatchObject({ showGridlines: false, showHeadings: false, rowHeights: { "1": 36 } });
     expect(sheet.columnWidths!["0"]).toBeCloseTo(148, 0);
     expect(sheet.tabColor).toMatch(/112233/);
+    expect(await xlsxSemanticDigest({ ...reopened.projection, sheets: [{ ...sheet, tabColor: "#FF0000" }, ...reopened.projection.sheets.slice(1)] })).not.toBe(reopened.projection.nativeBinding.semanticDigest);
     expect(sheet.tables).toEqual([expect.objectContaining({ name: "FirstTable", range: "A1:B2" })]);
     expect(sheet.charts).toEqual([expect.objectContaining({ title: "First chart", type: "column" })]);
     expect(sheet.validations).toEqual([expect.objectContaining({ type: "whole", sqref: "B2", formula1: "0", formula2: "10" })]);
@@ -128,9 +162,9 @@ describe("S11 Office model boundaries", () => {
     expect(reopened.projection.sheets[0]!.cells).toContainEqual(expect.objectContaining({ ref: "AA101", value: "Beyond original extent" }));
   });
 
-  it("reports native transition editing unavailable and preserves its XML through another edit", async () => {
+  it("reports native transition support and preserves its XML through an unrelated edit", async () => {
     const opened = await deck("transition-law");
-    expect(opened.capabilities.human.find((capability) => capability.id === "edit-native-transition")?.available).toBe(false);
+    expect(opened.capabilities.human.find((capability) => capability.id === "edit-native-transition")?.available).toBe(true);
     const slide = opened.projection.slides.find((item) => item.hasTransition)!;
     const bytes = await pptxLens.mutate(opened.preservedCarry, { kind: "set-title", slideId: slide.id, text: "Title with preserved transition" });
     const part = slide.id.replace(/^pptx:slide:\//, "");
@@ -140,5 +174,23 @@ describe("S11 Office model boundaries", () => {
     const reopened = await pptxLens.open(bytes);
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.title).toBe("Title with preserved transition");
     expect(reopened.projection.slides.find((item) => item.id === slide.id)!.hasTransition).toBe(true);
+  });
+
+  it("removes a modeled picture while retaining the original native media bytes", async () => {
+    const opened = await deck("media-preservation");
+    const content = pptxArtifactContent(opened.projection);
+    const slide = content.slides.find((item) => item.objects.some((object) => object.type === "image"))!;
+    const picture = slide.objects.find((object) => object.type === "image")!;
+    const desired = { ...content, slides: content.slides.map((item) => item.id === slide.id ? { ...item, objects: item.objects.filter((object) => object.id !== picture.id) } : item) };
+    const update = pptxProjectionUpdateFromContent(desired, opened.projection, { objectLists: "complete" });
+    const bytes = await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection });
+    const actual = await pptxLens.open(bytes);
+    expect(actual.projection.slides.find((item) => item.id === slide.id)!.objects.some((object) => object.id === picture.id)).toBe(false);
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(actual.projection.nativeBinding.semanticDigest);
+    const beforeParts = unzipSync(opened.preservedCarry.payload);
+    const afterParts = unzipSync(bytes);
+    const media = Object.keys(beforeParts).filter((name) => name.startsWith("ppt/media/"));
+    expect(media.length).toBeGreaterThan(0);
+    for (const name of media) expect(afterParts[name], name).toEqual(beforeParts[name]);
   });
 });

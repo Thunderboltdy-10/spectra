@@ -3468,6 +3468,14 @@ export default defineSchema({
     finalStateVectorHash: v.optional(v.string()),
     finalSnapshot: v.optional(v.any()),
     finalIntegrityHash: v.optional(v.string()),
+    restoreRequestId: v.optional(v.string()),
+    restoreRequestFingerprint: v.optional(v.string()),
+    restoreHeadHash: v.optional(v.string()),
+    restoreReceipt: v.optional(v.object({
+      outcome: v.union(v.literal("restored"), v.literal("unchanged")),
+      versionId: v.optional(v.id("spectraArtifactVersions")), roomId: v.id("collaborationRooms"),
+      sequence: v.number(), updateDigest: v.optional(v.string()), nativeResult: v.any(), committedAt: v.number(),
+    })),
     summary: v.optional(v.string()),
     status: v.union(
       v.literal("open"),
@@ -3485,7 +3493,8 @@ export default defineSchema({
       "lastActivityAt",
     ])
     .index("by_run", ["runId"])
-    .index("by_version", ["versionId"]),
+    .index("by_version", ["versionId"])
+    .index("by_artifact_restore_request", ["artifactId", "actorAccountId", "restoreRequestId"]),
 
   artifactEmbeds: defineTable({
     containerType: artifactEmbedContainerTypeValidator,

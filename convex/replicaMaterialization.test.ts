@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { getActorForAccountId } from "./identityShared";
 import {
   queueMaterializationInTransaction,
@@ -226,6 +226,36 @@ async function invokeCloud(t: ReturnType<typeof convexTest>, f: Fixture) {
 }
 
 describe("Native materialization in the admitting mutation", () => {
+  it("refuses the unsigned public native effects without creating a request", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seedWork(t);
+    const before = await snapshot(t, f);
+    await expect(t.withIdentity(identity).mutation(api.replicas.queueMaterialization, queueArgs(f)))
+      .rejects.toThrow("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
+    await expect(t.withIdentity(identity).mutation(api.replicas.commitCloudMaterialization, cloudArgs(f)))
+      .rejects.toThrow("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
+    expect(await snapshot(t, f)).toEqual(before);
+  });
+  it("queues a human durable restore without inventing AI identity or projecting canonical content", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seedWork(t);
+    const before = await snapshot(t, f);
+    await t.run(async ctx => {
+      const actor = await getActorForAccountId(ctx, f.accountId);
+      if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+      await queueMaterializationInTransaction(ctx, actor, queueArgs(f), {
+        actorKind: "user", canonicalProjection: "durable",
+      });
+    });
+    const after = await snapshot(t, f);
+    expect(after.work).toEqual(before.work);
+    expect(after.cloud).toEqual(before.cloud);
+    expect(after.requests).toHaveLength(1);
+    expect(after.operations).toHaveLength(1);
+    expect(after.operations[0]?.actorKind).toBe("user");
+    expect(after.operations[0]?.runId).toBeUndefined();
+  });
+
   it("queues AI provenance and readback without an independent canonical projection", async () => {
     const t = convexTest(schema, modules);
     const f = await seedWork(t);
@@ -263,7 +293,10 @@ describe("Native materialization in the admitting mutation", () => {
   it("refuses a protected AI save before changing an existing request or pending content", async () => {
     const t = convexTest(schema, modules);
     const f = await seedWork(t);
-    await t.withIdentity(identity).mutation(api.replicas.queueMaterialization, queueArgs(f));
+    // An existing human request, admitted through the signed transport.
+    await t.mutation(internal.nativeMaterialization.commitHuman, {
+      accountId: f.accountId, artifactId: f.workId, candidate: { destination: "bridge", queue: queueArgs(f) },
+    });
     await t.run(ctx => ctx.db.insert("syncPolicies", {
       accountId: f.accountId, scopeKind: "item", scopeId: String(f.workId),
       ...POLICY_PRESETS.linked, createdAt: Date.now(), updatedAt: Date.now(),

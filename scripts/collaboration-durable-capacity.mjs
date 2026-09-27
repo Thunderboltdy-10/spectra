@@ -37,6 +37,7 @@ export function utf8ByteLength(value) {
 /**
  * Versioned immutable payload manifest. Digests are hex SHA-256 of raw bytes.
  * Legacy rows without a manifest are treated as inline bytes by resolve helpers.
+ * @param {{ kind: string, bytes: Uint8Array, payloadRef?: string | null, encoding?: string, mediaType?: string }} input
  */
 export function createDurablePayloadManifest({
   kind,

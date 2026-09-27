@@ -16,6 +16,8 @@ import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
   pptxProjectionSchema,
+  pptxTransitionSchema,
+  pptxImageAssetSchema,
   presentationObjectProjectionSchema,
   xlsxProjectionSchema,
   type PptxOperation,
@@ -27,6 +29,7 @@ import { xlsxFormulaSupport } from "./xlsx-formula-support";
 import { parseAddress, columnName } from "../sheets/model";
 import { quoteSheetPrefix } from "../sheets/formula-refs";
 import { normalizeNativeFontFamily } from "../office-fonts";
+import { normalizePptxProjectionForReadback, pptxTitleFromObjects, pptxTextFromObjects } from "./pptx-readback";
 
 function codedOfficeContentError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -893,11 +896,14 @@ export function pptxArtifactContent(
         // speaker notes at all, and then saving could only ever write them back
         // as empty.
         ...(slide.speakerNotes ? { speakerNotes: slide.speakerNotes } : {}),
-        objects: slide.objects,
-        ...(slide.hasTransition || slide.hasTiming
+        // Editor content is authored independently of the base projection it is
+        // later diffed against; sharing object records let an edit rewrite the base.
+        objects: structuredClone(slide.objects),
+        ...(slide.transition && slide.transition.kind !== "none" ? { transition: slide.transition } : {}),
+        ...((slide.hasTransition && !slide.transition) || slide.hasTiming
           ? {
               nativeCompatibility: {
-                ...(slide.hasTransition
+                ...(slide.hasTransition && !slide.transition
                   ? { transition: "preserved" as const }
                   : {}),
                 ...(slide.hasTiming
@@ -1470,6 +1476,7 @@ const pptxEditorContentSchema = z
           title: z.string().optional(),
           speakerNotes: z.string().optional(),
           hidden: z.boolean().optional(),
+          transition: pptxTransitionSchema.optional(),
           objects: z
             .array(
               z
@@ -1489,7 +1496,6 @@ const pptxEditorContentSchema = z
 
 function editorObject(value: Record<string, unknown>, fallbackId: string) {
   return {
-    id: typeof value.id === "string" && value.id ? value.id : fallbackId,
     type: value.type as PptxProjection["slides"][number]["objects"][number]["type"],
     x: typeof value.x === "number" ? value.x : 80,
     y: typeof value.y === "number" ? value.y : 300,
@@ -1498,6 +1504,7 @@ function editorObject(value: Record<string, unknown>, fallbackId: string) {
     rotation: typeof value.rotation === "number" ? value.rotation : 0,
     content: value.content ?? { text: "" },
     ...value,
+    id: typeof value.id === "string" && value.id ? value.id : fallbackId,
   };
 }
 
@@ -1505,6 +1512,26 @@ export type PptxContentProjectionOptions = {
   /** Only callers holding a complete hydrated editor model may authorize removal. */
   objectLists?: "complete";
 };
+
+function mapNativeTitleIntent(objects: PresentationObject[], previous: PptxProjection["slides"][number], title: string | undefined) {
+  if (title === undefined || title === previous.title || pptxTitleFromObjects(objects) !== previous.title || pptxTitleFromObjects(previous.objects) !== previous.title) return objects;
+  const placeholder = objects.find((object) => record(object.content).nativeShapeKind === "placeholder");
+  const target = placeholder ?? objects.find((object) => pptxTextFromObjects([object]).length > 0);
+  if (!target || target.type !== "text" || !previous.objects.some((object) => object.id === target.id) || typeof record(target.content).nativeShapeId !== "string") return objects;
+  const content = record(target.content);
+  const paragraphs = (Array.isArray(content.paragraphs) ? content.paragraphs : []) as PresentationParagraph[];
+  if (!paragraphs.every((paragraph) => Array.isArray(paragraph.runs) && paragraph.runs.every((run) => typeof run.text === "string"))) return objects;
+  const index = placeholder ? 0 : paragraphs.findIndex((paragraph) => paragraph.runs.some((run) => run.text.length));
+  if (index < 0) return objects;
+  const next = paragraphs.length ? paragraphs.map((paragraph) => ({ ...paragraph, runs: paragraph.runs.map((run) => ({ ...run })) })) : [{ runs: [{ text: "" }] }];
+  const paragraph = next[index]!;
+  if (!paragraph.runs.length) paragraph.runs.push({ text: title });
+  else paragraph.runs = paragraph.runs.map((run, runIndex) => ({ ...run, text: runIndex === 0 ? title : placeholder ? run.text : "" }));
+  const text = next.map((item) => item.runs.map((run) => run.text).join("")).filter((value) => value.length).join("\n").trim();
+  const originalText = record(previous.objects.find((object) => object.id === target.id)!.content).text;
+  if (typeof content.text === "string" && content.text !== originalText && content.text !== text) return objects;
+  return objects.map((object) => object.id === target.id ? { ...object, content: { ...content, text, paragraphs: next } } : object);
+}
 
 /** The one Presentation editor-model -> PPTX projection transform. */
 export function pptxProjectionFromContent(
@@ -1516,13 +1543,24 @@ export function pptxProjectionFromContent(
   const raw = pptxEditorContentSchema.parse(content);
   const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
   if (!raw.slides.length) return base;
-  return pptxProjectionSchema.parse({
+  const projection = pptxProjectionSchema.parse({
     ...base,
     slides: raw.slides.map((next, index) => {
       const slide = baseById.get(next.id);
       const incomingRawObjects = (next.objects ?? []).map(
         (object) => object as Record<string, unknown>,
       );
+      // Completeness is caller authority, never inferred from binding metadata.
+      // Omission carries even for whole-model callers; a supplied list is strict.
+      const completeObjects = options?.objectLists === "complete" && next.objects !== undefined;
+      if (completeObjects) z.array(presentationObjectProjectionSchema).parse(next.objects);
+      const incomingIds = new Set<string>();
+      for (const incoming of incomingRawObjects) {
+        if (typeof incoming.id !== "string" || !incoming.id) continue;
+        if (incomingIds.has(incoming.id))
+          throw codedOfficeContentError("PPTX_DUPLICATE_OBJECT_ID", "A slide contains duplicate object identities.");
+        incomingIds.add(incoming.id);
+      }
       const incomingObjects = (
         slide
           ? incomingRawObjects
@@ -1548,27 +1586,27 @@ export function pptxProjectionFromContent(
           text,
           objects: incomingObjects,
           hasTransition: false,
+          transition: next.transition ?? { kind: "none" },
           hasTiming: false,
           ...(next.hidden ? { hidden: true } : {}),
           speakerNotes: next.speakerNotes ?? "",
         };
-      // Completeness is caller authority, never inferred from binding metadata.
-      // Even an authorized whole-model caller may omit this property to carry it.
-      const completeObjects = options?.objectLists === "complete" && next.objects !== undefined;
-      if (completeObjects) z.array(presentationObjectProjectionSchema).parse(next.objects);
       const previousById = new Map(slide.objects.map((object) => [object.id, object]));
-      const incomingIds = new Set<string>();
       const occupiedIds = new Set([...previousById.keys(), ...incomingObjects.flatMap((object) => object.id ? [object.id] : [])]);
       const resolvedObjects = incomingObjects.map((incoming, objectIndex) => {
-        if (incoming.id && incomingIds.has(incoming.id))
-          throw codedOfficeContentError("PPTX_DUPLICATE_OBJECT_ID", "A slide contains duplicate object identities.");
-        if (incoming.id) incomingIds.add(incoming.id);
         const previous = previousById.get(incoming.id);
         if (previous) {
           // A sparse content patch must not erase native shape/media locators.
-          const content = !completeObjects && incoming.content && typeof incoming.content === "object" && !Array.isArray(incoming.content)
+          let content = !completeObjects && incoming.content && typeof incoming.content === "object" && !Array.isArray(incoming.content)
             ? { ...record(previous.content), ...record(incoming.content) }
             : incoming.content ?? previous.content;
+          const originalContent = record(previous.content);
+          if (content && typeof content === "object" && !Array.isArray(content)) {
+            const authored = record(content);
+            if (authored.nativeShapeId !== undefined && authored.nativeShapeId !== originalContent.nativeShapeId)
+              throw codedOfficeContentError("PPTX_OBJECT_IDENTITY_CHANGED", "An existing object cannot change its native shape identity.");
+            content = { ...Object.fromEntries(Object.entries(originalContent).filter(([key]) => key.startsWith("native"))), ...authored };
+          }
           return { ...previous, ...incoming, content };
         }
         let suffix = objectIndex + 1;
@@ -1578,12 +1616,19 @@ export function pptxProjectionFromContent(
         return editorObject(incoming, fallbackId);
       });
       const resolvedById = new Map(resolvedObjects.map((object) => [object.id, object]));
-      const objects = completeObjects
+      const carriedObjects = completeObjects
         ? resolvedObjects
         : [
             ...slide.objects.map((object) => resolvedById.get(object.id) ?? object),
             ...resolvedObjects.filter((object) => !previousById.has(object.id)),
           ];
+      const objects = completeObjects ? mapNativeTitleIntent(carriedObjects, slide, next.title) : carriedObjects;
+      if (next.transition && slide.hasTransition && !slide.transition)
+        throw codedOfficeContentError("PPTX_TRANSITION_PRESERVED", "This slide's native transition is not fully modeled and cannot be replaced losslessly.");
+      const transition = next.transition
+        ? next.transition.kind === "none" ? { kind: "none" as const }
+          : { ...slide.transition, ...next.transition }
+        : completeObjects && slide.transition ? { kind: "none" as const } : slide.transition;
       return {
         ...slide,
         index,
@@ -1592,11 +1637,13 @@ export function pptxProjectionFromContent(
           ? next.hidden === true || undefined
           : slide.hidden,
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
-        text: completeObjects ? objects.filter((object) => object.type === "text").map((object) => presentationObjectText(object as PresentationObject)) : text.length ? text : slide.text,
+        text: completeObjects ? slide.text : text.length ? text : slide.text,
         objects,
+        ...(transition ? { transition } : {}),
       };
     }),
   });
+  return options?.objectLists === "complete" ? normalizePptxProjectionForReadback(projection, base) : projection;
 }
 
 export function pptxOperationsBetween(
@@ -1653,10 +1700,12 @@ export function pptxOperationsBetween(
       ...(typeof value.valueAxisTitle === "string" ? { valueAxisTitle: value.valueAxisTitle } : {}),
     };
   };
+  let duplicateSources: Map<string, PptxProjection["slides"][number]> | undefined;
   const duplicateSource = (slide: PptxProjection["slides"][number]) => {
     const signature = (candidate: PptxProjection["slides"][number]) => JSON.stringify({
       title: candidate.title,
       speakerNotes: candidate.speakerNotes,
+      transition: candidate.transition,
       objects: candidate.objects.map((object) => ({
         type: object.type,
         x: object.x,
@@ -1668,7 +1717,17 @@ export function pptxOperationsBetween(
         style: object.style,
       })),
     });
-    return before.slides.find((candidate) => signature(candidate) === signature(slide));
+    // Build only when a slide is added, then reuse for the whole delta. The
+    // previous search reserialized every candidate and the new slide for each
+    // comparison, which made multi-slide additions quadratic in deck size.
+    if (!duplicateSources) {
+      duplicateSources = new Map();
+      for (const candidate of before.slides) {
+        const key = signature(candidate);
+        if (!duplicateSources.has(key)) duplicateSources.set(key, candidate);
+      }
+    }
+    return duplicateSources.get(signature(slide));
   };
   const previous = new Map(before.slides.map((slide) => [slide.id, slide]));
   const operations: PptxOperation[] = [];
@@ -1718,9 +1777,13 @@ export function pptxOperationsBetween(
           slideId: slide.id,
           hidden: true,
         });
+      if (slide.transition && slide.transition.kind !== "none")
+        operations.push({ kind: "set-transition", slideId: slide.id, transition: slide.transition });
       return;
     }
-    if (slide.title !== old.title)
+    const derivesTitleFromChangedObjects = pptxTitleFromObjects(old.objects) === old.title
+      && pptxTitleFromObjects(slide.objects) === slide.title;
+    if (slide.title !== old.title && !derivesTitleFromChangedObjects)
       operations.push({
         kind: "set-title",
         slideId: slide.id,
@@ -1732,6 +1795,8 @@ export function pptxOperationsBetween(
         slideId: slide.id,
         text: slide.speakerNotes,
       });
+    if (slide.transition && !equal(slide.transition, old.transition ?? { kind: "none" }))
+      operations.push({ kind: "set-transition", slideId: slide.id, transition: slide.transition });
     if (Boolean(slide.hidden) !== Boolean(old.hidden))
       operations.push({
         kind: "set-slide-hidden",
@@ -1742,6 +1807,9 @@ export function pptxOperationsBetween(
       old.objects.map((object) => [object.id, object]),
     );
     const keptObjects = new Set(slide.objects.map((object) => object.id));
+    const retainedOrder = old.objects.filter((candidate) => keptObjects.has(candidate.id)).map((candidate) => candidate.id);
+    const desiredRetainedOrder = slide.objects.filter((candidate) => oldObjects.has(candidate.id)).map((candidate) => candidate.id);
+    const inheritedRemovalOrder = keptObjects.size < old.objects.length && equal(retainedOrder, desiredRetainedOrder);
     for (const oldObject of old.objects) {
       if (!keptObjects.has(oldObject.id)) {
         const id = nativeId(oldObject);
@@ -1753,6 +1821,10 @@ export function pptxOperationsBetween(
       const value = objectData(object);
       const nextText = textOf(object);
       if (!previousObject) {
+        if (object.type === "image") {
+          const image = pptxImageAssetSchema.parse({ assetId: value.assetId, mediaType: value.mediaType, sha256: value.sha256, ...(value.name !== undefined ? { name: value.name } : {}) });
+          operations.push({ kind: "insert-image", slideId: slide.id, objectId: object.id, image, x: object.x, y: object.y, width: object.width, height: object.height, rotation: object.rotation, ...(object.altText !== undefined ? { altText: object.altText } : {}), ...(object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}) });
+        }
         if (object.type === "group") {
           const childShapeIds = slide.objects
             .filter((candidate) => candidate.parentId === object.id)
@@ -1781,6 +1853,13 @@ export function pptxOperationsBetween(
           text: nextText,
         });
       if (!nativeShapeId) continue;
+      if (object.type === "image" && typeof value.assetId === "string") {
+        const prior = objectData(previousObject);
+        if (["assetId", "sha256", "mediaType", "name"].some((key) => value[key] !== prior[key])) {
+          const image = pptxImageAssetSchema.parse({ assetId: value.assetId, mediaType: value.mediaType, sha256: value.sha256, ...(value.name !== undefined ? { name: value.name } : {}) });
+          operations.push({ kind: "replace-image", slideId: slide.id, shapeId: nativeShapeId, image });
+        }
+      }
       if (equal(object.hyperlink, previousObject.hyperlink) === false)
         operations.push({
           kind: "set-object-link",
@@ -1879,8 +1958,9 @@ export function pptxOperationsBetween(
         if (!equal(crop, previousCrop) && crop)
           operations.push({ kind: "set-image-crop", slideId: slide.id, shapeId: nativeShapeId, crop: { left: Number(crop.left ?? 0), top: Number(crop.top ?? 0), right: Number(crop.right ?? 0), bottom: Number(crop.bottom ?? 0) } });
       }
-      if (object.hidden !== previousObject.hidden || object.readingOrder !== previousObject.readingOrder || object.parentId !== previousObject.parentId) {
-        operations.push({ kind: "set-object-state", slideId: slide.id, shapeId: nativeShapeId, ...(object.hidden !== undefined ? { hidden: object.hidden } : {}), ...(object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}), ...(object.parentId !== undefined ? { parentId: object.parentId ?? null } : {}) });
+      const orderChanged = object.readingOrder !== previousObject.readingOrder && !inheritedRemovalOrder;
+      if (object.hidden !== previousObject.hidden || orderChanged || object.parentId !== previousObject.parentId) {
+        operations.push({ kind: "set-object-state", slideId: slide.id, shapeId: nativeShapeId, ...(object.hidden !== undefined ? { hidden: object.hidden } : {}), ...(orderChanged && object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}), ...(object.parentId !== undefined ? { parentId: object.parentId ?? null } : {}) });
       }
     }
   });

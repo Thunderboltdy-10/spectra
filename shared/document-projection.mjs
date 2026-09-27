@@ -391,7 +391,7 @@ export function docxRichBlockToJson(value, binding) {
               ? authoredPlainInline(cell, expected)
               : cell;
           return {
-          type: rowIndex === 0 ? "tableHeader" : "tableCell",
+          type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
           content: cellJsonFromRichContent(effectiveCell, binding, nativeReadOnly),
           };
         }),
@@ -514,7 +514,7 @@ function blockToJson(blockValue, index, nativeBinding) {
       content: (rows.length ? rows : [[""]]).map((row, rowIndex) => ({
         type: "tableRow",
         content: row.map((cell) => ({
-          type: rowIndex === 0 ? "tableHeader" : "tableCell",
+          type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
           content: [{ type: "paragraph", content: inlineText(cell) }],
         })),
       })),
@@ -720,6 +720,18 @@ function tableRichRows(node) {
   );
 }
 
+function unsupportedTableStructure(node) {
+  const containsTable = (child) => child?.type === "table" || (child?.content ?? []).some(containsTable);
+  const rows = node.content ?? [];
+  const columns = rows[0]?.content?.length ?? 0;
+  const headerRow = rows[0]?.content?.every((cell) => cell.type === "tableHeader") ?? false;
+  return rows.some((row, index) => row.type !== "tableRow" || row.content?.length !== columns ||
+    row.content.some((cell) =>
+      cell.type !== (index === 0 && headerRow ? "tableHeader" : "tableCell") ||
+      (cell.attrs?.colspan ?? 1) !== 1 || (cell.attrs?.rowspan ?? 1) !== 1 ||
+      (cell.content ?? []).some(containsTable)));
+}
+
 export function documentBlocksFromJson(json) {
   const seen = new Set();
   return (json?.content ?? []).map((node, index) => {
@@ -746,9 +758,11 @@ export function documentBlocksFromJson(json) {
     ...(richRows.some((row) => row.some(richInlineHasSemantics))
           ? { richRows }
           : {}),
-        ...(node.attrs?.nativeReadOnly === true
-          ? { attrs: { nativeReadOnly: true } }
-          : {}),
+        attrs: {
+          headerRow: Boolean(node.content?.[0]?.content?.length && node.content[0].content.every((cell) => cell.type === "tableHeader")),
+          ...(node.attrs?.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
+          ...(unsupportedTableStructure(node) ? { unsupportedTableStructure: true } : {}),
+        },
       };
     }
 

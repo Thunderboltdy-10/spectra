@@ -300,7 +300,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.table",
     "Insert a table at the caret.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.tableStructure,
+      delta: "insert-table",
       touches: ["tableStructure"],
       manifest: "create_table",
     },
@@ -1508,7 +1508,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "insert.image",
     "Insert a picture on this slide.",
-    { reason: R.newMedia, touches: ["media"] },
+    { delta: "insert-image", touches: ["images"] },
   ],
   [
     "insert.video",
@@ -1733,8 +1733,8 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     "animate.transition",
     "Set the transition for this slide.",
     {
-      params: text,
-      reason: R.transition,
+      params: z.enum(["none", "fade", "push", "dissolve"]),
+      delta: "set-transition",
       touches: ["transitions"],
       field: true,
     },
@@ -1743,8 +1743,8 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     "animate.transitionDuration",
     "Set how long the transition lasts.",
     {
-      params: num,
-      reason: R.transition,
+      params: z.number().int().min(0).max(4_294_967_295),
+      delta: "set-transition",
       touches: ["transitions"],
       field: true,
     },
@@ -1752,7 +1752,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "animate.transitionApplyAll",
     "Apply this transition to every slide.",
-    { reason: R.transition, touches: ["transitions"] },
+    { delta: "set-transition", touches: ["transitions"] },
   ],
   [
     "animate.defaultTransition",
@@ -1969,7 +1969,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "image.replace",
     "Replace this picture.",
-    { reason: R.newMedia, touches: ["media"] },
+    { delta: "replace-image", touches: ["images"] },
   ],
   [
     "accessibility.altText",

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, type MutationCtx } from "./_generated/server";
+import { query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internalMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
@@ -7,7 +7,7 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import { appendRoomUpdate, parseGatewayProjection } from "./collaborationGatewayStore";
 import { commitChangeGroup, commitHumanCheckpoint } from "./changeGroups";
 import { NATIVE_VERSION_OWNER_TABLE } from "./durablePayloadOwnership";
-import { nativeAiCommitArgs, type NativeAiCommitArgs } from "./nativeAiCommitContract";
+import { nativeAiCommitArgs, type NativeAiCandidate, type NativeAiCommitArgs } from "./nativeAiCommitContract";
 import { queueMaterializationInTransaction, commitCloudMaterializationInTransaction } from "./replicaMaterialization";
 import { artifactOperationDigest, artifactOperationTarget, artifactOutput, artifactSourceIdentity, artifactWriteReceipt,
   assertVerifiedAiArtifactWriteAdmission, lookupVerifiedAiArtifactWriteReplay, preparedArtifactScope } from "./spectraArtifactWriteScope";
@@ -43,64 +43,98 @@ export const head = query({
   },
 });
 
-async function activePayload(ctx: MutationCtx, accountId: Id<"accounts">, ref: string, hash: string) {
+type NativeAdmissionInput = {
+  accountId: Id<"accounts">; artifactId: Id<"spectraArtifacts">;
+  nativeSource: NativeAiCommitArgs["expected"]["nativeSource"]; nativeCandidate: NativeAiCandidate;
+};
+type MaterializationActor = Parameters<typeof queueMaterializationInTransaction>[1];
+type MaterializationEffects = Parameters<typeof queueMaterializationInTransaction>[3];
+
+async function activePayload(ctx: MutationCtx, accountId: Id<"accounts">, ref: string, hash: string, code: string) {
   const id = ctx.db.normalizeId("payloadObjects", ref);
   const payload = id ? await ctx.db.get(id) : null;
   if (!payload || payload.state !== "active" || payload.accountId !== accountId || payload.hash !== hash)
-    throw new Error("AI_NATIVE_PAYLOAD_INVALID");
+    throw new Error(`${code}_PAYLOAD_INVALID`);
   return payload;
 }
 
-async function verifyNativeCandidate(ctx: MutationCtx, args: NativeAiCommitArgs) {
-  const source = args.expected.nativeSource;
+/** The one verifier for a trusted, readback-proven native candidate. AI writes
+ * and human history restores admit native effects only through this check;
+ * `code` selects the caller's error namespace, never a weaker rule. */
+export async function verifyNativeAdmissionCandidate(ctx: MutationCtx, input: NativeAdmissionInput, code = "AI_NATIVE") {
+  const source = input.nativeSource;
   const replica = await ctx.db.get(source.replicaId);
-  if (!replica || replica.accountId !== args.append.accountId || replica.workId !== args.append.artifactId ||
+  if (!replica || replica.accountId !== input.accountId || replica.workId !== input.artifactId ||
       replica.payloadRef !== source.payloadRef || replica.contentHash !== source.hash ||
       replica.revision !== source.revision || replica.nativeFormat !== source.nativeFormat)
-    throw new Error("AI_NATIVE_SOURCE_STALE");
-  const sourcePayload = await activePayload(ctx, args.append.accountId, source.payloadRef, source.hash);
-  if (sourcePayload.bytes !== source.bytes) throw new Error("AI_NATIVE_SOURCE_STALE");
-  const candidate = args.nativeCandidate;
+    throw new Error(`${code}_SOURCE_STALE`);
+  const sourcePayload = await activePayload(ctx, input.accountId, source.payloadRef, source.hash, code);
+  if (sourcePayload.bytes !== source.bytes) throw new Error(`${code}_SOURCE_STALE`);
+  const candidate = input.nativeCandidate;
   const destination = candidate.destination;
   const materialization = destination === "bridge" ? candidate.queue : destination === "cloud" ? candidate.cloud : undefined;
   const resultRef = materialization?.payloadRef ?? (candidate.destination === "none" ? candidate.unchanged.resultPayloadRef : "");
   const resultHash = materialization?.contentHash ?? (candidate.destination === "none" ? candidate.unchanged.resultHash : "");
   const nativeReceipt = materialization?.nativeReceipt ?? (candidate.destination === "none" ? candidate.unchanged.preservationEvidence : undefined);
-  if (!nativeReceipt || (materialization && (materialization.workId !== args.append.artifactId ||
-      materialization.baseRevision !== source.revision))) throw new Error("AI_NATIVE_CANDIDATE_INVALID");
+  if (!nativeReceipt || (materialization && (materialization.workId !== input.artifactId ||
+      materialization.baseRevision !== source.revision))) throw new Error(`${code}_CANDIDATE_INVALID`);
   if (destination === "bridge") {
     // The materializer normally reads verified CLOUD bytes and queues them
     // for a local target. Source provenance and destination identity differ.
     const target = candidate.queue.localReplicaId ? await ctx.db.get(candidate.queue.localReplicaId) : null;
-    if (!target || target.kind !== "local" || target.accountId !== args.append.accountId ||
-        target.workId !== args.append.artifactId || target.revision !== candidate.queue.baseRevision || target.contentHash !== source.hash)
-      throw new Error("AI_NATIVE_DESTINATION_INVALID");
+    if (!target || target.kind !== "local" || target.accountId !== input.accountId ||
+        target.workId !== input.artifactId || target.revision !== candidate.queue.baseRevision || target.contentHash !== source.hash)
+      throw new Error(`${code}_DESTINATION_INVALID`);
   }
-  const receipt = validateNativeSaveReceipt(nativeReceipt, { artifactId: String(args.append.artifactId),
+  const receipt = validateNativeSaveReceipt(nativeReceipt, { artifactId: String(input.artifactId),
     baseRevision: source.revision, basePayloadHash: source.hash, targetRevision: resultHash,
     resultPayloadHash: resultHash, nativeFormat: source.nativeFormat, target: nativeReceipt.targets });
   if (receipt.semantic.resultDigest !== receipt.semantic.readbackDigest || receipt.errorCode ||
-      ["conflicted", "failed"].includes(receipt.state)) throw new Error("AI_NATIVE_READBACK_INVALID");
+      ["conflicted", "failed"].includes(receipt.state)) throw new Error(`${code}_READBACK_INVALID`);
   if (materialization && materialization.projectionContentHash !== receipt.semantic.readbackDigest)
-    throw new Error("AI_NATIVE_READBACK_INVALID");
+    throw new Error(`${code}_READBACK_INVALID`);
   if (candidate.destination === "none" && (receipt.state !== "unchanged" || resultRef !== source.payloadRef ||
       resultHash !== source.hash || candidate.unchanged.sourcePayloadRef !== source.payloadRef ||
       candidate.unchanged.sourceHash !== source.hash || candidate.unchanged.readbackProjectionHash !== receipt.semantic.readbackDigest))
-    throw new Error("AI_NATIVE_UNCHANGED_UNVERIFIED");
-  await activePayload(ctx, args.append.accountId, resultRef, resultHash);
-  return { source, resultRef, resultHash, receipt };
+    throw new Error(`${code}_UNCHANGED_UNVERIFIED`);
+  const resultPayload = await activePayload(ctx, input.accountId, resultRef, resultHash, code);
+  return { source, sourcePayload, resultRef, resultHash, resultPayload, receipt, materialization };
+}
+export type VerifiedNativeAdmission = Awaited<ReturnType<typeof verifyNativeAdmissionCandidate>>;
+
+/** The trusted materializer produced these exact bytes from the current bound
+ * source. Attest version ownership before any replica can advance past them;
+ * later version reconciliation preserves this attested hash/ref. */
+export async function attestNativeVersionOwnership(ctx: MutationCtx, versionId: Id<"spectraArtifactVersions">, payloadRefs: string[]) {
+  for (const payloadRef of new Set(payloadRefs)) {
+    const prior = await ctx.db.query("collaborationPayloadOwners").withIndex("by_owner", q => q.eq("ownerId", String(versionId)))
+      .filter(q => q.eq(q.field("payloadRef"), payloadRef)).first();
+    if (prior) await ctx.db.patch(prior._id, { ownerTable: NATIVE_VERSION_OWNER_TABLE });
+    else await ctx.db.insert("collaborationPayloadOwners", { ownerId: String(versionId), ownerTable: NATIVE_VERSION_OWNER_TABLE, payloadRef });
+  }
 }
 
-async function admittedResponse(ctx: MutationCtx, stored: AdmittedAiCommit, duplicate: boolean): Promise<AdmittedAiCommit> {
-  const roomId = ctx.db.normalizeId("collaborationRooms", stored.receipt.roomId);
-  if (!roomId) throw new Error("AI_NATIVE_RECEIPT_INVALID");
+/** Apply the verified candidate's single native effect in the caller's
+ * admission transaction, after canonical history and ownership are written. */
+export async function applyNativeAdmissionEffect(ctx: MutationCtx, actor: MaterializationActor, candidate: NativeAiCandidate,
+  native: VerifiedNativeAdmission, effects: MaterializationEffects, code = "AI_NATIVE") {
+  const nativeResult = candidate.destination === "bridge" ? await queueMaterializationInTransaction(ctx, actor, candidate.queue, effects)
+    : candidate.destination === "cloud" ? await commitCloudMaterializationInTransaction(ctx, actor, candidate.cloud, effects)
+    : { state: "unchanged" as const, payloadRef: native.resultRef, hash: native.resultHash, nativeReceipt: native.receipt };
+  if (["failed", "conflicted", "protected-pending"].includes(nativeResult.state)) throw new Error(`${code}_EFFECT_REFUSED`);
+  return nativeResult;
+}
+
+/** Exact admitted delta for a receipt: inline bytes, the durable spilled body,
+ * or a covering replay once compaction removed the row. Never a new plan. */
+export async function admittedUpdateDescriptor(ctx: QueryCtx | MutationCtx, roomId: Id<"collaborationRooms">,
+  sequence: number): Promise<AdmittedAiCommit["admitted"]> {
   const row = await ctx.db.query("collaborationUpdates")
-    .withIndex("by_room_sequence", q => q.eq("roomId", roomId).eq("sequence", stored.receipt.sequence)).unique();
-  let admitted: AdmittedAiCommit["admitted"] = { encoding: "replay", roomId, throughSequence: stored.receipt.sequence };
+    .withIndex("by_room_sequence", q => q.eq("roomId", roomId).eq("sequence", sequence)).unique();
   if (row?.payloadRef) {
     const id = ctx.db.normalizeId("collaborationDurablePayloads", row.payloadRef);
     const payload = id ? await ctx.db.get(id) : null;
-    if (payload?.status === "active") admitted = { encoding: "payload", payloadRef: row.payloadRef,
+    if (payload?.status === "active") return { encoding: "payload", payloadRef: row.payloadRef,
       digest: row.payloadDigest!, byteLength: row.byteLength };
   } else if (row) {
     // At most the existing 760KiB inline bound. No large body is copied into
@@ -109,9 +143,15 @@ async function admittedResponse(ctx: MutationCtx, stored: AdmittedAiCommit, dupl
     let binary = "";
     for (let offset = 0; offset < bytes.length; offset += 16_384)
       binary += String.fromCharCode(...bytes.subarray(offset, offset + 16_384));
-    admitted = { encoding: "inline", updateBase64: btoa(binary) };
+    return { encoding: "inline", updateBase64: btoa(binary) };
   }
-  return { ...stored, duplicate, admitted };
+  return { encoding: "replay", roomId, throughSequence: sequence };
+}
+
+async function admittedResponse(ctx: MutationCtx, stored: AdmittedAiCommit, duplicate: boolean): Promise<AdmittedAiCommit> {
+  const roomId = ctx.db.normalizeId("collaborationRooms", stored.receipt.roomId);
+  if (!roomId) throw new Error("AI_NATIVE_RECEIPT_INVALID");
+  return { ...stored, duplicate, admitted: await admittedUpdateDescriptor(ctx, roomId, stored.receipt.sequence) };
 }
 
 export const commit = internalMutation({
@@ -137,7 +177,8 @@ export const commit = internalMutation({
         !["active", "compacting"].includes(room.status) || artifact.updatedAt !== expected.artifactUpdatedAt ||
         (artifact.contentHash ?? null) !== expected.contentHash || (artifact.currentVersionId ?? null) !== expected.currentVersionId)
       throw new Error("AI_NATIVE_CANONICAL_STALE");
-    const native = await verifyNativeCandidate(ctx, args);
+    const native = await verifyNativeAdmissionCandidate(ctx, { accountId: append.accountId, artifactId: append.artifactId,
+      nativeSource: expected.nativeSource, nativeCandidate: args.nativeCandidate });
     const beforeProjection = await parseGatewayProjection(ctx, args.beforeProjectionJson, args.beforeProjectionHash,
       artifact, { accountId: actor.accountId, policyVersion: append.policyVersion });
     const afterProjection = await parseGatewayProjection(ctx, append.projectionJson, append.projectionHash,
@@ -177,23 +218,9 @@ export const commit = internalMutation({
     const history = await commitChangeGroup(ctx, groupId, { source: "ai", provenance: { kind: "ai_native_commit",
       operationId: args.aiOperation.operationId, requestDigest: args.requestDigest } });
     const versionId = history.status === "committed" ? history.versionId : undefined;
-    if (versionId) {
-      // The trusted materializer produced this exact verified result from the
-      // current bound source. Attest ownership before the replica can advance.
-      // Subsequent version reconciliation preserves this attested hash/ref.
-      for (const payloadRef of new Set([native.source.payloadRef, native.resultRef])) {
-        const prior = await ctx.db.query("collaborationPayloadOwners").withIndex("by_owner", q => q.eq("ownerId", String(versionId)))
-          .filter(q => q.eq(q.field("payloadRef"), payloadRef)).first();
-        if (prior) await ctx.db.patch(prior._id, { ownerTable: NATIVE_VERSION_OWNER_TABLE });
-        else await ctx.db.insert("collaborationPayloadOwners", { ownerId: String(versionId), ownerTable: NATIVE_VERSION_OWNER_TABLE, payloadRef });
-      }
-    }
+    if (versionId) await attestNativeVersionOwnership(ctx, versionId, [native.source.payloadRef, native.resultRef]);
     const effects = { actorKind: "ai" as const, canonicalProjection: "durable" as const, runId: args.aiOperation.runId };
-    const candidate = args.nativeCandidate;
-    const nativeResult = candidate.destination === "bridge" ? await queueMaterializationInTransaction(ctx, actor, candidate.queue, effects)
-      : candidate.destination === "cloud" ? await commitCloudMaterializationInTransaction(ctx, actor, candidate.cloud, effects)
-      : { state: "unchanged" as const, payloadRef: native.resultRef, hash: native.resultHash, nativeReceipt: native.receipt };
-    if (["failed", "conflicted", "protected-pending"].includes(nativeResult.state)) throw new Error("AI_NATIVE_EFFECT_REFUSED");
+    const nativeResult = await applyNativeAdmissionEffect(ctx, actor, args.nativeCandidate, native, effects);
     const updateIdentity = await nativeAiUpdateIdentity(append);
     const result: AdmittedAiCommit = { state: "committed", duplicate: false,
       receipt: { roomId: room._id, sequence: appended.sequence, updateDigest: updateIdentity.updateDigest, versionId, nativeResult },

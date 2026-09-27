@@ -61,7 +61,12 @@ it.each([
   if (historicalOwner) await t.run(ctx => ctx.db.insert("collaborationPayloadOwners", { ownerId: String(version.versionId), ownerTable: "spectraArtifactVersions", payloadRef }));
   const versionOwners = await t.run(ctx => ctx.db.query("collaborationPayloadOwners").withIndex("by_owner", q => q.eq("ownerId", String(version.versionId))).collect());
   expect(versionOwners.filter(owner => owner.ownerTable === "spectraArtifactVersions:native").map(owner => owner.payloadRef)).not.toContain(payloadRef);
-  await attacker.mutation(api.artifactEmbeds.create, { containerType: "artifact", containerId: String(container.artifactId), containerRegionId: "document:pin", sourceArtifactId: forged.artifactId, mode: "compact", interaction: "read", versionPolicy: "pinned", pinnedVersionId: version.versionId, contextPolicy: "summary" });
+  const embed = await attacker.mutation(api.artifactEmbeds.create, { containerType: "artifact", containerId: String(container.artifactId), containerRegionId: "reference:pin", sourceArtifactId: forged.artifactId, mode: "compact", interaction: "read", versionPolicy: "pinned", pinnedVersionId: version.versionId, contextPolicy: "summary" });
+  // Prove canonical placement so the exact retained path itself must refuse
+  // the authored native references (not an earlier placement denial).
+  await t.run(ctx => ctx.db.patch(container.artifactId, { content: { tiptap: { type: "doc", content: [{ type: "spectraReference", attrs: {
+    embedId: String(embed.embedId), containerType: "artifact", containerId: String(container.artifactId), containerRegionId: "reference:pin",
+    sourceArtifactId: String(forged.artifactId), versionPolicy: "pinned", pinnedVersionId: String(version.versionId), blockId: "reference:pin" } }] } } }));
   const deletion = await sourceOwner.mutation(api.spectraArtifacts.permanentlyDelete, { artifactId: forged.artifactId });
   for (let step = 0; step < 100; step++) {
     const job = await t.run(ctx => ctx.db.get(deletion.jobId));

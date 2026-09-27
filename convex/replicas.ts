@@ -880,13 +880,8 @@ export const activateLens = mutation({
 
 export const queueMaterialization = mutation({
   args: queueMaterializationArgs,
-  handler: async (ctx, args) => {
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    return queueMaterializationInTransaction(ctx, actor, args, {
-      actorKind: "user",
-      canonicalProjection: "legacy",
-    });
+  handler: async (): Promise<Awaited<ReturnType<typeof queueMaterializationInTransaction>>> => {
+    throw new Error("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
   },
 });
 
@@ -894,13 +889,8 @@ export const queueMaterialization = mutation({
  * Yjs remains the authored-content authority; only the native replica advances. */
 export const commitCloudMaterialization = mutation({
   args: commitCloudMaterializationArgs,
-  handler: async (ctx, args) => {
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    return commitCloudMaterializationInTransaction(ctx, actor, args, {
-      actorKind: "user",
-      canonicalProjection: "legacy",
-    });
+  handler: async (): Promise<Awaited<ReturnType<typeof commitCloudMaterializationInTransaction>>> => {
+    throw new Error("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
   },
 });
 

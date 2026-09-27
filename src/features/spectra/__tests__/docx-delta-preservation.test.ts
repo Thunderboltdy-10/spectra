@@ -95,10 +95,10 @@ describe("Shared DOCX delta and insertion policy", () => {
     expect(await docxLens.materialize({ carry: reopened.preservedCarry, projection: reopened.projection })).toEqual(reopened.preservedCarry.payload);
   });
 
-  it("rejects unsupported new tables through the shared policy", async () => {
+  it("rejects malformed new tables through the shared policy", async () => {
     const base = await blank();
-    const desired: DocxProjection = { ...base.projection, blocks: [...base.projection.blocks, { id: "new-table", type: "table", text: "Cell", rows: [["Cell"]] }] };
-    expect(() => docxOperationsBetween(base.projection, desired)).toThrow(/new table/);
-    await expect(docxLens.materialize({ carry: base.preservedCarry, projection: desired })).rejects.toThrow(/new table/);
+    const desired: DocxProjection = { ...base.projection, blocks: [...base.projection.blocks, { id: "new-table", type: "table", text: "Cell", rows: [["Cell"], ["Two", "Cells"]] }] };
+    expect(() => docxOperationsBetween(base.projection, desired)).toThrow(/rectangular/);
+    await expect(docxLens.materialize({ carry: base.preservedCarry, projection: desired })).rejects.toThrow(/rectangular/);
   });
 });

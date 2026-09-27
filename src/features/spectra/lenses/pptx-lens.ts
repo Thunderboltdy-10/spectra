@@ -16,10 +16,18 @@ import { sha256Payload } from "./docx-lens";
 import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
+import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
+import { readPptxTransition, writePptxTransition } from "./pptx-transition";
+import { readPptxImageAsset, writePptxImage, type PptxMediaWriteOptions, type PptxMediaReadCache } from "./pptx-media";
 
 export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
 export class PptxLensError extends Error { constructor(public readonly code: string, message: string) { super(message); this.name = "PptxLensError"; } }
+
+export function pptxProjectionSemanticDigest(projection: PptxProjection, before?: PptxProjection) {
+  const requested = before ? normalizePptxProjectionForReadback(projection, before) : projection;
+  return sha256Payload(new TextEncoder().encode(JSON.stringify(pptxSemanticContent(requested))));
+}
 
 function descendants(root: XmlElement): XmlElement[] { const result: XmlElement[] = []; const pending = [...root.elements()].reverse(); while (pending.length) { const child = pending.pop()!; result.push(child); const nested = child.elements(); for (let index = nested.length - 1; index >= 0; index -= 1) pending.push(nested[index]!); } return result; }
 function semanticNode(root: XmlElement, localName: string) { return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === localName); }
@@ -273,6 +281,7 @@ async function slideObjects(
   slideId: string,
   layoutRoot?: XmlElement,
   canvas?: { width: number; height: number },
+  mediaCache?: PptxMediaReadCache,
 ): Promise<PresentationObject[]> {
   const layoutPlaceholders = new Map<string, XmlElement>();
   if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
@@ -294,7 +303,8 @@ async function slideObjects(
         type: "group",
         ...shapeGeometry(shape, undefined, canvas),
         content: { nativeShapeId, childIds },
-        parentId,
+        // Nested groups use the same object-id parent reference as every other child.
+        ...(parentId ? { parentId: `${slideId}:shape:${parentId}` } : {}),
         readingOrder: objects.length,
       });
       continue;
@@ -302,6 +312,7 @@ async function slideObjects(
     const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
     const isTitle = ["title", "ctrTitle"].includes(placeholder?.getAttribute("type") ?? "");
     const type = shape.localName === "pic" ? "image" : shape.localName === "graphicFrame" ? (descendants(shape).some((node) => node.localName === "chart") ? "chart" : "table") : "text";
+    const authoredImage = type === "image" ? await readPptxImageAsset(deck, slidePartName, shape, mediaCache) : undefined;
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
@@ -316,6 +327,7 @@ async function slideObjects(
             nativeParagraphIndex: 0,
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
             ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
+            ...(authoredImage ? { ...authoredImage.image, nativeMediaSha256: authoredImage.image.sha256 } : {}),
           };
     const nativeObjectLink = hyperlinkFor(deck, slidePartName, firstDescendant(shape, PML_NAMESPACE, "cNvPr"));
     const uniformTextLink = type === "text"
@@ -329,7 +341,7 @@ async function slideObjects(
     const chart = type === "chart" ? content as PresentationChartContent : undefined;
     const hiddenObject = ["1", "true", "on"].includes((firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("hidden") ?? "").toLowerCase());
     objects.push({
-      id: `${slideId}:shape:${nativeShapeId}`,
+      id: authoredImage?.objectId ?? `${slideId}:shape:${nativeShapeId}`,
       type,
       ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas),
       content,
@@ -376,6 +388,7 @@ async function presentationThemeFonts(deck: Presentation) {
 
 async function projectPresentation(deck: Presentation, profile: LensCompatibilityProfile) {
   const entries: LensFidelityEntry[] = [];
+  const mediaCache: PptxMediaReadCache = new Map();
   const presentationXml = await deck.office.xml("/ppt/presentation.xml");
   const slideSize = firstDescendant(presentationXml.root, PML_NAMESPACE, "sldSz");
   const canvas = {
@@ -385,11 +398,20 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   const slides = await Promise.all(deck.slides().map(async (slide, index) => {
     const root = slide.root();
     const transition = semanticNode(root, "transition");
+    const modeledTransition = transition && transition.parent !== root ? undefined : readPptxTransition(root).transition;
     const timing = semanticNode(root, "timing");
     const title = titleShape(root);
     const id = `pptx:slide:${slide.partName}`;
     entries.push({ regionId: id, feature: "slide", class: "NATIVE", partName: slide.partName });
-    if (transition) entries.push({ regionId: `${id}:transition`, feature: "transition", class: "PRESERVED", partName: slide.partName, pathPattern: "transition", namespaceUri: PML_NAMESPACE, readOnly: true, reason: "This PowerPoint transition is preserved. Editing it requires an exact native equivalent." });
+    if (transition) {
+      const claim = {
+        regionId: `${id}:transition`, feature: "native-transition", class: "PRESERVED" as const,
+        partName: slide.partName, pathPattern: "transition", namespaceUri: PML_NAMESPACE, readOnly: true,
+        ...(modeledTransition ? { scopeMode: "pptx-transition-remainder" as const } : {}),
+        reason: modeledTransition ? "Native advance, sound and extension settings are preserved while the supported effect and duration remain editable." : "This native transition is preserved because its effect is not fully modeled.",
+      };
+      entries.push(claim);
+    }
     if (timing) entries.push({ regionId: `${id}:animation`, feature: "animation", class: "PRESERVED", partName: slide.partName, pathPattern: "timing", namespaceUri: PML_NAMESPACE, readOnly: true });
     const layoutRoot = slide.layoutPartName ? (await deck.office.xml(slide.layoutPartName)).root : undefined;
     const notesPartName = notesPartNameFor(deck, slide.partName);
@@ -397,7 +419,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas, mediaCache), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["ole", /\/embeddings\//i], ["macro", /\/vbaProject\.bin$/i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -419,7 +441,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     ["slides", "NATIVE"],
     ["shapes", "NATIVE"],
     ["speakerNotes", "EQUIVALENT", "Speaker notes are written into native PowerPoint notes pages, creating the page and master when needed."],
-    ["transitions", slides.some((slide) => slide.hasTransition) ? "PRESERVED" : "NATIVE", "PowerPoint saved these transitions and Spectra preserves them exactly."],
+    ["transitions", "NATIVE", "Supported native transitions are editable; unmodeled transitions are protected on their own slides."],
     ["animations", slides.some((slide) => slide.hasTiming) ? "PRESERVED" : "NATIVE", "PowerPoint animation timing is preserved exactly rather than approximated."],
     ["masters", partNames.some((name) => /\/slideMasters\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide masters are preserved exactly as PowerPoint saved them."],
     ["layouts", partNames.some((name) => /\/slideLayouts\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide layouts come from this file's own masters and are preserved."],
@@ -435,9 +457,9 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   for (const [feature, cls, reason] of regionClasses) {
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })))));
   const themeFonts = await presentationThemeFonts(deck);
-  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
+  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest: "0".repeat(64), canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
+  projection.nativeBinding.semanticDigest = await pptxProjectionSemanticDigest(projection);
   return { projection, fidelityMap };
 }
 
@@ -946,11 +968,16 @@ function moveShapeToOrder(root: XmlElement, shapeIdValue: string, order: number)
   const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
   const shape = tree?.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === shapeIdValue);
   if (!tree || !shape) return;
-  const objects = tree.elements().filter((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
-  const bounded = Math.max(0, Math.min(objects.length - 1, order));
-  const reference = objects[bounded] === shape ? objects[bounded + 1] ?? null : objects[bounded] ?? null;
+  // `order` is the shape's final index. Resolve it among the other shapes so a
+  // later target lands after the shape currently holding that index.
+  const others = tree.elements().filter((node) => node !== shape && ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+  const bounded = Math.max(0, Math.min(others.length, order));
   tree.removeChild(shape);
-  tree.insertBefore(shape, reference === shape ? null : reference);
+  // After the last shape, stay before any trailing spTree extension element.
+  const siblings = tree.elements();
+  const last = others[others.length - 1];
+  const reference = others[bounded] ?? (last ? siblings[siblings.indexOf(last) + 1] : undefined) ?? null;
+  tree.insertBefore(shape, reference);
 }
 
 function removeShape(root: XmlElement, shapeIdValue: string) {
@@ -1729,7 +1756,7 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   await updateEmbeddedWorkbook(deck, chartPart, root, input.series);
 }
 
-async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta) {
+async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta, options?: PptxMediaWriteOptions) {
   const deck = await Presentation.open(carry.safePayload ?? carry.payload); const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   // A slide added in this delta has no part until it exists, so its caller-side
   // id is mapped to the real one and every later operation in the same delta —
@@ -1770,7 +1797,22 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     const slide = slideFor(deck, resolveSlideId(operation.slideId));
-    if (operation.kind === "add-text-box") {
+    if (operation.kind === "insert-image") {
+      const added = await writePptxImage(deck, slide.partName, slide.root(), operation.image, operation.objectId, options);
+      setShapeGeometry(added, operation, {
+        width: carry.projection.nativeBinding.canvasWidthEmu ?? 12192000,
+        height: carry.projection.nativeBinding.canvasHeightEmu ?? 6858000,
+      });
+      if (operation.altText !== undefined) setAltText(added, operation.altText);
+      if (operation.readingOrder !== undefined) moveShapeToOrder(slide.root(), shapeId(added)!, operation.readingOrder);
+    }
+    else if (operation.kind === "replace-image") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_IMAGE_MISSING", "The picture being replaced no longer exists on this slide.");
+      const prior = await readPptxImageAsset(deck, slide.partName, shape);
+      await writePptxImage(deck, slide.partName, slide.root(), operation.image, prior?.objectId ?? `${resolveSlideId(operation.slideId)}:shape:${operation.shapeId}`, options, shape);
+    }
+    else if (operation.kind === "add-text-box") {
       const added = addTextBox(slide.root(), operation.text);
       const link = normalizePresentationHyperlink(operation.hyperlink);
       if (link) {
@@ -1802,6 +1844,13 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
         if (!node) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint text run no longer exists.");
         replaceNodeText(node, operation.text);
       }
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-transition") {
+      // AlternateContent and other non-direct transition encodings stay opaque.
+      const existing = semanticNode(slide.root(), "transition");
+      if (existing && existing.parent !== slide.root()) throw new PptxLensError("PPTX_TRANSITION_PRESERVED", "This native transition uses an unmodeled compatibility encoding.");
+      writePptxTransition(slide.root(), operation.transition);
       deck.office.markDirty(slide.partName);
     }
     else if (operation.kind === "set-notes") {
@@ -1905,10 +1954,10 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
 export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
   format: "pptx",
   async open(payload, profile = "strict-native"): Promise<LensOpenResult<PptxProjection>> { let deck: Presentation; let safePayload: Uint8Array; try { safePayload = await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS); deck = await Presentation.open(safePayload); } catch (error) { throw new PptxLensError("PPTX_CORRUPT", `This PowerPoint package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); } const { projection, fidelityMap } = await projectPresentation(deck, profile); return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, safePayload, projection }, capabilities: this.capabilities(profile, fidelityMap) }; },
-  mutate: applyDelta,
-  async materialize({ projection, carry }) {
+  async mutate(carry, delta, options) { return applyDelta(carry, delta, options as PptxMediaWriteOptions | undefined); },
+  async materialize({ projection, carry, options }) {
     const operations = pptxOperationsBetween(carry.projection, projection);
-    return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
+    return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }, options as PptxMediaWriteOptions | undefined) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: false, reason: hasTransition ? "The native transition is preserved; native transition editing is not implemented yet." : "Native transition authoring is not implemented yet." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
+  capabilities(profile, _fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "insert-image", available: true }, { id: "replace-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "insert_image", "replace_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

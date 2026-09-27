@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHash, createHmac } from "node:crypto";
+import type { AiBeforeCommit, PreparedCanonicalAiUpdate } from "../ai/admitted-ai-update";
+import type { NativeMaterializeResult } from "../ai/native-ai-promotion";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -355,12 +357,7 @@ function setup(
     storeArtifactContent: async (_artifactId: string, content: unknown) => content,
   }));
   const materializeDocxArtifact = vi.fn(
-    async (): Promise<{
-      state: "conflicted" | "pending" | "verified" | "claimed";
-      requestId?: string;
-      hash?: string;
-      conflict?: { message?: string };
-    }> => ({
+    async (): Promise<NativeMaterializeResult> => ({
       state: "conflicted",
       conflict: { message: "Both copies changed. Nothing overwritten." },
     }),
@@ -375,6 +372,10 @@ function setup(
   vi.doMock("@/app/api/spectra/lenses/office/route", () => ({
     materializeOfficeArtifact,
   }));
+  const nativeCommit = vi.fn(async () => ({ state: "committed", duplicate: false,
+    receipt: { roomId: "native-room", sequence: 1, updateDigest: "a".repeat(64), nativeResult: { state: "pending" } },
+    admitted: { encoding: "inline", updateBase64: "AQ==" } }));
+  vi.doMock("@/lib/native-ai-commit-server", () => ({ commitPreparedNativeAiRequest: nativeCommit }));
   vi.doMock("@/features/spectra/ai/yjs-artifact-operation", () => {
     class AiArtifactRegionConflictError extends Error {
       artifactId: string;
@@ -409,15 +410,7 @@ function setup(
       readLiveArtifactValue: vi.fn(async () => null),
       applyAiArtifactMutation: vi.fn(async (params: {
         artifactId: string;
-        beforeCommit?: (info: {
-          desired: {
-            title: string;
-            summary?: string;
-            content: unknown;
-            tags: string[];
-          };
-          changedRegionIds: string[];
-        }) => Promise<void>;
+        beforeCommit?: AiBeforeCommit;
         resolveDesired: (current: {
           title: string;
           summary?: string;
@@ -439,6 +432,15 @@ function setup(
         await params.beforeCommit?.({
           desired,
           changedRegionIds: ["docx:paragraph:unique"],
+          prepareAdmittedUpdate: async () => ({
+            expected: { roomId: "native-room", nextSequence: 1, artifactUpdatedAt: 1, contentHash: null, currentVersionId: null },
+            beforeProjectionJson: "{}", beforeProjectionHash: "a".repeat(64),
+            append: { artifactId: params.artifactId, accountId: "account-real", partitionKey: "root", actorKind: "ai", update: "AQ==",
+              clientId: "native-client", policyVersion: 1, idempotencyKey: "native-operation", expectedRoomId: "native-room", expectedNextSequence: 1,
+              baseStateVectorHash: "a".repeat(64), stateVectorHash: "b".repeat(64), regionIds: ["docx:paragraph:unique"], projectionJson: "{}", projectionHash: "b".repeat(64) },
+            evidence: { version: 1, operationDigest: "a".repeat(64), sourceContentIdentity: "a".repeat(64), baseContentDigest: "a".repeat(64),
+              resultContentDigest: "b".repeat(64), fullContentDeletion: false },
+          } as PreparedCanonicalAiUpdate),
         });
         savedArtifact = {
           ...savedArtifact,
@@ -472,6 +474,7 @@ function setup(
     getSavedArtifact: () => savedArtifact,
     materializeDocxArtifact,
     materializeOfficeArtifact,
+    nativeCommit,
   };
 }
 
@@ -2697,7 +2700,7 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.type === "error" || event.type === "final")).toBe(true);
   });
 
-  it("applies a native document update once after verified promotion", async () => {
+  it("applies a native document update once after atomic admission", async () => {
     const original = {
       blocks: [{ id: "p1", type: "paragraph", text: "Variable: new_name Scope: Local" }],
     };
@@ -2744,9 +2747,14 @@ describe("Spectra run route", () => {
       },
     );
     materializeDocxArtifact.mockResolvedValue({
-      state: "pending",
-      requestId: "req-native",
-      hash: "ee",
+      state: "prepared",
+      hash: "b".repeat(64),
+      projectionContent: next,
+      nativeSource: { replicaId: "native-cloud", payloadRef: "native-base", revision: "a".repeat(64), hash: "a".repeat(64), bytes: 100, nativeFormat: "docx" },
+      nativeCandidate: { destination: "bridge", queue: {
+        workId: "artifact-real" as import("../../../../convex/_generated/dataModel").Id<"spectraArtifacts">,
+        payloadRef: "native-result", contentHash: "b".repeat(64), baseRevision: "a".repeat(64), fidelityMap: {}, regionIds: ["docx:paragraph:unique"], partNames: [],
+      } },
     });
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(

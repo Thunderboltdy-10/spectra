@@ -168,7 +168,9 @@ function nativePptxImageAsset(
   source: Record<string, unknown>,
   binding: PresentationContent["nativeBinding"],
 ): SpectraArtifactAsset | undefined {
-  if (typeof source.assetId === "string") return undefined;
+  // A pending replacement should preview its new durable bytes. After native
+  // readback, matching hashes make the embedded image authoritative again.
+  if (typeof source.assetId === "string" && source.sha256 !== source.nativeMediaSha256) return undefined;
   const partName =
     typeof source.nativeMediaPart === "string" ? source.nativeMediaPart : "";
   const downloadUrl = pptxNativeMediaUrl(binding, partName);
@@ -1074,9 +1076,8 @@ function SlideCanvas({
               object={object}
               themeFonts={deck.theme.fonts}
               asset={
-                typeof source.assetId === "string"
-                  ? assetById.get(source.assetId)
-                  : nativePptxImageAsset(source, deck.nativeBinding)
+                nativePptxImageAsset(source, deck.nativeBinding) ??
+                (typeof source.assetId === "string" ? assetById.get(source.assetId) : undefined)
               }
               linkedValues={linkedChartValues(object, artifacts)}
               linkedArtifact={
@@ -1675,6 +1676,7 @@ export function PresentationStudio({
   const [searchQuery, setSearchQuery] = useState("");
   const [stageZoom, setStageZoom] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaTargetRef = useRef<{ slideId: string; objectId?: string } | undefined>(undefined);
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
   const textOriginRef = useRef<PresentationContent | undefined>(undefined);
@@ -2583,15 +2585,26 @@ export function PresentationStudio({
       setGestureDeck(null);
     }
   }
+  function chooseMedia(kind: "image" | "video", replace = false) {
+    mediaTargetRef.current = { slideId: activeSlide.id, ...(replace && selectedObject ? { objectId: selectedObject.id } : {}) };
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = kind === "video" ? "video/mp4,video/webm" : contract.compatibilityProfile === "strict-native" ? "image/png,image/jpeg" : "image/*";
+      fileInputRef.current.click();
+    }
+  }
   async function addMedia(file: File) {
     if (readOnly || !file.size) return;
     setAssetError(undefined);
     setAssetBusy(true);
     try {
+      const target = mediaTargetRef.current ?? { slideId: activeSlide.id };
       if (!file.type.startsWith("image/") && !file.type.startsWith("video/"))
         throw new Error("Choose an image or video file.");
+      if (contract.compatibilityProfile === "strict-native" && !["image/png", "image/jpeg"].includes(file.type))
+        throw new Error("Choose a PNG or JPEG picture for this PowerPoint file.");
       if (file.size > 100_000_000)
         throw new Error("Presentation media cannot exceed 100 MB per asset.");
+      const sha256 = await sha256Blob(file);
       const uploaded = await uploadArtifactAsset({
         artifactId,
         path: `media/${Date.now().toString(36)}-${crypto
@@ -2602,7 +2615,7 @@ export function PresentationStudio({
           )}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(-120)}`,
         name: file.name,
         mediaType: file.type,
-        sha256: await sha256Blob(file),
+        sha256,
         blob: file,
       });
       const result = await getArtifactAssets(artifactId);
@@ -2611,17 +2624,31 @@ export function PresentationStudio({
         file.type.startsWith("video/") ? "video" : "image",
         activeSlide.objects.length + 1,
       );
-      object.content = { assetId: uploaded.assetId, name: file.name };
+      const imageContent = { assetId: uploaded.assetId, name: file.name, mediaType: file.type, sha256 };
+      object.content = imageContent;
       object.altText = "";
-      mutate((draft) => draft.slides[activeSlideIndex]!.objects.push(object));
-      setSelectedObjectId(object.id);
-      setLayerSelection([object.id]);
+      mutate((draft) => {
+        const slide = draft.slides.find((candidate) => candidate.id === target.slideId);
+        if (!slide) throw new Error("The slide was removed while the media uploaded.");
+        if (target.objectId) {
+          const picture = slide.objects.find((candidate) => candidate.id === target.objectId);
+          if (!picture || !["image", "video"].includes(picture.type)) throw new Error("The picture was removed while its replacement uploaded.");
+          picture.content = { ...(picture.content && typeof picture.content === "object" ? picture.content : {}), ...imageContent };
+          picture.type = object.type;
+        } else {
+          object.readingOrder = slide.objects.length;
+          slide.objects.push(object);
+        }
+      });
+      setSelectedObjectId(target.objectId ?? object.id);
+      setLayerSelection([target.objectId ?? object.id]);
     } catch (error) {
       setAssetError(
         error instanceof Error ? error.message : "Media could not be added.",
       );
     } finally {
       setAssetBusy(false);
+      mediaTargetRef.current = undefined;
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -3337,8 +3364,8 @@ export function PresentationStudio({
           object.content = { text: "Say the one thing this slide is for." };
         }),
       shape: (shape) => addShape(shape),
-      image: () => fileInputRef.current?.click(),
-      video: () => addObject("video"),
+      image: () => chooseMedia("image"),
+      video: () => chooseMedia("video"),
       chart: () => addObject("chart"),
       table: () => addObject("table"),
       embed: () => addObject("embed"),
@@ -3479,7 +3506,7 @@ export function PresentationStudio({
             [axis === "x" ? "focalX" : "focalY"]: Math.min(100, Math.max(0, value)),
           };
         }),
-      replaceImage: () => fileInputRef.current?.click(),
+      replaceImage: () => chooseMedia("image", true),
       bindSource: (artifactId) =>
         updateSelected((object) => {
           if (!artifactId) {
@@ -4372,10 +4399,10 @@ export function PresentationStudio({
                             type="button"
                             className={INSPECTOR_BUTTON}
                             disabled={readOnly || assetBusy}
-                            onClick={() => fileInputRef.current?.click()}
+                            onClick={() => chooseMedia("image")}
                           >
                             <ImagePlus className="h-3.5 w-3.5" />{" "}
-                            {assetBusy ? "Uploading" : "Image or video"}
+                            {assetBusy ? "Uploading" : "Image"}
                           </button>
                           <button
                             type="button"

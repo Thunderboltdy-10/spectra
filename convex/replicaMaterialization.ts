@@ -23,7 +23,7 @@ const RETRYABLE_MATERIALIZATION_FAILURES = new Set([
 /** Only server mutation callers choose effect provenance. AI callers must first
  * pass current run/attempt/operation admission in this same transaction. */
 export type NativeMaterializationEffects =
-  | { actorKind: "user"; canonicalProjection: "legacy" }
+  | { actorKind: "user"; canonicalProjection: "legacy" | "durable" }
   | { actorKind: "ai"; canonicalProjection: "durable"; runId: Id<"spectraAiRuns"> };
 
 export const queueMaterializationArgs = v.object({

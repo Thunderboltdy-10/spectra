@@ -1042,54 +1042,57 @@ export class ArtifactYjsModel {
   ) {
     const selected = [...new Set(regionIds)];
     if (selected.length === 0) return { applied: true as const, claims: [] };
-    const next = decomposeArtifactContent(this.typeKey, value.content);
     if (selected.includes("artifact:structure")) {
       return controller.edit("artifact:structure", ["artifact:structure"], () =>
-        this.writeComplete(value, next),
+        this.writeComplete(value, decomposeArtifactContent(this.typeKey, value.content)),
       );
     }
-    const claimedRegions: Array<{
-      regionId: string;
-      overlapDomains: string[];
-    }> = [];
-    const mutations: Array<() => void> = [];
-    for (const regionId of selected) {
-      if (regionId === "metadata:title") {
-        claimedRegions.push({ regionId, overlapDomains: [regionId] });
-        mutations.push(() => this.metadata.set("title", value.title));
-        continue;
-      }
-      if (regionId === "metadata:summary") {
-        claimedRegions.push({ regionId, overlapDomains: [regionId] });
-        mutations.push(() => this.metadata.set("summary", value.summary ?? ""));
-        continue;
-      }
-      if (regionId === "metadata:tags") {
-        claimedRegions.push({ regionId, overlapDomains: [regionId] });
-        mutations.push(() => this.metadata.set("tags", [...value.tags]));
-        continue;
-      }
-      const currentDescriptor = this.descriptor(regionId);
-      const nextDescriptor = next.descriptors.get(regionId);
-      const encoded = next.regionValues.get(regionId);
-      if (
-        !currentDescriptor ||
-        !nextDescriptor ||
-        encoded === undefined ||
-        JSON.stringify(currentDescriptor) !== JSON.stringify(nextDescriptor)
-      ) {
-        throw new Error(
-          `ARTIFACT_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`,
-        );
-      }
-      claimedRegions.push({
-        regionId,
-        overlapDomains: [currentDescriptor.overlapDomain],
-      });
-      mutations.push(() => this.regions.set(regionId, encoded));
-    }
-    return controller.editMany(claimedRegions, () => {
-      for (const mutation of mutations) mutation();
-    });
+    const plan = planArtifactYjsRestore(this.transport.document, this.typeKey, value, selected);
+    return controller.editMany(plan.regions, plan.apply);
   }
+}
+
+/** Prepare a restore without changing the document. Server admission can use
+ * this same selection logic on a reconstructed room before committing bytes. */
+export function planArtifactYjsRestore(
+  document: Y.Doc,
+  typeKey: ArtifactTypeKey,
+  value: ArtifactLiveValue,
+  regionIds?: readonly string[],
+): ArtifactYjsMutationPlan {
+  if (!regionIds || regionIds.includes("artifact:structure"))
+    return planArtifactYjsMutation(document, typeKey, value);
+  const { metadata, regions, descriptors } = documentMaps(document);
+  const next = decomposeArtifactContent(typeKey, value.content);
+  const selected = [...new Set(regionIds)];
+  const claims: ArtifactYjsMutationRegion[] = [];
+  const assertDescriptors = () => {
+    for (const regionId of selected) {
+      if (["metadata:title", "metadata:summary", "metadata:tags"].includes(regionId)) continue;
+      const encoded = descriptors.get(regionId);
+      const current = encoded ? JSON.parse(encoded) as StoredArtifactRegionDescriptor : null;
+      const historical = next.descriptors.get(regionId);
+      if (!current || !historical || !next.regionValues.has(regionId) ||
+        JSON.stringify(current) !== JSON.stringify(historical))
+        throw new Error(`ARTIFACT_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`);
+    }
+  };
+  assertDescriptors();
+  for (const regionId of selected) {
+    const descriptor = next.descriptors.get(regionId);
+    claims.push({ regionId, overlapDomains: [descriptor?.overlapDomain ?? regionId] });
+  }
+  return {
+    regions: claims,
+    apply: () => {
+      // A claim may have waited. Validate all paths again before the first write.
+      assertDescriptors();
+      for (const regionId of selected) {
+        if (regionId === "metadata:title") metadata.set("title", value.title);
+        else if (regionId === "metadata:summary") metadata.set("summary", value.summary ?? "");
+        else if (regionId === "metadata:tags") metadata.set("tags", [...value.tags]);
+        else regions.set(regionId, next.regionValues.get(regionId)!);
+      }
+    },
+  };
 }

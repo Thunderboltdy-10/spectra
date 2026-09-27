@@ -1018,7 +1018,7 @@ export async function executeOperation(
     const nativeFormat = (
       artifact.nativeFormat ?? localNative?.nativeFormat
     )?.toLowerCase();
-    const officeKind = localNative ? linkedOfficeKind(nativeFormat) : null;
+    const officeKind = linkedOfficeKind(nativeFormat);
     let academicBefore: unknown;
     let academicDesired: unknown;
     const resolveAcademic = (current: unknown) => {
@@ -1038,16 +1038,15 @@ export async function executeOperation(
       onConflictResolved: context.onRegionConflictResolved,
       collaborationClientId: context.collaborationClientId,
       beforeCommit: officeKind
-        ? async ({ desired, changedRegionIds }) => {
-            if (!changedRegionIds.some(isNativeContentRegion)) return;
-            const promotion = await promoteNativeAiContent({
+        ? async (commit) => {
+            if (!commit.changedRegionIds.some(isNativeContentRegion)) return;
+            return promoteNativeAiContent({
               workId: input.artifactId,
               blueprintKey: artifact.blueprintKey,
               nativeFormat: nativeFormat!,
-              content: desired.content,
+              commit,
+              aiOperation: { runId, executionId: context.executionId, operationId },
             });
-            if (promotion.projectionContent !== undefined)
-              desired.content = promotion.projectionContent;
           }
         : undefined,
       resolveDesired: (current) => ({

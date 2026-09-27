@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
 function requireWriteRequestId(
@@ -15,6 +15,15 @@ function requireWriteRequestId(
 }
 
 const modules = import.meta.glob("./**/*.ts");
+
+type HumanQueueArgs = { workId: Id<"spectraArtifacts">; payloadRef: string; contentHash: string; baseRevision: string;
+  fidelityMap: { entries: unknown[] }; regionIds: string[]; partNames: string[] };
+/** Human native writes are admitted only through the signed gateway mutation. */
+async function queueHumanMaterialization(t: { mutation: ReturnType<typeof convexTest>["mutation"] }, accountId: Id<"accounts">, queue: HumanQueueArgs) {
+  return await t.mutation(internal.nativeMaterialization.commitHuman, {
+    accountId, artifactId: queue.workId, candidate: { destination: "bridge", queue },
+  }) as { requestId: Id<"bridgeWriteRequests"> | "protected-original"; state: string };
+}
 const credential = "bridge-chaos-credential-000000000001";
 const identity = {
   subject: "clerk_bridge_chaos",
@@ -164,7 +173,7 @@ describe("Bridge revocation chaos", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedRevocation(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueHumanMaterialization(t, fixture.accountId, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -211,7 +220,7 @@ describe("Bridge revocation chaos", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedRevocation(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueHumanMaterialization(t, fixture.accountId, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,

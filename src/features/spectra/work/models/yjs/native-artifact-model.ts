@@ -548,87 +548,64 @@ export class NativeArtifactYjsModel {
     if (selected.length === 0) return { applied: true as const, claims: [] };
     if (selected.includes("artifact:structure"))
       return this.replaceSnapshot(value, controller);
-
-    const historicalRegions = new Map(
-      this.adapter
-        .deriveSemanticRegions(this.transport.document, value.content)
-        .map((region) => [region.regionId, region]),
-    );
-    const contentRegionIds = selected.filter(
-      (regionId) => !regionId.startsWith("metadata:"),
-    );
-    const currentContent = this.adapter.project(this.transport.document);
-    const currentRegions = new Map(
-      this.adapter
-        .deriveSemanticRegions(this.transport.document, currentContent)
-        .map((region) => [region.regionId, region]),
-    );
-    const claims = selected.map((regionId) => {
-      if (regionId.startsWith("metadata:"))
-        return { regionId, overlapDomains: [regionId] };
-      const currentRegion = currentRegions.get(regionId);
-      const historicalRegion = historicalRegions.get(regionId);
-      if (
-        !currentRegion ||
-        !historicalRegion ||
-        !descriptorMatches(currentRegion, historicalRegion)
-      )
-        throw new Error(`NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`);
-      return {
-        regionId,
-        overlapDomains: [currentRegion.overlapDomain],
-      };
-    });
-
-    const result = await controller.editMany(claims, () => {
-      const liveContent = this.adapter.project(this.transport.document);
-      const mergedContent = structuredClone(liveContent);
-      const liveRegions = new Map(
-        this.adapter
-          .deriveSemanticRegions(this.transport.document, liveContent)
-          .map((region) => [region.regionId, region]),
-      );
-      for (const regionId of contentRegionIds) {
-        const liveRegion = liveRegions.get(regionId);
-        const historicalRegion = historicalRegions.get(regionId);
-        if (
-          !liveRegion ||
-          !historicalRegion ||
-          !descriptorMatches(liveRegion, historicalRegion)
-        )
-          throw new Error(
-            `NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`,
-          );
-        const historicalValue = valueAtPath(
-          value.content,
-          historicalRegion.path,
-        );
-        if (historicalValue === undefined)
-          throw new Error(
-            `NATIVE_PARTIAL_RESTORE_VALUE_MISSING: ${regionId}`,
-          );
-        replaceAtPath(
-          mergedContent,
-          liveRegion.path,
-          structuredClone(historicalValue),
-        );
-      }
-      if (contentRegionIds.length)
-        this.adapter.applyProjection(
-          this.transport.document,
-          mergedContent,
-          workYjsOrigins(this.actor).localHuman,
-        );
-      if (selected.includes("metadata:title"))
-        this.liveMeta.set("title", value.title);
-      if (selected.includes("metadata:summary"))
-        this.liveMeta.set("summary", value.summary ?? "");
-      if (selected.includes("metadata:tags"))
-        this.liveMeta.set("tags", [...value.tags]);
-    });
+    const plan = planNativeArtifactYjsRestore(this.transport.document, this.typeKey, value, this.actor, selected);
+    const result = await controller.editMany(plan.regions, plan.apply);
     if (result.applied) this.rebuildSnapshotImmediately();
     return result;
   }
+}
+
+/** A prepared selection has no Yjs effect until apply runs. The server uses
+ * the same region identity checks when preparing an admitted history restore. */
+export function planNativeArtifactYjsRestore(
+  document: Y.Doc,
+  typeKey: ArtifactTypeKey,
+  value: ArtifactLiveValue,
+  actor: WorkActorIdentity,
+  regionIds?: readonly string[],
+): ArtifactYjsMutationPlan {
+  if (!regionIds || regionIds.includes("artifact:structure"))
+    return planNativeArtifactYjsMutation(document, typeKey, value, actor);
+  const selected = [...new Set(regionIds)];
+  const metadataRegions = new Set(["metadata:title", "metadata:summary", "metadata:tags"]);
+  const contentRegions = selected.filter(regionId => !metadataRegions.has(regionId));
+  const adapter = workYjsAdapter(typeKey);
+  const historicalRegions = new Map(adapter.deriveSemanticRegions(document, value.content)
+    .map(region => [region.regionId, region]));
+  const currentRegions = new Map(adapter.deriveSemanticRegions(document, adapter.project(document))
+    .map(region => [region.regionId, region]));
+  const claims = selected.map(regionId => {
+    if (metadataRegions.has(regionId)) return { regionId, overlapDomains: [regionId] };
+    const current = currentRegions.get(regionId);
+    const historical = historicalRegions.get(regionId);
+    if (!current || !historical || !descriptorMatches(current, historical))
+      throw new Error(`NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`);
+    return { regionId, overlapDomains: [current.overlapDomain] };
+  });
+  return {
+    regions: claims,
+    apply: () => {
+      const live = adapter.project(document);
+      let merged = structuredClone(live);
+      const liveRegions = new Map(adapter.deriveSemanticRegions(document, live)
+        .map(region => [region.regionId, region]));
+      for (const regionId of contentRegions) {
+        const current = liveRegions.get(regionId);
+        const historical = historicalRegions.get(regionId);
+        if (!current || !historical || !descriptorMatches(current, historical))
+          throw new Error(`NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`);
+        const historicalValue = valueAtPath(value.content, historical.path);
+        if (historicalValue === undefined)
+          throw new Error(`NATIVE_PARTIAL_RESTORE_VALUE_MISSING: ${regionId}`);
+        merged = replaceAtPath(merged, current.path, structuredClone(historicalValue));
+      }
+      if (contentRegions.length) adapter.applyProjection(document, merged, workYjsOrigins(actor).localHuman);
+      const meta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+      if (selected.includes("metadata:title")) meta.set("title", value.title);
+      if (selected.includes("metadata:summary")) meta.set("summary", value.summary ?? "");
+      if (selected.includes("metadata:tags")) meta.set("tags", [...value.tags]);
+    },
+  };
 }
 
 export function readNativeArtifactYjsDocument(

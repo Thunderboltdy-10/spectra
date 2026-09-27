@@ -16,6 +16,7 @@ import {
   docxProjectionSchema,
   docxRichInlineSchema,
   docxSemanticDeltaSchema,
+  docxInsertTableOperationSchema,
   type DocxOperation,
   type DocxRunFormat,
   type DocxParagraphFormat,
@@ -644,7 +645,19 @@ export function docxOperationsBetween(
     const old = previous.get(block.id);
     previous.delete(block.id);
     if (!old) {
-      if (block.type === "table") throw new Error("DOCX_UNSUPPORTED_EDIT: Adding a new table to a mounted Word file is unavailable in strict native mode.");
+      if (block.type === "table") {
+        if (block.attrs?.unsupportedTableStructure)
+          throw new Error("DOCX_UNSUPPORTED_EDIT: Merged, nested or irregular table structures cannot be inserted into Word.");
+        operations.push(docxInsertTableOperationSchema.parse({
+          kind: "insert-table",
+          regionId: block.id,
+          afterRegionId: index ? after.blocks[index - 1]!.id : null,
+          rows: block.rows ?? rowsFor(block),
+          ...(block.richRows ? { richRows: block.richRows } : {}),
+          ...(block.attrs?.headerRow !== undefined ? { headerRow: block.attrs.headerRow } : {}),
+        }));
+        return;
+      }
       operations.push({
         kind: "insert-paragraph",
         regionId: block.id,
@@ -664,6 +677,11 @@ export function docxOperationsBetween(
       return;
     }
     if (block.type === "table" && old.type === "table") {
+      // Lens reads always state headerRow. An unstated base uses the canonical
+      // editor default (first row is a header), so a Yjs round trip that
+      // merely makes that default explicit is not a structural edit.
+      if (block.attrs?.headerRow !== undefined && block.attrs.headerRow !== (old.attrs?.headerRow ?? true))
+        throw new Error("DOCX_UNSUPPORTED_EDIT: Changing an existing Word table's header structure is unavailable.");
       const oldRows = rowsFor(old);
       const newRows = rowsFor(block);
       if (newRows.length > oldRows.length)

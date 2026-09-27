@@ -113,7 +113,7 @@ export { PRESENTATION_STRICT_REASONS };
 
 /* ------------------------------------------------------------ vocabularies */
 
-/** The transitions Spectra models. Only Fade has a plausible OOXML mapping. */
+/** Transitions with native mappings; Push uses the editor's leftward direction. */
 export const PRESENTATION_TRANSITIONS: readonly CommandControlOption[] = [
   { value: "none", label: "None" },
   { value: "fade", label: "Fade" },
@@ -792,9 +792,9 @@ export function presentationCommandBindings(
       requires: "edit",
       disabled: state.mediaBusy,
       hint: state.mediaBusy ? "Still uploading media" : "Place a picture on this slide",
-      touches: ["media", "images"],
+      touches: ["images"],
       manifestOps: ["create_object"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.newMedia },
+      strictNative: { available: true },
       onSelect: () => handlers.insert.image(),
     },
     {
@@ -1300,11 +1300,12 @@ export function presentationCommandBindings(
       group: "Transitions",
       priority: "essential",
       requires: "edit",
+      disabled: state.transitionPreserved,
       hint: state.transitionPreserved
         ? "This slide carries a PowerPoint transition that Spectra preserves rather than rewrites"
         : "How this slide arrives",
       touches: ["transitions"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.transition },
+      strictNative: { available: !state.transitionPreserved, reason: PRESENTATION_STRICT_REASONS.transition },
       control: {
         kind: "select",
         options: PRESENTATION_TRANSITIONS,
@@ -1324,13 +1325,13 @@ export function presentationCommandBindings(
       group: "Transitions",
       priority: "secondary",
       requires: "edit",
-      disabled: state.transitionKind === "none",
+      disabled: state.transitionKind === "none" || state.transitionPreserved,
       hint:
         state.transitionKind === "none"
           ? "Choose a transition first"
           : "Milliseconds",
       touches: ["transitions"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.transition },
+      strictNative: { available: !state.transitionPreserved, reason: PRESENTATION_STRICT_REASONS.transition },
       control: {
         kind: "numeric",
         value: state.transitionDurationMs,
@@ -1351,9 +1352,10 @@ export function presentationCommandBindings(
       group: "Transitions",
       priority: "secondary",
       requires: "edit",
+      disabled: state.transitionPreserved,
       hint: "Gives every slide this slide's transition and length",
       touches: ["transitions"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.transition },
+      strictNative: { available: !state.transitionPreserved, reason: PRESENTATION_STRICT_REASONS.transition },
       onSelect: () => handlers.transition.applyToAll(),
     },
     {
@@ -2000,10 +2002,10 @@ export function presentationCommandBindings(
       group: "Image",
       priority: "secondary",
       requires: "edit",
-      disabled: !isImage || state.mediaBusy,
+      disabled: selection.objectType !== "image" || state.mediaBusy,
       hint: "Keeps this object's position, size and alt text",
-      touches: ["media", "images"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.newMedia },
+      touches: ["images"],
+      strictNative: { available: true },
       onSelect: () => handlers.object.replaceImage(),
     },
 
@@ -2094,7 +2096,7 @@ export function presentationCommandBindings(
       disabled: true,
       hint: state.transitionPreserved
         ? "PowerPoint saved this slide's transition. Spectra keeps its XML exactly, including the effect and the timing, and does not rewrite it."
-        : "This slide has no PowerPoint transition to preserve.",
+        : state.transitionKind !== "none" ? "This transition has an editable native PowerPoint equivalent. Advance, sound and extension settings are preserved." : "This slide has no PowerPoint transition to preserve.",
       touches: ["transitions"],
       undo: "none(explain)",
       onSelect: noop,

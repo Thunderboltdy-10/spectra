@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Id } from "./_generated/dataModel";
+import type { NativeMaterializationCandidate } from "../src/features/spectra/lenses/native-materialization-options";
 import { MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS } from "../shared/collaboration-bridge";
 import { isDurableContentRef, MAX_BRIDGE_ENVELOPE_BYTES } from "../shared/durable-content";
 import {
@@ -15,6 +16,7 @@ import {
 } from "../shared/collaboration-durable-limits";
 
 const operation = v.union(
+  v.literal("materializeNative"),
   v.literal("authorize"),
   v.literal("policy"),
   v.literal("load"),
@@ -23,6 +25,7 @@ const operation = v.union(
   v.literal("append"),
   v.literal("nativeReconcile"),
   v.literal("commitAiNative"),
+  v.literal("historyRestore"),
   v.literal("checkpoint"),
   v.literal("snapshot"),
   v.literal("storeDurablePayload"),
@@ -168,6 +171,15 @@ export const exchange = action({
       "artifact_id",
     ) as Id<"spectraArtifacts">;
     const partitionKey = text(payload.partitionKey, "partition_key", 180);
+
+    if (args.operation === "materializeNative") {
+      if (partitionKey !== "root") throw new Error("NATIVE_MATERIALIZATION_PARTITION_INVALID");
+      return ctx.runMutation(internal.nativeMaterialization.commitHuman, {
+        accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        artifactId,
+        candidate: payload.candidate as Exclude<NativeMaterializationCandidate, { destination: "none" }>,
+      });
+    }
 
     if (["load", "snapshot", "issueDurableUpload", "storeDurablePayload"].includes(args.operation)) {
       const authorization = await ctx.runQuery(internal.collaborationGatewayStore.authorize, {
@@ -445,7 +457,7 @@ export const exchange = action({
       });
     }
 
-    if (args.operation === "nativeReconcile") {
+    if (args.operation === "nativeReconcile" || args.operation === "historyRestore") {
       const append = payload.append;
       if (!append || typeof append !== "object" || Array.isArray(append))
         throw new Error("NATIVE_RECONCILIATION_ENVELOPE_INVALID");
@@ -456,6 +468,15 @@ export const exchange = action({
       const encoded = typeof envelope.update === "string" ? envelope.update : "";
       if (encoded.length > 1_400_000) throw new Error("COLLABORATION_BRIDGE_UPDATE_INVALID");
       const update = Buffer.from(encoded, "base64");
+      if (args.operation === "historyRestore") {
+        return ctx.runMutation(makeFunctionReference<"mutation">("artifactRestore:commit"), {
+          request: payload.request, expectedHeadHash: payload.expectedHeadHash,
+          append: { ...envelope, update: update.buffer.slice(update.byteOffset, update.byteOffset + update.byteLength) },
+          beforeProjectionJson: payload.beforeProjectionJson, beforeProjectionHash: payload.beforeProjectionHash,
+          ...(payload.nativeSource ? { nativeSource: payload.nativeSource } : {}),
+          ...(payload.nativeCandidate ? { nativeCandidate: payload.nativeCandidate } : {}),
+        });
+      }
       // The native mutation's complete validator checks the nested append and
       // operation arguments. This dynamic reference also avoids an API type
       // cycle between the shared appender and its transactional native wrapper.

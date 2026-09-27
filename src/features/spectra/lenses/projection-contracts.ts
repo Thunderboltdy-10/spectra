@@ -236,6 +236,22 @@ export type DocxRichInline = z.infer<typeof docxRichInlineSchema>;
 export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 
+/** Ordinary Word tables only; keep allocation and topology bounded at ingress. */
+export const docxInsertTableOperationSchema = z.object({
+  kind: z.literal("insert-table"),
+  regionId: z.string().min(1).max(300).optional(),
+  afterRegionId: z.string().nullable().optional(),
+  rows: z.array(z.array(z.string().max(250_000)).min(1).max(63)).min(1).max(1_000),
+  richRows: z.array(z.array(z.array(docxRichInlineSchema).max(10_000)).min(1).max(63)).min(1).max(1_000).optional(),
+  headerRow: z.boolean().optional(),
+}).strict().superRefine((value, context) => {
+  const columns = value.rows[0]?.length ?? 0;
+  if (value.rows.some((row) => row.length !== columns) || value.rows.length * columns > 10_000)
+    context.addIssue({ code: "custom", message: "A new Word table must be rectangular and contain at most 10,000 cells." });
+  if (value.richRows && (value.richRows.length !== value.rows.length || value.richRows.some((row) => row.length !== columns)))
+    context.addIssue({ code: "custom", message: "Rich Word table cells must match the requested row and column dimensions." });
+});
+
 export const docxOperationSchema = z.discriminatedUnion("kind", [
   ...wordNoteOperationSchemas,
   ...wordReviewOperationSchemas,
@@ -243,6 +259,7 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  docxInsertTableOperationSchema,
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({
     kind: z.literal("delete-image"),
@@ -539,6 +556,14 @@ export const presentationObjectProjectionSchema = z
       .optional(),
   })
   .passthrough();
+export const pptxTransitionSchema = z.object({
+  kind: z.enum(["none", "fade", "push", "dissolve"]),
+  durationMs: z.number().int().min(0).max(4_294_967_295).optional(),
+}).strict().refine((transition) => transition.kind !== "none" || transition.durationMs === undefined, {
+  message: "A transition duration requires an effect.",
+});
+export type PptxTransition = z.infer<typeof pptxTransitionSchema>;
+
 export const pptxSlideProjectionSchema = z
   .object({
     id: z.string(),
@@ -548,6 +573,7 @@ export const pptxSlideProjectionSchema = z
     objects: z.array(presentationObjectProjectionSchema),
     layoutPartName: z.string().optional(),
     hasTransition: z.boolean(),
+    transition: pptxTransitionSchema.optional(),
     hasTiming: z.boolean(),
     hidden: z.boolean().optional(),
     speakerNotes: z.string(),
@@ -577,7 +603,18 @@ export const pptxProjectionSchema = z
 export type PptxSlideProjection = z.infer<typeof pptxSlideProjectionSchema>;
 export type PptxProjection = z.infer<typeof pptxProjectionSchema>;
 
+export const pptxImageAssetSchema = z.object({
+  assetId: z.string().min(1).max(300),
+  mediaType: z.enum(["image/png", "image/jpeg"]),
+  sha256: semanticDigestSchema,
+  name: z.string().max(500).optional(),
+}).strict();
+export type PptxImageAsset = z.infer<typeof pptxImageAssetSchema>;
+
 export const pptxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("insert-image"), slideId: z.string(), objectId: z.string().min(1).max(500), image: pptxImageAssetSchema, x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive(), rotation: z.number(), altText: z.string().max(500).optional(), readingOrder: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("replace-image"), slideId: z.string(), shapeId: z.string(), image: pptxImageAssetSchema }).strict(),
+  z.object({ kind: z.literal("set-transition"), slideId: z.string(), transition: pptxTransitionSchema }).strict(),
   z.object({ kind: z.literal("set-title"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),
   z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string(), hyperlink: z.union([

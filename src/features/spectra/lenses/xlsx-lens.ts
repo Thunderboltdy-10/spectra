@@ -401,6 +401,7 @@ export async function xlsxSemanticDigest(
       hidden: sheet.hidden,
       showGridlines: sheet.showGridlines,
       showHeadings: sheet.showHeadings,
+      tabColor: sheet.tabColor,
       tables: sheet.tables,
       charts: sheet.charts,
       validations: sheet.validations,

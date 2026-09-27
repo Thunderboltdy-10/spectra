@@ -42,6 +42,13 @@ Updated 2026-09-26. Product baseline d9aabfb5. Integration branch codex/launch-i
 
 ## Cross-system decisions
 
+## September 27 reviewed closeout integrations
+
+- PERFORMANCE `6ce896a5` and `2c5f5075` integrated as `21391d4b` and `cf30b32c`. Coordinator inspected all retention/open/access helpers and shell callers. Saved guarded JSON independently confirms 56 passing cases across nine files. The sole merge conflict retained the integration's stronger native-binding reference-identity assertion. Closed bodies are released, selected reads are fenced, fresh permission denials propagate, and already mounted work can be refocused without another body fetch. A newly identified residual retains completed access decisions while an unrelated read remains pending; PERFORMANCE owns a narrow follow-up. Browser heap and live latency remain deferred final evidence.
+- ENGINE candidates `caf89a98`, `7aed8218`, `1fa29c85`, `0ef96b2e`, `db0cdddc`, `9f4cd432`, `44a63f7f`, `abbe4f2e`, `ff381b1f`, `e2a1ffa9` integrated through `1125bbf7`. Coordinator reviewed the no-replay paths, full normalized comparison, receipt reporting and prepared-effect call conditions; AI-REVIEW independently approved the bounded runtime unit. SECURITY's corresponding preparation files were already byte-identical to `f4a92d59` in integration, so they were not reapplied. Saved logs establish 132 passing cases across the initial run and fixture corrections, not a same-head whole-route pass. Acknowledged edits cannot reopen or replay over intervening human work; replies and create-only plans skip existing-artifact preparation. Sequential final-effect verification, compact discovery, clarification and compaction remain separately owned closeout units.
+
+## Cross-system decisions (continued)
+
 Native reconciliation uses the existing durable log/history/projection machinery, exact canonical and room-sequence CAS, immutable native ancestry and idempotent receipt. A stale retry must load and actually merge newer state including deletes; merely replacing the expected hash is invalid. Preserve real overlap conflicts. Direct native commits must be learned by open rooms before stale projection/compaction can overwrite them. No second storage engine. Gateway liveness should not inherently block solo native work.
 
 Artifact full-wipe/archive approval binds persisted run/attempt/operation, input digest, authoritative base identity and result digest. Approval is rechecked at first-effect sinks in the same admission/commit transaction; UI/preflight acknowledgement grants no authority. Real authored shapes count as content; removing all sheet values/formulas requires approval despite residual styling/charts. New blank artifacts and substantive replacements remain direct.

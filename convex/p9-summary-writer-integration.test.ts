@@ -200,6 +200,19 @@ describe("P9.I3 summary-writer integration", () => {
         createdAt,
         updatedAt: createdAt,
       });
+      // Rebase delivers provider text, so the recipient needs a current
+      // verified provider identity, exactly as production sync requires.
+      await ctx.db.insert("externalIdentityMappings", {
+        integrationId,
+        schoolId: actor.schoolId,
+        accountId: actor.accountId,
+        providerUserId: "provider-p9",
+        verifiedEmailHash: "p9-hash",
+        status: "verified",
+        matchCount: 1,
+        createdAt,
+        updatedAt: createdAt,
+      });
       const syncRunId = await ctx.db.insert("externalSyncRuns", {
         integrationId,
         schoolId: actor.schoolId,

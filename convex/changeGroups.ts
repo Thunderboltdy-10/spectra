@@ -592,6 +592,9 @@ export async function commitDirectHumanChange(
     };
     regionIds: string[];
     summary: string;
+    /** A trusted provider effect records import history in the same
+     * transaction; it is never selectable by a public caller. */
+    origin?: { source: "import"; provenance: Record<string, unknown> };
   },
 ) {
   const artifact = await ctx.db.get(input.artifactId);
@@ -612,7 +615,7 @@ export async function commitDirectHumanChange(
   const changeGroupId = await ctx.db.insert("changeGroups", {
     artifactId: artifact._id,
     schoolId: artifact.schoolId,
-    source: "human",
+    source: input.origin?.source ?? "human",
     actorAccountId: input.actorAccountId,
     operationIds: [],
     regionIds: [...new Set(input.regionIds)].slice(0, 200),
@@ -632,8 +635,9 @@ export async function commitDirectHumanChange(
     lastActivityAt: now,
   });
   return commitChangeGroup(ctx, changeGroupId, {
-    source: "manual",
+    source: input.origin?.source ?? "manual",
     summary: input.summary,
+    ...(input.origin ? { provenance: input.origin.provenance } : {}),
   });
 }
 

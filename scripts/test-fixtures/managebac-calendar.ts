@@ -75,6 +75,11 @@ export async function calendarFixture(modules: Record<string, () => Promise<unkn
       capabilityIds: [capabilityId], counts: { fetched: 0, created: 0, updated: 0, unchanged: 0, tombstoned: 0, projected: 0, skipped: 0, quarantined: 0, conflicts: 0, errors: 0 },
       attemptCount: 1, nextAttemptAt: now, startedAt: now, createdAt: now, updatedAt: now,
     });
+    // Provider facts reach a planner only for a currently verified identity.
+    await ctx.db.insert("externalIdentityMappings", {
+      integrationId, schoolId, accountId, providerUserId: "provider-student", verifiedEmailHash: "fixture-hash",
+      status: "verified", matchCount: 1, createdAt: now, updatedAt: now,
+    });
     const selectionId = await ctx.db.insert("managebacClassSelections", {
       integrationId, schoolId, accountId, providerClassId: "class-1", providerRecordKey: "class:1",
       academicPeriodKey: "2026-27", selected: true, retention: "keep_in_spectra", selectionRevision: 1,
@@ -105,6 +110,22 @@ export async function calendarFixture(modules: Record<string, () => Promise<unkn
       records, pageNumber: sequence, timestamp, nonce, payloadDigest, signature,
     });
   };
+  /** Signed full reconciliation; omitted provider keys are tombstoned. */
+  const complete = async (seenProviderKeys: string[] = ["assignment:1"]) => {
+    const seenSourceIdentityKeys = await t.run(async ctx => (await ctx.db.query("externalRecords").collect())
+      .filter(row => seenProviderKeys.includes(row.providerRecordKey) && row.sourceIdentityKey)
+      .map(row => row.sourceIdentityKey!));
+    const payload = { seenProviderKeys, seenSourceIdentityKeys, reconciledCapabilityIds: [seed.capabilityId] };
+    const timestamp = Date.now();
+    const nonce = `calendar-fixture-${++sequence}`;
+    const payloadDigest = createHash("sha256").update(canonicalJson(payload)).digest("base64url");
+    const signature = createHmac("sha256", bridgeKey).update([
+      "sync-complete", identity.subject, seed.integrationId, seed.syncRunId, timestamp, nonce, payloadDigest,
+    ].join("|")).digest("base64url");
+    return user.mutation(api.managebac.completeSync, {
+      integrationId: seed.integrationId, syncRunId: seed.syncRunId, ...payload, timestamp, nonce, payloadDigest, signature,
+    });
+  };
   const items = () => t.run(async ctx => {
     const rows = await ctx.db.query("calendarItems").withIndex("by_account_kind", q => q.eq("ownerAccountId", seed.accountId)).collect();
     const official = rows.find(row => row.kind === "official_deadline")!;
@@ -113,5 +134,5 @@ export async function calendarFixture(modules: Record<string, () => Promise<unkn
   });
   const plan = () => t.run(ctx => ctx.db.query("spectraArtifacts")
     .withIndex("by_account_blueprint", q => q.eq("ownerAccountId", seed.accountId).eq("blueprintKey", "planner_task")).unique());
-  return { t, user, seed, sync, items, editTask, editPlan, plan };
+  return { t, user, seed, sync, complete, items, editTask, editPlan, plan };
 }

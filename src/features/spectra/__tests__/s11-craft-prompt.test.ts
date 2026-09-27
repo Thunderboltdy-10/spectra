@@ -137,7 +137,7 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     expect(packets[0]!.tool_choice).toBe("auto");
     expect(packets[1]!.messages.slice(0, packets[0]!.messages.length)).toEqual(packets[0]!.messages);
     const observation = packets[1]!.messages.find((message) => message.role === "tool");
-    expect(JSON.parse(String(observation?.content))).toMatchObject({ ok: true, guideId: guide.id, instructions: guide.instructions });
+    expect(JSON.parse(String(observation?.content))).toMatchObject({ status: 0, guideId: guide.id, instructions: guide.instructions });
     expect(result.plan.operations).toHaveLength(1);
     expect(result.plan.operations[0]).toMatchObject({ type: "artifact.create", input: {
       blueprintKey: "document", content: { blocks: [expect.objectContaining({ text: body })] },

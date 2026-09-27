@@ -1,4 +1,5 @@
 import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { queueHumanNativeMaterialization, commitHumanCloudMaterialization } from "@/lib/native-materialization-server";
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
@@ -300,7 +301,7 @@ async function materializeDocxArtifactAttempt(
     return preparedNativeMaterialization(truth,
       local ? { destination: "bridge", queue: queueArgs() } : { destination: "cloud", cloud: cloudArgs },
       projectionContent, hash);
-  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", cloudArgs);
+  const saveCloud = () => commitHumanCloudMaterialization(cloudArgs);
   if (!local) {
     await saveCloud();
     return {
@@ -314,9 +315,7 @@ async function materializeDocxArtifactAttempt(
   }
   let queued: { requestId: string; state: string };
   try {
-    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
-      "replicas:queueMaterialization", queueArgs(),
-    );
+    queued = await queueHumanNativeMaterialization(queueArgs());
   } catch (error) {
     if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
       return materializeDocxArtifactAttempt(workId, content, attempt + 1, options);
@@ -710,22 +709,7 @@ export async function POST(request: Request) {
         intent: { format: "docx", projection: externalOpened.projection, operations: docxOperationsBetween(externalOpened.projection, resolved.projection) },
       });
       const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
-      const queued = await convexMutation<
-        {
-          workId: Id<"spectraArtifacts">;
-          payloadRef: string;
-          contentHash: string;
-          baseRevision: string;
-          fidelityMap: unknown;
-          regionIds: string[];
-          partNames: string[];
-          localReplicaId?: Id<"workReplicas">;
-          projectionContent?: unknown;
-          projectionContentHash?: string;
-          projectionTextIndex?: string;
-        },
-        { requestId: string; state: string }
-      >("replicas:queueMaterialization", {
+      const queued = await queueHumanNativeMaterialization({
         workId,
         payloadRef: stored.payloadRef,
         contentHash: hash,

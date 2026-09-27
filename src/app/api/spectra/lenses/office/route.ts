@@ -1,4 +1,5 @@
 import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { queueHumanNativeMaterialization, commitHumanCloudMaterialization } from "@/lib/native-materialization-server";
 import { pptxMediaWriteOptions } from "@/features/spectra/lenses/pptx-media-server";
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { NextResponse } from "next/server";
@@ -469,7 +470,7 @@ async function materializeOfficeArtifactAttempt(
     return preparedNativeMaterialization(materializationTruth,
       local ? { destination: "bridge", queue: queueArgs() } : { destination: "cloud", cloud: cloudArgs },
       projectionContent, hash);
-  const saveCloud = () => convexMutation("replicas:commitCloudMaterialization", cloudArgs);
+  const saveCloud = () => commitHumanCloudMaterialization(cloudArgs);
   if (!local) {
     await saveCloud();
     return {
@@ -483,9 +484,7 @@ async function materializeOfficeArtifactAttempt(
   }
   let queued: { requestId: string; state: string };
   try {
-    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
-      "replicas:queueMaterialization", queueArgs(),
-    );
+    queued = await queueHumanNativeMaterialization(queueArgs());
   } catch (error) {
     if (
       attempt === 0 &&
@@ -876,7 +875,7 @@ export async function POST(request: Request) {
         hash,
         local.truth.nativeFormat,
       );
-      const queued = await convexMutation("replicas:queueMaterialization", {
+      const queued = await queueHumanNativeMaterialization({
         workId,
         payloadRef: stored.payloadRef,
         contentHash: hash,

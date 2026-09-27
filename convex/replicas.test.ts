@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash, createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -10,6 +10,28 @@ import {
   sheetCellEntries,
 } from "../shared/sheet-cells";
 import { BRIDGE_CLAIM_REDRIVE_MS, BRIDGE_WRITE_EXPIRES_MS } from "../shared/replica-truth";
+import type { QueueMaterializationArgs, CloudMaterializationArgs, queueMaterializationInTransaction,
+  commitCloudMaterializationInTransaction } from "./replicaMaterialization";
+
+const nativeBridgeKey = "native-materialization-test-key-0000000001";
+beforeEach(() => vi.stubEnv("SPECTRA_COLLAB_BRIDGE_KEY", nativeBridgeKey));
+afterEach(() => vi.unstubAllEnvs());
+type NativeTestClient = Pick<ReturnType<typeof convexTest>, "query" | "action">;
+async function signedNative(client: NativeTestClient, candidate:
+  { destination: "bridge"; queue: QueueMaterializationArgs } | { destination: "cloud"; cloud: CloudMaterializationArgs }) {
+  const workId = candidate.destination === "bridge" ? candidate.queue.workId : candidate.cloud.workId;
+  const { accountId } = await client.query(api.nativeMaterialization.head, { workId });
+  const operation = "materializeNative" as const;
+  const payloadJson = JSON.stringify({ artifactId: workId, accountId, partitionKey: "root", candidate });
+  const timestamp = Date.now(), nonce = "native-materialization-fixture-nonce";
+  const digest = createHash("sha256").update(payloadJson).digest("base64url");
+  const signature = createHmac("sha256", nativeBridgeKey).update([operation,timestamp,nonce,digest].join("|")).digest("base64url");
+  return client.action(api.collaborationGatewayBridge.exchange, { operation, payloadJson, timestamp, nonce, signature });
+}
+const queueNative = (client: NativeTestClient, queue: QueueMaterializationArgs) =>
+  signedNative(client, { destination: "bridge", queue }) as Promise<Awaited<ReturnType<typeof queueMaterializationInTransaction>>>;
+const cloudNative = (client: NativeTestClient, cloud: CloudMaterializationArgs) =>
+  signedNative(client, { destination: "cloud", cloud }) as Promise<Awaited<ReturnType<typeof commitCloudMaterializationInTransaction>>>;
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -26,7 +48,7 @@ describe("Bridge materialization receipt replay", () => {
   it("refreshes only the current authorized claim before the native write", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
-    const queued = await t.withIdentity(identity).mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(t.withIdentity(identity), {
       workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash,
       baseRevision: baseHash, fidelityMap: {}, regionIds: [], partNames: [],
     });
@@ -61,7 +83,7 @@ describe("Bridge materialization receipt replay", () => {
         projectionContent: { blocks: [{ id: "body", text: "older A" }] },
         projectionContentHash: nextHash, promotionMode: "immediate-projection" as const,
       };
-      const a = await asUser.mutation(api.replicas.queueMaterialization, input);
+      const a = await queueNative(asUser, input);
       if (state !== "pending") {
         const claimed = (await t.mutation(api.bridgeSync.claimWrite, { credential: bridgeCredential })).request;
         expect(claimed?.requestId).toBe(a.requestId);
@@ -73,7 +95,7 @@ describe("Bridge materialization receipt replay", () => {
       }
       const newer = { blocks: [{ id: "body", text: "newer B" }] };
       if (state === "verified") {
-        const b = await asUser.mutation(api.replicas.queueMaterialization, {
+        const b = await queueNative(asUser, {
           ...input, payloadRef: String(fixture.basePayloadId), contentHash: baseHash, baseRevision: nextHash,
           projectionContent: newer, projectionContentHash: "c".repeat(64),
         });
@@ -96,7 +118,7 @@ describe("Bridge materialization receipt replay", () => {
         request: await ctx.db.get(requireWriteRequestId(a.requestId)),
       }));
       const before = await snapshot();
-      const replay = await asUser.mutation(api.replicas.queueMaterialization, input);
+      const replay = await queueNative(asUser, input);
       expect(replay).toMatchObject({ requestId: a.requestId, state });
       expect(await snapshot()).toEqual(before);
       expect(before.work?.content).toEqual(newer);
@@ -298,20 +320,20 @@ describe("replica truth machine", () => {
       },
     };
     const before = await t.run(ctx => ctx.db.get(fixture.workId));
-    const first = await actor.mutation(api.replicas.commitCloudMaterialization, input);
-    expect(await actor.mutation(api.replicas.commitCloudMaterialization, input)).toEqual(first);
+    const first = await cloudNative(actor, input);
+    expect(await cloudNative(actor, input)).toEqual(first);
     expect(await t.run(ctx => ctx.db.get(fixture.cloudId))).toMatchObject({ revision: nextHash, payloadRef: String(fixture.nextPayloadId) });
     expect((await t.run(ctx => ctx.db.get(fixture.workId)))?.content).toEqual(before?.content);
     const newer = "d".repeat(64);
     await t.run(ctx => ctx.db.patch(fixture.cloudId, { revision: newer, contentHash: newer }));
-    expect(await actor.mutation(api.replicas.commitCloudMaterialization, input)).toEqual(first);
+    expect(await cloudNative(actor, input)).toEqual(first);
     expect((await t.run(ctx => ctx.db.get(fixture.cloudId)))?.revision).toBe(newer);
-    await expect(actor.mutation(api.replicas.commitCloudMaterialization, {
+    await expect(cloudNative(actor, {
       ...input, baseRevision: nextHash,
       nativeReceipt: { ...input.nativeReceipt, baseRevision: nextHash, basePayloadHash: nextHash, operationId: `native:${fixture.workId}:${nextHash}:${nextHash}` },
     })).rejects.toThrow("MATERIALIZATION_BASE_STALE");
     await t.run(ctx => ctx.db.patch(fixture.workId, { status: "deleted" }));
-    await expect(actor.mutation(api.replicas.commitCloudMaterialization, input)).rejects.toThrow();
+    await expect(cloudNative(actor, input)).rejects.toThrow();
   });
 
   it("activates and materializes a workbook beyond Convex's object-field limit", async () => {
@@ -361,9 +383,8 @@ describe("replica truth machine", () => {
     )?.sheets?.[0];
     expect(sheetCellEntries(activatedSheet?.cells)).toHaveLength(1_322);
 
-    const queued = await t
-      .withIdentity(identity)
-      .mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(t
+      .withIdentity(identity), {
         workId: fixture.workId,
         payloadRef: String(fixture.nextPayloadId),
         contentHash: nextHash,
@@ -400,14 +421,8 @@ describe("replica truth machine", () => {
       partNames: ["word/document.xml"],
     };
 
-    const first = await asUser.mutation(
-      api.replicas.queueMaterialization,
-      input,
-    );
-    const replay = await asUser.mutation(
-      api.replicas.queueMaterialization,
-      input,
-    );
+    const first = await queueNative(asUser, input);
+    const replay = await queueNative(asUser, input);
 
     expect(replay.requestId).toBe(first.requestId);
     const truth = await t.run(async (ctx) => ({
@@ -473,9 +488,7 @@ describe("replica truth machine", () => {
       });
     });
 
-    const queued = await t.withIdentity(identity).mutation(
-      api.replicas.queueMaterialization,
-      {
+    const queued = await queueNative(t.withIdentity(identity), {
         workId: fixture.workId,
         payloadRef: String(fixture.nextPayloadId),
         contentHash: nextHash,
@@ -484,8 +497,7 @@ describe("replica truth machine", () => {
         regionIds: ["body"],
         partNames: ["word/document.xml"],
         localReplicaId: staleLocalId,
-      },
-    );
+      });
     const request = await t.run(async (ctx) =>
       ctx.db.get(requireWriteRequestId(queued.requestId)),
     );
@@ -508,7 +520,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    await asUser.mutation(api.replicas.queueMaterialization, {
+    await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -533,7 +545,7 @@ describe("replica truth machine", () => {
       });
     });
     await expect(
-      asUser.mutation(api.replicas.queueMaterialization, {
+      queueNative(asUser, {
         workId: fixture.workId,
         payloadRef: String(thirdPayloadId),
         contentHash: thirdHash,
@@ -550,7 +562,7 @@ describe("replica truth machine", () => {
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const projection = { blocks: [{ id: "body", text: "Saved projection" }] };
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -1163,9 +1175,8 @@ describe("replica truth machine", () => {
       return { localId, payloadId, deviceId, mountId, collaboratorGrantId };
     });
 
-    const queued = await t
-      .withIdentity(collaboratorIdentity)
-      .mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(t
+      .withIdentity(collaboratorIdentity), {
         workId: fixture.workId,
         payloadRef: String(seeded.payloadId),
         contentHash: nextHash,
@@ -1177,7 +1188,7 @@ describe("replica truth machine", () => {
     expect(queued.state).toBe("pending");
 
     await expect(
-      t.withIdentity(collaboratorIdentity).mutation(api.replicas.queueMaterialization, {
+      queueNative(t.withIdentity(collaboratorIdentity), {
         workId: fixture.workId,
         payloadRef: String(seeded.payloadId),
         contentHash: nextHash,
@@ -1190,7 +1201,7 @@ describe("replica truth machine", () => {
     ).rejects.toThrow(/LOCAL_REPLICA_UNAVAILABLE/);
 
     await expect(
-      t.withIdentity(readerIdentity).mutation(api.replicas.queueMaterialization, {
+      queueNative(t.withIdentity(readerIdentity), {
         workId: fixture.workId,
         payloadRef: String(seeded.payloadId),
         contentHash: nextHash,
@@ -1787,7 +1798,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2157,7 +2168,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    await asUser.mutation(api.replicas.queueMaterialization, {
+    await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2217,7 +2228,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+    const first = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2262,7 +2273,7 @@ describe("replica truth machine", () => {
       });
       return { keepPayloadId };
     });
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(payloads.keepPayloadId),
       contentHash: keepHash,
@@ -2344,7 +2355,7 @@ describe("replica truth machine", () => {
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const seeded = await seedKeepSpectraConflict(t, fixture);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(seeded.keepPayloadId),
       contentHash: seeded.keepHash,
@@ -2376,7 +2387,7 @@ describe("replica truth machine", () => {
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const seeded = await seedKeepSpectraConflict(t, fixture);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(seeded.keepPayloadId),
       contentHash: seeded.keepHash,
@@ -2523,7 +2534,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2555,9 +2566,7 @@ describe("replica truth machine", () => {
     const projection = {
       blocks: [{ id: "body", text: "Spectra owns the accepted revision" }],
     };
-    const queued = await t.withIdentity(identity).mutation(
-      api.replicas.queueMaterialization,
-      {
+    const queued = await queueNative(t.withIdentity(identity), {
         workId: fixture.workId,
         payloadRef: String(fixture.nextPayloadId),
         contentHash: nextHash,
@@ -2568,8 +2577,7 @@ describe("replica truth machine", () => {
         projectionContent: projection,
         projectionContentHash: nextHash,
         promotionMode: "immediate-projection",
-      },
-    );
+      });
     const truth = await t.run(async (ctx) => ({
       work: await ctx.db.get(fixture.workId),
       request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
@@ -2608,7 +2616,7 @@ describe("replica truth machine", () => {
         verifiedAt: now,
       });
     });
-    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+    const first = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2631,7 +2639,7 @@ describe("replica truth machine", () => {
     const latestProjection = {
       blocks: [{ id: "body", text: "first edit plus second edit" }],
     };
-    const second = await asUser.mutation(api.replicas.queueMaterialization, {
+    const second = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(thirdPayloadId),
       contentHash: thirdHash,
@@ -2693,7 +2701,7 @@ describe("replica truth machine", () => {
     });
     const asUser = t.withIdentity(identity);
     const projection = { blocks: [{ id: "body", text: "P5V1-NATIVE-AI-2301" }] };
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2736,7 +2744,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2792,7 +2800,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2860,7 +2868,7 @@ describe("replica truth machine", () => {
         verifiedAt: Date.now(),
       });
     });
-    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+    const first = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,
@@ -2883,7 +2891,7 @@ describe("replica truth machine", () => {
       claimToken: firstClaim.request.claimToken,
     });
 
-    const second = await asUser.mutation(api.replicas.queueMaterialization, {
+    const second = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(thirdPayloadId),
       contentHash: thirdHash,
@@ -2938,7 +2946,7 @@ describe("replica truth machine", () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
-    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+    const queued = await queueNative(asUser, {
       workId: fixture.workId,
       payloadRef: String(fixture.nextPayloadId),
       contentHash: nextHash,

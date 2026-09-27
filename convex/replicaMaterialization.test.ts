@@ -226,6 +226,16 @@ async function invokeCloud(t: ReturnType<typeof convexTest>, f: Fixture) {
 }
 
 describe("Native materialization in the admitting mutation", () => {
+  it("refuses the unsigned public native effects without creating a request", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seedWork(t);
+    const before = await snapshot(t, f);
+    await expect(t.withIdentity(identity).mutation(api.replicas.queueMaterialization, queueArgs(f)))
+      .rejects.toThrow("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
+    await expect(t.withIdentity(identity).mutation(api.replicas.commitCloudMaterialization, cloudArgs(f)))
+      .rejects.toThrow("NATIVE_SIGNED_MATERIALIZATION_REQUIRED");
+    expect(await snapshot(t, f)).toEqual(before);
+  });
   it("queues a human durable restore without inventing AI identity or projecting canonical content", async () => {
     const t = convexTest(schema, modules);
     const f = await seedWork(t);

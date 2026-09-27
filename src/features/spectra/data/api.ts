@@ -827,6 +827,8 @@ export type SpectraTimetableReminderNotification = {
 export type SpectraArtifactEmbed =
   import("../../../../shared/artifact-embed").ArtifactEmbedReference & {
   effectiveInteraction?: "read" | "interact" | "edit";
+  /** Opaque current-host placement witness; never source authority. */
+  placementRefreshKey?: string;
   canConfigure?: boolean;
   canRequestAccess?: boolean;
   accessRequest?: { requestId: string; status: "pending"; createdAt: number };

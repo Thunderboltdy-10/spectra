@@ -4,12 +4,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
-import { makeFunctionReference, type FunctionArgs, type FunctionReturnType } from "convex/server";
+import { makeFunctionReference, type ApiFromModules, type FunctionArgs, type FunctionReturnType } from "convex/server";
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement, loadRoomPage, type loadHead, type recordProof } from "./artifactEmbedPlacement";
-import type { refresh } from "./artifactEmbedPlacementActions";
+import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement, loadRoomPage } from "./artifactEmbedPlacement";
 import { containsPinnedArtifactPlacement } from "../shared/artifact-embed-placement";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { releaseVersionIfUnpinned } from "./artifactSnapshots";
@@ -18,13 +17,17 @@ import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "placement-owner", email: "placement@example.test", emailVerified: true };
-const refreshRef = makeFunctionReference<"action", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<typeof refresh>>("artifactEmbedPlacementActions:refresh");
-const headRef = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<typeof loadHead>>("artifactEmbedPlacement:loadHead");
-const recordRef = makeFunctionReference<"mutation", { embedId: Id<"artifactEmbeds">; headHash: string }, FunctionReturnType<typeof recordProof>>("artifactEmbedPlacement:recordProof");
+type PlacementApi = ApiFromModules<{
+  placement: typeof import("./artifactEmbedPlacement");
+  actions: typeof import("./artifactEmbedPlacementActions");
+}>;
+const refreshRef = makeFunctionReference<"action", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<PlacementApi["actions"]["refresh"]>>("artifactEmbedPlacementActions:refresh");
+const headRef = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<PlacementApi["placement"]["loadHead"]>>("artifactEmbedPlacement:loadHead");
+const recordRef = makeFunctionReference<"mutation", { embedId: Id<"artifactEmbeds">; headHash: string }, FunctionReturnType<PlacementApi["placement"]["recordProof"]>>("artifactEmbedPlacement:recordProof");
 const buffer = (value: Uint8Array) => Uint8Array.from(value).buffer;
 const vectorHash = (document: Y.Doc) => createHash("sha256").update(Y.encodeStateVector(document)).digest("base64url");
 const pageHandler = (loadRoomPage as unknown as {
-  _handler: (ctx: QueryCtx, args: FunctionArgs<typeof loadRoomPage>) => Promise<FunctionReturnType<typeof loadRoomPage>>;
+  _handler: (ctx: QueryCtx, args: FunctionArgs<PlacementApi["placement"]["loadRoomPage"]>) => Promise<FunctionReturnType<PlacementApi["placement"]["loadRoomPage"]>>;
 })._handler;
 
 async function fixture(typeKey = "document") {

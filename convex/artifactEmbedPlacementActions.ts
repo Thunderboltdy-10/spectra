@@ -3,22 +3,24 @@
 import { createHash } from "node:crypto";
 import * as Y from "yjs";
 import { v } from "convex/values";
-import { makeFunctionReference, type FunctionReturnType } from "convex/server";
+import { makeFunctionReference, type ApiFromModules, type FunctionReturnType } from "convex/server";
 import { action, type ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import type { loadHead, loadRoomPage } from "./artifactEmbedPlacement";
-import type { getMeta } from "./collaborationDurablePayload";
 import { isDurableContentRef, MAX_DURABLE_PAYLOAD_BYTES } from "../shared/durable-content";
 import { containsPinnedArtifactPlacement } from "../shared/artifact-embed-placement";
 import { artifactProjection } from "../scripts/collaboration-artifact-projection.mjs";
 import { encodeDurableFrontier } from "../shared/collaboration-durable-frontier.mjs";
 
-const headQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<typeof loadHead>>("artifactEmbedPlacement:loadHead");
-const pageQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds">; headHash: string; afterSequence?: number }, FunctionReturnType<typeof loadRoomPage>>("artifactEmbedPlacement:loadRoomPage");
-const payloadQuery = makeFunctionReference<"query", { payloadRef: string; digest: string }, FunctionReturnType<typeof getMeta>>("collaborationDurablePayload:getMeta");
+type PlacementApi = ApiFromModules<{
+  placement: typeof import("./artifactEmbedPlacement");
+  payload: typeof import("./collaborationDurablePayload");
+}>;
+const headQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<PlacementApi["placement"]["loadHead"]>>("artifactEmbedPlacement:loadHead");
+const pageQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds">; headHash: string; afterSequence?: number }, FunctionReturnType<PlacementApi["placement"]["loadRoomPage"]>>("artifactEmbedPlacement:loadRoomPage");
+const payloadQuery = makeFunctionReference<"query", { payloadRef: string; digest: string }, FunctionReturnType<PlacementApi["payload"]["getMeta"]>>("collaborationDurablePayload:getMeta");
 const recordMutation = makeFunctionReference<"mutation", { embedId: Id<"artifactEmbeds">; headHash: string }, boolean>("artifactEmbedPlacement:recordProof");
 
-type Head = NonNullable<FunctionReturnType<typeof loadHead>>;
+type Head = NonNullable<FunctionReturnType<typeof headQuery>>;
 type StoredUpdate = { update: ArrayBuffer; byteLength: number; payloadRef: string | null; payloadDigest: string | null };
 type ProofResult = { status: "proven" | "unavailable" | "stale" | "needs_checkpoint"; headHash?: string };
 

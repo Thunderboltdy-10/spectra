@@ -5,6 +5,7 @@ import type {
 } from "./openrouter-stream";
 import { toModelToolResult } from "../tools/execution/tool-result";
 import { readSnapshot, stableReadObservation, type ReadSnapshot } from "./read-snapshot";
+import { compactAgentMessages, messageCharacters } from "./agent-context";
 
 export type SpectraAgentMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -108,6 +109,8 @@ export async function runSpectraAgentLoop(input: {
   ) => boolean;
   signal?: AbortSignal;
   onTurn?: (turn: OpenRouterAgentTurn, index: number) => void;
+  /** Exact harness task state (staged graph, receipts) kept across compaction. */
+  taskState?: () => string | undefined;
   budget?: {
     maxTurns?: number;
     maxToolCalls?: number;
@@ -149,8 +152,33 @@ export async function runSpectraAgentLoop(input: {
   // was large — the agent still had headroom, but the sum crossed 250k.
   const maxPromptTokens = Math.max(
     20_000,
-    Math.min(500_000, input.budget?.maxTotalTokens ?? 250_000),
+    Math.min(500_000, input.budget?.maxTotalTokens ?? 256_000),
   );
+  // Compaction starts well before the window and reduces to about half of it,
+  // so a long task does not compact on every turn. Short conversations only
+  // pay a number comparison per turn.
+  const compactAtTokens = Math.floor(maxPromptTokens * 0.8);
+  const compactTargetTokens = Math.floor(maxPromptTokens * 0.5);
+  // The initial request is bounded by context assembly; measurement starts
+  // from the provider's first report plus what this loop appends.
+  let knownPromptTokens = 0;
+  let appendedCharacters = 0;
+  const compact = () => {
+    const result = compactAgentMessages(messages, {
+      targetTokens: compactTargetTokens,
+      taskState: input.taskState?.(),
+      isProtectedTool: (name) => input.isMutationTool?.({ id: "", name, arguments: "{}" }) === true,
+    });
+    if (!result.changed) return false;
+    messages.splice(0, messages.length, ...result.messages);
+    knownPromptTokens = result.estimatedTokens;
+    appendedCharacters = 0;
+    return true;
+  };
+  const append = (...next: SpectraAgentMessage[]) => {
+    messages.push(...next);
+    appendedCharacters += messageCharacters(next);
+  };
   // Cumulative spend remains bounded, but loosely — turn/time/tool caps are the
   // primary runaway guards. Four full context windows is enough for complex QC.
   const maxCumulativeTokens = Math.max(
@@ -196,13 +224,21 @@ export async function runSpectraAgentLoop(input: {
     }
     turns += 1;
     if (finalizationOnly) finalizationTurns += 1;
+    if (knownPromptTokens + Math.ceil(appendedCharacters / 3.5) >= compactAtTokens) compact();
     const turn = await input.requestTurn(messages, turns);
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (finalizationOnly) lastFinalizationText = turn.text;
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
-    const turnPromptTokens = turn.usage?.promptTokens ?? 0;
-    if (turnPromptTokens > maxPromptTokens)
+    const turnPromptTokens = turn.usage?.promptTokens;
+    if (turnPromptTokens !== undefined) {
+      knownPromptTokens = turnPromptTokens;
+      appendedCharacters = 0;
+    }
+    // Emergency guard: an over-window request must shrink before the next
+    // turn. Only when nothing reducible remains (the instructions themselves
+    // are too large) does the agent pause instead of truncating the task.
+    if ((turnPromptTokens ?? 0) > maxPromptTokens && !compact())
       throw new Error(
         "Spectra paused this agent after its reliability context budget. Continue in the thread to resume with a narrower context.",
       );
@@ -236,7 +272,7 @@ export async function runSpectraAgentLoop(input: {
       } satisfies SpectraAgentLoopResult;
     }
 
-    messages.push({
+    append({
       role: "assistant",
       content: turn.text || null,
       tool_calls: turn.toolCalls.map((call) => ({
@@ -388,7 +424,7 @@ export async function runSpectraAgentLoop(input: {
     );
     for (const [index, call] of turn.toolCalls.entries()) {
       const result = toModelToolResult(results[index]);
-      messages.push({
+      append({
         role: "tool",
         tool_call_id: call.id,
         content: JSON.stringify(result),
@@ -407,7 +443,7 @@ export async function runSpectraAgentLoop(input: {
     if (!finalizationOnly && turnsWithoutProgress === 2) {
       // Add feedback after the observations, preserving the stable prompt
       // prefix and the complete user request. Writes remain available here.
-      messages.push({
+      append({
         role: "system",
         content: "The last two tool turns added no new information or accepted work. Use the results already available, correct a failed request, or take the next needed action. Continue every unresolved part of the user's request; an accepted operation covers only that operation. If nothing useful remains possible, explain the concrete missing information or failed action. Do not repeat the same retrieval cycle or invent saved results.",
       });

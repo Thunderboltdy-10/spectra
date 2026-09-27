@@ -4791,6 +4791,16 @@ export async function callModel(
           }]
         : messages,
       budget: budgetForAgentPass(requestMode, agentRuntimeBudget),
+      // Survives context compaction: identities of staged (unsaved) work and
+      // actions this attempt already committed. Typed payloads stay in memory.
+      taskState: () => acceptedAgentOperations.length || committedApplicationSummaries.length
+        ? JSON.stringify({
+            stagedOperations: acceptedAgentOperations.map((operation, operationIndex) => ({
+              operationIndex, phase: "staged_not_saved", ...safeOperationPreview(operation),
+            })),
+            committedActions: committedApplicationSummaries,
+          })
+        : undefined,
       signal,
       isParallelSafeTool: (call) =>
         spectraToolRegistry.get(call.name)?.parallelSafe === true,

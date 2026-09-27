@@ -303,7 +303,8 @@ async function slideObjects(
         type: "group",
         ...shapeGeometry(shape, undefined, canvas),
         content: { nativeShapeId, childIds },
-        parentId,
+        // Nested groups use the same object-id parent reference as every other child.
+        ...(parentId ? { parentId: `${slideId}:shape:${parentId}` } : {}),
         readingOrder: objects.length,
       });
       continue;
@@ -967,11 +968,16 @@ function moveShapeToOrder(root: XmlElement, shapeIdValue: string, order: number)
   const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
   const shape = tree?.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === shapeIdValue);
   if (!tree || !shape) return;
-  const objects = tree.elements().filter((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
-  const bounded = Math.max(0, Math.min(objects.length - 1, order));
-  const reference = objects[bounded] === shape ? objects[bounded + 1] ?? null : objects[bounded] ?? null;
+  // `order` is the shape's final index. Resolve it among the other shapes so a
+  // later target lands after the shape currently holding that index.
+  const others = tree.elements().filter((node) => node !== shape && ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+  const bounded = Math.max(0, Math.min(others.length, order));
   tree.removeChild(shape);
-  tree.insertBefore(shape, reference === shape ? null : reference);
+  // After the last shape, stay before any trailing spTree extension element.
+  const siblings = tree.elements();
+  const last = others[others.length - 1];
+  const reference = others[bounded] ?? (last ? siblings[siblings.indexOf(last) + 1] : undefined) ?? null;
+  tree.insertBefore(shape, reference);
 }
 
 function removeShape(root: XmlElement, shapeIdValue: string) {
@@ -1953,5 +1959,5 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
     const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }, options as PptxMediaWriteOptions | undefined) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "insert-image", available: true }, { id: "replace-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "insert_image", "replace_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
+  capabilities(profile, _fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "insert-image", available: true }, { id: "replace-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "insert_image", "replace_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

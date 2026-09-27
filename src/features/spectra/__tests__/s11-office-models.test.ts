@@ -1,3 +1,4 @@
+/* eslint-disable spectra/no-raw-hex-in-styles -- Native PowerPoint fixture colors, not UI styles. */
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { Workbook } from "@ariadng/office/xlsx";

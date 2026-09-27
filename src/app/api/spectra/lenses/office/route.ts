@@ -11,6 +11,7 @@ import {
   assertNativePreparationIdentity,
   preparedNativeMaterialization,
   type NativeMaterializationOptions,
+  type QueuedNativeMaterialization,
 } from "@/features/spectra/lenses/native-materialization-options";
 import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../../../convex/replicaMaterialization";
 import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
@@ -482,9 +483,9 @@ async function materializeOfficeArtifactAttempt(
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
     };
   }
-  let queued: { requestId: string; state: string };
+  let queued: QueuedNativeMaterialization;
   try {
-    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
+    queued = await convexMutation<QueueMaterializationArgs, QueuedNativeMaterialization>(
       "replicas:queueMaterialization", queueArgs(),
     );
   } catch (error) {
@@ -513,7 +514,7 @@ async function materializeOfficeArtifactAttempt(
   if (queued.state !== "pending")
     throw new Error(`MATERIALIZATION_NOT_PENDING:${queued.state}`);
   return {
-    state: queued.state,
+    state: "pending" as const,
     requestId: queued.requestId,
     hash,
     projectionContent: contentForStorage(next.projection as OfficeProjection, isSheet, { artifactId: String(workId), payloadHash: hash }),

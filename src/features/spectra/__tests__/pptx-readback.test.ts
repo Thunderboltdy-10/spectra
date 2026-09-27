@@ -1,3 +1,4 @@
+/* eslint-disable spectra/no-raw-hex-in-styles -- Native PowerPoint fixture colors, not UI styles. */
 import { describe, expect, it } from "vitest";
 import { normalizePptxProjectionForReadback, pptxTextFromObjects, pptxTitleFromObjects, pptxSemanticContent } from "../lenses/pptx-readback";
 import type { PptxProjection } from "../lenses/projection-contracts";

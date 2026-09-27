@@ -71,7 +71,7 @@ describe("Native DOCX table insertion", () => {
     expect(await docxLens.materialize({ carry: reopened.preservedCarry, projection: reopened.projection })).toEqual(output);
     const capability = officeCapabilitiesFor("document").find((entry) => entry.id === "document.insert.table")!;
     expect(capability.native).toMatchObject({ delta: "insert-table", touches: ["tableStructure"] });
-    expect(capability.availability(commandContext("document", () => true, "owner", undefined, { compatibilityProfile: "strict-native", fidelity: fidelityRegionMap(base.fidelityMap.entries) })).state).toBe("enabled");
+    expect(capability.availability(commandContext("document", () => true, "edit", undefined, { compatibilityProfile: "strict-native", fidelity: fidelityRegionMap(base.fidelityMap.entries) })).state).toBe("enabled");
   });
 
   it.each([true, false, undefined])("retains header intent %s in native and editor roundtrips", async (headerRow) => {

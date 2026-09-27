@@ -3,7 +3,6 @@ import {
   presentationCommandBindings,
   presentationStubHandlers,
   PRESENTATION_CAPABILITY_DEFERRALS,
-  PRESENTATION_STRICT_REASONS,
   type PresentationHandlers,
 } from "../commands/office/presentation-commands";
 import {

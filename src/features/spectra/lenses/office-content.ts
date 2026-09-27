@@ -896,7 +896,9 @@ export function pptxArtifactContent(
         // speaker notes at all, and then saving could only ever write them back
         // as empty.
         ...(slide.speakerNotes ? { speakerNotes: slide.speakerNotes } : {}),
-        objects: slide.objects,
+        // Editor content is authored independently of the base projection it is
+        // later diffed against; sharing object records let an edit rewrite the base.
+        objects: structuredClone(slide.objects),
         ...(slide.transition && slide.transition.kind !== "none" ? { transition: slide.transition } : {}),
         ...((slide.hasTransition && !slide.transition) || slide.hasTiming
           ? {

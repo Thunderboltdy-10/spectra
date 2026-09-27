@@ -54,7 +54,7 @@ describe("PPTX actual materialization route", () => {
     expect(io.mutation).not.toHaveBeenCalled();
     const actual = await pptxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
     expect(actual.projection.slides.flatMap((item) => item.objects).find((object) => object.id === objectId)!.content).toMatchObject(image);
-    expect(result.nativeCandidate.queue.nativeReceipt.semantic.resultDigest).toBe(actual.projection.nativeBinding.semanticDigest);
+    expect(result.nativeCandidate.queue.nativeReceipt?.semantic.resultDigest).toBe(actual.projection.nativeBinding.semanticDigest);
   });
 
   it("stops an inaccessible durable image before upload or effect", async () => {
@@ -84,8 +84,8 @@ describe("PPTX actual materialization route", () => {
     expect(result.nativeCandidate.destination).toBe("bridge");
     if (result.nativeCandidate.destination !== "bridge") throw new Error("Expected a bridge candidate");
     const receipt = result.nativeCandidate.queue.nativeReceipt;
-    expect(receipt.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
-    expect(receipt.semantic.readbackDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+    expect(receipt?.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+    expect(receipt?.semantic.readbackDigest).toBe(readback.projection.nativeBinding.semanticDigest);
   });
 
   it.each(["fade", "push", "dissolve", "none"] as const)("prepares and verifies a native %s transition through the preservation guard", async (kind) => {
@@ -101,7 +101,7 @@ describe("PPTX actual materialization route", () => {
     expect(io.upload).toHaveBeenCalledTimes(1);
     const readback = await pptxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
     expect(readback.projection.slides[0]!.transition).toEqual(kind === "none" ? { kind } : { kind, durationMs: 550 });
-    expect(result.nativeCandidate.queue.nativeReceipt.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+    expect(result.nativeCandidate.queue.nativeReceipt?.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
   });
 
   it.each(["text", "transition"] as const)("rejects an actual writer fault that drops requested %s before any candidate upload or effect", async (field) => {

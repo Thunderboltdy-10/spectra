@@ -39,6 +39,7 @@ import {
   assertNativePreparationIdentity,
   preparedNativeMaterialization,
   type NativeMaterializationOptions,
+  type QueuedNativeMaterialization,
 } from "@/features/spectra/lenses/native-materialization-options";
 import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../../../convex/replicaMaterialization";
 
@@ -314,9 +315,9 @@ async function materializeDocxArtifactAttempt(
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
     };
   }
-  let queued: { requestId: string; state: string };
+  let queued: QueuedNativeMaterialization;
   try {
-    queued = await convexMutation<QueueMaterializationArgs, { requestId: string; state: string }>(
+    queued = await convexMutation<QueueMaterializationArgs, QueuedNativeMaterialization>(
       "replicas:queueMaterialization", queueArgs(),
     );
   } catch (error) {

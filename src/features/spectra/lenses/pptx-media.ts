@@ -23,7 +23,7 @@ function all(root: XmlElement): XmlElement[] {
   while (pending.length) {
     const node = pending.pop()!;
     result.push(node);
-    pending.push(...node.elements().reverse());
+    pending.push(...[...node.elements()].reverse());
   }
   return result;
 }

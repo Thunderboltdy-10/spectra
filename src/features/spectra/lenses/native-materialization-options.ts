@@ -1,6 +1,14 @@
 import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../convex/replicaMaterialization";
 import type { NativeSaveReceipt } from "../../../../shared/native-office-contract";
 import type { NativePayloadTruth } from "./native-payload-server";
+import type { Doc } from "../../../../convex/_generated/dataModel";
+
+/** `replicas:queueMaterialization` returns the durable request state, or the
+ * protected-original placeholder; never an arbitrary string. */
+export type QueuedNativeMaterialization = {
+  requestId: string;
+  state: Doc<"bridgeWriteRequests">["state"] | "protected-pending";
+};
 
 /** Supplied by the authenticated AI executor, never by a model tool argument. */
 export type NativeAiOperationIdentity = {

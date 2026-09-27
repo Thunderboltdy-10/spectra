@@ -677,7 +677,10 @@ export function docxOperationsBetween(
       return;
     }
     if (block.type === "table" && old.type === "table") {
-      if (block.attrs?.headerRow !== undefined && block.attrs.headerRow !== (old.attrs?.headerRow ?? false))
+      // Lens reads always state headerRow. An unstated base uses the canonical
+      // editor default (first row is a header), so a Yjs round trip that
+      // merely makes that default explicit is not a structural edit.
+      if (block.attrs?.headerRow !== undefined && block.attrs.headerRow !== (old.attrs?.headerRow ?? true))
         throw new Error("DOCX_UNSUPPORTED_EDIT: Changing an existing Word table's header structure is unavailable.");
       const oldRows = rowsFor(old);
       const newRows = rowsFor(block);

@@ -90,6 +90,8 @@ Validation is pending the guarded test lane. The prepared runner compares both o
 
 ## Unit 6: retained local draft recovery view
 
+Source candidate: `896c0693` (unvalidated; controller implementation dependency remains outstanding).
+
 The new recovery view consumes COLLAB's exact `220b1b8b` controller types. It uses the existing Dialog, Button and dismissible notice. Dismissal is keyed by stable branch ID, while the persistent Local drafts menu remains available. Inspection reads bounded excerpts on demand; export receives the controller's complete recovery blob only after a click. Current excerpts and mutating actions disappear when current read access is lost, while local inspection/export remain available.
 
 Applying selected regions and adopting current content use the exact reviewed branch generation and room anchor. Duplicate actions are fenced synchronously; stale witnesses require another deliberate review. Artifact changes, closure and superseding inspections abort their view requests and reject late results, including transports that ignore cancellation. No UI method decodes/replays raw Yjs bytes or writes a new local store.
@@ -100,6 +102,8 @@ Twelve direct component regression cases are prepared but unrun. The runtime con
 
 ## Unit 7: retained-pin consumers and visible proof refresh
 
+Source candidate: `3c1bcf56` (unvalidated; focused tests prepared).
+
 The working consumer change uses SECURITY's exact-pin evaluator (`f61599e8`) for deleted sources. Denials return no snapshot or current source metadata. Allowed projections select the verified version, keep existing quiz redaction based on independent source level, expose read-only interaction, and take displayed metadata and resource bindings only from the pinned snapshot. The authenticated runtime selects the same exact pinned build and cannot fall back to a newer publication. Ordinary restored/active source behavior keeps the existing authority path.
 
 Placement denial exposes only the shared opaque host-head key. The recovery view coalesces mounted readers per Convex client/embed, starts only for a visible reference on a visible page, and waits 750ms for a settled head. There is at most one reconstruction in flight per embed; an unavailable, stale, failed or checkpoint-required result waits for an explicit retry or a genuinely new head. Successful proof still requires the subscribed projection to pass source authority before content appears. Entries are released when the final reader and request finish. This is request-coalescing source behavior, not a live latency/heap/traffic measurement.
@@ -109,6 +113,8 @@ Dependencies consumed: HISTORY `9cfb7f29`, `ce4c4033`, `f460e7ae`, `d3347cf7`, S
 On September 27 the coordinator and RUNTIME-R chats both failed with the provider error “The requested item was created under a different Azure OpenAI resource.” No new test lane was assumed and no test runner was started. Source formatting used the existing filesystem guard; the shared dependency junction and target were left intact. Candidate source and private guarded runners remain available for the next authorized validation slot.
 
 ## Architecture and independent decision ledger
+
+September 27 orchestration has resumed in coordinator `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9` with scheduler RUNTIME-R2 `01a0e28a-9b76-7683-bd90-a4a028a1fc3f`. New focused validation requests were sent; old reservations confer no execution authority. Full final passthrough is intentionally deferred. Later final verification should cover actual local-draft restart/quota/revocation/conflict recovery, read-only and modified-source retained pins across all hosts, visible refresh coalescing during sustained editing, authenticated runtime loading, browser theme/export, and native Office round trips. These are distinct from the finite deterministic candidate checks.
 
 Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb47-5362-7f51-83b1-0a2b0775fe3d`, turn `01a0cb47-a868-7672-9b1b-a8eac6a69b5a`; final live S9/S10-AI `01a0d3b1-e48a-7292-b2eb-051452e961ae`, turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`. The latter explicitly deferred ownership, chat/side-panel and theme-consistent embeds; its successful contract counts were not authenticated embed acceptance. Relevant ancestry inspected: `f683c055`, `b63daf0c`, with current callers read on `d9aabfb5`.
 

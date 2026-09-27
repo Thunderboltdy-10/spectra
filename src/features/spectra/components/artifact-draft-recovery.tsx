@@ -180,9 +180,12 @@ function ArtifactDraftRecoveryView({
       !current.current.open ||
       current.current.selectedId !== branch.id ||
       !current.current.recovery.branches.some(
-        (candidate) => candidate.id === branch.id && candidate.generation === branch.generation,
+        (candidate) =>
+          candidate.id === branch.id &&
+          candidate.generation === branch.generation,
       )
-    ) return;
+    )
+      return;
     const reviewed = inspection?.branch;
     if (action === "discard" && branch.id === current.current.recovery.activeBranchId) return;
     if (
@@ -192,7 +195,8 @@ function ArtifactDraftRecoveryView({
         reviewed.generation !== branch.generation ||
         !sameAnchor(reviewed.currentAnchor, branch.currentAnchor) ||
         !reviewed.currentAnchor ||
-        !branch.canReadCurrent || !reviewed.canReadCurrent ||
+        !branch.canReadCurrent ||
+        !reviewed.canReadCurrent ||
         (action === "reapply" &&
           (!branch.canReapply || regionIds.length === 0)))
     )

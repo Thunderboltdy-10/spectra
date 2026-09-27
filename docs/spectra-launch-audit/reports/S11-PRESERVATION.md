@@ -68,7 +68,22 @@ The inherited four-file candidate adds the closed `scopeMode: "pptx-transition-r
 
 The helper indexes claims by part and the guard indexes positive scope proofs. When there are no changed scoped parts or removed parts, proof construction avoids reopening either ZIP; removal graph work runs only for actual removals. This optimization does not alter package comparison, native readback, or deletion authorization.
 
-Recovered tests add positive effects and adversarial preservation cases, including direct text and nested extension transitions. At the initial dependency commit these additions are **UNRUN**; `git diff --check` passed. The earlier validation results and failures above describe `bf891b0b`, not this extension. RUNTIME-R2 owns allocation of the finite guarded test/lint slot. OFFICE-MODELS owns real writer/route integration at `8715bb46` and may consume the helper as an explicitly unvalidated dependency.
+Recovered tests add positive effects and adversarial preservation cases, including direct text and nested extension transitions. Dependency commit `5f30a344` was initially handed off **UNRUN**; it is now covered by the September 27 focused results below, with one test-fixture correction. The earlier validation results and failures above describe `bf891b0b`, not this extension. OFFICE-MODELS owns real writer/route integration at `8715bb46`; this helper result alone does not establish that integration.
+
+### September 27 focused results
+
+The current coordinator granted temporary lane 1 for two test files, four-file lint, and the already prepared proof microbenchmark. The private runner preserves inherited `NODE_OPTIONS`, appends the existing filesystem guard and a 4096 MiB old-space limit, uses worktree-local temp/cache directories, runs serially with one Vitest worker and no file parallelism, and terminates each process tree at 180 seconds. No phase timed out. No dependency, service, publication, full-suite, or transitive typecheck work ran.
+
+| Check | Result |
+| --- | --- |
+| `preservation-proof.test.ts` and `preservation-guard.test.ts` | **56/56 passed**, two files, 2.81 seconds Vitest duration. |
+| ESLint over the four changed TypeScript files, `--max-warnings=0` | Passed, 4.12 seconds wall time. |
+| Existing proof/guard microbenchmark | Passed, 1.56 seconds Vitest duration; 40 alternating samples per case. |
+| `git diff --check` | Passed. |
+
+The first focused run passed 55/56. Its namespace-prefix fixture used a global `p:` replacement, which also changed `http:` within namespace URIs. The correction replaces element-name prefixes only; production guard code and preservation assertions are unchanged. The failed evidence remains in `.spectra-local/launch-s11/preservation/transition-focused-20260927-133049.log`. Passing logs are `transition-focused-20260927-133127.log`, `transition-lint-20260927-133127.log`, and `transition-bench-20260927-133127.log` in that same directory; `transition-run-20260927-133127.json` records exit codes and phase wall times.
+
+The benchmark compares the `bf891b0b` proof/guard with the candidate on the existing 653,105-byte, 15-slide, 100-part PPTX fixture (93 fidelity entries). Unchanged-package proof+guard median was **0.2278 → 0.0250 ms**, p95 **0.3097 → 0.0607 ms**. A controlled slide-text edit measured median **0.4920 → 0.4843 ms**, p95 **0.7779 → 0.6142 ms**; its median is effectively unchanged at this scale. The benchmark excludes lens open, package comparison, conversion, app latency, and network/database traffic. Uncontrolled last-sample heap observations are retained privately and do not establish a memory improvement. Detailed measurements are in `transition-bench/results.json`. No installed Office, live Bridge, or launch-readiness result is implied.
 
 Deferred final prompt: on the integrated candidate, validate supported transition authoring and unrelated edits through actual prepare/materialize routes, fault the writer to remove preserved root text/advance/sound/extension content, and verify refusal precedes native queue/cloud advancement. Then perform disposable PowerPoint save/reopen and Bridge/history/retry acceptance under the shared runtime owner's reservation. Do not infer installed Office or launch acceptance from this helper suite.
 

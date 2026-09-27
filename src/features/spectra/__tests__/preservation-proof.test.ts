@@ -100,7 +100,7 @@ describe("supported transition preservation remainder", () => {
   it("uses namespaces rather than prefixes for the effect, duration and preserved data", async () => {
     const before = packageFor(transition("<p:fade/>"));
     const afterXml = new TextDecoder().decode(unzipSync(packageFor(transition("<p:dissolve/>").replace('p14:dur="600"', 'p14:dur="20000"')))[slidePart]!)
-      .replaceAll("p:", "q:").replace("xmlns:p=", "xmlns:q=")
+      .replace(/(<\/?)p:/g, "$1q:").replace("xmlns:p=", "xmlns:q=")
       .replaceAll("p14:", "t:").replace("xmlns:p14=", "xmlns:t=");
     await expect(check(before, pack({ [slidePart]: afterXml }), [remainderClaim])).resolves.toBeDefined();
   });

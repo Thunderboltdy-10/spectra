@@ -7,7 +7,7 @@ The user's September 27 directive is to finish and integrate the work, using foc
 | Area | Integrated or recovered evidence | Finite remaining implementation |
 | --- | --- | --- |
 | Runtime | Existing checkpoint `860bffac` TypeScript pass recovered; reboot ended old runners; two guarded lanes restored | Maintain prompt finite test handoffs; produce exact later frozen-runtime verification procedure |
-| Client performance | Body release, selected-open ordering and mounted reuse integrated through `cf30b32c`; saved 56-case pass | Release completed access decisions independently of unrelated pending reads |
+| Client performance | Body release, selected-open ordering and mounted reuse through `cf30b32c`; completed access-decision body release `bbfea604`; prior 56-case and follow-up 27-case passes | Owned implementation complete; live browser/heap acceptance deferred |
 | AI execution | No ambiguous/acknowledged replay, full replacement verification, direct sanitized pre-effect errors and preparation skips integrated through `1125bbf7` | Exact acknowledged final-effect verification; authorized discovered-target compact context; clarification and steering continuity |
 | AI review/compaction | Independent bounded runtime verdict recovered | Real context compaction around 256k with durable intent, approvals, staged work and receipt continuity |
 | Authority | Indexed preparation, authorized receipt replay and shared hydrated evidence integrated through `49bbd3e2` | Retained cross-school invited-host consistency; create/@created first-effect binding and actual sink consumption |

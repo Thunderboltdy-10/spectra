@@ -1,6 +1,16 @@
 # S11-SECURITY — finite authorization and approval review
 
-Date: 2026-09-25. Coordinator: `01a0d83f-92fb-7b80-9ea4-99fcecef20aa`. Worker: `01a0d846-5cc7-7162-ae9e-bcad7af153db`.
+Updated: 2026-09-27. Current coordinator: `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9`. Worker: `01a0d846-5cc7-7162-ae9e-bcad7af153db`.
+
+## Current bounded handoff
+
+Backend creation/dependency scope `bceaf6df` and retained host-invitation correction `ce5d60af` are committed. **66/66 final focused cases passed**: creation9, artifact scope26, retained access26, signed evidence5. All16 owned source/test roots passed ESLint. Earlier authority7 also passed, yielding73 unique cases across the two finite sessions; no full final passthrough was run. The coordinator explicitly deferred transitive TypeScript checks for this closeout.
+
+The final run used guarded lane2 with a single worker, local ignored cache/temp and4GiB heap. Vitest PID39020 started2026-09-27T11:32:55.324Z and exited0 after5.45s; lint PID39180 started11:33:24.744Z and exited0. Captured tool-result evidence is in ignored `.spectra-local/launch-s11/security/closeout-checks.txt`. No executable remains; lane2 is released with the consolidated handoff.
+
+Dependencies: creation requires existing `dce9bf0d`/`d67df501` plus `72b14244`, `74a2d1cf`, `0c78177b`; the latter uses SCHOOL `3b8f9e05`/`aa8c79a1`. Retained correction requires `f61599e8`, one-head helper `0a200ef3`, and HISTORY's actual proof chain (`9cfb7f29`, `ba68fdd1`, `ce4c4033`, `f460e7ae`, `d3347cf7`, `c1d0a693`, `cfc87f79`, `a802cc3c`; `2a2be47a` is the measurement fixture). `5987a0cd` fixes the signed-evidence/benchmark fixtures and records earlier validation. Do not cherry-pick both original and consumed copies of those dependencies.
+
+Remaining production integration is explicitly owned elsewhere: ENGINE moves preparation after pending attachments and wires the late-create selector; COLLAB/DURABLE accept create/alias binding in the trusted signer and atomic native sink; EXPERIENCE adopts exact retained decisions in projection/runtime readers. This branch supplies and validates their backend contracts, not those consuming edits. Log-leading/large-payload preparation must use actual hydrated canonical state and existing trusted transport; the measured50k-cell temporary memory cost remains a constraint. No broad optimization or new audit was opened during closeout. Later verification should cover these integrated flows, actual isolate capacity, native lost-reply/Stop recovery, retained quiz/runtime consumers, and the unrun CHOREO writer tests.
 
 ## First repair: approve the presented effect, not a later subtree
 

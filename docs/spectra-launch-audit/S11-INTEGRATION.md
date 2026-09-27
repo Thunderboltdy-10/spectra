@@ -1,5 +1,9 @@
 # S11 coordinator review and integration ledger
 
+September 27 recovery: coordinator `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9` verified clean integration `860bffac` and recovered the original brief plus latest user steering. Current work is implementation closeout and reviewed integration. The exhaustive final verification below is deferred to separately supplied agent prompts at the user's request; it is not cancelled or claimed complete. Focused checks still support individual integration decisions. See the current routing at the top of S11-FLEET.md.
+
+Recovered exact-checkpoint evidence: RUNTIME's private runtime-860bffac-typecheck.json records sourceUnchanged=true, exitCode=0, no timeout, 43.437 seconds, completed September 26 at 12:36:14 UTC. Its diagnostic log is empty. This establishes the existing checkpoint's TypeScript pass without repeating it; later candidate integrations need appropriate checks of their own.
+
 Updated 2026-09-26. Product baseline d9aabfb5. Integration branch codex/launch-integration; main unchanged. Candidate pass counts are scoped observations, not integrated or release acceptance; post-restoration guarded results are distinguished below.
 
 | Unit | Candidate | Integration | Coordinator verdict and proof boundary |

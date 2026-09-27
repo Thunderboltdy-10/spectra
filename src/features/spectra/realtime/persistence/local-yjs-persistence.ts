@@ -40,6 +40,9 @@ export type LocalYjsRecord = {
   recoveryAnchor?: DurableRoomAnchor;
   authoredRegionIds?: string[];
   recoveryGeneration?: number;
+  generation?: string;
+  adoptionId?: string;
+  writerId?: string;
 };
 
 export type LocalYjsMeta = {
@@ -47,6 +50,11 @@ export type LocalYjsMeta = {
   bytes: number;
   lastOpenedAt: number;
   pendingRemoteSync: boolean;
+  generation?: string;
+  recoveryAnchor?: DurableRoomAnchor;
+  recoveryConflict?: NativeRecoveryConflict;
+  authoredRegionIds?: string[];
+  updatedAt?: number;
 };
 
 export interface LocalYjsStore {
@@ -57,12 +65,41 @@ export interface LocalYjsStore {
   listMeta(): Promise<LocalYjsMeta[]>;
   commit(record: LocalYjsRecord, limits: LocalYjsLimits): Promise<LocalYjsRecord>;
   deleteIfDurable(key: string): Promise<boolean>;
+  archiveAndReplace?(args: LocalRecoveryReplacement): Promise<{ archivedBranchId: string; record: LocalYjsRecord }>;
+  /** Deletes one retained recovery branch only if it is still the exact reviewed generation. */
+  discardBranch?(key: string, expectedGeneration: string): Promise<void>;
+}
+
+/** Retained recovery branches live beside the active record under this prefix. */
+export const localRecoveryBranchPrefix = (key: string) => `${key}:recovery:`;
+
+export type LocalRecoveryReplacement = { key: string; branchKey: string; expectedGeneration: string;
+  expectedActiveGeneration: string; record: LocalYjsRecord; limits: LocalYjsLimits; validate?: () => void };
+export const localRecordGeneration = (record: Pick<LocalYjsRecord, "generation" | "updatedAt" | "bytes">) =>
+  record.generation ?? `legacy:${record.updatedAt}:${record.bytes}`;
+
+/** The active draft is archived intact (with its own base) before adoption.
+ * A clean active record holds nothing to retain. */
+function retainedActive(args: LocalRecoveryReplacement, active: LocalYjsRecord): LocalYjsRecord | null {
+  if (args.branchKey !== args.key && !active.pendingRemoteSync) return null;
+  return { ...active, key: `${localRecoveryBranchPrefix(args.key)}${crypto.randomUUID()}`, pendingRemoteSync: true,
+    generation: crypto.randomUUID() };
+}
+
+function assertReplacementQuota(args: LocalRecoveryReplacement, records: Array<Pick<LocalYjsMeta, "key" | "bytes">>,
+  active: LocalYjsRecord, archived: LocalYjsRecord | null) {
+  const others = records.filter(record => record.key !== args.key);
+  const total = others.reduce((sum, record) => sum + record.bytes, 0) + (archived ? active.bytes : 0) + args.record.bytes;
+  if (others.length + (archived ? 2 : 1) > args.limits.maxWorks || total > args.limits.totalBytes)
+    throw new Error("LOCAL_YJS_QUOTA_RESERVED_FOR_PENDING_CHANGES");
 }
 
 export type LocalYjsLimits = { perWorkBytes: number; totalBytes: number; maxWorks: number };
 
 function recordMeta(record: LocalYjsRecord): LocalYjsMeta {
-  return { key: record.key, bytes: record.bytes, lastOpenedAt: record.lastOpenedAt, pendingRemoteSync: record.pendingRemoteSync };
+  return { key: record.key, bytes: record.bytes, lastOpenedAt: record.lastOpenedAt, pendingRemoteSync: record.pendingRemoteSync,
+    generation: localRecordGeneration(record), recoveryAnchor: record.recoveryAnchor, recoveryConflict: record.recoveryConflict,
+    authoredRegionIds: record.authoredRegionIds, updatedAt: record.updatedAt };
 }
 
 export function mergeLocalYjsRecord(previous: LocalYjsRecord | null, incoming: LocalYjsRecord, maxBytes: number): LocalYjsRecord {
@@ -98,7 +135,7 @@ export function mergeLocalYjsRecord(previous: LocalYjsRecord | null, incoming: L
   const journalBytes = update.byteLength + (durableFrontier?.byteLength ?? 0);
   if (journalBytes > maxBytes) throw new Error("LOCAL_YJS_QUOTA_RESERVED_FOR_PENDING_CHANGES");
   Y.decodeUpdate(update);
-  return { ...incoming, baseId, baseByteLength: baseUpdate?.byteLength, update, bytes: journalBytes + (baseUpdate?.byteLength ?? 0),
+  return { ...incoming, generation: crypto.randomUUID(), baseId, baseByteLength: baseUpdate?.byteLength, update, bytes: journalBytes + (baseUpdate?.byteLength ?? 0),
     ...ancestry, durableFrontier,
     recoveryConflict: incoming.recoveryConflict ?? (covered && !incoming.pendingRemoteSync ? undefined : previous?.recoveryConflict),
     pendingRemoteSync: incoming.pendingRemoteSync || Boolean(previous?.pendingRemoteSync && !covered) };
@@ -113,6 +150,8 @@ export type LocalDurabilitySnapshot = {
   recoveryConflict?: NativeRecoveryConflict;
   recoveryAnchor?: DurableRoomAnchor;
   authoredRegionIds?: string[];
+  generation?: string;
+  branchKey?: string;
 };
 
 const UNSUPPORTED: LocalDurabilitySnapshot = {
@@ -227,6 +266,10 @@ export class IndexedDbYjsStore implements LocalYjsStore {
     const updates = transaction.objectStore(LOCAL_YJS_STORE);
     const metadata = transaction.objectStore(LOCAL_YJS_META_STORE);
     try {
+      const active = await requestResult(updates.get(record.key) as IDBRequest<LocalYjsRecord | undefined>);
+      if (active && active.adoptionId !== record.adoptionId) record = { ...record,
+        key: `${localRecoveryBranchPrefix(record.key)}${record.writerId ?? crypto.randomUUID()}`, pendingRemoteSync: true,
+        recoveryConflict: { regionIds: ["artifact:structure"], nativeOperationId: null } };
       const previousHeader = await requestResult(updates.get(record.key) as IDBRequest<LocalYjsRecord | undefined>);
       const previous = previousHeader?.baseId && previousHeader.baseId === record.baseId && record.baseUpdate?.byteLength === previousHeader.baseByteLength
         ? { ...previousHeader, baseUpdate: record.baseUpdate } : await hydrateBase(transaction, previousHeader);
@@ -257,6 +300,41 @@ export class IndexedDbYjsStore implements LocalYjsStore {
       try { transaction.abort(); } catch { /* Already aborted. */ }
       await completed.catch(() => undefined); throw error;
     }
+  }
+
+  async archiveAndReplace(args: LocalRecoveryReplacement) {
+    const database = await this.open();
+    const transaction = database.transaction([LOCAL_YJS_STORE, LOCAL_YJS_META_STORE, LOCAL_YJS_BASE_STORE], "readwrite");
+    const completed = transactionDone(transaction); void completed.catch(() => undefined);
+    try {
+      const updates = transaction.objectStore(LOCAL_YJS_STORE);
+      const active = await hydrateBase(transaction, await requestResult(updates.get(args.key) as IDBRequest<LocalYjsRecord | undefined>));
+      const branch = args.branchKey === args.key ? active : await hydrateBase(transaction,
+        await requestResult(updates.get(args.branchKey) as IDBRequest<LocalYjsRecord | undefined>));
+      if (!active || !branch || localRecordGeneration(active) !== args.expectedActiveGeneration ||
+          localRecordGeneration(branch) !== args.expectedGeneration) throw new Error("LOCAL_RECOVERY_GENERATION_CHANGED");
+      const archived = retainedActive(args, active);
+      const records = await requestResult(transaction.objectStore(LOCAL_YJS_META_STORE).getAll() as IDBRequest<LocalYjsMeta[]>);
+      assertReplacementQuota(args, records, active, archived);
+      args.validate?.();
+      if (archived) await writeLocalRecord(transaction, archived);
+      await writeLocalRecord(transaction, args.record, active.baseId);
+      await completed;
+      return { archivedBranchId: archived?.key ?? args.branchKey, record: args.record };
+    } catch (error) { try { transaction.abort(); } catch {} await completed.catch(() => undefined); throw error; }
+  }
+
+  async discardBranch(key: string, expectedGeneration: string) {
+    const database = await this.open();
+    const transaction = database.transaction([LOCAL_YJS_STORE, LOCAL_YJS_META_STORE, LOCAL_YJS_BASE_STORE], "readwrite");
+    const completed = transactionDone(transaction); void completed.catch(() => undefined);
+    try {
+      const updates = transaction.objectStore(LOCAL_YJS_STORE);
+      const current = await requestResult(updates.get(key) as IDBRequest<LocalYjsRecord | undefined>);
+      if (!current || localRecordGeneration(current) !== expectedGeneration) throw new Error("LOCAL_RECOVERY_GENERATION_CHANGED");
+      updates.delete(key); transaction.objectStore(LOCAL_YJS_META_STORE).delete(key); await deleteBase(transaction, key);
+      await completed;
+    } catch (error) { try { transaction.abort(); } catch {} await completed.catch(() => undefined); throw error; }
   }
 
   async deleteIfDurable(key: string) {
@@ -318,6 +396,10 @@ export class MemoryYjsStore implements LocalYjsStore {
 
   async commit(record: LocalYjsRecord, limits: LocalYjsLimits) {
     // No await between the read and commit: this store models one atomic IDB transaction.
+    const active = this.records.get(record.key);
+    if (active && active.adoptionId !== record.adoptionId) record = { ...record,
+      key: `${localRecoveryBranchPrefix(record.key)}${record.writerId ?? crypto.randomUUID()}`, pendingRemoteSync: true,
+      recoveryConflict: { regionIds: ["artifact:structure"], nativeOperationId: null } };
     const merged = mergeLocalYjsRecord(this.records.get(record.key) ?? null, record, limits.perWorkBytes);
     const candidates = [...this.records.values()].filter(entry => entry.key !== record.key)
       .sort((left, right) => left.lastOpenedAt - right.lastOpenedAt);
@@ -336,6 +418,24 @@ export class MemoryYjsStore implements LocalYjsStore {
     return { ...merged, update: merged.update.slice() };
   }
 
+  async archiveAndReplace(args: LocalRecoveryReplacement) {
+    const active = this.records.get(args.key), branch = this.records.get(args.branchKey);
+    if (!active || !branch || localRecordGeneration(active) !== args.expectedActiveGeneration ||
+        localRecordGeneration(branch) !== args.expectedGeneration) throw new Error("LOCAL_RECOVERY_GENERATION_CHANGED");
+    const archived = retainedActive(args, active);
+    assertReplacementQuota(args, [...this.records.values()], active, archived);
+    args.validate?.();
+    if (archived) this.records.set(archived.key, archived);
+    this.records.set(args.key, args.record);
+    return { archivedBranchId: archived?.key ?? args.branchKey, record: args.record };
+  }
+
+  async discardBranch(key: string, expectedGeneration: string) {
+    const current = this.records.get(key);
+    if (!current || localRecordGeneration(current) !== expectedGeneration) throw new Error("LOCAL_RECOVERY_GENERATION_CHANGED");
+    this.records.delete(key);
+  }
+
   async deleteIfDurable(key: string) {
     if (this.records.get(key)?.pendingRemoteSync) return false;
     this.records.delete(key);
@@ -351,12 +451,7 @@ export class MemoryYjsStore implements LocalYjsStore {
   }
 
   async listMeta() {
-    return [...this.records.values()].map((record) => ({
-      key: record.key,
-      bytes: record.bytes,
-      lastOpenedAt: record.lastOpenedAt,
-      pendingRemoteSync: record.pendingRemoteSync,
-    }));
+    return [...this.records.values()].map(recordMeta);
   }
 }
 
@@ -405,8 +500,13 @@ export class BoundedYjsLocalPersistence {
   private durableFrontier: Uint8Array | null = null;
   private localBase: { id: string; update: Uint8Array } | null = null;
   private recoveryAnchor: DurableRoomAnchor | undefined;
+  private adoptionId: string | undefined;
+  private readonly writerId = crypto.randomUUID();
   private authoredRegionIds: string[] = [];
   private closePromise: Promise<void> | null = null;
+  // Set once this writer's draft was archived and a new head adopted. The
+  // replacement instance owns the key; this one never writes again.
+  private retired = false;
   private snapshot: LocalDurabilitySnapshot;
   private readonly onUpdate: (update: Uint8Array, origin: unknown, document: Y.Doc, transaction: Y.Transaction) => void;
 
@@ -472,6 +572,7 @@ export class BoundedYjsLocalPersistence {
         this.localBase = record.baseId && record.baseUpdate ? { id: record.baseId, update: record.baseUpdate } : null;
         this.durableFrontier = record.durableFrontier ?? null;
         this.recoveryAnchor = readDurableRoomAnchor(record.recoveryAnchor) ?? undefined;
+        this.adoptionId = record.adoptionId;
         this.authoredRegionIds = recoveryRegionIds(record.authoredRegionIds ?? (record.pendingRemoteSync ? ["artifact:structure"] : []));
         this.documentPendingRemoteSync = record.pendingRemoteSync;
         this.snapshot = {
@@ -482,6 +583,7 @@ export class BoundedYjsLocalPersistence {
           recoveryConflict: record.recoveryConflict,
           recoveryAnchor: this.recoveryAnchor,
           authoredRegionIds: this.authoredRegionIds,
+          generation: localRecordGeneration(record), branchKey: record.key,
         };
       } else {
         this.snapshot = {
@@ -505,7 +607,7 @@ export class BoundedYjsLocalPersistence {
   }
 
   markRemoteDurable(anchor?: DurableRoomAnchor) {
-    if (this.snapshot.recoveryConflict) return;
+    if (this.snapshot.recoveryConflict || this.retired) return;
     if (!this.store || !this.initialized) return;
     if (!this.snapshot.pendingRemoteSync && (!anchor ||
         (anchor.roomId === this.recoveryAnchor?.roomId && anchor.nextSequence === this.recoveryAnchor.nextSequence &&
@@ -525,7 +627,7 @@ export class BoundedYjsLocalPersistence {
   }
 
   async persistNow() {
-    if (!this.store || this.destroyed || !this.initialized) return;
+    if (!this.store || this.destroyed || !this.initialized || this.retired) return;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -600,7 +702,7 @@ export class BoundedYjsLocalPersistence {
     if (this.closePromise) return this.closePromise;
     if (this.destroyed) return Promise.resolve();
     const finalSnapshot =
-      this.store && this.initialized && this.dirty
+      this.store && this.initialized && this.dirty && !this.retired
         ? {
             version: this.changeVersion,
             pendingRemoteSync: this.documentPendingRemoteSync,
@@ -662,12 +764,14 @@ export class BoundedYjsLocalPersistence {
         lastOpenedAt: timestamp,
         pendingRemoteSync,
         modelVersion: this.options.modelVersion,
+        adoptionId: this.adoptionId, writerId: this.writerId,
         recoveryConflict: this.snapshot.recoveryConflict,
         ...recovery,
       }, { perWorkBytes: this.perWorkBytes, totalBytes: this.totalBytes, maxWorks: this.maxWorks });
       this.persistAttempts = 0;
       failedWrites.delete(this.options.key);
       if (committed.baseId && committed.baseUpdate) this.localBase = { id: committed.baseId, update: committed.baseUpdate };
+      if (committed.key !== this.options.key) this.snapshot = { ...this.snapshot, recoveryConflict: committed.recoveryConflict };
       this.dirty = version !== this.changeVersion ||
         pendingRemoteSync !== this.documentPendingRemoteSync;
       if (!closing)
@@ -684,6 +788,7 @@ export class BoundedYjsLocalPersistence {
           recoveryConflict: committed.recoveryConflict,
           recoveryAnchor: committed.recoveryAnchor,
           authoredRegionIds: committed.authoredRegionIds,
+          generation: localRecordGeneration(committed), branchKey: committed.key,
         });
     } catch (error) {
       this.dirty = true;
@@ -731,10 +836,74 @@ export class BoundedYjsLocalPersistence {
       next.error === this.snapshot.error
       && next.retryExhausted === this.snapshot.retryExhausted
       && next.recoveryConflict === this.snapshot.recoveryConflict
+      && next.generation === this.snapshot.generation && next.branchKey === this.snapshot.branchKey
     )
       return;
     this.snapshot = next;
     this.emit();
+  }
+
+  get key() { return this.options.key; }
+
+  async listRecoveryRecords() {
+    if (!this.store) return [];
+    const prefix = localRecoveryBranchPrefix(this.options.key);
+    return (await this.store.listMeta()).filter(record => record.key.startsWith(prefix) ||
+      (record.key === this.options.key && record.pendingRemoteSync));
+  }
+
+  async readRecoveryRecord(key: string) {
+    if (!this.store || (key !== this.options.key && !key.startsWith(localRecoveryBranchPrefix(this.options.key))))
+      throw new Error("LOCAL_RECOVERY_BRANCH_MISSING");
+    const record = await this.store.get(key);
+    if (!record) throw new Error("LOCAL_RECOVERY_BRANCH_MISSING");
+    return record;
+  }
+
+  /** Only a retained branch can be discarded; the active draft must first be
+   * archived by adopting the current version. */
+  async discardRecoveryRecord(key: string, expectedGeneration: string) {
+    if (!this.store?.discardBranch || !key.startsWith(localRecoveryBranchPrefix(this.options.key)))
+      throw new Error("LOCAL_RECOVERY_BRANCH_MISSING");
+    await this.store.discardBranch(key, expectedGeneration);
+  }
+
+  async archiveAndAdopt(args: { branchKey: string; expectedGeneration: string; update: Uint8Array;
+    anchor: DurableRoomAnchor; signal?: AbortSignal }) {
+    if (!this.store?.archiveAndReplace) throw new Error("LOCAL_RECOVERY_UNAVAILABLE");
+    args.signal?.throwIfAborted();
+    await this.persistNow();
+    if (this.dirty || !["ready", "local_only"].includes(this.snapshot.state)) throw new Error("LOCAL_RECOVERY_NOT_SAVED");
+    const active = await this.store.get(this.options.key);
+    if (!active) throw new Error("LOCAL_RECOVERY_BRANCH_MISSING");
+    const version = this.changeVersion;
+    const current = new Y.Doc();
+    const adoptionId = crypto.randomUUID();
+    let frontier: Uint8Array;
+    try { Y.applyUpdate(current, args.update); frontier = encodeDurableFrontier(Y, current)!;
+      if (!frontier) throw new Error("LOCAL_RECOVERY_CURRENT_UNAVAILABLE"); }
+    finally { current.destroy(); }
+    const record: LocalYjsRecord = { key: this.options.key, update: new Uint8Array([0, 0]),
+      baseId: crypto.randomUUID(), baseUpdate: args.update, baseByteLength: args.update.byteLength, recoveryMode: "delta",
+      durableFrontier: frontier, bytes: args.update.byteLength + frontier.byteLength + 2,
+      updatedAt: this.now(), lastOpenedAt: this.now(), modelVersion: this.options.modelVersion,
+      pendingRemoteSync: false, recoveryAnchor: args.anchor, authoredRegionIds: [], generation: crypto.randomUUID(), adoptionId };
+    const result = await this.store.archiveAndReplace({ key: this.options.key, branchKey: args.branchKey,
+      expectedGeneration: args.expectedGeneration, expectedActiveGeneration: localRecordGeneration(active), record,
+      limits: { perWorkBytes: this.perWorkBytes, totalBytes: this.totalBytes, maxWorks: this.maxWorks },
+      validate: () => { args.signal?.throwIfAborted(); if (this.changeVersion !== version) throw new Error("LOCAL_RECOVERY_GENERATION_CHANGED"); } });
+    if (this.changeVersion !== version) {
+      // An edit between transaction commit and its completion event is saved
+      // to this old writer's retained branch (the adoption id no longer
+      // matches), never merged into the new head.
+      await this.persistNow();
+      if (this.dirty) throw new Error("LOCAL_RECOVERY_NOT_SAVED");
+    }
+    this.dirty = false;
+    this.retired = true;
+    this.options.document.off("update", this.onUpdate);
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    return { archivedBranchId: result.archivedBranchId, adoptionId };
   }
 
   private captureRecovery(): Pick<LocalYjsRecord, "update" | "recoveryMode" | "durableFrontier" | "baseId" | "baseUpdate" | "recoveryAnchor" | "authoredRegionIds" | "recoveryGeneration"> {
@@ -761,7 +930,7 @@ export class BoundedYjsLocalPersistence {
   }
 
   preserveConflict(conflict: NativeRecoveryConflict) {
-    if (this.snapshot.recoveryConflict === conflict) return;
+    if (this.snapshot.recoveryConflict === conflict || this.retired) return;
     this.changeVersion += 1;
     this.dirty = true;
     this.documentPendingRemoteSync = true;

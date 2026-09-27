@@ -273,7 +273,9 @@ export function useArtifactCollaboration(
     initializationError,
     presence: EMPTY_PRESENCE,
     localDurability,
+    localPersistence,
     recoverAuthoritative,
+    reopenLiveSession,
     // Only hard-lock when access is known read-only or revoked. Connecting,
     // closed, reconnecting, and unsynchronized must not freeze the editor —
     // private artifacts still need to be editable when the live socket is

@@ -65,11 +65,12 @@ describe("PPTX actual materialization route", () => {
     expect(io.mutation).not.toHaveBeenCalled();
   });
 
-  it.each(["remove", "reorder"] as const)("prepares a verified native %s with complete list authority and no early effect", async (change) => {
+  it.each(["remove", "reorder", "title"] as const)("prepares a verified native %s with complete list authority and no early effect", async (change) => {
     const { content } = await fixture();
     const slide = content.slides.find((item) => item.objects.length > 1)!;
     if (change === "remove") slide.objects = slide.objects.slice(1);
-    else slide.objects = [...slide.objects].reverse();
+    else if (change === "reorder") slide.objects = [...slide.objects].reverse();
+    else slide.title = "An independently edited native title";
     const expectedIds = slide.objects.map((object) => object.id);
     const result = await materializeOfficeArtifact(workId, content, options);
     expect(result.state).toBe("prepared");
@@ -78,6 +79,7 @@ describe("PPTX actual materialization route", () => {
     expect(io.upload).toHaveBeenCalledTimes(1);
     const bytes = io.upload.mock.calls[0]![1] as Uint8Array;
     const readback = await pptxLens.open(bytes);
+    if (change === "title") expect(readback.projection.slides.find((item) => item.id === slide.id)!.title).toBe(slide.title);
     expect(readback.projection.slides.find((item) => item.id === slide.id)!.objects.map((object) => object.id)).toEqual(expectedIds);
     expect(result.nativeCandidate.destination).toBe("bridge");
     if (result.nativeCandidate.destination !== "bridge") throw new Error("Expected a bridge candidate");

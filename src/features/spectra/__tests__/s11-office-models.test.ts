@@ -16,6 +16,18 @@ const deck = async (name = "chart-notes-preservation") => pptxLens.open(
 );
 
 describe("S11 Office model boundaries", () => {
+  it("maps a title-only editor intent to the native title run and retains neighboring run formatting", async () => {
+    const initial = await deck("typical-preservation");
+    const title = initial.projection.slides[0]!.objects.find((object) => (object.content as { nativeShapeKind?: string }).nativeShapeKind === "placeholder")!;
+    const opened = await pptxLens.open(await pptxLens.mutate(initial.preservedCarry, { kind: "format-rich-text", slideId: initial.projection.slides[0]!.id, shapeId: (title.content as { nativeShapeId: string }).nativeShapeId, paragraphs: [{ runs: [{ text: "Original title", bold: true }, { text: " retained suffix", italic: true }] }] }));
+    const content = pptxArtifactContent(opened.projection);
+    content.slides[0]!.title = "Edited title";
+    const update = pptxProjectionUpdateFromContent(content, opened.projection, { objectLists: "complete" });
+    const actual = await pptxLens.open(await pptxLens.materialize({ carry: opened.preservedCarry, projection: update.projection }));
+    expect(actual.projection.slides[0]!.title).toBe("Edited title");
+    expect(actual.projection.slides[0]!.objects.find((object) => object.id === title.id)!.content).toMatchObject({ paragraphs: [{ runs: [{ text: "Edited title", bold: true }, { text: " retained suffix", italic: true }] }] });
+    expect(await pptxProjectionSemanticDigest(update.projection)).toBe(actual.projection.nativeBinding.semanticDigest);
+  });
   it("removes an object from a hydrated snapshot and preserves retained identities, order and native assets", async () => {
     const opened = await deck();
     const document = presentationYjsAdapter.createDocument(pptxArtifactContent(opened.projection));

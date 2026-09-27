@@ -29,7 +29,7 @@ import { xlsxFormulaSupport } from "./xlsx-formula-support";
 import { parseAddress, columnName } from "../sheets/model";
 import { quoteSheetPrefix } from "../sheets/formula-refs";
 import { normalizeNativeFontFamily } from "../office-fonts";
-import { normalizePptxProjectionForReadback, pptxTitleFromObjects } from "./pptx-readback";
+import { normalizePptxProjectionForReadback, pptxTitleFromObjects, pptxTextFromObjects } from "./pptx-readback";
 
 function codedOfficeContentError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -1511,6 +1511,26 @@ export type PptxContentProjectionOptions = {
   objectLists?: "complete";
 };
 
+function mapNativeTitleIntent(objects: PresentationObject[], previous: PptxProjection["slides"][number], title: string | undefined) {
+  if (title === undefined || title === previous.title || pptxTitleFromObjects(objects) !== previous.title || pptxTitleFromObjects(previous.objects) !== previous.title) return objects;
+  const placeholder = objects.find((object) => record(object.content).nativeShapeKind === "placeholder");
+  const target = placeholder ?? objects.find((object) => pptxTextFromObjects([object]).length > 0);
+  if (!target || target.type !== "text" || !previous.objects.some((object) => object.id === target.id) || typeof record(target.content).nativeShapeId !== "string") return objects;
+  const content = record(target.content);
+  const paragraphs = (Array.isArray(content.paragraphs) ? content.paragraphs : []) as PresentationParagraph[];
+  if (!paragraphs.every((paragraph) => Array.isArray(paragraph.runs) && paragraph.runs.every((run) => typeof run.text === "string"))) return objects;
+  const index = placeholder ? 0 : paragraphs.findIndex((paragraph) => paragraph.runs.some((run) => run.text.length));
+  if (index < 0) return objects;
+  const next = paragraphs.length ? paragraphs.map((paragraph) => ({ ...paragraph, runs: paragraph.runs.map((run) => ({ ...run })) })) : [{ runs: [{ text: "" }] }];
+  const paragraph = next[index]!;
+  if (!paragraph.runs.length) paragraph.runs.push({ text: title });
+  else paragraph.runs = paragraph.runs.map((run, runIndex) => ({ ...run, text: runIndex === 0 ? title : placeholder ? run.text : "" }));
+  const text = next.map((item) => item.runs.map((run) => run.text).join("")).filter((value) => value.length).join("\n").trim();
+  const originalText = record(previous.objects.find((object) => object.id === target.id)!.content).text;
+  if (typeof content.text === "string" && content.text !== originalText && content.text !== text) return objects;
+  return objects.map((object) => object.id === target.id ? { ...object, content: { ...content, text, paragraphs: next } } : object);
+}
+
 /** The one Presentation editor-model -> PPTX projection transform. */
 export function pptxProjectionFromContent(
   content: unknown,
@@ -1594,12 +1614,13 @@ export function pptxProjectionFromContent(
         return editorObject(incoming, fallbackId);
       });
       const resolvedById = new Map(resolvedObjects.map((object) => [object.id, object]));
-      const objects = completeObjects
+      const carriedObjects = completeObjects
         ? resolvedObjects
         : [
             ...slide.objects.map((object) => resolvedById.get(object.id) ?? object),
             ...resolvedObjects.filter((object) => !previousById.has(object.id)),
           ];
+      const objects = completeObjects ? mapNativeTitleIntent(carriedObjects, slide, next.title) : carriedObjects;
       if (next.transition && slide.hasTransition && !slide.transition)
         throw codedOfficeContentError("PPTX_TRANSITION_PRESERVED", "This slide's native transition is not fully modeled and cannot be replaced losslessly.");
       const transition = next.transition

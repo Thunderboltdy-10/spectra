@@ -7,7 +7,11 @@ import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { AiDurableAckGate } from "@/features/spectra/ai/ai-durable-ack";
-import { commitAiYjsAfterNativeQueue } from "@/features/spectra/ai/native-ai-promotion";
+import { applyAdmittedProviderUpdate, type AiBeforeCommit } from "./admitted-ai-update";
+import { assertPreparedAiCommit, loadAdmittedAiUpdate, prepareCanonicalAiUpdate, retryCanonicalAiMutation, type NativeAiHead, type AiCanonicalBridge } from "./canonical-ai-update";
+import { createCollaborationGatewayBridgeClient } from "../../../../scripts/collaboration-gateway-bridge-client.mjs";
+import { durableFrontierHash } from "../../../../scripts/collaboration-canonical-room.mjs";
+import { getConvexUrl } from "@/lib/env";
 import {
   collaborationDocumentName,
   collaborationProtocolVersion,
@@ -94,6 +98,7 @@ type CollaborationSession = {
   url: string;
   providerKind: "cloudflare" | "hocuspocus";
   level: "read" | "modify";
+  policyVersion: number;
 };
 
 type AiRealtimeProvider = {
@@ -102,6 +107,7 @@ type AiRealtimeProvider = {
   readonly isAuthenticated: boolean;
   readonly hasUnsyncedChanges: boolean;
   beginDurableTransaction?(): void;
+  applyCommittedUpdate?(update: Uint8Array): void;
   awareness?: {
     getLocalState(): { user?: unknown } | null;
     getStates(): Map<unknown, { user?: unknown }>;
@@ -197,6 +203,12 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
 
   beginDurableTransaction() {
     this.durableAck.beginTransaction();
+  }
+
+  applyCommittedUpdate(update: Uint8Array) {
+    // The sink already appended these exact bytes. Provider origin suppresses
+    // a second authored upload while the refresh hint wakes other open peers.
+    applyAdmittedProviderUpdate(this.transport, update, `admitted:${randomUUID()}`);
   }
 
   handleStateless(payload: string) {
@@ -612,6 +624,7 @@ async function createCollaborationSession(
     token,
     providerKind,
     level,
+    policyVersion: room.policyVersion,
     url:
       providerKind === "cloudflare"
         ? (process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
@@ -937,10 +950,9 @@ async function synchronizeMutation(params: {
   onConflictResolved?: () => void | Promise<void>;
   baseSnapshot?: ArtifactRegionSnapshot;
   proposedSnapshot?: ArtifactRegionSnapshot;
-  beforeCommit?: (info: {
-    desired: ArtifactLiveValue;
-    changedRegionIds: string[];
-  }) => Promise<void>;
+  beforeCommit?: AiBeforeCommit;
+  nativeHead?: NativeAiHead;
+  canonicalBridge?: AiCanonicalBridge;
   /**
    * Re-read the live model after a human-held target becomes free. A queued
    * operation may have waited through several collaborator transactions; its
@@ -1042,6 +1054,7 @@ async function synchronizeMutation(params: {
   if (plan.regions.length === 0) {
     return { changedRegionIds: [] as string[] };
   }
+  const authoredFrontier = durableFrontierHash(params.document);
   const claims = await acquirePlanClaims({
     artifactId: params.session.artifact._id,
     clientId: params.session.clientId,
@@ -1463,31 +1476,74 @@ async function synchronizeMutation(params: {
       }
     }
     logPhase("choreography-complete", { beatCount: beats.length });
-    await commitAiYjsAfterNativeQueue({
-      document: params.document,
-      apply: plan.apply,
-      origin: {
-        kind: "spectra-ai-operation",
-        runId: params.runId,
-        operationId: params.operationId,
-      },
+    let preparedResult: Awaited<ReturnType<typeof prepareCanonicalAiUpdate>> | undefined;
+    let preparation: Promise<Awaited<ReturnType<typeof prepareCanonicalAiUpdate>>> | undefined;
+    let finalHead = params.nativeHead;
+    if (finalHead) {
+      const fresh = await convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
+        "nativeAiCommit:head", { artifactId: params.session.artifact._id, aiOperation: {
+          runId: params.runId, executionId: params.executionId, operationId: params.operationId,
+        } });
+      if (fresh.committedResult || fresh.operationDigest !== finalHead.operationDigest ||
+          fresh.sourceContentIdentity !== finalHead.sourceContentIdentity ||
+          fresh.room?._id !== finalHead.room?._id || fresh.room?.nextSequence !== finalHead.room?.nextSequence)
+        throw new Error("AI_NATIVE_CANONICAL_STALE");
+      // Preview metadata changes updatedAt without changing authored content.
+      finalHead = fresh;
+    }
+    const admitted = await params.beforeCommit?.({
       desired,
       changedRegionIds: plan.regions.map((region) => region.regionId),
-      beforeCommit: async (info) => {
-        await params.beforeCommit?.(info);
-        params.provider.beginDurableTransaction?.();
+      prepareAdmittedUpdate: async (normalizedDesired) => {
+        if (!finalHead || !params.canonicalBridge || !params.provider.applyCommittedUpdate)
+          throw new Error("AI_NATIVE_ADMISSION_UNAVAILABLE");
+        if (preparation) throw new Error("AI_NATIVE_UPDATE_ALREADY_PREPARED");
+        preparation = prepareCanonicalAiUpdate({ head: finalHead, bridge: params.canonicalBridge,
+          authoredFrontier, desired: normalizedDesired, clientId: params.session.clientId, operationId: params.operationId });
+        preparedResult = await preparation;
+        return preparedResult.prepared;
       },
     });
+    let acceptedFrontier: { artifactId: string; runId: string; executionId: string; operationId: string;
+      sequence: number; before: ArtifactLiveValue; after: ArtifactLiveValue } | undefined;
+    if (admitted) {
+      if (!params.canonicalBridge || !params.provider.applyCommittedUpdate) throw new Error("AI_NATIVE_ADMISSION_UNAVAILABLE");
+      if (!admitted.duplicate) {
+        if (!preparedResult) throw new Error("AI_ADMITTED_PREPARATION_MISMATCH");
+        assertPreparedAiCommit(preparedResult.prepared, admitted);
+      }
+      const update = await loadAdmittedAiUpdate(admitted, params.canonicalBridge, {
+        artifactId: params.session.artifact._id, accountId: params.session.actor.accountId, policyVersion: params.session.policyVersion,
+      });
+      params.provider.applyCommittedUpdate(update);
+      if (!admitted.duplicate && preparedResult) acceptedFrontier = {
+        artifactId: params.session.artifact._id, runId: params.runId, executionId: params.executionId,
+        operationId: params.operationId, sequence: admitted.receipt.sequence,
+        before: preparedResult.before, after: preparedResult.after,
+      };
+    } else {
+      // A prepared native candidate may never fall through to a second plan.
+      if (preparation) throw new Error("AI_NATIVE_COMMIT_RECEIPT_REQUIRED");
+      // A native-aware callback may decline a metadata-only edit. Its ordinary
+      // gateway path still needs the human history boundary skipped above.
+      if (params.nativeHead) await convexMutation("changeGroups:checkpointBeforeAi", {
+        artifactId: params.session.artifact._id, runId: params.runId, executionId: params.executionId,
+      });
+      params.provider.beginDurableTransaction?.();
+      params.document.transact(plan.apply, { kind: "spectra-ai-operation", runId: params.runId, operationId: params.operationId });
+    }
     logPhase("transaction-applied");
     params.provider.flushPendingUpdates();
     logPhase("updates-flushed");
     try {
-      await waitUntil(
-        () => params.provider.synced && !params.provider.hasUnsyncedChanges,
-        () => abortError(params.signal) ?? params.getConnectionError(),
-        12_000,
-        "AI_ARTIFACT_CONNECTION_STALLED: The collaboration room did not confirm the live edit.",
-      );
+      if (!admitted) {
+        await waitUntil(
+          () => params.provider.synced && !params.provider.hasUnsyncedChanges,
+          () => abortError(params.signal) ?? params.getConnectionError(),
+          12_000,
+          "AI_ARTIFACT_CONNECTION_STALLED: The collaboration room did not confirm the live edit.",
+        );
+      }
     } catch (error) {
       const connection =
         abortError(params.signal) ?? params.getConnectionError();
@@ -1536,6 +1592,7 @@ async function synchronizeMutation(params: {
     }
     return {
       changedRegionIds: plan.regions.map((region) => region.regionId),
+      ...(acceptedFrontier ? { acceptedFrontier } : {}),
     };
   } catch (error) {
     logPhase("failed", {
@@ -1617,7 +1674,7 @@ export async function readLiveArtifactValue(params: {
  * an exact narrative slide count may instead retain verified citations in
  * native notes/metadata without adding a separate slide.
  */
-export async function applyAiArtifactMutation(params: {
+async function applyAiArtifactMutationAttempt(params: {
   artifactId: string;
   runId: string;
   operationId: string;
@@ -1637,10 +1694,7 @@ export async function applyAiArtifactMutation(params: {
   checkpointBeforeAi?: boolean;
   replacePendingCreate?: boolean;
   operations?: string[];
-  beforeCommit?: (info: {
-    desired: ArtifactLiveValue;
-    changedRegionIds: string[];
-  }) => Promise<void>;
+  beforeCommit?: AiBeforeCommit;
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1664,7 +1718,14 @@ export async function applyAiArtifactMutation(params: {
     claimActorKind,
   );
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
-  if (!params.replacePendingCreate) {
+  const nativeHead = params.beforeCommit && claimActorKind === "ai"
+    ? await convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
+      "nativeAiCommit:head", { artifactId: params.artifactId, aiOperation: {
+        runId: params.runId, executionId: params.executionId, operationId: params.operationId,
+      } }) : undefined;
+  const canonicalBridge: AiCanonicalBridge | undefined = nativeHead
+    ? createCollaborationGatewayBridgeClient({ convexUrl: getConvexUrl(), bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY! }) : undefined;
+  if (!params.replacePendingCreate && !nativeHead?.committedResult) {
     const native = await nativeGateContext(session.artifact);
     const gate = gateAiArtifactMutation({
       type: typeKey as WorkType,
@@ -1722,6 +1783,14 @@ export async function applyAiArtifactMutation(params: {
       authenticated: authenticated || provider.isAuthenticated,
       synced: provider.synced,
     });
+    if (nativeHead?.committedResult) {
+      if (!canonicalBridge || !provider.applyCommittedUpdate) throw new Error("AI_NATIVE_ADMISSION_UNAVAILABLE");
+      provider.applyCommittedUpdate(await loadAdmittedAiUpdate(nativeHead.committedResult, canonicalBridge, {
+        artifactId: params.artifactId, accountId: session.actor.accountId, policyVersion: session.policyVersion,
+      }));
+      // Later replay state cannot attest this operation's original projection.
+      return { artifactId: params.artifactId, changedRegionIds: [] as string[], duplicate: true };
+    }
     const presenceName =
       claimActorKind === "human"
         ? session.actor.name.trim() || "You"
@@ -1877,7 +1946,7 @@ export async function applyAiArtifactMutation(params: {
         changedRegionIds: [] as string[],
       };
 
-    if (params.checkpointBeforeAi !== false) {
+    if (params.checkpointBeforeAi !== false && !nativeHead) {
       await convexMutation<
         { artifactId: string; runId: string; executionId: string },
         unknown
@@ -1899,7 +1968,7 @@ export async function applyAiArtifactMutation(params: {
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
     // preserved by field-level patch operations rather than overwritten from
     // an earlier database projection.
-    let plannedStateVector = stateVectorHash(document);
+    let plannedStateVector = durableFrontierHash(document);
     const refreshed = readLiveYjsDocument(document, typeKey);
     await yieldForCollaboration();
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
@@ -1964,10 +2033,12 @@ export async function applyAiArtifactMutation(params: {
       onConflict: params.onConflict,
       onConflictResolved: params.onConflictResolved,
       beforeCommit: params.beforeCommit,
+      nativeHead,
+      canonicalBridge,
       baseSnapshot,
       proposedSnapshot,
       rebaseAfterHumanWait: async () => {
-        const nextStateVector = stateVectorHash(document);
+        const nextStateVector = durableFrontierHash(document);
         if (nextStateVector === plannedStateVector) return undefined;
         plannedStateVector = nextStateVector;
         const liveBase = readLiveYjsDocument(document, typeKey);
@@ -2040,4 +2111,8 @@ export async function applyAiArtifactMutation(params: {
     provider.destroy();
     document.destroy();
   }
+}
+
+export async function applyAiArtifactMutation(params: Parameters<typeof applyAiArtifactMutationAttempt>[0]) {
+  return retryCanonicalAiMutation(() => applyAiArtifactMutationAttempt(params), params.signal);
 }

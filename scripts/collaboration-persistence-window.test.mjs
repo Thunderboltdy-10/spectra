@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { canonicalDurableUpdate } from "./collaboration-update-envelope.mjs";
 import { samePersistenceBatch } from "./collaboration-persist.mjs";
 import { chainPersistThenCompact, persistenceFlushDelay, PERSISTENCE_MAX_BATCH_ENTRIES } from "./collaboration-persist.mjs";
+import { mergeCanonicalIntoLive } from "./collaboration-canonical-room.mjs";
 
 const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
 function harness(persist = vi.fn(async () => undefined)) {
@@ -25,17 +26,46 @@ function harness(persist = vi.fn(async () => undefined)) {
   const confirmCode = source.slice(source.indexOf("  async onStateless("), source.indexOf("  async onLoadDocument("));
   const release = vi.fn();
   const reject = vi.fn();
+  const canonical = new Y.Doc();
+  const unapplied = new WeakSet();
   const confirmDeps = { flushPersistence: handlers.flushPersistence, reauthorize: vi.fn(async () => undefined),
     documentFrontierHash: () => "fixture-frontier",
     documentDurableAnchors: new WeakMap(),
     acquireDocumentMessage: vi.fn(async () => undefined), releaseDocumentMessage: release,
-    sendGatewayState: sent, rejectPeerUpdate: reject, collaborationFailureMessage: String };
+    sendGatewayState: sent, rejectPeerUpdate: reject, collaborationFailureMessage: String,
+    Y, MAX_COMPACTION_STATE_VECTOR_BYTES: 128 * 1024, documentPersistenceQueues: queues,
+    unappliedDocumentMessages: unapplied, mergeCanonicalIntoLive,
+    canonicalRoom: () => ({ run: async work => work({ refresh: async () => ({ document: canonical }) }) }) };
   const confirm = new Function(...Object.keys(confirmDeps), `return ({${confirmCode}}).onStateless;`)(...Object.values(confirmDeps));
-  return { ...handlers, persist, sent, confirm, release, reject };
+  return { ...handlers, persist, sent, confirm, release, reject, canonical, unapplied };
 }
 const entry = () => ({ documentUpdate: new Uint8Array([0, 0]), context: { artifactId: "fixture" }, messageId: "update", connection: {} });
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
 afterEach(() => vi.useRealTimers());
+
+it("refreshes an already committed room without authoring another persistence entry", async () => {
+  const h = harness(); const doc = new Y.Doc();
+  h.canonical.getText("body").insert(0, "Accepted by the atomic sink");
+  try {
+    await h.confirm({ connection: { context: {}, socketId: "peer" }, document: doc,
+      payload: JSON.stringify({ type: "spectra.canonical_refresh", confirmationId: "admitted:1" }) });
+    expect(doc.getText("body").toString()).toBe("Accepted by the atomic sink");
+    expect(h.persist).not.toHaveBeenCalled();
+    expect(h.sent).not.toHaveBeenCalled();
+  } finally { doc.destroy(); h.canonical.destroy(); }
+});
+
+it("defers committed refresh while a human frame is captured but not applied", async () => {
+  const h = harness(); const doc = new Y.Doc();
+  h.canonical.getText("body").insert(0, "Native state");
+  h.unapplied.add(doc);
+  try {
+    await h.confirm({ connection: { context: {}, socketId: "peer" }, document: doc,
+      payload: JSON.stringify({ type: "spectra.canonical_refresh", confirmationId: "admitted:1" }) });
+    expect(doc.getText("body").toString()).toBe("");
+    expect(h.persist).not.toHaveBeenCalled();
+  } finally { doc.destroy(); h.canonical.destroy(); }
+});
 
 it("flushes sustained edits within a second and coalesces short bursts", async () => {
   const h = harness(); const doc = new Y.Doc();

@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { readAdmittedAiUpdate, type AdmittedAiCommit } from "../ai/admitted-ai-update";
+import WebSocket from "ws";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { applyAdmittedProviderUpdate, readAdmittedAiUpdate, type AdmittedAiCommit } from "../ai/admitted-ai-update";
 
 const fixture = () => {
   const doc = new Y.Doc(); doc.getText("body").insert(0, "accepted");
@@ -13,6 +15,20 @@ const fixture = () => {
   return { result, update, digest };
 };
 const readers = () => ({ payload: vi.fn(), replay: vi.fn() });
+
+it("applies committed bytes through a real provider without authoring a second update", () => {
+  const document = new Y.Doc();
+  const socket = new HocuspocusProviderWebsocket({ url: "ws://127.0.0.1:1", WebSocketPolyfill: WebSocket, autoConnect: false });
+  const provider = new HocuspocusProvider({ name: "admitted-fixture", document, websocketProvider: socket, flushDelay: 180 });
+  try {
+    const { update } = fixture();
+    applyAdmittedProviderUpdate(provider, update, "admitted:fixture");
+    expect(document.getText("body").toString()).toBe("accepted");
+    expect(provider.hasUnsyncedChanges).toBe(false);
+    document.getText("body").insert(0, "authored ");
+    expect(provider.hasUnsyncedChanges).toBe(true);
+  } finally { provider.destroy(); socket.destroy(); document.destroy(); }
+});
 
 it("consumes only the exact admitted inline bytes after a lost acknowledgement", async () => {
   const { result, update } = fixture(); const read = readers();

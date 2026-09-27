@@ -1,9 +1,11 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import * as Y from "yjs";
+import type { HocuspocusProvider } from "@hocuspocus/provider";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
 
-type CanonicalPayload =
+export type CanonicalPayload =
   | { update: string; payloadRef?: never; payloadDigest?: never; byteLength?: never; payloadManifest?: never }
   | { update: ""; payloadRef: string; payloadDigest: string; byteLength: number; payloadManifest: unknown };
 
@@ -68,6 +70,18 @@ export type AiBeforeCommitInfo = {
   prepareAdmittedUpdate: (normalizedDesired: ArtifactLiveValue) => Promise<PreparedCanonicalAiUpdate>;
 };
 export type AiBeforeCommit = (info: AiBeforeCommitInfo) => Promise<AdmittedAiCommit | void>;
+
+/** The durable sink already authored this update. Hocuspocus recognizes its
+ * own origin and does not enqueue the accepted bytes as another local write. */
+export function applyAdmittedProviderUpdate(provider: HocuspocusProvider, update: Uint8Array, confirmationId: string) {
+  Y.applyUpdate(provider.document, update, provider);
+  try {
+    provider.sendStateless(JSON.stringify({ type: "spectra.canonical_refresh", confirmationId }));
+  } catch {
+    // Receipt durability is independent of this latency hint. The gateway's
+    // existing policy sweep will catch up a peer whose socket just closed.
+  }
+}
 
 const MAX_ADMITTED_BYTES = 256 * 1024 * 1024;
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");

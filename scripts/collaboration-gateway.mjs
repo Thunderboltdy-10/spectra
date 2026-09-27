@@ -1199,7 +1199,7 @@ const server = new Server({
     if (payload.length > 256) return;
     let request;
     try { request = JSON.parse(payload); } catch { return; }
-    if (!["spectra.durable_confirm", "spectra.recovery_request"].includes(request?.type) ||
+    if (!["spectra.durable_confirm", "spectra.recovery_request", "spectra.canonical_refresh"].includes(request?.type) ||
         typeof request.confirmationId !== "string" ||
         !/^[a-zA-Z0-9:-]{1,120}$/.test(request.confirmationId)) return;
     await reauthorize(connection.context);
@@ -1214,16 +1214,16 @@ const server = new Server({
     finally { releaseDocumentMessage(connection.socketId); }
     try {
       await barrier;
-      if (request.type === "spectra.recovery_request") {
+      if (request.type === "spectra.recovery_request" || request.type === "spectra.canonical_refresh") {
         await canonicalRoom(document, connection.context).run(async session => {
           const { document: canonical } = await session.refresh();
-          const vector = Y.encodeStateVector(canonical);
-          if (vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
+          const vector = request.type === "spectra.recovery_request" ? Y.encodeStateVector(canonical) : null;
+          if (vector && vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
             throw new Error("COLLABORATION_RECOVERY_VECTOR_SIZE");
           const pending = documentPersistenceQueues.get(document);
           if (!pending?.pending.length && !pending?.flushing && !unappliedDocumentMessages.has(document))
             mergeCanonicalIntoLive(canonical, document);
-          sendGatewayState(connection, {
+          if (request.type === "spectra.recovery_request") sendGatewayState(connection, {
             type: "spectra.recovery_vector", confirmationId: request.confirmationId,
             stateVector: Buffer.from(vector).toString("base64"),
           });

@@ -44,7 +44,15 @@ it.each(["current", "advanced", "legacy"] as const)("preserves a %s native base 
   }
   const pinIds = await t.run(async ctx => {
     const pins = [];
-    for (const region of ["first", "second"]) pins.push(await ctx.db.insert("artifactEmbeds", { containerType: "artifact", containerId: String(containerId), containerRegionId: `document:${region}`, sourceArtifactId: artifactId, schoolId, mode: "compact", interaction: "read", versionPolicy: "pinned", pinnedVersionId: version.versionId, contextPolicy: "summary", createdByAccountId: accountId, createdAt: Date.now(), updatedAt: Date.now() }));
+    const references = [];
+    for (const region of ["first", "second"]) {
+      const containerRegionId = `reference:${region}`;
+      const embedId = await ctx.db.insert("artifactEmbeds", { containerType: "artifact", containerId: String(containerId), containerRegionId, sourceArtifactId: artifactId, schoolId, mode: "compact", interaction: "read", versionPolicy: "pinned", pinnedVersionId: version.versionId, contextPolicy: "summary", createdByAccountId: accountId, createdAt: Date.now(), updatedAt: Date.now() });
+      pins.push(embedId);
+      // Retained reads require proven canonical placement in the host.
+      references.push({ type: "spectraReference", attrs: { embedId: String(embedId), containerType: "artifact", containerId: String(containerId), containerRegionId, sourceArtifactId: String(artifactId), versionPolicy: "pinned", pinnedVersionId: String(version.versionId), blockId: containerRegionId } });
+    }
+    await ctx.db.patch(containerId, { content: { tiptap: { type: "doc", content: references } } });
     return pins;
   });
   const deletion = await actor.mutation(api.spectraArtifacts.permanentlyDelete, { artifactId });
@@ -67,9 +75,14 @@ it.each(["current", "advanced", "legacy"] as const)("preserves a %s native base 
   const other = t.withIdentity({ subject: "unrelated-reader", email: "unrelated@example.test", emailVerified: true });
   await expect(other.query(api.payloads.get, { workId: artifactId, hash })).rejects.toThrow();
   const grantId = await t.run(ctx => ctx.db.insert("accessGrants", { schoolId, resourceType: "artifact", resourceId: containerId, principalType: "account", principalId: otherAccountId, level: "read", capabilities: ["read", "use", "comment"], source: "direct", createdByAccountId: accountId, createdAt: Date.now(), updatedAt: Date.now() }));
+  // Host access alone is not a source capability (retained pins require
+  // independent source rights); both together grant the retained read.
+  await expect(other.query(api.payloads.get, { workId: artifactId, hash })).rejects.toThrow();
+  const sourceGrantId = await t.run(ctx => ctx.db.insert("accessGrants", { schoolId, resourceType: "artifact", resourceId: artifactId, principalType: "account", principalId: otherAccountId, level: "read", capabilities: ["read"], source: "direct", createdByAccountId: accountId, createdAt: Date.now(), updatedAt: Date.now() }));
   expect(await other.query(api.payloads.get, { workId: artifactId, hash })).toMatchObject({ hash });
   await t.run(ctx => ctx.db.delete(grantId));
   await expect(other.query(api.payloads.get, { workId: artifactId, hash })).rejects.toThrow();
+  await t.run(ctx => ctx.db.delete(sourceGrantId));
   await actor.mutation(api.artifactEmbeds.remove, { embedId: pinIds[0] });
   expect(await t.mutation(internal.durablePayloadOwnership.release, { payloadRef })).toBe(false);
   expect(await actor.query(api.payloads.get, { workId: artifactId, hash })).toMatchObject({ hash });

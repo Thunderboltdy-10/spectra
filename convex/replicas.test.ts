@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -12,6 +13,14 @@ import {
 import { BRIDGE_CLAIM_REDRIVE_MS, BRIDGE_WRITE_EXPIRES_MS } from "../shared/replica-truth";
 
 const modules = import.meta.glob("./**/*.ts");
+// School-scoped work maintains org-node aggregates, as it does in production.
+function setupTest() {
+  const t = convexTest(schema, modules);
+  aggregateTest.register(t, "orgNodeCountByType");
+  aggregateTest.register(t, "orgNodeCountByWorkspace");
+  aggregateTest.register(t, "orgNodeCountByParent");
+  return t;
+}
 const identity = {
   subject: "clerk_replica_truth",
   email: "replica-truth@example.test",
@@ -24,7 +33,7 @@ const bridgeCredential = "bridge-test-credential-000000000001";
 
 describe("Bridge materialization receipt replay", () => {
   it("refreshes only the current authorized claim before the native write", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const queued = await t.withIdentity(identity).mutation(api.replicas.queueMaterialization, {
       workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash,
@@ -51,7 +60,7 @@ describe("Bridge materialization receipt replay", () => {
   it.each(["pending", "claimed", "verified"] as const)(
     "keeps the newer canonical head and immutable request when replaying %s A",
     async (state) => {
-      const t = convexTest(schema, modules);
+      const t = setupTest();
       const fixture = await seedWork(t);
       const asUser = t.withIdentity(identity);
       const input = {
@@ -269,7 +278,7 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
 
 describe("replica truth machine", () => {
   it("does not reactivate an original package over a durable authored head", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const content = { blocks: [{ id: "edited", text: "saved edit" }] };
     await t.run(ctx => ctx.db.patch(fixture.workId, { blueprintKey: "document", content, liveStateVectorHash: "durable-head" }));
@@ -281,7 +290,7 @@ describe("replica truth machine", () => {
   });
 
   it("commits cloud native bytes once and fences stale materializations without replacing authored content", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const actor = t.withIdentity(identity);
     const semantic = "c".repeat(64);
@@ -315,7 +324,7 @@ describe("replica truth machine", () => {
   });
 
   it("activates and materializes a workbook beyond Convex's object-field limit", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const cells = Object.fromEntries(
       Array.from({ length: 1_322 }, (_, index) => [
@@ -387,7 +396,7 @@ describe("replica truth machine", () => {
   });
 
   it("derives one replay-safe request without optimistic current stamps", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const input = {
@@ -428,7 +437,7 @@ describe("replica truth machine", () => {
   });
 
   it("retargets materialization onto the live Bridge replica of the same path", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const staleLocalId = await t.run(async (ctx) => {
       const now = Date.now();
@@ -505,7 +514,7 @@ describe("replica truth machine", () => {
   });
 
   it("rejects a second materialization until the first write is verified", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.queueMaterialization, {
@@ -546,7 +555,7 @@ describe("replica truth machine", () => {
   });
 
   it("advances the stored semantic base to the projection represented by verified bytes", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const projection = { blocks: [{ id: "body", text: "Saved projection" }] };
@@ -585,7 +594,7 @@ describe("replica truth machine", () => {
   });
 
   it("keeps an external upload and its exact replay on the same replica truth", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const input = {
       credential: bridgeCredential,
@@ -637,7 +646,7 @@ describe("replica truth machine", () => {
   });
 
   it("retains the verified common base across successive external saves", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const thirdHash = payloadHash("third");
     const thirdPayloadId = await t.run(async (ctx) => {
@@ -708,7 +717,7 @@ describe("replica truth machine", () => {
   });
 
   it("does not present a superseded external revision as still syncing", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -734,7 +743,7 @@ describe("replica truth machine", () => {
   });
 
   it("lets a modify collaborator read replica truth without crashing", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const collaboratorIdentity = {
       subject: "clerk_replica_collaborator",
@@ -821,7 +830,7 @@ describe("replica truth machine", () => {
   });
 
   it("forwards shared Office capability to cloud payloads and lens activation without exposing owner Bridge state", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const collaboratorIdentity = {
       subject: "clerk_replica_native_collaborator",
@@ -1030,7 +1039,7 @@ describe("replica truth machine", () => {
   });
 
   it("lets a modify collaborator queue materialization only onto their own local replica", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const collaboratorCredential = "bridge-collaborator-credential-000001";
     const collaboratorIdentity = {
@@ -1255,7 +1264,7 @@ describe("replica truth machine", () => {
   });
 
   it("does not keep Syncing after an applied Spectra write", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -1280,7 +1289,7 @@ describe("replica truth machine", () => {
   });
 
   it("does not treat a Keep Spectra write as an open conflict", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -1305,7 +1314,7 @@ describe("replica truth machine", () => {
   });
 
   it("expires an external revision that never reaches reconciliation", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const operationId = await t.run(async (ctx) => {
       const stalledAt = Date.now() - BRIDGE_WRITE_EXPIRES_MS - 1;
@@ -1335,7 +1344,7 @@ describe("replica truth machine", () => {
   });
 
   it("compensates an expired claimed write and its dependent rows", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const ids = await t.run(async (ctx) => {
       const then = Date.now() - 60 * 60_000;
@@ -1403,7 +1412,7 @@ describe("replica truth machine", () => {
   });
 
   it("releases only payload bytes with no live references", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) =>
       ctx.db.patch(fixture.nextPayloadId, {
@@ -1422,7 +1431,7 @@ describe("replica truth machine", () => {
   });
 
   it("finishes cloud-to-device storage only after Bridge read-back", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => ctx.db.delete(fixture.localId));
     const asUser = t.withIdentity(identity);
@@ -1511,7 +1520,7 @@ describe("replica truth machine", () => {
   });
 
   it("finishes Keep in Spectra by attaching a retained payload without waiting on Bridge", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.transitionStorageStrategy, {
@@ -1563,7 +1572,7 @@ describe("replica truth machine", () => {
   });
 
   it("completes Keep in Spectra from disk-only bytes after Bridge uploads them", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.transitionStorageStrategy, {
@@ -1620,7 +1629,7 @@ describe("replica truth machine", () => {
   });
 
   it("claims a Keep in Spectra upload when the cloud payload hash does not match disk", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.transitionStorageStrategy, {
@@ -1654,7 +1663,7 @@ describe("replica truth machine", () => {
   });
 
   it("gives Library the full replica set so a This-PC file is not Unavailable", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.transitionStorageStrategy, {
@@ -1677,7 +1686,7 @@ describe("replica truth machine", () => {
   });
 
   it("sweeps a stalled pending storage transition so the radios can exit", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const stalledAt = Date.now() - 3 * 60_000;
     await t.run(async (ctx) => {
@@ -1711,7 +1720,7 @@ describe("replica truth machine", () => {
   });
 
   it("makes linked storage metadata-only without losing the verified local revision", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
 
@@ -1741,7 +1750,7 @@ describe("replica truth machine", () => {
   });
 
   it("rolls a storage strategy back when Bridge read-back disagrees", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => ctx.db.delete(fixture.localId));
     const asUser = t.withIdentity(identity);
@@ -1784,7 +1793,7 @@ describe("replica truth machine", () => {
   });
 
   it("parks a locked write outside the eligible claim window", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -1824,7 +1833,7 @@ describe("replica truth machine", () => {
   });
 
   it("reconciles legacy labels from retained payload hashes", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       await ctx.db.patch(fixture.localId, {
@@ -1862,7 +1871,7 @@ describe("replica truth machine", () => {
   });
 
   it("migrates a local-only full-cloud work to ahead, never false current", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => ctx.db.delete(fixture.cloudId));
 
@@ -1876,7 +1885,7 @@ describe("replica truth machine", () => {
   });
 
   it("keeps both byte versions by moving the local identity to a real fork", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -1953,8 +1962,8 @@ describe("replica truth machine", () => {
     });
   });
 
-  it("resolves only the conflict covered by the reconciled revision and regions", async () => {
-    const t = convexTest(schema, modules);
+  it("refuses legacy conflict resolution outside the durable reconciliation commit", async () => {
+    const t = setupTest();
     const fixture = await seedWork(t);
     const conflicts = await t.run(async (ctx) => {
       const now = Date.now();
@@ -2007,7 +2016,7 @@ describe("replica truth machine", () => {
       return { relevant, unrelated };
     });
 
-    const result = await t
+    const result = t
       .withIdentity(identity)
       .mutation(api.replicas.recordExternalReconciliation, {
         workId: fixture.workId,
@@ -2021,27 +2030,22 @@ describe("replica truth machine", () => {
         conflictRegionIds: [],
         resolution: "local",
       });
-    expect(result.state).toBe("applied");
+    // Applying and resolving now happen only in the durable Yjs/history
+    // transaction (nativeReconciliation.commit, covered in
+    // s11-native-history-boundaries). The legacy public path must not resolve.
+    await expect(result).rejects.toThrow("EXTERNAL_DURABLE_COMMIT_REQUIRED");
     const truth = await t.run(async (ctx) => ({
       relevant: await ctx.db.get(conflicts.relevant),
       unrelated: await ctx.db.get(conflicts.unrelated),
       cloud: await ctx.db.get(fixture.cloudId),
-      local: await ctx.db.get(fixture.localId),
-      work: await ctx.db.get(fixture.workId),
     }));
-    expect(truth.relevant).toMatchObject({ state: "resolved-local" });
+    expect(truth.relevant).toMatchObject({ state: "open" });
     expect(truth.unrelated).toMatchObject({ state: "open" });
-    expect(truth.cloud).toMatchObject({
-      state: "current",
-      revision: nextHash,
-      payloadRef: String(fixture.nextPayloadId),
-    });
-    expect(truth.local).toMatchObject({ state: "current", revision: nextHash });
-    expect(truth.work?.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(truth.cloud).toMatchObject({ revision: baseHash, payloadRef: String(fixture.basePayloadId) });
   });
 
-  it("resolves overlapping-region Keep Office conflicts for the same local revision", async () => {
-    const t = convexTest(schema, modules);
+  it("keeps overlapping Keep Office conflicts open without the durable reconciliation commit", async () => {
+    const t = setupTest();
     const fixture = await seedWork(t);
     const conflictId = await t.run(async (ctx) => {
       const now = Date.now();
@@ -2081,7 +2085,7 @@ describe("replica truth machine", () => {
       });
     });
 
-    const result = await t
+    const result = t
       .withIdentity(identity)
       .mutation(api.replicas.recordExternalReconciliation, {
         workId: fixture.workId,
@@ -2095,13 +2099,14 @@ describe("replica truth machine", () => {
         conflictRegionIds: [],
         resolution: "local",
       });
-    expect(result.state).toBe("applied");
+    // Keep Office resolution is part of the durable reconciliation commit.
+    await expect(result).rejects.toThrow("EXTERNAL_DURABLE_COMMIT_REQUIRED");
     const truth = await t.run(async (ctx) => ctx.db.get(conflictId));
-    expect(truth).toMatchObject({ state: "resolved-local" });
+    expect(truth).toMatchObject({ state: "open" });
   });
 
   it("persists precise conflict previews for reload", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -2154,7 +2159,7 @@ describe("replica truth machine", () => {
   });
 
   it("does not blob-conflict a Word save against an unverified Spectra write", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2214,7 +2219,7 @@ describe("replica truth machine", () => {
   });
 
   it("supersedes an in-flight write when the disk revision moved", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const first = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2340,7 +2345,7 @@ describe("replica truth machine", () => {
   }
 
   it("binds Keep Spectra to the queued write even when open conflict regions are a unioned superset", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const seeded = await seedKeepSpectraConflict(t, fixture);
@@ -2372,7 +2377,7 @@ describe("replica truth machine", () => {
   });
 
   it("still binds Keep Spectra when the write overlaps any open conflict region", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const seeded = await seedKeepSpectraConflict(t, fixture);
@@ -2394,7 +2399,7 @@ describe("replica truth machine", () => {
   });
 
   it("refuses Keep Spectra when no pending write exists", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => {
       const now = Date.now();
@@ -2433,7 +2438,7 @@ describe("replica truth machine", () => {
   });
 
   it("resolves Keep Spectra when the active local copy and cloud agree", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const seeded = await t.run(async (ctx) => {
       const now = Date.now();
@@ -2520,7 +2525,7 @@ describe("replica truth machine", () => {
   });
 
   it("leaves work content unchanged while a verified-first materialization is pending", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2550,7 +2555,7 @@ describe("replica truth machine", () => {
   });
 
   it("projects an immediately accepted native edit while Bridge sync is pending", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const projection = {
       blocks: [{ id: "body", text: "Spectra owns the accepted revision" }],
@@ -2589,7 +2594,7 @@ describe("replica truth machine", () => {
   });
 
   it("coalesces a newer Spectra edit over an unclaimed Office-locked write", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const thirdHash = "c".repeat(64);
@@ -2673,7 +2678,7 @@ describe("replica truth machine", () => {
   });
 
   it("advances replica byte and projection bases on verified-first without rewriting work content", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const externalOperationId = await t.run(async (ctx) => {
       const now = Date.now();
@@ -2733,7 +2738,7 @@ describe("replica truth machine", () => {
   });
 
   it("reports authorized materialization status and hides requests from strangers", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2789,7 +2794,7 @@ describe("replica truth machine", () => {
   });
 
   it("cancels pending verified-first writes without overwriting a newer projection", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {
@@ -2842,7 +2847,7 @@ describe("replica truth machine", () => {
   });
 
   it("fences late A acknowledgements after B has verified on the same replica", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const thirdHash = "c".repeat(64);
@@ -2935,7 +2940,7 @@ describe("replica truth machine", () => {
   });
 
   it("ignores an acknowledgement from a reclaimed claim generation", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
     const queued = await asUser.mutation(api.replicas.queueMaterialization, {

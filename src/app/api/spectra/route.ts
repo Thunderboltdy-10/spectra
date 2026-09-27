@@ -14,6 +14,7 @@ import {
 } from "@/features/spectra/artifacts/types";
 import { parseModelOperation } from "@/features/spectra/operations/schema";
 import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 const BLUEPRINTS = new Set([
   "document",
@@ -1542,12 +1543,25 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "commitArtifactRestore") {
-      const result = await spectraMutation("changeGroups:commitRestore", {
-        artifactId: requireString(body.artifactId, "artifactId"),
-        sourceVersionId: requireString(body.sourceVersionId, "sourceVersionId"),
+      if (body.regionIds !== undefined && (!Array.isArray(body.regionIds) ||
+          body.regionIds.some((id: unknown) => typeof id !== "string")))
+        return badRequest("Choose valid regions to restore.");
+      const { admitArtifactRestore } = await import("@/lib/artifact-restore-server");
+      const { prepareNativeArtifactRestore } = await import("@/lib/artifact-restore-native");
+      try {
+        const result = await admitArtifactRestore({
+        artifactId: requireString(body.artifactId, "artifactId") as Id<"spectraArtifacts">,
+        sourceVersionId: requireString(body.sourceVersionId, "sourceVersionId") as Id<"spectraArtifactVersions">,
+        requestId: requireString(body.requestId, "requestId"),
         clientId: requireString(body.clientId, "clientId"),
-      });
-      return ok(result);
+        ...(body.regionIds !== undefined ? { regionIds: body.regionIds as string[] } : {}),
+        }, prepareNativeArtifactRestore);
+        return ok(result);
+      } catch (error) {
+        if (/ARTIFACT_RESTORE_STALE|MATERIALIZATION_BASE_STALE|COLLABORATION_BASE_STATE_STALE|COLLABORATION_REPLAY_GENERATION_CHANGED/.test(String(error)))
+          return badRequest("New changes arrived before restoration. Review the current version and try again.", 409);
+        throw error;
+      }
     }
 
     if (action === "createArtifactCheckpoint") {

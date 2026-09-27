@@ -433,7 +433,7 @@ export async function commitHumanCheckpoint(
   ctx: MutationCtx,
   artifactId: Id<"spectraArtifacts">,
   summary: string,
-  options: { kind?: "pre_ai_checkpoint" | "pre_native_checkpoint" } = {},
+  options: { kind?: "pre_ai_checkpoint" | "pre_native_checkpoint" | "pre_restore_checkpoint" } = {},
 ) {
   const groups = await ctx.db
     .query("changeGroups")
@@ -899,45 +899,10 @@ export const commitRestore = mutation({
     sourceVersionId: v.id("spectraArtifactVersions"),
     clientId: v.string(),
   },
-  handler: async (ctx, args) => {
-    const { actor } = await requireArtifactCapability(
-      ctx,
-      args.artifactId,
-      "restore",
-    );
-    const sourceVersion = await ctx.db.get(args.sourceVersionId);
-    if (!sourceVersion || sourceVersion.artifactId !== args.artifactId)
-      throw new Error("ARTIFACT_RESTORE_VERSION_INVALID");
-    const groups = await ctx.db
-      .query("changeGroups")
-      .withIndex("by_artifact_status_activity", (q) =>
-        q.eq("artifactId", args.artifactId).eq("status", "open"),
-      )
-      .collect();
-    const clientId = args.clientId.trim().slice(0, 180);
-    const mine = groups.filter(
-      (group) =>
-        group.actorAccountId === actor.accountId &&
-        group.clientId === clientId &&
-        group.source === "human",
-    );
-    if (mine.length === 0)
-      throw new Error(
-        "ARTIFACT_RESTORE_NOT_SYNCHRONIZED: Synchronize the restored state before recording history.",
-      );
-    const committed = [];
-    const sourceLabel =
-      sourceVersion.name ||
-      sourceVersion.summary ||
-      new Date(sourceVersion.createdAt).toISOString();
-    for (const group of mine)
-      committed.push(
-        await commitChangeGroup(ctx, group._id, {
-          source: "restore",
-          summary: `Restored ${sourceLabel}`,
-        }),
-      );
-    return committed;
+  handler: async () => {
+    // Older clients must not label a prior optimistic write as an admitted
+    // restore. The signed artifactRestore transaction now owns this boundary.
+    throw new Error("ARTIFACT_RESTORE_ADMISSION_REQUIRED");
   },
 });
 

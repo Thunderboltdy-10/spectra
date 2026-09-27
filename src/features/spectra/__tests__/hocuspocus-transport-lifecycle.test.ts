@@ -422,4 +422,27 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     });
     transport.destroy();
   });
+
+  it("consumes an admitted restore delta once, as a gateway frame, and asks for a canonical refresh", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-admitted");
+    await transport.connect();
+    const source = new Y.Doc();
+    source.getMap("meta").set("title", "Restored");
+    const update = Y.encodeStateAsUpdate(source);
+    source.destroy();
+    const digest = createHash("sha256").update(update).digest("hex");
+    const inline = { encoding: "inline" as const, updateBase64: Buffer.from(update).toString("base64") };
+    await expect(transport.consumeAdmittedUpdate(inline, "0".repeat(64), "restore:bad")).rejects.toThrow(
+      "COLLABORATION_ADMITTED_UPDATE_INVALID");
+    expect(transport.document.getMap("meta").get("title")).toBeUndefined();
+    await transport.consumeAdmittedUpdate(inline, digest, "restore:one");
+    expect(transport.document.getMap("meta").get("title")).toBe("Restored");
+    // Provider origin: the accepted bytes are never re-sent as a local write.
+    expect(hocuspocus.provider?.documentUpdateHandler).not.toHaveBeenCalled();
+    await transport.consumeAdmittedUpdate({ encoding: "replay", roomId: "room", throughSequence: 4 }, digest, "restore:two");
+    const refreshes = hocuspocus.provider!.sendStateless.mock.calls.map(([payload]) => JSON.parse(payload as string))
+      .filter(request => request.type === "spectra.canonical_refresh");
+    expect(refreshes.map(request => request.confirmationId)).toEqual(["restore:one", "restore:two"]);
+    transport.destroy();
+  });
 });

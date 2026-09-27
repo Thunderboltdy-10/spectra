@@ -54,7 +54,7 @@ export type NativeReconciliationResult = NativeMerge & {
 const digest = (value: string | Uint8Array) => createHash("sha256").update(value).digest("base64url");
 const stale = (error: unknown) => /NATIVE_RECONCILIATION_STALE|COLLABORATION_BASE_STATE_STALE|COLLABORATION_REPLAY_GENERATION_CHANGED/.test(String(error));
 
-async function storeCommitContent(
+export async function storeCommitContent(
   value: unknown,
   context: { artifactId: string; partitionKey: string; accountId: string; policyVersion: number },
   bridge: ReturnType<typeof createCollaborationGatewayBridgeClient>,

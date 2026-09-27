@@ -140,7 +140,7 @@ import {
 import { resolvePresenceAnchorFromPoint } from "../collaboration/presence-anchor";
 import { useJoinLateArrival } from "../collaboration/presentation-lane";
 import { targetAttrs } from "../collaboration/target-attributes";
-import type { CollaborationPresence } from "../collaboration/types";
+import type { AdmittedUpdateDescriptor, CollaborationPresence } from "../collaboration/types";
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
@@ -188,7 +188,6 @@ import {
   claimCloseAction,
   decideClose,
   persistableTitle,
-  restoreMayBypassHungSave,
 } from "./artifact-persistence";
 import { workTypeMeta } from "./artifact-card";
 import {
@@ -1699,6 +1698,7 @@ function HistoryComparisonOverlay({
                   type="button"
                   key={version._id}
                   onClick={() => onSelect(version)}
+                  disabled={busyVersionId !== null}
                   className={`relative flex w-full gap-3 rounded-control border px-3 py-2.5 text-left ${selectedVersion ? "border-[color-mix(in_oklab,var(--brand-primary)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`}
                 >
                   <span
@@ -3093,6 +3093,10 @@ function ArtifactStudioEditor({
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] =
     useState<SpectraArtifactVersion | null>(null);
+  const restoreInFlightRef = useRef(false);
+  const pendingRestoreRequestRef = useRef<{ key: string; requestId: string } | null>(null);
+  const restoreSelectionRef = useRef({ artifactId: artifact._id, versionId: previewVersion?._id });
+  restoreSelectionRef.current = { artifactId: artifact._id, versionId: previewVersion?._id };
   const selectHistoryVersion = useCallback(async (version: SpectraArtifactVersionSummary) => {
     if (version.artifactId !== artifact._id || historyActiveArtifactRef.current !== artifact._id) return;
     previewRequestRef.current?.abort();
@@ -5248,7 +5252,7 @@ function ArtifactStudioEditor({
     version: SpectraArtifactVersion,
     regionIds?: readonly string[],
   ) {
-    if (readOnly || version.artifactId !== artifact._id || version._id !== previewVersion?._id) return;
+    if (readOnly || restoreInFlightRef.current || version.artifactId !== artifact._id || version._id !== previewVersion?._id) return;
     if (!version.after) {
       setLiveConflict({
         message:
@@ -5256,6 +5260,7 @@ function ArtifactStudioEditor({
       });
       return;
     }
+    restoreInFlightRef.current = true;
     setHistoryBusy(version._id);
     try {
       // History actions commonly follow the last auto-save by only a few
@@ -5264,66 +5269,56 @@ function ArtifactStudioEditor({
       const syncDeadline = Date.now() + 12_000;
       while (
         syncingRef.current &&
-        Date.now() < syncDeadline &&
-        !restoreMayBypassHungSave(live.state)
+        Date.now() < syncDeadline
       )
         await new Promise((resolve) => window.setTimeout(resolve, 40));
-      if (syncingRef.current && !restoreMayBypassHungSave(live.state))
+      if (syncingRef.current)
         throw new Error(
           "Spectra is still saving your latest edit. The restore was not applied; try again in a moment.",
         );
-      if (dirtyRef.current && !restoreMayBypassHungSave(live.state)) {
+      if (dirtyRef.current) {
         const synchronized = await synchronizeDraft(currentSnapshotRef.current);
         if (!synchronized)
           throw new Error(
             "Your latest edit could not be saved, so the restore was safely withheld.",
           );
       }
-      if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
-      // A restore is its own semantic operation. Close any preceding human
-      // session first so ordinary edits cannot be mislabeled as a restore.
-      await postSpectra({
-        action: "commitArtifactCurrentSession",
-        artifactId: artifact._id,
-        clientId: live.transport?.clientId,
-        summary: "Edited before restore",
-      });
-      const snapshot = version.after;
-      const target = {
-        title: snapshot.title,
-        ...(snapshot.summary ? { summary: snapshot.summary } : {}),
-        content: snapshot.content,
-        tags: snapshot.tags,
-      };
-      const incoming = {
-        title: target.title,
-        summary: target.summary ?? "",
-        tagDraft: target.tags.join(", "),
-        content: target.content,
-      };
-      if (!regionIds?.length)
-        localSyncKeysRef.current.add(snapshotKey(incoming));
-      const result = regionIds?.length
-        ? await live.restoreRegions(target, regionIds)
-        : await live.synchronize(target);
-      if (result && "applied" in result && result.applied === false) {
-        const claim = "claim" in result ? result.claim : undefined;
-        setLiveConflict({
-          message:
-            "A collaborator is editing a region included in this restore. Nothing was overwritten; the restore remains queued for review.",
-          claimId: claim?.claimId,
-          regionId: claim?.conflict?.regionId,
-          queuePosition: claim?.conflict?.queuePosition,
-        });
-        return;
-      }
-      await postSpectra({
+      if (!live.supported || !live.transport) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
+      await live.transport.flush();
+      if (restoreSelectionRef.current.artifactId !== artifact._id || restoreSelectionRef.current.versionId !== version._id)
+        throw new Error("The selected version changed before restoration. Review it and try again.");
+      const key = JSON.stringify([artifact._id, version._id, [...(regionIds ?? [])].sort()]);
+      if (pendingRestoreRequestRef.current?.key !== key)
+        pendingRestoreRequestRef.current = { key, requestId: crypto.randomUUID() };
+      // The server closes preceding history and admits this exact restore in
+      // one transaction. No optimistic restore is authored in the local Y.Doc.
+      const requestId = pendingRestoreRequestRef.current.requestId;
+      const result = await postSpectra<{
+        state: "committed" | "unchanged";
+        receipt: { versionId?: string; updateDigest?: string };
+        admitted?: AdmittedUpdateDescriptor;
+      }>({
         action: "commitArtifactRestore",
         artifactId: artifact._id,
         sourceVersionId: version._id,
-        clientId: live.transport?.clientId,
+        requestId,
+        clientId: live.transport.clientId,
+        ...(regionIds?.length ? { regionIds: [...regionIds] } : {}),
       });
-      setHistoryOpen(false);
+      if (!result.receipt || (result.state !== "unchanged" && (result.state !== "committed" || !result.receipt.versionId)))
+        throw new Error("The restore was not confirmed. Try again to recover its result.");
+      pendingRestoreRequestRef.current = null;
+      if (restoreSelectionRef.current.artifactId === artifact._id) {
+        setHistoryOpen(false);
+        // Consume the exact admitted server delta through the provider path,
+        // which does not create another authored restore or another append.
+        try {
+          if (result.state === "committed" && result.admitted && result.receipt.updateDigest)
+            await live.transport.consumeAdmittedUpdate?.(result.admitted, result.receipt.updateDigest, `restore:${requestId}`);
+          await live.transport.retry();
+        }
+        catch { setLiveConflict({ message: "This version was restored. Reconnect to display the latest changes." }); }
+      }
     } catch (error) {
       setLiveConflict({
         message:
@@ -5332,6 +5327,7 @@ function ArtifactStudioEditor({
             : "This restore could not be applied safely.",
       });
     } finally {
+      restoreInFlightRef.current = false;
       setHistoryBusy(null);
     }
   }

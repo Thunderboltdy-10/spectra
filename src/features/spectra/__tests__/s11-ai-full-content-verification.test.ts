@@ -4,6 +4,7 @@ import { normalizeArtifactContent } from "@/features/spectra/ai/content-normaliz
 import { applyDocumentAcademicOperations } from "@/features/spectra/commands/office/document-academic-operations";
 import { parseModelOperation } from "@/features/spectra/operations/schema";
 import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
+import { applyBibliographySlides } from "@/features/spectra/presentation/bibliography";
 import { normalizePresentationContent } from "@/features/spectra/presentation/model";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), readLive: vi.fn() }));
@@ -153,13 +154,16 @@ describe("full replacement verification", () => {
     expect(incomplete.slides[0]!.accessibility!.readingOrder).toEqual([]);
   });
 
-  it("rejects a missing generated bibliography rather than reconstructing observed content", async () => {
+  // The AI policy no longer generates bibliography slides (CRAFT ce0e1dde);
+  // an explicitly authored one is requested content and must be observed.
+  it("rejects a missing requested bibliography rather than reconstructing observed content", async () => {
     const content = normalizePresentationContent({ slides: [{
       id: "slide-1", title: "Photosynthesis evidence", objects: [],
       citations: [{ id: "citation-1", label: "Biology reference", sourceRefs: ["evidence:source-1"] }],
     }] });
+    applyBibliographySlides(content);
     const complete = enforceAiPresentationContentPolicy(structuredClone(content), "");
-    expect(complete.slides.length).toBeGreaterThan(content.slides.length);
+    expect(complete.slides).toHaveLength(2);
     mocks.query.mockResolvedValue(saved(complete, "presentation"));
     await verify(update({ blueprintKey: "presentation", content }));
     mocks.query.mockResolvedValue(saved({ ...complete, slides: complete.slides.slice(0, 1) }, "presentation"));

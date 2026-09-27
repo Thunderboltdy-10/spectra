@@ -3923,7 +3923,11 @@ export default defineSchema({
     ])
     .index("by_school_status", ["schoolId", "status", "updatedAt"])
     .index("by_workspace", ["workspaceId"])
-    .index("by_artifact", ["artifactId"]),
+    .index("by_artifact", ["artifactId"])
+    .searchIndex("search_title", {
+      searchField: "title",
+      filterFields: ["ownerAccountId", "schoolId", "status", "workspaceId"],
+    }),
 
   spectraMessages: defineTable({
     threadId: v.id("spectraThreads"),

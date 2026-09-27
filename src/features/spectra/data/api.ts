@@ -997,6 +997,26 @@ export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
   else workspaceCache.clear();
 }
 
+/**
+ * A request that never reached the server is a connection problem. The
+ * browser's own wording ("Failed to fetch", "Load failed", "NetworkError when
+ * attempting to fetch resource") is not something to print at a student, and
+ * every caller below forwards its error message into a toast or error state.
+ */
+export const SPECTRA_REQUEST_UNREACHABLE =
+  "Spectra could not reach the server. Check your connection, then try again.";
+const SPECTRA_REQUEST_FAILED =
+  "Spectra could not finish this request. Try again in a moment.";
+
+async function requestSpectra(input: RequestInfo | URL, init?: RequestInit) {
+  try {
+    return await globalThis.fetch(input, init);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    throw new Error(SPECTRA_REQUEST_UNREACHABLE, { cause: error });
+  }
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => null)) as
     T | { error?: { message?: string } } | { error?: string } | null;
@@ -1007,7 +1027,7 @@ async function readJson<T>(response: Response): Promise<T> {
           ? payload.error
           : payload.error?.message
         : undefined;
-    throw new Error(message || `Spectra request failed (${response.status})`);
+    throw new Error(message || SPECTRA_REQUEST_FAILED);
   }
   return payload as T;
 }
@@ -1020,7 +1040,7 @@ export async function getSpectraOverview(workspaceId?: string, force = false) {
   const params = new URLSearchParams({ action: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
   const value = await readJson<SpectraOverview>(
-    await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${params.toString()}`, { cache: "no-store" }),
   );
   overviewCache.set(key, { value, cachedAt: Date.now() });
   if (workspaceId && value.workspace)
@@ -1037,7 +1057,7 @@ export async function getSpectraWorkspace(workspaceId: string, force = false) {
     return { workspace: cached.value };
   const qs = new URLSearchParams({ action: "workspace", workspaceId });
   const value = await readJson<{ workspace: SpectraOverview["workspace"] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
   workspaceCache.set(workspaceId, {
     value: value.workspace,
@@ -1049,16 +1069,16 @@ export async function getSpectraWorkspace(workspaceId: string, force = false) {
 export function getSpectraWorkspacePage(cursor?: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ action: "workspaceGraphPage" });
   if (cursor) params.set("cursor", cursor);
-  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraWorkspace>>);
+  return requestSpectra(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraWorkspace>>);
 }
 export function getSpectraAgentPage(cursor?: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ action: "agentGraphPage" });
   if (cursor) params.set("cursor", cursor);
-  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraArtifact>>);
+  return requestSpectra(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraArtifact>>);
 }
 export function getSpectraWorkspaceMetadata(workspaceId: string, signal?: AbortSignal) {
   const params = new URLSearchParams({ action: "workspaceMetadata", workspaceId });
-  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<{ workspace: SpectraWorkspace | null }>);
+  return requestSpectra(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<{ workspace: SpectraWorkspace | null }>);
 }
 export const spectraWorkspaceCatalog = createCatalogPageCache<SpectraWorkspace>((_key, cursor, signal) => getSpectraWorkspacePage(cursor, signal));
 export const spectraAgentCatalog = createCatalogPageCache<SpectraArtifact>((_key, cursor, signal) => getSpectraAgentPage(cursor, signal));
@@ -1071,7 +1091,7 @@ export async function exportSpectraWorkspaceManifest(workspaceId: string) {
   return readJson<{
     manifest: SpectraWorkspacePortableManifest;
     report: SpectraWorkspaceManifestReport;
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraArtifacts(params?: {
@@ -1088,20 +1108,20 @@ export async function getSpectraArtifacts(params?: {
     qs.set("blueprintKey", params.blueprintKey);
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   return readJson<{ artifacts: SpectraArtifact[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
   );
 }
 
 export async function getSpectraArtifact(artifactId: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
   return readJson<{ artifact: SpectraArtifact }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
   );
 }
 
 export async function getSpectraArtifactForDeepLink(artifactId: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
-  const response = await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal });
+  const response = await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal });
   if (response.status === 404) return { artifact: null };
   if (response.status === 403) {
     const payload = await response.clone().json().catch(() => null);
@@ -1120,7 +1140,7 @@ export async function getSpectraArtifactUserState(artifactId: string) {
     state: TimetablePersonalState | null;
     revision: number;
     updatedAt: number | null;
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function saveSpectraArtifactUserState(input: {
@@ -1154,7 +1174,7 @@ export async function getSpectraMemory(params?: {
   return readJson<{
     preferences: SpectraMemoryPreferences;
     claims: SpectraMemoryClaim[];
-  }>(await fetch(`/api/spectra?${query.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${query.toString()}`, { cache: "no-store" }));
 }
 
 export async function updateSpectraMemoryPreferences(
@@ -1220,13 +1240,13 @@ export async function clearSpectraMemory(confirmation: string) {
 
 export async function exportSpectraMemory() {
   return readJson<Record<string, unknown>>(
-    await fetch("/api/spectra?action=memoryExport", { cache: "no-store" }),
+    await requestSpectra("/api/spectra?action=memoryExport", { cache: "no-store" }),
   );
 }
 
 async function postManageBac<T>(body: Record<string, unknown>) {
   return readJson<T>(
-    await fetch("/api/spectra/managebac", {
+    await requestSpectra("/api/spectra/managebac", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -1236,7 +1256,7 @@ async function postManageBac<T>(body: Record<string, unknown>) {
 
 export async function getSpectraManageBacOverview() {
   return readJson<SpectraManageBacOverview>(
-    await fetch("/api/spectra/managebac?action=overview", {
+    await requestSpectra("/api/spectra/managebac?action=overview", {
       cache: "no-store",
     }),
   );
@@ -1415,7 +1435,7 @@ export async function getSpectraFlashcardStudy(artifactId: string) {
     states: SpectraFlashcardStudyState[];
     dueCount: number;
     update: SpectraFlashcardStudyUpdate;
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function setSpectraFlashcardNote(input: {
@@ -1519,7 +1539,7 @@ export async function getSpectraQuizPracticeAttempts(
     limit: String(limit),
   });
   return readJson<{ attempts: SpectraQuizPracticeAttempt[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1551,7 +1571,7 @@ export async function getSpectraQuizResponseSummary(artifactId: string) {
     artifactId,
   });
   return readJson<SpectraQuizResponseSummary>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1598,7 +1618,7 @@ export async function searchSpectra(query: string, options?: { signal?: AbortSig
   return readJson<{
     artifacts: SpectraArtifact[];
     workspaces: SpectraWorkspace[];
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }));
 }
 
 export async function getSpectraResultCards(params?: {
@@ -1615,14 +1635,14 @@ export async function getSpectraResultCards(params?: {
   if (params?.includeHidden) qs.set("includeHidden", "true");
   if (params?.limit) qs.set("limit", String(params.limit));
   return readJson<{ resultCards: SpectraResultCard[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
 export async function getSpectraRunDetail(runId: string) {
   const qs = new URLSearchParams({ action: "runDetail", runId });
   return readJson<SpectraRunDetail>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1685,7 +1705,7 @@ export async function getSpectraRunTabs(
     key,
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      fetch(`/api/spectra?${key}`, { cache: "no-store" }).then((response) =>
+      requestSpectra(`/api/spectra?${key}`, { cache: "no-store" }).then((response) =>
         readJson<{ runTabs: SpectraRunTab[] }>(response),
       ),
     { force: options.force },
@@ -1698,7 +1718,7 @@ export async function getSpectraShareInvitations(options: { force?: boolean } = 
     "shareInvitations",
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }).then(
+      requestSpectra("/api/spectra?action=shareInvitations", { cache: "no-store" }).then(
         (response) =>
           readJson<{ invitations: SpectraShareInvitation[] }>(response),
       ),
@@ -1721,7 +1741,7 @@ export async function getSpectraNotificationCenter(
     qs.toString(),
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
+      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
         (response) =>
           readJson<{
             comments: SpectraArtifactCommentNotification[];
@@ -1741,7 +1761,7 @@ export async function searchSpectraSchoolMembers(search: string, limit = 20) {
     limit: String(limit),
   });
   return readJson<{ members: SpectraSchoolMember[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1755,7 +1775,7 @@ export async function getSpectraShareState(
     resourceId,
   });
   return readJson<{ shares: SpectraShareEntry[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1769,7 +1789,7 @@ export async function getSpectraPublicLinks(
     resourceId,
   });
   return readJson<{ publicLinks: SpectraPublicLinkEntry[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1779,7 +1799,7 @@ export async function getSpectraInheritedAudience(artifactId: string) {
     artifactId,
   });
   return readJson<{ audience: SpectraInheritedAccessEntry[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1789,7 +1809,7 @@ export async function getSpectraArtifactAccessRequests(artifactId: string) {
     artifactId,
   });
   return readJson<{ requests: SpectraArtifactAccessRequest[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1802,7 +1822,7 @@ export async function getSpectraRunEvents(runId: string, after = 0) {
   const key = qs.toString();
   const existing = runEventRequests.get(key);
   if (existing && Date.now() - existing.at < 850) return existing.promise;
-  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then(
+  const promise = requestSpectra(`/api/spectra?${key}`, { cache: "no-store" }).then(
     (response) => readJson<{ events: SpectraRunEvent[] }>(response),
   );
   runEventRequests.set(key, { at: Date.now(), promise });
@@ -1827,7 +1847,7 @@ export async function getSpectraOperationConflict(operationId: string) {
       currentStateVectorHash: string;
       currentSnapshot: unknown;
     };
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function resolveSpectraOperationConflict(
@@ -1856,7 +1876,7 @@ export async function getSpectraArtifactVersions(
   });
   if (cursor !== undefined) qs.set("cursor", cursor);
   return readJson<SpectraArtifactVersionPage>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
   );
 }
 
@@ -1867,7 +1887,7 @@ export async function getSpectraArtifactVersion(
 ) {
   const qs = new URLSearchParams({ action: "artifactVersion", artifactId, versionId });
   return readJson<{ version: SpectraArtifactVersion | null }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
   );
 }
 
@@ -1956,7 +1976,7 @@ export type SpectraAgentResourceHealth = {
 export async function getSpectraAgentReleases(agentId: string) {
   const qs = new URLSearchParams({ action: "agentReleases", agentId });
   return readJson<{ releases: SpectraAgentRelease[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -1983,13 +2003,13 @@ export async function getSpectraAgentEvalRuns(agentId: string) {
   return readJson<{
     currentContentHash: string;
     runs: SpectraAgentEvalRun[];
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraAgentResourceHealth(agentId: string) {
   const qs = new URLSearchParams({ action: "agentResourceHealth", agentId });
   return readJson<{ resources: SpectraAgentResourceHealth[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2003,7 +2023,7 @@ export async function evaluateSpectraAgent(agentId: string, threshold = 0.8) {
     averageScore: number;
     results: SpectraAgentEvalResult[];
   }>(
-    await fetch("/api/spectra/agents/evaluate", {
+    await requestSpectra("/api/spectra/agents/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agentId, threshold }),
@@ -2021,7 +2041,7 @@ export async function generateSpectraAgentEvalSuite(agentId: string) {
       required: boolean;
     }>;
   }>(
-    await fetch("/api/spectra/agents/evaluate", {
+    await requestSpectra("/api/spectra/agents/evaluate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "generate", agentId }),
@@ -2032,7 +2052,7 @@ export async function generateSpectraAgentEvalSuite(agentId: string) {
 export async function getSpectraAgentAnalytics(agentId: string) {
   const qs = new URLSearchParams({ action: "agentAnalytics", agentId });
   return readJson<{ analytics: SpectraAgentAnalytics }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2124,7 +2144,7 @@ export async function getSpectraPublicAgents(params?: {
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   if (params?.limit) qs.set("limit", String(params.limit));
   return readJson<{ agents: SpectraPublicAgent[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
   );
 }
 
@@ -2138,7 +2158,7 @@ export type SpectraInstalledAgent = SpectraPublicAgent & {
 export async function getSpectraInstalledAgents(options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "installedAgents" });
   return readJson<{ agents: SpectraInstalledAgent[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
   );
 }
 
@@ -2178,7 +2198,7 @@ export async function signSpectraAgentManifest(
   manifest: Record<string, unknown>,
 ) {
   return readJson<{ ok: true; manifest: SpectraSignedAgentManifest }>(
-    await fetch("/api/spectra/agents/manifest", {
+    await requestSpectra("/api/spectra/agents/manifest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "sign", manifest }),
@@ -2195,7 +2215,7 @@ export async function verifySpectraAgentManifest(manifest: unknown) {
       content: unknown;
     };
   }>(
-    await fetch("/api/spectra/agents/manifest", {
+    await requestSpectra("/api/spectra/agents/manifest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "verify", manifest }),
@@ -2209,7 +2229,7 @@ export async function verifySpectraAgentManifest(manifest: unknown) {
 
 async function foundryRequest<T>(body: Record<string, unknown>) {
   return readJson<{ ok: true } & T>(
-    await fetch("/api/spectra/agents/foundry", {
+    await requestSpectra("/api/spectra/agents/foundry", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -2302,7 +2322,7 @@ export async function getSpectraArtifactComments(
     limit: String(limit),
   });
   return readJson<{ comments: SpectraArtifactComment[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2312,7 +2332,7 @@ export async function getSpectraArtifactCommentPreference(artifactId: string) {
     artifactId,
   });
   return readJson<{ mode: "all" | "mentions_replies" | "off" }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2326,7 +2346,7 @@ export async function getSpectraArtifactCommentNotifications(
     limit: String(limit),
   });
   return readJson<{ notifications: SpectraArtifactCommentNotification[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2349,7 +2369,7 @@ export async function getSpectraPlannerReminderNotifications(
     limit: String(limit),
   });
   return readJson<{ notifications: SpectraPlannerReminderNotification[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2372,7 +2392,7 @@ export async function getSpectraTimetableReminderNotifications(
     limit: String(limit),
   });
   return readJson<{ notifications: SpectraTimetableReminderNotification[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2388,14 +2408,14 @@ export async function markSpectraTimetableReminderNotificationsRead(
 export async function getSpectraArtifactLinks(artifactId: string) {
   const qs = new URLSearchParams({ action: "artifactLinks", artifactId });
   return readJson<{ links: SpectraArtifactLink[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
 export async function getSpectraArtifactEmbed(embedId: string) {
   const qs = new URLSearchParams({ action: "artifactEmbed", embedId });
   return readJson<{ embed: SpectraArtifactEmbed }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2416,7 +2436,7 @@ export async function getSpectraThreads(params?: {
     key,
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }).then(
+      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }).then(
         (response) => readJson<SpectraThreadPage>(response),
       ),
     { force: params?.force },
@@ -2426,7 +2446,7 @@ export async function getSpectraThreads(params?: {
 export async function getSpectraThread(threadId: string) {
   const qs = new URLSearchParams({ action: "thread", threadId });
   return readJson<SpectraThreadDetail>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
 
@@ -2445,7 +2465,7 @@ export async function getSpectraThreadMessages(
     messages: SpectraMessage[];
     hasOlder: boolean;
     olderBefore?: string;
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraThreadRunTrace(
@@ -2488,12 +2508,12 @@ export async function getSpectraThreadRunTrace(
     eventPage?: { hasMore: boolean; after: number; nextCursor?: string | null };
     operationPage?: { hasMore: boolean; before?: string | null };
     cardPage?: { hasMore: boolean; before?: string | null };
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function clearSpectraRunAgent(runId: string) {
   return readJson<{ cleared: boolean; threadId?: string }>(
-    await fetch("/api/spectra/run", {
+    await requestSpectra("/api/spectra/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "clear_agent", runId }),
@@ -2503,7 +2523,7 @@ export async function clearSpectraRunAgent(runId: string) {
 
 export async function postSpectra<T>(body: JsonRecord) {
   const value = await readJson<T>(
-    await fetch("/api/spectra", {
+    await requestSpectra("/api/spectra", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -2540,7 +2560,7 @@ export async function getPublishedCodeBuild(artifactId: string) {
     build: PublishedCodeBuildProjection | null;
     sourceMatchesCurrent: boolean;
   }>(
-    await fetch(`/api/spectra/runtime/publish?${params.toString()}`, {
+    await requestSpectra(`/api/spectra/runtime/publish?${params.toString()}`, {
       cache: "no-store",
     }),
   );
@@ -2555,7 +2575,7 @@ export async function publishCodeBuild(
     build: PublishedCodeBuildProjection;
     reused: boolean;
   }>(
-    await fetch("/api/spectra/runtime/publish", {
+    await requestSpectra("/api/spectra/runtime/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2569,7 +2589,7 @@ export async function publishCodeBuild(
 
 export async function unpublishCodeBuild(artifactId: string) {
   return readJson<{ ok: true; unpublished: boolean }>(
-    await fetch("/api/spectra/runtime/publish", {
+    await requestSpectra("/api/spectra/runtime/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "unpublish", artifactId }),
@@ -2623,7 +2643,7 @@ export async function beginArtifactImportOriginal(input: {
   sha256: string;
 }) {
   return readJson<{ ok: true; jobId: string }>(
-    await fetch("/api/spectra/imports", {
+    await requestSpectra("/api/spectra/imports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "begin", ...input }),
@@ -2634,7 +2654,7 @@ export async function beginArtifactImportOriginal(input: {
 export async function uploadArtifactImportOriginal(jobId: string, blob: Blob) {
   const query = new URLSearchParams({ jobId });
   return readJson<{ ok: true; jobId: string; status: string }>(
-    await fetch(`/api/spectra/imports?${query.toString()}`, {
+    await requestSpectra(`/api/spectra/imports?${query.toString()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/octet-stream" },
       body: blob,
@@ -2667,7 +2687,7 @@ export async function completeArtifactImport(input: {
     receipt?: SpectraArtifactCommitReceipt | null;
     commitDeferred?: boolean;
   }>(
-    await fetch("/api/spectra/imports", {
+    await requestSpectra("/api/spectra/imports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "complete", ...input }),
@@ -2677,7 +2697,7 @@ export async function completeArtifactImport(input: {
 
 export async function abortArtifactImportUpload(jobId: string, reason: string) {
   return readJson<{ ok: true; aborted: boolean }>(
-    await fetch("/api/spectra/imports", {
+    await requestSpectra("/api/spectra/imports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "abort", jobId, reason }),
@@ -2688,7 +2708,7 @@ export async function abortArtifactImportUpload(jobId: string, reason: string) {
 export async function getArtifactImports(artifactId: string) {
   const query = new URLSearchParams({ artifactId });
   return readJson<{ ok: true; imports: SpectraArtifactImport[] }>(
-    await fetch(`/api/spectra/imports?${query.toString()}`, {
+    await requestSpectra(`/api/spectra/imports?${query.toString()}`, {
       cache: "no-store",
     }),
   );
@@ -2715,7 +2735,7 @@ export async function getArtifactAssets(
   const query = new URLSearchParams({ artifactId });
   assetIds?.forEach((assetId) => query.append("assetId", assetId));
   return readJson<{ ok: true; assets: SpectraArtifactAsset[] }>(
-    await fetch(`/api/spectra/assets?${query.toString()}`, {
+    await requestSpectra(`/api/spectra/assets?${query.toString()}`, {
       cache: "no-store",
     }),
   );
@@ -2737,7 +2757,7 @@ export async function uploadArtifactAsset(input: {
     ...(input.uploadReceipt ? { uploadReceipt: input.uploadReceipt } : {}),
   });
   return readJson<{ ok: true; assetId: string; reused: boolean; uploadReceipt?: string; status?: string; storageId?: string }>(
-    await fetch(`/api/spectra/assets?${query.toString()}`, {
+    await requestSpectra(`/api/spectra/assets?${query.toString()}`, {
       method: "PUT",
       headers: {
         "Content-Type": input.mediaType,
@@ -2753,7 +2773,7 @@ export async function uploadArtifactAsset(input: {
 export async function revokeArtifactAsset(assetId: string) {
   const query = new URLSearchParams({ assetId });
   return readJson<{ ok: true; revoked: boolean }>(
-    await fetch(`/api/spectra/assets?${query.toString()}`, {
+    await requestSpectra(`/api/spectra/assets?${query.toString()}`, {
       method: "DELETE",
     }),
   );

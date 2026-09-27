@@ -546,7 +546,7 @@ function WorkspaceHeader({
               {workspace?.isShared ? (
                 <Share2
                   className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]"
-                  aria-label="Shared workspace"
+                  role="img" aria-label="Shared workspace"
                 />
               ) : null}
             </div>

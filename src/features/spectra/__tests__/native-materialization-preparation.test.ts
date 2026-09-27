@@ -8,6 +8,7 @@ import { docxLens, sha256Payload } from "../lenses/docx-lens";
 import { xlsxLens } from "../lenses/xlsx-lens";
 import { xlsxArtifactContent } from "../lenses/office-content";
 import { compactDocxProjectionForStorage } from "../lenses/document-projection";
+import { prepareWholeNativeHistoryRestore, preparePartialNativeHistoryRestore } from "../lenses/native-restore-preparation";
 
 const io = vi.hoisted(() => ({
   query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn(),
@@ -70,6 +71,45 @@ async function fixture(format: "docx" | "xlsx", changed: boolean, local = true) 
 }
 
 describe("Native preparation before atomic admission", () => {
+  it("prepares a human partial restore through the current-package preservation path", async () => {
+    const f = await fixture("docx", true);
+    const result = await preparePartialNativeHistoryRestore(workId, "docx", f.content);
+    expect(result.state).toBe("prepared");
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
+  it("retains exact historical bytes while fencing the current native source", async () => {
+    const current = await fixture("docx", false);
+    const historical = Document.create(); historical.addParagraph("Historical body");
+    const bytes = await historical.save(); const hash = await sha256Payload(bytes);
+    const result = await prepareWholeNativeHistoryRestore(workId, {
+      sourceVersionId: "exact-version", sourcePayloadHash: hash, payloadRef: "version-retained-copy", nativeFormat: "docx", bytes: bytes.length,
+    }, bytes);
+    expect(result.nativeSource.hash).toBe(current.truth.hash);
+    expect(result.hash).toBe(hash);
+    expect(result.nativeCandidate).toMatchObject({ destination: "bridge", queue: {
+      baseRevision: current.truth.revision, contentHash: hash,
+      nativeReceipt: { basePayloadHash: current.truth.hash, resultPayloadHash: hash, state: "pending" },
+    } });
+    expect(io.upload.mock.calls[0]?.[1]).toEqual(bytes);
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
+  it("prepares unchanged historical bytes without uploading or claiming a save", async () => {
+    const f = await fixture("xlsx", false);
+    const result = await prepareWholeNativeHistoryRestore(workId, {
+      sourceVersionId: "exact-version", sourcePayloadHash: f.truth.hash, payloadRef: "version-copy", nativeFormat: "xlsx", bytes: f.payload.length,
+    }, f.payload);
+    expect(result.nativeCandidate.destination).toBe("none"); expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects substituted historical bytes before reading current state", async () => {
+    await expect(prepareWholeNativeHistoryRestore(workId, {
+      sourceVersionId: "exact-version", sourcePayloadHash: "a".repeat(64), payloadRef: "version-copy", nativeFormat: "docx", bytes: 1,
+    }, new Uint8Array([1]))).rejects.toThrow("NATIVE_RESTORE_SOURCE_INVALID");
+    expect(io.fetchNative).not.toHaveBeenCalled(); expect(io.upload).not.toHaveBeenCalled();
+  });
   it.each([
     ["docx", true], ["docx", false], ["xlsx", true], ["xlsx", false],
   ] as const)("prepares %s with local=%s using actual native bytes but creates no effect", async (format, local) => {

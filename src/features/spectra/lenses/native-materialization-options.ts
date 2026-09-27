@@ -23,6 +23,8 @@ export type NativeMaterializationOptions = {
   aiOperation?: NativeAiOperationIdentity;
   /** Return a transient verified candidate without queueing or replica writes. */
   prepareOnly?: boolean;
+  /** Trusted human restore preparation; authorization remains in admission. */
+  preparationActor?: "user";
 };
 
 export type NativeMaterializationSource = Pick<
@@ -48,6 +50,7 @@ export type NativeMaterializationCandidate =
 
 export function assertNativePreparationIdentity(options?: NativeMaterializationOptions) {
   if (!options?.prepareOnly) return;
+  if (options.preparationActor === "user") return;
   const identity = options.aiOperation;
   if (!identity || [identity.runId, identity.executionId, identity.operationId]
     .some(value => typeof value !== "string" || !value.trim()))

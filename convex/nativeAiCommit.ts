@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { query, type MutationCtx } from "./_generated/server";
 import { internalMutation } from "./orgNodeMutation";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { appendRoomUpdate, parseGatewayProjection } from "./collaborationGatewayStore";
@@ -9,7 +9,7 @@ import { commitChangeGroup, commitHumanCheckpoint } from "./changeGroups";
 import { NATIVE_VERSION_OWNER_TABLE } from "./durablePayloadOwnership";
 import { nativeAiCommitArgs, type NativeAiCommitArgs } from "./nativeAiCommitContract";
 import { queueMaterializationInTransaction, commitCloudMaterializationInTransaction } from "./replicaMaterialization";
-import { artifactOperationDigest, artifactOutput, artifactSourceIdentity, artifactWriteReceipt,
+import { artifactOperationDigest, artifactOperationTarget, artifactOutput, artifactSourceIdentity, artifactWriteReceipt,
   assertVerifiedAiArtifactWriteAdmission, lookupVerifiedAiArtifactWriteReplay, preparedArtifactScope } from "./spectraArtifactWriteScope";
 import { nativeAiRequestDigest, nativeAiUpdateIdentity } from "../shared/native-ai-commit";
 import { validateNativeSaveReceipt } from "../shared/native-office-contract";
@@ -22,12 +22,15 @@ export const head = query({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const { artifact } = await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
+    const access = await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
+    const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
     const [run, operation] = await Promise.all([ctx.db.get(args.aiOperation.runId), ctx.db.get(args.aiOperation.operationId)]);
     if (!run || !operation || run.ownerAccountId !== actor.accountId || run.schoolId !== actor.schoolId ||
-        operation.actorType !== "ai" || operation.runId !== run._id || operation.type !== "artifact.update" ||
-        artifactOutput(operation.input).artifactId !== artifact._id || operation.executionId !== args.aiOperation.executionId ||
+        operation.actorType !== "ai" || operation.runId !== run._id || !["artifact.create", "artifact.update"].includes(operation.type) ||
+        operation.executionId !== args.aiOperation.executionId ||
         run.executionId !== args.aiOperation.executionId) throw new Error("AI_ARTIFACT_OPERATION_NOT_OWNED");
+    if (await artifactOperationTarget(ctx, operation) !== artifact._id)
+      throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
     const operationDigest = await artifactOperationDigest(operation);
     const receipt = artifactWriteReceipt(operation.output);
     if (receipt && receipt.scope !== operationDigest) throw new Error("AI_ARTIFACT_RECEIPT_SCOPE_MISMATCH");

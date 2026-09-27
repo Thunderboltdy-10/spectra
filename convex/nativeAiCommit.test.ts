@@ -7,7 +7,7 @@ import * as Y from "yjs";
 import { makeFunctionReference } from "convex/server";
 import schema from "./schema";
 import type { NativeAiCommitArgs } from "./nativeAiCommitContract";
-import { artifactOperationDigest, artifactScopeDigest, artifactSourceIdentity } from "./spectraArtifactWriteScope";
+import { artifactCreationIdentity, artifactOperationDigest, artifactScopeDigest, artifactSourceIdentity } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { nativeAiRequestDigest } from "../shared/native-ai-commit";
 import { nativeOperationId } from "../shared/native-office-contract";
@@ -40,7 +40,7 @@ const hash = (value: string | Uint8Array) => createHash("sha256").update(value).
 const wire = (value: string | Uint8Array) => createHash("sha256").update(value).digest("base64url");
 const body = (text: string) => ({ blocks: [{ id: "body", type: "paragraph", text }] });
 
-async function fixture() {
+async function fixture(kind: "update" | "create" = "update") {
   const t = convexTest(schema, modules);
   for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
   const seeded = await t.run(async ctx => {
@@ -53,7 +53,7 @@ async function fixture() {
       joinedAt: now, createdAt: now, updatedAt: now });
     const document = new Y.Doc();
     const actor = { kind: "ai" as const, accountId, clientId: "native-ai-test" };
-    document.transact(planNativeArtifactYjsMutation(document, "document", { title: "Native AI", tags: [], content: body("Before") }, actor).apply);
+    document.transact(planNativeArtifactYjsMutation(document, "document", { title: "Native AI", tags: [], content: body(kind === "create" ? "" : "Before") }, actor).apply);
     const before = readNativeArtifactYjsDocument(document, "document")!;
     const baseUpdate = Y.encodeStateAsUpdate(document);
     const baseVector = Y.encodeStateVector(document);
@@ -77,14 +77,19 @@ async function fixture() {
       sourceSurface: "artifact", userPrompt: "Replace the paragraph", status: "running", executionId: "attempt",
       createdAt: now, updatedAt: now });
     const operationId = await ctx.db.insert("spectraOperations", { runId, executionId: "attempt", actorType: "ai",
-      type: "artifact.update", status: "executing", input: { artifactId, blueprintKey: "document", content: after.content },
+      type: kind === "create" ? "artifact.create" : "artifact.update", status: "executing",
+      input: { ...(kind === "update" ? { artifactId } : { title: before.title }), blueprintKey: "document", content: after.content },
+      ...(kind === "create" ? { pendingArtifactId: artifactId, planIndex: 0 } : {}),
       affected: [], requiresConfirmation: false, createdAt: now });
+    if (kind === "create") await ctx.db.patch(artifactId, { createdFrom: { source: "ai", runId, operationId,
+      allocationContentDigest: await artifactScopeDigest(canonicalArtifactWriteContent("document", before.content)) } });
     const sourceContentIdentity = await artifactSourceIdentity((await ctx.db.get(artifactId))!);
     const operationDigest = await artifactOperationDigest((await ctx.db.get(operationId))!);
     const baseContentDigest = await artifactScopeDigest(canonicalArtifactWriteContent("document", before.content));
     const resultContentDigest = await artifactScopeDigest(canonicalArtifactWriteContent("document", after.content));
     await ctx.db.patch(operationId, { output: { artifactWriteScope: { version: 1, artifactId, runId, executionId: "attempt",
-      operationId, operationDigest, sourceContentIdentity, baseContentDigest, resultContentDigest, kind: "update" } } });
+      operationId, operationDigest, sourceContentIdentity, baseContentDigest, resultContentDigest, kind,
+      ...(kind === "create" ? { creationSourceIdentity: await artifactCreationIdentity((await ctx.db.get(artifactId))!) } : {}) } } });
     const claimId = await ctx.db.insert("regionClaims", { artifactId, roomId, schoolId, actorAccountId: accountId,
       actorKind: "ai", clientId: actor.clientId, runId, operationId, regionId: "artifact:structure", overlapDomains: ["artifact:structure"],
       baseStateVectorHash: baseHash, status: "active", leaseExpiresAt: now + 100_000, createdAt: now, updatedAt: now });
@@ -148,11 +153,65 @@ async function bridgeFixture() {
   const cloud = f.args.nativeCandidate.cloud;
   f.args.nativeCandidate = { destination: "bridge", queue: { ...cloud, localReplicaId: localId,
     regionIds: cloud.nativeReceipt.targets.regionIds, partNames: cloud.nativeReceipt.targets.partNames,
-    nativeReceipt: { ...cloud.nativeReceipt, state: "queued" } } };
+    nativeReceipt: { ...cloud.nativeReceipt, state: "pending" } } };
   return { ...f, localId };
 }
 
 describe("atomic AI native commit", () => {
+  it("admits the exact pending create binding and replays its original native receipt after Stop", async () => {
+    const f = await fixture("create");
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    expect(await client.query(makeFunctionReference<"query">("nativeAiCommit:head"), {
+      artifactId: f.ids.artifactId, aiOperation: f.args.aiOperation,
+    })).toMatchObject({ operation: { type: "artifact.create", writeScope: { kind: "create", artifactId: f.ids.artifactId } } });
+    const original = await f.commit();
+    expect(original).toMatchObject({ state: "committed", receipt: { nativeResult: { state: "cloud_saved" } } });
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.runId, { status: "cancelled" });
+      await ctx.db.patch(f.ids.artifactId, { content: body("Human after creation") });
+    });
+    expect(await f.commit()).toMatchObject({ duplicate: true, receipt: original.receipt });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(body("Human after creation"));
+  });
+
+  it("resolves a dependent alias through its creator receipt and refuses it before that receipt exists", async () => {
+    const f = await fixture();
+    const creatorId = await f.t.run(async ctx => {
+      const creatorId = await ctx.db.insert("spectraOperations", { runId: f.ids.runId, executionId: "attempt",
+        actorType: "ai", type: "artifact.create", status: "executed", input: { blueprintKey: "document", content: f.before.content },
+        pendingArtifactId: f.ids.artifactId, planIndex: 0, affected: [], requiresConfirmation: false, createdAt: Date.now() });
+      const operation = (await ctx.db.get(f.ids.operationId))!;
+      await ctx.db.patch(operation._id, { input: { ...operation.input, artifactId: "@created:0" },
+        planRootOperationId: creatorId, planIndex: 1 });
+      const operationDigest = await artifactOperationDigest((await ctx.db.get(operation._id))!);
+      f.args.evidence.operationDigest = operationDigest;
+      await ctx.db.patch(operation._id, { output: { ...operation.output, artifactWriteScope: {
+        ...operation.output.artifactWriteScope, operationDigest, baseProducerOperationId: creatorId,
+      } } });
+      return creatorId;
+    });
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    const readHead = () => client.query(makeFunctionReference<"query">("nativeAiCommit:head"), {
+      artifactId: f.ids.artifactId, aiOperation: f.args.aiOperation,
+    });
+    await expect(readHead()).rejects.toThrow("AI_ARTIFACT_DEPENDENCY_NOT_COMMITTED");
+    await expect(f.commit()).rejects.toThrow("AI_ARTIFACT_DEPENDENCY_NOT_COMMITTED");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(2);
+    await f.t.run(async ctx => {
+      const creator = (await ctx.db.get(creatorId))!;
+      const operationDigest = await artifactOperationDigest(creator);
+      await ctx.db.patch(creatorId, { output: {
+        artifactWriteScope: { version: 1, artifactId: f.ids.artifactId, runId: f.ids.runId, executionId: "attempt",
+          operationId: creatorId, operationDigest, sourceContentIdentity: "allocation", baseContentDigest: "empty",
+          resultContentDigest: f.args.evidence.baseContentDigest, kind: "create" },
+        artifactWriteReceipt: { scope: operationDigest, result: { artifactId: f.ids.artifactId },
+          sourceContentIdentity: f.args.evidence.sourceContentIdentity, resultContentDigest: f.args.evidence.baseContentDigest },
+      } });
+    });
+    expect(await readHead()).toMatchObject({ operation: { type: "artifact.update", input: { artifactId: "@created:0" } } });
+    expect(await f.commit()).toMatchObject({ state: "committed", receipt: { nativeResult: { state: "cloud_saved" } } });
+  });
+
   it("returns the authoritative prompt and original receipt before loading a retired room for preparation", async () => {
     const f = await fixture();
     const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });

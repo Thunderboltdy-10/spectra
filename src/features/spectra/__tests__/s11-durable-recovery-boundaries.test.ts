@@ -60,7 +60,7 @@ describe("S11 independent durable recovery boundaries", () => {
       wire.callbacks!.onSynced({ state: true });
       const request = wire.provider!.sendStateless.mock.calls.map(call => JSON.parse(call[0])).find(value => value.type === "spectra.recovery_request");
       expect(wire.provider!.documentUpdateHandler).not.toHaveBeenCalled();
-      wire.callbacks!.onStateless({ payload: JSON.stringify({ type: "spectra.recovery_vector",
+      wire.callbacks!.onStateless({ payload: JSON.stringify({ type: "spectra.recovery_vector", admitted: true,
         confirmationId: request.confirmationId, stateVector: Buffer.from(baseline).toString("base64") }) });
       const sent = wire.provider!.documentUpdateHandler.mock.calls.map(call => call[0] as Uint8Array);
       expect(sent.length).toBeGreaterThan(0);

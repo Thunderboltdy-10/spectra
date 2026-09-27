@@ -113,11 +113,13 @@ export function useArtifactCollaboration(
           next.markLocalRecoveryPending?.(durability.recoveryConflict, {
             recoveryAnchor: durability.recoveryAnchor, authoredRegionIds: durability.authoredRegionIds,
           });
+        else if (durability?.recoveryAnchor)
+          next.restoreDurableAnchor?.(durability.recoveryAnchor);
         setTransport(next);
         setLocalPersistence(persistence);
       })
       .then(() => {
-        if (!cancelled && !persistence.getSnapshot().recoveryConflict) void next.connect();
+        if (!cancelled) void next.connect();
       })
       .catch(() => {
         if (cancelled) return;
@@ -254,6 +256,13 @@ export function useArtifactCollaboration(
       setGeneration((value) => value + 1);
     })();
   }, [transport, localPersistence]);
+  // Rebuilds the live session from the local head, e.g. after a recovery
+  // adoption committed a new head. Never writes content itself.
+  const reopenLiveSession = useCallback(() => {
+    recoveryAttemptRef.current = 0;
+    transport?.destroy();
+    setGeneration((value) => value + 1);
+  }, [transport]);
   const canRecoverOffline =
     localDurability.state === "ready" ||
     localDurability.state === "local_only" ||

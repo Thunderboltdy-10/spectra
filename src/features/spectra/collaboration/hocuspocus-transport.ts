@@ -4,13 +4,14 @@ import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/pro
 import * as Y from "yjs";
 import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
 import { encodeDurableFrontier } from "../../../../shared/collaboration-durable-frontier.mjs";
-import { readDurableRoomAnchor, type DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
+import { readDurableRoomAnchor, recoveryRegionIds, type DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
 import type {
   ArtifactCollaborationTransport,
   CollaborationPresence,
   CollaborationSyncState,
   CollaborationTransportSnapshot,
   LocalRecoveryAncestry,
+  RecoveryCurrent,
 } from "./types";
 import { readInteractionState } from "./interaction-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
@@ -271,6 +272,19 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   readonly clientId: string;
   private provider: HocuspocusProvider | null = null;
   private websocketProvider: HocuspocusProviderWebsocket | null = null;
+  // Handshake quarantine. The provider only ever sees `providerDocument`.
+  // Local edits reach it immediately while the socket is synchronized; a
+  // restored/offline branch stays in `document` until the gateway admits it
+  // against its saved room anchor, so the initial Yjs handshake can neither
+  // upload the draft nor overwrite it with newer native state.
+  private providerDocument = new Y.Doc();
+  private quarantined = false;
+  private connectionStarted = false;
+  private rebuildingProvider = false;
+  private providerChangeVersion = 0;
+  private authoredRegionIds: string[] = [];
+  private recoveryCurrentRequests = new Map<string, { resolve: (value: RecoveryCurrent) => void;
+    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly snapshots = new ScopedCollaborationSnapshots();
   private state: CollaborationSyncState = "connecting";
   private level: "read" | "modify" | null = null;
@@ -302,11 +316,21 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private connectionRetryTimer?: number;
   private connectionRetryAttempt = 0;
   private readonly onLocalDocumentUpdate = (
-    _update: Uint8Array,
+    update: Uint8Array,
     origin: unknown,
   ) => {
     this.documentChangeVersion += 1;
     this.localDurabilityPending = true;
+    if (origin !== this.provider && this.connectionStarted) {
+      if (!this.provider?.synced) {
+        this.quarantined = true;
+        this.localRecoveryPending = true;
+      }
+      const regionId = origin && typeof origin === "object" ? (origin as { regionId?: unknown }).regionId : undefined;
+      this.authoredRegionIds = recoveryRegionIds([...this.authoredRegionIds,
+        ...(typeof regionId === "string" ? regionId.split(",") : ["artifact:structure"])]);
+      if (!this.quarantined) Y.applyUpdate(this.providerDocument, update, origin);
+    }
     if (
       !origin ||
       typeof origin !== "object" ||
@@ -330,6 +354,47 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   ) {
     this.clientId = clientIdentity(artifactId);
     this.document.on("update", this.onLocalDocumentUpdate);
+    this.providerDocument.on("update", this.onProviderDocumentUpdate);
+  }
+
+  private readonly onProviderDocumentUpdate = (update: Uint8Array, origin: unknown) => {
+    this.providerChangeVersion += 1;
+    if (!this.quarantined && origin === this.provider) Y.applyUpdate(this.document, update, this.provider);
+  };
+
+  /** Opens the quarantine after admission or a covering durable frontier.
+   * Both merges use the provider origin: the draft was already delivered (or
+   * is durable), so Hocuspocus must not upload it a second time. */
+  private releaseQuarantine() {
+    if (!this.quarantined) return;
+    Y.applyUpdate(this.document, Y.encodeStateAsUpdate(this.providerDocument, Y.encodeStateVector(this.document)), this.provider);
+    Y.applyUpdate(this.providerDocument, Y.encodeStateAsUpdate(this.document, Y.encodeStateVector(this.providerDocument)), this.provider);
+    this.quarantined = false;
+  }
+
+  private rebuildProviderReplica() {
+    if (this.destroyed || this.rebuildingProvider) return;
+    this.rebuildingProvider = true;
+    this.localRecoveryPending = true;
+    this.quarantined = true;
+    // The old replica may contain a sent but unacknowledged branch. Discard it
+    // before it can run another handshake; the draft remains in `document`.
+    this.websocketProvider?.disconnect();
+    queueMicrotask(() => {
+      if (this.destroyed) return;
+      this.provider?.destroy(); this.provider = null;
+      this.websocketProvider?.destroy(); this.websocketProvider = null;
+      this.providerDocument.off("update", this.onProviderDocumentUpdate);
+      this.providerDocument.destroy(); this.providerDocument = new Y.Doc();
+      this.providerDocument.on("update", this.onProviderDocumentUpdate);
+      this.rebuildingProvider = false;
+      if (!this.intentionallyDisconnected) this.scheduleConnectionRetry();
+    });
+  }
+
+  restoreDurableAnchor(anchor: DurableRoomAnchor) {
+    if (this.destroyed || this.durableAnchor) return;
+    this.durableAnchor = readDurableRoomAnchor(anchor) ?? undefined;
   }
 
   getSnapshot = (): CollaborationTransportSnapshot =>
@@ -348,6 +413,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     // origin is LOCAL_PERSISTENCE_ORIGIN. Keep it pending until the gateway
     // confirms the complete merged document hash, never just socket sync.
     this.localRecoveryPending = true;
+    this.quarantined = true;
+    this.authoredRegionIds = recoveryRegionIds(ancestry?.authoredRegionIds ?? ["artifact:structure"]);
     this.durableAnchor = readDurableRoomAnchor(ancestry?.recoveryAnchor) ?? undefined;
     this.localDurabilityPending = true;
     if (conflict) {
@@ -377,7 +444,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // Ask for the committed causal base. A restored branch can contain a
       // tiny edit to a large artifact; its whole body need not be uploaded.
       this.recoveryVectorRequest = `vector:${++this.recoveryConfirmationSequence}`;
-      provider.sendStateless(JSON.stringify({ type: "spectra.recovery_request", confirmationId: this.recoveryVectorRequest }));
+      provider.sendStateless(JSON.stringify({ type: "spectra.recovery_request", confirmationId: this.recoveryVectorRequest,
+        recoveryAnchor: this.durableAnchor ?? null, regionIds: this.authoredRegionIds }));
     } catch {
       this.recoveryVectorRequest = null;
       this.localRecoveryDeliveryPending = false;
@@ -401,6 +469,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       });
       this.recoveryVectorRequest = null;
       provider.flushPendingUpdates();
+      // The gateway admitted this branch against its saved anchor. Later
+      // edits flow normally; durability still requires a covering frontier.
+      this.releaseQuarantine();
       this.requestDurableConfirmation();
     } catch {
       this.recoveryVectorRequest = null;
@@ -423,16 +494,28 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private confirmDurableFrontier(confirmedHash: string, candidateAnchor?: unknown) {
     if (this.nativeConflict) return;
     if (!/^[a-f0-9]{64}$/.test(confirmedHash)) return;
-    const frontier = encodeDurableFrontier(Y, this.document);
+    const candidate = this.quarantined ? new Y.Doc() : this.document;
+    if (candidate !== this.document) {
+      Y.applyUpdate(candidate, Y.encodeStateAsUpdate(this.document));
+      Y.applyUpdate(candidate, Y.encodeStateAsUpdate(this.providerDocument));
+    }
+    const frontier = encodeDurableFrontier(Y, candidate);
+    if (candidate !== this.document) candidate.destroy();
     if (!frontier) return;
     const version = this.documentChangeVersion;
     const epoch = this.durabilityEpoch;
+    const providerVersion = this.providerChangeVersion;
     void crypto.subtle.digest("SHA-256", new Uint8Array(frontier)).then(digest => {
       const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-      if (this.destroyed || epoch !== this.durabilityEpoch || version !== this.documentChangeVersion || hash !== confirmedHash) return;
+      if (this.destroyed || epoch !== this.durabilityEpoch || version !== this.documentChangeVersion ||
+          providerVersion !== this.providerChangeVersion || hash !== confirmedHash) return;
       const anchor = readDurableRoomAnchor(candidateAnchor);
       if (anchor?.frontierHash === hash && (!this.durableAnchor || anchor.roomId !== this.durableAnchor.roomId ||
           anchor.nextSequence >= this.durableAnchor.nextSequence)) this.durableAnchor = anchor;
+      // A covering durable frontier proves the room already has the whole
+      // branch, so the quarantine may open in both directions.
+      this.releaseQuarantine();
+      this.authoredRegionIds = [];
       this.durablePendingUpdateIds.clear();
       this.localDurabilityPending = false;
       this.localRecoveryPending = false;
@@ -587,6 +670,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
 
   async connect() {
     if (this.destroyed || this.provider) return;
+    this.connectionStarted = true;
     if (this.connectionRetryTimer !== undefined) {
       window.clearTimeout(this.connectionRetryTimer);
       this.connectionRetryTimer = undefined;
@@ -624,7 +708,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       const provider = new HocuspocusProvider({
         websocketProvider,
         name: initial.documentName,
-        document: this.document,
+        document: this.providerDocument,
         flushDelay: 180,
         token: async () => {
           if (this.destroyed) throw new Error("COLLABORATION_CLOSED");
@@ -682,17 +766,29 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             });
         },
         onSynced: ({ state }) => {
+          if (this.provider !== provider) return;
           if (this.state === "permission_lost" || this.state === "closed")
             return;
           if (!state) {
             this.update({ state: "synchronizing" });
             return;
           }
+          // Content restored before the provider existed (a clean cache) was
+          // never offered to the room. If the room lacks any of it, treat it as
+          // a branch that needs admission rather than silently diverging.
+          if (!this.quarantined && !this.localRecoveryPending &&
+              !Y.snapshotContainsUpdate(Y.snapshot(this.providerDocument), Y.encodeStateAsUpdate(this.document))) {
+            this.quarantined = true;
+            this.localRecoveryPending = true;
+            this.localDurabilityPending = true;
+            this.authoredRegionIds = recoveryRegionIds([...this.authoredRegionIds, "artifact:structure"]);
+          }
           this.sendLocalRecoveryUpdate();
           this.requestDurableConfirmation();
           this.updateSynchronizationState();
         },
         onUnsyncedChanges: ({ number }) => {
+          if (this.provider !== provider) return;
           this.providerUnsynchronizedChanges = number;
           this.updateSynchronizationState();
         },
@@ -848,6 +944,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           });
         },
         onStateless: ({ payload }) => {
+          if (this.provider !== provider) return;
           try {
             const message = JSON.parse(payload) as {
               type?: string;
@@ -861,9 +958,37 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               regionIds?: unknown;
               nativeOperationId?: unknown;
               message?: unknown;
+              updateBase64?: unknown;
+              anchor?: unknown;
+              admitted?: unknown;
             };
+            if (message.type === "spectra.recovery_current") {
+              const requestId = typeof message.confirmationId === "string" ? message.confirmationId : "";
+              const pending = this.recoveryCurrentRequests.get(requestId);
+              if (!pending) return;
+              this.recoveryCurrentRequests.delete(requestId); clearTimeout(pending.timer);
+              const anchor = readDurableRoomAnchor(message.anchor);
+              if (!anchor || typeof message.updateBase64 !== "string" || !this.level) {
+                pending.reject(new Error("LOCAL_RECOVERY_CURRENT_UNAVAILABLE")); return;
+              }
+              const update = Uint8Array.from(atob(message.updateBase64), character => character.charCodeAt(0));
+              const verify = new Y.Doc();
+              try {
+                Y.applyUpdate(verify, update);
+                const frontier = encodeDurableFrontier(Y, verify);
+                if (!frontier) throw new Error("LOCAL_RECOVERY_CURRENT_UNAVAILABLE");
+                const level = this.level;
+                void crypto.subtle.digest("SHA-256", new Uint8Array(frontier)).then(digest => {
+                  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+                  if (hash !== anchor.frontierHash || this.destroyed || !this.level) pending.reject(new Error("LOCAL_RECOVERY_CURRENT_CHANGED"));
+                  else pending.resolve({ update, anchor, level });
+                }).catch(error => pending.reject(error));
+              } catch (error) { pending.reject(error instanceof Error ? error : new Error(String(error))); }
+              finally { verify.destroy(); }
+              return;
+            }
             if (message.type === "spectra.recovery_vector") {
-              if (typeof message.confirmationId === "string" && typeof message.stateVector === "string")
+              if (message.admitted === true && typeof message.confirmationId === "string" && typeof message.stateVector === "string")
                 this.sendLocalRecoveryDelta(message.confirmationId, message.stateVector);
               return;
             }
@@ -980,7 +1105,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   regionIds: Array.isArray(message.regionIds) ? message.regionIds.filter((value): value is string => typeof value === "string").slice(0, 128) : [],
                   nativeOperationId: typeof message.nativeOperationId === "string" ? message.nativeOperationId : null,
                 };
-                this.websocketProvider?.disconnect();
+                this.quarantined = true;
               }
               this.updateSynchronizationState(
                 typeof message.message === "string"
@@ -1030,6 +1155,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review."
                 : undefined,
           });
+          if (this.provider === provider && this.localDurabilityPending) this.rebuildProviderReplica();
         },
       });
       this.websocketProvider = websocketProvider;
@@ -1114,6 +1240,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     }
     this.provider?.destroy();
     this.provider = null;
+    this.providerDocument.destroy();
+    for (const pending of this.recoveryCurrentRequests.values()) { clearTimeout(pending.timer); pending.reject(new Error("COLLABORATION_CLOSED")); }
+    this.recoveryCurrentRequests.clear();
     this.websocketProvider?.destroy();
     this.websocketProvider = null;
     this.document.off("update", this.onLocalDocumentUpdate);
@@ -1142,6 +1271,24 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.provider.forceSync();
     this.provider.flushPendingUpdates();
     await this.flush();
+  }
+
+  async readRecoveryCurrent(signal?: AbortSignal): Promise<RecoveryCurrent> {
+    signal?.throwIfAborted();
+    if (!this.provider) await this.connect();
+    const start = Date.now();
+    while (!this.provider?.synced || !this.level) {
+      signal?.throwIfAborted();
+      if (this.destroyed || this.state === "permission_lost" || Date.now() - start > 10_000)
+        throw new Error("LOCAL_RECOVERY_CURRENT_UNAVAILABLE");
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const confirmationId = `current:${++this.recoveryConfirmationSequence}`;
+    return new Promise<RecoveryCurrent>((resolve, reject) => {
+      const timer = setTimeout(() => { this.recoveryCurrentRequests.delete(confirmationId); reject(new Error("LOCAL_RECOVERY_CURRENT_UNAVAILABLE")); }, 10_000);
+      this.recoveryCurrentRequests.set(confirmationId, { resolve, reject, timer });
+      this.provider!.sendStateless(JSON.stringify({ type: "spectra.recovery_current", confirmationId }));
+    });
   }
 
   setPresence(fields: Omit<CollaborationPresence, "clientId">) {

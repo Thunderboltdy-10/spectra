@@ -226,6 +226,8 @@ export type CollaborationClaimRelease = {
   resumed: CollaborationStructuralClaim | null;
 };
 
+export type RecoveryCurrent = { update: Uint8Array; anchor: DurableRoomAnchor; level: "read" | "modify" };
+
 export type ArtifactCollaborationTransport = {
   readonly document: Y.Doc;
   readonly clientId: string;
@@ -244,6 +246,12 @@ export type ArtifactCollaborationTransport = {
    * update during document hydration may implement this as a no-op.
    */
   markLocalRecoveryPending?(conflict?: NativeRecoveryConflict, ancestry?: LocalRecoveryAncestry): void;
+  /** A clean restored cache carries the exact room anchor it was saved at.
+   * Edits made before the first handshake are admitted against it. */
+  restoreDurableAnchor?(anchor: DurableRoomAnchor): void;
+  /** Reads the current canonical room with its exact anchor, without applying
+   * it to the (possibly quarantined) local document. */
+  readRecoveryCurrent?(signal?: AbortSignal): Promise<RecoveryCurrent>;
   retry(): Promise<void>;
   disconnect(): void;
   destroy(): void;

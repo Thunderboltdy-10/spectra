@@ -54,6 +54,8 @@ import type * as identityShared from "../identityShared.js";
 import type * as intakeAttestation from "../intakeAttestation.js";
 import type * as localStudentRehearsal from "../localStudentRehearsal.js";
 import type * as managebac from "../managebac.js";
+import type * as managebacProjectionAction from "../managebacProjectionAction.js";
+import type * as managebacProjectionJobs from "../managebacProjectionJobs.js";
 import type * as memberships from "../memberships.js";
 import type * as memory from "../memory.js";
 import type * as memoryEmbedding from "../memoryEmbedding.js";
@@ -149,6 +151,8 @@ declare const fullApi: ApiFromModules<{
   intakeAttestation: typeof intakeAttestation;
   localStudentRehearsal: typeof localStudentRehearsal;
   managebac: typeof managebac;
+  managebacProjectionAction: typeof managebacProjectionAction;
+  managebacProjectionJobs: typeof managebacProjectionJobs;
   memberships: typeof memberships;
   memory: typeof memory;
   memoryEmbedding: typeof memoryEmbedding;

@@ -30,6 +30,7 @@ import {
 } from "@/features/spectra/lenses/xlsx-lens";
 import {
   pptxLens,
+  pptxProjectionSemanticDigest,
   PptxLensError,
   type PptxProjection,
 } from "@/features/spectra/lenses/pptx-lens";
@@ -355,15 +356,11 @@ async function materializeOfficeArtifactAttempt(
           cells: sheet.cells.map(cell => invalidatesFormulaCaches && cell.formula ? { ...cell, value: null } : cell),
         })),
       })
-    : await sha256Payload(new TextEncoder().encode(JSON.stringify(
-        (projection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
-      )));
+    : await pptxProjectionSemanticDigest(projection as PptxProjection, baseProjection as PptxProjection);
   if (hash === materializationTruth.hash) {
     const readbackDigest = isSheet
       ? await xlsxSemanticDigest(baseProjection as XlsxProjection)
-      : await sha256Payload(new TextEncoder().encode(JSON.stringify(
-          (baseProjection as PptxProjection).slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })),
-        )));
+      : await pptxProjectionSemanticDigest(baseProjection as PptxProjection);
     if (readbackDigest !== requestedDigest)
       throw new Error("OFFICE_READBACK_MISMATCH");
     const unchanged = {

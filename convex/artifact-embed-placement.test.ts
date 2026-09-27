@@ -241,16 +241,41 @@ describe("server-observed offloaded and collaboration placement", () => {
     } finally { f.document.destroy(); }
   });
 
+  it.each(["structs", "deletes"])("withholds proof when matching state vectors hide unresolved %s", async kind => {
+    const f = await roomFixture();
+    const incomplete = new Y.Doc();
+    try {
+      const map = incomplete.getMap("missing-dependency");
+      map.set("value", "first");
+      const before = Y.encodeStateVector(incomplete);
+      if (kind === "deletes") map.delete("value");
+      else map.set("value", "second");
+      const update = buffer(Y.encodeStateAsUpdate(incomplete, before));
+      await f.t.run(async ctx => {
+        await ctx.db.insert("collaborationUpdates", {
+          roomId: f.roomId, sequence: 2, update, byteLength: update.byteLength,
+          stateVectorHash: vectorHash(f.document), actorAccountId: f.ids.accountId,
+          clientId: "incomplete", idempotencyKey: "incomplete:2", regionIds: ["artifact:structure"], createdAt: f.ids.now + 1,
+        });
+        await ctx.db.patch(f.roomId, { nextSequence: 3 });
+      });
+      expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "needs_checkpoint" });
+      expect(await f.proven()).toBe(false);
+      expect((await f.t.run(ctx => ctx.db.get(f.ids.embedId)))?.placementProof).toBeUndefined();
+    } finally { incomplete.destroy(); f.document.destroy(); }
+  });
+
   it("reads a covering offloaded snapshot despite many newer failed snapshots, and rejects corrupt storage", async () => {
     const f = await roomFixture(3);
     try {
       const bytes = Y.encodeStateAsUpdate(f.document);
       const stored = await f.payload(bytes, "yjs-snapshot");
       const snapshot = { roomId: f.roomId, artifactId: f.ids.hostId, throughSequence: 3, update: new ArrayBuffer(0), stateVector: buffer(Y.encodeStateVector(f.document)), contentHash: createHash("sha256").update(bytes).digest("base64url"), schemaVersion: 1, payloadRef: String(stored.payloadId), payloadDigest: stored.digest, byteLength: stored.byteLength, createdBy: "compactor" as const, createdAt: f.ids.now };
-      await f.t.run(async ctx => {
+      const snapshotId = await f.t.run(async ctx => {
         for (const update of await ctx.db.query("collaborationUpdates").withIndex("by_room_sequence", q => q.eq("roomId", f.roomId)).collect()) await ctx.db.delete(update._id);
-        await ctx.db.insert("collaborationSnapshots", { ...snapshot, status: "verified" });
+        const id = await ctx.db.insert("collaborationSnapshots", { ...snapshot, status: "verified" });
         await ctx.db.patch(f.roomId, { snapshotSequence: 3 });
+        return id;
       });
       const head = await f.actor.query(headRef, { embedId: f.ids.embedId });
       const measure = () => f.actor.run(async ctx => {
@@ -276,6 +301,10 @@ describe("server-observed offloaded and collaboration placement", () => {
       }
       expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "proven" });
       await f.patchEmbed({ placementProof: undefined });
+      await f.t.run(ctx => ctx.db.patch(snapshotId, { contentHash: "wrong" }));
+      expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "unavailable" });
+      expect(await f.proven()).toBe(false);
+      await f.t.run(ctx => ctx.db.patch(snapshotId, { contentHash: snapshot.contentHash }));
       await f.t.run(ctx => ctx.storage.delete(stored.storageId));
       expect(await f.actor.action(refreshRef, { embedId: f.ids.embedId })).toMatchObject({ status: "unavailable" });
       expect(await f.proven()).toBe(false);

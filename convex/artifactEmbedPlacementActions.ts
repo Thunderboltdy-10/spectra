@@ -11,6 +11,7 @@ import type { getMeta } from "./collaborationDurablePayload";
 import { isDurableContentRef, MAX_DURABLE_PAYLOAD_BYTES } from "../shared/durable-content";
 import { containsPinnedArtifactPlacement } from "../shared/artifact-embed-placement";
 import { artifactProjection } from "../scripts/collaboration-artifact-projection.mjs";
+import { encodeDurableFrontier } from "../shared/collaboration-durable-frontier.mjs";
 
 const headQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds"> }, FunctionReturnType<typeof loadHead>>("artifactEmbedPlacement:loadHead");
 const pageQuery = makeFunctionReference<"query", { embedId: Id<"artifactEmbeds">; headHash: string; afterSequence?: number }, FunctionReturnType<typeof loadRoomPage>>("artifactEmbedPlacement:loadRoomPage");
@@ -70,7 +71,7 @@ async function materializeRoom(ctx: ActionCtx, embedId: Id<"artifactEmbeds">, he
           bytesRead += page.snapshot.byteLength;
           if (bytesRead > MAX_REPLAY_BYTES) return { status: "needs_checkpoint" as const };
           const bytes = await updateBytes(ctx, head, page.snapshot, "yjs-snapshot");
-          if (!page.snapshot.payloadRef && createHash("sha256").update(bytes).digest("base64url") !== page.snapshot.contentHash)
+          if (createHash("sha256").update(bytes).digest("base64url") !== page.snapshot.contentHash)
             throw new Error("PLACEMENT_SNAPSHOT_CORRUPT");
           Y.applyUpdate(document, bytes);
           const vector = Y.encodeStateVector(document);
@@ -92,6 +93,9 @@ async function materializeRoom(ctx: ActionCtx, embedId: Id<"artifactEmbeds">, he
       if (afterSequence === head.room.nextSequence - 1) break;
       if (page.updates.length === 0) return { status: "needs_checkpoint" as const };
     }
+    // Matching clocks do not cover unresolved structs or pending deletes.
+    // Missing dependencies must recover before any observed node proves access.
+    if (!encodeDurableFrontier(Y, document)) return { status: "needs_checkpoint" as const };
     if (!expectedVector || createHash("sha256").update(Y.encodeStateVector(document)).digest("base64url") !== expectedVector)
       throw new Error("PLACEMENT_ROOM_INCOMPLETE");
     const json = artifactProjection(document, head.room.schemaVersion);

@@ -4,7 +4,7 @@ import { internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { containsPinnedArtifactPlacement, type PinnedPlacementTarget } from "../shared/artifact-embed-placement";
 import { isDurableContentRef } from "../shared/durable-content";
-import { snapshotHash } from "./artifactSnapshots";
+import { snapshotHash } from "./snapshotHash";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";

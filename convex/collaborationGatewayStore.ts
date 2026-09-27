@@ -20,6 +20,7 @@ import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 import { fitChangeGroupSnapshots } from "../shared/collaboration-change-group-capacity";
 import { filenameFromRelativePath } from "../shared/native-filename";
 import { isDurableContentRef } from "../shared/durable-content";
+import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 import {
   finalizeArtifactSummary,
@@ -127,6 +128,18 @@ async function syncListingAfterProjection(
   await syncSourceNodes(ctx, "work", artifact._id, listingTitle);
 }
 
+/** Provider facts and official deadlines in a planner change only through
+ * the trusted provider context; an ordinary editor keeps personal fields. */
+function assertEditorSourceBoundary(
+  artifact: Doc<"spectraArtifacts">,
+  projection: GatewayProjection | null,
+  providerAppend = false,
+) {
+  if (providerAppend || !projection || artifact.blueprintKey !== "planner_task" ||
+      isDurableContentRef(artifact.content) || isDurableContentRef(projection.content)) return;
+  assertPlannerSourceEdit(artifact.content, projection.content);
+}
+
 export async function parseGatewayProjection(
   ctx: MutationCtx,
   projectionJson: string | undefined,
@@ -137,6 +150,8 @@ export async function parseGatewayProjection(
     summary?: string;
   },
   authority?: { accountId: Id<"accounts">; policyVersion: number },
+  /** A trusted provider merge supplies its exact summary; never a client. */
+  options: { preserveSummary?: boolean } = {},
 ): Promise<GatewayProjection | null> {
   if (!projectionJson) return null;
   if (
@@ -180,7 +195,7 @@ export async function parseGatewayProjection(
     timetableContentContainsPersonalState(value.content)
   )
     throw new Error("COLLABORATION_TIMETABLE_PERSONAL_STATE_FORBIDDEN");
-  const summary = isGeneratedArtifactSummary(
+  const summary = !options.preserveSummary && isGeneratedArtifactSummary(
     artifact.summary,
     artifact.blueprintKey as BlueprintKey,
   )
@@ -1012,7 +1027,9 @@ export async function appendRoomUpdate(
       args.projectionHash,
       artifact,
       { accountId: args.accountId, policyVersion: args.policyVersion },
+      { preserveSummary: Boolean(providerContext) },
     );
+    assertEditorSourceBoundary(artifact, projection, Boolean(providerContext));
     if (providerContext) {
       if (!projection) throw new Error("COLLABORATION_PROVIDER_PROJECTION_REQUIRED");
       await providerContext.validateProjection(projection);
@@ -1465,6 +1482,7 @@ export const checkpoint = internalMutation({
       { accountId: args.accountId, policyVersion: args.policyVersion },
     );
     if (!projection) throw new Error("COLLABORATION_PROJECTION_INVALID");
+    assertEditorSourceBoundary(artifact, projection);
     if (args.roomId !== undefined && room._id !== args.roomId)
       throw new Error("COLLABORATION_DURABLE_RECOVERY_STALE");
     const currentProjectionSequence = room.lastProjectionSequence ?? 0;

@@ -86,6 +86,21 @@ afterEach(() => {
 });
 
 describe("visible retained pin placement recovery", () => {
+  it("does not repeat materialization when the action already checked a newer subscribed head", async () => {
+    mocks.refresh.mockResolvedValueOnce({
+      status: "proven",
+      headHash: "head-b",
+    });
+    const { rerender } = render(
+      <RetainedPinRecovery embedId="embed" refreshKey="head-a" />,
+    );
+    show();
+    await tick();
+    rerender(<RetainedPinRecovery embedId="embed" refreshKey="head-b" />);
+    await tick(5_000);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Placement verified");
+  });
   it("does not materialize hidden or offscreen references and cancels pending demand on hide", async () => {
     render(<RetainedPinRecovery embedId="embed" refreshKey="head-a" />);
     await tick(5_000);

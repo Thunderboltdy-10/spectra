@@ -20,6 +20,7 @@ type PlacementResult = {
 type RefreshState = {
   state: "idle" | "checking" | PlacementResult["status"] | "failed";
   key?: string;
+  headHash?: string;
 };
 type Entry = {
   snapshot: RefreshState;
@@ -76,7 +77,8 @@ class PlacementRefreshes {
     entry.pending = Promise.resolve()
       .then(run)
       .then(
-        (result) => publish({ key, state: result.status }),
+        (result) =>
+          publish({ key, state: result.status, headHash: result.headHash }),
         () => publish({ key, state: "failed" }),
       )
       .finally(() => {
@@ -160,7 +162,8 @@ export function RetainedPinRecovery({
       !visible ||
       !pageVisible ||
       state.state === "checking" ||
-      state.key === refreshKey
+      state.key === refreshKey ||
+      state.headHash === refreshKey
     )
       return;
     // Acknowledged edits change the proof head. Wait for a settled head, and
@@ -170,7 +173,7 @@ export function RetainedPinRecovery({
   }, [visible, pageVisible, refreshKey, state, run]);
 
   const currentState =
-    state.key === refreshKey
+    state.key === refreshKey || state.headHash === refreshKey
       ? state.state
       : state.state === "checking"
         ? "checking"

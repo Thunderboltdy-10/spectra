@@ -10,16 +10,16 @@ The user's September 27 directive is to finish and integrate the work, using foc
 | Client performance | Body release, selected-open ordering and mounted reuse through `cf30b32c`; completed access-decision body release `bbfea604`; prior 56-case and follow-up 27-case passes | Owned implementation complete; live browser/heap acceptance deferred |
 | AI execution | No ambiguous/acknowledged replay, full replacement verification, direct sanitized pre-effect errors and preparation skips integrated through `1125bbf7` | Exact acknowledged final-effect verification; authorized discovered-target compact context; clarification and steering continuity |
 | AI review/compaction | Independent bounded runtime verdict recovered | Real context compaction around 256k with durable intent, approvals, staged work and receipt continuity |
-| Authority | Indexed preparation, authorized receipt replay and shared hydrated evidence integrated through `49bbd3e2` | Retained cross-school invited-host consistency; create/@created first-effect binding and actual sink consumption |
+| Authority | Preparation/receipt/evidence plus retained-source and create/alias bindings through `ce2f4f29`; final 66-case pass | Native signer/sink consumption and combined first-effect integration |
 | Durability | Native reconciliation/history/ancestor transaction integrated | Atomic AI canonical/history/native intent/receipt transaction, exact source/result retention and consumer wiring |
 | Bridge | Prepared native candidate and human helper recovered | Signed atomic transport, actual AI/human promotion, public sink closure, mirror/retry protocol closeout |
 | Collaboration | Canonical admission, retained ancestry and rebase prerequisites integrated | Quarantine offline draft before provider upload, restore UI controller, exact admitted AI bytes without second append; invitation repair |
 | History | Bounded metadata, retained placement/frontier proof and shared canonical projection integrated through `2ad4e204`; focused 27/27 | Complete restore admission and native helper wiring |
 | Office document | Academic mapping, delta policy and formatting repairs integrated | Table/reference preservation validation and final shared conversion wiring |
 | Office models | Complete-list authority baseline integrated | Readback-derived differences, transition duration/identity, native media and new slide/text identity mapping |
-| Native preservation | Full attached-subtree proof integrated | Exact transition remainder proof and atomic admission cross-review |
+| Native preservation | Transition remainder proof integrated through `eab223dc`; 56-case pass and bounded atomic source review | Owned unit complete; actual writer/native acceptance remains with Office/final verification |
 | Choreography | Prior executor/visibility/settings candidates recovered | Finish actual settings and paragraph actions through durable admission, ordinary/Follow visibility behavior |
-| Context | Current-source authority, exact compact orientation and routing prerequisites integrated | Semantic memory and bounded thread-history candidates, actual authorized tool/caller integration |
+| Context | Semantic memory, indexed thread title/history and exact message chunks integrated through `0401ba61`; 90-case pass | ENGINE tool/caller integration and deployed index readiness |
 | Data | Sparse scan improvement integrated | Actor-graph production discovery and real workspace/Agent Library caller/cache migration |
 | Craft | Optional tools prompt and authored slide sequence integrated | Finish lossless quality policies, prompt-prefix stability, task-sensitive skills and candidate validation |
 | Experience | Shared embeds/themes and lifecycle baseline integrated | Exact retained pin refresh, recovery UI wired to collaboration controller |

@@ -1,5 +1,6 @@
 import type { PptxProjection, PptxSlideProjection } from "./projection-contracts";
 import type { PresentationObject } from "../presentation/model";
+import { pptxImageReadbackObject } from "./pptx-media-readback";
 
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -79,6 +80,6 @@ export function normalizePptxProjectionForReadback(requested: PptxProjection, be
 }
 
 /** Shared native readback content; transition is a primary authored field. */
-export function pptxSemanticContent(projection: Pick<PptxProjection, "slides">) {
-  return projection.slides.map(({ id, title, text, objects, hidden, speakerNotes, transition }: PptxSlideProjection) => ({ id, title, text, objects, hidden, speakerNotes, ...(transition ? { transition } : {}) }));
+export function pptxSemanticContent(projection: Pick<PptxProjection, "slides"> & Partial<Pick<PptxProjection, "nativeBinding">>) {
+  return projection.slides.map(({ id, title, text, objects, hidden, speakerNotes, transition }: PptxSlideProjection) => ({ id, title, text, objects: projection.nativeBinding ? objects.map((object, index) => pptxImageReadbackObject(object, index, projection.nativeBinding!)) : objects, hidden, speakerNotes, ...(transition ? { transition } : {}) }));
 }

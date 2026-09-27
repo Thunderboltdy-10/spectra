@@ -66,6 +66,8 @@ const PARAM_SAMPLES: unknown[] = [
   "left",
   "Georgia",
   "#101828",
+  // Enumerated scalars, e.g. the native PPTX transition kinds.
+  "fade",
 ];
 
 describe("P3.V1 protocol conformance", () => {

@@ -65,6 +65,9 @@ describe("artifact live-model lifecycle", () => {
       displayName: "Pablo",
       unsynchronizedChanges: 0,
       canEdit: true,
+      // The real hook always reports local durability; a closed store has no draft branch.
+      localDurability: { state: "closed", bytes: 0, pendingRemoteSync: false, restored: false },
+      localPersistence: null,
     };
 
     function Probe() {

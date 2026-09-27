@@ -91,9 +91,11 @@ export async function prepareCanonicalAiUpdate(args: {
       const digest = createHash("sha256").update(update).digest("hex");
       const payload = await args.bridge("storeDurablePayload", { ...scope(head), kind: "yjs-update", digest,
         mediaType: "application/vnd.spectra.yjs-update", bytesBase64: Buffer.from(update).toString("base64") }) as { payloadRef: string };
-      envelope = { update: "", payloadRef: payload.payloadRef, payloadDigest: digest, byteLength: update.byteLength,
+      const spilled: Extract<CanonicalPayload, { payloadRef: string }> = { update: "", payloadRef: payload.payloadRef,
+        payloadDigest: digest, byteLength: update.byteLength,
         payloadManifest: createDurablePayloadManifest({ kind: "yjs-update", bytes: update,
           payloadRef: payload.payloadRef, encoding: "payload-ref", mediaType: "application/vnd.spectra.yjs-update" }) };
+      envelope = spilled;
     }
     const spillProjections = Buffer.byteLength(JSON.stringify({ beforeProjectionJson,
       append: { ...envelope, projectionJson } })) > 1200 * 1024;

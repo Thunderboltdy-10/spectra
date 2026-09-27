@@ -22,7 +22,7 @@ type HumanQueueArgs = { workId: Id<"spectraArtifacts">; payloadRef: string; cont
 async function queueHumanMaterialization(t: { mutation: ReturnType<typeof convexTest>["mutation"] }, accountId: Id<"accounts">, queue: HumanQueueArgs) {
   return await t.mutation(internal.nativeMaterialization.commitHuman, {
     accountId, artifactId: queue.workId, candidate: { destination: "bridge", queue },
-  }) as { requestId: string; state: string };
+  }) as { requestId: Id<"bridgeWriteRequests"> | "protected-original"; state: string };
 }
 const credential = "bridge-chaos-credential-000000000001";
 const identity = {

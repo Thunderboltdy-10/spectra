@@ -14,7 +14,7 @@ function fixture() {
   const head = { accountId: "account", artifact: { _id: "artifact", blueprintKey: "document", schemaVersion: 4,
     updatedAt: 100, contentHash: "physical" }, operationDigest: "operation", prompt: "Edit paragraph",
     operation: { id: "operation", type: "artifact.update", input: { content: desired.content } },
-    sourceContentIdentity: "source", room: { _id: "room", nextSequence: 2, policyVersion: 3 }, committedResult: null } as NativeAiHead;
+    sourceContentIdentity: "source", room: { _id: "room", nextSequence: 2, policyVersion: 3 }, committedResult: null } as unknown as NativeAiHead;
   const stored = { roomId: "room", nextSequence: 2, liveStateVectorHash: stateVectorHash(document),
     updates: [{ sequence: 1, update: Buffer.from(Y.encodeStateAsUpdate(document)).toString("base64") }] };
   const bridge = vi.fn(async () => stored);

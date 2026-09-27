@@ -6,26 +6,47 @@ export function isUnavailableShellArtifact(artifact: SpectraArtifact) {
   return artifact.accessLevel === null || artifact.status === "deleted";
 }
 
-/** Order overlapping authoritative reads; release their results when all settle. */
+/** Order overlapping authoritative reads without caching completed bodies. */
 export function createShellArtifactAccess(readDetail: DetailReader = getSpectraArtifactForDeepLink) {
   let sequence = 0;
-  let pending = 0;
-  const decisions = new Map<string, { sequence: number; artifact: SpectraArtifact | null }>();
+  // A list can report revocation for any id, but only an older detail read of
+  // the same id needs a newer body for its navigation handoff.
+  const pendingDetails = new Map<string, Set<number>>();
+  const pendingLists = new Set<number>();
+  const decisions = new Map<string, {
+    sequence: number;
+    result?: { artifact: SpectraArtifact | null };
+  }>();
   const listeners = new Set<(id: string) => void>();
-  const begin = () => {
+  // Monotonic requests are inserted in order, so the first remaining entry
+  // is the oldest. Finishing one detail never scans unrelated decisions.
+  const oldest = (requests?: Set<number>): number => requests?.values().next().value ?? Infinity;
+  const releaseSettled = (id: string) => {
+    const decision = decisions.get(id);
+    if (!decision) return;
+    const needsBody = oldest(pendingDetails.get(id)) < decision.sequence;
+    if (!needsBody && oldest(pendingLists) >= decision.sequence) decisions.delete(id);
+    else if (!needsBody) delete decision.result;
+  };
+  const begin = (id: string | null) => {
     const request = ++sequence;
-    pending += 1;
+    const requests = id === null ? pendingLists : (pendingDetails.get(id) ?? new Set<number>());
+    requests.add(request);
+    if (id !== null) pendingDetails.set(id, requests);
     return {
       accept(id: string, artifact: SpectraArtifact | null) {
         if ((decisions.get(id)?.sequence ?? 0) > request) return false;
-        decisions.set(id, { sequence: request, artifact });
+        decisions.set(id, { sequence: request, result: { artifact } });
         return true;
       },
       finish() {
-        pending -= 1;
-        // Only concurrent requests need the latest decision. Nothing survives
-        // after they settle, even if many closed works have been visited.
-        if (pending === 0) decisions.clear();
+        if (!requests.delete(request)) return;
+        if (id === null) {
+          for (const artifactId of decisions.keys()) releaseSettled(artifactId);
+        } else {
+          if (requests.size === 0) pendingDetails.delete(id);
+          releaseSettled(id);
+        }
       },
     };
   };
@@ -36,29 +57,35 @@ export function createShellArtifactAccess(readDetail: DetailReader = getSpectraA
       return () => { listeners.delete(listener); };
     },
     async read(id: string, options?: { signal?: AbortSignal }) {
-      const request = begin();
+      const signal = options?.signal;
+      if (signal?.aborted) throw new DOMException("Artifact read was superseded.", "AbortError");
+      const request = begin(id);
+      // Even a reader that ignores abort must not keep newer bodies pinned.
+      signal?.addEventListener("abort", request.finish, { once: true });
       try {
         const result = await readDetail(id, options);
-        if (options?.signal?.aborted) {
+        if (signal?.aborted) {
           throw new DOMException("Artifact read was superseded.", "AbortError");
         }
         const artifact = result.artifact && !isUnavailableShellArtifact(result.artifact) ? result.artifact : null;
         // An open still needs its navigation handoff when a later refresh wins.
         // Give it that newer complete decision, never its stale response.
-        if (!request.accept(id, artifact)) return { artifact: decisions.get(id)!.artifact };
+        // This still-pending detail keeps the newer result alive until finally.
+        if (!request.accept(id, artifact)) return decisions.get(id)!.result!;
         if (!artifact) {
           unavailable(id);
           return { artifact: null };
         }
         return result;
       } finally {
+        signal?.removeEventListener("abort", request.finish);
         request.finish();
       }
     },
     // Call only before a forced network refresh. Cached lists and missing rows
     // never establish revocation; updatedAt is not a permission revision.
     beginListRefresh() {
-      const request = begin();
+      const request = begin(null);
       return {
         reconcile(artifacts: readonly SpectraArtifact[]) {
           for (const artifact of artifacts) {

@@ -142,4 +142,63 @@ describe("shell authoritative access reads", () => {
     await expect(reading).rejects.toMatchObject({ name: "AbortError" });
     expect(revoked).not.toHaveBeenCalled();
   });
+
+  it("keeps a newer same-work handoff through unrelated reads and both delayed lists", async () => {
+    const old = deferred();
+    const fresh = { ...artifact(), content: "new authorized version" };
+    const read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValueOnce({ artifact: fresh });
+    const access = createShellArtifactAccess(read);
+    const revoked = vi.fn();
+    access.subscribe(revoked);
+    const firstList = access.beginListRefresh();
+    const opening = access.read("work");
+    const secondList = access.beginListRefresh();
+    expect((await access.read("work")).artifact).toBe(fresh);
+    read.mockResolvedValueOnce({ artifact: artifact("unrelated") });
+    await access.read("unrelated");
+    const staleDenial = { ...releaseShellArtifactContent(fresh), accessLevel: null };
+    firstList.reconcile([staleDenial]);
+    firstList.finish();
+    old.resolve({ artifact: null });
+    expect((await opening).artifact).toBe(fresh);
+    // The handoff has settled, but the remaining list still needs its fence.
+    secondList.reconcile([staleDenial]);
+    secondList.finish();
+    expect(revoked).not.toHaveBeenCalled();
+    read.mockResolvedValueOnce({ artifact: null });
+    expect(await access.read("work")).toEqual({ artifact: null });
+    expect(revoked).toHaveBeenCalledExactlyOnceWith("work");
+  });
+
+  it("releases an aborted overlap without letting its late result affect a newer read", async () => {
+    const old = deferred();
+    const fresh = { ...artifact(), content: "fresh" };
+    const controller = new AbortController();
+    const read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValueOnce({ artifact: fresh });
+    const access = createShellArtifactAccess(read);
+    const firstList = access.beginListRefresh();
+    const opening = access.read("work", { signal: controller.signal });
+    const rejected = expect(opening).rejects.toMatchObject({ name: "AbortError" });
+    expect((await access.read("work")).artifact).toBe(fresh);
+    controller.abort();
+    const revoked = vi.fn();
+    access.subscribe(revoked);
+    firstList.reconcile([{ ...releaseShellArtifactContent(fresh), accessLevel: null }]);
+    firstList.finish();
+    expect(revoked).not.toHaveBeenCalled();
+    read.mockResolvedValueOnce({ artifact: null });
+    expect(await access.read("work")).toEqual({ artifact: null });
+    old.resolve({ artifact: artifact() });
+    await rejected;
+    expect(revoked).toHaveBeenCalledExactlyOnceWith("work");
+  });
+
+  it("does not start a detail read for an already aborted signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const read = vi.fn();
+    const access = createShellArtifactAccess(read);
+    await expect(access.read("work", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(read).not.toHaveBeenCalled();
+  });
 });

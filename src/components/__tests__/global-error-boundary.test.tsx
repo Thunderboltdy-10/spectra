@@ -4,8 +4,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
+import RouteError from "@/app/error";
+
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 const providersSource = readFileSync(
   path.resolve(process.cwd(), "src/components/providers.tsx"),
@@ -77,5 +81,17 @@ describe("GlobalErrorBoundary navigation recovery", () => {
 
     expect(screen.getByRole("textbox", { name: "Draft" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Something went wrong" })).toBeNull();
+  });
+});
+
+describe("app router error screen", () => {
+  it("gives a server-rendered failure the recovery screen and refetches on retry", () => {
+    const reset = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<RouteError error={Object.assign(new Error("Server Components render failed"), { digest: "123" })} reset={reset} />);
+    expect(screen.getByRole("heading", { name: "Something went wrong" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(reset).toHaveBeenCalledOnce();
   });
 });

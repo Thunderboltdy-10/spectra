@@ -17,6 +17,7 @@ describe("run outcome copy", () => {
   it("labels a stopped run with the same word as the Stop control", () => {
     const model = deriveLiveDockTab({
       runId: "run-1",
+      threadId: "thread-1",
       run: { status: "cancelled", phase: "stopped" },
     });
     expect(model.state).toBe("cancelled");
@@ -26,6 +27,7 @@ describe("run outcome copy", () => {
   it("says a failed run could not finish and what to do next", () => {
     const model = deriveLiveDockTab({
       runId: "run-2",
+      threadId: "thread-2",
       run: { status: "failed", phase: "failed", retryable: false },
     });
     expect(liveDockStateCopy[model.state]).toBe("Could not finish");

@@ -3636,11 +3636,20 @@ export const resolveConflict = mutation({
         "INTEGRATION_CONFLICT_PENDING: This resolution is still being applied.",
       );
     const now = Date.now();
+    // A personal conflict touches only that account's projections. Reading
+    // every account's projection of a shared record made each student's
+    // resolution O(class size) and conflict with every classmate's write.
     const projections = (
-      await ctx.db
-        .query("externalProjections")
-        .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
-        .collect()
+      await (conflict.accountId
+        ? ctx.db
+            .query("externalProjections")
+            .withIndex("by_account_record", (q) =>
+              q.eq("accountId", conflict.accountId).eq("recordId", conflict.recordId),
+            )
+        : ctx.db
+            .query("externalProjections")
+            .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
+      ).collect()
     ).filter(
       (projection) =>
         projection.schoolId === actor.schoolId &&

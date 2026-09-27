@@ -127,14 +127,19 @@ async function authorizePlannerProvider(
   return { importer, recipient, artifact, room, policyVersion: policy?.version ?? 0 };
 }
 
-/** Terminal status for a run from its current errors and open conflicts. */
+/** The review list shows this many open conflicts; the run count stops there. */
+export const OPEN_CONFLICT_COUNT_LIMIT = 100;
+
+/** Terminal status for a run from its current errors and open conflicts. The
+ * read is bounded: conflicts carry full old/new source payloads, and a school
+ * run otherwise read every open conflict of every student in one mutation. */
 export async function syncRunOutcome(ctx: MutationCtx, run: Doc<"externalSyncRuns">) {
   const conflicts = run.accountId
     ? (await ctx.db.query("externalSyncConflicts")
-        .withIndex("by_account_status", q => q.eq("accountId", run.accountId!).eq("status", "open")).collect())
+        .withIndex("by_account_status", q => q.eq("accountId", run.accountId!).eq("status", "open")).take(OPEN_CONFLICT_COUNT_LIMIT))
         .filter(item => item.integrationId === run.integrationId && item.schoolId === run.schoolId)
     : await ctx.db.query("externalSyncConflicts")
-        .withIndex("by_integration_status", q => q.eq("integrationId", run.integrationId).eq("status", "open")).collect();
+        .withIndex("by_integration_status", q => q.eq("integrationId", run.integrationId).eq("status", "open")).take(OPEN_CONFLICT_COUNT_LIMIT);
   const status = run.counts.errors > 0 ? "partial" as const
     : conflicts.length > 0 ? "awaiting_review" as const : "completed" as const;
   return { status, conflicts: conflicts.length };

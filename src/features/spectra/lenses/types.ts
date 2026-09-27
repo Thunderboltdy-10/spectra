@@ -22,6 +22,8 @@ export type LensFidelityEntry = {
   pathPattern?: string;
   /** Resolved namespace of the scoped element; prefixes are not identity. */
   namespaceUri?: string;
+  /** Preserve everything except the validated native transition effect/duration. */
+  scopeMode?: "pptx-transition-remainder";
   readOnly?: boolean;
   reason?: string;
 };

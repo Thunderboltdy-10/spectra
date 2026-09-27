@@ -45,6 +45,7 @@ export type PreservationEntry = {
   partName?: unknown;
   pathPattern?: unknown;
   namespaceUri?: unknown;
+  scopeMode?: unknown;
   readOnly?: unknown;
   reason?: unknown;
 };
@@ -65,6 +66,7 @@ export type PreservationProof = {
     partName: string;
     pathPattern: string;
     namespaceUri?: string;
+    scopeMode?: string;
     unchanged: boolean;
   }[];
 };
@@ -76,6 +78,8 @@ export type PreservationInput = {
 };
 
 const normalize = (name: string) => (name.startsWith("/") ? name : `/${name}`);
+const scopeKey = (partName: string, pathPattern: string, namespaceUri?: string, scopeMode?: string) =>
+  JSON.stringify([normalize(partName), pathPattern, namespaceUri ?? null, scopeMode ?? null]);
 
 /**
  * Every part the lens promised to preserve that came back with different
@@ -94,7 +98,7 @@ export function preservationViolations(input: PreservationInput): PreservationVi
     }
   }
 
-  const claimed = new Map<string, { feature: string; pathPattern?: string; namespaceUri?: string }[]>();
+  const claimed = new Map<string, { feature: string; pathPattern?: string; namespaceUri?: string; scopeMode?: string }[]>();
   for (const entry of input.entries) {
     const preserved = entry.class === "PRESERVED" || entry.readOnly === true;
     if (!preserved || typeof entry.partName !== "string" || !entry.partName) continue;
@@ -113,12 +117,15 @@ export function preservationViolations(input: PreservationInput): PreservationVi
       feature: typeof entry.feature === "string" ? entry.feature : "",
       ...(pathPattern ? { pathPattern } : {}),
       ...(typeof entry.namespaceUri === "string" ? { namespaceUri: entry.namespaceUri } : {}),
+      ...(typeof entry.scopeMode === "string" ? { scopeMode: entry.scopeMode } : {}),
     });
     claimed.set(key, claims);
   }
 
   const violations: PreservationViolation[] = [];
   const removedParts = new Set(input.proof?.removedParts.map(normalize));
+  const unchangedScopes = new Set(input.proof?.scopes.filter(scope => scope.unchanged)
+    .map(scope => scopeKey(scope.partName, scope.pathPattern, scope.namespaceUri, scope.scopeMode)));
   for (const part of input.parts) {
     // ZIP directory entries are transport metadata, not OPC package parts.
     if (part.name.endsWith("/")) continue;
@@ -132,11 +139,7 @@ export function preservationViolations(input: PreservationInput): PreservationVi
     const claim = removed
       ? claimed.get(key)?.[0] ?? { feature: "native-part" }
       : claimed.get(key)?.find((candidate) => !candidate.pathPattern ||
-        !input.proof?.scopes.some((scope) =>
-          normalize(scope.partName) === key &&
-          scope.pathPattern === candidate.pathPattern &&
-          scope.namespaceUri === candidate.namespaceUri && scope.unchanged,
-        ));
+        !unchangedScopes.has(scopeKey(key, candidate.pathPattern, candidate.namespaceUri, candidate.scopeMode)));
     if (!claim) continue;
     const feature = claim.feature;
     const region = regionsForLensFeature(feature)[0];

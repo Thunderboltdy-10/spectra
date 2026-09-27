@@ -3,6 +3,7 @@
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
+import { toast } from "sonner";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -196,6 +197,7 @@ import {
   type ArtifactCommentRegion,
 } from "./artifact-comments-panel";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
+import { ArtifactDraftRecovery, describeLocalRecoveryFailure } from "./artifact-draft-recovery";
 import { ChatBrowserButton } from "./chat-browser-panel";
 import {
   WorkbarMenuAction,
@@ -2947,6 +2949,17 @@ function ArtifactStudioEditor({
         ? String(artifact.updatedAt)
         : null,
   );
+  const [localDraftsArtifactId, setLocalDraftsArtifactId] = useState<string | null>(null);
+  const recoveryViewRef = useRef({ artifactId: artifact._id });
+  if (recoveryViewRef.current.artifactId !== artifact._id)
+    recoveryViewRef.current = { artifactId: artifact._id };
+  const recoveryAdoptionRequest = useRef<AbortController | null>(null);
+  const recoveryNeedsReview = useRef<string | null>(null);
+  const observedRecoveryAdoption = useRef({ artifactId: artifact._id, adoptionId: live.recovery.adoptionId });
+  useEffect(() => () => {
+    recoveryAdoptionRequest.current?.abort();
+    recoveryAdoptionRequest.current = null;
+  }, [artifact._id]);
   const liveRecovery = useMemo(
     () =>
       describeFailure(
@@ -4835,6 +4848,12 @@ function ArtifactStudioEditor({
 
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
+    // The recovery controller publishes this only after durable archival and
+    // replacement-model readiness. Reuse normal model reconciliation once;
+    // never hydrate from the old cached artifact or write another Yjs update.
+    const adoptedRecovery = observedRecoveryAdoption.current.artifactId === artifact._id &&
+      Boolean(live.recovery.adoptionId) && observedRecoveryAdoption.current.adoptionId !== live.recovery.adoptionId;
+    observedRecoveryAdoption.current = { artifactId: artifact._id, adoptionId: live.recovery.adoptionId };
     const incomingKey = snapshotKey(incomingSnapshot);
     if (switchedArtifacts) {
       reconciliationOriginRef.current = {
@@ -4858,11 +4877,11 @@ function ArtifactStudioEditor({
       { source: incomingSource, revision: artifact.updatedAt, localSync: isLocalSyncKey },
       incomingKey,
     );
-    if (lastReconciledIncomingKeyRef.current === reconciliationKey) {
+    if (lastReconciledIncomingKeyRef.current === reconciliationKey && !adoptedRecovery) {
       return;
     }
     lastReconciledIncomingKeyRef.current = reconciliationKey;
-    const decision = switchedArtifacts ? "accept-bootstrap" : decideRemoteStudioIncoming({
+    const decision = switchedArtifacts || adoptedRecovery ? "accept-bootstrap" : decideRemoteStudioIncoming({
         dirty: dirtyRef.current,
         userHasEdited: userHasEditedRef.current,
         incomingKey,
@@ -4987,6 +5006,7 @@ function ArtifactStudioEditor({
     incomingSnapshot,
     isCollaborativeArtifact,
     live.liveValueSource,
+    live.recovery.adoptionId,
     nativeOfficeDocument,
     snapshotKey,
   ]);
@@ -5207,7 +5227,7 @@ function ArtifactStudioEditor({
     if (!claimCloseAction(closeActionRef)) return;
     setCloseActionBusy(true);
     try {
-      await discardQueuedDraft();
+      if (!(await discardQueuedDraft())) return;
       setUnsavedCloseOpen(false);
       onClose();
     } finally {
@@ -5217,31 +5237,43 @@ function ArtifactStudioEditor({
   }
 
   async function discardQueuedDraft() {
-    if (liveConflict?.claimId && live.transport) {
-      await postSpectra({
-        action: "releaseRegionClaim",
-        claimId: liveConflict.claimId,
-        clientId: live.transport.clientId,
-        resolution: "keep_current",
-      }).catch(() => undefined);
+    if (recoveryAdoptionRequest.current) return false;
+    const branch = live.recovery.branches.find((candidate) => candidate.id === live.recovery.activeBranchId);
+    if (!branch?.canReadCurrent || !branch.currentAnchor || recoveryNeedsReview.current === branch.id) {
+      setUnsavedCloseOpen(false);
+      setLocalDraftsArtifactId(artifact._id);
+      return false;
     }
-    // Destroy the rejected Y.Doc before rebuilding from the authoritative
-    // server log. Reusing incomingSnapshot here would preserve the rejected
-    // local update because that snapshot is derived from the same Y.Doc.
-    live.recoverAuthoritative();
-    const authoritative = artifactEditorSnapshot(artifact);
-    reconcilingRemoteRef.current = true;
-    setTitle(authoritative.title);
-    setSummary(authoritative.summary);
-    setTagDraft(authoritative.tagDraft);
-    setContent(authoritative.content);
-    setBaseline(authoritative);
-    writeStudioDirty(dirtyRef, setDirty, false);
-    userHasEditedRef.current = false;
-    setLiveConflict(null);
-    window.requestAnimationFrame(() => {
-      reconcilingRemoteRef.current = false;
-    });
+    const origin = recoveryViewRef.current;
+    const request = new AbortController();
+    recoveryAdoptionRequest.current = request;
+    try {
+      await live.archiveAndAdoptCurrent({
+        branchId: branch.id,
+        expectedGeneration: branch.generation,
+        expectedCurrentAnchor: branch.currentAnchor,
+        signal: request.signal,
+      });
+      if (origin !== recoveryViewRef.current || request.signal.aborted) return false;
+      recoveryNeedsReview.current = null;
+      if (liveConflict?.claimId && live.transport) {
+        await postSpectra({
+          action: "releaseRegionClaim",
+          claimId: liveConflict.claimId,
+          clientId: live.transport.clientId,
+          resolution: "keep_current",
+        }).catch(() => undefined);
+      }
+      return origin === recoveryViewRef.current && !request.signal.aborted;
+    } catch (error) {
+      if (origin === recoveryViewRef.current && !request.signal.aborted) {
+        recoveryNeedsReview.current = branch.id;
+        toast.error(describeLocalRecoveryFailure(error, "adopt"));
+      }
+      return false;
+    } finally {
+      if (recoveryAdoptionRequest.current === request) recoveryAdoptionRequest.current = null;
+    }
   }
 
   async function restoreVersion(
@@ -5950,6 +5982,9 @@ function ArtifactStudioEditor({
               >
                 <History className="h-4 w-4" /> Version history
               </WorkbarMenuAction>
+              <WorkbarMenuAction onSelect={() => setLocalDraftsArtifactId(artifact._id)}>
+                <RotateCcw className="h-4 w-4" /> Local drafts
+              </WorkbarMenuAction>
             </WorkbarMore>
             <IconButton
               label={
@@ -5963,6 +5998,12 @@ function ArtifactStudioEditor({
           </div>
         </div>
       </header>
+      <ArtifactDraftRecovery
+        artifactId={artifact._id}
+        controller={live}
+        open={localDraftsArtifactId === artifact._id}
+        onOpenChange={(open) => setLocalDraftsArtifactId(open ? artifact._id : null)}
+      />
       {accessBanner && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-micro text-[var(--text-secondary)]">
           {accessBanner.text}
@@ -6006,7 +6047,7 @@ function ArtifactStudioEditor({
           </DismissibleArtifactNotice>
         </div>
       ) : null}
-      {isCollaborativeArtifact && liveConflict && dirty ? (
+      {isCollaborativeArtifact && liveConflict && dirty && live.recovery.state !== "review_required" ? (
         <div className="relative z-dropdown h-0 shrink-0">
           <DismissibleArtifactNotice
             artifactId={artifact._id}
@@ -6031,9 +6072,9 @@ function ArtifactStudioEditor({
             <button
               type="button"
               className="shrink-0 rounded-chip px-2 py-1 text-micro font-medium text-[var(--text-tertiary)]"
-              onClick={() => void discardQueuedDraft()}
+              onClick={() => setLocalDraftsArtifactId(artifact._id)}
             >
-              Use latest
+              Review draft
             </button>
           </DismissibleArtifactNotice>
         </div>

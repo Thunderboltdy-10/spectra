@@ -25,7 +25,7 @@ export function isBlankTitle(title: string): boolean {
  * Close is never a silent no-op (UX-1/UX-2). Clean work closes. Dirty work
  * asks. Queued live changes that have not reached the server are the same
  * as a dirty React draft: closing without a choice would hide the only door
- * to stay, retry, or discard. Saving with an empty name uses Untitled
+ * to stay, retry, or retain the local draft. Saving with an empty name uses Untitled
  * instead of trapping the file.
  */
 export function decideClose(
@@ -82,12 +82,12 @@ export function UnsavedCloseDialog({
         </DialogTitle>
         <DialogDescription className="mt-1.5">
           {unnamed
-            ? "This work has no name yet. Save it as Untitled, or discard these edits."
-            : "Closing without saving will discard the edits you have not saved."}
+            ? "Save this work as Untitled, or keep your edits as a local draft on this device."
+            : "Save your edits, or keep them as a local draft on this device. You can reopen local drafts from More work actions."}
         </DialogDescription>
         <DialogFooter className="mt-5">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onDiscard}>
-            Discard
+            Keep draft and close
           </Button>
           <Button
             variant="secondary"

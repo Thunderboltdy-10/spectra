@@ -269,7 +269,10 @@ describe("runSpectraAgentLoop", () => {
 
     expect(result.terminalTool?.name).toBe("submit_plan");
     expect(result.turns).toBe(5);
-    expect(requestTurn.mock.calls[4]?.[0][0]).toMatchObject({
+    expect(requestTurn.mock.calls[4]?.[0][0]).toEqual({
+      role: "user", content: "Review this conversation",
+    });
+    expect(requestTurn.mock.calls[4]?.[0].at(-1)).toMatchObject({
       role: "system",
       content: expect.stringContaining("Finish now using the context and tool results already gathered"),
     });

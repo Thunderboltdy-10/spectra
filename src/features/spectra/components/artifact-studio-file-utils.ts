@@ -40,27 +40,69 @@ export function escapeDocumentHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
-export function sanitizeDocumentHtml(source: string) {
+/** Active, foreign-namespace and raw-text elements. Raw-text/template/foreign
+ * content is removed whole: it serializes differently from how a scripting-
+ * enabled document re-parses it (mutation XSS), and SVG/MathML carry their own
+ * URL-bearing attributes and animation elements. */
+const DROPPED_DOCUMENT_ELEMENTS =
+  "script,style,iframe,frame,frameset,object,embed,applet,portal,form,input,button,textarea,select,option,meta,link,base,noscript,noembed,noframes,template,svg,math,xmp,plaintext,title";
+const DOCUMENT_URL_ATTRIBUTES = new Set([
+  "href", "src", "action", "formaction", "poster", "background", "cite", "longdesc", "lowsrc", "dynsrc", "data",
+]);
+const SAFE_DOCUMENT_URL_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
+
+function safeDocumentUrl(attribute: string, value: string) {
+  // Browsers strip ASCII whitespace/control characters inside a URL scheme,
+  // so `java&#9;script:` must be judged by the scheme the browser will use.
+  const normalized = value.replace(/[\u0000- \u007f]/g, "").toLowerCase();
+  const scheme = /^([a-z][a-z0-9+.-]*):/.exec(normalized)?.[1];
+  if (!scheme) return true;
+  if (SAFE_DOCUMENT_URL_SCHEMES.has(scheme)) return true;
+  return (
+    scheme === "data" &&
+    (attribute === "src" || attribute === "poster") &&
+    /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp);/.test(normalized)
+  );
+}
+
+function sanitizeDocumentHtmlPass(source: string) {
   const parsed = new DOMParser().parseFromString(source, "text/html");
-  parsed
-    .querySelectorAll(
-      "script,style,iframe,object,embed,form,input,button,meta,link,base",
-    )
+  parsed.body
+    .querySelectorAll(DROPPED_DOCUMENT_ELEMENTS)
     .forEach((node) => node.remove());
-  parsed.querySelectorAll("*").forEach((element) => {
+  parsed.body.querySelectorAll("*").forEach((element) => {
     Array.from(element.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
-      const value = attribute.value.trim().toLowerCase();
+      const value = attribute.value.toLowerCase();
       if (
         name.startsWith("on") ||
-        (name === "style" && /url\s*\(|expression\s*\(/i.test(value)) ||
-        ((name === "href" || name === "src") &&
-          /^(?:javascript|vbscript|data:text\/html)/i.test(value))
+        name.includes(":") ||
+        name === "srcset" ||
+        name === "ping" ||
+        name === "srcdoc" ||
+        (name === "style" && /url\s*\(|expression\s*\(|\\/i.test(value)) ||
+        (DOCUMENT_URL_ATTRIBUTES.has(name) &&
+          !safeDocumentUrl(name, attribute.value))
       )
         element.removeAttribute(attribute.name);
     });
   });
   return parsed.body.innerHTML;
+}
+
+/**
+ * Sanitize untrusted document HTML (imports, shared card text, AI output)
+ * before it reaches `innerHTML` or an editor. The result must be a fixed point:
+ * if sanitizing the output changes it again, the markup relies on a parser
+ * differential and only its text is kept.
+ */
+export function sanitizeDocumentHtml(source: string) {
+  const sanitized = sanitizeDocumentHtmlPass(source);
+  if (sanitizeDocumentHtmlPass(sanitized) === sanitized) return sanitized;
+  const text =
+    new DOMParser().parseFromString(sanitized, "text/html").body.textContent ??
+    "";
+  return `<p>${escapeDocumentHtml(text)}</p>`;
 }
 
 export function markdownToDocumentHtml(source: string) {

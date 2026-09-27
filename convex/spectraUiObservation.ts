@@ -125,7 +125,8 @@ export async function changeUiObservationInterest(ctx: MutationCtx, run: Run, op
   }
   if (interest.mode !== "follow" || existing) return uiObservationSnapshot(run, operation);
   if (observation.participants.length >= MAX_UI_OBSERVERS) throw new Error("UI_OBSERVER_CAPACITY");
-  const next = { ...observation, participants: [...observation.participants, interest] };
+  // Persist only the participant fields; callers may pass their request args.
+  const next = { ...observation, participants: [...observation.participants, { clientId: interest.clientId, mode: interest.mode }] };
   await ctx.db.patch(operation._id, { uiObservation: next });
   const snapshot = uiObservationSnapshot(run, { ...operation, uiObservation: next });
   await appendObservationEvent(ctx, run, operation, "settings_toggle_prepared", snapshot);

@@ -565,6 +565,48 @@ function assertContinuationSelection(
     throw new Error("That choice was not offered for this request. Start a new request.");
 }
 
+/** Per-account AI admission. One thread admits one live run, but threads are
+ * free to create, so without an account-wide ceiling a single client can fan
+ * out unbounded concurrent model work billed to its school. Only runs holding
+ * a live lease count, so a crashed worker cannot lock the account out. */
+export const MAX_LIVE_RUNS_PER_ACCOUNT = 4;
+export const MAX_RUNS_PER_ACCOUNT_PER_HOUR = 120;
+
+async function assertRunAdmission(
+  ctx: MutationCtx,
+  ownerAccountId: Id<"accounts">,
+  now: number,
+) {
+  const byStatus = (status: "queued" | "running") =>
+    ctx.db
+      .query("spectraAiRuns")
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", ownerAccountId).eq("status", status),
+      )
+      .take(64);
+  const [queued, running, recent] = await Promise.all([
+    byStatus("queued"),
+    byStatus("running"),
+    ctx.db
+      .query("spectraAiRuns")
+      .withIndex("by_account_created", (q) =>
+        q.eq("ownerAccountId", ownerAccountId).gte("createdAt", now - 60 * 60_000),
+      )
+      .take(MAX_RUNS_PER_ACCOUNT_PER_HOUR),
+  ]);
+  const live = [...queued, ...running].filter(
+    (run) => (run.leaseExpiresAt ?? 0) > now,
+  );
+  if (live.length >= MAX_LIVE_RUNS_PER_ACCOUNT)
+    throw new Error(
+      "Several AI requests are already running. Wait for one to finish, or stop one, before starting another.",
+    );
+  if (recent.length >= MAX_RUNS_PER_ACCOUNT_PER_HOUR)
+    throw new Error(
+      "You have started many AI requests in the last hour. Wait a little before starting another.",
+    );
+}
+
 export const beginRun = mutation({
   args: {
     sourceSurface: vSurface,
@@ -617,6 +659,7 @@ export const beginRun = mutation({
         created: false,
       };
     }
+    await assertRunAdmission(ctx, actor._id, Date.now());
 
     let thread = args.threadId ? await ctx.db.get(args.threadId) : null;
     if (

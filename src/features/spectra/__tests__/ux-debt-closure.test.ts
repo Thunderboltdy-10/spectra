@@ -54,7 +54,8 @@ describe("P6.I1 UX debt closure", () => {
     expect(shell).toContain("previousRequestedArtifactIdRef.current");
     expect(shell).toContain("function closeActiveStudio()");
     expect(shell).toContain("replaceWorkspaceLocation(selectedWorkspaceId)");
-    expect(shell).toContain('openArtifactPanel(artifact, "replace")');
+    // Route-driven opens are fenced by the shared open request and replace history.
+    expect(shell).toContain('requestArtifactOpen(routeArtifactId, "replace")');
   });
 
   it("keeps narrow chrome, retries, board movement, and first-run exits reachable", () => {

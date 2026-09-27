@@ -3919,6 +3919,11 @@ export async function callModel(
         ? null
         : speculativeSingleCreation;
   const singleCreationBlueprint = boundedSingleCreation?.blueprintKey;
+  // Offer the guide reader (and so an unforced tool choice) only to families
+  // that actually have specialist guides; other creations stay one forced turn.
+  const singleCreationHasGuides = singleCreationBlueprint
+    ? Boolean((await loadArtifactSkill(singleCreationBlueprint)).specialistGuides?.length)
+    : false;
   const qualityBlueprint =
     (effectiveCalendarNeedsCoordination ? undefined : effectiveForcedSingleCreation?.blueprintKey) ??
     singleCreationBlueprint ?? (directFocusedAction ? focusedBlueprintKey : undefined);
@@ -4029,7 +4034,8 @@ export async function callModel(
                     tool.function.name !== "propose_operation",
                 )
               : SPECTRA_AGENT_TOOLS.filter((tool) =>
-                  ["web_search", "get_school_data", "retrieve_memory", "read_artifact_skill"].includes(
+                  ["web_search", "get_school_data", "retrieve_memory",
+                    ...(singleCreationHasGuides ? ["read_artifact_skill"] : [])].includes(
                     tool.function.name,
                   ),
                 )),

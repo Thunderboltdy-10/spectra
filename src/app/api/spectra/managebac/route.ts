@@ -28,6 +28,7 @@ import {
   storeSchoolSecret,
 } from "@/lib/server-secrets";
 import { badRequest, ok } from "@/lib/http";
+import { isNonPublicAddress } from "@/lib/network-egress";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -469,32 +470,6 @@ async function bridgeArgs(input: {
   return { timestamp, nonce, signature };
 }
 
-function isPrivateIpv4(ip: string) {
-  const parts = ip.split(".").map(Number);
-  return (
-    parts[0] === 10 ||
-    parts[0] === 127 ||
-    (parts[0] === 169 && parts[1] === 254) ||
-    (parts[0] === 172 && (parts[1] ?? 0) >= 16 && (parts[1] ?? 0) <= 31) ||
-    (parts[0] === 192 && parts[1] === 168) ||
-    parts[0] === 0
-  );
-}
-
-function isPrivateIpv6(ip: string) {
-  const normalized = ip.toLowerCase();
-  return (
-    normalized === "::1" ||
-    normalized === "::" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe8") ||
-    normalized.startsWith("fe9") ||
-    normalized.startsWith("fea") ||
-    normalized.startsWith("feb")
-  );
-}
-
 async function assertPublicApiHost(baseUrl: string) {
   const url = new URL(baseUrl);
   const localStack = process.env.SPECTRA_APP_URL?.startsWith(
@@ -516,11 +491,10 @@ async function assertPublicApiHost(baseUrl: string) {
   }
   if (url.protocol !== "https:" || url.username || url.password)
     throw new Error("INTEGRATION_EGRESS_BLOCKED: API URL must be HTTPS.");
-  if (isIP(url.hostname)) {
-    if (
-      (isIP(url.hostname) === 4 && isPrivateIpv4(url.hostname)) ||
-      (isIP(url.hostname) === 6 && isPrivateIpv6(url.hostname))
-    )
+  // WHATWG URLs keep IPv6 literals bracketed; judge the literal itself.
+  const literal = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if (isIP(literal)) {
+    if (isNonPublicAddress(literal))
       throw new Error(
         "INTEGRATION_EGRESS_BLOCKED: Private network hosts are blocked.",
       );
@@ -529,9 +503,7 @@ async function assertPublicApiHost(baseUrl: string) {
   const addresses = await lookup(url.hostname, { all: true, verbatim: true });
   if (
     addresses.length === 0 ||
-    addresses.some(({ address, family }) =>
-      family === 4 ? isPrivateIpv4(address) : isPrivateIpv6(address),
-    )
+    addresses.some(({ address }) => isNonPublicAddress(address))
   )
     throw new Error(
       "INTEGRATION_EGRESS_BLOCKED: API host resolves to a private network.",

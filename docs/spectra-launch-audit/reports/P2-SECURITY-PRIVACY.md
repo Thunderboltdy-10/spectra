@@ -1,0 +1,61 @@
+# P2 — Security and privacy (Phase 2)
+
+Branch `p2/security-privacy`, from `main` 0bb65e90. The threat model covers four
+attackers: a student in the same school, a student in another school, a member who
+has been removed, and an anonymous visitor. It also takes the view of a school
+data-protection officer responsible for minors' data. This report does not repeat
+anything already closed in `S11-SECURITY.md` or in the "Cross-system decisions"
+section of `S11-INTEGRATION.md`.
+
+## Findings ledger
+
+### Fixed
+
+| # | Sev | Finding | Root fix | Test |
+|---|-----|---------|----------|------|
+| F1 | High | **Stored XSS through the shared document HTML sanitizer.** The old sanitizer was a denylist. It missed eight bypasses: a `noscript` parser differential, `java&#9;script:` URLs split with tab or newline entities, `svg`/`math` with `xlink:href` or `<animate>`, `template` round-trips, `svg <style>` breakouts, `data:text/html` links and `form action`. Its output reaches `dangerouslySetInnerHTML` in `src/features/spectra/components/flashcard-studio.tsx:2221` (card HTML shared between students, through `artifact-studio.tsx:6623`) and the Tiptap HTML import (`document-studio.tsx:2061`). | `src/features/spectra/components/artifact-studio-file-utils.ts:43-106`. The new sanitizer removes foreign and raw-text elements entirely. It checks URL schemes only after control characters are stripped, and allows `data:image/*` only in `src` and `poster`. The output must be a fixed point when sanitized again; if it is not, only the text is kept. | `src/features/spectra/__tests__/document-html-sanitizer.test.ts`: 11 cases, 8 of which fail on 0bb65e90. |
+| F2 | High | **Anonymous public links survived removal of their creator.** `resolvePublicLink` and `publicProjection` checked only the link and the resource. A student who was removed from the school, deactivated, or in a suspended school could still expose that school's work to anonymous viewers. | `convex/authority.ts:67`. `publicLinkCreatorStillPublishes` re-derives the creator as an actor (active account, membership and school) and requires the current `publish` capability on the exact resource. Both queries now call it (`:1300` and `:1338`). | `convex/authority.test.ts` "closes anonymous public links when the creator leaves or the school is suspended". It fails before the fix. |
+| F3 | High (minors' data) | **A school purge left minors' data behind.** The purge did not delete these tables: work replicas, sync conflicts, bridge write/fs requests, sync operations, storage transitions, intake release receipts, collaboration receipts, all calendar tables (including personal events), ManageBac selections and imports, identity migrations, compiler/deletion jobs and revision facts. It also left the native Office payload bytes, runtime build blobs and the candidate/original storage of assets and imports. | `convex/administration.ts`. `PURGE_DEPENDENT_TABLES` (:3161) now resolves each row to its school through the work or room. `purgedPayloadRefs` (:3195) releases payload refs through `releasePayloadIfUnreferenced`. `PURGE_SCHOOL_TABLES` (:3217) is extended. Runtime build blobs and candidate/original blobs are now deleted (`purgeSchoolRows` and `purgeStoredSchoolObjects` :3436/:3490). New tables were added only at the end of each list, so the table index of any purge already in flight stays valid. | `convex/school-purge-lifecycle.test.ts`. It runs the real cron to completion, checks that another school's rows are kept, and fails before the fix. |
+| F4 | Medium | **ManageBac SSRF classifier gaps.** The old classifier missed several address forms that reach the server's own network, so a school-configured base URL whose DNS returns any of them passed: `::ffff:169.254.169.254` or `::ffff:a9fe:a9fe` (AAAA records), NAT64 `64:ff9b::/96`, 6to4 `2002::` wrapping a private IPv4, CGNAT `100.64/10` (Alibaba metadata), `192.0.0/24`, `198.18/15`, multicast and reserved `>=224`, and `ff00::/8`. | New `src/lib/network-egress.ts` (`isNonPublicAddress`) unwraps embedded IPv4 before judging it. `src/app/api/spectra/managebac/route.ts:495-506` uses it for bracketed IPv6 literals and for every DNS answer. | `src/lib/__tests__/network-egress.test.ts` (31 cases). The old functions return false for all seven bypass inputs; checked with a scratch evaluation of the removed code. |
+| F5 | Medium (cost/abuse) | **Unbounded concurrent AI runs per account.** `beginRun` admitted one live run per thread, but omitting `threadId` creates a new thread each time. A student, or a script using their session, could fan out unlimited concurrent model runs billed to the school. There was also no hourly ceiling. | `convex/spectraRuns.ts:568-608` and `:662`. `assertRunAdmission` allows at most 4 queued or running runs that hold a live lease, and at most 120 runs per rolling hour, per account. It reads bounded indexed data (`by_account_status`, `by_account_created`). Lapsed leases do not count, and a replayed `submissionKey` still resolves idempotently. | `convex/ai-run-admission.test.ts`. It fails before the fix. |
+
+### Reported, not fixed (large, ambiguous, or owned by another lane)
+
+| # | Sev | Where | Finding / why not fixed here |
+|---|-----|-------|------------------------------|
+| R1 | High (cost) | `convex/metering.ts:196,296`, `convex/schema.ts:661` | `limitPolicies` can be set to `enforcement: "enforced"`, including for `model_tokens`, but no code path reads it before model work. No school actually has a cost ceiling. Fixing this needs a product decision on the rule semantics (the day/month/total windows, and what a "warning" does), plus a metering read at admission or in the run loop's model sink. F5 is the per-account backstop until then. |
+| R2 | High (minors' data) | `src/app/api/webhooks/clerk/route.ts:62` | The Clerk `user.deleted` event is skipped. When an identity is deleted at the IdP, the Spectra account, memberships and all owned work stay active and are never offboarded. Fixing this needs a decision on the account-level erasure cascade, which does not exist today. Only per-work and per-school deletion exist. |
+| R3 | Medium (minors' data) | `convex/administration.ts:3582-3615` (purge finalize) | Finalize deletes memberships but keeps the `accounts` rows (minors' names and emails) and the account-scoped `accountPreferences`, `bridgeDevices`/mounts and `syncPolicies`. An account may belong to several schools, so deleting it needs the same account-erasure design as R2. |
+| R4 | Low (perf) | `convex/administration.ts` generic `PURGE_SCHOOL_TABLES` loop | Deletion goes through a `schoolId` filter scan per page on tables without a `by_school` index. It is correct but slow on large tables. This belongs to ops-performance (unbounded reads). |
+| R5 | Low | `src/app/api/spectra/managebac/route.ts:503` | The ManageBac fetch has a DNS rebinding TOCTOU. The host is resolved and checked, and then `fetch` resolves it again. Pinning the checked address needs a custom dispatcher (`undici` Agent `connect.lookup`), and `undici` is not a direct dependency; the protocol forbids adding one. The risk is reduced by: HTTPS only (the certificate must match the host), `redirect: "error"`, a 20 s timeout and a 12 MB cap. |
+| R6 | Low | `src/lib/sanitize-html.ts` | This is a second, allowlist-based HTML sanitizer (`sanitizeArtifactDocumentHtml`). Nothing imports it except its own test. It is dead, parallel code. Delete it, or merge it into F1's sanitizer in a cleanup pass. It was not switched in here because its tag unwrapping would change Tiptap import output. |
+| R7 | Low | `convex/artifactContent.ts:31` | `issueUpload` returns the caller's own `clerkId` to the client. It is the caller's own id, so this is not a cross-user leak, but it is unnecessary identity exposure. |
+| R8 | Low | `convex/spectraRuns.ts:619` | `beginRun.messageMetadata` is `v.any()` and has no size bound. The route builds it server-side, but the public mutation accepts any shape. It should be narrowed to the `{ attachments: [...] }` contract. This was left alone because the file is AI-choreography-adjacent (write-paths lane). |
+| R9 | Low (privacy) | `src/lib/invitations.ts:118` | An SMTP failure logs the recipient address (`to`). Invitations go to students, so this puts minors' emails into server logs. It should log a hash or the domain only. Copy/log policy is shared, so this is reported rather than fixed. |
+
+### Reviewed and rejected as not real
+
+- Collaboration gateway (`scripts/collaboration-gateway.mjs`): it uses HS256 room JWTs, re-authorizes on every hook, and applies `maxPayload` caps. OK.
+- Archive and zip parsing (`shared/parser-limits.ts`): it caps entry count, total and per-entry size and ratio. OK.
+- Runtime iframe: it runs under `sandbox="allow-scripts"` only, with a CSP. OK. KaTeX renders without `trust`. OK. The inline script in `layout.tsx` is static. `markdownToDocumentHtml` escapes before it formats.
+- Bridge pairing is challenge-secret based. The replica stubs and `changeGroups.commitRestore` throw. `recordExternalReconciliation` and embed refresh are authenticated. `beginRun` derives the actor from auth and ignores the route's `actorClerkId`.
+- Public agent discovery (`convex/spectraArtifacts.ts:1056,1128`) is limited to the same school.
+- `NEXT_PUBLIC_*` exposes only the app URL, the Clerk publishable key, the Convex URLs, the collaboration URL and a realtime flag. No secrets.
+- ManageBac and provider tokens are stored with AES-256-GCM under `SPECTRA_MASTER_ENCRYPTION_KEY` (`src/lib/server-secrets.ts`) and are not logged. The verified email in a ManageBac query parameter is the provider's lookup contract, sent over HTTPS to the school's own tenant.
+- Artifact `pendingPayloadRef`/`projectionPayloadRef` after a purge: artifact deletes run through the trigger-wrapped `internalMutation`. `reconcileDurablePayloadOwners` then schedules a release for dropped refs, so these are not orphaned.
+
+## Needs live verification
+
+1. **F1:** In a real browser, paste each of the 10 payloads from the sanitizer test into flashcard card HTML and into document HTML import. Confirm there is no script execution or navigation, and that ordinary rich text, links, equations and pasted `data:image` images still render.
+2. **F2:** Create a public link as a student. Then remove the student from the school, deactivate the account, and separately suspend the school. After each step, confirm `/p/...` returns not-found. Confirm the link reopens after the student is restored.
+3. **F3:** On a staging deployment, run a school purge on a school that has Bridge-synced DOCX, XLSX or PPTX work, a published runtime build, calendars and a ManageBac import. Then confirm in the Convex dashboard: the job completes, `_storage` has no blob for those payloads, builds or assets, and the other school's replicas are intact.
+4. **F4:** Point a staging ManageBac integration at a hostname whose AAAA record is `::ffff:169.254.169.254`, and at another whose A record is `100.100.100.200`. Expect `INTEGRATION_EGRESS_BLOCKED`. A real ManageBac tenant must still sync.
+5. **F5:** Start 5 chats in parallel from one student account. The 5th must show the "Several AI requests are already running" message. Stop one, and a new chat must start. After a worker crash, new runs must be admitted within one lease (about 2 minutes).
+
+## Gates
+
+`npx tsc --noEmit` passes. ESLint on the touched files passes with `--max-warnings=0`. `check:architecture`, `check:copy`, `check:design-tokens`, `check:capabilities` and `check:secrets` all pass. The focused tests listed above pass. The full `vitest run` gives 418 files passed and 1 skipped, and 3914 tests passed.
+
+## Shared files touched
+
+`convex/administration.ts` (the purge lists and helpers only), `convex/authority.ts` (the public-link helper and two call sites), `convex/spectraRuns.ts` (the admission helper and one call in `beginRun`), and `src/app/api/spectra/managebac/route.ts` (the classifier swap only). No changes to `convex/schema.ts` or `src/app/api/spectra/route.ts`.

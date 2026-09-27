@@ -118,7 +118,22 @@ The recovered source includes the lazy boundary `03e4d429`, body retention `6ce8
 
 Review found that `createShellArtifactAccess` kept every completed detail in its decision map until **all** requests settled. A slow unrelated restored detail or forced list could therefore retain many closed bodies after the shell released them. Follow-up `f3c8052656eb5c2ecd8f290eca1bbffe0981c75a` tracks pending detail identities and list sequences separately. It keeps a newer complete result only for an older pending detail of that same work. Older forced lists retain sequence metadata to reject stale denials. Aborted detail reads release their retention claim immediately, including when the underlying reader resolves late or ignores cancellation. Finishing a detail examines only that work's decision; it does not rescan unrelated retained metadata. A fresh reopen still reads again; grants, denial/deletion and the newer-result navigation handoff keep their existing semantics.
 
-New direct cases cover a newer granted handoff while two earlier lists and unrelated reads complete in different orders, an aborted overlap with a later reopen, and a signal aborted before the reader starts. `git diff --check` passes. No remaining source blocker was identified in this bounded unit. The RUNTIME-requested finite group is 27 cases across `shell-artifact-access`, `shell-artifact-content` and `shell-artifact-open`, followed sequentially by ESLint on the two changed source/test files and private `measure-access-retention.cjs` with Node `--expose-gc`. The latter compares actual prior/current helpers with explicit fixture readers, using WeakRefs to observe collection behind an unrelated slow detail/list and after aborting a same-work handoff. It is a prepared Node reachability probe, not browser heap evidence. These follow-up checks remain **unexecuted pending the explicitly required RUNTIME slot**; no slot has been granted to this recovery worker. Do not label `f3c80526` tested based on the predecessor's 56-test result. No full suite/typecheck/build or live/native test was run in recovery.
+New direct cases cover a newer granted handoff while two earlier lists and unrelated reads complete in different orders, an aborted overlap with a later reopen, and a signal aborted before the reader starts. No remaining source blocker was identified in this bounded unit. The finite checks were initially queued. The current coordinator then explicitly granted temporary lane 2 after verifying no live test processes; the following checks completed serially on September 27 with the inherited filesystem guard, a 4096 MiB heap limit and local cache/temp. Tested checkout HEAD was documentation-only `1b759921`, with production/test source unchanged from `f3c80526`.
+
+- **27/27 tests passed**, three files: `shell-artifact-access`, `shell-artifact-content` and `shell-artifact-open`; Vitest reported 5.16 seconds, one worker, no file parallelism. Logs: `.spectra-local/launch-s11/performance/focused-f3c80526.{json,log}`.
+- **Scoped ESLint passed**, exit 0 with `--max-warnings=0`, on the changed helper and test file. Log: `.spectra-local/launch-s11/performance/eslint-f3c80526.log`.
+- **Node reachability probe passed**, exit 0, Node v24.11.1 with `--expose-gc`. The private `measure-access-retention.cjs` bundles the actual prior/current helpers with an explicit fixture reader and uses WeakRefs after five GC/event-loop turns. Results: `access-retention-measurements.json` and `access-retention-f3c80526.log` in the same private directory.
+- `git diff --check` passed. No full suite/typecheck/build, service change, dependency mutation, browser or native test was run. The prior 56-test run and this overlapping 27-test group are separate evidence and must not be added into a unique passing-test total.
+
+| Synthetic retained body reachability | Before (`2c5f5075`) | After (`f3c80526`) |
+| --- | ---: | ---: |
+| 24 visited/closed bodies while an unrelated detail remains pending | 24 | 0 |
+| 24 visited/closed bodies while an earlier forced list remains pending | 24 | 0 |
+| Newer body needed by an older same-work detail | 1 | 1 |
+| That body after the old read is aborted, before its transport settles | 1 | 0 |
+| Bodies after every read settles, in each scenario | 0 | 0 |
+
+The late canceled read still returned `AbortError` in both versions. These are synthetic Node/V8 object-reachability results, **not browser heap sizes, transfer bytes or artifact-open latency**. Live efficiency validation remains deferred as directed.
 
 ### Deferred final validation prompt
 

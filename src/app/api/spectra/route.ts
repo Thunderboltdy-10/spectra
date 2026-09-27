@@ -137,7 +137,7 @@ function requireFlashcardDirection(value: unknown) {
 
 function emptySchoolRead(action: string) {
   if (action === "bootstrap") return ok({ actor: null, needsSchool: true });
-  if (action === "artifactPage" || action === "workspacePage")
+  if (["artifactPage", "workspacePage", "artifactGraphPage", "workspaceGraphPage", "agentGraphPage"].includes(action))
     return ok({ items: [], continueCursor: null, isDone: true, needsSchool: true });
   if (action === "overview") {
     return ok({
@@ -191,6 +191,25 @@ export async function GET(request: NextRequest) {
     // Shell identity is independent of catalog, workspace contents and runs.
     // An unavailable collection must not prevent navigation or opening a file.
     if (action === "bootstrap") return ok({ actor, needsSchool: false });
+
+    if (action === "workspaceMetadata") {
+      return ok(await spectraQuery("catalogGraph:workspaceMetadata", {
+        workspaceId: requireString(params.get("workspaceId"), "workspaceId"),
+      }));
+    }
+    if (action === "agentGraphPage") return ok(await spectraQuery("catalogGraph:listAgents", {
+      cursor: params.get("cursor") ?? undefined,
+    }));
+    if (action === "artifactGraphPage" || action === "workspaceGraphPage") {
+      const limit = params.has("limit") ? Number(params.get("limit")) : undefined;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 24))
+        return badRequest("Choose a page size between 1 and 24.");
+      const common = { cursor: params.get("cursor") ?? undefined, limit, search: params.get("search") ?? undefined };
+      return ok(action === "workspaceGraphPage"
+        ? await spectraQuery("catalogGraph:listWorkspaces", { ...common, includeArchived: params.get("includeArchived") === "true" })
+        : await spectraQuery("catalogGraph:listArtifacts", { ...common, status: params.get("status") ?? undefined,
+            blueprintKey: params.get("blueprintKey") ?? undefined, placement: params.get("placement") ?? "all" }));
+    }
 
     if (action === "artifactPage" || action === "workspacePage") {
       const scope = params.get("scope") ?? "school";

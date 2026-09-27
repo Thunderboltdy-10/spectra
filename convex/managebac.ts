@@ -23,7 +23,11 @@ import {
   defaultArtifactSchemaVersion,
 } from "./spectraShared";
 import { upsertSourceCalendarItem } from "./calendarShared";
-import { refreshPlannerSourceContent } from "../shared/planner-source.mjs";
+import { managebacPlainText as plainText, managebacText as text } from "../shared/planner-provider-refresh";
+import {
+  applyPlannerProviderUpdate, inlinePlannerProjections, recordProviderConflict, scheduleProviderFanout, syncRunOutcome,
+  PROVIDER_INLINE_PLANNERS,
+} from "./managebacProjectionJobs";
 
 const EMPTY_COUNTS = {
   fetched: 0,
@@ -104,7 +108,8 @@ async function assertCurrentSyncLease(
   leaseToken?: string,
   options: { allowSelectionChange?: boolean } = {},
 ) {
-  if (syncRun.status === "completed" || syncRun.status === "failed" || syncRun.status === "cancelled")
+  if (syncRun.status === "completed" || syncRun.status === "failed" || syncRun.status === "cancelled" ||
+      syncRun.projectionIngestionComplete)
     throw new Error("INTEGRATION_SYNC_FENCED: This sync is no longer current.");
   if (syncRun.leaseToken && syncRun.leaseToken !== leaseToken)
     throw new Error("INTEGRATION_SYNC_FENCED: A newer sync owns this work.");
@@ -168,6 +173,9 @@ async function activeRunForScope(
     )
   ).flat();
   for (const row of rows) {
+    // Ingestion finished; only staged planner effects remain. They are fenced
+    // by source hash, not by this run's lease, and never block a new sync.
+    if (row.projectionIngestionComplete) continue;
     if (row.accountId && row.selectionRevision !== undefined) {
       const current = await selectionSnapshot(ctx, integrationId, row.accountId);
       if (current.revision !== row.selectionRevision) {
@@ -322,32 +330,6 @@ const vNormalizedRecord = v.object({
 
 type Ctx = QueryCtx | MutationCtx;
 type Actor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
-
-function text(value: unknown, maximum: number, fallback = "") {
-  return typeof value === "string"
-    ? value.replace(/\s+/g, " ").trim().slice(0, maximum)
-    : fallback;
-}
-
-/** Strip ManageBac HTML so planner summaries/descriptions never show raw tags. */
-function plainText(value: unknown, maximum: number, fallback = "") {
-  if (typeof value !== "string") return fallback;
-  const stripped = value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
-  return (stripped || fallback).slice(0, maximum);
-}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -2516,69 +2498,16 @@ async function ensureSourceRelations(
   });
 }
 
+/** Non-planner source projections. Planner content is provider-owned only
+ * through `managebacProjectionJobs`, which records import history. */
 async function safelyRefreshProjection(
   ctx: MutationCtx,
   projection: Doc<"externalProjections">,
   previousSourceHash: string,
   source: Doc<"externalRecords">,
   force = false,
-  previousNormalized?: unknown,
 ) {
   const normalized = record(source.normalized);
-  if (projection.projectionType === "planner_task") {
-    const artifactId = ctx.db.normalizeId(
-      "spectraArtifacts",
-      projection.projectionId,
-    );
-    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-    if (!artifact || artifact.blueprintKey !== "planner_task" ||
-      artifact.ownerAccountId !== projection.accountId || artifact.schoolId !== projection.schoolId) return false;
-    const content = record(artifact.content);
-    const sourceState = record(content.source);
-    if (!force && sourceState.hash !== previousSourceHash) return false;
-    const title = text(
-      normalized.title ?? normalized.name,
-      240,
-      artifact.title,
-    );
-    const previous = previousNormalized !== undefined && sourceState.hash === previousSourceHash
-      ? record(previousNormalized) : undefined;
-    const previousText = previous ? {
-      title: text(previous.title ?? previous.name, 240, "ManageBac task"),
-      description: plainText(previous.description, 20_000),
-    } : undefined;
-    const nextContent = refreshPlannerSourceContent(content, {
-      title,
-      description: plainText(normalized.description, 20_000),
-      dueAt: timestampValue(normalized.dueAt),
-      source: {
-        ...sourceState,
-        provider: "managebac",
-        externalId: source.providerRecordId,
-        version: source.payloadVersion,
-        hash: source.sourceHash,
-        status: "active",
-        lockedFields: ["taskTitle", "description", "dueAt", "source"],
-      },
-    }, previousText);
-    const nextTitle = previousText && artifact.title === previousText.title ? title : artifact.title;
-    const nextSummary = previous && artifact.summary === plainText(previous.description, 600)
-      ? plainText(normalized.description, 600, artifact.summary ?? "") : artifact.summary;
-    const now = Date.now();
-    await ctx.db.patch(artifact._id, {
-      title: nextTitle,
-      summary: nextSummary,
-      content: nextContent,
-      textIndex: buildArtifactTextIndex({
-        title: nextTitle,
-        summary: nextSummary,
-        content: nextContent,
-        tags: artifact.tags,
-      }),
-      updatedAt: now,
-    });
-    return true;
-  }
   if (projection.projectionType === "timetable_event") {
     const directItem = await directTimetableCalendarItem(ctx, projection, source);
     if (directItem) {
@@ -2672,24 +2601,6 @@ async function markProjectionSourceRemoved(
   ctx: MutationCtx,
   projection: Doc<"externalProjections">,
 ) {
-  if (projection.projectionType === "planner_task") {
-    const artifactId = ctx.db.normalizeId(
-      "spectraArtifacts",
-      projection.projectionId,
-    );
-    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-    if (!artifact || artifact.blueprintKey !== "planner_task") return;
-    const content = record(artifact.content);
-    const source = record(content.source);
-    await ctx.db.patch(artifact._id, {
-      content: {
-        ...content,
-        source: { ...source, status: "removed" },
-      },
-      updatedAt: Date.now(),
-    });
-    return;
-  }
   if (projection.projectionType === "timetable_event") {
     const source = await ctx.db.get(projection.recordId);
     const directItem = source
@@ -2745,6 +2656,33 @@ async function markProjectionSourceRemoved(
         });
     }
   }
+}
+
+/** Existing projections of one source. A personal sync reads only its own
+ * rows of a widely shared source; a shared reconciliation reads a bounded set
+ * of planner projections and otherwise continues them as a fanout chain. */
+async function projectionsForRecord(
+  ctx: MutationCtx,
+  recordId: Id<"externalRecords">,
+  accountId: Id<"accounts"> | undefined,
+) {
+  if (accountId) {
+    const rows = await ctx.db
+      .query("externalProjections")
+      .withIndex("by_account_record", (q) => q.eq("accountId", accountId).eq("recordId", recordId))
+      .collect();
+    return { rows, fanout: false };
+  }
+  const [planners, others] = await Promise.all([
+    inlinePlannerProjections(ctx, recordId),
+    Promise.all((["workspace", "timetable_event", "resource", "link"] as const).map((projectionType) =>
+      ctx.db
+        .query("externalProjections")
+        .withIndex("by_record_type", (q) => q.eq("recordId", recordId).eq("projectionType", projectionType))
+        .collect(),
+    )),
+  ]);
+  return { rows: [...(planners ?? []), ...others.flat()], fanout: planners === null };
 }
 
 async function projectRecord(
@@ -2968,17 +2906,9 @@ export const commitNormalizedPage = mutation({
         });
         source = (await ctx.db.get(existing._id))!;
         counts.updated += 1;
-        const candidateProjections = await ctx.db
-          .query("externalProjections")
-          .withIndex("by_record_type", (q) => q.eq("recordId", existing._id))
-          .collect()
-          .then((rows) =>
-            syncRun.accountId
-              ? rows.filter((item) => item.accountId === syncRun.accountId)
-              : rows,
-          );
-        const following = await Promise.all(candidateProjections.map(projection => followsClass(projection.accountId, source)));
-        const projections = candidateProjections.filter((_, index) => following[index]);
+        const current = await projectionsForRecord(ctx, existing._id, syncRun.accountId);
+        const following = await Promise.all(current.rows.map(projection => followsClass(projection.accountId, source)));
+        const projections = current.rows.filter((_, index) => following[index]);
         const overlays = syncRun.accountId
           ? await ctx.db
               .query("externalRecordOverlays")
@@ -2991,58 +2921,37 @@ export const commitNormalizedPage = mutation({
           : null;
         const sourceChangedUnderOverlay =
           Boolean(overlays) && overlays!.sourceHashAtEdit !== input.sourceHash;
-        let projectionRefreshFailed = false;
+        const conflicted = sourceChangedUnderOverlay ? projections : [];
         if (!sourceChangedUnderOverlay) {
           for (const projection of projections) {
-            const refreshed = await safelyRefreshProjection(
-              ctx,
-              projection,
-              existing.sourceHash,
-              source,
-              false,
-              previousNormalized,
-            );
-            if (!refreshed) projectionRefreshFailed = true;
-          }
-        }
-        if (
-          projections.length &&
-          (sourceChangedUnderOverlay || projectionRefreshFailed)
-        ) {
-          await ctx.db.insert("externalSyncConflicts", {
-            syncRunId: syncRun._id,
-            integrationId: integration._id,
-            schoolId: integration.schoolId,
-            accountId: syncRun.accountId,
-            recordId: existing._id,
-            projectionType: projections[0]!.projectionType,
-            projectionId: projections[0]!.projectionId,
-            kind: "customization_overlap",
-            oldSource: previousNormalized,
-            newSource: input.normalized,
-            overlay: overlays ?? {
-              reason:
-                "A source-controlled field no longer matches the last synchronized value.",
-            },
-            affectedLinks: projections.map((item) => item.projectionId),
-            suggestedActions: ["rebase", "keep_overlay", "detach"],
-            status: "open",
-            createdAt: now,
-            updatedAt: now,
-          });
-          for (const projection of projections)
-            await ctx.db.patch(projection._id, {
-              state: "conflicted",
-              updatedAt: now,
-            });
-          counts.conflicts += 1;
-        } else {
-          for (const projection of projections)
+            if (projection.projectionType === "planner_task") {
+              const outcome = await applyPlannerProviderUpdate(ctx, projection, source, {
+                mode: "refresh", syncRunId: syncRun._id, importerAccountId: actor.accountId,
+                previousSourceHash: existing.sourceHash, previousNormalized,
+              });
+              if (outcome === "conflict") conflicted.push(projection);
+              continue;
+            }
+            if (!await safelyRefreshProjection(ctx, projection, existing.sourceHash, source)) {
+              conflicted.push(projection);
+              continue;
+            }
             await ctx.db.patch(projection._id, {
               sourceHash: input.sourceHash,
               state: "active",
               updatedAt: now,
             });
+          }
+          if (current.fanout)
+            await scheduleProviderFanout(ctx, {
+              recordId: existing._id, expectedSourceHash: source.sourceHash, mode: "refresh",
+              syncRunId: syncRun._id, importerAccountId: actor.accountId,
+              previousSourceHash: existing.sourceHash, previousNormalized,
+            });
+        }
+        if (conflicted.length) {
+          await recordProviderConflict(ctx, syncRun, source, conflicted, previousNormalized, overlays ?? undefined);
+          counts.conflicts += 1;
         }
       } else {
         const id = await ctx.db.insert("externalRecords", {
@@ -3530,33 +3439,36 @@ export const completeSync = mutation({
         fetchedAt: now,
         updatedAt: now,
       });
-      const candidateProjections = await ctx.db
-        .query("externalProjections")
-        .withIndex("by_record_type", (q) => q.eq("recordId", source._id))
-        .collect()
-        .then((rows) =>
-          syncRun.accountId
-            ? rows.filter((item) => item.accountId === syncRun.accountId)
-            : rows,
-        );
-      const following = await Promise.all(candidateProjections.map(projection => followsClass(projection.accountId, source)));
-      const projections = candidateProjections.filter((_, index) => following[index]);
+      const removed = (await ctx.db.get(source._id))!;
+      const current = await projectionsForRecord(ctx, source._id, syncRun.accountId);
+      const following = await Promise.all(current.rows.map(projection => followsClass(projection.accountId, source)));
+      const projections = current.rows.filter((_, index) => following[index]);
       for (const projection of projections) {
-        await markProjectionSourceRemoved(ctx, projection);
+        if (projection.projectionType === "planner_task")
+          await applyPlannerProviderUpdate(ctx, projection, removed, {
+            mode: "removed", syncRunId: syncRun._id, importerAccountId: actor.accountId,
+            previousSourceHash: projection.sourceHash,
+          });
+        else await markProjectionSourceRemoved(ctx, projection);
         await ctx.db.patch(projection._id, {
           state: "tombstoned",
           updatedAt: now,
         });
       }
-      if (projections.length)
+      if (current.fanout)
+        await scheduleProviderFanout(ctx, {
+          recordId: source._id, expectedSourceHash: removed.sourceHash, mode: "removed",
+          syncRunId: syncRun._id, importerAccountId: actor.accountId,
+        });
+      if (projections.length || current.fanout)
         await ctx.db.insert("externalSyncConflicts", {
           syncRunId: syncRun._id,
           integrationId: integration._id,
           schoolId: integration.schoolId,
           accountId: syncRun.accountId,
           recordId: source._id,
-          projectionType: projections[0]!.projectionType,
-          projectionId: projections[0]!.projectionId,
+          projectionType: projections[0]?.projectionType ?? "planner_task",
+          projectionId: projections[0]?.projectionId,
           kind: "source_removed",
           oldSource: source.normalized,
           newSource: null,
@@ -3568,45 +3480,28 @@ export const completeSync = mutation({
         });
       tombstoned += 1;
     }
-    const conflicts = syncRun.accountId
-      ? (
-          await ctx.db
-            .query("externalSyncConflicts")
-            .withIndex("by_account_status", (q) =>
-              q.eq("accountId", syncRun.accountId!).eq("status", "open"),
-            )
-            .collect()
-        ).filter(
-          (item) =>
-            item.integrationId === integration._id &&
-            item.schoolId === integration.schoolId,
-        )
-      : await ctx.db
-          .query("externalSyncConflicts")
-          .withIndex("by_integration_status", (q) =>
-            q.eq("integrationId", integration._id).eq("status", "open"),
-          )
-          .collect();
-    const status =
-      syncRun.counts.errors > 0
-        ? ("partial" as const)
-        : conflicts.length > 0
-          ? ("awaiting_review" as const)
-          : ("completed" as const);
+    // Staged provider effects keep the run pending; the last one to drain
+    // records the final status from the then-current errors and conflicts.
+    const latestRun = (await ctx.db.get(syncRun._id))!;
+    const outcome = await syncRunOutcome(ctx, latestRun);
+    const pendingProjections = (latestRun.projectionWorkRemaining ?? 0) > 0;
+    const status = pendingProjections ? ("running" as const) : outcome.status;
     const counts = {
-      ...syncRun.counts,
-      tombstoned: syncRun.counts.tombstoned + tombstoned,
-      conflicts: conflicts.length,
-      skipped: syncRun.counts.skipped + unfinishedCapabilityRuns.length,
+      ...latestRun.counts,
+      tombstoned: latestRun.counts.tombstoned + tombstoned,
+      conflicts: outcome.conflicts,
+      skipped: latestRun.counts.skipped + unfinishedCapabilityRuns.length,
     };
     await ctx.db.patch(syncRun._id, {
       status,
-      stage: status === "awaiting_review" ? "review_conflicts" : "complete",
+      stage: pendingProjections ? "applying_projections"
+        : status === "awaiting_review" ? "review_conflicts" : "complete",
+      projectionIngestionComplete: true,
       currentCapabilityId: undefined,
       cursorState: undefined,
       counts,
       leaseExpiresAt: undefined,
-      completedAt: now,
+      completedAt: pendingProjections ? undefined : now,
       updatedAt: now,
     });
     const nextSyncAt =
@@ -3736,6 +3631,10 @@ export const resolveConflict = mutation({
       throw new Error(
         "INTEGRATION_CONFLICT_FORBIDDEN: Conflict is unavailable.",
       );
+    if (conflict.projectionResolution)
+      throw new Error(
+        "INTEGRATION_CONFLICT_PENDING: This resolution is still being applied.",
+      );
     const now = Date.now();
     const projections = (
       await ctx.db
@@ -3804,20 +3703,43 @@ export const resolveConflict = mutation({
           .unique()
       : null;
     const source = await ctx.db.get(conflict.recordId);
+    const rebaseFailed = () => new Error(
+      "INTEGRATION_CONFLICT_REBASE_FAILED: The source projection is unavailable or no longer has a compatible shape.",
+    );
     if (
       source &&
       (args.resolution === "rebase" || args.resolution === "keep_overlay")
     ) {
+      const mode = args.resolution;
+      const planners = projections.filter((projection) => projection.projectionType === "planner_task");
+      // Staged canonical-room effects must see this accepted resolution; the
+      // conflict resolves only when every one of them has committed.
+      if (planners.length && !source.tombstone)
+        await ctx.db.patch(conflict._id, {
+          projectionResolution: mode,
+          resolvedByAccountId: actor.accountId,
+          updatedAt: now,
+        });
+      if (planners.length > PROVIDER_INLINE_PLANNERS && !source.tombstone)
+        await scheduleProviderFanout(ctx, {
+          recordId: source._id, expectedSourceHash: source.sourceHash, mode,
+          syncRunId: conflict.syncRunId, conflictId: conflict._id, importerAccountId: actor.accountId,
+          accountId: conflict.accountId, previousNormalized: conflict.oldSource,
+        });
       for (const projection of projections) {
-        if (
-          args.resolution === "keep_overlay" &&
-          projection.projectionType === "planner_task"
-        ) {
-          await ctx.db.patch(projection._id, {
-            sourceHash: source.sourceHash,
-            state: "active",
-            updatedAt: now,
+        if (projection.projectionType === "planner_task") {
+          if (source.tombstone) {
+            // A withdrawn source has no provider facts to rebase onto.
+            if (mode === "rebase") throw rebaseFailed();
+            await ctx.db.patch(projection._id, { sourceHash: source.sourceHash, state: "active", updatedAt: now });
+            continue;
+          }
+          if (planners.length > PROVIDER_INLINE_PLANNERS) continue;
+          const outcome = await applyPlannerProviderUpdate(ctx, projection, source, {
+            mode, syncRunId: conflict.syncRunId, conflictId: conflict._id, importerAccountId: actor.accountId,
+            previousSourceHash: projection.sourceHash, previousNormalized: conflict.oldSource,
           });
+          if (outcome === "unavailable" || outcome === "conflict") throw rebaseFailed();
           continue;
         }
         const refreshed = await safelyRefreshProjection(
@@ -3826,18 +3748,17 @@ export const resolveConflict = mutation({
           projection.sourceHash,
           source,
           true,
-          conflict.oldSource,
         );
-        if (!refreshed)
-          throw new Error(
-            "INTEGRATION_CONFLICT_REBASE_FAILED: The source projection is unavailable or no longer has a compatible shape.",
-          );
+        if (!refreshed) throw rebaseFailed();
         await ctx.db.patch(projection._id, {
           sourceHash: source.sourceHash,
           state: "active",
           updatedAt: now,
         });
       }
+      const staged = await ctx.db.get(conflict._id);
+      if ((staged?.projectionWorkRemaining ?? 0) > 0)
+        return { conflictId: conflict._id, resolution: args.resolution, pending: true };
     }
     if (
       overlay &&
@@ -3851,11 +3772,12 @@ export const resolveConflict = mutation({
     await ctx.db.patch(conflict._id, {
       status: "resolved",
       resolution: args.resolution,
+      projectionResolution: undefined,
       resolvedByAccountId: actor.accountId,
       resolvedAt: now,
       updatedAt: now,
     });
-    return { conflictId: conflict._id, resolution: args.resolution };
+    return { conflictId: conflict._id, resolution: args.resolution, pending: false };
   },
 });
 

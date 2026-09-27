@@ -18,5 +18,13 @@ export function assertPlannerSourceEdit(currentContent: unknown, proposedContent
 export function refreshPlannerSourceContent(
   value: unknown,
   next: PlannerSourceText & { dueAt?: number; source: Record<string, unknown> },
-  previous?: PlannerSourceText,
+  previous?: Partial<PlannerSourceText>,
 ): Record<string, unknown>;
+export type PlannerSourceProjection = { title: string; summary?: string; content: unknown; tags: string[] };
+export type PlannerSourceRefresh = {
+  previousSourceHash: string;
+  previous?: Partial<PlannerSourceText> & { summary?: string };
+  next: PlannerSourceText & { summary: string; dueAt?: number; source: Record<string, unknown> };
+  force?: boolean;
+};
+export function refreshPlannerSourceProjection(current: PlannerSourceProjection, input: PlannerSourceRefresh): PlannerSourceProjection | null;

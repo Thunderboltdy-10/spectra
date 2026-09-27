@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertPlannerSourceEdit, bindPlannerSourceTask, plannerSourceMetadata, refreshPlannerSourceContent } from "./planner-source.mjs";
+import { assertPlannerSourceEdit, bindPlannerSourceTask, plannerSourceMetadata, refreshPlannerSourceContent, refreshPlannerSourceProjection } from "./planner-source.mjs";
 
 const legacy = {
   taskTitle: "Essay", description: "Evidence", dueAt: 12345,
@@ -66,5 +66,27 @@ describe("planner source write guard", () => {
     expect(() => assertPlannerSourceEdit({ tasks: [personal] }, { tasks: [{ ...personal, dueAt: 200 }] })).not.toThrow();
     const official = { ...personal, officialDeadlineRef: "school:other" };
     expect(() => assertPlannerSourceEdit({ tasks: [official] }, { tasks: [personal] })).toThrow("PLANNER_SOURCE_METADATA_LOCKED");
+  });
+});
+
+describe("provider projection baseline", () => {
+  const current = { title: "Essay", summary: "", tags: ["managebac"], content: { ...legacy, description: "" } };
+  const next = { title: "Revised essay", description: "New instructions", summary: "New instructions", dueAt: 20000, source: { ...legacy.source, hash: "v2" } };
+  it("does not treat missing old provider text as an explicitly empty baseline", () => {
+    const preserved = refreshPlannerSourceProjection(current, { previousSourceHash: "v1", previous: { title: "Essay" }, next })!;
+    expect(preserved.title).toBe("Revised essay");
+    expect(preserved.summary).toBe("");
+    expect(preserved.content).toMatchObject({ description: "", dueAt: 20000, source: { hash: "v2" } });
+    const copied = refreshPlannerSourceProjection(current, { previousSourceHash: "v1", previous: { title: "Essay", description: "", summary: "" }, next })!;
+    expect(copied.summary).toBe("New instructions");
+    expect(copied.content).toMatchObject({ description: "New instructions" });
+  });
+  it("rejects a stale baseline while explicit rebase preserves uncertain personal text", () => {
+    const input = { previousSourceHash: "older", previous: { title: "Essay", description: "", summary: "" }, next };
+    expect(refreshPlannerSourceProjection(current, input)).toBeNull();
+    const rebased = refreshPlannerSourceProjection(current, { ...input, force: true })!;
+    expect(rebased.title).toBe("Essay");
+    expect(rebased.summary).toBe("");
+    expect(rebased.content).toMatchObject({ description: "", dueAt: 20000, source: { hash: "v2" } });
   });
 });

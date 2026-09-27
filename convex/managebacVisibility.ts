@@ -38,7 +38,7 @@ async function currentAuthority(ctx: Ctx, actor: Actor) {
  * Do not reuse this reader after writing membership, integration or selection
  * state in the same mutation; use a fresh wrapper/reader for the later check.
  */
-export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
+function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
   let authority: ReturnType<typeof currentAuthority> | undefined;
   const memberships = new Map<string, Promise<boolean>>();
   const selections = new Map<string, Promise<boolean>>();
@@ -48,7 +48,8 @@ export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
     const { currentActor, integration } = current;
     // Source snapshots are never memoized: callers may hold an earlier row.
     const source = await ctx.db.get(record._id);
-    if (!source || source.schoolId !== currentActor.schoolId || source.integrationId !== integration._id || !sourceAvailable(source)) return false;
+    if (!source || source.schoolId !== currentActor.schoolId || source.integrationId !== integration._id ||
+        (removal ? !source.tombstone : !sourceAvailable(source))) return false;
 
     // Missing periods only match other missing periods. They are not a wildcard
     // for another year's use of the same provider class ID.
@@ -116,6 +117,16 @@ export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
     return record && await canReadRecord(record) ? record : null;
   };
   return { canReadRecord, readSource };
+}
+
+export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
+  return visibilityReader(ctx, actor, false);
+}
+
+/** A removal notice carries no withdrawn source body, but still requires the
+ * recipient's current identity, membership, audience and class selection. */
+export async function canApplyManagebacSourceRemoval(ctx: Ctx, actor: Actor, record: Doc<"externalRecords">) {
+  return visibilityReader(ctx, actor, true).canReadRecord(record);
 }
 
 export async function canReadManagebacRecord(ctx: Ctx, actor: Actor, record: Doc<"externalRecords">) {

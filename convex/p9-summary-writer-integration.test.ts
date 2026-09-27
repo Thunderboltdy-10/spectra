@@ -200,6 +200,19 @@ describe("P9.I3 summary-writer integration", () => {
         createdAt,
         updatedAt: createdAt,
       });
+      // Rebase delivers provider text, so the recipient needs a current
+      // verified provider identity, exactly as production sync requires.
+      await ctx.db.insert("externalIdentityMappings", {
+        integrationId,
+        schoolId: actor.schoolId,
+        accountId: actor.accountId,
+        providerUserId: "provider-p9",
+        verifiedEmailHash: "p9-hash",
+        status: "verified",
+        matchCount: 1,
+        createdAt,
+        updatedAt: createdAt,
+      });
       const syncRunId = await ctx.db.insert("externalSyncRuns", {
         integrationId,
         schoolId: actor.schoolId,
@@ -296,8 +309,10 @@ describe("P9.I3 summary-writer integration", () => {
         projectionType: "planner_task",
         projectionId: String(artifactId),
         kind: "customization_overlap",
-        oldSource: { title: "Physics report" },
-        newSource: { title: "Revised physics report" },
+        // Production conflicts retain the normalized provider baseline. Rebase
+        // can advance copied text only when its previous value is known.
+        oldSource: { title: "Physics report", description: "Use the old rubric." },
+        newSource: { title: "Revised physics report", description: "Use the revised rubric." },
         affectedLinks: [String(artifactId)],
         suggestedActions: ["rebase"],
         status: "open",

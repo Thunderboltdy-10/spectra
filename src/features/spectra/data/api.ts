@@ -6,6 +6,7 @@ import type { QuizExperience } from "../quiz/experience";
 import type { TimetablePersonalState } from "../timetable/model";
 import { spectraBus } from "../events";
 import { coalesceInFlight } from "@/lib/coalesce-inflight";
+import { createCatalogPageCache, type CatalogPage } from "./catalog-page-cache";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
@@ -383,6 +384,8 @@ export type SpectraArtifact = {
     pinned?: boolean;
   }>;
   placementStatus?: "inbox" | "shared" | "workspace";
+  /** False on compact agent cards; selected actions must resolve current placements. */
+  placementsComplete?: boolean;
   ownership?: "owned" | "shared";
   accessLevel?: "read" | "modify" | null;
   capabilities?: Array<
@@ -968,14 +971,8 @@ const workspaceCache = new Map<
   string,
   { value: SpectraOverview["workspace"]; cachedAt: number }
 >();
-let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null =
-  null;
 const CACHE_TTL = 5 * 60_000;
 const FIRST_PAINT_FETCH_TTL_MS = 1_100;
-const workspaceListRequests = new Map<
-  string,
-  { at: number; promise: Promise<SpectraWorkspace[]> }
->();
 const CACHE_LOCAL_ACTIONS = new Set([
   "acquireRegionClaim",
   "renewRegionClaim",
@@ -994,7 +991,8 @@ export function peekSpectraWorkspace(workspaceId: string) {
 
 export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
   overviewCache.clear();
-  workspacesCache = null;
+  spectraWorkspaceCatalog.invalidate();
+  spectraAgentCatalog.invalidate();
   if (scope?.workspaceId) workspaceCache.delete(scope.workspaceId);
   else workspaceCache.clear();
 }
@@ -1048,27 +1046,22 @@ export async function getSpectraWorkspace(workspaceId: string, force = false) {
   return value;
 }
 
-export async function getSpectraWorkspaces(force = false) {
-  if (
-    !force &&
-    workspacesCache &&
-    Date.now() - workspacesCache.cachedAt < CACHE_TTL
-  )
-    return workspacesCache.value;
-  return coalesceInFlight(
-    workspaceListRequests,
-    "workspaces",
-    FIRST_PAINT_FETCH_TTL_MS,
-    async () => {
-      const value = await readJson<{ workspaces: SpectraWorkspace[] }>(
-        await fetch("/api/spectra?action=workspaces", { cache: "no-store" }),
-      );
-      workspacesCache = { value: value.workspaces, cachedAt: Date.now() };
-      return value.workspaces;
-    },
-    { force },
-  );
+export function getSpectraWorkspacePage(cursor?: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ action: "workspaceGraphPage" });
+  if (cursor) params.set("cursor", cursor);
+  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraWorkspace>>);
 }
+export function getSpectraAgentPage(cursor?: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ action: "agentGraphPage" });
+  if (cursor) params.set("cursor", cursor);
+  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<CatalogPage<SpectraArtifact>>);
+}
+export function getSpectraWorkspaceMetadata(workspaceId: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ action: "workspaceMetadata", workspaceId });
+  return fetch(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<{ workspace: SpectraWorkspace | null }>);
+}
+export const spectraWorkspaceCatalog = createCatalogPageCache<SpectraWorkspace>((_key, cursor, signal) => getSpectraWorkspacePage(cursor, signal));
+export const spectraAgentCatalog = createCatalogPageCache<SpectraArtifact>((_key, cursor, signal) => getSpectraAgentPage(cursor, signal));
 
 export async function exportSpectraWorkspaceManifest(workspaceId: string) {
   const qs = new URLSearchParams({
@@ -2125,12 +2118,13 @@ export type SpectraPublicAgent = {
 export async function getSpectraPublicAgents(params?: {
   search?: string;
   limit?: number;
+  signal?: AbortSignal;
 }) {
   const qs = new URLSearchParams({ action: "publicAgents" });
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   if (params?.limit) qs.set("limit", String(params.limit));
   return readJson<{ agents: SpectraPublicAgent[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
   );
 }
 
@@ -2141,10 +2135,10 @@ export type SpectraInstalledAgent = SpectraPublicAgent & {
 };
 
 /** Agents installed from Discover — a reference to a published release. */
-export async function getSpectraInstalledAgents() {
+export async function getSpectraInstalledAgents(options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "installedAgents" });
   return readJson<{ agents: SpectraInstalledAgent[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
   );
 }
 

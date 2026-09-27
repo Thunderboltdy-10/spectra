@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSchema";
+import { providerProjectionIntent, providerProjectionReceipt } from "./managebacProjectionContract";
 import {
   artifactEmbedContainerTypeValidator,
   artifactEmbedContextPolicyValidator,
@@ -1044,6 +1045,9 @@ export default defineSchema({
     capabilityIds: v.array(v.id("integrationCapabilities")),
     currentCapabilityId: v.optional(v.id("integrationCapabilities")),
     cursorState: v.optional(v.any()),
+    /** Staged provider projection work; the run stays running until it drains. */
+    projectionWorkRemaining: v.optional(v.number()),
+    projectionIngestionComplete: v.optional(v.boolean()),
     counts: v.object({
       fetched: v.number(),
       created: v.number(),
@@ -1113,6 +1117,9 @@ export default defineSchema({
     .index("by_capability_created", ["capabilityId", "createdAt"]),
 
   externalSyncConflicts: defineTable({
+    /** An accepted rebase/keep resolution still applying to canonical rooms. */
+    projectionResolution: v.optional(v.union(v.literal("rebase"), v.literal("keep_overlay"))),
+    projectionWorkRemaining: v.optional(v.number()),
     syncRunId: v.id("externalSyncRuns"),
     integrationId: v.id("schoolIntegrations"),
     schoolId: v.id("schools"),
@@ -1198,6 +1205,8 @@ export default defineSchema({
     projectionId: v.string(),
     providerKey: v.string(),
     sourceHash: v.string(),
+    pendingProvider: v.optional(providerProjectionIntent),
+    providerReceipt: v.optional(providerProjectionReceipt),
     overlayHash: v.optional(v.string()),
     state: v.union(
       v.literal("active"),
@@ -1212,7 +1221,9 @@ export default defineSchema({
     .index("by_record_type", ["recordId", "projectionType"])
     .index("by_provider_key", ["integrationId", "providerKey"])
     .index("by_projection", ["projectionType", "projectionId"])
-    .index("by_account_updated", ["accountId", "updatedAt"]),
+    .index("by_account_updated", ["accountId", "updatedAt"])
+    /** A personal sync reads its own projections of a widely shared source. */
+    .index("by_account_record", ["accountId", "recordId"]),
 
   /**
    * Account-scoped receipt for an explicit provider-resource download. The
@@ -1310,6 +1321,12 @@ export default defineSchema({
     legacyEventId: v.optional(v.string()),
     /** Caller-owned identity for retrying one scheduled work-block request. */
     idempotencyKey: v.optional(v.string()),
+    /** Original request and source identity; canonical targets remain on the block. */
+    scheduleScope: v.optional(v.object({
+      requestTaskItemId: v.optional(v.id("calendarItems")),
+      requestPlanTaskId: v.optional(v.string()),
+      sourceRecordId: v.optional(v.id("externalRecords")),
+    })),
     revision: v.number(),
     createdBy: v.union(
       v.literal("human"),
@@ -2927,6 +2944,7 @@ export default defineSchema({
     deprecatedAt: v.optional(v.number()),
   })
     .index("by_agent_number", ["agentId", "releaseNumber"])
+    .index("by_agent_status_rollout_number", ["agentId", "status", "rollout", "releaseNumber"])
     .index("by_agent_status", ["agentId", "status"])
     .index("by_school_published", ["schoolId", "publishedAt"]),
 

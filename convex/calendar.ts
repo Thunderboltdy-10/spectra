@@ -1,5 +1,5 @@
 import { query } from "./_generated/server";
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -307,6 +307,83 @@ function plannerGroupWire(rows: readonly Doc<"calendarPlanTaskReadModels">[]) {
     revision: 0,
     dueAt: first.dueAt,
   };
+}
+
+type ScheduleRequest = {
+  taskItemId?: Id<"calendarItems">;
+  planArtifactId?: Id<"spectraArtifacts">;
+  planTaskId?: string;
+  startAt: number;
+  endAt: number;
+  timezone: string;
+};
+
+/** Receipt recovery checks current authority but creates no new scheduled work. */
+async function recoverScheduledBlock(
+  ctx: MutationCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  args: ScheduleRequest,
+  block: Doc<"calendarItems">,
+) {
+  const scope = block.scheduleScope;
+  const sameRequest = block.kind === "scheduled_work_block" &&
+    block.ownerAccountId === actor.accountId && block.schoolId === actor.schoolId &&
+    block.planArtifactId === args.planArtifactId &&
+    block.startAt === args.startAt && block.endAt === args.endAt && block.timezone === args.timezone &&
+    (scope ? scope.requestTaskItemId === args.taskItemId && scope.requestPlanTaskId === args.planTaskId
+      : (!args.taskItemId || args.taskItemId === block.taskItemId));
+  if (!sameRequest)
+    throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling key was already used for another block.");
+  if (block.status !== "active")
+    throw new Error("CALENDAR_IDEMPOTENCY_REPLAY_REMOVED: This scheduled block is no longer active.");
+
+  // Resolve the admitted IDs, not today's result for a request alias or feed.
+  const task = block.taskItemId ? await ctx.db.get(block.taskItemId) : null;
+  if (block.taskItemId) {
+    if (!task || task.ownerAccountId !== actor.accountId || task.schoolId !== actor.schoolId || task.kind !== "task")
+      throw new Error("CALENDAR_TASK_NOT_FOUND");
+    if (task.status === "removed") throw new Error("CALENDAR_TASK_UNAVAILABLE");
+  }
+  if (scope && scope.sourceRecordId !== task?.sourceRecordId)
+    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+  if (task?.officialDeadlineItemId !== block.officialDeadlineItemId)
+    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+  if (block.officialDeadlineItemId) {
+    const official = await ctx.db.get(block.officialDeadlineItemId);
+    if (!official || official.ownerAccountId !== actor.accountId || official.schoolId !== actor.schoolId ||
+      official.kind !== "official_deadline" || !official.sourceLocked || official.sourceRecordId !== task?.sourceRecordId)
+      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+  }
+  if (block.planArtifactId) {
+    const plan = await ctx.db.get(block.planArtifactId);
+    if (!plan || plan.ownerAccountId !== actor.accountId ||
+      (plan.schoolId !== undefined && plan.schoolId !== actor.schoolId) || plan.blueprintKey !== "planner_task" ||
+      !["active", "archived"].includes(plan.status))
+      throw new Error("CALENDAR_PLAN_NOT_FOUND");
+    const content = object(plan.content);
+    if (!plannerTaskCandidates(plan).some(candidate => candidate.id === block.planTaskId))
+      throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
+    if (!scope && args.planTaskId !== block.planTaskId) {
+      // Old receipts did not retain the requested visual-subtask alias. Only
+      // an extant legacy alias belonging to this same admitted root is safe.
+      const sameLegacyRoot = block.planTaskId === "task-1" && !Array.isArray(content.tasks) &&
+        Array.isArray(content.subtasks) && content.subtasks.some(candidate => object(candidate).id === args.planTaskId);
+      if (!sameLegacyRoot) throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT");
+    }
+    const sourceRecordId = await sourceRecordForPlanner(ctx, plan._id, actor.accountId);
+    const sourceRoot = block.planTaskId === "task-1" ? sourceRecordId : undefined;
+    if (task) {
+      const linkedDirectly = task.planArtifactId === plan._id && task.planTaskId === block.planTaskId;
+      const linkedBySource = Boolean(sourceRoot && task.sourceRecordId === sourceRoot);
+      if (!linkedDirectly && !linkedBySource) throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+      if (sourceRoot && task.sourceRecordId !== sourceRoot) throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+    } else if (sourceRoot || (block.planTaskId === "task-1" && object(content.source).provider === "managebac")) {
+      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+    }
+  } else if (args.planTaskId !== undefined || block.planTaskId !== undefined || !task) {
+    throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT");
+  }
+  return itemWire(block);
 }
 
 async function readPlannerTasks(
@@ -786,6 +863,12 @@ export const scheduleTask = mutation({
       (!idempotencyKey || idempotencyKey.length < 8)
     )
       throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+    const existingByKey = idempotencyKey
+      ? await ctx.db.query("calendarItems")
+          .withIndex("by_schedule_idempotency", q => q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
+          .unique()
+      : null;
+    if (existingByKey) return recoverScheduledBlock(ctx, actor, args, existingByKey);
     let plannerArtifact: Doc<"spectraArtifacts"> | null = null;
     let plannerTask: { id: string; title: string } | undefined;
     let taskItem = args.taskItemId ? await ctx.db.get(args.taskItemId) : null;
@@ -863,38 +946,6 @@ export const scheduleTask = mutation({
         throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
       officialDeadlineItemId = official._id;
     }
-    const existingByKey = idempotencyKey
-      ? await ctx.db
-          .query("calendarItems")
-          .withIndex("by_schedule_idempotency", (q) =>
-            q
-              .eq("ownerAccountId", actor.accountId)
-              .eq("idempotencyKey", idempotencyKey),
-          )
-          .unique()
-      : null;
-    if (existingByKey) {
-      const sameTask =
-        (String(existingByKey.taskItemId ?? "") === String(resolvedTaskItemId ?? "") ||
-          (!args.taskItemId && !existingByKey.taskItemId)) &&
-        String(existingByKey.planArtifactId ?? "") ===
-          String(args.planArtifactId ?? "") &&
-        String(existingByKey.planTaskId ?? "") ===
-          String(resolvedPlanTaskId ?? "") &&
-        existingByKey.startAt === args.startAt &&
-        existingByKey.endAt === args.endAt &&
-        existingByKey.timezone === args.timezone &&
-        existingByKey.schoolId === actor.schoolId;
-      if (!sameTask)
-        throw new Error(
-          "CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling key was already used for another block.",
-        );
-      if (existingByKey.status !== "active")
-        throw new Error(
-          "CALENDAR_IDEMPOTENCY_REPLAY_REMOVED: This scheduled block is no longer active.",
-        );
-      return itemWire(existingByKey);
-    }
     const title = taskItem?.title ?? plannerTask?.title ?? "Scheduled work";
     const now = Date.now();
     const itemId = await ctx.db.insert("calendarItems", {
@@ -915,6 +966,11 @@ export const scheduleTask = mutation({
       officialDeadlineItemId,
       linkedArtifactIds: args.planArtifactId ? [args.planArtifactId] : [],
       idempotencyKey,
+      scheduleScope: idempotencyKey ? {
+        requestTaskItemId: args.taskItemId,
+        requestPlanTaskId: args.planTaskId,
+        sourceRecordId: taskItem?.sourceRecordId,
+      } : undefined,
       revision: 1,
       createdBy: args.actorKind ?? "human",
       createdAt: now,

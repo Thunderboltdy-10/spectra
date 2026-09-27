@@ -105,7 +105,9 @@ describe("personal analytics semantics", () => {
     expect(result.recentWork.map(row => row.title)).toEqual(Array.from({ length: 8 }, (_, index) => `Work ${2009 - index}`));
     expect(result.recentRuns.map(row => row.title)).toEqual(Array.from({ length: 8 }, (_, index) => `Run ${2009 - index}`));
     expect(JSON.stringify(result)).not.toContain("PRIVATE_PROMPT");
-  });
+    // 4,020 fixture inserts plus the backfill exceed the 15 s default under a
+    // loaded full-suite run; the query itself is bounded and fast.
+  }, 60_000);
 });
 
 describe("analytics compact read boundary", () => {

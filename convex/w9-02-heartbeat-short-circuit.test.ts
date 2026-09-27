@@ -164,7 +164,8 @@ describe("W9-02 spectraAiRuns heartbeat short-circuit", () => {
         executionId: "execution-1",
         workerId: "worker-1",
         heartbeatAt: now,
-        leaseExpiresAt: now + 120_000,
+        // Heartbeats only write when the lease is due for renewal.
+        leaseExpiresAt: now,
         eventSequence: 1,
         createdAt: now,
         updatedAt: now,
@@ -215,6 +216,10 @@ describe("W9-02 spectraAiRuns heartbeat short-circuit", () => {
       return { runId, tabId, cardId, cardSummaryId, tabUpdatedAt: now };
     });
 
+    // Fixture and heartbeat can land in the same millisecond; the assertion
+    // below is that the heartbeat advances time, so let the clock move first.
+    while (Date.now() <= fixture.tabUpdatedAt)
+      await new Promise((resolve) => setTimeout(resolve, 1));
     runProjectionTriggerIo.reset();
     await t.withIdentity(identity).mutation(api.spectraRuns.heartbeat, {
       runId: fixture.runId,

@@ -402,8 +402,6 @@ export async function evaluateRetainedPinAccess(
   const embed = await ctx.db.get(embedId);
   if (!embed || embed.removedAt !== undefined || embed.placementState === "removed" || embed.versionPolicy !== "pinned" || !embed.pinnedVersionId)
     return { allowed: false, reason: "placement_unavailable" };
-  if (embed.schoolId !== undefined && embed.schoolId !== current.schoolId)
-    return { allowed: false, reason: "host_unavailable" };
   const source = await ctx.db.get(embed.sourceArtifactId);
   if (!source) return { allowed: false, reason: "source_forbidden" };
   const version = await ctx.db.get(embed.pinnedVersionId);
@@ -414,7 +412,8 @@ export async function evaluateRetainedPinAccess(
   if (embed.containerType === "thread") {
     const threadId = ctx.db.normalizeId("spectraThreads", embed.containerId);
     const host = threadId ? await ctx.db.get(threadId) : null;
-    if (!host || host.status === "deleted" || host.ownerAccountId !== current.accountId || host.schoolId !== current.schoolId)
+    if (!host || host.status === "deleted" || host.ownerAccountId !== current.accountId || host.schoolId !== current.schoolId ||
+        (embed.schoolId !== undefined && embed.schoolId !== host.schoolId))
       return { allowed: false, reason: "host_unavailable" };
     // The thread row is the placement; there is no second editor save.
     if (embed.placementState !== "confirmed" ||
@@ -423,7 +422,8 @@ export async function evaluateRetainedPinAccess(
   } else {
     const hostId = ctx.db.normalizeId("spectraArtifacts", embed.containerId);
     const host = hostId ? await ctx.db.get(hostId) : null;
-    if (!host || (host.status !== "active" && host.status !== "draft") || host.schoolId !== current.schoolId)
+    if (!host || (host.status !== "active" && host.status !== "draft") ||
+        (embed.schoolId !== undefined && embed.schoolId !== host.schoolId))
       return { allowed: false, reason: "host_unavailable" };
     const hostAccess = await evaluateLoadedResourceAccess(ctx, current,
       host.blueprintKey === "agent" ? "agent" : "artifact", host._id,

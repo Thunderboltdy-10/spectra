@@ -178,6 +178,37 @@ describe("exact retained pin source authority", () => {
     await f.grant();
     expect(await f.evaluate()).toMatchObject({ allowed: true, sourceLevel: "read" });
   });
+
+  it("requires a current explicit account invite for a foreign artifact host as well as independent source access", async () => {
+    const f = await fixture();
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.ids.sourceId, { schoolId: f.ids.foreignSchoolId });
+      await ctx.db.patch(f.ids.versionId, { schoolId: f.ids.foreignSchoolId });
+    });
+    const sourceGrantId = await f.grant({ schoolId: f.ids.foreignSchoolId });
+    const hostId = await f.t.run(async ctx => {
+      const now = Date.now();
+      const hostId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: f.ids.ownerId, schoolId: f.ids.foreignSchoolId, blueprintKey: "document", title: "Invited foreign host", content: {}, tags: [], status: "active", createdAt: now, updatedAt: now });
+      await ctx.db.patch(f.ids.embedId, { containerType: "artifact", containerId: String(hostId), schoolId: f.ids.foreignSchoolId, containerRegionId: "reference:one" });
+      const attrs = { embedId: String(f.ids.embedId), containerId: String(hostId), containerRegionId: "reference:one", sourceArtifactId: String(f.ids.sourceId), versionPolicy: "pinned", pinnedVersionId: String(f.ids.versionId), blockId: "reference:one" };
+      await ctx.db.patch(hostId, { content: { tiptap: { type: "doc", content: [{ type: "spectraReference", attrs }] } } });
+      await ctx.db.insert("accessGrants", { schoolId: f.ids.foreignSchoolId, resourceType: "artifact", resourceId: hostId, principalType: "school", principalId: f.ids.schoolId, level: "read", capabilities: ["read"], source: "direct", createdByAccountId: f.ids.ownerId, createdAt: now, updatedAt: now });
+      return hostId;
+    });
+    expect(await f.evaluate()).toEqual({ allowed: false, reason: "host_unavailable" });
+    const hostGrantId = await f.grant({ schoolId: f.ids.foreignSchoolId, resourceId: hostId });
+    expect(await f.evaluate()).toMatchObject({ allowed: true, capabilities: ["read"] });
+    await f.t.run(ctx => ctx.db.patch(sourceGrantId, { revokedAt: Date.now() }));
+    expect(await f.evaluate()).toEqual({ allowed: false, reason: "source_forbidden" });
+    await f.t.run(ctx => ctx.db.patch(sourceGrantId, { revokedAt: undefined }));
+    await f.t.run(ctx => ctx.db.patch(hostGrantId, { revokedAt: Date.now() }));
+    expect(await f.evaluate()).toEqual({ allowed: false, reason: "host_unavailable" });
+    await f.t.run(async ctx => {
+      await ctx.db.patch(hostGrantId, { revokedAt: undefined });
+      await ctx.db.patch(f.ids.embedId, { schoolId: f.ids.schoolId });
+    });
+    expect(await f.evaluate()).toEqual({ allowed: false, reason: "host_unavailable" });
+  });
 });
 
 describe("retained native and asset readers", () => {

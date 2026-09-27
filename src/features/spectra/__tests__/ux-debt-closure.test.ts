@@ -111,10 +111,12 @@ describe("P6.I1 UX debt closure", () => {
     expect(appShell).toContain("<SignedInContinue");
     expect(appShell).toContain('data-sidebar-recents=""');
     expect(appShell).toContain("prefetch={false}");
-    expect(appShell).toContain("window.addEventListener(\"focus\", refresh)");
-    expect(appShell).toContain("void refreshWorkspaces(true)");
-    expect(appShell).not.toContain(
-      "const refresh = () => void refreshWorkspaces(true)",
-    );
+    // Workspace discovery moved to the shared paged catalog: focus reuses a
+    // warm page while a workspace change forces a fresh traversal.
+    const catalog = read("src/features/spectra/data/use-catalog-pages.ts");
+    expect(appShell).toContain("useWorkspaceCatalog(selectedWorkspaceId)");
+    expect(catalog).toContain("window.addEventListener(\"focus\", onFocus)");
+    expect(catalog).toContain("const onFocus = () => { void refresh(); };");
+    expect(catalog).toContain("void refresh(true)");
   });
 });

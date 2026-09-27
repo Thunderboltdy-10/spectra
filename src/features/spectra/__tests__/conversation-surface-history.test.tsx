@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConversationSurface } from "../components/conversation-surface";
+import { ConversationSurface, ThreadConversation } from "../components/conversation-surface";
 import type { SpectraRun, SpectraThreadDetail } from "../data/api";
 
 const mocks = vi.hoisted(() => ({
@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   getTrace: vi.fn(),
   postSpectra: vi.fn(),
   useQuery: vi.fn(),
+  getThread: vi.fn(),
+  workspaceCatalog: { items: [] as Array<{ _id: string; title: string }>, status: "loading", isDone: false, error: null, more: vi.fn(), refresh: vi.fn() },
 }));
+vi.mock("../data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => mocks.workspaceCatalog }));
 
 vi.mock("convex/react", () => ({ useQuery: mocks.useQuery }));
 vi.mock("../data/use-authed-args", () => ({
@@ -20,16 +23,18 @@ vi.mock("../data/use-authed-args", () => ({
 vi.mock("../data/api", () => ({
   clearSpectraRunAgent: vi.fn(),
   getSpectraOperationConflict: vi.fn(),
-  getSpectraThread: vi.fn(),
+  getSpectraThread: mocks.getThread,
   getSpectraThreadMessages: mocks.getMessages,
   getSpectraThreadRunTrace: mocks.getTrace,
-  getSpectraWorkspaces: vi.fn(),
   postSpectra: mocks.postSpectra,
   resolveSpectraOperationConflict: vi.fn(),
   submitSpectraAgentFeedback: vi.fn(),
 }));
 vi.mock("../events", () => ({ spectraBus: { emit: vi.fn(), on: vi.fn(() => () => {}) } }));
-vi.mock("../ai/use-spectra-run", () => ({ useSpectraRun: vi.fn() }));
+vi.mock("../ai/use-spectra-run", () => ({ useSpectraRun: () => ({
+  liveExchange: null, cards: [], submitting: false,
+  run: vi.fn(), retry: vi.fn(), steer: vi.fn(), stop: vi.fn(), onCardAction: vi.fn(),
+}) }));
 vi.mock("../collaboration/run-ledger", () => ({
   operationCounts: () => ({ proposed: 0, active: 0, completed: 0, failed: 0 }),
   useRunLedger: () => undefined,
@@ -98,6 +103,11 @@ const detail = (
 });
 
 beforeEach(() => {
+  mocks.getThread.mockReset();
+  mocks.workspaceCatalog.items = [];
+  mocks.workspaceCatalog.status = "loading";
+  mocks.workspaceCatalog.isDone = false;
+  mocks.workspaceCatalog.more.mockReset();
   mocks.activeExecution = undefined;
   mocks.getMessages.mockReset();
   mocks.getTrace.mockReset();
@@ -123,6 +133,27 @@ afterEach(() => {
 });
 
 describe("ConversationSurface history and saved results", () => {
+  it("renders the thread without waiting for workspace discovery", async () => {
+    mocks.getThread.mockResolvedValue(detail("thread-a", "The thread is ready"));
+    render(<ThreadConversation threadId="thread-a" showComposer={false} />);
+    expect(await screen.findByText("The thread is ready")).toBeTruthy();
+    expect(mocks.workspaceCatalog.status).toBe("loading");
+  });
+
+  it("keeps the real result picker incomplete until its remaining workspace pages load", async () => {
+    const source = detail("thread-a", "Saved guide");
+    source.traces = [{ run, operations: [], cards: [], events: [], artifacts: [{ _id: "guide", title: "Guide", blueprintKey: "document",
+      tags: [], status: "active", createdAt: 1, updatedAt: 1 }] }];
+    const view = render(<ConversationSurface detail={source} threadId="thread-a" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add to workspace" }));
+    expect(screen.getByText("Loading workspaces…")).toBeTruthy();
+    expect(screen.queryByText("Create a workspace first.")).toBeNull();
+    mocks.workspaceCatalog.items = [{ _id: "first", title: "First workspace" }];
+    mocks.workspaceCatalog.status = "ready";
+    view.rerender(<ConversationSurface detail={source} threadId="thread-a" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load more workspaces" }));
+    expect(mocks.workspaceCatalog.more).toHaveBeenCalledTimes(1);
+  });
   it("ignores an older-page response after switching to another thread", async () => {
     let resolveOlder!: (value: { messages: never[]; hasOlder: boolean }) => void;
     mocks.getMessages.mockReturnValueOnce(

@@ -5,10 +5,11 @@ import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
-import { artifactGraphPage, workspaceGraphPage, GRAPH_READ_ROWS, type ArtifactGraphArgs, type WorkspaceGraphArgs } from "./catalogGraph";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { artifactGraphPage, workspaceGraphPage, agentGraphPage, GRAPH_READ_ROWS, type ArtifactGraphArgs, type WorkspaceGraphArgs } from "./catalogGraph";
+import { list as legacyWorkspaceList } from "./spectraWorkspaces";
 import { syncSourceNodes, upsertArtifactSummary } from "./orgTreeShared";
 import { evaluateArtifactAccessForActor } from "./authorityShared";
 import { requireSpectraActor } from "./spectraShared";
@@ -136,12 +137,68 @@ async function basicGraph(f: Fixture) {
 }
 
 describe("S11 actor graph prototype", () => {
+  it("registers current workspace metadata and bounded agent cards without native bodies or release-history scans", async () => {
+    const f = await fixture();
+    const ids = await f.t.run(async ctx => {
+      const workspaceId = await f.workspace(ctx, "Selected outside the first page", { ownerAccountId: f.ids.readerId });
+      const agentId = await f.artifact(ctx, "Agent", 1, { blueprintKey: "agent", ownerAccountId: f.ids.readerId });
+      const versionId = await ctx.db.insert("spectraArtifactVersions", { artifactId: agentId, ownerAccountId: f.ids.readerId, source: "manual", createdAt: 1 });
+      for (const [releaseNumber, rollout] of [[10, undefined], [7, "published"], [99, "internal_test"], [100, "limited"]] as const) {
+        await ctx.db.insert("agentReleases", { agentId, schoolId: f.ids.schoolId, versionId, releaseNumber, rollout,
+          status: "published", publishedByAccountId: f.ids.readerId, publishedAt: releaseNumber });
+      }
+      return { workspaceId, agentId };
+    });
+    const identity = await f.user.query(api.catalogGraph.identity, {});
+    expect(identity?.membershipId).toBe(f.ids.membershipId);
+    const selected = await f.user.query(api.catalogGraph.workspaceMetadata, { workspaceId: ids.workspaceId });
+    expect(selected.workspace?._id).toBe(ids.workspaceId);
+    const result = await traverse(cursor => f.user.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const result = await agentGraphPage({ ...ctx, db: observer.db }, { cursor });
+      return { result, ...observer.snapshot(), responseBytes: serializedBytes(result) };
+    }));
+    expect(result.found).toMatchObject([{ _id: ids.agentId, owner: { name: "graph-reader" }, agentRelease: { releaseNumber: 10 }, placementsComplete: false }]);
+    expect(result.found[0]).not.toHaveProperty("content");
+    const registered = await f.user.query(api.catalogGraph.listAgents, {});
+    expect(registered.isDone).toBe(false);
+    expect(registered.continueCursor).toBeTruthy();
+    await f.t.run(ctx => ctx.db.patch(f.ids.membershipId, { status: "ended" }));
+    expect(await f.user.query(api.catalogGraph.identity, {})).toBeNull();
+    await expect(f.user.query(api.catalogGraph.workspaceMetadata, { workspaceId: ids.workspaceId })).rejects.toThrow();
+  });
+
+  it("compares the real workspace caller read with compact traversal in a bounded invitation-history fixture", async () => {
+    const f = await fixture();
+    const workspaceId = await f.t.run(async ctx => {
+      const id = await f.workspace(ctx, "Workspace", { ownerAccountId: f.ids.readerId });
+      for (let i = 0; i < 64; i++) await ctx.db.insert("shareInvitations", { schoolId: f.ids.schoolId, resourceType: "workspace",
+        resourceId: id, inviterAccountId: f.ids.readerId, inviteeAccountId: f.ids.ownerId, level: "read", status: "expired",
+        message: "historical invitation ".repeat(200), createdAt: i, updatedAt: i });
+      return id;
+    });
+    const before = await f.user.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const handler = (legacyWorkspaceList as unknown as { _handler: (ctx: QueryCtx, args: Record<string, never>) => Promise<Array<{ _id: string }>> })._handler;
+      const result = await handler({ ...ctx, db: observer.db }, {});
+      return { ids: result.map(row => row._id), ...observer.snapshot(), responseBytes: serializedBytes(result) };
+    });
+    const after = await traverse(cursor => f.workspacePage({ cursor }));
+    expect(before.ids).toEqual([workspaceId]);
+    expect(after.found.map(row => row._id)).toEqual(before.ids);
+    expect(after.rowBytes).toBeLessThan(before.serializedDocumentBytes / 10);
+    if (process.env.SPECTRA_S11_GRAPH_EVIDENCE === "write") writeFileSync(".spectra-local/launch-s11/data/workspace-caller-comparison.json",
+      JSON.stringify({ kind: "Actual old handler versus complete graph traversal, fixed64expired invitations; convex-test returned-row bytes, not hosted engine or billing.", before, after }, null, 2));
+  });
   it("keeps complete traversal independent of unrelated private density", async () => {
     const f = await fixture();
     const ids = await basicGraph(f);
     const samples = [];
     let inserted = 0;
-    for (const unrelated of [0, 128, 1_024, 10_000]) {
+    // Fixture insertion, not traversal, dominates at 10,000 rows (~150 s in
+    // convex-test), so the default run stops at 2,048; evidence mode adds it.
+    const densities = process.env.SPECTRA_S11_GRAPH_EVIDENCE === "write" ? [0, 128, 1_024, 10_000] : [0, 128, 2_048];
+    for (const unrelated of densities) {
       await f.t.run(async ctx => {
         for (; inserted < unrelated; inserted++) {
           const id = await f.artifact(ctx, "Unrelated private", 10_000 + inserted);
@@ -162,7 +219,7 @@ describe("S11 actor graph prototype", () => {
       writeFileSync(`${path}/graph-density.json`, JSON.stringify({ semantics: "Actual kernel, convex-test returned-row bytes; not hosted billing/engine scans",
         sha256: createHash("sha256").update(readFileSync("convex/catalogGraph.ts")).digest("hex"), samples }, null, 2));
     }
-  }, 120_000);
+  }, process.env.SPECTRA_S11_GRAPH_EVIDENCE === "write" ? 900_000 : 180_000);
 
   it("matches actual source authority across principals, types, inheritance and school boundaries", async () => {
     const f = await fixture();
@@ -225,6 +282,12 @@ describe("S11 actor graph prototype", () => {
     expect(oracle).toEqual(expected);
     const result = await traverse(cursor => f.page({ cursor, limit: 3 }));
     expect(result.found.map(r => r._id)).toEqual(expected);
+    // Shared-only discovery is the same authority minus owned rows, and it
+    // never reads the owner's artifact stream.
+    const owned = new Set(result.found.filter(r => r.ownership === "owned").map(r => r._id));
+    expect(owned.size).toBe(1);
+    const shared = await traverse(cursor => f.page({ cursor, limit: 3, placement: "shared" }));
+    expect(shared.found.map(r => r._id)).toEqual(expected.filter(id => !owned.has(id)));
   });
 
   it("finishes unsorted grant and node streams, dedupes tied keys, and searches late matches", async () => {

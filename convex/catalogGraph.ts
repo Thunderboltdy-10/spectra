@@ -5,8 +5,10 @@ import { ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { CATALOG_MIGRATION_KEY } from "./catalogPages";
 import { openCatalogCursor, sealCatalogCursor } from "./catalogCursor";
 import { normalizeWorkspaceView } from "../shared/workspace-view";
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+import { requireWorkspaceCapability } from "./spectraShared";
 
-// Prototype only: no registered endpoint or caller switches to this kernel.
 // Unsorted grant/placement streams must finish before any ordered emission.
 export const GRAPH_BATCH = 8;
 export const GRAPH_LIMIT = 24;
@@ -41,7 +43,7 @@ export type ArtifactGraphArgs = {
   placement?: "all" | "shared";
 };
 export type WorkspaceGraphArgs = { cursor?: string; limit?: number; search?: string; includeArchived?: boolean };
-type Args = ArtifactGraphArgs & WorkspaceGraphArgs & { kind: "artifacts" | "workspaces" };
+type Args = ArtifactGraphArgs & WorkspaceGraphArgs & { kind: "artifacts" | "workspaces"; agentCards?: boolean };
 
 /** Reserve worst-case returned rows BEFORE every database operation, including
  * failed/empty proofs. unique reserves two (duplicate detection); no collect,
@@ -205,7 +207,7 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   const streams = (["account", "school"] as const).flatMap(principal => types.map(type => ({ principal, type })));
   const maxStage = streams.length + 1;
   const scope = JSON.stringify(["actor-graph-v1", actor.accountId, actor.schoolId, actor.membershipId, args.kind,
-    limit, search, args.status ?? "active", args.blueprintKey ?? null, args.placement ?? "all", args.includeArchived === true]);
+    limit, search, args.status ?? "active", args.blueprintKey ?? null, args.placement ?? "all", args.includeArchived === true, args.agentCards === true]);
   let state = await decode(args.cursor, scope, maxStage, limit);
   const consider = async (row: Source | null, proof: Proof, loaded?: Parameters<typeof proofStamp>[5]) => {
     if (!row || !matches(row, actor, args, search, state.after)) return false;
@@ -249,6 +251,8 @@ async function graphPage(ctx: QueryCtx, args: Args) {
     return progress("scanning");
   }
 
+  // Shared-only discovery never emits an owned row; skip that stream outright.
+  if (state.stage === 0 && args.kind === "artifacts" && args.placement === "shared") state.stage = 1;
   if (state.stage === 0) {
     const page = args.kind === "artifacts"
       ? await budget.read(GRAPH_BATCH, () => ctx.db.query("spectraArtifactSummaries")
@@ -311,10 +315,62 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   }
   const isDone = rows.length <= limit;
   const emitted = rows.slice(0, limit);
-  return { items: emitted.map(row => project(row, actor)), isDone,
+  const items = [];
+  for (const row of emitted) {
+    const projected = project(row, actor);
+    if (args.agentCards && "artifactId" in row) {
+      const owner = await budget.read(1, () => ctx.db.get(row.ownerAccountId));
+      // Legacy absent rollout is published. Neither creation order nor an
+      // arbitrary history slice establishes the latest published number.
+      const releases = [];
+      for (const rollout of [undefined, "published"] as const) {
+        releases.push(await budget.read(1, () => ctx.db.query("agentReleases")
+          .withIndex("by_agent_status_rollout_number", q => q.eq("agentId", row.artifactId)
+            .eq("status", "published").eq("rollout", rollout)).order("desc").first()));
+      }
+      const release = releases.filter((item) => item !== null).sort((a, b) => b.releaseNumber - a.releaseNumber)[0];
+      items.push({ ...projected, owner: owner ? { name: owner.name, avatarUrl: owner.avatarUrl } : undefined,
+        agentRelease: release ? { versionId: release.versionId, releaseNumber: release.releaseNumber, publishedAt: release.publishedAt } : null,
+        // Absence of list placement data is not proof that an agent is unplaced.
+        // The selected action hydrates current detail before choosing add/open.
+        placementsComplete: false });
+    } else items.push(projected);
+  }
+  return { items, isDone,
     continueCursor: isDone ? null : await sealCatalogCursor(initial(scope, keyFor(emitted.at(-1)!)), scope),
     phase: "ready" as const, budget: diagnostics() };
 }
 
 export const artifactGraphPage = (ctx: QueryCtx, args: ArtifactGraphArgs) => graphPage(ctx, { ...args, kind: "artifacts" });
 export const workspaceGraphPage = (ctx: QueryCtx, args: WorkspaceGraphArgs) => graphPage(ctx, { ...args, kind: "workspaces" });
+
+const pageArgs = { cursor: v.optional(v.string()), limit: v.optional(v.number()), search: v.optional(v.string()) };
+export const listWorkspaces = query({
+  args: { ...pageArgs, includeArchived: v.optional(v.boolean()) },
+  handler: workspaceGraphPage,
+});
+export const listArtifacts = query({
+  args: { ...pageArgs, status: v.optional(v.union(v.literal("active"), v.literal("archived"), v.literal("deleted"))),
+    blueprintKey: v.optional(v.string()), placement: v.optional(v.union(v.literal("all"), v.literal("shared"))) },
+  handler: artifactGraphPage,
+});
+export const agentGraphPage = (ctx: QueryCtx, args: { cursor?: string }) => graphPage(ctx, {
+  ...args, kind: "artifacts", blueprintKey: "agent", limit: 8, agentCards: true,
+});
+export const listAgents = query({ args: { cursor: v.optional(v.string()) }, handler: agentGraphPage });
+export const identity = query({ args: {}, handler: async (ctx) => {
+  try {
+    const actor = await actorFor(ctx, new Budget());
+    return { accountId: actor.accountId, schoolId: actor.schoolId, membershipId: actor.membershipId };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("AUTH_NO_SCHOOL")) return null;
+    throw error;
+  }
+} });
+export const workspaceMetadata = query({
+  args: { workspaceId: v.id("spectraWorkspaces") },
+  handler: async (ctx, { workspaceId }) => {
+    const { actor, workspace } = await requireWorkspaceCapability(ctx, workspaceId, "read");
+    return { workspace: workspace.status === "active" ? project(workspace, actor) : null };
+  },
+});

@@ -2943,6 +2943,7 @@ export default defineSchema({
     deprecatedAt: v.optional(v.number()),
   })
     .index("by_agent_number", ["agentId", "releaseNumber"])
+    .index("by_agent_status_rollout_number", ["agentId", "status", "rollout", "releaseNumber"])
     .index("by_agent_status", ["agentId", "status"])
     .index("by_school_published", ["schoolId", "publishedAt"]),
 

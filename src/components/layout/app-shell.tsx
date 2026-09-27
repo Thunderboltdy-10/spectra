@@ -53,7 +53,6 @@ import { ViewportReadinessMount } from "@/features/spectra/components/viewport-r
 import { cn } from "@/lib/utils";
 import {
   getSpectraNotificationCenter,
-  getSpectraWorkspaces,
   getSpectraThreads,
   markSpectraArtifactCommentNotificationsRead,
   markSpectraPlannerReminderNotificationsRead,
@@ -65,6 +64,8 @@ import {
   type SpectraWorkspace,
   type SpectraThread,
 } from "@/features/spectra/data/api";
+import { useWorkspaceCatalog } from "@/features/spectra/data/use-catalog-pages";
+import { CatalogProgress } from "@/features/spectra/components/catalog-progress";
 import {
   getAdministration,
   type AdministrationIdentity,
@@ -147,9 +148,8 @@ function ShellNavigation() {
         pathname.slice("/workspace/".length).split("/", 1)[0] ?? "",
       ) || null
     : searchParams.get("workspaceId");
-  const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
-  const [, setWorkspacesLoading] = useState(true);
-  const [, setWorkspacesUnavailable] = useState(false);
+  const workspaceCatalog = useWorkspaceCatalog(selectedWorkspaceId);
+  const workspaces = workspaceCatalog.items;
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [isMacPlatform, setIsMacPlatform] = useState(false);
@@ -272,31 +272,6 @@ function ShellNavigation() {
       });
     return destinations;
   }, [administrationIdentity]);
-
-  const refreshWorkspaces = useCallback(async (force = false) => {
-    try {
-      const next = await getSpectraWorkspaces(force);
-      setWorkspaces(next.filter((workspace) => workspace.status === "active"));
-      setWorkspacesUnavailable(false);
-    } catch {
-      setWorkspacesUnavailable(true);
-    } finally {
-      setWorkspacesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshWorkspaces();
-    const refresh = () => void refreshWorkspaces();
-    const removeChanged = spectraBus.on("workspaces.changed", () => {
-      void refreshWorkspaces(true);
-    });
-    window.addEventListener("focus", refresh);
-    return () => {
-      removeChanged();
-      window.removeEventListener("focus", refresh);
-    };
-  }, [refreshWorkspaces]);
 
   useEffect(() => {
     let active = true;
@@ -958,6 +933,7 @@ function ShellNavigation() {
                   </Link>
                 );
               })}
+              <CatalogProgress catalog={workspaceCatalog} />
               <Link
                 href="/workspace?create=1"
                 className="mt-1 flex min-h-12 items-center gap-3 rounded-surface px-3 py-2 text-ui font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"

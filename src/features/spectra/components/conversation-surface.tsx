@@ -46,7 +46,6 @@ import {
   getSpectraThread,
   getSpectraThreadMessages,
   getSpectraThreadRunTrace,
-  getSpectraWorkspaces,
   postSpectra,
   resolveSpectraOperationConflict,
   submitSpectraAgentFeedback,
@@ -61,6 +60,8 @@ import { useQuery } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
+import { useWorkspaceCatalog } from "../data/use-catalog-pages";
+import { CatalogProgress } from "./catalog-progress";
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
@@ -1624,14 +1625,14 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
 
 function ArtifactResult({
   artifact,
-  workspaces,
   onOpen,
 }: {
   artifact: SpectraArtifact;
-  workspaces: SpectraWorkspace[];
   onOpen?: (id: string) => void;
 }) {
   const [choosing, setChoosing] = useState(false);
+  const workspaceCatalog = useWorkspaceCatalog(undefined, choosing);
+  const workspaces = workspaceCatalog.items;
   const [busy, setBusy] = useState(false);
   const meta = workTypeMeta[artifact.blueprintKey];
   const ArtifactIcon = meta?.icon ?? FileText;
@@ -1728,7 +1729,8 @@ function ArtifactResult({
               {workspace.title}
             </button>
           ))}
-          {workspaces.length === 0 ? (
+          <CatalogProgress catalog={workspaceCatalog} />
+          {workspaces.length === 0 && workspaceCatalog.status === "ready" && workspaceCatalog.isDone ? (
             <span className="text-micro text-[var(--text-tertiary)]">
               Create a workspace first.
             </span>
@@ -2399,7 +2401,6 @@ export function ConversationSurface({
                         <ArtifactResult
                           key={artifact._id}
                           artifact={artifact}
-                          workspaces={workspaces}
                           onOpen={onOpenArtifact}
                         />
                       ))}
@@ -2614,7 +2615,8 @@ export function ThreadConversation({
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);
-  const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
+  const workspaceCatalog = useWorkspaceCatalog();
+  const workspaces = workspaceCatalog.items;
   const [loading, setLoading] = useState(true);
   const activeThreadIdRef = useRef(threadId);
   const refreshRequestRef = useRef(0);
@@ -2622,10 +2624,7 @@ export function ThreadConversation({
   const refresh = useCallback(async () => {
     const requestedThreadId = threadId;
     const requestId = ++refreshRequestRef.current;
-    const [thread, workspaceRows] = await Promise.all([
-      getSpectraThread(requestedThreadId),
-      getSpectraWorkspaces(),
-    ]);
+    const thread = await getSpectraThread(requestedThreadId);
     // A side-panel switch can finish the previous thread's fetch after the
     // new header has already rendered. Never let that stale response replace
     // the newly selected conversation body (or its workspace links).
@@ -2635,7 +2634,6 @@ export function ThreadConversation({
     )
       return;
     setDetail(thread);
-    setWorkspaces(workspaceRows);
   }, [threadId]);
   useEffect(() => {
     setDetail(null);

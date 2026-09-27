@@ -35,6 +35,7 @@ import type * as bridgeSync from "../bridgeSync.js";
 import type * as calendar from "../calendar.js";
 import type * as calendarReadModels from "../calendarReadModels.js";
 import type * as calendarShared from "../calendarShared.js";
+import type * as catalogGraph from "../catalogGraph.js";
 import type * as changeGroups from "../changeGroups.js";
 import type * as collaboration from "../collaboration.js";
 import type * as collaborationClaimAuthorization from "../collaborationClaimAuthorization.js";
@@ -132,6 +133,7 @@ declare const fullApi: ApiFromModules<{
   calendar: typeof calendar;
   calendarReadModels: typeof calendarReadModels;
   calendarShared: typeof calendarShared;
+  catalogGraph: typeof catalogGraph;
   changeGroups: typeof changeGroups;
   collaboration: typeof collaboration;
   collaborationClaimAuthorization: typeof collaborationClaimAuthorization;

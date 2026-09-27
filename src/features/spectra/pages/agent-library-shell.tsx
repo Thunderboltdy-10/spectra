@@ -48,9 +48,7 @@ import { useSpectraRun } from "../ai/use-spectra-run";
 import {
   addSpectraPublicAgent,
   getSpectraArtifact,
-  getSpectraArtifacts,
   getSpectraPublicAgents,
-  getSpectraWorkspaces,
   postSpectra,
   getSpectraInstalledAgents,
   setSpectraAgentInstalled,
@@ -63,6 +61,10 @@ import { formatRelativeTime } from "../components/spectra-view-model";
 import { WorkbenchLiveStack } from "./workbench-live-stack";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
+import { useAgentCatalog, useWorkspaceCatalog } from "../data/use-catalog-pages";
+import { CatalogProgress } from "../components/catalog-progress";
+import { createLatestStudioLoad } from "../components/latest-studio-load";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -220,7 +222,9 @@ function AgentCard({
         ? "Install"
         : card.section === "installed"
           ? "Uninstall"
-          : placed
+          : card.artifact?.placementsComplete === false
+            ? "Use agent"
+            : placed
             ? "Open agent"
             : "Add to workspace";
   return (
@@ -384,13 +388,23 @@ export function AgentLibraryShell({
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedAgentId = initialAgentId ?? searchParams.get("agentId");
-  const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
-  const [publicAgents, setPublicAgents] = useState<SpectraPublicAgent[]>([]);
-  const [installedAgents, setInstalledAgents] = useState<
-    SpectraInstalledAgent[]
-  >([]);
-  const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
-  const [loading, setLoading] = useState(true);
+  const agentCatalog = useAgentCatalog();
+  const { key: catalogKey, refresh: refreshCatalog } = agentCatalog;
+  const [hydrated, setHydrated] = useState<Record<string, SpectraArtifact>>({});
+  const artifacts = useMemo(() => {
+    const rows = new Map(agentCatalog.items.map(item => [item._id, item]));
+    for (const artifact of Object.values(hydrated)) rows.set(artifact._id, artifact);
+    return [...rows.values()];
+  }, [agentCatalog.items, hydrated]);
+  const [publicSources, setPublicSources] = useState<{ key: string | null; public: SpectraPublicAgent[]; installed: SpectraInstalledAgent[] }>({ key: null, public: [], installed: [] });
+  const publicAgents = useMemo(() => publicSources.key === catalogKey ? publicSources.public : [], [catalogKey, publicSources]);
+  const installedAgents = useMemo(() => publicSources.key === catalogKey ? publicSources.installed : [], [catalogKey, publicSources]);
+  const [publicLoading, setPublicLoading] = useState(true);
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const publicRequest = useRef<{ key: string; controller: AbortController; promise: Promise<void> } | null>(null);
+  const currentScope = useRef(catalogKey);
+  currentScope.current = catalogKey;
+  const loading = !agentCatalog.unavailable && (publicLoading || ((agentCatalog.status === "idle" || agentCatalog.status === "loading") && artifacts.length === 0));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [subject, setSubject] = useState("all");
@@ -402,6 +416,8 @@ export function AgentLibraryShell({
   );
   const [placementTarget, setPlacementTarget] =
     useState<SpectraArtifact | null>(null);
+  const workspaceCatalog = useWorkspaceCatalog(undefined, Boolean(placementTarget));
+  const workspaces = workspaceCatalog.items;
   const [shareTarget, setShareTarget] = useState<SpectraArtifact | null>(null);
   const [publicPreview, setPublicPreview] = useState<SpectraPublicAgent | null>(
     null,
@@ -410,8 +426,67 @@ export function AgentLibraryShell({
   const openedQueryRef = useRef<string | null>(null);
   const studio = useArtifactStudioState(
     "spectra.agentLibrary.studio",
-    artifacts,
+    Object.values(hydrated),
   );
+  const [openLoader] = useState(() => createLatestStudioLoad((id, signal) => getSpectraArtifact(id, { signal }).then(result => result.artifact)));
+  const opening = useRef(0);
+  const { openSplit } = studio;
+  const openAgent = useCallback(async (id: string, choosePlacement = false) => {
+    const request = ++opening.current;
+    try {
+      const artifact = await openLoader.load(id);
+      if (!artifact || request !== opening.current) return;
+      if (artifact.blueprintKey !== "agent" || artifact.content === undefined) throw new Error("Agent detail is unavailable.");
+      const detail = { ...artifact, placementsComplete: true };
+      if (choosePlacement && detail.ownership === "shared" && !detail.placements?.length) setPlacementTarget(detail);
+      else {
+        setHydrated(current => ({ ...current, [id]: detail }));
+        openSplit(detail);
+      }
+    } catch (error) {
+      if (request === opening.current) toast.error(error instanceof Error ? error.message : "Could not open this agent.");
+    }
+  }, [openLoader, openSplit]);
+  const closeStudio = () => { opening.current++; openLoader.cancel(); studio.closeStudio(); };
+  const openObjects = useSpectraContextStore(state => state.openObjects);
+  useEffect(() => {
+    const openIds = new Set(openObjects.filter(item => item.type === "artifact").map(item => item.id));
+    setHydrated(current => {
+      const kept = Object.entries(current).filter(([id]) => openIds.has(id));
+      return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
+    });
+  }, [openObjects]);
+  useEffect(() => {
+    // A request counter, not a DOM node: cleanup must invalidate the same ref.
+    const requests = opening;
+    currentScope.current = catalogKey;
+    setHydrated({});
+    setPlacementTarget(null);
+    openedQueryRef.current = null;
+    requests.current++;
+    openLoader.cancel();
+    return () => {
+      currentScope.current = null;
+      publicRequest.current?.controller.abort();
+      publicRequest.current = null;
+      requests.current++;
+      openLoader.cancel();
+    };
+  }, [catalogKey, openLoader]);
+  const missingRestored = JSON.stringify(openObjects.filter(item => item.type === "artifact" && item.id !== requestedAgentId &&
+    !hydrated[item.id] && agentCatalog.items.some(artifact => artifact._id === item.id)).map(item => item.id));
+  useEffect(() => {
+    const ids = JSON.parse(missingRestored) as string[];
+    if (!catalogKey || !ids.length) return;
+    const controller = new AbortController();
+    void Promise.all(ids.map(id => getSpectraArtifact(id, { signal: controller.signal }).catch(() => null))).then(results => {
+      if (controller.signal.aborted) return;
+      const details = results.flatMap(result => result?.artifact.blueprintKey === "agent" && result.artifact.content !== undefined
+        ? [[result.artifact._id, { ...result.artifact, placementsComplete: true }] as const] : []);
+      setHydrated(current => ({ ...current, ...Object.fromEntries(details) }));
+    });
+    return () => controller.abort();
+  }, [catalogKey, missingRestored]);
   const activeAgentArtifact = studio.activeArtifact;
   const activeAgentArtifactId = activeAgentArtifact?._id;
   const [focusMode, setFocusMode] = useState<ComposerFocusMode>(
@@ -432,54 +507,27 @@ export function AgentLibraryShell({
     setFocusMode(activeAgentArtifactId ? "artifact" : "global");
   }, [activeAgentArtifactId]);
 
-  useEffect(() => {
-    if (!activeAgentArtifactId || activeAgentArtifact?.content !== undefined)
-      return;
-    let cancelled = false;
-    void getSpectraArtifact(activeAgentArtifactId)
-      .then(({ artifact }) => {
-        if (cancelled)
-          return;
-        setArtifacts((current) =>
-          current.map((candidate) =>
-            candidate._id === artifact._id ? artifact : candidate,
-          ),
-        );
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [activeAgentArtifact, activeAgentArtifactId]);
-
   const load = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true);
-    try {
-      const [artifactResult, publicResult, installedResult, workspaceResult] =
-        await Promise.all([
-          getSpectraArtifacts({ blueprintKey: "agent", placement: "all" }),
-          getSpectraPublicAgents({ limit: 100 }),
-          getSpectraInstalledAgents(),
-          getSpectraWorkspaces(),
-        ]);
-      setArtifacts(artifactResult.artifacts);
-      setPublicAgents(publicResult.agents);
-      setInstalledAgents(installedResult.agents);
-      setWorkspaces(
-        workspaceResult.filter((workspace) => workspace.status === "active"),
-      );
-      return artifactResult.artifacts;
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not load the Agent Library.",
-      );
-      return [];
-    } finally {
-      if (!quiet) setLoading(false);
+    if (!catalogKey) { setPublicLoading(false); return; }
+    const catalogRefresh = refreshCatalog(quiet);
+    if (publicRequest.current?.key !== catalogKey) {
+      if (!quiet) setPublicLoading(true);
+      const controller = new AbortController();
+      const promise = Promise.all([getSpectraPublicAgents({ limit: 100, signal: controller.signal }), getSpectraInstalledAgents({ signal: controller.signal })])
+        .then(([published, installed]) => {
+          if (currentScope.current !== catalogKey) return;
+          setPublicSources({ key: catalogKey, public: published.agents, installed: installed.agents });
+          setPublicError(null);
+        }).catch((error) => {
+          if (currentScope.current === catalogKey) setPublicError(error instanceof Error ? error.message : "Could not load published agents.");
+        }).finally(() => {
+          if (publicRequest.current?.promise === promise) publicRequest.current = null;
+          if (currentScope.current === catalogKey) setPublicLoading(false);
+        });
+      publicRequest.current = { key: catalogKey, controller, promise };
     }
-  }, []);
+    await Promise.all([catalogRefresh, publicRequest.current.promise]);
+  }, [catalogKey, refreshCatalog]);
 
   useEffect(() => {
     void load();
@@ -502,13 +550,10 @@ export function AgentLibraryShell({
   useEffect(() => {
     if (!requestedAgentId || openedQueryRef.current === requestedAgentId)
       return;
-    const artifact = artifacts.find(
-      (candidate) => candidate._id === requestedAgentId,
-    );
-    if (!artifact) return;
+    if (!catalogKey) return;
     openedQueryRef.current = requestedAgentId;
-    studio.openSplit(artifact);
-  }, [artifacts, requestedAgentId, studio]);
+    void openAgent(requestedAgentId);
+  }, [catalogKey, openAgent, requestedAgentId]);
 
   const cards = useMemo(() => {
     // An agent you built stays in Yours even if you also follow it; an agent
@@ -597,11 +642,8 @@ export function AgentLibraryShell({
         content: payload.content,
         tags: payload.tags,
       });
-      const next = await load();
-      const created = next.find(
-        (artifact) => artifact._id === result.artifactId,
-      );
-      if (created) studio.openSplit(created);
+      await load();
+      await openAgent(result.artifactId);
       toast.success("Agent draft created.");
     } catch (error) {
       toast.error(
@@ -697,7 +739,7 @@ export function AgentLibraryShell({
   }
 
   function openCard(card: LibraryCard) {
-    if (card.artifact) studio.openSplit(card.artifact);
+    if (card.artifact) void openAgent(card.artifact._id);
     else if (card.publicAgent) setPublicPreview(card.publicAgent);
   }
 
@@ -711,11 +753,7 @@ export function AgentLibraryShell({
       return;
     }
     if (!card.artifact) return;
-    if (card.section === "shared" && !card.artifact.placements?.length) {
-      setPlacementTarget(card.artifact);
-      return;
-    }
-    studio.openSplit(card.artifact);
+    void openAgent(card.artifact._id, card.section === "shared");
   }
 
   function closeTab(artifactId: string) {
@@ -766,7 +804,7 @@ export function AgentLibraryShell({
           tabs={studio.tabs}
           dirtyIds={studio.dirtyIds}
           sourceLabel="Agent Library"
-          onClose={studio.closeStudio}
+          onClose={closeStudio}
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeTab}
@@ -874,6 +912,9 @@ export function AgentLibraryShell({
             <div className="mt-8 flex items-center gap-2 text-caption text-[var(--text-secondary)]"><Loader2 className="size-4 animate-spin" /> Loading agents…</div>
           ) : (
             <>
+              <CatalogProgress catalog={agentCatalog} label="agents" />
+              {!agentCatalog.isDone && agentCatalog.items.length > 0 ? <p role="status" className="text-micro text-[var(--text-secondary)]">More agents and filter choices are loading.</p> : null}
+              {publicError ? <button type="button" onClick={() => void load()} className="text-micro text-[var(--text-secondary)]">Published agents could not be loaded. Retry</button> : null}
               <LibrarySectionBlock
                 title="Discover"
                 description="Published agents whose owners opened them to your school. Installing references their release; it does not copy the agent."
@@ -933,7 +974,7 @@ export function AgentLibraryShell({
           panelWidth={panelWidth}
           sourceLabel="Agent Library"
           onPanelWidthChange={setPanelWidth}
-          onClose={studio.closeStudio}
+          onClose={closeStudio}
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeTab}
@@ -1050,7 +1091,8 @@ export function AgentLibraryShell({
                   </button>
                 );
               })}
-              {!workspaces.length ? (
+              <CatalogProgress catalog={workspaceCatalog} />
+              {!workspaces.length && workspaceCatalog.status === "ready" && workspaceCatalog.isDone ? (
                 <div className="rounded-card border border-dashed border-[var(--border-default)] p-6 text-center text-caption text-[var(--text-secondary)]">
                   Create a workspace before placing this agent.
                 </div>

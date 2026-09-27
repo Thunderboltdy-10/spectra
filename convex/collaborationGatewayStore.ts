@@ -268,8 +268,7 @@ export const authorize = internalQuery({
     const loaded = "loaded" in decision ? decision.loaded : null;
     if (
       !loaded ||
-      (loaded.lifecycle !== "active" && loaded.lifecycle !== "draft") ||
-      loaded.schoolId !== actor.schoolId
+      (loaded.lifecycle !== "active" && loaded.lifecycle !== "draft")
     )
       return { allowed: false as const, reason: "access_revoked" as const };
     const resourceType =
@@ -283,11 +282,9 @@ export const authorize = internalQuery({
       )
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
-    // Ownership is the strongest edit grant. A stale or incomplete policy
-    // projection must never turn an owner into a read-level room participant;
-    // the surrounding policy version checks still fail closed on revocation.
+    // The central evaluator includes ownership and exact account invitations.
+    // A cross-school read grant must not become modify via an owner shortcut.
     const canModify =
-      loaded.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
     if (
       loaded.resource.blueprintKey === "quiz" &&
@@ -460,7 +457,6 @@ export const recoverNativeSnapshot = internalMutation({
       !room ||
       room.status === "closed" ||
       (artifact.status !== "active" && artifact.status !== "draft") ||
-      artifact.schoolId !== actor.schoolId ||
       !isArtifactTypeKey(artifact.blueprintKey)
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
@@ -487,7 +483,6 @@ export const recoverNativeSnapshot = internalMutation({
     ]);
     const currentPolicyVersion = policy?.version ?? 0;
     const canModify =
-      artifact.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
     if (
       !decision.allowed ||
@@ -684,7 +679,7 @@ export const bootstrapNative = internalMutation({
         )
         .unique(),
     ]);
-    if (!actor || !artifact || artifact.schoolId !== actor.schoolId || !room || room.status !== "active")
+    if (!actor || !artifact || !room || room.status !== "active")
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
       artifact.blueprintKey === "agent"
@@ -707,7 +702,6 @@ export const bootstrapNative = internalMutation({
     ]);
     const currentPolicyVersion = policy?.version ?? 0;
     const canModify =
-      artifact.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
     if (
       !decision.allowed ||
@@ -900,8 +894,7 @@ export async function appendRoomUpdate(
       !artifact ||
       !room ||
       !["active", "compacting"].includes(room.status) ||
-      (artifact.status !== "active" && artifact.status !== "draft") ||
-      artifact.schoolId !== actor.schoolId
+      (artifact.status !== "active" && artifact.status !== "draft")
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     if (providerContext) {
@@ -929,7 +922,6 @@ export async function appendRoomUpdate(
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
     const canModify =
-      artifact.ownerAccountId === actor.accountId ||
       decision?.capabilities.includes("modify");
     if (
       (!providerContext && (!decision?.allowed || !canModify)) ||
@@ -1426,8 +1418,7 @@ export const checkpoint = internalMutation({
       !artifact ||
       !room ||
       room.status === "closed" ||
-      (artifact.status !== "active" && artifact.status !== "draft") ||
-      artifact.schoolId !== actor.schoolId
+      (artifact.status !== "active" && artifact.status !== "draft")
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
     const resourceType =
@@ -1448,7 +1439,6 @@ export const checkpoint = internalMutation({
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
     const canModify =
-      artifact.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
     if (
       !decision.allowed ||

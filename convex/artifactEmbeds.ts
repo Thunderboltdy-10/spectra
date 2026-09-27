@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
+import { evaluateRetainedPinAccess } from "./retainedPinAccess";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
 import { loadVersionAfter, releaseVersionIfUnpinned } from "./artifactSnapshots";
@@ -71,6 +72,9 @@ async function sourceDecision(
 ) {
   const source = await ctx.db.get(sourceArtifactId);
   if (!source) return { source: null, decision: null };
+  // Ordinary source access never admits a tombstone. Retained consumers use
+  // the exact-pin evaluator below; avoid an extra doomed generic lookup.
+  if (source.status === "deleted") return { source, decision: null };
   const decision = await evaluateAccessForActor(
     ctx,
     actorValue,
@@ -222,9 +226,9 @@ async function projection(
   const sourceUnavailable = source?.status === "deleted";
   const retainedPinnedSource = Boolean(
     sourceUnavailable &&
-      !embed.removedAt &&
-      embed.versionPolicy === "pinned" &&
-      embed.pinnedVersionId,
+    !embed.removedAt &&
+    embed.versionPolicy === "pinned" &&
+    embed.pinnedVersionId,
   );
   const safe: ArtifactEmbedReference & { canConfigure: boolean } = {
     embedId: embed._id,
@@ -247,16 +251,33 @@ async function projection(
   if (embed.removedAt) {
     return { ...safe, state: "removed" as const };
   }
-  if (
-    sourceUnavailable &&
-    !retainedPinnedSource
-  ) {
+  // A retained placement only selects a version. The shared evaluator proves
+  // the actual current placement and independent source rights on every read.
+  const retainedAccess = retainedPinnedSource
+    ? await evaluateRetainedPinAccess(ctx, actorValue, embed._id)
+    : null;
+  if (retainedAccess && !retainedAccess.allowed) {
+    if (
+      retainedAccess.reason === "placement_unavailable" ||
+      retainedAccess.reason === "version_unavailable"
+    )
+      return {
+        ...safe,
+        state: "version_unavailable" as const,
+        ...(retainedAccess.reason === "placement_unavailable" &&
+        retainedAccess.placementRefreshKey
+          ? { placementRefreshKey: retainedAccess.placementRefreshKey }
+          : {}),
+      };
+    return { ...safe, state: "no_access" as const, canRequestAccess: false };
+  }
+  if (sourceUnavailable && !retainedPinnedSource) {
     return { ...safe, state: "deleted" as const };
   }
   if (
     (!source ||
-    !decision?.allowed ||
-    !decision.capabilities.includes("read")) &&
+      !decision?.allowed ||
+      !decision.capabilities.includes("read")) &&
     !retainedPinnedSource
   ) {
     const requests =
@@ -284,7 +305,7 @@ async function projection(
             status: "pending" as const,
             createdAt: pending.createdAt,
           }
-      : undefined,
+        : undefined,
     };
   }
   if (!source) return { ...safe, state: "no_access" as const };
@@ -303,9 +324,11 @@ async function projection(
       }
     | undefined;
   if (embed.versionPolicy === "pinned") {
-    const pinned = embed.pinnedVersionId
-      ? await ctx.db.get(embed.pinnedVersionId)
-      : null;
+    const pinned = retainedAccess?.allowed
+      ? retainedAccess.version
+      : embed.pinnedVersionId
+        ? await ctx.db.get(embed.pinnedVersionId)
+        : null;
     if (!pinned || pinned.artifactId !== source._id) {
       return {
         ...safe,
@@ -323,11 +346,15 @@ async function projection(
       return {
         ...safe,
         state: "version_unavailable" as const,
-        source: {
-          artifactId: source._id,
-          title: source.title,
-          blueprintKey: source.blueprintKey,
-        },
+        ...(retainedAccess?.allowed
+          ? {}
+          : {
+              source: {
+                artifactId: source._id,
+                title: source.title,
+                blueprintKey: source.blueprintKey,
+              },
+            }),
       };
     }
     version = {
@@ -337,17 +364,25 @@ async function projection(
       name: pinned.name,
     };
   }
-  if (source.blueprintKey === "quiz" && decision?.level !== "modify") {
+  const sourceLevel = retainedAccess?.allowed
+    ? retainedAccess.sourceLevel
+    : decision?.level;
+  if (source.blueprintKey === "quiz" && sourceLevel !== "modify") {
     snapshot = projectQuizSnapshotForLearner(snapshot);
   } else if (source.blueprintKey === "timetable") {
     snapshot = projectTimetableSnapshot(snapshot);
   }
   const effectiveInteraction =
-    embed.interaction === "edit" && !decision?.capabilities.includes("modify")
+    retainedAccess?.allowed ||
+    (embed.interaction === "edit" && !decision?.capabilities.includes("modify"))
       ? "read"
       : embed.interaction;
   let runtimeBuild;
   let runtimeResources;
+  const snapshotRecord =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, unknown>)
+      : {};
   if (source.blueprintKey === "code") {
     const candidates =
       embed.versionPolicy === "pinned" && embed.pinnedVersionId
@@ -387,15 +422,13 @@ async function projection(
         publishedAt: selected.publishedAt,
       };
     }
-    const snapshotRecord =
-      snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
-        ? (snapshot as Record<string, unknown>)
-        : {};
     runtimeResources = await codeRuntimeResources(
       ctx,
       actorValue,
       source,
-      snapshotRecord.content ?? source.content,
+      retainedAccess?.allowed
+        ? snapshotRecord.content
+        : (snapshotRecord.content ?? source.content),
     );
   }
   return {
@@ -405,11 +438,27 @@ async function projection(
     effectiveInteraction,
     source: {
       artifactId: source._id,
-      title: source.title,
-      summary: source.summary,
+      title: retainedAccess?.allowed
+        ? typeof snapshotRecord.title === "string"
+          ? snapshotRecord.title
+          : "Pinned work"
+        : source.title,
+      summary: retainedAccess?.allowed
+        ? typeof snapshotRecord.summary === "string"
+          ? snapshotRecord.summary
+          : undefined
+        : source.summary,
       blueprintKey: source.blueprintKey,
-      tags: source.tags,
-      updatedAt: source.updatedAt,
+      tags: retainedAccess?.allowed
+        ? Array.isArray(snapshotRecord.tags)
+          ? snapshotRecord.tags.filter(
+              (tag): tag is string => typeof tag === "string",
+            )
+          : []
+        : source.tags,
+      updatedAt: retainedAccess?.allowed
+        ? retainedAccess.version.createdAt
+        : source.updatedAt,
       snapshot,
     },
     version,
@@ -1131,22 +1180,31 @@ export const runtimeBuildAccess = query({
       actorValue,
       embed.sourceArtifactId,
     );
+    const retainedAccess =
+      source?.status === "deleted" && embed.versionPolicy === "pinned"
+        ? await evaluateRetainedPinAccess(ctx, actorValue, embed._id)
+        : null;
     if (
       !source ||
       source.blueprintKey !== "code" ||
-      source.status === "deleted" ||
-      !decision?.allowed ||
-      !decision.capabilities.includes("read")
+      (source.status === "deleted"
+        ? !retainedAccess?.allowed
+        : !decision?.allowed || !decision.capabilities.includes("read"))
     )
       throw new Error("AUTH_NO_ACCESS");
+    const pinnedVersionId = retainedAccess?.allowed
+      ? retainedAccess.version._id
+      : embed.pinnedVersionId;
+    if (embed.versionPolicy === "pinned" && !pinnedVersionId)
+      throw new Error("RUNTIME_BUILD_UNAVAILABLE");
     const candidates =
-      embed.versionPolicy === "pinned" && embed.pinnedVersionId
+      embed.versionPolicy === "pinned" && pinnedVersionId
         ? await ctx.db
             .query("spectraRuntimeBuilds")
             .withIndex("by_artifact_version", (q) =>
               q
                 .eq("artifactId", source._id)
-                .eq("artifactVersionId", embed.pinnedVersionId!),
+                .eq("artifactVersionId", pinnedVersionId),
             )
             .collect()
         : await ctx.db

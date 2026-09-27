@@ -39,6 +39,8 @@ import { mapOperationArtifactReferences } from "@/features/spectra/operations/de
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
+import { smartCompletionValue, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
+import { waitForSettingsAction } from "./ui-observation";
 import { applyDocumentAcademicOperations, documentAcademicEffectsLanded } from "@/features/spectra/commands/office/document-academic-operations";
 import { verifyAcademicSourceHandles } from "@/features/spectra/commands/office/document-academic-source-verification";
 
@@ -113,11 +115,13 @@ export async function executeApplicationCommand(
         }
       : args;
   const parsed = definition.inputSchema.parse(inputArgs) as Record<string, unknown>;
+  let uiObservation: UiObservationFence | undefined;
   const applyMutation: typeof mutate = async <TArgs extends object, TResult>(_name: string, _args: TArgs) => {
     throwIfAborted(signal);
     if (!operationId) throw new Error("APPLICATION_OPERATION_ID_REQUIRED");
     return mutate<object, TResult>("spectraApplicationWrites:execute", {
       runId, executionId, operationId, expectedCommand: command, expectedArgs: parsed,
+      ...(uiObservation ? { uiObservation } : {}),
     });
   };
   if (definition.aiAvailability === "prohibited")
@@ -163,11 +167,30 @@ export async function executeApplicationCommand(
   // adding a command requires adding its schema and one handler here.
   if (command === "change_spectra_settings") {
     const patch = normalizeAiPreferencePatch(parsed.patch);
-    const settings = await applyMutation("accountPreferences:writeLayer", {
-      actorClerkId,
-      scope: "account",
-      scopeKey: "account",
-      values: patch,
+    const observed = smartCompletionValue(patch) !== undefined && Boolean(operationId);
+    const prepare = () => waitForSettingsAction({ runId, executionId, operationId: operationId! }, signal);
+    let pacing = observed ? await prepare() : undefined;
+    uiObservation = pacing?.fence;
+    let settings: unknown;
+    if (pacing?.committed) settings = pacing.committed.result;
+    else {
+      const apply = () => applyMutation("accountPreferences:writeLayer", {
+        actorClerkId, scope: "account", scopeKey: "account", values: patch,
+      });
+      try {
+        settings = await apply();
+      } catch (error) {
+        // A sealed lease can expire between readiness and the atomic write.
+        // Re-read/expire that epoch once; never retry from timeout alone.
+        if (!observed || !(error instanceof Error) || !error.message.includes("UI_OBSERVATION_STALE")) throw error;
+        pacing = await prepare();
+        uiObservation = pacing.fence;
+        settings = pacing.committed ? pacing.committed.result : await apply();
+      }
+    }
+    if (observed && uiObservation) await onUiEvent?.({
+      key: "settings_toggle_committed",
+      payload: { runId, executionId, operationId, ...uiObservation },
     });
     const changedSection = [
       "ai",
@@ -177,7 +200,7 @@ export async function executeApplicationCommand(
       "privacy",
       "integrations",
     ].find((section) => Object.hasOwn(patch, section));
-    onUiEvent?.({
+    await onUiEvent?.({
       key: "settings_changed",
       payload: {
         targetId: changedSection === "integrations" ? "devices" : changedSection ?? "ai",

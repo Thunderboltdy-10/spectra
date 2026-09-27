@@ -183,6 +183,19 @@ async function retainedFixture(t: ReturnType<typeof convexTest>) {
       createdAt: now,
       updatedAt: now,
     });
+    // Retained-pin authority requires the exact placement in each host's
+    // current content; a confirmed flag alone is not placement evidence.
+    for (const [hostId, embedId, containerRegionId] of [
+      [firstContainerId, firstEmbedId, "document:body:first"],
+      [secondContainerId, secondEmbedId, "document:body:second"],
+    ] as const) {
+      await ctx.db.patch(hostId, {
+        content: { tiptap: { type: "doc", content: [{ type: "spectraReference", attrs: {
+          embedId: String(embedId), containerType: "artifact", containerId: String(hostId), containerRegionId,
+          sourceArtifactId: String(sourceArtifactId), versionPolicy: "pinned", pinnedVersionId: String(pinnedVersionId),
+        } }] } },
+      });
+    }
     const mixedRunId = await ctx.db.insert("spectraAiRuns", {
       ownerAccountId: accountId,
       schoolId,

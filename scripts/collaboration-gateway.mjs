@@ -5,6 +5,7 @@ import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
 import { encodeDurableFrontier } from "../shared/collaboration-durable-frontier.mjs";
+import { readDurableRoomAnchor, recoveryRegionIds } from "../shared/collaboration-recovery.mjs";
 import * as decoding from "lib0/decoding";
 import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
 import {
@@ -1011,9 +1012,24 @@ const server = new Server({
         // A retry after a lost acknowledgement may already be in this Y.Doc.
         // Its no-op is acknowledged only after earlier accepted writes drain.
         messageQueue(socketId).push({ context: { ...context }, connection, noop: true });
+        delete context.recoveryAdmission;
         return;
       }
       if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
+      const recovery = context.recoveryAdmission;
+      if (recovery) {
+        await canonicalRoom(document, context).run(async session => {
+          const refreshed = await session.refresh();
+          const overlap = nativeOverlap({ baseSequence: recovery.anchor.nextSequence, authoredRegions: recovery.regionIds,
+            nativeRegions: refreshed.nativeRegions, historyFloor: refreshed.historyFloor });
+          if (refreshed.stored.roomId !== recovery.anchor.roomId || overlap) {
+            sendGatewayState(connection, { type: "spectra.durable_failed", code: "COLLABORATION_NATIVE_OVERLAP",
+              regionIds: [overlap?.regionId ?? "artifact:structure"], nativeOperationId: overlap?.operationId ?? null,
+              message: "The saved version changed while reconnecting. Your local draft is preserved for review." });
+            throw new Error("COLLABORATION_NATIVE_OVERLAP");
+          }
+        });
+      }
       if (documentUpdate.byteLength > MAX_ASSEMBLED_BYTES) {
         process.stderr.write(
           `[beforeHandleMessage] oversized canonical delta incoming=${incomingUpdate.byteLength} durable=${documentUpdate.byteLength} canonical=${Y.encodeStateAsUpdate(document).byteLength} native=${nativeBefore}\n`,
@@ -1047,10 +1063,12 @@ const server = new Server({
         nativeBefore,
         nativeProjectionBefore,
         baseStateVectorHash,
-        baseSequence: openDocuments.get(durableHeadKey(context))?.nextSequence,
+        baseSequence: recovery?.anchor.nextSequence ?? openDocuments.get(durableHeadKey(context))?.nextSequence,
         messageId: `${context.clientId}:${updateHash}`,
       });
+      delete context.recoveryAdmission;
     } catch (error) {
+      delete context.recoveryAdmission;
       releaseDocumentMessage(socketId);
       const reason =
         error instanceof Error
@@ -1196,10 +1214,10 @@ const server = new Server({
     // A recovery confirmation follows the restored update on the same ordered
     // socket. Capture its durable barrier under the apply gate, then release
     // that gate before I/O so other collaborators can continue editing.
-    if (payload.length > 256) return;
+    if (payload.length > 70_000) return;
     let request;
     try { request = JSON.parse(payload); } catch { return; }
-    if (!["spectra.durable_confirm", "spectra.recovery_request", "spectra.canonical_refresh"].includes(request?.type) ||
+    if (!["spectra.durable_confirm", "spectra.recovery_request", "spectra.recovery_current", "spectra.canonical_refresh"].includes(request?.type) ||
         typeof request.confirmationId !== "string" ||
         !/^[a-zA-Z0-9:-]{1,120}$/.test(request.confirmationId)) return;
     await reauthorize(connection.context);
@@ -1214,9 +1232,31 @@ const server = new Server({
     finally { releaseDocumentMessage(connection.socketId); }
     try {
       await barrier;
-      if (request.type === "spectra.recovery_request" || request.type === "spectra.canonical_refresh") {
+      if (request.type === "spectra.recovery_request" || request.type === "spectra.recovery_current" ||
+          request.type === "spectra.canonical_refresh") {
         await canonicalRoom(document, connection.context).run(async session => {
-          const { document: canonical } = await session.refresh();
+          const refreshed = await session.refresh();
+          const { document: canonical, stored } = refreshed;
+          if (request.type === "spectra.recovery_current") {
+            sendGatewayState(connection, { type: "spectra.recovery_current", confirmationId: request.confirmationId,
+              updateBase64: Buffer.from(Y.encodeStateAsUpdate(canonical)).toString("base64"),
+              anchor: { roomId: stored.roomId, nextSequence: stored.nextSequence, frontierHash: documentFrontierHash(canonical) } });
+            return;
+          }
+          if (request.type === "spectra.recovery_request") {
+            const anchor = readDurableRoomAnchor(request.recoveryAnchor);
+            const regionIds = recoveryRegionIds(request.regionIds);
+            const overlap = anchor ? nativeOverlap({ baseSequence: anchor.nextSequence, authoredRegions: regionIds.length ? regionIds : ["artifact:structure"],
+              nativeRegions: refreshed.nativeRegions, historyFloor: refreshed.historyFloor }) : null;
+            if (!anchor || anchor.roomId !== stored.roomId || anchor.nextSequence > stored.nextSequence || overlap ||
+                (anchor.nextSequence === stored.nextSequence && anchor.frontierHash !== documentFrontierHash(canonical))) {
+              sendGatewayState(connection, { type: "spectra.durable_failed", code: "COLLABORATION_NATIVE_OVERLAP",
+                regionIds: [overlap?.regionId ?? "artifact:structure"], nativeOperationId: overlap?.operationId ?? null,
+                message: "The local draft needs review against the saved version before it can sync." });
+              return;
+            }
+            connection.context.recoveryAdmission = { anchor, regionIds: regionIds.length ? regionIds : ["artifact:structure"] };
+          }
           const vector = request.type === "spectra.recovery_request" ? Y.encodeStateVector(canonical) : null;
           if (vector && vector.byteLength > MAX_COMPACTION_STATE_VECTOR_BYTES)
             throw new Error("COLLABORATION_RECOVERY_VECTOR_SIZE");
@@ -1225,6 +1265,7 @@ const server = new Server({
             mergeCanonicalIntoLive(canonical, document);
           if (request.type === "spectra.recovery_request") sendGatewayState(connection, {
             type: "spectra.recovery_vector", confirmationId: request.confirmationId,
+            admitted: true,
             stateVector: Buffer.from(vector).toString("base64"),
           });
         });

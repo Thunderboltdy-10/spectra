@@ -663,7 +663,10 @@ describe("classroom load browser bundle attachment", () => {
     const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
     expect(gateway).toContain("chain.enqueue");
     expect(gateway).toContain("chainPersistThenCompact");
-    expect(gateway).toContain("if (attempt >= 12) {");
-    expect(gateway).toContain("lastPersistenceFailure = persistenceRecord");
+    // Retries stay bounded at 12 attempts (also bounded per CAS rebase) and
+    // record the last failure for health, then force a canonical reconnect.
+    expect(gateway).toContain("attempt >= 12 ||");
+    expect(gateway).toContain("lastPersistenceFailure = {");
+    expect(gateway).toContain("forceCanonicalReconnect(entries[0].context, persistenceMessage)");
   });
 });

@@ -67,6 +67,7 @@ export const SpectraReferenceNode = Node.create({
   addAttributes() {
     return {
       embedId: { default: null },
+      placementOperationId: { default: null },
       containerType: { default: "artifact" },
       containerId: { default: null },
       containerRegionId: { default: "artifact:structure" },

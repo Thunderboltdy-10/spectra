@@ -22,6 +22,7 @@ import { NativeArtifactYjsModel } from "../work/models/yjs/native-artifact-model
 import { useArtifactCollaboration } from "./use-artifact-collaboration";
 import { realtimeProviderForWorkType } from "../realtime/providers/provider-factory";
 import { nativeRoomBaselineExpected } from "./native-bootstrap";
+import { useLocalRecoveryController } from "./recovery-controller";
 
 const EMPTY_MODEL_SNAPSHOT: ArtifactLiveModelSnapshot = {
   initialized: false,
@@ -193,8 +194,21 @@ export function useArtifactLiveModel(
     [controller, model],
   );
 
+  const recoveryController = useLocalRecoveryController({
+    typeKey: supported ? typeKey : null,
+    transport: collaboration.transport,
+    persistence: collaboration.localPersistence,
+    durability: collaboration.localDurability,
+    level: collaboration.level,
+    syncState: collaboration.state,
+    sessionReady: Boolean(model && modelSnapshot.initialized && modelSnapshot.validity === "valid"),
+    reopen: collaboration.reopenLiveSession,
+    restoreRegions,
+  });
+
   return {
     ...collaboration,
+    ...recoveryController,
     model,
     modelSnapshot,
     liveValueSource,

@@ -47,9 +47,9 @@ export function createCanonicalRoom({ load, expectedRoomId }) {
     }
     stored = latest;
     historyFloor = Math.max(historyFloor, latest.snapshot?.throughSequence ?? 0);
-    for (const entry of latest.updates ?? []) if (entry.nativeReconciliationOperationId) {
+    for (const entry of latest.updates ?? []) if (entry.nativeReconciliationOperationId || entry.providerSourceOperationId) {
       for (const regionId of entry.regionIds ?? []) nativeRegions.set(regionId, {
-        regionId, sequence: entry.sequence, operationId: entry.nativeReconciliationOperationId,
+        regionId, sequence: entry.sequence, operationId: entry.nativeReconciliationOperationId ?? entry.providerSourceOperationId,
       });
     }
     if (latest.liveStateVectorHash && stateVectorHash(document) !== latest.liveStateVectorHash) {

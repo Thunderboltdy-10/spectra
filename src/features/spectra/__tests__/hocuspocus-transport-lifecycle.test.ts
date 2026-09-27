@@ -50,7 +50,7 @@ vi.mock("@hocuspocus/provider", () => ({
     sendStateless = vi.fn((payload: string) => {
       const request = JSON.parse(payload);
       if (request.type === "spectra.recovery_request") hocuspocus.callbacks?.onStateless({ payload: JSON.stringify({
-        type: "spectra.recovery_vector", confirmationId: request.confirmationId, stateVector: "AA==",
+        type: "spectra.recovery_vector", confirmationId: request.confirmationId, admitted: true, stateVector: "AA==",
       }) });
     });
     flushPendingUpdates = vi.fn();
@@ -319,12 +319,22 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     callbacks.onSynced({ state: true });
     const first = provider.sendStateless.mock.calls.map(call => JSON.parse(call[0])).find(value => value.type === "spectra.durable_confirm");
     callbacks.onDisconnect({ event: { code: 1006, reason: "restart" } });
-    callbacks.onSynced({ state: true });
-    const second = provider.sendStateless.mock.calls.map(call => JSON.parse(call[0])).filter(value => value.type === "spectra.durable_confirm").at(-1);
+    // A pending branch never reuses the old provider replica: the next
+    // handshake runs on a fresh provider and must be admitted again.
+    await Promise.resolve();
+    expect(provider.destroy).toHaveBeenCalledOnce();
+    await transport.retry();
+    const reconnected = hocuspocus.provider!;
+    const reconnectedCallbacks = hocuspocus.callbacks!;
+    expect(reconnected).not.toBe(provider);
+    reconnected.synced = true;
+    reconnectedCallbacks.onSynced({ state: true });
+    const second = reconnected.sendStateless.mock.calls.map(call => JSON.parse(call[0])).filter(value => value.type === "spectra.durable_confirm").at(-1);
     expect(second.confirmationId).not.toBe(first.confirmationId);
     callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: first.confirmationId }) });
+    reconnectedCallbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: first.confirmationId }) });
     expect(transport.getSyncSnapshot().unsynchronizedChanges).toBeGreaterThan(0);
-    callbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: second.confirmationId,
+    reconnectedCallbacks.onStateless({ payload: JSON.stringify({ type: "spectra.durable_ack", confirmationId: second.confirmationId,
       frontierHash: createHash("sha256").update(encodeDurableFrontier(Y, transport.document)!).digest("hex") }) });
     await vi.waitFor(() => expect(transport.getSyncSnapshot()).toMatchObject({ state: "synchronized", unsynchronizedChanges: 0 }));
     transport.destroy();

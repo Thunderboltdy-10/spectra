@@ -1,6 +1,6 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
-import { performAppUiEvent } from "./app-choreography-host";
 import { spectraBus } from "../events";
+import { handleSettingsObservationEvent } from "./settings-observation-client";
 
 export type SpectraAiUiEvent = {
   key: string;
@@ -37,10 +37,11 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     return;
   }
   if (event.key === "settings_changed") {
+    const targetId = event.payload?.targetId;
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
       route: "settings",
-      target: "preferences",
+      target: typeof targetId === "string" && targetId ? targetId : "preferences",
       note:
         typeof event.payload?.note === "string"
           ? event.payload.note
@@ -196,10 +197,10 @@ function rememberEvent(event: SpectraAiUiEvent): void {
   });
 }
 
-/** Convert durable semantic UI events into the single Follow AI controller
- * and the app choreography coordinator. Non-followed actors update remembered
- * location without moving the user. */
+/** Remember durable outcomes without replaying actions that already happened.
+ * Non-followed actors update location without moving the user. Prepared local
+ * performances use app-choreography-host before execution, never this feed. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
+  if (handleSettingsObservationEvent(event)) return;
   rememberEvent(event);
-  if (event.runId) performAppUiEvent(event);
 }

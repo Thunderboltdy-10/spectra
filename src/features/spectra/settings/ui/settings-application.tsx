@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,8 @@ import { ProductPageHeader } from "../../components/product-page-header";
 import { SurfaceField } from "../../field/surface-field";
 import { COMMAND_TABS } from "../../commands";
 import { BridgeSettings } from "../../bridge/bridge-settings";
+import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
+import { registerSettingsToggleControl } from "../../collaboration/settings-toggle-control";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
@@ -94,10 +96,27 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
   );
 }
 
-function WritingSettings({ p, update }: SectionProps<"writing">) {
+function SmartCompletionControl({ checked, onCheckedChange, refreshConfirmedPreferences }: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  refreshConfirmedPreferences: () => Promise<void>;
+}) {
+  const control = useRef<HTMLButtonElement>(null);
+  const refresh = useRef(refreshConfirmedPreferences);
+  refresh.current = refreshConfirmedPreferences;
+  useEffect(() => {
+    if (!control.current) return;
+    return registerSettingsToggleControl(control.current, () => refresh.current());
+  }, []);
+  return <Switch ref={control} checked={checked} onCheckedChange={onCheckedChange} aria-label="Smart completion" data-spectra-ai-target={SMART_COMPLETION_TARGET} />;
+}
+
+function WritingSettings({ p, update, refreshConfirmedPreferences }: SectionProps<"writing"> & {
+  refreshConfirmedPreferences: () => Promise<void>;
+}) {
   return (
     <SettingGroup title="Writing suggestions" description="Short phrase completions appear as you type. They never insert text until you accept them.">
-      <ToggleRow label="Smart completion" checked={p.smartCompletion} onCheckedChange={(smartCompletion) => update({ smartCompletion })} />
+      <SettingRow label="Smart completion" control={<SmartCompletionControl checked={p.smartCompletion} onCheckedChange={(smartCompletion) => update({ smartCompletion })} refreshConfirmedPreferences={refreshConfirmedPreferences} />} />
       <ToggleRow label="Quick Chat suggestions" checked={p.quickChatSuggestions} onCheckedChange={(quickChatSuggestions) => update({ quickChatSuggestions })} />
       <ToggleRow label="Document suggestions" checked={p.longFormSuggestions} onCheckedChange={(longFormSuggestions) => update({ longFormSuggestions })} />
       <SettingRow label="Suggestion delay" description={`${p.delayMs} ms after you pause`} control={<input aria-label="Suggestion delay" type="range" min={120} max={1200} step={20} value={p.delayMs} onChange={(event) => update({ delayMs: Number(event.target.value) })} />} />
@@ -251,13 +270,13 @@ function PrivacySettings() {
 
 export function SettingsApplication({ initialSection = "ai" }: { initialSection?: string }) {
   const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
-  const { preferences, hydrated, saveError, saving, update, reset } = useSpectraPreferences();
+  const { preferences, hydrated, saveError, saving, update, reset, refreshConfirmedPreferences } = useSpectraPreferences();
   const saveStatus = preferenceSaveStatus({ saving, saveError });
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
     ai: <ConversationSettings p={preferences.ai} update={updateSection("ai")} />,
-    writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} />,
+    writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     devices: <BridgeSettings />,

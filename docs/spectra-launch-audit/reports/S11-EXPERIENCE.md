@@ -80,7 +80,43 @@ Seven meaningful component regressions were run against the original component f
 
 The approved eight-file batch therefore totals **65 passing tests** across its final seven-file and dock runs. Scoped lint/syntax/diff checks pass. The scoped typecheck limitations are listed above; neither the dock component nor its test emitted diagnostics. Executables finished and lane 1 was explicitly released to the coordinator and replacement RUNTIME `01a0dd80-9b7e-7db3-b1a5-5ccb5beb8fba`. Live chat navigation, multiplayer membership updates, authenticated loading and native export remain integration gates.
 
+## Unit 5: exact insertion identity
+
+Source candidate `722c33f2` preserves `placementOperationId` in the real Tiptap reference schema and includes `versionPolicy` / exact `pinnedVersionId` in presentation reference content. The existing presentation source binding still describes whether the reference is live. New cases exercise actual editor insertion and JSON reload, plus presentation normalization and its Yjs adapter; operation replay must retain the same placement identity.
+
+OFFICE separately owns canonical document projection preservation (`ba68fdd1`); its source is consumed here as a dependency. It prevents a valid typed reference from becoming a paragraph during mirrored-label reconciliation and full block rebuilds. These changes are not proof that a merely confirmed database row is a saved artifact placement.
+
+Validation is pending the guarded test lane. The prepared runner compares both original insertion sources with the same tests and restores their exact working bytes in `finally`, then runs the fixed neighbors. No new passing-test claim is made for this candidate yet.
+
+## Unit 6: retained local draft recovery view
+
+Source candidate: `896c0693` (unvalidated; controller implementation dependency remains outstanding).
+
+The new recovery view consumes COLLAB's exact `220b1b8b` controller types. It uses the existing Dialog, Button and dismissible notice. Dismissal is keyed by stable branch ID, while the persistent Local drafts menu remains available. Inspection reads bounded excerpts on demand; export receives the controller's complete recovery blob only after a click. Current excerpts and mutating actions disappear when current read access is lost, while local inspection/export remain available.
+
+Applying selected regions and adopting current content use the exact reviewed branch generation and room anchor. Duplicate actions are fenced synchronously; stale witnesses require another deliberate review. Artifact changes, closure and superseding inspections abort their view requests and reject late results, including transports that ignore cancellation. No UI method decodes/replays raw Yjs bytes or writes a new local store.
+
+The editor awaits `archiveAndAdoptCurrent` before closing. Failure preserves its current view, dirty flag and conflict. The controller's new `adoptionId` triggers the existing model-to-editor reconciliation once; the old independent React reset and transport destruction are removed. This requires COLLAB to publish adoption only after the replacement live model is ready. The close dialog now accurately says that the draft is kept on the device.
+
+Twelve direct component regression cases are prepared but unrun. The runtime controller/hook implementation remains COLLAB-owned and is not yet present in this checkout; this source candidate must not be integrated without that dependency. The imported contract itself also depends on COLLAB's durable-room-anchor types from `832625c7`. No live/offline recovery acceptance is claimed.
+
+## Unit 7: retained-pin consumers and visible proof refresh
+
+Source candidate: `3c1bcf56` (unvalidated; focused tests prepared).
+
+Follow-up `328f9b51` reuses the head actually checked by the action, avoiding duplicate materialization when the subscription advances from an older requested head. HISTORY's final corrections `c1d0a693`, `cfc87f79`, and `a802cc3c` are also consumed; the production proof files and dedicated proof fixture match its final source. HISTORY reported 27 focused tests passing and no owned scoped type diagnostics; SECURITY reported 25 retained-access cases passing. Those owner results do not substitute for the still-pending EXPERIENCE consumer/UI cases.
+
+The working consumer change uses SECURITY's exact-pin evaluator (`f61599e8`) for deleted sources. Denials return no snapshot or current source metadata. Allowed projections select the verified version, keep existing quiz redaction based on independent source level, expose read-only interaction, and take displayed metadata and resource bindings only from the pinned snapshot. The authenticated runtime selects the same exact pinned build and cannot fall back to a newer publication. Ordinary restored/active source behavior keeps the existing authority path.
+
+Placement denial exposes only the shared opaque host-head key. The recovery view coalesces mounted readers per Convex client/embed, starts only for a visible reference on a visible page, and waits 750ms for a settled head. There is at most one reconstruction in flight per embed; an unavailable, stale, failed or checkpoint-required result waits for an explicit retry or a genuinely new head. Successful proof still requires the subscribed projection to pass source authority before content appears. Entries are released when the final reader and request finish. This is request-coalescing source behavior, not a live latency/heap/traffic measurement.
+
+Dependencies consumed: HISTORY `9cfb7f29`, `ce4c4033`, `f460e7ae`, `d3347cf7`, SECURITY's agreed HISTORY helper `0a200ef3`, OFFICE `ba68fdd1`, and SECURITY `f61599e8`. The only cherry-pick conflicts were absent HISTORY/SECURITY report files; dependency reports were retained unchanged. Fifteen authenticated consumer cases and nine refresh-view cases are prepared; execution remains pending.
+
+On September 27 the coordinator and RUNTIME-R chats both failed with the provider error “The requested item was created under a different Azure OpenAI resource.” No new test lane was assumed and no test runner was started. Source formatting used the existing filesystem guard; the shared dependency junction and target were left intact. Candidate source and private guarded runners remain available for the next authorized validation slot.
+
 ## Architecture and independent decision ledger
+
+September 27 orchestration has resumed in coordinator `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9` with scheduler RUNTIME-R2 `01a0e28a-9b76-7683-bd90-a4a028a1fc3f`. New focused validation requests were sent; old reservations confer no execution authority. Full final passthrough is intentionally deferred. Later final verification should cover actual local-draft restart/quota/revocation/conflict recovery, read-only and modified-source retained pins across all hosts, visible refresh coalescing during sustained editing, authenticated runtime loading, browser theme/export, and native Office round trips. These are distinct from the finite deterministic candidate checks.
 
 Historical conversations inspected with `read_thread`: S9-AI integration `01a0cb47-5362-7f51-83b1-0a2b0775fe3d`, turn `01a0cb47-a868-7672-9b1b-a8eac6a69b5a`; final live S9/S10-AI `01a0d3b1-e48a-7292-b2eb-051452e961ae`, turn `01a0d3b1-e8af-7d72-ae44-47f7cb278cad`. The latter explicitly deferred ownership, chat/side-panel and theme-consistent embeds; its successful contract counts were not authenticated embed acceptance. Relevant ancestry inspected: `f683c055`, `b63daf0c`, with current callers read on `d9aabfb5`.
 

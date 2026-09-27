@@ -99,7 +99,21 @@ describe("AI UI events", () => {
     });
   });
 
-  it("enqueues app choreography when a run id is present", async () => {
+  it("keeps Follow on the prepared settings section after its saved event", () => {
+    const targets: Array<string | undefined> = [];
+    const remove = spectraBus.handle("navigation.show", ({ target }) => { targets.push(target); });
+    followAiActor("settings-run");
+    noteAiSurface({ actorId: "settings-run", route: "settings", target: "writing", note: "Updating Smart completion" });
+    handleSpectraAiUiEvent({
+      key: "settings_changed", runId: "settings-run",
+      payload: { targetId: "writing", note: "Updated Spectra settings" },
+    });
+    expect(getAiSurfaceLocation()).toMatchObject({ target: "writing" });
+    expect(targets).toEqual(["writing"]);
+    remove();
+  });
+
+  it("remembers a saved outcome without replaying a fictitious control action", async () => {
     const { getAppChoreographyCoordinator, __resetAppChoreographyHost } =
       await import("../collaboration/app-choreography-host");
     __resetAppChoreographyHost();
@@ -109,13 +123,8 @@ describe("AI UI events", () => {
       runId: "run-wired",
       payload: { targetId: "folder-1", note: "Created Sources" },
     });
-    expect(getAppChoreographyCoordinator().snapshot()).toContainEqual(
-      expect.objectContaining({
-        actorId: "run-wired",
-        target: "library",
-        status: "performing",
-      }),
-    );
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+    expect(getAiSurfaceLocation()).toMatchObject({ target: "folder-1", note: "Created Sources" });
     __resetAppChoreographyHost();
   });
 

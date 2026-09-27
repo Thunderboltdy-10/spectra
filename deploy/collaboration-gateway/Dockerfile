@@ -13,6 +13,8 @@ ENV SPECTRA_COLLAB_HOST=0.0.0.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY scripts/collaboration-gateway.mjs \
+     scripts/collaboration-artifact-projection.mjs \
+     scripts/collaboration-canonical-room.mjs \
      scripts/serve-collaboration-gateway.mjs \
      scripts/load-collaboration-env.mjs \
      scripts/collaboration-gateway-process.mjs \
@@ -28,6 +30,7 @@ COPY scripts/collaboration-gateway.mjs \
      ./scripts/
 COPY shared/collaboration-framing.mjs \
      shared/collaboration-durable-frontier.mjs \
+     shared/collaboration-recovery.mjs \
      shared/sheet-regions.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \

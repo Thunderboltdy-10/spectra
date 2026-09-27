@@ -26,6 +26,7 @@ import { embedCapabilityEnabled } from "../capabilities";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
 import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
+import { RetainedPinRecovery } from "./retained-pin-recovery";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
@@ -618,9 +619,9 @@ export function ArtifactEmbed({
           : embed.state === "version_unavailable"
             ? {
                 icon: AlertCircle,
-                title: "Pinned version unavailable",
+                title: embed.placementRefreshKey ? "Pinned placement needs verification" : "Pinned version unavailable",
                 detail:
-                  "The retained source version is missing or failed its integrity check.",
+                  embed.placementRefreshKey ? "The saved reference must match the current surrounding work before its retained content can be shown." : "The retained source version is missing or failed its integrity check.",
               }
             : embed.state === "removed"
               ? {
@@ -669,6 +670,9 @@ export function ArtifactEmbed({
             <p className="mt-0.5 max-w-[620px] text-micro leading-4 text-[var(--text-secondary)]">
               {status.detail}
             </p>
+            {embed.state === "version_unavailable" && embed.placementRefreshKey ? (
+              <RetainedPinRecovery embedId={embed.embedId} refreshKey={embed.placementRefreshKey} />
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5 self-end sm:self-auto">
             {embed.state === "no_access" &&
@@ -700,6 +704,7 @@ export function ArtifactEmbed({
               </button>
             ) : null}
             {embed.state === "version_unavailable" &&
+            !embed.sourceUnavailable &&
             embed.canConfigure &&
             onUseLiveVersion ? (
               <button
@@ -711,7 +716,7 @@ export function ArtifactEmbed({
                 Use live source
               </button>
             ) : null}
-            {onRetry ? (
+            {onRetry && !embed.placementRefreshKey ? (
               <button
                 type="button"
                 disabled={busy}

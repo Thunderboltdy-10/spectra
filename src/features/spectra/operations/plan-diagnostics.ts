@@ -98,33 +98,33 @@ export function formatZodPlanPublicError(error: ZodError) {
     return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
   }
   if (/operations$/.test(path) && /cannot contain operations/i.test(message)) {
-    return "Spectra mixed an answer with edit operations. Rephrase as either a question or a specific change to one open artifact.";
+    return "Spectra mixed an answer with an edit. Ask it as a question, or name one change to make in the work you have open.";
   }
   if (
     /operations$/.test(path) &&
     /require at least one operation/i.test(message)
   ) {
-    return "Spectra planned an edit but did not name a concrete change. Open the target artifact and describe the exact update.";
+    return "Spectra planned an edit but did not name a concrete change. Open the work you want changed and describe the exact update.";
   }
   if (/operations(\.\d+)?\.type/i.test(path)) {
-    return "Spectra drafted an unsupported operation. Rephrase the request or open the artifact you want changed, then try again.";
+    return "Spectra drafted a change it cannot make. Rephrase the request or open the work you want changed, then try again.";
   }
   if (
     /operations(\.\d+)?\.input\.(content|contentPatch|blueprintKey|title|tags)/i.test(
       path,
     )
   ) {
-    return "Spectra drafted an incomplete edit plan. Keep the relevant artifact open and try a more specific request.";
+    return "Spectra drafted an incomplete edit. Keep the work open and try a more specific request.";
   }
   if (/operations(\.\d+)?\.input/i.test(path)) {
-    return "Spectra drafted an incomplete edit plan. Keep the relevant artifact open and try a more specific request.";
+    return "Spectra drafted an incomplete edit. Keep the work open and try a more specific request.";
   }
   if (
     /intent\.(mode|requestedArtifactTypes|targetArtifactId|targetWorkspaceId)/i.test(
       path,
     )
   ) {
-    return "Spectra misread the request intent. Name the artifact or workspace explicitly, or open it first, then try again.";
+    return "Spectra was not sure what you meant. Name the work or workspace, or open it first, then try again.";
   }
   if (/choices(\.|$)/i.test(path)) {
     return "Spectra needs a clearer choice from you. Reply with one of the options, or name the object to use.";
@@ -135,9 +135,8 @@ export function formatZodPlanPublicError(error: ZodError) {
   if (/decision|finalResponse|blueprintKey/i.test(path)) {
     return "Spectra returned an incomplete response plan. Your work is unchanged — try again in a moment.";
   }
-  return path
-    ? `Spectra paused after its recovery passes (${path}). Your work is unchanged; retry when ready.`
-    : "Spectra paused after its recovery passes. Your work is unchanged; retry when ready.";
+  // The failing schema path is logged by the caller; it is not a sentence.
+  return "Spectra could not finish this response. Your work is unchanged; try again when you are ready.";
 }
 
 export function formatPlanApplicationPublicError(error: unknown, options?: { explanationOnly?: boolean }) {
@@ -150,7 +149,7 @@ export function formatPlanApplicationPublicError(error: unknown, options?: { exp
       : "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
   if (error instanceof TypeError)
     return explanationOnly ? "The run could not finish its remaining steps."
-      : "Spectra paused after its recovery passes. Your saved work is safe, and this run can be retried.";
+      : "Spectra could not finish its remaining steps. Your saved work is safe, and you can retry this run.";
   const message =
     error instanceof Error ? error.message : "Spectra run failed.";
   if (/PRESENTATION_CITATION_EVIDENCE_REQUIRED/i.test(message)) {
@@ -186,7 +185,7 @@ export function formatPlanApplicationPublicError(error: unknown, options?: { exp
       message,
     )
   ) {
-    return "Spectra's draft did not match the selected object or request. Open the intended artifact or workspace and try a more specific prompt.";
+    return "Spectra's draft did not match what you selected or asked for. Open the work or workspace you meant and try a more specific request.";
   }
   if (/hollow\/incomplete|no scheduled events|empty <main>/i.test(message)) {
     return explanationOnly ? "The result did not pass its completeness check."

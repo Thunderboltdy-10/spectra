@@ -366,7 +366,7 @@ describe("plan diagnostics and schema slip recovery", () => {
           },
         ]),
       ),
-    ).toContain("misread the request intent");
+    ).toContain("was not sure what you meant");
   });
 
   it("surfaces the matching blueprint branch beneath an invalid union", () => {
@@ -415,7 +415,7 @@ describe("plan diagnostics and schema slip recovery", () => {
       formatPlanApplicationPublicError(
         new Error("The proposed artifact update is unrelated to the interpreted request."),
       ),
-    ).toContain("did not match the selected object");
+    ).toContain("did not match what you selected or asked for");
     expect(
       formatPlanApplicationPublicError(
         new Error("Invalid artifact reference. The operation must use an owned id from the current context."),

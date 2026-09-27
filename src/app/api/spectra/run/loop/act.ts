@@ -34,6 +34,7 @@ import {
   sheetsCellHighlightPaths,
 } from "@/features/spectra/components/ai-region-path";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
+import { getWorkDefinition } from "@/features/spectra/work/registry/registry";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { mapOperationArtifactReferences } from "@/features/spectra/operations/dependencies";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
@@ -582,7 +583,7 @@ export function operationEffectProgress(
   if (operation.type === "artifact.create")
     return {
       title: `Building ${operation.input.title}`.slice(0, 88),
-      detail: "Forming the requested content in its live artifact",
+      detail: "Writing the requested content",
       activity: "create",
       operationIndex,
       artifactType: operation.input.blueprintKey,
@@ -600,7 +601,9 @@ export function operationEffectProgress(
         ? "/summary"
         : "/metadata");
   const segments = firstPath.split("/").filter(Boolean);
-  let target = `${operation.input.blueprintKey.replaceAll("_", " ")} content`;
+  // The Live Dock reads this aloud; never a raw blueprint key (CANON D13).
+  const typeName = getWorkDefinition(operation.input.blueprintKey)?.userFacingName;
+  let target = typeName ? `the ${typeName.toLocaleLowerCase()}` : "the work";
   const numbered = (collection: string, singular: string) => {
     const index = segments[0] === collection ? Number(segments[1]) : Number.NaN;
     return Number.isInteger(index) ? `${singular} ${index + 1}` : null;
@@ -640,8 +643,8 @@ export function operationEffectProgress(
       ),
     detail:
       paths.length > 1
-        ? `${paths.length} related fields will change together`
-        : "Changing only the requested semantic region",
+        ? `${paths.length} related parts will change together`
+        : "Changing only the part you asked about",
     activity: "edit",
     operationIndex,
     artifactType: operation.input.blueprintKey,

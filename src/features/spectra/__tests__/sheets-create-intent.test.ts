@@ -366,7 +366,7 @@ describe("vague sheets create intent", () => {
     );
     expect(isRepairablePlanFailure(error)).toBe(true);
     expect(formatPlanApplicationPublicError(error)).toContain(
-      "did not match the selected object or request",
+      "did not match what you selected or asked for",
     );
     expect(
       isRepairablePlanFailure(

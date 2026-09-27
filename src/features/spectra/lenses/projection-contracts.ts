@@ -603,7 +603,17 @@ export const pptxProjectionSchema = z
 export type PptxSlideProjection = z.infer<typeof pptxSlideProjectionSchema>;
 export type PptxProjection = z.infer<typeof pptxProjectionSchema>;
 
+export const pptxImageAssetSchema = z.object({
+  assetId: z.string().min(1).max(300),
+  mediaType: z.enum(["image/png", "image/jpeg"]),
+  sha256: semanticDigestSchema,
+  name: z.string().max(500).optional(),
+}).strict();
+export type PptxImageAsset = z.infer<typeof pptxImageAssetSchema>;
+
 export const pptxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("insert-image"), slideId: z.string(), objectId: z.string().min(1).max(500), image: pptxImageAssetSchema, x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive(), rotation: z.number(), altText: z.string().max(500).optional(), readingOrder: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("replace-image"), slideId: z.string(), shapeId: z.string(), image: pptxImageAssetSchema }).strict(),
   z.object({ kind: z.literal("set-transition"), slideId: z.string(), transition: pptxTransitionSchema }).strict(),
   z.object({ kind: z.literal("set-title"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),

@@ -407,6 +407,12 @@ describe("presentation command set", () => {
 });
 
 describe("presentation honesty under strict-native", () => {
+  it("enables native picture insertion while keeping video unavailable", () => {
+    const insert = bindings().find((entry) => entry.id === "insert.image")!;
+    const video = bindings().find((entry) => entry.id === "insert.video")!;
+    expect(commandForBinding("presentation", insert, 0).availability(fullContext("strict-native")).state).toBe("enabled");
+    expect(commandForBinding("presentation", video, 0).availability(fullContext("strict-native")).state).toBe("disabled");
+  });
   it("refuses an unmodeled native transition while enabling supported native effects", () => {
     const handlers = presentationStubHandlers();
     const binding = presentationCommandBindings({ ...handlers, state: { ...handlers.state, transitionPreserved: true } }).find((entry) => entry.id === "animate.transition")!;

@@ -17,6 +17,7 @@ import { z } from "zod";
 import {
   pptxProjectionSchema,
   pptxTransitionSchema,
+  pptxImageAssetSchema,
   presentationObjectProjectionSchema,
   xlsxProjectionSchema,
   type PptxOperation,
@@ -1797,6 +1798,10 @@ export function pptxOperationsBetween(
       const value = objectData(object);
       const nextText = textOf(object);
       if (!previousObject) {
+        if (object.type === "image") {
+          const image = pptxImageAssetSchema.parse({ assetId: value.assetId, mediaType: value.mediaType, sha256: value.sha256, ...(value.name !== undefined ? { name: value.name } : {}) });
+          operations.push({ kind: "insert-image", slideId: slide.id, objectId: object.id, image, x: object.x, y: object.y, width: object.width, height: object.height, rotation: object.rotation, ...(object.altText !== undefined ? { altText: object.altText } : {}), ...(object.readingOrder !== undefined ? { readingOrder: object.readingOrder } : {}) });
+        }
         if (object.type === "group") {
           const childShapeIds = slide.objects
             .filter((candidate) => candidate.parentId === object.id)
@@ -1825,6 +1830,13 @@ export function pptxOperationsBetween(
           text: nextText,
         });
       if (!nativeShapeId) continue;
+      if (object.type === "image" && typeof value.assetId === "string") {
+        const prior = objectData(previousObject);
+        if (["assetId", "sha256", "mediaType", "name"].some((key) => value[key] !== prior[key])) {
+          const image = pptxImageAssetSchema.parse({ assetId: value.assetId, mediaType: value.mediaType, sha256: value.sha256, ...(value.name !== undefined ? { name: value.name } : {}) });
+          operations.push({ kind: "replace-image", slideId: slide.id, shapeId: nativeShapeId, image });
+        }
+      }
       if (equal(object.hyperlink, previousObject.hyperlink) === false)
         operations.push({
           kind: "set-object-link",

@@ -18,6 +18,7 @@ import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, Len
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
 import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
 import { readPptxTransition, writePptxTransition } from "./pptx-transition";
+import { readPptxImageAsset, writePptxImage, type PptxMediaWriteOptions } from "./pptx-media";
 
 export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
@@ -309,6 +310,7 @@ async function slideObjects(
     const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
     const isTitle = ["title", "ctrTitle"].includes(placeholder?.getAttribute("type") ?? "");
     const type = shape.localName === "pic" ? "image" : shape.localName === "graphicFrame" ? (descendants(shape).some((node) => node.localName === "chart") ? "chart" : "table") : "text";
+    const authoredImage = type === "image" ? await readPptxImageAsset(deck, slidePartName, shape) : undefined;
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
@@ -323,6 +325,7 @@ async function slideObjects(
             nativeParagraphIndex: 0,
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
             ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
+            ...(authoredImage ? authoredImage.image : {}),
           };
     const nativeObjectLink = hyperlinkFor(deck, slidePartName, firstDescendant(shape, PML_NAMESPACE, "cNvPr"));
     const uniformTextLink = type === "text"
@@ -336,7 +339,7 @@ async function slideObjects(
     const chart = type === "chart" ? content as PresentationChartContent : undefined;
     const hiddenObject = ["1", "true", "on"].includes((firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("hidden") ?? "").toLowerCase());
     objects.push({
-      id: `${slideId}:shape:${nativeShapeId}`,
+      id: authoredImage?.objectId ?? `${slideId}:shape:${nativeShapeId}`,
       type,
       ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas),
       content,
@@ -451,9 +454,9 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   for (const [feature, cls, reason] of regionClasses) {
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(pptxSemanticContent({ slides }))));
   const themeFonts = await presentationThemeFonts(deck);
-  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
+  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest: "0".repeat(64), canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
+  projection.nativeBinding.semanticDigest = await pptxProjectionSemanticDigest(projection);
   return { projection, fidelityMap };
 }
 
@@ -1745,7 +1748,7 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   await updateEmbeddedWorkbook(deck, chartPart, root, input.series);
 }
 
-async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta) {
+async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta, options?: PptxMediaWriteOptions) {
   const deck = await Presentation.open(carry.safePayload ?? carry.payload); const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   // A slide added in this delta has no part until it exists, so its caller-side
   // id is mapped to the real one and every later operation in the same delta —
@@ -1786,7 +1789,22 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     const slide = slideFor(deck, resolveSlideId(operation.slideId));
-    if (operation.kind === "add-text-box") {
+    if (operation.kind === "insert-image") {
+      const added = await writePptxImage(deck, slide.partName, slide.root(), operation.image, operation.objectId, options);
+      setShapeGeometry(added, operation, {
+        width: carry.projection.nativeBinding.canvasWidthEmu ?? 12192000,
+        height: carry.projection.nativeBinding.canvasHeightEmu ?? 6858000,
+      });
+      if (operation.altText !== undefined) setAltText(added, operation.altText);
+      if (operation.readingOrder !== undefined) moveShapeToOrder(slide.root(), shapeId(added)!, operation.readingOrder);
+    }
+    else if (operation.kind === "replace-image") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_IMAGE_MISSING", "The picture being replaced no longer exists on this slide.");
+      const prior = await readPptxImageAsset(deck, slide.partName, shape);
+      await writePptxImage(deck, slide.partName, slide.root(), operation.image, prior?.objectId ?? `${resolveSlideId(operation.slideId)}:shape:${operation.shapeId}`, options, shape);
+    }
+    else if (operation.kind === "add-text-box") {
       const added = addTextBox(slide.root(), operation.text);
       const link = normalizePresentationHyperlink(operation.hyperlink);
       if (link) {
@@ -1928,10 +1946,10 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
 export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
   format: "pptx",
   async open(payload, profile = "strict-native"): Promise<LensOpenResult<PptxProjection>> { let deck: Presentation; let safePayload: Uint8Array; try { safePayload = await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS); deck = await Presentation.open(safePayload); } catch (error) { throw new PptxLensError("PPTX_CORRUPT", `This PowerPoint package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); } const { projection, fidelityMap } = await projectPresentation(deck, profile); return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, safePayload, projection }, capabilities: this.capabilities(profile, fidelityMap) }; },
-  mutate: applyDelta,
-  async materialize({ projection, carry }) {
+  async mutate(carry, delta, options) { return applyDelta(carry, delta, options as PptxMediaWriteOptions | undefined); },
+  async materialize({ projection, carry, options }) {
     const operations = pptxOperationsBetween(carry.projection, projection);
-    return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
+    return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }, options as PptxMediaWriteOptions | undefined) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
+  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "insert-image", available: true }, { id: "replace-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: true, reason: "Fade, leftward Push and Dissolve use native effects and exact durations. Unmodeled transitions stay protected on their own slides." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "insert_image", "replace_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "set_transition", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

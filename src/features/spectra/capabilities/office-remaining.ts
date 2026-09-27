@@ -1508,7 +1508,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "insert.image",
     "Insert a picture on this slide.",
-    { reason: R.newMedia, touches: ["media"] },
+    { delta: "insert-image", touches: ["images"] },
   ],
   [
     "insert.video",
@@ -1969,7 +1969,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "image.replace",
     "Replace this picture.",
-    { reason: R.newMedia, touches: ["media"] },
+    { delta: "replace-image", touches: ["images"] },
   ],
   [
     "accessibility.altText",

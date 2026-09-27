@@ -6,9 +6,10 @@ import { pptxLens } from "../lenses/pptx-lens";
 import { sha256Payload } from "../lenses/docx-lens";
 import { pptxArtifactContent } from "../lenses/office-content";
 
-const io = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn() }));
+const io = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn(), resolveAsset: vi.fn() }));
 vi.mock("@/lib/convex-server", () => ({ convexQuery: io.query, convexMutation: io.mutation, hydrateContentForWrite: vi.fn(), checkpointArtifactDurableContent: vi.fn() }));
 vi.mock("../lenses/native-payload-server", () => ({ fetchVerifiedNativePayload: io.fetchNative, fetchStoredNativeBase: vi.fn(), uploadNativePayload: io.upload, ensureImportedNativePayload: vi.fn() }));
+vi.mock("../lenses/asset-resolver-server", () => ({ resolveArtifactAssetBytes: io.resolveAsset }));
 const workId = "s11-pptx-route" as Id<"spectraArtifacts">;
 const options = { prepareOnly: true, aiOperation: { runId: "run-s11-pptx", executionId: "attempt-s11-pptx", operationId: "operation-s11-pptx" } };
 
@@ -16,6 +17,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   io.mutation.mockImplementation(async () => { throw new Error("UNEXPECTED_NATIVE_EFFECT"); });
   io.upload.mockResolvedValue({ payloadRef: "retained-pptx-result", deduplicated: false });
+  io.resolveAsset.mockRejectedValue(new Error("ASSET_NOT_AUTHORIZED"));
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -30,6 +32,39 @@ async function fixture(input?: Uint8Array) {
 }
 
 describe("PPTX actual materialization route", () => {
+  it.each(["insert", "replace"] as const)("resolves durable bytes and prepares a verified native image %s", async (change) => {
+    const { content } = await fixture(new Uint8Array(await readFile("fixtures/office/pptx/media-preservation.pptx")));
+    const png = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+    const image = { assetId: "route-image-asset", name: "route-image.png", mediaType: "image/png", sha256: await sha256Payload(png) };
+    io.resolveAsset.mockResolvedValue({ ...image, bytes: png });
+    const slide = content.slides[0]!;
+    let objectId: string;
+    if (change === "insert") {
+      objectId = "route-new-picture";
+      slide.objects.push({ id: objectId, type: "image", x: 90, y: 100, width: 300, height: 180, rotation: 0, content: image, readingOrder: slide.objects.length });
+    } else {
+      const picture = content.slides.flatMap((item) => item.objects).find((object) => object.type === "image")!;
+      objectId = picture.id;
+      picture.content = { ...(picture.content as object), ...image };
+    }
+    const result = await materializeOfficeArtifact(workId, content, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared" || result.nativeCandidate.destination !== "bridge") throw new Error("Expected a prepared bridge candidate");
+    expect(io.resolveAsset).toHaveBeenCalledWith(image.assetId);
+    expect(io.mutation).not.toHaveBeenCalled();
+    const actual = await pptxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
+    expect(actual.projection.slides.flatMap((item) => item.objects).find((object) => object.id === objectId)!.content).toMatchObject(image);
+    expect(result.nativeCandidate.queue.nativeReceipt.semantic.resultDigest).toBe(actual.projection.nativeBinding.semanticDigest);
+  });
+
+  it("stops an inaccessible durable image before upload or effect", async () => {
+    const { content } = await fixture();
+    content.slides[0]!.objects.push({ id: "inaccessible-image", type: "image", x: 90, y: 100, width: 300, height: 180, rotation: 0, content: { assetId: "denied", mediaType: "image/png", sha256: "0".repeat(64) } });
+    await expect(materializeOfficeArtifact(workId, content, options)).rejects.toThrow("ASSET_NOT_AUTHORIZED");
+    expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
   it.each(["remove", "reorder"] as const)("prepares a verified native %s with complete list authority and no early effect", async (change) => {
     const { content } = await fixture();
     const slide = content.slides.find((item) => item.objects.length > 1)!;

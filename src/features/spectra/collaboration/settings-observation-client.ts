@@ -11,7 +11,7 @@ import { settingsToggleControls } from "./settings-toggle-control";
 import { disengageFollowAi, getFollowedAiActorId, isFollowingAi, noteAiSurface, subscribeFollowAi } from "./follow-ai";
 
 let clientId: string | undefined;
-const runs = new Map<string, string>();
+const runs = new Map<string, { executionId: string }>();
 type Pending = { action: SettingsToggleAction; mode: "ordinary" | "follow"; confirmed: boolean; recovering: boolean; resolve: () => void; reject: (error: Error) => void };
 const pending = new Map<string, Pending>();
 const delivered = new Map<string, { key: string }>();
@@ -52,13 +52,16 @@ function sendInterest(runId: string, payload: Record<string, unknown>): Promise<
 
 /** One interest update per discovered attempt or actual mode transition. */
 export function observeUiRun(runId: string, executionId?: string, register = true): void {
-  if (!executionId || runs.get(runId) === executionId) return;
-  runs.set(runId, executionId);
-  if (runs.size > 24) runs.delete(runs.keys().next().value!);
+  if (!executionId || runs.get(runId)?.executionId === executionId) return;
+  stopObservingUiRun(runId);
+  runs.set(runId, { executionId });
+  if (runs.size > 24) stopObservingUiRun(runs.keys().next().value!);
   if (register) void publishInterest(runId, executionId);
 }
 
 async function publishInterest(runId: string, executionId: string, release = false, releaseCurrent = false) {
+  const lifetime = runs.get(runId);
+  if (lifetime?.executionId !== executionId) return;
   const observer = uiObserverForRun(runId);
   try {
     const current = currentActions.get(runId);
@@ -67,6 +70,9 @@ async function publishInterest(runId: string, executionId: string, release = fal
       ...(current?.executionId === executionId ? { operationId: current.operationId } : {}),
       ...(releaseCurrent ? { releaseCurrent: true } : {}),
     }) as { observation?: unknown };
+    // Interest can finish after Stop, unmount, or a replacement attempt. It
+    // must not resurrect a performer or change the new attempt's Follow state.
+    if (runs.get(runId) !== lifetime) return;
     const joined = uiObservationSnapshotSchema.safeParse(response.observation);
     if (joined.success && joined.data.phase === "waiting" && joined.data.action &&
       joined.data.participants?.some((entry) => entry.clientId === clientId && !entry.outcome) &&
@@ -75,7 +81,8 @@ async function publishInterest(runId: string, executionId: string, release = fal
       await performPrepared(joined.data);
     }
   } catch {
-    endFollow(runId, "Follow AI could not connect to this action. The task continues.");
+    if (runs.get(runId) === lifetime)
+      endFollow(runId, "Follow AI could not connect to this action. The task continues.");
   }
 }
 
@@ -105,10 +112,10 @@ export function startSettingsObservationClient(): () => void {
     if (previousFollow === next) return;
     const changed = new Set([previousFollow, next]);
     previousFollow = next;
-    for (const runId of changed) if (runId && runs.has(runId)) void publishInterest(runId, runs.get(runId)!, false, runId !== next);
+    for (const runId of changed) if (runId && runs.has(runId)) void publishInterest(runId, runs.get(runId)!.executionId, false, runId !== next);
   });
   const visibility = () => {
-    for (const [runId, executionId] of runs) void publishInterest(runId, executionId, document.visibilityState !== "visible");
+    for (const [runId, { executionId }] of runs) void publishInterest(runId, executionId, document.visibilityState !== "visible");
     if (document.visibilityState !== "visible" && previousFollow)
       endFollow(previousFollow, "Follow AI paused because this tab is hidden. The task continues.");
   };

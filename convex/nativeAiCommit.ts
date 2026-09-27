@@ -45,7 +45,7 @@ export const head = query({
 
 type NativeAdmissionInput = {
   accountId: Id<"accounts">; artifactId: Id<"spectraArtifacts">;
-  nativeSource: NativeAiCommitArgs["expected"]["nativeSource"]; nativeCandidate: NativeAiCandidate;
+  nativeSource: NonNullable<NativeAiCommitArgs["expected"]["nativeSource"]>; nativeCandidate: NativeAiCandidate;
 };
 type MaterializationActor = Parameters<typeof queueMaterializationInTransaction>[1];
 type MaterializationEffects = Parameters<typeof queueMaterializationInTransaction>[3];
@@ -154,6 +154,10 @@ async function admittedResponse(ctx: MutationCtx, stored: AdmittedAiCommit, dupl
   return { ...stored, duplicate, admitted: await admittedUpdateDescriptor(ctx, roomId, stored.receipt.sequence) };
 }
 
+/** The one AI admission for live artifacts. With a verified native candidate it
+ * also advances the native outbox/cloud replica; without one (no native file
+ * binding) it admits the same exact Yjs delta, history and operation receipt,
+ * so a retry after an acknowledged save replays instead of writing again. */
 export const commit = internalMutation({
   args: nativeAiCommitArgs,
   handler: async (ctx, args): Promise<AdmittedAiCommit> => {
@@ -167,7 +171,9 @@ export const commit = internalMutation({
       return admittedResponse(ctx, stored, true);
     }
     if (await nativeAiRequestDigest(args) !== args.requestDigest) throw new Error("AI_NATIVE_REQUEST_DIGEST_MISMATCH");
-    const { append, expected } = args;
+    const { append, expected, nativeCandidate } = args;
+    const nativeSource = expected.nativeSource;
+    if (Boolean(nativeSource) !== Boolean(nativeCandidate)) throw new Error("AI_NATIVE_ENVELOPE_INVALID");
     const actor = await getActorForAccountId(ctx, append.accountId);
     const artifact = await ctx.db.get(append.artifactId);
     const room = await ctx.db.get(expected.roomId);
@@ -177,14 +183,14 @@ export const commit = internalMutation({
         !["active", "compacting"].includes(room.status) || artifact.updatedAt !== expected.artifactUpdatedAt ||
         (artifact.contentHash ?? null) !== expected.contentHash || (artifact.currentVersionId ?? null) !== expected.currentVersionId)
       throw new Error("AI_NATIVE_CANONICAL_STALE");
-    const native = await verifyNativeAdmissionCandidate(ctx, { accountId: append.accountId, artifactId: append.artifactId,
-      nativeSource: expected.nativeSource, nativeCandidate: args.nativeCandidate });
+    const native = nativeSource && nativeCandidate ? await verifyNativeAdmissionCandidate(ctx, { accountId: append.accountId,
+      artifactId: append.artifactId, nativeSource, nativeCandidate }) : null;
     const beforeProjection = await parseGatewayProjection(ctx, args.beforeProjectionJson, args.beforeProjectionHash,
       artifact, { accountId: actor.accountId, policyVersion: append.policyVersion });
     const afterProjection = await parseGatewayProjection(ctx, append.projectionJson, append.projectionHash,
       artifact, { accountId: actor.accountId, policyVersion: append.policyVersion });
     if (!beforeProjection || !afterProjection) throw new Error("AI_NATIVE_PROJECTION_REQUIRED");
-    if (({ docx: "document", xlsx: "sheets", pptx: "presentation" } as const)[native.receipt.format] !== artifact.blueprintKey ||
+    if ((native && ({ docx: "document", xlsx: "sheets", pptx: "presentation" } as const)[native.receipt.format] !== artifact.blueprintKey) ||
         beforeProjection.schemaVersion !== artifact.schemaVersion || afterProjection.schemaVersion !== artifact.schemaVersion)
       throw new Error("AI_NATIVE_TYPE_MISMATCH");
     const admission = await assertVerifiedAiArtifactWriteAdmission(ctx, identity);
@@ -193,37 +199,17 @@ export const commit = internalMutation({
     await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
     await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
     await commitHumanCheckpoint(ctx, artifact._id, "Your work before Spectra edited", { kind: "pre_ai_checkpoint" });
-    const appended = await appendRoomUpdate(ctx, append, { deferAiHistory: true });
+    // Without native sources the appender's ordinary AI history boundary is
+    // the whole history effect; it already fits oversized snapshots off-row.
+    const appended = await appendRoomUpdate(ctx, append, { deferAiHistory: Boolean(native) });
     if (appended.duplicate) throw new Error("AI_NATIVE_BUSINESS_RECEIPT_MISSING");
-    const updated = (await ctx.db.get(artifact._id))!;
-    const after = { title: updated.title, summary: updated.summary, content: updated.content, tags: updated.tags };
-    const baseSnapshot = { ...before, nativeSources: [{ sourcePayloadHash: native.source.hash }] };
-    const finalSnapshot = { ...after, nativeSources: [{ sourcePayloadHash: native.resultHash }] };
-    if (new TextEncoder().encode(JSON.stringify({ baseSnapshot, finalSnapshot })).byteLength > 850_000)
-      throw new Error("AI_NATIVE_SNAPSHOT_REQUIRED");
-    let groupId = "changeGroupId" in appended ? appended.changeGroupId : undefined;
-    if (groupId) {
-      const group = await ctx.db.get(groupId);
-      if (!group || group.status !== "open" || group.source !== "ai" || group.runId !== args.aiOperation.runId ||
-          group.actorAccountId !== actor.accountId || group.operationIds.length !== 1 || group.operationIds[0] !== args.aiOperation.operationId)
-        throw new Error("AI_NATIVE_HISTORY_SCOPE_INVALID");
-      await ctx.db.patch(groupId, { baseSnapshot, finalSnapshot });
-    } else {
-      groupId = await ctx.db.insert("changeGroups", { artifactId: artifact._id, schoolId: artifact.schoolId,
-        source: "ai", actorAccountId: actor.accountId, clientId: append.clientId, runId: args.aiOperation.runId,
-        operationIds: [args.aiOperation.operationId], regionIds: append.regionIds, baseStateVectorHash: append.baseStateVectorHash,
-        finalStateVectorHash: append.stateVectorHash, finalIntegrityHash: append.projectionHash,
-        baseVersionId: updated.currentVersionId, baseSnapshot, finalSnapshot, status: "open", openedAt: Date.now(), lastActivityAt: Date.now() });
-    }
-    const history = await commitChangeGroup(ctx, groupId, { source: "ai", provenance: { kind: "ai_native_commit",
-      operationId: args.aiOperation.operationId, requestDigest: args.requestDigest } });
-    const versionId = history.status === "committed" ? history.versionId : undefined;
-    if (versionId) await attestNativeVersionOwnership(ctx, versionId, [native.source.payloadRef, native.resultRef]);
-    const effects = { actorKind: "ai" as const, canonicalProjection: "durable" as const, runId: args.aiOperation.runId };
-    const nativeResult = await applyNativeAdmissionEffect(ctx, actor, args.nativeCandidate, native, effects);
+    const nativeResult = native && nativeCandidate
+      ? await admitNativeHistoryAndEffect(ctx, args, { actor, artifact, before, appended, native, nativeCandidate })
+      : { versionId: await liveAiHistoryVersion(ctx, args, actor.accountId, appended), nativeResult: null };
     const updateIdentity = await nativeAiUpdateIdentity(append);
     const result: AdmittedAiCommit = { state: "committed", duplicate: false,
-      receipt: { roomId: room._id, sequence: appended.sequence, updateDigest: updateIdentity.updateDigest, versionId, nativeResult },
+      receipt: { roomId: room._id, sequence: appended.sequence, updateDigest: updateIdentity.updateDigest,
+        versionId: nativeResult.versionId, nativeResult: nativeResult.nativeResult },
       admitted: { encoding: "replay", roomId: room._id, throughSequence: appended.sequence } };
     await ctx.db.patch(admission.operation._id, { output: { ...artifactOutput(admission.operation.output),
       artifactWriteReceipt: { scope: admission.operationDigest, requestDigest: args.requestDigest, result,
@@ -231,3 +217,49 @@ export const commit = internalMutation({
     return admittedResponse(ctx, result, false);
   },
 });
+
+type AppendedAiUpdate = Awaited<ReturnType<typeof appendRoomUpdate>>;
+
+/** The appender committed this attempt's AI group; bind it to the operation. */
+async function liveAiHistoryVersion(ctx: MutationCtx, args: NativeAiCommitArgs, accountId: Id<"accounts">, appended: AppendedAiUpdate) {
+  const group = "changeGroupId" in appended && appended.changeGroupId ? await ctx.db.get(appended.changeGroupId) : null;
+  if (!group || group.source !== "ai" || group.runId !== args.aiOperation.runId || group.actorAccountId !== accountId ||
+      group.operationIds.length !== 1 || group.operationIds[0] !== args.aiOperation.operationId)
+    throw new Error("AI_NATIVE_HISTORY_SCOPE_INVALID");
+  return group.versionId;
+}
+
+async function admitNativeHistoryAndEffect(ctx: MutationCtx, args: NativeAiCommitArgs, input: {
+  actor: NonNullable<Awaited<ReturnType<typeof getActorForAccountId>>>; artifact: Doc<"spectraArtifacts">;
+  before: { title: string; summary?: string; content: unknown; tags: string[] }; appended: AppendedAiUpdate;
+  native: VerifiedNativeAdmission; nativeCandidate: NativeAiCandidate;
+}) {
+  const { actor, artifact, before, appended, native } = input;
+  const append = args.append;
+  const updated = (await ctx.db.get(artifact._id))!;
+  const after = { title: updated.title, summary: updated.summary, content: updated.content, tags: updated.tags };
+  const baseSnapshot = { ...before, nativeSources: [{ sourcePayloadHash: native.source.hash }] };
+  const finalSnapshot = { ...after, nativeSources: [{ sourcePayloadHash: native.resultHash }] };
+  if (new TextEncoder().encode(JSON.stringify({ baseSnapshot, finalSnapshot })).byteLength > 850_000)
+    throw new Error("AI_NATIVE_SNAPSHOT_REQUIRED");
+  let groupId = "changeGroupId" in appended ? appended.changeGroupId : undefined;
+  if (groupId) {
+    const group = await ctx.db.get(groupId);
+    if (!group || group.status !== "open" || group.source !== "ai" || group.runId !== args.aiOperation.runId ||
+        group.actorAccountId !== actor.accountId || group.operationIds.length !== 1 || group.operationIds[0] !== args.aiOperation.operationId)
+      throw new Error("AI_NATIVE_HISTORY_SCOPE_INVALID");
+    await ctx.db.patch(groupId, { baseSnapshot, finalSnapshot });
+  } else {
+    groupId = await ctx.db.insert("changeGroups", { artifactId: artifact._id, schoolId: artifact.schoolId,
+      source: "ai", actorAccountId: actor.accountId, clientId: append.clientId, runId: args.aiOperation.runId,
+      operationIds: [args.aiOperation.operationId], regionIds: append.regionIds, baseStateVectorHash: append.baseStateVectorHash,
+      finalStateVectorHash: append.stateVectorHash, finalIntegrityHash: append.projectionHash,
+      baseVersionId: updated.currentVersionId, baseSnapshot, finalSnapshot, status: "open", openedAt: Date.now(), lastActivityAt: Date.now() });
+  }
+  const history = await commitChangeGroup(ctx, groupId, { source: "ai", provenance: { kind: "ai_native_commit",
+    operationId: args.aiOperation.operationId, requestDigest: args.requestDigest } });
+  const versionId = history.status === "committed" ? history.versionId : undefined;
+  if (versionId) await attestNativeVersionOwnership(ctx, versionId, [native.source.payloadRef, native.resultRef]);
+  const effects = { actorKind: "ai" as const, canonicalProjection: "durable" as const, runId: args.aiOperation.runId };
+  return { versionId, nativeResult: await applyNativeAdmissionEffect(ctx, actor, input.nativeCandidate, native, effects) };
+}

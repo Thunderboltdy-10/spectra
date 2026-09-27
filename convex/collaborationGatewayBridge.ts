@@ -453,7 +453,7 @@ export const exchange = action({
         aiOperation: payload.aiOperation, requestDigest: payload.requestDigest, expected: payload.expected,
         beforeProjectionJson: payload.beforeProjectionJson, beforeProjectionHash: payload.beforeProjectionHash,
         append: { ...append, update: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) },
-        evidence: payload.evidence, nativeCandidate: payload.nativeCandidate,
+        evidence: payload.evidence, ...(payload.nativeCandidate ? { nativeCandidate: payload.nativeCandidate } : {}),
       });
     }
 

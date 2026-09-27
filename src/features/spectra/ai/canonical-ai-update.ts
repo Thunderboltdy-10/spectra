@@ -52,20 +52,25 @@ export function assertPreparedAiCommit(prepared: PreparedCanonicalAiUpdate, admi
     throw new Error("AI_ADMITTED_PREPARATION_MISMATCH");
 }
 
-/** Prepare from one durable head, after native readback. Never rebase a stale
- * normalized result: the caller must rerun the original semantic operation. */
+/** Prepare from one durable head. A fixed desired value (native readback) is
+ * never rebased: it requires the exact authored frontier, and a stale result
+ * reruns the original semantic operation. A resolver (no native package) is
+ * evaluated against the fenced durable base itself, so a non-overlapping human
+ * edit persisted meanwhile is kept rather than refused or overwritten. */
 export async function prepareCanonicalAiUpdate(args: {
   head: NativeAiHead; bridge: AiCanonicalBridge; authoredFrontier: string | null;
-  desired: ArtifactLiveValue; clientId: string; operationId: string;
+  desired: ArtifactLiveValue | ((fencedBase: ArtifactLiveValue) => ArtifactLiveValue);
+  clientId: string; operationId: string;
 }): Promise<{ prepared: PreparedCanonicalAiUpdate; before: ArtifactLiveValue; after: ArtifactLiveValue }> {
   const { head } = args;
-  if (!head.room || !args.authoredFrontier) throw new Error("AI_NATIVE_CANONICAL_STALE");
+  const resolveDesired = typeof args.desired === "function" ? args.desired : undefined;
+  if (!head.room || (!resolveDesired && !args.authoredFrontier)) throw new Error("AI_NATIVE_CANONICAL_STALE");
   const stored = await args.bridge("load", scope(head)) as StoredRoom | null;
   if (!stored || stored.roomId !== head.room._id || stored.nextSequence !== head.room.nextSequence)
     throw new Error("AI_NATIVE_CANONICAL_STALE");
   const scratch = applyStoredRoomUpdates(Y, stored) as Y.Doc;
   try {
-    if (durableFrontierHash(scratch) !== args.authoredFrontier ||
+    if ((!resolveDesired && durableFrontierHash(scratch) !== args.authoredFrontier) ||
         (stored.liveStateVectorHash && stateVectorHash(scratch) !== stored.liveStateVectorHash))
       throw new Error("AI_NATIVE_CANONICAL_STALE");
     const beforeProjectionJson = artifactProjection(scratch, head.artifact.schemaVersion ?? 1);
@@ -73,7 +78,8 @@ export async function prepareCanonicalAiUpdate(args: {
     const before = JSON.parse(beforeProjectionJson) as ArtifactLiveValue;
     const baseStateVectorHash = stateVectorHash(scratch);
     const vector = Y.encodeStateVector(scratch);
-    const plan = planNativeArtifactYjsMutation(scratch, head.artifact.blueprintKey, args.desired, {
+    const desired = resolveDesired ? resolveDesired(before) : args.desired as ArtifactLiveValue;
+    const plan = planNativeArtifactYjsMutation(scratch, head.artifact.blueprintKey, desired, {
       clientId: args.clientId, kind: "ai", name: "Spectra AI",
     });
     scratch.transact(plan.apply, { kind: "spectra-ai-admission", operationId: args.operationId });

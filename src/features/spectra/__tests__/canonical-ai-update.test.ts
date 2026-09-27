@@ -5,6 +5,7 @@ import { initializeNativeArtifactDocument, nativeArtifactProjection } from "../.
 import { durableFrontierHash, stateVectorHash } from "../../../../scripts/collaboration-canonical-room.mjs";
 import { assertPreparedAiCommit, loadAdmittedAiUpdate, prepareCanonicalAiUpdate, retryCanonicalAiMutation, type NativeAiHead } from "../ai/canonical-ai-update";
 import type { AdmittedAiCommit } from "../ai/admitted-ai-update";
+import { planNativeArtifactYjsMutation } from "../work/models/yjs/native-artifact-model";
 
 function fixture() {
   const document = new Y.Doc();
@@ -96,4 +97,34 @@ it("recovers a compacted accepted payload only from a verified covering room", a
     await expect(loadAdmittedAiUpdate(result, bridge, { artifactId: "artifact", accountId: "account", policyVersion: 3 }))
       .rejects.toThrow("AI_ADMITTED_REPLAY_BEHIND_RECEIPT");
   } finally { f.document.destroy(); }
+});
+
+it("resolves a non-native operation against the fenced base, keeping a human edit persisted after authoring", async () => {
+  const f = fixture();
+  const humanDocument = new Y.Doc();
+  try {
+    const twoBlocks = { title: "Work", tags: [], content: { blocks: [
+      { id: "p", type: "paragraph", text: "First paragraph" }, { id: "q", type: "paragraph", text: "Second paragraph" }] } };
+    initializeNativeArtifactDocument(humanDocument, { ...twoBlocks, typeKey: "document", schemaVersion: 4 });
+    const authoredFrontier = durableFrontierHash(humanDocument);
+    const vector = Y.encodeStateVector(humanDocument);
+    const base = Y.encodeStateAsUpdate(humanDocument);
+    // A collaborator's non-overlapping edit is persisted after the AI planned.
+    humanDocument.transact(planNativeArtifactYjsMutation(humanDocument, "document", { ...twoBlocks, content: { blocks: [
+      twoBlocks.content.blocks[0]!, { id: "q", type: "paragraph", text: "Human rewrite" }] } },
+    { clientId: "human", kind: "human", name: "Human" }).apply);
+    f.stored.liveStateVectorHash = stateVectorHash(humanDocument);
+    f.stored.nextSequence = 3;
+    f.stored.updates = [{ sequence: 1, update: Buffer.from(base).toString("base64") },
+      { sequence: 2, update: Buffer.from(Y.encodeStateAsUpdate(humanDocument, vector)).toString("base64") }];
+    f.head.room!.nextSequence = 3;
+    const patch = { changes: [{ path: "/blocks/id:p/text", value: "Edited paragraph" }] };
+    f.head.operation.input = { contentPatch: patch };
+    const resolve = (current: { title: string; tags: string[]; content: unknown }) => ({ ...current,
+      content: { blocks: (current.content as typeof twoBlocks.content).blocks.map(block => block.id === "p" ? { ...block, text: "Edited paragraph" } : block) } });
+    await expect(prepareCanonicalAiUpdate({ ...f, authoredFrontier, desired: resolve(twoBlocks) })).rejects.toThrow("AI_NATIVE_CANONICAL_STALE");
+    const result = await prepareCanonicalAiUpdate({ ...f, authoredFrontier, desired: resolve });
+    expect(JSON.stringify(result.after.content)).toContain("Edited paragraph");
+    expect(JSON.stringify(result.after.content)).toContain("Human rewrite");
+  } finally { humanDocument.destroy(); f.document.destroy(); }
 });

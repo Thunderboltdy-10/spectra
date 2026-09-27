@@ -108,6 +108,42 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     expect(selectedAgentAllowsModelTool(restricted, "propose_operation")).toBe(false);
   });
 
+  it.each([false, true])("reads a specialist guide and then creates once (assigned worker: %s)", async (assigned) => {
+    const packets: Packet[] = [];
+    const prompt = "Create a short document thanking the volunteers.";
+    const body = "Thank you for making the workshop possible. Your preparation gave every participant time to practice.";
+    const guide = documentSkill.specialistGuides!.find((entry) => entry.id === "academic-sources")!;
+    const fetchMock = vi.fn(async (url: unknown, options: RequestInit) => {
+      expect(String(url)).toBe("https://openrouter.ai/api/v1/chat/completions");
+      packets.push(JSON.parse(String(options.body)) as Packet);
+      if (packets.length > 2) throw new Error("Unexpected extra model request");
+      const name = packets.length === 1 ? "read_artifact_skill" : "create_document";
+      const args = packets.length === 1
+        ? { blueprintKey: "document", guideId: guide.id }
+        : { title: "Thank you", workSummary: "Writing the thank-you note", summary: "A note for the volunteers.",
+          content: { blocks: [{ id: "thanks", type: "paragraph", text: body }], outline: [] }, tags: [],
+          conversationTitle: "Volunteer thanks", conversationSummary: "Prepared a thank-you note.",
+          finalResponse: "The thank-you note is ready." };
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: {
+        content: "", tool_calls: [{ id: `call-${packets.length}`, type: "function",
+          function: { name, arguments: JSON.stringify(args) } }],
+      } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("chat", prompt, {}, [], undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, "synthetic-actor",
+      assigned ? { blueprintKey: "document", label: "Document", clause: prompt } : undefined);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(packets[0]!.tool_choice).toBe("auto");
+    expect(packets[1]!.messages.slice(0, packets[0]!.messages.length)).toEqual(packets[0]!.messages);
+    const observation = packets[1]!.messages.find((message) => message.role === "tool");
+    expect(JSON.parse(String(observation?.content))).toMatchObject({ ok: true, guideId: guide.id, instructions: guide.instructions });
+    expect(result.plan.operations).toHaveLength(1);
+    expect(result.plan.operations[0]).toMatchObject({ type: "artifact.create", input: {
+      blueprintKey: "document", content: { blocks: [expect.objectContaining({ text: body })] },
+    } });
+  });
+
   it("keeps task-specific document intent separate from the static rubric", () => {
     expect(artifactQualityPromptSection("document")).not.toContain("Editing intent for this request");
     expect(artifactQualityTaskSection("document", "Rewrite the whole document from the supplied source.")).toContain("Editing intent for this request");

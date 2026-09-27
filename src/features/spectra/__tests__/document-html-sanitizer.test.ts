@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
-import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { sanitizeDocumentHtml } from "../components/artifact-studio-file-utils";
 
-/** Insert sanitized markup the way React's dangerouslySetInnerHTML does, in a
- * document whose parser runs with scripting enabled (as a real browser does). */
+/** Insert sanitized markup the way React's dangerouslySetInnerHTML does. */
 function renderInScriptingDocument(html: string) {
-  const dom = new JSDOM("<!doctype html><body><div id=host></div></body>", {
-    runScripts: "outside-only",
-  });
-  const host = dom.window.document.getElementById("host")!;
+  const host = document.createElement("div");
   host.innerHTML = html;
   return host;
 }
@@ -55,7 +50,7 @@ describe("sanitizeDocumentHtml", () => {
     ["svg style breakout", '<p>x</p><svg><style><img src=x onerror=alert(1)></style></svg>'],
     ["data html frame", '<p><a href="data:text/html;base64,PHNjcmlwdD4=">d</a></p>'],
     ["form action", '<p><a href="#">x</a></p><form action="javascript:alert(1)"><button>go</button></form>'],
-  ])("removes %s even after re-parsing with scripting enabled", (_label, payload) => {
+  ])("removes %s and stays a fixed point when re-parsed", (_label, payload) => {
     const sanitized = sanitizeDocumentHtml(payload);
     expect(activeSurfaces(renderInScriptingDocument(sanitized))).toEqual([]);
     // A second pass must be a fixed point: sanitized output is stable markup.

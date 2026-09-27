@@ -4,6 +4,7 @@ import { normalizeArtifactContent } from "@/features/spectra/ai/content-normaliz
 import { applyDocumentAcademicOperations } from "@/features/spectra/commands/office/document-academic-operations";
 import { parseModelOperation } from "@/features/spectra/operations/schema";
 import { enforceAiPresentationContentPolicy } from "@/features/spectra/presentation/ai-content-policy";
+import { applyBibliographySlides } from "@/features/spectra/presentation/bibliography";
 import { normalizePresentationContent } from "@/features/spectra/presentation/model";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), readLive: vi.fn() }));
@@ -153,13 +154,16 @@ describe("full replacement verification", () => {
     expect(incomplete.slides[0]!.accessibility!.readingOrder).toEqual([]);
   });
 
-  it("rejects a missing generated bibliography rather than reconstructing observed content", async () => {
+  // The AI policy no longer generates bibliography slides (CRAFT ce0e1dde);
+  // an explicitly authored one is requested content and must be observed.
+  it("rejects a missing requested bibliography rather than reconstructing observed content", async () => {
     const content = normalizePresentationContent({ slides: [{
       id: "slide-1", title: "Photosynthesis evidence", objects: [],
       citations: [{ id: "citation-1", label: "Biology reference", sourceRefs: ["evidence:source-1"] }],
     }] });
+    applyBibliographySlides(content);
     const complete = enforceAiPresentationContentPolicy(structuredClone(content), "");
-    expect(complete.slides.length).toBeGreaterThan(content.slides.length);
+    expect(complete.slides).toHaveLength(2);
     mocks.query.mockResolvedValue(saved(complete, "presentation"));
     await verify(update({ blueprintKey: "presentation", content }));
     mocks.query.mockResolvedValue(saved({ ...complete, slides: complete.slides.slice(0, 1) }, "presentation"));
@@ -183,5 +187,67 @@ describe("full replacement verification", () => {
     (withDate.foundry as { state: { history: Array<{ at: number }> } }).state.history[0]!.at = Date.now();
     mocks.query.mockResolvedValue(saved(withDate, "agent"));
     await expectMismatch(update({ blueprintKey: "agent", content: withoutDate }));
+  });
+});
+
+describe("ordered same-target final verification", () => {
+  const patch = (path: string, value: unknown, overrides: Record<string, unknown> = {}) =>
+    update({ content: null, contentPatch: { changes: [{ path, value }] }, ...overrides });
+  const card = (index: number) => ({
+    id: `card-${index}`, front: `Prompt ${index}`, back: `Answer ${index}`, hint: `Cue ${index}`,
+    sourceRefs: [], confidence: "unknown",
+  });
+  const deckAppend = (index: number) => update({
+    blueprintKey: "flashcard_deck", content: null,
+    contentPatch: { changes: [{ path: "/cards/-", value: { front: `Prompt ${index}`, back: `Answer ${index}` } }] },
+  });
+  const verifySequence = (operations: ReturnType<typeof update>[]) =>
+    verifyCommittedOutcomes("actor", operations.map((operation) => ({
+      operation, affected: [{ type: "artifact", id: "artifact-real" }],
+    })));
+  const expectSequenceMismatch = async (operations: ReturnType<typeof update>[]) => {
+    const result = expect(verifySequence(operations)).rejects.toThrow(
+      "The saved artifact did not contain the requested content change.",
+    );
+    await vi.runAllTimersAsync();
+    await result;
+  };
+  const withIntro = (text: string) => ({ ...requested, blocks: [{ ...requested.blocks[0]!, text }, requested.blocks[1]!] });
+
+  it("accepts a later overwrite of the same path and the same metadata field", async () => {
+    mocks.query.mockResolvedValue({ ...saved(withIntro("Light becomes chemical energy.")), title: "Second title" });
+    await verifySequence([
+      patch("/blocks/id:intro/text", "Glucose is made in daylight.", { title: "First title" }),
+      patch("/blocks/id:intro/text", "Light becomes chemical energy.", { title: "Second title" }),
+    ]);
+    expect(mocks.readLive).not.toHaveBeenCalled();
+  });
+
+  it("still requires an earlier disjoint change that was lost after a later write", async () => {
+    mocks.query.mockResolvedValue(saved({ ...requested, blocks: [requested.blocks[0]!, { ...requested.blocks[1]!, text: "Chloroplasts hold chlorophyll pigments." }] }));
+    await expectSequenceMismatch([
+      patch("/blocks/id:intro/text", "Glucose is made in daylight."),
+      patch("/blocks/id:detail/text", "Chloroplasts hold chlorophyll pigments."),
+    ]);
+  });
+
+  it("retains every successive append to the same list", async () => {
+    const existing = [card(1), card(2)];
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), card(4)] }, "flashcard_deck"));
+    await verifySequence([deckAppend(3), deckAppend(4)]);
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(4)] }, "flashcard_deck"));
+    await expectSequenceMismatch([deckAppend(3), deckAppend(4)]);
+  });
+
+  it("lets a later complete replacement supersede earlier patches but verifies it whole", async () => {
+    mocks.query.mockResolvedValue(saved(requested));
+    await verifySequence([patch("/blocks/id:intro/text", "Glucose is made in daylight."), update()]);
+    mocks.query.mockResolvedValue(saved(withIntro("Glucose is made in daylight.")));
+    await expectSequenceMismatch([patch("/blocks/id:intro/text", "Glucose is made in daylight."), update()]);
+  });
+
+  it("verifies a later patch on top of an earlier replacement", async () => {
+    mocks.query.mockResolvedValue(saved(withIntro("Light becomes chemical energy.")));
+    await verifySequence([update(), patch("/blocks/id:intro/text", "Light becomes chemical energy.")]);
   });
 });

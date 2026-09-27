@@ -5,6 +5,8 @@ import type {
 } from "./registry";
 import { spectraToolRegistry } from "./registry";
 import { preferenceLayerValuesSchema } from "../../settings/schema/preferences";
+import { ARTIFACT_TYPE_KEYS } from "../../artifacts/types";
+import { artifactSkillReadResult } from "../../artifacts/skill-guidance";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
@@ -85,12 +87,31 @@ export function registerApplicationTools() {
   };
   define({
     ...readDefaults,
+    id: "read_artifact_skill",
+    title: "Read artifact guidance",
+    description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
+    inputSchema: z.object({
+      blueprintKey: z.enum(ARTIFACT_TYPE_KEYS),
+      guideId: z.string().min(1).max(100).optional(),
+    }),
+    execute: async (_context, value) => {
+      const input = value as { blueprintKey: typeof ARTIFACT_TYPE_KEYS[number]; guideId?: string };
+      const { loadArtifactSkill } = await import("../../artifacts/registry");
+      return artifactSkillReadResult(await loadArtifactSkill(input.blueprintKey), input.guideId);
+    },
+  });
+  define({
+    ...readDefaults,
     id: "search_objects",
     title: "Search work",
     description:
-      "Search the user's permissioned Spectra work by meaning or title instead of guessing an id.",
+      "Search permissioned Spectra work or conversation titles instead of guessing an id. Thread search is literal title search, defaults to active threads, and returns a cursor for more matches; workspaceId selects the primary workspace.",
     inputSchema: z.object({
       query: z.string().min(1).max(500),
+      kind: z.enum(["artifact", "thread"]).optional(),
+      cursor: z.string().max(8192).optional(),
+      workspaceId: z.string().min(1).optional(),
+      status: z.enum(["active", "archived"]).optional(),
       blueprintKey: z.string().nullable().optional(),
       refresh: refreshRead,
     }),
@@ -132,8 +153,11 @@ export function registerApplicationTools() {
     id: "read_thread",
     title: "Read conversation",
     description:
-      "Read the recent messages and title of one permissioned Spectra conversation.",
-    inputSchema: z.object({ threadId: z.string().min(1), refresh: refreshRead }),
+      "Read permissioned conversation history. Use before for older pages, query/searchCursor for indexed search, or messageId/offset/revision for a complete message. Continue only with the exact returned cursor or revision. Pages contain at most 24 messages, search 16 hits, and chunks 6000 characters; partial content is explicit.",
+    inputSchema: z.object({ threadId: z.string().min(1), query: z.string().min(1).max(500).optional(),
+      searchCursor: z.string().max(8192).optional(), before: z.string().max(8192).optional(),
+      messageId: z.string().min(1).optional(), offset: z.number().int().min(0).optional(),
+      revision: z.string().min(1).max(128).optional(), limit: z.number().int().min(1).max(6000).optional(), refresh: refreshRead }),
   });
   define({
     ...readDefaults,
@@ -142,7 +166,8 @@ export function registerApplicationTools() {
     description:
       "Retrieve deeper permission-bound personal context when the supplied context capsule is insufficient; claims remain fallible evidence.",
     inputSchema: z.object({
-      query: z.string().min(3).max(500),
+      query: z.string().min(3).max(32768),
+      claimIds: z.array(z.string().min(1)).max(8).optional(),
       depth: z.enum(["focused", "deep"]),
       refresh: refreshRead,
     }),
@@ -217,6 +242,8 @@ export function registerApplicationTools() {
     cancellable: true,
     resumable: true,
   };
+  // Offered only when a clarification continuation restores staged work.
+  define({ ...mutationDefaults, id: "revise_staged_operation", title: "Revise staged action", description: "Replace or withdraw one operation staged earlier in this same request, identified by its operationIndex. Use it when the user's answer changes or cancels staged work, or after reading the current target of a position marked needs_revalidation. Indexes never shift; a replacement is validated like propose_operation.", inputSchema: z.object({ operationIndex: z.number().int().min(0).max(99), action: z.enum(["replace", "withdraw"]), operation: jsonObject.optional(), reason: z.string().min(1).max(500).optional() }).refine((input) => input.action === "withdraw" || input.operation !== undefined, { message: "A replacement requires the complete typed operation.", path: ["operation"] }) });
   define({ ...mutationDefaults, id: "propose_operation", title: "Propose work action", description: "Validate and stage one complete typed semantic mutation. Set fulfillsRequest only when this one operation fulfills the entire current user request, with no other artifact, action, answer or approval remaining. Otherwise continue and submit the complete plan.", inputSchema: z.object({ workSummary: z.string().min(1).max(160), operation: jsonObject, fulfillsRequest: z.boolean().optional() }) });
 
   define({
@@ -655,5 +682,6 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
+  "read_artifact_skill",
   "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "create_calendar_personal_event", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "setup_bridge", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "add_comment", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

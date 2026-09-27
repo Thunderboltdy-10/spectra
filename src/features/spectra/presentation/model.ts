@@ -534,6 +534,12 @@ export function createPresentationSlide(ordinal: number): PresentationSlide {
 
 export function normalizePresentationContent(
   value: unknown,
+  options: {
+    onObjectNormalized?: (
+      object: Readonly<PresentationObject>,
+      raw: Readonly<Record<string, unknown>>,
+    ) => void;
+  } = {},
 ): PresentationContent {
   const input = record(value);
   const theme = record(input.theme);
@@ -594,103 +600,105 @@ export function normalizePresentationContent(
         10,
         canvasHeight,
       );
-      return [
-        {
-          id: uniqueIdentifier(
-            text(object.id),
-            `${slideId}:object-${objectIndex + 1}`,
-            occupiedObjectIds,
-          ),
-          type,
-          x: bounded(object.x, 100 + objectIndex * 20, 0, 1_000 - width),
-          y: bounded(
-            object.y,
-            100 + objectIndex * 20,
-            0,
-            canvasHeight - height,
-          ),
-          width,
-          height,
-          rotation: bounded(object.rotation, 0, -360, 360),
-          content: object.content ?? {},
-          ...(object.style && typeof object.style === "object"
-            ? { style: record(object.style) }
-            : {}),
-          ...(typeof object.altText === "string"
-            ? { altText: object.altText.slice(0, 2_000) }
-            : {}),
-          ...(typeof object.locked === "boolean"
-            ? { locked: object.locked }
-            : {}),
-          ...(typeof object.hidden === "boolean"
-            ? { hidden: object.hidden }
-            : {}),
-          readingOrder: Math.max(
-            0,
-            Math.round(finite(object.readingOrder, objectIndex)),
-          ),
-          ...(typeof object.parentId === "string" && object.parentId.trim()
-            ? { parentId: object.parentId.trim().slice(0, 180) }
-            : {}),
-          ...(typeof object.componentId === "string" &&
-          object.componentId.trim()
-            ? { componentId: object.componentId.trim().slice(0, 180) }
-            : {}),
-          ...(normalizePresentationHyperlink(object.hyperlink)
-            ? { hyperlink: normalizePresentationHyperlink(object.hyperlink) }
-            : {}),
-          ...(typeof sourceBinding.artifactId === "string" &&
-          sourceBinding.artifactId.trim() &&
-          (sourceBinding.kind === "artifact" ||
-            sourceBinding.kind === "sheets_range")
-            ? {
-                sourceBinding: {
-                  artifactId: sourceBinding.artifactId.trim().slice(0, 180),
-                  kind: sourceBinding.kind,
-                  ...(typeof sourceBinding.range === "string" &&
-                  sourceBinding.range.trim()
-                    ? { range: sourceBinding.range.slice(0, 160) }
-                    : {}),
-                  ...(typeof sourceBinding.versionId === "string" &&
-                  sourceBinding.versionId.trim()
-                    ? {
-                        versionId: sourceBinding.versionId.trim().slice(0, 180),
-                      }
-                    : {}),
-                  ...(typeof sourceBinding.live === "boolean"
-                    ? { live: sourceBinding.live }
-                    : {}),
-                },
-              }
-            : {}),
-          ...(animation.kind === "none" ||
-          animation.kind === "fade" ||
-          animation.kind === "rise" ||
-          animation.kind === "scale" ||
-          animation.kind === "wipe"
-            ? {
-                animation: {
-                  kind: animation.kind,
-                  ...(typeof animation.durationMs === "number"
-                    ? {
-                        durationMs: bounded(
-                          animation.durationMs,
-                          350,
-                          0,
-                          10_000,
-                        ),
-                      }
-                    : {}),
-                  ...(typeof animation.delayMs === "number"
-                    ? {
-                        delayMs: bounded(animation.delayMs, 0, 0, 30_000),
-                      }
-                    : {}),
-                },
-              }
-            : {}),
-        } satisfies PresentationObject,
-      ];
+      const normalizedObject = {
+        id: uniqueIdentifier(
+          text(object.id),
+          `${slideId}:object-${objectIndex + 1}`,
+          occupiedObjectIds,
+        ),
+        type,
+        x: bounded(object.x, 100 + objectIndex * 20, 0, 1_000 - width),
+        y: bounded(
+          object.y,
+          100 + objectIndex * 20,
+          0,
+          canvasHeight - height,
+        ),
+        width,
+        height,
+        rotation: bounded(object.rotation, 0, -360, 360),
+        content: object.content ?? {},
+        ...(object.style && typeof object.style === "object"
+          ? { style: record(object.style) }
+          : {}),
+        ...(typeof object.altText === "string"
+          ? { altText: object.altText.slice(0, 2_000) }
+          : {}),
+        ...(typeof object.locked === "boolean"
+          ? { locked: object.locked }
+          : {}),
+        ...(typeof object.hidden === "boolean"
+          ? { hidden: object.hidden }
+          : {}),
+        readingOrder: Math.max(
+          0,
+          Math.round(finite(object.readingOrder, objectIndex)),
+        ),
+        ...(typeof object.parentId === "string" && object.parentId.trim()
+          ? { parentId: object.parentId.trim().slice(0, 180) }
+          : {}),
+        ...(typeof object.componentId === "string" &&
+        object.componentId.trim()
+          ? { componentId: object.componentId.trim().slice(0, 180) }
+          : {}),
+        ...(normalizePresentationHyperlink(object.hyperlink)
+          ? { hyperlink: normalizePresentationHyperlink(object.hyperlink) }
+          : {}),
+        ...(typeof sourceBinding.artifactId === "string" &&
+        sourceBinding.artifactId.trim() &&
+        (sourceBinding.kind === "artifact" ||
+          sourceBinding.kind === "sheets_range")
+          ? {
+              sourceBinding: {
+                artifactId: sourceBinding.artifactId.trim().slice(0, 180),
+                kind: sourceBinding.kind,
+                ...(typeof sourceBinding.range === "string" &&
+                sourceBinding.range.trim()
+                  ? { range: sourceBinding.range.slice(0, 160) }
+                  : {}),
+                ...(typeof sourceBinding.versionId === "string" &&
+                sourceBinding.versionId.trim()
+                  ? {
+                      versionId: sourceBinding.versionId.trim().slice(0, 180),
+                    }
+                  : {}),
+                ...(typeof sourceBinding.live === "boolean"
+                  ? { live: sourceBinding.live }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(animation.kind === "none" ||
+        animation.kind === "fade" ||
+        animation.kind === "rise" ||
+        animation.kind === "scale" ||
+        animation.kind === "wipe"
+          ? {
+              animation: {
+                kind: animation.kind,
+                ...(typeof animation.durationMs === "number"
+                  ? {
+                      durationMs: bounded(
+                        animation.durationMs,
+                        350,
+                        0,
+                        10_000,
+                      ),
+                    }
+                  : {}),
+                ...(typeof animation.delayMs === "number"
+                  ? {
+                      delayMs: bounded(animation.delayMs, 0, 0, 30_000),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      } satisfies PresentationObject;
+      // Observe the canonical ID and frame before invalid groups are removed.
+      // Optional metadata consumers need not reconstruct the normalization.
+      options.onObjectNormalized?.(normalizedObject, object);
+      return [normalizedObject];
     });
     const invalidGroupIds = new Set<string>();
     objects

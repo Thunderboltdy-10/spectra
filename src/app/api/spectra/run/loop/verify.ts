@@ -264,6 +264,111 @@ export async function verifyResearchEvidenceReadback(
   return assertResearchEvidenceReadback(saved as Record<string, unknown>);
 }
 
+type VerifiedOutcome = {
+  operation: ModelOperation;
+  affected: Array<{ type: string; id: string }>;
+};
+
+function verifiedArtifactId(outcome: VerifiedOutcome) {
+  const operation = outcome.operation;
+  if (operation.type === "artifact.update" || operation.type === "artifact.archive")
+    return operation.input.artifactId;
+  if (operation.type === "artifact.create")
+    return outcome.affected.find((item) => item.type === "artifact")?.id;
+  return undefined;
+}
+
+function patchSegments(path: string) {
+  return canonicalizeSheetsPatchChange({ path, value: null }).path
+    .replace(/^\/content(?=\/)/, "")
+    .split("/")
+    .slice(1);
+}
+
+/** Two appends add distinct elements. An append may be the element a later
+ * indexed or selected write addresses, so that pair is treated as overlapping. */
+function patchPathsOverlap(earlier: string[], later: string[]) {
+  const shared = Math.min(earlier.length, later.length);
+  for (let index = 0; index < shared; index += 1) {
+    const left = earlier[index]!;
+    const right = later[index]!;
+    if (left === "-" && right === "-") return false;
+    if (left !== right && left !== "-" && right !== "-") return false;
+  }
+  return true;
+}
+
+type FinalObligation = {
+  title: boolean;
+  summary: boolean;
+  tags: boolean;
+  content: boolean;
+  changes: Set<number>;
+  /** Later retained appends to the same array, by change index. */
+  laterAppends: Map<number, number>;
+};
+
+/**
+ * The final predicates of each write in an ordered same-target sequence.
+ * A later write to the same field, an overlapping content path, or a complete
+ * replacement explicitly supersedes the earlier predicate; disjoint
+ * obligations and every append remain required. Each write was verified
+ * against its own result when it was acknowledged, and a later replacement is
+ * itself verified as the complete intended value, so nothing is adopted
+ * silently from an earlier write.
+ */
+export function finalVerificationObligations(outcomes: readonly VerifiedOutcome[]) {
+  const obligations: FinalObligation[] = outcomes.map(() => ({
+    title: true, summary: true, tags: true, content: true, changes: new Set<number>(), laterAppends: new Map(),
+  }));
+  const writes = outcomes.map((outcome, index) => {
+    const operation = outcome.operation;
+    if (operation.type !== "artifact.update") return null;
+    const changes = operation.input.contentPatch?.changes ?? [];
+    changes.forEach((_, changeIndex) => obligations[index]!.changes.add(changeIndex));
+    return {
+      target: verifiedArtifactId(outcome),
+      input: operation.input,
+      replaces: !operation.input.documentOperations && changes.length === 0 && operation.input.content !== null,
+      paths: changes.map((change) => patchSegments(change.path)),
+    };
+  });
+  const sequence = writes.flatMap((write, index) =>
+    write ? write.paths.map((segments, changeIndex) => ({ index, changeIndex, segments, target: write.target })) : []);
+  for (const [position, entry] of sequence.entries()) {
+    for (const later of sequence.slice(position + 1)) {
+      if (later.target === entry.target && patchPathsOverlap(entry.segments, later.segments))
+        obligations[entry.index]!.changes.delete(entry.changeIndex);
+    }
+  }
+  for (const [index, write] of writes.entries()) {
+    if (!write) continue;
+    const obligation = obligations[index]!;
+    for (const later of writes.slice(index + 1)) {
+      if (!later || later.target !== write.target) continue;
+      if (later.input.title !== null) obligation.title = false;
+      if (later.input.summary !== null) obligation.summary = false;
+      if (later.input.tags !== null) obligation.tags = false;
+      const laterWritesContent = later.replaces || later.paths.length > 0 || Boolean(later.input.documentOperations);
+      if (later.replaces) {
+        obligation.content = false;
+        obligation.changes.clear();
+      } else if (write.replaces && laterWritesContent) obligation.content = false;
+    }
+  }
+  // An append names the last element only until another append follows it.
+  for (const [position, entry] of sequence.entries()) {
+    if (entry.segments.at(-1) !== "-" || !obligations[entry.index]!.changes.has(entry.changeIndex)) continue;
+    const parent = entry.segments.slice(0, -1).join("/");
+    const following = sequence.slice(position + 1).filter((later) =>
+      later.target === entry.target && later.segments.at(-1) === "-" &&
+      later.segments.slice(0, -1).join("/") === parent &&
+      obligations[later.index]!.changes.has(later.changeIndex)).length;
+    if (following) obligations[entry.index]!.laterAppends.set(entry.changeIndex, following);
+  }
+  return obligations;
+}
+
 export async function verifyCommittedOutcomes(
   actorClerkId: string,
   outcomes: Array<{
@@ -272,8 +377,10 @@ export async function verifyCommittedOutcomes(
   }>,
   options: { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean } = {},
 ) {
-  for (const outcome of outcomes) {
+  const obligations = finalVerificationObligations(outcomes);
+  for (const [outcomeIndex, outcome] of outcomes.entries()) {
     const operation = outcome.operation;
+    const obligation = obligations[outcomeIndex]!;
     if (
       operation.type !== "artifact.create" &&
       operation.type !== "artifact.update" &&
@@ -350,6 +457,7 @@ export async function verifyCommittedOutcomes(
     }
     if (operation.type === "artifact.update") {
       if (
+        obligation.title &&
         operation.input.title !== null &&
         artifact.title !== operation.input.title
       )
@@ -357,6 +465,7 @@ export async function verifyCommittedOutcomes(
           "The saved artifact title did not match the requested change.",
         );
       if (
+        obligation.summary &&
         operation.input.summary !== null &&
         artifact.summary !== operation.input.summary
       )
@@ -364,6 +473,7 @@ export async function verifyCommittedOutcomes(
           "The saved artifact summary did not match the requested change.",
         );
       if (
+        obligation.tags &&
         operation.input.tags !== null &&
         JSON.stringify(artifact.tags ?? []) !==
           JSON.stringify(operation.input.tags)
@@ -378,8 +488,12 @@ export async function verifyCommittedOutcomes(
         operation.input.blueprintKey, operation.input.content, options.prompt ?? "",
       ) : undefined;
       const matchesContent = (content: unknown) => {
-        if (operation.input.documentOperations) return documentAcademicOperationsLanded(content, operation.input.documentOperations);
+        // A later complete replacement supersedes academic operations too.
+        if (operation.input.documentOperations)
+          return !obligation.content && changes.length === 0 ||
+            documentAcademicOperationsLanded(content, operation.input.documentOperations);
         if (replacesContent) {
+          if (!obligation.content) return true;
           // Compare complete normalized values: subset/substring matching loses
           // deletions and extra keys. Repair policy applies only to the request;
           // repairing observed content could hide missing saved work. Add no
@@ -392,14 +506,21 @@ export async function verifyCommittedOutcomes(
           }
         }
         if (changes.length === 0) return true;
-        let matched = 0;
-        for (const change of changes) {
+        for (const [changeIndex, change] of changes.entries()) {
+          if (!obligation.changes.has(changeIndex)) continue;
           const sheetsCanonical = canonicalizeSheetsPatchChange(change);
           const canonical = canonicalizeWhiteboardPatchChange(
             content,
             sheetsCanonical,
           );
-          const savedValue = readContentPointer(content, canonical.path);
+          const laterAppends = obligation.laterAppends.get(changeIndex) ?? 0;
+          const appendedTo = laterAppends > 0 && canonical.path.endsWith("/-")
+            ? readContentPointer(content, canonical.path.slice(0, -2))
+            : undefined;
+          // Later appends follow this one, so its element is no longer last.
+          const savedValue = Array.isArray(appendedTo)
+            ? appendedTo.at(-(laterAppends + 1))
+            : readContentPointer(content, canonical.path);
           if (
             contentPatchChangeMatchesSaved(
               canonical.path,
@@ -413,12 +534,11 @@ export async function verifyCommittedOutcomes(
             (operation.input.blueprintKey === "document" &&
               authoredValueLandedInContent(canonical.value, content))
           ) {
-            matched += 1;
             continue;
           }
           return false;
         }
-        return matched === changes.length;
+        return true;
       };
       if (matchesContent(artifact.content)) {
         if (artifactHasNativeBacking(artifact))

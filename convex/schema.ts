@@ -4185,6 +4185,9 @@ export default defineSchema({
     heartbeatAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     contextSnapshot: v.optional(v.any()),
+    // Server-owned original request, answers and unexecuted staged candidates
+    // of a request paused for clarification (spectraRunContinuations.ts).
+    clarificationContinuation: v.optional(v.any()),
     attemptCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),

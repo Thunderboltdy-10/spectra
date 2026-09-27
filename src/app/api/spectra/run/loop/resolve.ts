@@ -1,4 +1,5 @@
 import { buildContext } from "./gather";
+import type { AuthenticatedPlacement } from "./discovery";
 import { provisionalSingleCreation } from "./intake";
 import { remapDocumentSectionRewriteChanges } from "@/features/spectra/ai/document-content-patch";
 import { PRESENTATION_LAYOUT_IDS } from "@/features/spectra/presentation/layouts";
@@ -22,7 +23,7 @@ import type { OwnedOperationReferences } from "@/features/spectra/operations/val
 import { isCalendarMutationCommand } from "@/features/spectra/calendar/domain/command";
 
 export function ownedReferences(
-  context: Awaited<ReturnType<typeof buildContext>>,
+  context: Awaited<ReturnType<typeof buildContext>> & { authenticatedPlacementNodes?: AuthenticatedPlacement[] },
 ): OwnedOperationReferences {
   const artifactIds = new Set<string>();
   const artifactBlueprints = new Map<string, string>();
@@ -77,6 +78,9 @@ export function ownedReferences(
             : undefined,
         workspaceId: item.workspaceId,
       });
+  }
+  for (const node of context.authenticatedPlacementNodes ?? []) {
+    placementNodes.set(node.id, { artifactId: node.artifactId, workspaceId: node.workspaceId });
   }
   return {
     artifactIds,

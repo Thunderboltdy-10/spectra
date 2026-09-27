@@ -27,6 +27,7 @@ import {
   syncSourceNodes,
 } from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
+import { readContinuation, transferClarificationContinuation } from "./spectraRunContinuations";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 import { recordMeterEvent } from "./metering";
@@ -928,6 +929,9 @@ export const beginRun = mutation({
     });
     const createdRun = await ctx.db.get(runId);
     if (!createdRun) throw new Error("AI run could not be created");
+    // The answered run was read before it was marked completed above.
+    if (continuationRun)
+      await transferClarificationContinuation(ctx, continuationRun, createdRun);
     let retainedAttachmentsCopied = false;
     const priorExecutionId = attachmentSourceRun?.executionId;
     if (attachmentSourceRun && priorExecutionId) {
@@ -3121,6 +3125,7 @@ export const resetForRetry = mutation({
       artifactId: run.artifactId,
       sourceSurface: run.sourceSurface,
       contextSnapshot: run.contextSnapshot,
+      continuationRunId: readContinuation(run)?.sourceRunId,
       executionId,
       previousExecutionId,
       created: true,

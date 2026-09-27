@@ -1,4 +1,5 @@
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
+import { gatherPlanReferenceContext } from "./loop/discovery";
 import { hasNumericTableSource } from "@/features/spectra/quality/source-requirements";
 import {
   applyContentPatch,
@@ -15,6 +16,7 @@ import type {
   NativeProgressUpdate,
   PreparedAttachment,
   ResultAction,
+  RestoredClarification,
   RetryReset,
   RunDetail,
   RunState,
@@ -197,6 +199,16 @@ function recoveryForAttempt(
   return interruptionRecovery(operationStatuses, hasPartialResponse);
 }
 
+/** The complete goal of a request resumed after one or more questions. */
+function composeRestoredRequest(restored: RestoredClarification) {
+  return [
+    `Original request:\n${restored.originalRequest}`,
+    ...restored.clarificationResponses.map(
+      (response, index) => `Clarification ${index + 1}:\n${response}`,
+    ),
+  ].join("\n\n");
+}
+
 async function runAttempt(
   params: {
     actorClerkId: string;
@@ -360,6 +372,32 @@ async function runAttempt(
       }).catch(() => null);
   };
   try {
+    // A continuation run owns the complete request that paused for a question
+    // and its staged work, reauthorized by the server for this exact attempt.
+    const restoredClarification = params.continuationRunId
+      ? ((await query<
+          { actorClerkId: string; runId: string; executionId: string },
+          RestoredClarification | null
+        >("spectraRunContinuations:restore", {
+          actorClerkId: params.actorClerkId,
+          runId: params.runId,
+          executionId: params.executionId,
+        })) ?? null)
+      : null;
+    // The persisted user message is the answer itself; the model receives the
+    // whole goal so a later answer never shrinks the original request.
+    const userMessage = params.prompt;
+    if (restoredClarification)
+      params = { ...params, prompt: composeRestoredRequest(restoredClarification) };
+    const restoredGoal = restoredClarification
+      ? {
+          originalRequest: restoredClarification.originalRequest,
+          clarificationResponses: restoredClarification.clarificationResponses,
+        }
+      : undefined;
+    // Staged positions are revised by index in the ordinary agent; shortcut
+    // planners and early shells would bypass that restored graph.
+    const restoredStagedWork = (restoredClarification?.candidates.length ?? 0) > 0;
     await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
@@ -566,12 +604,13 @@ async function runAttempt(
     // separate object. This prevents invisible orphan shells on every edit.
     // An open artifact is often the source or update target for a larger task;
     // it must not disable explicit creation work in that same request.
-    const parallelCreations = parallelCreationContract(
+    const parallelCreations = restoredStagedWork ? [] : parallelCreationContract(
       params.prompt,
       Boolean(params.artifactId),
     );
-    const provisionalCreation =
-      params.artifactId &&
+    const provisionalCreation = restoredStagedWork
+      ? null
+      : params.artifactId &&
       promptLooksLikeFocusedStructuralEdit(params.prompt) &&
       !/\b(?:new|another|separate)\b/i.test(params.prompt)
         ? null
@@ -632,9 +671,7 @@ async function runAttempt(
         },
       });
     }
-    const context = await buildContext(
-      params.actorClerkId,
-      {
+    const contextBody = {
         workspaceId: params.workspaceId,
         scopeNodeId: params.scopeNodeId,
         artifactId: params.artifactId,
@@ -650,15 +687,20 @@ async function runAttempt(
         continuationRunId: params.continuationRunId,
         batchSelections: params.batchSelections,
         executionId: params.executionId,
-      },
-      params.prompt,
-    );
+    };
+    let context = await buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal });
     const explicitlyTargetsFocusedArtifact =
       promptExplicitlyTargetsFocusedArtifact(params.prompt, context.packet);
     const signalsFocusedEdit =
       Boolean(params.artifactId) &&
       signalsMutationIntent &&
       explicitlyTargetsFocusedArtifact;
+    // An explicit edit or direct use of the visible artifact is the demand for
+    // its current content; other requests keep identity-only orientation.
+    if (explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || promptDirectlyUsesFocusedContent(params.prompt)))
+      context = await buildContext(params.actorClerkId, contextBody, params.prompt, {
+        mode: "orientation", hydrateTargets: true, restoredGoal,
+      });
     const ordinarySpectraRequested = requestsOrdinarySpectra(
       params.prompt,
       params.disableAgentRouting,
@@ -754,7 +796,7 @@ async function runAttempt(
     });
     const persistedConversation =
       context.conversation.at(-1)?.role === "user" &&
-      context.conversation.at(-1)?.content === params.prompt
+      context.conversation.at(-1)?.content === userMessage
         ? context.conversation.slice(0, -1)
         : context.conversation;
     const conversation = persistedConversation.slice(-30);
@@ -848,7 +890,7 @@ async function runAttempt(
     // P4.I2 owns splitting breadth-first indexing from post-resolution depth.
     loop.enter("plan");
     const focusedToolPlan =
-      parallelCreations.length || (params.attachments?.length ?? 0) > 0
+      restoredStagedWork || parallelCreations.length || (params.attachments?.length ?? 0) > 0
         ? null
         : (explicitlyTargetsFocusedArtifact
             ? (fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
@@ -1002,6 +1044,7 @@ async function runAttempt(
               ? { focusedArtifact: boundedArtifactRead(context.focusedArtifact, { prompt: params.prompt }) }
               : {}),
             conversation,
+            ...(restoredClarification ? { stagedContinuation: restoredClarification } : {}),
           },
           modelAttachments,
           (content, mode) => {
@@ -1349,6 +1392,7 @@ async function runAttempt(
     let targetTitlesById = new Map<string, string>();
     try {
       loop.enter("resolve");
+      context = await gatherPlanReferenceContext(params.actorClerkId, context, modelResult.plan);
       const resolved = resolveAndValidatePlan(
         modelResult.plan,
         context,
@@ -1553,28 +1597,13 @@ async function runAttempt(
       metadataWrite,
       progressiveWritesReady,
     ]);
-    // Derive destructive artifact effects from the stored plan and authorized
-    // current content; neither a model flag nor patch syntax grants approval.
-    if (plan.operations.some((operation) => operation.type === "artifact.update" || operation.type === "artifact.archive")) {
-      const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
-        "spectraArtifactWrites:preparePlan",
-        { runId: params.runId, executionId: params.executionId },
-      );
-      if (artifactPolicy.approvalReasons.length > 0) {
-        policy.requiresConfirmation = true;
-        policy.reasons.push(...artifactPolicy.approvalReasons);
-      }
-    }
     recordPhase("plan_recorded");
     const pendingArtifacts = new Map<string, string>();
     for (let index = 0; index < stored.operationIds.length; index += 1) {
       const operationId = stored.operationIds[index]!;
       const operation = plan.operations[index];
       let pendingArtifactId: string | undefined;
-      if (
-        operation?.type === "artifact.create" &&
-        !policy.requiresConfirmation
-      ) {
+      if (operation?.type === "artifact.create") {
         pendingArtifactId =
           earlyPendingBlueprintByIndex.get(index) ===
           operation.input.blueprintKey
@@ -1673,8 +1702,32 @@ async function runAttempt(
       });
     }
 
+    // All create allocations must be bound to their exact stored operation
+    // before preparing creates and later @created:N consumers. Allocation is
+    // still a pending preview; approval and first-effect guards govern saves.
+    if (plan.operations.some((operation) => operation.type === "artifact.create" || operation.type === "artifact.update" || operation.type === "artifact.archive")) {
+      const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
+        "spectraArtifactWrites:preparePlan",
+        { runId: params.runId, executionId: params.executionId },
+      );
+      if (artifactPolicy.approvalReasons.length > 0) {
+        policy.requiresConfirmation = true;
+        policy.reasons.push(...artifactPolicy.approvalReasons);
+      }
+    }
+
     if (plan.decision !== "operate") {
       loop.enter("report", "answer, clarification, and refusal do not mutate");
+      // Park before the question becomes answerable, so an answer can never
+      // arrive ahead of the staged work it continues.
+      if (plan.decision === "clarify" && "stagedCandidates" in modelResult && modelResult.stagedCandidates)
+        await mutate("spectraRunContinuations:park", {
+          actorClerkId: params.actorClerkId,
+          runId: params.runId,
+          executionId: params.executionId,
+          candidates: modelResult.stagedCandidates,
+          ...("stagedCandidatesOmitted" in modelResult && modelResult.stagedCandidatesOmitted ? { omitted: true } : {}),
+        });
       await Promise.all([
         mutate("spectraArtifacts:discardPendingForRun", {
           actorClerkId: params.actorClerkId,
@@ -4027,6 +4080,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       agentId:
         state.run.selectedAgentId ?? reset.contextSnapshot?.requestedAgentId,
       disableAgentRouting: reset.contextSnapshot?.disableAgentRouting,
+      continuationRunId: reset.continuationRunId,
       attachments: retryAttachments,
     };
     if (
@@ -4068,6 +4122,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             state.run.selectedAgentId ??
             reset.contextSnapshot?.requestedAgentId,
           disableAgentRouting: reset.contextSnapshot?.disableAgentRouting,
+          continuationRunId: reset.continuationRunId,
           attachments: retryAttachments,
         },
         emit,
@@ -4368,7 +4423,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     const operations = proposed.map((row) =>
       parseModelOperation({ type: row.type, input: row.input }),
     );
-    const context = await buildContext(
+    let context = await buildContext(
       actor.clerkId,
       {
         workspaceId: state.run.workspaceId,
@@ -4382,7 +4437,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         currentView: state.run.contextSnapshot?.currentView,
       },
       state.run.userPrompt,
+      { mode: "orientation" },
     );
+    context = await gatherPlanReferenceContext(actor.clerkId, context, {
+      decision: "operate", intent, operations, presentedArtifactIds: [],
+      finalResponse: state.run.finalSummary ?? "Confirmed changes completed.",
+    });
     validatePlanAgainstIntent(
       {
         decision: "operate",

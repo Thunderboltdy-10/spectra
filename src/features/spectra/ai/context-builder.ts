@@ -42,6 +42,16 @@ function compactText(value: unknown, cap: number) {
   return chunks.join(" ").replace(/\s+/g, " ").trim().slice(0, cap);
 }
 
+/** Bounded, but never silently narrowing: keep both the start and the end of
+ * a long instruction, and say how much of the middle was omitted. */
+function goalText(value: unknown, cap: number) {
+  const text = compactText(value, 200_000);
+  if (text.length <= cap) return text;
+  const head = Math.floor(cap * 0.6);
+  const tail = cap - head;
+  return `${text.slice(0, head)} … [${text.length - cap} characters omitted] … ${text.slice(-tail)}`;
+}
+
 function placements(artifact: ArtifactRecord) {
   return Array.isArray(artifact.placements)
     ? artifact.placements.slice(0, 6).map((value) => {
@@ -975,10 +985,10 @@ export function buildBoundedContextPacket(input: {
         : null,
     activeGoal: input.activeGoal
       ? {
-          request: compactText(input.activeGoal.request, 2_400),
-          question: compactText(input.activeGoal.question, 1_000),
+          request: goalText(input.activeGoal.request, 2_400),
+          question: goalText(input.activeGoal.question, 1_000),
           selectedChoice: compactText(input.activeGoal.selectedChoice, 500),
-          userResponse: compactText(input.activeGoal.userResponse, 1_000),
+          userResponse: goalText(input.activeGoal.userResponse, 1_000),
           intent: input.activeGoal.intent ?? null,
           rule: "This unresolved request is the authoritative current goal. The selected choice or explicit user response answers its question. Earlier requests in the thread are historical and must not be revived.",
         }

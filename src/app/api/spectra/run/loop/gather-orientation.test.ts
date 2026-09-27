@@ -80,6 +80,17 @@ describe("initial context orientation", () => {
     expect(live).toHaveBeenCalledWith({ artifactId, timeoutMs: 4_000 });
   });
 
+  it("hydrates only the visible target, without discovery, when an explicit edit demands it", async () => {
+    const context = await buildContext("actor", { artifactId, workspaceId: "workspace" },
+      "Rewrite this guide's introduction", { mode: "orientation", hydrateTargets: true });
+    expect(context.focusedArtifact).toMatchObject({ id: artifactId, content: contents.content });
+    expect(context.packet.contextMode).toBe("orientation");
+    expect(context.packet.omitted).toMatchObject({ artifactContents: false, workspaceDiscovery: true, memoryRetrieval: true });
+    expect(query.mock.calls.map(([name]) => name).sort()).toEqual(["spectraArtifacts:get", "spectraContext:getWorkspace"]);
+    expect(act).not.toHaveBeenCalled();
+    expect(live).toHaveBeenCalledTimes(1);
+  });
+
   it("retains the current conversation and a durable clarification's original goal", async () => {
     const context = await buildContext("actor", {
       threadId: "current-thread", clarificationId: "question", choiceMessageId: "message",

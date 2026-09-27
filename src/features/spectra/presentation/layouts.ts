@@ -59,15 +59,6 @@ const NEEDS_ALT_TEXT = new Set<PresentationObjectType>([
   "embed",
 ]);
 
-export const GENERATED_PRESENTATION_LAYOUT_CYCLE = [
-  "statement",
-  "title-content",
-  "two-column",
-  "title-visual-text",
-  "three-ideas",
-  "visual-story",
-] as const satisfies readonly PresentationLayoutId[];
-
 const GENERATED_THEME = {
   background: "var(--bg-secondary)",
   heading: "var(--accent-mint)",
@@ -119,6 +110,7 @@ function applyGeneratedTextStyle(
   role: "title" | "body",
   align?: "left" | "center" | "right",
 ) {
+  const authoredSize = numericStyle(object, "fontSize", 0);
   const tokens = deck.theme.tokens ?? {};
   const color =
     (role === "title" ? tokens.heading : tokens.body) ??
@@ -136,7 +128,8 @@ function applyGeneratedTextStyle(
     lineHeight: role === "title" ? 1.08 : 1.22,
     align: align ?? object.style?.align ?? "left",
   };
-  object.style.fontSize = fittedFontSize(object, role);
+  object.style.fontSize =
+    authoredSize > 0 ? authoredSize : fittedFontSize(object, role);
 }
 
 function firstVisibleText(slide: PresentationSlide) {
@@ -269,7 +262,10 @@ export function applyPresentationLayout(
       height: height * 0.5,
       style: {
         ...title.style,
-        fontSize: 58,
+        fontSize:
+          mode === "generated" && numericStyle(title, "fontSize", 0) > 0
+            ? numericStyle(title, "fontSize", 58)
+            : 58,
         fontWeight: 720,
         align: "center",
       },
@@ -419,32 +415,6 @@ function inferredLayout(slide: PresentationSlide, slideIndex: number) {
   return "title-content";
 }
 
-function layoutSequenceNeedsRepair(layouts: readonly string[]) {
-  if (layouts.length < 6) return false;
-  const expectedVariety = Math.min(4, Math.ceil(layouts.length / 3));
-  if (new Set(layouts.filter(Boolean)).size < expectedVariety) return true;
-  for (let index = 2; index < layouts.length; index += 1) {
-    if (
-      layouts[index] &&
-      layouts[index] === layouts[index - 1] &&
-      layouts[index] === layouts[index - 2]
-    )
-      return true;
-  }
-  return false;
-}
-
-function generatedLayoutForSlide(
-  slide: PresentationSlide,
-  slideIndex: number,
-  repairVariety: boolean,
-): PresentationLayoutId {
-  if (!repairVariety) return inferredLayout(slide, slideIndex);
-  return GENERATED_PRESENTATION_LAYOUT_CYCLE[
-    slideIndex % GENERATED_PRESENTATION_LAYOUT_CYCLE.length
-  ];
-}
-
 const GENERIC_COPY =
   /^(?:slide \d+|title|subtitle|add a clear idea|add the supporting idea|add a visual|new slide|key idea \d+|visual)$/i;
 
@@ -482,14 +452,17 @@ function writeCopy(object: PresentationObject, value: string) {
 function hydrateGeneratedRoles(
   slide: PresentationSlide,
   layoutId: PresentationLayoutId,
+  authoredTitle: boolean,
 ) {
+  const authoredObjects = new Set(slide.objects.map((object) => object.id));
+  const needsCopy = (object: PresentationObject) =>
+    !authoredObjects.has(object.id) &&
+    GENERIC_COPY.test(presentationObjectText(object).trim());
   const copy = collectSlideCopy(slide);
   const heading = copy[0] || slide.title.trim() || "Key idea";
-  if (!slide.title.trim() || GENERIC_COPY.test(slide.title.trim()))
-    slide.title = heading;
+  if (!authoredTitle) slide.title = heading;
   const title = ensureTitle(slide, true);
-  if (title && GENERIC_COPY.test(presentationObjectText(title).trim()))
-    writeCopy(title, heading);
+  if (title && needsCopy(title)) writeCopy(title, heading);
   if (!title) return;
 
   const extras = copy.filter(
@@ -514,7 +487,7 @@ function hydrateGeneratedRoles(
     }
     bodies.slice(0, needed).forEach((body, index) => {
       const source = supporting[index] ?? supporting[0] ?? heading;
-      if (GENERIC_COPY.test(presentationObjectText(body).trim()))
+      if (needsCopy(body))
         writeCopy(body, shortIdea(source, source, 12));
     });
   }
@@ -537,7 +510,7 @@ function hydrateGeneratedRoles(
     }
     cards.slice(0, 3).forEach((card, index) => {
       const source = supporting[index] ?? heading;
-      if (GENERIC_COPY.test(presentationObjectText(card).trim()))
+      if (needsCopy(card))
         writeCopy(card, shortIdea(source, source, 8));
     });
   }
@@ -548,54 +521,22 @@ function hydrateGeneratedRoles(
     layoutId === "full-bleed"
   ) {
     const visual = ensureVisual(slide, title, true);
-    if (visual && GENERIC_COPY.test(presentationObjectText(visual).trim()))
+    if (visual && needsCopy(visual))
       writeCopy(visual, shortIdea(heading, "Visual", 5));
     const bodies = ensureSupportingText(slide, title, true);
     bodies.forEach((body, index) => {
       const source = supporting[index] ?? supporting[0] ?? heading;
-      if (GENERIC_COPY.test(presentationObjectText(body).trim()))
+      if (needsCopy(body))
         writeCopy(body, shortIdea(source, source, 12));
     });
   }
 }
 
-function parkExtraObjectsForSparseLayout(
+function fitGeneratedSlide(
+  deck: PresentationContent,
   slide: PresentationSlide,
-  layoutId: PresentationLayoutId,
+  authoredHeights: ReadonlySet<string>,
 ) {
-  if (layoutId !== "statement" && layoutId !== "title-only") return;
-  const title = firstVisibleText(slide);
-  if (!title) return;
-  slide.objects = slide.objects.filter((object) => {
-    if (object.id === title.id) return true;
-    const text = presentationObjectText(object).trim();
-    if (text && !GENERIC_COPY.test(text))
-      slide.speakerNotes = [slide.speakerNotes?.trim(), text]
-        .filter(Boolean)
-        .join(" ");
-    return false;
-  });
-}
-
-function parkOverflowingText(
-  slide: PresentationSlide,
-  object: PresentationObject,
-) {
-  const words = presentationObjectText(object)
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  while (words.length > 3 && estimateTextOverflow(object)) {
-    const parked = words.pop();
-    if (!parked) break;
-    slide.speakerNotes = [slide.speakerNotes?.trim(), parked]
-      .filter(Boolean)
-      .join(" ");
-    Object.assign(object, withPresentationObjectText(object, words.join(" ")));
-  }
-}
-
-function fitGeneratedSlide(deck: PresentationContent, slide: PresentationSlide) {
   const height = canvasHeight(deck);
   const title = firstVisibleText(slide);
   visibleObjects(slide).forEach((object) => {
@@ -611,17 +552,18 @@ function fitGeneratedSlide(deck: PresentationContent, slide: PresentationSlide) 
         object.style?.align === "center" ? "center" : undefined,
       );
     else if (object.type === "chart" || object.type === "table") {
-      // Charts and tables carry visible labels too, but do not use text-frame
-      // fitting for them: their own renderer owns the internal layout. Keep
-      // authored label sizing above the shared presentation readability floor.
-      const fontSize = Number(object.style?.fontSize ?? 21);
-      if (Number.isFinite(fontSize) && fontSize < 20)
-        object.style = { ...object.style, fontSize: 20 };
+      // Native chart/table renderers own label layout. Supply a default only
+      // when absent; a positive authored size is an intentional design choice.
+      if (object.style?.fontSize == null)
+        object.style = { ...object.style, fontSize: 21 };
     }
     const room = Math.max(40, height - object.y - 16);
-    while (estimateTextOverflow(object) && object.height < room)
+    while (
+      !authoredHeights.has(object.id) &&
+      estimateTextOverflow(object) &&
+      object.height < room
+    )
       object.height = Math.min(room, object.height + 16);
-    if (estimateTextOverflow(object)) parkOverflowingText(slide, object);
     if (NEEDS_ALT_TEXT.has(object.type) && !object.altText?.trim())
       object.altText = `${object.type} on ${slide.title || "this slide"}`;
   });
@@ -645,29 +587,84 @@ function ensureGeneratedTheme(deck: PresentationContent) {
   };
 }
 
+function objectRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is Record<string, unknown> =>
+          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+      )
+    : [];
+}
+
 /**
  * The AI authors semantic objects and a layout intent. This realizes that
  * intent through the same geometry the studio uses, then returns canonical
  * content for storage and verification.
  */
 export function realizeGeneratedPresentation(value: unknown) {
-  const deck = normalizePresentationContent(value);
+  const geometry = new Map<
+    string,
+    Partial<Pick<PresentationObject, "x" | "y" | "width" | "height">>
+  >();
+  const deck = normalizePresentationContent(value, {
+    onObjectNormalized(object, raw) {
+      const fields: Partial<
+        Pick<PresentationObject, "x" | "y" | "width" | "height">
+      > = {};
+      for (const key of ["x", "y", "width", "height"] as const) {
+        const rawValue = raw[key];
+        if (
+          typeof rawValue === "number" &&
+          Number.isFinite(rawValue) &&
+          (key === "x" || key === "y" || rawValue > 0)
+        )
+          fields[key] = object[key];
+      }
+      geometry.set(object.id, fields);
+    },
+  });
   ensureGeneratedTheme(deck);
-  const authored = deck.slides.map((slide, index) =>
-    inferredLayout(slide, index),
+  const rawSlides = objectRecords(
+    value && typeof value === "object" && "slides" in value
+      ? value.slides
+      : undefined,
   );
-  const repairVariety = layoutSequenceNeedsRepair(authored);
+  const authoredHeights = new Set(
+    [...geometry]
+      .filter(([, fields]) => fields.height !== undefined)
+      .map(([id]) => id),
+  );
   deck.slides.forEach((slide, slideIndex) => {
-    const layoutId = generatedLayoutForSlide(slide, slideIndex, repairVariety);
-    hydrateGeneratedRoles(slide, layoutId);
+    // Keep authored frame fields after applying defaults for sparse input.
+    // Values come from the canonical normalizer so its canvas bounds remain.
+    const layoutId = inferredLayout(slide, slideIndex);
+    if (layoutId !== "blank")
+      hydrateGeneratedRoles(
+        slide,
+        layoutId,
+        typeof rawSlides[slideIndex]?.title === "string",
+      );
     applyPresentationLayout(deck, slideIndex, layoutId, {
       createMissing: true,
       mode: "generated",
     });
-    parkExtraObjectsForSparseLayout(slide, layoutId);
-    fitGeneratedSlide(deck, slide);
-    // Reading order is derived from objects that remain after parking and
-    // overflow. Authored IDs are not an identity for writes.
+    slide.objects.forEach((object) => {
+      const authored = geometry.get(object.id) ?? {};
+      Object.assign(object, authored);
+      // A supplied position or size can make the complementary layout default
+      // too large. Fit only unspecified fields back inside the canvas.
+      if (authored.width === undefined)
+        object.width = Math.min(object.width, 1_000 - object.x);
+      if (authored.height === undefined)
+        object.height = Math.min(object.height, canvasHeight(deck) - object.y);
+      if (authored.x === undefined)
+        object.x = Math.min(object.x, 1_000 - object.width);
+      if (authored.y === undefined)
+        object.y = Math.min(object.y, canvasHeight(deck) - object.height);
+    });
+    fitGeneratedSlide(deck, slide, authoredHeights);
+    // Preserve authored objects and derive complete reading order. Overflow
+    // remains visible to the quality gate for a deliberate authoring repair.
     finalizeReadingOrder(slide);
   });
   return deck;

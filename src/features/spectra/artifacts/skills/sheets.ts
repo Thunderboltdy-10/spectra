@@ -1,4 +1,5 @@
 import { defineArtifactSkill } from "../types";
+import { artifactDesignGuidance } from "./artifact-design";
 export const sheetsSkill = defineArtifactSkill({
   typeKey: "sheets",
   purpose:
@@ -32,6 +33,7 @@ export const sheetsSkill = defineArtifactSkill({
     "named range",
   ],
   operations: [
+    ...artifactDesignGuidance,
     "Put labels and units beside the data, distinguish inputs from calculated results, freeze useful headers, and use readable number formats and widths. Provide a concise interpretation of the verified values, including meaningful limitations.",
     "For a cell edit, use /sheets/0/cells/D1 or a partial cells map containing only changed addresses, with the actual supplied sheet index. Preserve every unrelated cell and formula; never replace the whole workbook for a new column.",
     "Inspect workbook outline, range values and formulas, dependencies, errors, tables, charts, names, and provenance.",

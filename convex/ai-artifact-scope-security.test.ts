@@ -10,6 +10,8 @@ import { artifactOperationDigest, artifactSourceIdentity, assertAiArtifactWriteA
 import { canonicalArtifactWriteContent, normalizeAiArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { preparationContext } from "./spectraArtifactWrites";
 import { observeDatabase } from "../scripts/perf-read-ledger";
+import type { Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 
 const modules = import.meta.glob("./**/*.ts");
 const prepare = makeFunctionReference<"action">("spectraArtifactWrites:preparePlan");
@@ -152,7 +154,10 @@ describe("artifact preparation and archive approval boundary", () => {
     }));
     const measure = () => f.actor.run(async ctx => {
       const observer = observeDatabase(ctx.db);
-      const result = await preparationContext._handler({ ...ctx, db: observer.db }, f.attempt);
+      const handler = Reflect.get(preparationContext, "_handler") as (
+        ctx: QueryCtx, args: typeof f.attempt,
+      ) => Promise<{ operations: Array<{ _id: Id<"spectraOperations"> }> }>;
+      const result = await handler({ ...ctx, db: observer.db }, f.attempt);
       return { ids: result.operations.map(operation => operation._id), ...observer.snapshot() };
     });
     const before = await measure();

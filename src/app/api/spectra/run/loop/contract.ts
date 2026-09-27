@@ -1,7 +1,26 @@
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
-import type { SpectraPlan } from "@/features/spectra/operations/schema";
+import type { ModelOperation, SpectraPlan } from "@/features/spectra/operations/schema";
 
 export type Surface = "chat" | "workspace" | "artifacts" | "artifact";
+
+export type StagedCandidateDisposition = "accepted" | "needs_revalidation" | "withdrawn";
+
+/** Authenticated server restoration of a request paused for clarification.
+ * Candidates are unexecuted proposals, never a client supplied write grant. */
+export type RestoredClarification = {
+  originalRequest: string;
+  clarificationResponses: string[];
+  candidates: Array<{ operation: unknown; disposition: StagedCandidateDisposition }>;
+  candidatesOmitted: boolean;
+};
+
+/** One staged position of a clarifying run, in its stable index space. */
+export type ParkedCandidate = {
+  operation: ModelOperation;
+  disposition: StagedCandidateDisposition;
+  /** Unchanged restored candidate: keeps its original source evidence. */
+  carried?: boolean;
+};
 
 export type Body = {
   action?:
@@ -197,6 +216,8 @@ export type RetryReset = {
   previousExecutionId: string;
   created: boolean;
   contextSnapshot?: RunState["contextSnapshot"];
+  /** The answered run when this run continues a clarification. */
+  continuationRunId?: string;
 };
 
 export type NativeProgressActivity =

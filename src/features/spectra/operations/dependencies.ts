@@ -82,3 +82,47 @@ export function mergeStagedOperations(staged: ModelOperation[], terminal: ModelO
     throw new Error("The final plan repeats only part of the staged operations. Include the complete staged prefix in order, or only the remaining operations using their final operation indexes.");
   return [...staged, ...terminal];
 }
+
+export type StagedDisposition = "accepted" | "needs_revalidation" | "withdrawn";
+
+/** A staged graph that cannot become an executable plan yet. The model can
+ * correct it with the same tools; nothing has been executed. */
+export class StagedGraphError extends Error {}
+
+/** Staged positions that declare a dependency on the given producer. */
+export function stagedDependents(operations: readonly ModelOperation[], producerIndex: number) {
+  return operations.flatMap((operation, index) => {
+    let depends = false;
+    mapOperationArtifactReferences(operation, (id) => {
+      if (createdDependencyIndex(id) === producerIndex) depends = true;
+      return id;
+    });
+    return depends ? [index] : [];
+  });
+}
+
+/** The executable form of a staged sequence whose indexes stayed stable while
+ * it was revised. Withdrawn positions are removed and declared dependencies
+ * renumbered; authored text that mentions @created:N is never rewritten. A
+ * candidate prepared against since-changed sources cannot enter the plan. */
+export function compileStagedOperations(
+  operations: readonly ModelOperation[],
+  disposition: (index: number) => StagedDisposition,
+) {
+  const pending = operations.flatMap((_, index) => disposition(index) === "needs_revalidation" ? [index] : []);
+  if (pending.length)
+    throw new StagedGraphError(`Staged operation indexes ${pending.join(", ")} were prepared before their source changed and are not accepted. Read the current targets, then replace each one with revise_staged_operation or withdraw it before finishing.`);
+  const kept = operations.flatMap((_, index) => disposition(index) === "withdrawn" ? [] : [index]);
+  if (kept.length === operations.length) return [...operations];
+  const nextIndex = new Map(kept.map((previous, index) => [previous, index]));
+  const compiled = kept.map((previous) => mapOperationArtifactReferences(operations[previous]!, (id) => {
+    const producer = createdDependencyIndex(id);
+    if (producer === null) return id;
+    const remapped = nextIndex.get(producer);
+    if (remapped === undefined)
+      throw new StagedGraphError(`Staged operation ${previous} depends on withdrawn operation @created:${producer}. Replace or withdraw it before finishing.`);
+    return `@created:${remapped}`;
+  }));
+  validateOperationDependencies(compiled);
+  return compiled;
+}

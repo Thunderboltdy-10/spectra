@@ -85,6 +85,7 @@ import type * as spectraArtifactDeletion from "../spectraArtifactDeletion.js";
 import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraOperations from "../spectraOperations.js";
+import type * as spectraRunContinuations from "../spectraRunContinuations.js";
 import type * as spectraRunLifecycle from "../spectraRunLifecycle.js";
 import type * as spectraRunProjection from "../spectraRunProjection.js";
 import type * as spectraRuns from "../spectraRuns.js";
@@ -180,6 +181,7 @@ declare const fullApi: ApiFromModules<{
   spectraArtifactLinks: typeof spectraArtifactLinks;
   spectraArtifacts: typeof spectraArtifacts;
   spectraOperations: typeof spectraOperations;
+  spectraRunContinuations: typeof spectraRunContinuations;
   spectraRunLifecycle: typeof spectraRunLifecycle;
   spectraRunProjection: typeof spectraRunProjection;
   spectraRuns: typeof spectraRuns;

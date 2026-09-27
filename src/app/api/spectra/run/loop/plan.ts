@@ -1,6 +1,8 @@
 import type {
   NativeProgressInput,
+  ParkedCandidate,
   PreparedAttachment,
+  RestoredClarification,
   Surface,
 } from "./contract";
 import { rows, summarizeArtifact } from "./gather";
@@ -23,7 +25,15 @@ import {
   selectedAgentRecord,
 } from "./intake";
 import type { ProvisionalCreation } from "./intake";
-import { mergeStagedOperations } from "@/features/spectra/operations/dependencies";
+import {
+  compileStagedOperations,
+  createdDependencyIndex,
+  mapOperationArtifactReferences,
+  mergeStagedOperations,
+  StagedGraphError,
+  stagedDependents,
+  validateOperationDependencies,
+} from "@/features/spectra/operations/dependencies";
 import { isRegisteredApplicationAction, prepareApplicationCommand } from "@/features/spectra/operations/application-command";
 import { hasNumericTableSource } from "@/features/spectra/quality/source-requirements";
 import { act, query, readQuery, safeJson } from "./io";
@@ -2492,6 +2502,8 @@ export function fastFocusedDeckHintPlan(
   });
 }
 
+const STAGED_REVISION_TOOLS = spectraToolRegistry.providerTools(["revise_staged_operation"]);
+
 export const SPECTRA_AGENT_TOOLS = spectraToolRegistry.providerTools(
   APPLICATION_AGENT_TOOL_IDS,
 );
@@ -3515,6 +3527,25 @@ export function promptDirectlyUsesFocusedContent(prompt: string) {
   );
 }
 
+/** Parse the runtime's authenticated restoration. A candidate that no longer
+ * parses under the current operation schema cannot be staged; the request is
+ * kept and the continuation is told to prepare that work again. */
+function restoredClarificationFrom(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const restored = value as RestoredClarification;
+  try {
+    const candidates = (Array.isArray(restored.candidates) ? restored.candidates : []).map((candidate) => ({
+      operation: parseModelOperation(candidate.operation),
+      disposition: candidate.disposition === "withdrawn" || candidate.disposition === "accepted"
+        ? candidate.disposition : "needs_revalidation" as const,
+    }));
+    validateOperationDependencies(candidates.map(({ operation }) => operation));
+    return { candidates, candidatesOmitted: restored.candidatesOmitted === true };
+  } catch {
+    return { candidates: [], candidatesOmitted: true };
+  }
+}
+
 export function buildAgentOrientation(context: unknown, prompt: string) {
   const record =
     context && typeof context === "object" && !Array.isArray(context)
@@ -3730,6 +3761,19 @@ export async function callModel(
     context && typeof context === "object" && !Array.isArray(context)
       ? (context as Record<string, unknown>)
       : {};
+  // Server-restored staged work of a request that paused for clarification.
+  // Positions keep their indexes (and @created:N identities) while revised.
+  const restoredClarification = restoredClarificationFrom(contextRecord.stagedContinuation);
+  const restoredCandidates = restoredClarification?.candidates ?? [];
+  if (restoredCandidates.length) {
+    // Early previews are keyed by staged index; a withdrawal renumbers the
+    // final graph, so restored work materializes only at execution.
+    onPlanOperation = undefined;
+    onPartialCreation = undefined;
+    // Revising staged positions needs the ordinary agent and its tools.
+    forcedSingleCreation = undefined;
+    forceGeneralPlan = true;
+  }
   const explicitMutationOnly = contextRecord.explicitMutationOnly === true;
   const explicitMutationTargetIds = Array.isArray(contextRecord.explicitMutationTargetIds)
     ? contextRecord.explicitMutationTargetIds.filter((id): id is string => typeof id === "string").slice(0, 8)
@@ -4050,10 +4094,16 @@ export async function callModel(
     const updateScopeTools = unresolvedExplicitMutationTargetIds.length
       ? new Set(["submit_plan"])
       : updateScopeReadTools;
-    const agentTools = baseAgentTools.filter((tool) =>
+    const scopedAgentTools = baseAgentTools.filter((tool) =>
       (!explicitMutationOnly || updateScopeTools.has(tool.function.name)) &&
       selectedAgentAllowsModelTool(contextRecord, tool.function.name),
     );
+    // Only a request resumed with staged candidates can revise positions by
+    // index; ordinary requests keep their lean, cache-stable tool list.
+    const agentTools = restoredCandidates.length &&
+      scopedAgentTools.some((tool) => tool.function.name === "propose_operation")
+      ? [...scopedAgentTools, ...STAGED_REVISION_TOOLS]
+      : scopedAgentTools;
     return fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -4105,8 +4155,37 @@ export async function callModel(
   const expectedCreationBlueprint = boundedSingleCreation?.blueprintKey;
   const defaultPlacement =
     surface === "chat" || surface === "artifacts" ? "inbox" : "context";
-  const acceptedAgentOperations: ModelOperation[] = [];
-  const acceptedAgentWorkSummaries: string[] = [];
+  const acceptedAgentOperations: ModelOperation[] = restoredCandidates.map(({ operation }) => operation);
+  // Only non-accepted positions are recorded. Carried positions are restored
+  // candidates not revised in this attempt; they keep their source evidence.
+  const stagedDispositions = new Map<number, "needs_revalidation" | "withdrawn">(
+    restoredCandidates.flatMap(({ disposition }, index) =>
+      disposition === "accepted" ? [] : [[index, disposition] as const]),
+  );
+  const carriedIndexes = new Set(restoredCandidates.map((_, index) => index));
+  const stagedDisposition = (index: number) => stagedDispositions.get(index) ?? "accepted";
+  const stagedGraph = (operations: readonly ModelOperation[] = acceptedAgentOperations) =>
+    stagedDispositions.size ? compileStagedOperations(operations, stagedDisposition) : [...operations];
+  const stageAcceptedOperation = (operation: ModelOperation) => {
+    const fingerprint = JSON.stringify(operation);
+    const existing = acceptedAgentOperations.findIndex((entry) => JSON.stringify(entry) === fingerprint);
+    if (existing < 0) return { index: acceptedAgentOperations.push(operation) - 1, duplicate: false };
+    // Proposing the identical typed operation again after a source change or
+    // a withdrawal is an explicit, freshly validated acceptance.
+    if (stagedDispositions.delete(existing)) carriedIndexes.delete(existing);
+    return { index: existing, duplicate: true };
+  };
+  const acceptedAgentWorkSummaries: string[] = restoredCandidates.map(({ operation }) => operationLabel(operation));
+  const restoredStagedMessage = () => [
+    "This request resumed after the user answered a clarification question. The complete original request and every answer are in the current User request.",
+    restoredClarification?.candidatesOmitted
+      ? "Work staged earlier in this request was too large to keep while waiting for the answer. Prepare it again from the request and the current sources."
+      : "",
+    acceptedAgentOperations.length
+      ? `The typed operations below were staged earlier in this same request; none is saved. Accepted positions are applied with your final response unless you change them: when the answer changes or cancels one, call revise_staged_operation to replace or withdraw that position. Positions marked needs_revalidation were prepared before their source changed and are not accepted: read the current target, then replace or withdraw each. Indexes and @created:N identities stay stable. Do not repeat staged operations; complete every remaining part of the request and finish normally.
+${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operationIndex, disposition: stagedDisposition(operationIndex), operation })))}`
+      : "",
+  ].filter(Boolean).join("\n");
   const committedApplicationSummaries: string[] = [];
   let qualityCritiqueFailures = 0;
   let lastQualityFailure: unknown;
@@ -4141,6 +4220,67 @@ export async function callModel(
       }
     }
   };
+  /** The complete structural, scope, agent and content validation of one
+   * proposed mutation. Staging and revising a staged position share it. */
+  const validateProposedOperation = (proposed: unknown) => {
+    const operation = prepareOperationForQuality(
+      sanitizeModelOperationUserFacingContent(
+        reconcileExplicitDocumentOperation(
+          parseModelOperation(
+            coerceProposedOperation(
+              proposed,
+              defaultPlacement,
+              contextRecord,
+              prompt,
+              ownedArtifactBlueprints,
+            ),
+          ),
+          prompt,
+          contextRecord.focusedArtifact,
+        ),
+        contextRecord,
+      ),
+      mergedResearchEvidence(),
+    );
+    assertExplicitMutationScope([operation]);
+    assertSelectedAgentAllowsOperations(contextRecord, [operation]);
+    assertRequestedArtifactContent([operation], prompt, numericSourceRequired);
+    assertRequestedArtifactMutation([operation], prompt);
+    assertPresentationLayoutContract([operation], prompt);
+    return operation;
+  };
+  /** Replace or withdraw one staged position without shifting any index. */
+  const reviseStagedOperation = (args: Record<string, unknown>) => {
+    const index = args.operationIndex;
+    if (typeof index !== "number" || !Number.isInteger(index) || !acceptedAgentOperations[index])
+      throw new Error("operationIndex must identify a staged operation.");
+    const liveDependents = stagedDependents(acceptedAgentOperations, index)
+      .filter((dependent) => stagedDisposition(dependent) !== "withdrawn");
+    if (args.action === "withdraw") {
+      if (liveDependents.length)
+        throw new Error(`Staged operations ${liveDependents.join(", ")} depend on @created:${index}. Replace or withdraw them first.`);
+      stagedDispositions.set(index, "withdrawn");
+      carriedIndexes.delete(index);
+      return { operationIndex: index, disposition: "withdrawn" as const };
+    }
+    if (args.action !== "replace") throw new Error("action must be replace or withdraw.");
+    const operation = validateProposedOperation(args.operation);
+    if (liveDependents.length && operation.type !== "artifact.create")
+      throw new Error(`Staged operations ${liveDependents.join(", ")} use @created:${index}; its replacement must still create an artifact.`);
+    const revised = acceptedAgentOperations.map((entry, position) => position === index ? operation : entry);
+    validateOperationDependencies(revised);
+    mapOperationArtifactReferences(operation, (id) => {
+      const producer = createdDependencyIndex(id);
+      if (producer !== null && stagedDisposition(producer) === "withdrawn")
+        throw new Error(`@created:${producer} was withdrawn; it cannot be used by a replacement.`);
+      return id;
+    });
+    acceptedAgentOperations[index] = operation;
+    stagedDispositions.delete(index);
+    carriedIndexes.delete(index);
+    acceptedAgentWorkSummaries[index] = operationLabel(operation);
+    return { operationIndex: index, disposition: "accepted" as const, preview: safeOperationPreview(operation) };
+  };
   const parseAndCheckPlan = (text: string) => {
     let candidateText = text;
     if (acceptedAgentOperations.length) {
@@ -4158,9 +4298,12 @@ export async function callModel(
         const terminalOperations = Array.isArray(raw.operations)
           ? raw.operations
           : [];
-        raw.operations = mergeStagedOperations(acceptedAgentOperations, terminalOperations.map(parseModelOperation));
+        const merged = mergeStagedOperations(acceptedAgentOperations, terminalOperations.map(parseModelOperation));
+        // A question executes nothing; its staged work is parked separately.
+        raw.operations = raw.decision === "clarify" ? [] : stagedGraph(merged);
         candidateText = JSON.stringify(raw);
-      } catch {
+      } catch (error) {
+        if (error instanceof StagedGraphError) throw error;
         // Keep the provider text intact so the normal bounded repair path can
         // explain malformed terminal metadata. Accepted typed operations stay
         // staged and are never committed before a valid terminal envelope.
@@ -4212,9 +4355,9 @@ export async function callModel(
     if (committedApplicationSummaries.length) {
       const groundedSummary = [
         ...committedApplicationSummaries,
-        ...acceptedAgentWorkSummaries.map(
-          (summary) => `${summary.replace(/[.!?]+$/, "")}.`,
-        ),
+        ...acceptedAgentWorkSummaries
+          .filter((_, index) => stagedDisposition(index) !== "withdrawn")
+          .map((summary) => `${summary.replace(/[.!?]+$/, "")}.`),
       ].join(" ");
       parsed = parseSpectraPlan({
         ...parsed,
@@ -4563,7 +4706,7 @@ export async function callModel(
       // Prose is never parsed as executable JSON. Only operations accepted
       // through typed tools can enter the durable graph on this path.
       latestPlanText = agentResult.text;
-      const completion = planFromAgentCompletion(agentResult.text, acceptedAgentOperations);
+      const completion = planFromAgentCompletion(agentResult.text, stagedGraph());
       return {
         plan: parseAndCheckPlan(JSON.stringify(completion)),
         result: {
@@ -4774,7 +4917,9 @@ export async function callModel(
     const agentResult = await runSpectraAgentLoop({
       // A provider/format repair must not discard already accepted work or
       // shift @created:N identities. Give the next pass the same staged graph.
-      messages: acceptedAgentOperations.length
+      messages: restoredClarification
+        ? [...messages, { role: "system", content: restoredStagedMessage() }]
+        : acceptedAgentOperations.length
         ? [...messages, {
             role: "system",
             content: `Continue the same complete user request. The following typed operations are already accepted and staged, not saved. Their indexes remain stable. Do not repeat them or omit other requested outcomes; correct only remaining work and finish normally.\n${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operationIndex, operation })))}`,
@@ -4786,7 +4931,9 @@ export async function callModel(
       taskState: () => acceptedAgentOperations.length || committedApplicationSummaries.length
         ? JSON.stringify({
             stagedOperations: acceptedAgentOperations.map((operation, operationIndex) => ({
-              operationIndex, phase: "staged_not_saved", ...safeOperationPreview(operation),
+              operationIndex, phase: "staged_not_saved",
+              ...(stagedDispositions.has(operationIndex) ? { disposition: stagedDisposition(operationIndex) } : {}),
+              ...safeOperationPreview(operation),
             })),
             committedActions: committedApplicationSummaries,
           })
@@ -4808,10 +4955,8 @@ export async function callModel(
           try {
             const args = JSON.parse(call.arguments) as Record<string, unknown>;
             const operation = parseModelOperation(prepareApplicationCommand(call.name, args));
-            const fingerprint = JSON.stringify(operation);
-            const previous = acceptedAgentOperations.findIndex((entry) => JSON.stringify(entry) === fingerprint);
-            const index = previous >= 0 ? previous : acceptedAgentOperations.push(operation) - 1;
-            if (previous < 0) {
+            const { index, duplicate } = stageAcceptedOperation(operation);
+            if (!duplicate) {
               acceptedAgentWorkSummaries.push(operationLabel(operation));
               onProgressUpdate?.(operationLabel(operation));
               onPlanOperation?.(operation, index);
@@ -4846,6 +4991,28 @@ export async function callModel(
               "I could not verify two distinct permissioned targets. Search or read the relevant work, then either use the single exact id you find or call request_context_target only when at least two valid candidates remain.",
           };
         }
+        if (call.name === "revise_staged_operation") {
+          try {
+            let args: unknown;
+            try {
+              args = JSON.parse(call.arguments);
+            } catch {
+              args = JSON.parse(jsonrepair(call.arguments));
+            }
+            const revision = reviseStagedOperation(
+              spectraToolRegistry.parseInput("revise_staged_operation", args) as Record<string, unknown>,
+            );
+            return {
+              ok: true,
+              ...revision,
+              message: revision.disposition === "withdrawn"
+                ? "This staged position is withdrawn and will not be applied. Its index stays reserved; do not reuse it."
+                : "The staged position was replaced after validation. It is staged, not saved.",
+            };
+          } catch (error) {
+            return { ok: false, code: "invalid_staged_revision", retryable: true, message: publicError(error) };
+          }
+        }
         if (call.name === "propose_operation") {
           if (
             qualityCritiqueFailures >= QUALITY_CRITIQUE_MAX_PASSES &&
@@ -4866,44 +5033,16 @@ export async function callModel(
             }
           }
           try {
-            const operation = prepareOperationForQuality(
-              sanitizeModelOperationUserFacingContent(
-                reconcileExplicitDocumentOperation(
-                  parseModelOperation(
-                    coerceProposedOperation(
-                      args.operation,
-                      defaultPlacement,
-                      contextRecord,
-                      prompt,
-                      ownedArtifactBlueprints,
-                    ),
-                  ),
-                  prompt,
-                  contextRecord.focusedArtifact,
-                ),
-                contextRecord,
-              ),
-              mergedResearchEvidence(),
-            );
-            assertExplicitMutationScope([operation]);
-            assertSelectedAgentAllowsOperations(contextRecord, [operation]);
-            assertRequestedArtifactContent([operation], prompt, numericSourceRequired);
-            assertRequestedArtifactMutation([operation], prompt);
-            assertPresentationLayoutContract([operation], prompt);
-            const fingerprint = JSON.stringify(operation);
-            const existingIndex = acceptedAgentOperations.findIndex(
-              (candidate) => JSON.stringify(candidate) === fingerprint,
-            );
-            if (existingIndex >= 0)
+            const operation = validateProposedOperation(args.operation);
+            const { index, duplicate } = stageAcceptedOperation(operation);
+            if (duplicate)
               return {
                 ok: true,
                 accepted: true,
                 duplicate: true,
-                operationIndex: existingIndex,
+                operationIndex: index,
                 message: "This exact mutation is already staged.",
               };
-            const index = acceptedAgentOperations.length;
-            acceptedAgentOperations.push(operation);
             const workSummary =
               typeof args.workSummary === "string" && args.workSummary.trim()
                 ? args.workSummary.trim().slice(0, 160)
@@ -5139,15 +5278,8 @@ export async function callModel(
             type: "app.command",
             input: { command: call.name, args },
           });
-          const fingerprint = JSON.stringify(operation);
-          const existingIndex = acceptedAgentOperations.findIndex(
-            (candidate) => JSON.stringify(candidate) === fingerprint,
-          );
-          const index =
-            existingIndex >= 0
-              ? existingIndex
-              : acceptedAgentOperations.push(operation) - 1;
-          if (existingIndex < 0) {
+          const { index, duplicate } = stageAcceptedOperation(operation);
+          if (!duplicate) {
             acceptedAgentWorkSummaries.push(operationLabel(operation));
             onProgressUpdate?.(operationLabel(operation));
             onPlanOperation?.(operation, index);
@@ -5629,8 +5761,24 @@ export async function callModel(
   if (!emittedPublicText) onPublicText?.(plan.finalResponse);
   else if (plan.finalResponse.startsWith(emittedPublicText))
     onPublicText?.(plan.finalResponse.slice(emittedPublicText.length));
+  // A question keeps the whole staged graph, in its stable index space, for
+  // the continuation that receives the answer. Nothing here is executable.
+  // A restored request always re-parks, even with nothing staged, so a
+  // candidate dropped here is never revived by a later answer.
+  const parksStagedWork = plan.decision === "clarify" && (acceptedAgentOperations.length > 0 || restoredClarification !== null);
+  const stagedCandidates: ParkedCandidate[] = parksStagedWork
+    ? acceptedAgentOperations.map((operation, index) => ({
+        operation,
+        disposition: stagedDisposition(index),
+        ...(carriedIndexes.has(index) ? { carried: true } : {}),
+      }))
+    : [];
   return {
     plan,
+    ...(parksStagedWork ? {
+      stagedCandidates,
+      ...(restoredClarification?.candidatesOmitted ? { stagedCandidatesOmitted: true } : {}),
+    } : {}),
     model: result.model,
     provider: result.provider,
     usage: result.usage,

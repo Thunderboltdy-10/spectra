@@ -242,6 +242,8 @@ export function registerApplicationTools() {
     cancellable: true,
     resumable: true,
   };
+  // Offered only when a clarification continuation restores staged work.
+  define({ ...mutationDefaults, id: "revise_staged_operation", title: "Revise staged action", description: "Replace or withdraw one operation staged earlier in this same request, identified by its operationIndex. Use it when the user's answer changes or cancels staged work, or after reading the current target of a position marked needs_revalidation. Indexes never shift; a replacement is validated like propose_operation.", inputSchema: z.object({ operationIndex: z.number().int().min(0).max(99), action: z.enum(["replace", "withdraw"]), operation: jsonObject.optional(), reason: z.string().min(1).max(500).optional() }).refine((input) => input.action === "withdraw" || input.operation !== undefined, { message: "A replacement requires the complete typed operation.", path: ["operation"] }) });
   define({ ...mutationDefaults, id: "propose_operation", title: "Propose work action", description: "Validate and stage one complete typed semantic mutation. Set fulfillsRequest only when this one operation fulfills the entire current user request, with no other artifact, action, answer or approval remaining. Otherwise continue and submit the complete plan.", inputSchema: z.object({ workSummary: z.string().min(1).max(160), operation: jsonObject, fulfillsRequest: z.boolean().optional() }) });
 
   define({

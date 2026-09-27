@@ -46,7 +46,7 @@ export function applyDocumentParagraphTextSplice(
     (children.length === 1 && !(children[0] instanceof Y.XmlText)))
     throw new Error("DOCUMENT_TEXT_SPLICE_UNSUPPORTED");
   const text = children[0] as Y.XmlText | undefined;
-  const delta = text?.toDelta() ?? [];
+  const delta: Array<{ insert?: unknown; attributes?: Record<string, unknown> }> = text?.toDelta() ?? [];
   if (delta.some((part) => typeof part.insert !== "string" || Object.keys(part.attributes ?? {}).length > 0))
     throw new Error("DOCUMENT_TEXT_SPLICE_UNSUPPORTED");
   const beforeText = delta.map((part) => part.insert as string).join("");

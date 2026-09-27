@@ -49,7 +49,7 @@ describe("shell authoritative access reads", () => {
   it("evicts an allowed open body on explicit fresh metadata denial, even at the same updatedAt", () => {
     const access = createShellArtifactAccess(vi.fn());
     const body = artifact();
-    const source: SpectraOverview = { artifacts: [body], workspaces: [], runs: [], resultCards: [] };
+    const source: SpectraOverview = { artifacts: [body], workspaces: [], workspace: null, runs: [], resultCards: [] };
     const { result } = renderHook(() => {
       const content = useShellArtifactContent(["work"]);
       useEffect(() => access.subscribe(content.revokeArtifact), [content.revokeArtifact]);

@@ -19,6 +19,8 @@ const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
 const PACKAGE_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const slidePart = "ppt/slides/slide1.xml";
 const claim = (pathPattern: string): PreservationEntry => ({ feature: pathPattern, class: "PRESERVED", partName: slidePart, pathPattern, namespaceUri: PML });
+const remainderClaim: PreservationEntry = { ...claim("transition"), scopeMode: "pptx-transition-remainder" };
+const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 const pack = (parts: Record<string, string | Uint8Array>) => zipSync(Object.fromEntries(Object.entries(parts).map(([key, value]) => [key, typeof value === "string" ? strToU8(value) : value])), { mtime: new Date("1980-01-01T00:00:00Z") });
 const sld = (body: string, prefix = "p") => `<${prefix}:sld xmlns:${prefix}="${PML}">${body}</${prefix}:sld>`;
 const rels = (...edges: [id: string, type: string, target: string][]) => `<Relationships xmlns="${PACKAGE_REL}">${edges.map(([id, type, target]) => `<Relationship Id="${id}" Type="${type.includes(":") ? type : `${REL}/${type}`}" Target="${target}"/>`).join("")}</Relationships>`;
@@ -48,6 +50,96 @@ function ownedGraph() {
   };
 }
 const deletedGraph = () => ({ "ppt/presentation.xml": `<p:presentation xmlns:p="${PML}"><p:sldIdLst/></p:presentation>` });
+
+describe("supported transition preservation remainder", () => {
+  const transition = (effect: string, attributes = 'p14:dur="600" advClick="0" advTm="4200" spd="slow" custom="keep"', ancillary = '<p:sndAc><p:stSnd r:embed="sound"/></p:sndAc><p:extLst><p:ext uri="urn:extension"><x:payload value="keep"/></p:ext></p:extLst>') =>
+    `<p:transition ${attributes}>${effect}${ancillary}</p:transition>`;
+  const packageFor = (body: string, text = "before", rootAttributes = "") => pack({ [slidePart]:
+    `<p:sld xmlns:p="${PML}" xmlns:p14="${P14}" xmlns:r="${REL}" xmlns:x="urn:extra" ${rootAttributes}><p:cSld>${text}</p:cSld>${body}</p:sld>` });
+
+  it.each(["<p:push dir=\"l\"/>", "<p:push/>", "<p:dissolve/>", "", '<p:fade thruBlk="false"/>'])("allows supported effect %s while retaining the rest", async effect => {
+    const before = packageFor(transition("<p:fade/>"));
+    const after = packageFor(transition(effect).replace('p14:dur="600"', effect ? 'p14:dur="20000"' : ""));
+    await expect(check(before, after, [remainderClaim])).resolves.toBeDefined();
+  });
+
+  it.each([
+    ['advClick="0"', 'advClick="1"'], ['advTm="4200"', 'advTm="5000"'],
+    ['spd="slow"', 'spd="fast"'], ['custom="keep"', ""],
+    ['r:embed="sound"', 'r:embed="other"'], ['value="keep"', 'value="lost"'],
+    ['xmlns:x="urn:extra"', 'xmlns:x="urn:different"'],
+  ])("rejects remainder mutation %s", async (from, to) => {
+    const before = packageFor(transition("<p:fade/>"));
+    const afterXml = new TextDecoder().decode(unzipSync(packageFor(transition('<p:push dir="l"/>')))[slidePart]!);
+    await expect(check(before, pack({ [slidePart]: afterXml.replace(from, to) }), [remainderClaim]))
+      .rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it.each(['<p:fade unknown="retain"/>', '<p:fade thruBlk="1"/>', '<p:push dir="r"/>',
+    '<p:fade x:extra="retain"/>', '<p:fade><x:payload/></p:fade>', '<p:wipe/>', '<x:fade/>',
+    '<p:fade/><p:dissolve/>', '<p:fade/><x:unmodeled/>'])
+  ("refuses to exclude unsupported effect content %s", async effect => {
+    await expect(check(packageFor(transition(effect)), packageFor(transition('<p:push dir="l"/>')), [remainderClaim]))
+      .rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it("allows unrelated edits when an unsupported transition stays intact", async () => {
+    const body = transition('<p:wipe unknown="kept"/>');
+    await expect(check(packageFor(body), packageFor(body, "edited"), [remainderClaim])).resolves.toBeDefined();
+  });
+
+  it("keeps direct transition text and nested extension transitions protected", async () => {
+    const body = transition('<p:fade/>retained text', undefined,
+      '<p:extLst><p:ext uri="urn:extension"><p:transition><p:wipe/></p:transition></p:ext></p:extLst>');
+    const edited = body.replace("<p:fade/>", "<p:dissolve/>");
+    await expect(check(packageFor(body), packageFor(edited), [remainderClaim])).resolves.toBeDefined();
+    for (const corrupted of [edited.replace("retained text", ""), edited.replace("<p:wipe/>", "<p:fade/>")])
+      await expect(check(packageFor(body), packageFor(corrupted), [remainderClaim])).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it("uses namespaces rather than prefixes for the effect, duration and preserved data", async () => {
+    const before = packageFor(transition("<p:fade/>"));
+    const afterXml = new TextDecoder().decode(unzipSync(packageFor(transition("<p:dissolve/>").replace('p14:dur="600"', 'p14:dur="20000"')))[slidePart]!)
+      .replaceAll("p:", "q:").replace("xmlns:p=", "xmlns:q=")
+      .replaceAll("p14:", "t:").replace("xmlns:p14=", "xmlns:t=");
+    await expect(check(before, pack({ [slidePart]: afterXml }), [remainderClaim])).resolves.toBeDefined();
+  });
+
+  it("retains inherited namespaces and significant whitespace in the remainder", async () => {
+    const before = packageFor(transition("<p:fade/>"), "before", 'xml:space="preserve"');
+    const after = packageFor(transition('<p:push dir="l"/>').replace("<p:sndAc>", "<p:sndAc> "), "edited", 'xml:space="preserve"');
+    await expect(check(before, after, [remainderClaim])).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+    const foreignDuration = transition("<p:fade/>").replace('p14:dur="600"', 'x:dur="600"');
+    await expect(check(packageFor(foreignDuration), packageFor(foreignDuration.replace('x:dur="600"', 'x:dur="700"').replace("<p:fade/>", "<p:dissolve/>")), [remainderClaim]))
+      .rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it("accepts native unsigned32 durations without a UI clamp and refuses invalid duration edits", async () => {
+    const before = packageFor(transition("<p:fade/>").replace('p14:dur="600"', 'p14:dur="20000"'));
+    await expect(check(before, packageFor(transition("<p:dissolve/>").replace('p14:dur="600"', 'p14:dur="4294967295"')), [remainderClaim]))
+      .resolves.toBeDefined();
+    for (const duration of ["-1", "1.5", "4294967296", "unknown"]) {
+      await expect(check(before, packageFor(transition("<p:dissolve/>").replace('p14:dur="600"', `p14:dur="${duration}"`)), [remainderClaim]))
+        .rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+    }
+    const invalid = transition("<p:fade/>").replace('p14:dur="600"', 'p14:dur="unknown"');
+    await expect(check(packageFor(invalid), packageFor(invalid.replace("<p:fade/>", "<p:dissolve/>")), [remainderClaim])).resolves.toBeDefined();
+    await expect(check(packageFor(invalid), packageFor(transition("<p:dissolve/>")), [remainderClaim])).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it("does not let partial proof satisfy a complete-transition claim", async () => {
+    const before = packageFor(transition("<p:fade/>")), after = packageFor(transition("<p:dissolve/>"));
+    for (const entries of [[claim("transition"), remainderClaim], [remainderClaim, claim("transition")]])
+      await expect(check(before, after, entries)).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+    await expect(check(before, after, [{ ...remainderClaim, scopeMode: "unknown-mode" }])).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+
+  it("refuses a removed, nested, or ambiguous transition owner", async () => {
+    const before = packageFor(transition("<p:fade/>"));
+    for (const body of ["", `<p:extLst>${transition("<p:dissolve/>")}</p:extLst>`, transition("<p:dissolve/>") + transition("<p:fade/>")])
+      await expect(check(before, packageFor(body), [remainderClaim])).rejects.toThrow("NATIVE_PRESERVATION_VIOLATION");
+  });
+});
 
 describe("complete native package preservation proof", () => {
   it("checks both transition and animation independent of claim order and omitted diagnostics", async () => {

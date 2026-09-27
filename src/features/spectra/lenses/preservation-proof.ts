@@ -1,6 +1,6 @@
 import { resolveRelationshipTarget } from "@ariadng/office/opc";
 import { compareXml } from "@ariadng/office/preservation";
-import { parseXml, type XmlElement } from "@ariadng/office/xml";
+import { parseXml, XmlElement } from "@ariadng/office/xml";
 import { ZipReader } from "@ariadng/office/zip";
 import { assertPreservationKept, type PreservationInput, type PreservationProof } from "../commands/office/preservation-guard";
 import type { DocxOperation, DocxProjection, PptxOperation, PptxProjection, XlsxOperation, XlsxProjection } from "./projection-contracts";
@@ -8,6 +8,8 @@ import type { DocxOperation, DocxProjection, PptxOperation, PptxProjection, Xlsx
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PACKAGE_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const PML = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main";
 const name = (value: string) => value.startsWith("/") ? value : `/${value}`;
 const zipName = (value: string) => value.replace(/^\//, "");
 
@@ -41,6 +43,68 @@ function ancestry(node: XmlElement) {
   const path: [string | null, string][] = [];
   for (let parent = node.parent; parent; parent = parent.parent) path.push([parent.namespaceUri(), parent.localName]);
   return JSON.stringify(path);
+}
+
+function namespaceDeclaration(attribute: XmlElement["attributes"][number]) {
+  return attribute.prefix === "xmlns" || attribute.prefix === null && attribute.localName === "xmlns";
+}
+
+/** The supported effect is deliberately a closed grammar, not a wildcard
+ * exclusion. Unknown effect content must never disappear under this claim. */
+function transitionEffect(node: XmlElement): XmlElement | null | false {
+  const owner = node.parent;
+  if (node.namespaceUri() !== PML || node.localName !== "transition" ||
+      !owner || owner.parent || owner.namespaceUri() !== PML || owner.localName !== "sld" ||
+      owner.elements().filter(child => child.namespaceUri() === PML && child.localName === "transition").length !== 1)
+    return false;
+  let effect: XmlElement | null = null;
+  for (const child of node.elements()) {
+    if (child.namespaceUri() !== PML) return false;
+    if (child.localName === "sndAc" || child.localName === "extLst") continue;
+    if (effect || !["fade", "push", "dissolve"].includes(child.localName)) return false;
+    if (child.attributes.some(attribute => !namespaceDeclaration(attribute) &&
+      !(attribute.prefix === null && (
+        child.localName === "fade" && attribute.localName === "thruBlk" && ["0", "false"].includes(attribute.value) ||
+        child.localName === "push" && attribute.localName === "dir" && attribute.value === "l")))) return false;
+    if (child.children.some(nested => nested.kind === "element" ||
+      (nested.kind === "text" || nested.kind === "cdata") &&
+      (child.preservesSpace() || !/^[\t\n\r ]*$/.test(nested.text)))) return false;
+    effect = child;
+  }
+  return effect;
+}
+
+/** Clone just this subtree and shallow ancestor context, so namespace and
+ * inherited xml:space semantics survive without copying the rest of a slide. */
+function cloneWithContext(node: XmlElement) {
+  const result = node.clone();
+  let child = result;
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    const context = new XmlElement(parent.localName, parent.prefix);
+    for (const attribute of parent.attributes)
+      context.setAttribute(attribute.prefix ? `${attribute.prefix}:${attribute.localName}` : attribute.localName, attribute.value);
+    context.appendChild(child);
+    child = context;
+  }
+  return result;
+}
+
+function transitionRemainderEqual(previous: XmlElement, current: XmlElement) {
+  // Unsupported transitions remain usable for unrelated slide edits when the
+  // whole subtree is intact. Only actual transition changes need the grammar.
+  if (compareXml(previous, current).length === 0) return true;
+  const beforeEffect = transitionEffect(previous), afterEffect = transitionEffect(current);
+  if (beforeEffect === false || afterEffect === false) return false;
+  const beforeDuration = previous.getAttributeNs(P14, "dur"), afterDuration = current.getAttributeNs(P14, "dur");
+  const durationChanged = beforeDuration !== afterDuration;
+  const supportedDuration = (value: string | undefined) => value === undefined || /^\d+$/.test(value) && Number(value) <= 0xffff_ffff;
+  if (durationChanged && (!supportedDuration(beforeDuration) || !supportedDuration(afterDuration))) return false;
+  const before = cloneWithContext(previous), after = cloneWithContext(current);
+  for (const [clone, effect] of [[before, beforeEffect], [after, afterEffect]] as const) {
+    if (effect) clone.removeChild(clone.elements().find(child => child.namespaceUri() === PML && child.localName === effect.localName)!);
+    if (durationChanged) clone.removeAttributeNs(P14, "dur");
+  }
+  return compareXml(before, after).length === 0;
 }
 
 function images(block: DocxProjection["blocks"][number]) {
@@ -290,27 +354,43 @@ export async function nativePreservationProof(input: PreservationInput & {
   after: Uint8Array;
   intent?: PreservationIntent;
 }): Promise<PreservationProof> {
+  const claimsByPart = new Map<string, PreservationInput["entries"][number][]>();
+  for (const entry of input.entries) {
+    if ((entry.class !== "PRESERVED" && entry.readOnly !== true) || typeof entry.partName !== "string" ||
+        typeof entry.pathPattern !== "string" || !entry.pathPattern) continue;
+    const key = name(entry.partName), claims = claimsByPart.get(key) ?? [];
+    claims.push(entry);
+    claimsByPart.set(key, claims);
+  }
+  const changedScopes = input.parts.filter(part => part.verdict === "different" &&
+    part.note !== "only in expected package" && part.note !== "only in actual package" && claimsByPart.has(name(part.name)));
+  const hasRemoval = input.parts.some(part => !part.name.endsWith("/") && part.verdict === "different" && part.note === "only in expected package");
+  if (!changedScopes.length && !hasRemoval) return { scopes: [], removedParts: [] };
   const before = await ZipReader.open(input.before);
   const after = await ZipReader.open(input.after);
   const scopes: PreservationProof["scopes"][number][] = [];
-  for (const part of input.parts) {
-    if (part.verdict !== "different" || part.note === "only in expected package" || part.note === "only in actual package") continue;
-    const claims = input.entries.filter((entry) => (entry.class === "PRESERVED" || entry.readOnly === true) && typeof entry.partName === "string" && name(entry.partName) === name(part.name) && typeof entry.pathPattern === "string" && entry.pathPattern);
-    if (!claims.length) continue;
+  for (const part of changedScopes) {
+    const claims = claimsByPart.get(name(part.name))!;
     const previous = parseXml(await before.read(zipName(part.name))).root;
     const current = parseXml(await after.read(zipName(part.name))).root;
     const previousNodes = elements(previous), currentNodes = elements(current);
     for (const claim of claims) {
       const pathPattern = claim.pathPattern as string;
       const namespaceUri = typeof claim.namespaceUri === "string" ? claim.namespaceUri : undefined;
+      const scopeMode = typeof claim.scopeMode === "string" ? claim.scopeMode : undefined;
       const matches = (node: XmlElement) => node.localName === pathPattern && (namespaceUri === undefined || node.namespaceUri() === namespaceUri);
       const expected = previousNodes.filter(matches), actual = currentNodes.filter(matches);
       scopes.push({ partName: name(part.name), pathPattern, ...(namespaceUri !== undefined ? { namespaceUri } : {}),
-        unchanged: expected.length > 0 && expected.length === actual.length && expected.every((node, index) => ancestry(node) === ancestry(actual[index]!) && compareXml(node, actual[index]!).length === 0),
+        ...(scopeMode !== undefined ? { scopeMode } : {}),
+        unchanged: expected.length > 0 && expected.length === actual.length && expected.every((node, index) =>
+          ancestry(node) === ancestry(actual[index]!) && (scopeMode === undefined
+            ? compareXml(node, actual[index]!).length === 0
+            : scopeMode === "pptx-transition-remainder" && namespaceUri === PML && pathPattern === "transition" &&
+              transitionRemainderEqual(node, actual[index]!))),
       });
     }
   }
-  return { scopes, removedParts: await proveRemovals(before, after, input.intent) };
+  return { scopes, removedParts: hasRemoval ? await proveRemovals(before, after, input.intent) : [] };
 }
 
 export async function assertNativePreservationKept(input: Parameters<typeof nativePreservationProof>[0]) {

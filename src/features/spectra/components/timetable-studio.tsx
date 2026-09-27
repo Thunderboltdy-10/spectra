@@ -1983,7 +1983,7 @@ path={eventPath(event.id)}
             />
           </label>
           <label>
-            Linked artifacts
+            Linked work
             <select
               value=""
               disabled={!selectedCanEditBase}

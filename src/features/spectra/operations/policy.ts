@@ -126,15 +126,15 @@ export function evaluatePlanPolicy(
     else reasons.push(authorityPublicMessage(authority));
   }
   if (operations.some((operation) => operation.type === "artifact.archive"))
-    reasons.push("Archive the selected artifact");
+    reasons.push("Archive the selected work");
   if (artifactCreates > 1)
-    reasons.push(`Create ${artifactCreates} visible artifacts`);
+    reasons.push(`Create ${artifactCreates} new work items`);
   if (operations.length > DIRECT_MUTATION_LIMIT)
     reasons.push(`Apply ${operations.length} changes`);
   if (operations.length > REVIEW_OPERATIONS_THRESHOLD)
     reasons.push(`Review this ${operations.length}-step run before it begins`);
   if (artifactCreates > REVIEW_ARTIFACTS_THRESHOLD)
-    reasons.push(`Review creation of ${artifactCreates} visible artifacts`);
+    reasons.push(`Review creation of ${artifactCreates} new work items`);
   const placementChanges = operations.filter(
     (operation) =>
       operation.type === "workspaceItem.add" ||

@@ -1594,8 +1594,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
               onChange={(event) => setShareComment(event.target.checked)}
             />
             Share this comment with the agent creator. The rating and category
-            are aggregated; your prompt, thread, memory, and artifacts are never
-            shared.
+            are aggregated; your prompt, thread, memory, and work are never shared.
           </label>
           <div className="flex justify-end gap-1.5">
             <button

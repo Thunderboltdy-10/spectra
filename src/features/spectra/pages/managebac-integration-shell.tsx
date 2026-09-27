@@ -2017,7 +2017,7 @@ function DisconnectDialog({
         </h2>
         <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
           The server-side token will be revoked, scheduled runs will stop, and
-          identity mappings will be cleared. Imported artifacts and user
+          identity mappings will be cleared. Imported work and user
           overlays remain intact with stale or removed-source provenance.
         </p>
         <div className="mt-5 flex justify-end gap-2">

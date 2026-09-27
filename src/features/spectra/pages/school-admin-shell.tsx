@@ -1123,7 +1123,7 @@ function PeopleSurface({
             />
             <PrivacyNotice>
               Student and teacher profiles have identical ordinary creation,
-              sharing, artifact, and agent capabilities.
+              sharing, work, and agent capabilities.
             </PrivacyNotice>
           </div>
         </form>
@@ -1796,7 +1796,7 @@ function AgentsResourcesSurface({
           ) : null}
           <PrivacyNotice>
             {data?.privacy ??
-              "Agent analytics use aggregate invocation and evaluation metadata; private prompts, sessions, memory, and unrelated artifacts are not available here."}
+              "Agent analytics use aggregate invocation and evaluation metadata; private prompts, sessions, memory, and unrelated work are not available here."}
           </PrivacyNotice>
           {data ? (
             <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -1902,7 +1902,7 @@ function AgentsResourcesSurface({
       <AdminCard>
         <AdminSectionHeader
           title="Resource governance"
-          detail="Knowledge resources stay permission-bound to their underlying artifact or workspace."
+          detail="Knowledge resources stay permission-bound to their underlying work or workspace."
         />
         <div className="grid gap-3 p-4 pt-1 sm:grid-cols-2">
           <div className="rounded-control border border-[var(--border-subtle)] p-3">
@@ -1911,8 +1911,7 @@ function AgentsResourcesSurface({
               Permission inheritance
             </strong>
             <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
-              Revoking a source artifact immediately removes agent retrieval
-              access.
+              Removing a source immediately stops the agent from reading it.
             </p>
           </div>
           <div className="rounded-control border border-[var(--border-subtle)] p-3">
@@ -2043,7 +2042,7 @@ function GovernanceSurface() {
     },
     {
       icon: BookOpen,
-      title: "Every artifact",
+      title: "Every kind of work",
       detail:
         "Creation, editing, collaboration, imports, and exports are ordinary capabilities.",
     },
@@ -2100,9 +2099,7 @@ function GovernanceSurface() {
           </p>
         </AdminCard>
         <PrivacyNotice>
-          Private prompts, threads, memory, and unrelated artifacts never appear
-          here. Public access is explicit and user-directed; workspace and
-          artifact permissions remain fully enforced.
+          Private prompts, threads, memory, and unrelated work never appear here. Public access is explicit and user-directed; workspace and work permissions remain fully enforced.
         </PrivacyNotice>
       </div>
     </div>

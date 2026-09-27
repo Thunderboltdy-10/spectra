@@ -388,7 +388,7 @@ export function ChatShell() {
             setHistoryOpen(false);
             studio.openSplit(resolved);
           })
-          .catch(() => toast.error("That artifact is no longer available."));
+          .catch(() => toast.error("That work is no longer available."));
         return;
       }
       setHistoryOpen(false);
@@ -782,7 +782,7 @@ export function ChatShell() {
                   studio.dirtyIds.has(studio.activeArtifact._id)
                 ) {
                   toast.message(
-                    "Save or discard the open artifact before opening Runs.",
+                    "Save or discard your open work before opening Runs.",
                   );
                   return;
                 }

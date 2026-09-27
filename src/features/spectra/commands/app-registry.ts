@@ -578,7 +578,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     id: "app.reference.begin-picking",
     title: "Pick a reference",
     icon: Link2,
-    description: "Begin semantic reference picking in the mounted artifact surface.",
+    description: "Click something in the open work to reference it.",
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Pick reference" } },
     defaultPlacement: { tab: "References", group: "Links", order: 1 },
     risk: "safe",

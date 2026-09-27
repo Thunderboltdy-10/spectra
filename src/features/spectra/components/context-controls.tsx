@@ -435,7 +435,7 @@ export function ContextFocusControl({
                     autoFocus
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Find artifacts, agents, workspaces, or threads…"
+                    placeholder="Find work, agents, workspaces, or threads…"
                     className="min-w-0 flex-1 bg-transparent text-ui outline-none placeholder:text-[var(--text-tertiary)]"
                   />
                 </div>
@@ -899,7 +899,7 @@ export function GlobalSearch({
                 {results.artifacts.length ? (
                   <section className="mt-2">
                     <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
-                      Artifacts
+                      Work
                     </div>
                     {results.artifacts.map((artifact) => {
                       const meta = workTypeMeta[artifact.blueprintKey];
@@ -992,7 +992,7 @@ export function GlobalSearch({
                 !results.workspaces.length &&
                 !results.artifacts.length ? (
                   <p className="px-3 py-12 text-center text-caption text-[var(--text-secondary)]">
-                    No matching workspaces or artifacts.
+                    No matching workspaces or work.
                   </p>
                 ) : null}
               </div>

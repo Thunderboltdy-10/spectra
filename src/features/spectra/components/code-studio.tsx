@@ -1255,7 +1255,7 @@ export function CodeStudio({
       if (workbook.runtime === "none") {
         setRunState("idle");
         setRunMessage(
-          "This artifact is source-only. Choose a supported runtime to execute it.",
+          "This code has no runtime yet. Choose a supported runtime to run it.",
         );
         return;
       }
@@ -2044,13 +2044,13 @@ export function CodeStudio({
     if (readOnly || publishState !== "idle") return;
     if (!synchronizationReady) {
       setPublishError(
-        "Wait for the live artifact to finish synchronizing before publishing.",
+        "Wait for your latest edits to finish saving before publishing.",
       );
       return;
     }
     if (workbook.runtime === "none") {
       setPublishError(
-        "Choose an executable runtime profile before publishing this artifact.",
+        "Choose a runtime that can run this code before publishing it.",
       );
       return;
     }
@@ -2097,7 +2097,7 @@ export function CodeStudio({
         "system",
         result.reused
           ? "The current reproducible runtime build is already published."
-          : "Published a reproducible runtime build pinned to this artifact checkpoint.",
+          : "Published a build of this exact version.",
       );
     } catch (error) {
       setPublishError(
@@ -2798,8 +2798,7 @@ export function CodeStudio({
             className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
-            Retaining the exact original, then staging safe source into the live
-            artifact…
+            Keeping the exact original, then adding the safe source to your code…
           </div>
         ) : null}
         {importError ? (
@@ -3226,7 +3225,7 @@ export function CodeStudio({
                       </div>
                     ))
                   ) : (
-                    <EmptyOutput text="Run the artifact to inspect console output." />
+                    <EmptyOutput text="Run the code to see console output." />
                   )}
                 </div>
               ) : null}
@@ -3243,8 +3242,8 @@ export function CodeStudio({
           }?`}
           detail={
             workbook.files.length === 1
-              ? "Every artifact needs at least one source file."
-              : "The file will be removed from the current live artifact. Its previous content remains recoverable through history."
+              ? "Code needs at least one source file."
+              : "The file will be removed from this code. You can recover its previous content from History."
           }
           confirmLabel="Delete file"
           destructive
@@ -4003,8 +4002,7 @@ function CodeSettings({
         >
           <h3>Entry and preview</h3>
           <p>
-            These settings affect the live artifact and its embedded
-            representation.
+            These settings affect this code and how it looks when embedded.
           </p>
           <div className="code-field-label">
             Entry file
@@ -4087,8 +4085,7 @@ function CodeSettings({
                 Rendered experience
               </strong>
               <span className="text-micro text-[var(--text-tertiary)]">
-                Show the executable output as this artifact’s primary
-                experience.
+                Show the running output first when this code opens.
               </span>
             </span>
             <input
@@ -4180,8 +4177,7 @@ function CodeSettings({
         >
           <h3>Security boundary</h3>
           <p>
-            Secrets are never part of artifact content, preview messages, or
-            client-visible environment records.
+            Secrets are never part of your code, preview messages, or environment records visible in the browser.
           </p>
           <div className="mt-3 space-y-2">
             <SecurityRow
@@ -4245,8 +4241,7 @@ function CodeSettings({
             </div>
             {content.runtime === "python" ? (
               <div className="mt-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-micro leading-4 text-[var(--text-secondary)]">
-                Python workers remain fully network-isolated. Use a permissioned
-                artifact resource for data needed by Python.
+                Python workers remain fully network-isolated. Connect a resource you have access to for data needed by Python.
               </div>
             ) : content.networkPolicy?.mode === "allowlist" ? (
               <>
@@ -4506,8 +4501,7 @@ function CodeSettings({
                 <div>
                   <h3>Environment declarations</h3>
                   <p>
-                    Names and descriptions only. Values and secrets never enter
-                    artifact content.
+                    Names and descriptions only. Values and secrets never enter your code.
                   </p>
                 </div>
                 <button
@@ -4845,9 +4839,8 @@ function CodeSettings({
             <div>
               <h3>Permissioned resources</h3>
               <p>
-                Bind artifacts or bounded Sheets ranges by stable ID. Preview
-                code reads them through the Spectra SDK; secrets and unrelated
-                artifact metadata are never included.
+                Connect work or Sheets ranges you have access to. Preview
+                code reads them through the Spectra SDK; secrets and details of unrelated work are never included.
               </p>
             </div>
             <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
@@ -4893,7 +4886,7 @@ function CodeSettings({
                     />
                   ) : (
                     <span className="text-micro text-[var(--text-tertiary)]">
-                      Read-only artifact snapshot
+                      Read-only snapshot
                     </span>
                   )}
                   <button
@@ -4916,14 +4909,13 @@ function CodeSettings({
             })}
             {(content.resourceBindings ?? []).length === 0 ? (
               <div className="rounded-control border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-micro leading-4 text-[var(--text-tertiary)]">
-                No resources are exposed to this runtime. Importing an artifact
-                in the editor never grants code access automatically.
+                No resources are exposed to this runtime. Importing work in the editor never gives code access to it automatically.
               </div>
             ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-card bg-[var(--bg-secondary)] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,.35fr)_auto]">
             <SelectField
-              ariaLabel="Artifact to bind"
+              ariaLabel="Work to connect"
               size="sm"
               placeholder="Choose accessible work"
               value={bindingArtifactId}
@@ -5066,7 +5058,7 @@ function CodeSettings({
             ) : null}
             {importHistoryState === "ready" && importHistory.length === 0 ? (
               <div className="rounded-control border border-dashed border-[var(--border-default)] px-3 py-5 text-center text-micro text-[var(--text-tertiary)]">
-                No source has been imported into this artifact.
+                No source has been imported into this code.
               </div>
             ) : null}
           </div>

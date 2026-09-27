@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { getEncoding } from "js-tiktoken";
 import { callModel } from "../../../src/app/api/spectra/run/loop/plan";
+import type { ProvisionalCreation } from "../../../src/app/api/spectra/run/loop/intake";
 
 async function main() {
   const label = process.argv[2];
@@ -23,10 +24,10 @@ async function main() {
       throw new Error(`Before request capture requires pre-prefix f9b5c686 source for ${file}.`);
     return [file, createHash("sha256").update(source).digest("hex")];
   }));
-  const cases = [
+  const cases: Array<{ id: string; prompt: string; context: unknown; assignment?: ProvisionalCreation }> = [
     { id: "simple", prompt: "Explain why we have leap years in two sentences.", context: {} },
-    { id: "document", prompt: "Create a short letter thanking the workshop volunteers, without section headings.", context: {} },
-    { id: "presentation", prompt: "Create an eight-slide handout comparing two rehearsal plans using the same two-column layout throughout and 18px body text.", context: {} },
+    { id: "document", prompt: "Create a short letter thanking the workshop volunteers, without section headings.", context: {}, assignment: { blueprintKey: "document", label: "Document", clause: "Create the requested thank-you letter." } },
+    { id: "presentation", prompt: "Create an eight-slide handout comparing two rehearsal plans using the same two-column layout throughout and 18px body text.", context: {}, assignment: { blueprintKey: "presentation", label: "Presentation", clause: "Create the requested comparison handout." } },
     { id: "sheets", prompt: "Create a rehearsal budget workbook with labelled inputs, calculated costs, clear units and a total.", context: {} },
     { id: "mixed", prompt: "Create a decision note and a three-slide briefing about two rehearsal plans, and explain their tradeoffs.", context: {} },
     { id: "continuation", prompt: "Explain the uncertainty in one sentence.", context: { currentView: "library", conversation: [{ role: "user", content: "We observed two rehearsals." }, { role: "assistant", content: "That is a small sample." }] } },
@@ -48,7 +49,8 @@ async function main() {
         throw new DOMException("Offline request captured", "AbortError");
       };
       try {
-        await callModel("chat", entry.prompt, entry.context, [], undefined, undefined, controller.signal);
+        await callModel("chat", entry.prompt, entry.context, [], undefined, undefined, controller.signal,
+          undefined, undefined, undefined, undefined, undefined, entry.assignment);
       } catch (error) {
         if (!controller.signal.aborted || !packet) throw error;
       }
@@ -59,7 +61,8 @@ async function main() {
       }));
       const toolSchemaTokens = encoding.encode(JSON.stringify(packet.tools ?? [])).length;
       const measured = {
-        id: entry.id, systemTokens: messageTokens.filter((message) => message.role === "system").reduce((sum, message) => sum + message.tokens, 0),
+        id: entry.id, assignment: entry.assignment ?? null,
+        systemTokens: messageTokens.filter((message) => message.role === "system").reduce((sum, message) => sum + message.tokens, 0),
         stableFirstSystemTokens: messageTokens[0]?.tokens ?? 0, messageTokens, toolSchemaTokens,
         componentTokenSum: messageTokens.reduce((sum, message) => sum + message.tokens, 0) + toolSchemaTokens,
         requestJsonBytes: Buffer.byteLength(JSON.stringify(packet)),

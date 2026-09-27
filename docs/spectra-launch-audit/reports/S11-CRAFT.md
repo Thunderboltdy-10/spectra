@@ -123,3 +123,43 @@ Added two mocked-provider regression cases that exercise a specialist guide read
 Prepared `.spectra-local/launch-s11/craft/run-guarded-check.ps1` with separate finite test, lint, prompt-capture and request-capture phases. It requires the exact clean candidate HEAD, inherits the RUNTIME filesystem guard and 4 GiB heap limit, uses private TEMP/TMP/tsx/Vite caches, runs one Node process at a time and saves command/result logs. The test phase names twelve focused suites: artifact design preservation, quality machinery, presentation model/content policy/citation persistence/citation export, source evidence, CRAFT prompt, application tools, agent loop, ENGINE and refresh. Baseline capture loads only the enumerated source files, restores their exact original bytes in `finally`, and verifies restoration. PowerShell parsing found no syntax errors; that is not an execution result.
 
 `git diff --check` passed. No Node, Vitest, ESLint, tokenizer, build or provider call ran in this continuation. The implementation, new regressions, capture script runtime compatibility and token/cache/latency claims still require the recorded guarded validation and later live acceptance.
+
+## September 27 bounded closeout — focused validation complete
+
+Current coordinator `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9` explicitly released lane 2 after SECURITY finished. The earlier manual release question and failed scheduler are superseded. The user deferred exhaustive final verification and provider/native sessions; this closeout ran only the authorized focused bundle, scoped lint and offline captures. Every Node process inherited the `2b0f` filesystem guard and 4 GiB limit. Vitest used one worker, no file parallelism and the local `.ts` cache wrapper. No service, dependency or primary-checkout change occurred.
+
+### Check evidence and concrete repairs
+
+- Initial twelve-file run at `38d4230c`: **113/114 passed**, about 15 seconds. The only failure was `agent-loop.test.ts` expecting recovery instructions in the first message. That assertion contradicted the reviewed append-only finalization contract. `2b4a3c71` now checks the preserved initial user request and the appended system guidance.
+- Targeted rerun at `2b4a3c71`: **18/18 agent-loop tests passed**, about 1.7 seconds. Combined evidence is 96 unaffected cases passing initially plus these 18 passing after the assertion repair. The whole bundle was not rerun. All nine CRAFT prompt cases, including guide-result delivery before both inferred and assigned creation, passed in the initial run.
+- Scoped ESLint: **19 files, zero warnings**, about 4.9 seconds, at `2b4a3c71`. After repairing capture setup/coverage, ESLint for the two changed capture files also passed with zero warnings at `9d73ace4`.
+- Both paired offline captures completed successfully. Candidate and baseline halves each took roughly 2.4–3.1 seconds. Enumerated baseline source files were restored byte-for-byte in `finally`; final Git status was clean after both phases. No provider request was dispatched.
+- The original capture invocation failed on `server-only`; direct RSC conditions then exposed registry UI imports requiring normal React exports. `e4924848` adds an offline process-local marker shim equivalent to Vitest's existing alias. It changes no dependency file or production module. Both failed setup logs are retained.
+- The first request capture showed that the document-letter and eight-slide-handout wording used the general request path. `9d73ace4` makes those two captures explicitly assigned workers and records the assignment, leaving production routing unchanged. Original unassigned captures are retained in `request-corpus-unassigned`.
+
+Machine-readable results and exact source hashes: `evaluations/S11-CRAFT-MEASUREMENTS.json`. Private raw packets, test reports, retained failures and phase records: `.spectra-local/launch-s11/craft/{validation,prompt-corpus,request-corpus,request-corpus-unassigned}`. No full/transitive typecheck or build was run. The earlier 86-test first-unit result is not reused here.
+
+### Measured prompt tradeoffs
+
+The worker-only comparison uses baseline `00523e2a`, before the design-guidance unit. Warm base stays **486 tokens**, workspace tools core **1,330**, and workspace plan core **1,422**. Document worker/rubric grows **1,815 → 1,932** (+117), presentation **2,089 → 2,283** (+194), and sheets **1,827 → 1,891** (+64). The task-sensitive design/evidence guidance has a real token cost; this unit does not claim that adaptation shortened every prompt.
+
+The real request-boundary comparison instead uses `f9b5c686`, which already includes the craft policy and ENGINE prerequisites but precedes the stable-prefix/optional-guide unit. Counts below sum message content and tool schemas using `o200k_base`; provider framing is excluded.
+
+| Captured path | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| Ordinary explanation | 8,851 | 8,976 | +125 (+1.41%) |
+| Assigned document writer | 3,288 | 3,293 | +5 (+0.15%) |
+| Assigned presentation writer | 10,922 | 11,047 | +125 (+1.14%) |
+| Inferred workbook writer | 7,105 | 7,081 | −24 (−0.34%) |
+| Mixed request, general path | 8,861 | 8,986 | +125 (+1.41%) |
+| Plain-history continuation | 8,865 | 8,990 | +125 (+1.41%) |
+
+The added guide-tool schema costs **134 tokens** on these paths. Document system instructions fall **2,053 → 1,933**, with only **1,923** in the first static message; workbook system instructions fall **3,464 → 3,315**. Presentation has no corresponding specialist-body saving in this capture. The result is selective guide access and tested prefix/context preservation, **not universal input-token savings**. Actual cache-hit and latency gains remain unknown and must not be inferred from the stable prefix. The original unassigned captures are routing observations, not evidence that assigned document/presentation writing used those general prompts.
+
+### Review, integration and residuals
+
+ENGINE-R reviewed `7f52a291` plus `749bfcca`: first-system/current/recovery inputs are preserved; discovery imports/maps and read-thread helpers do not overlap. Its clarification continuation uses the released `buildAgentMessages` seam and appends candidate state at `runNativeAgentPass`. The coordinator independently reviewed lossless realization, quality policy and the prompt/guide source before releasing this focused run.
+
+Ordered remaining CRAFT source/evidence chain: `40356d79fa490adb35c6fb5b308ac46e24f87305`, `8816400c129f41c8f8358717f8816a26cfdc763d`, `7f52a2913a5ec5303620037b3e81dacfd90fb794`, `749bfcca5a184cb9d643693040ebb602a6ccb7f2`, `710d146a417a64a24f53b33460a7ea05a721448e`, `e608dfa00c2201e768c15adf8961a602ddb0a633`, `38d4230c0e731c9f39410414992255d1d7df0495`, `2b4a3c71359a87e585a167903bb89149243d3f04`, `e4924848d7190674c73ac7e936a492da622e157c`, `9d73ace4d7b9168a211a3f273e5c6be48276562e`, followed by this documentation/evidence commit. `git cherry` confirmed the bibliography repair `4277d915`, ordinary prompt alignment `00523e2a` and local ENGINE prerequisites `c0218336`/`5db0d927`/`f9b5c686` already have integrated equivalents; do not duplicate them.
+
+No remaining source blocker is identified in this bounded CRAFT unit. Shared dependencies remain the integrated ENGINE completion/refresh protocol and SECURITY's independent deterministic empty-deck fallback. CRAFT owns model/layout normalization, not native new-slide/text-box ID mapping or Office media writers. Canonical history/compaction, authenticated discovery and clarification durability remain ENGINE/CONTEXT contracts. Native fidelity, independently judged saved-artifact quality, real approval/receipt/UI flows and cache/latency behavior remain deferred acceptance work. The ready-to-use later task prompt is in `evaluations/S11-CRAFT.md`, covering C1–C8/P1–P4, the repeated-layout handout/letter cases and the separately budgeted six-case usage probe. Stop expansion after this handoff.

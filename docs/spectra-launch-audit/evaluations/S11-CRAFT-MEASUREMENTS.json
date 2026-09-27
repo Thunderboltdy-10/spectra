@@ -1,0 +1,425 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-27",
+  "candidateHead": "9d73ace4d7b9168a211a3f273e5c6be48276562e",
+  "encoding": "o200k_base",
+  "evidenceRoot": "<local-workspace>",
+  "tests": {
+    "initialHead": "38d4230c0e731c9f39410414992255d1d7df0495",
+    "initialTotal": 114,
+    "initialPassed": 113,
+    "initialFailed": 1,
+    "repairHead": "2b4a3c71359a87e585a167903bb89149243d3f04",
+    "repairFile": "src/features/spectra/__tests__/agent-loop.test.ts",
+    "repairTotal": 18,
+    "repairPassed": 18,
+    "repairFailed": 0,
+    "files": 12,
+    "uniqueCases": 114,
+    "note": "96 unaffected cases passed initially; all 18 agent-loop cases passed after replacing an obsolete first-message assertion with preserved-request/appended-guidance assertions. No repeated full bundle."
+  },
+  "lint": {
+    "firstHead": "2b4a3c71359a87e585a167903bb89149243d3f04",
+    "firstFiles": 19,
+    "exitCode": 0,
+    "warnings": 0,
+    "followupHead": "9d73ace4d7b9168a211a3f273e5c6be48276562e",
+    "followupFiles": [
+      "docs/spectra-launch-audit/evaluations/capture-s11-craft-runtime.mjs",
+      "docs/spectra-launch-audit/evaluations/capture-s11-craft-requests.ts"
+    ],
+    "followupExitCode": 0,
+    "followupWarnings": 0
+  },
+  "promptCapture": {
+    "baseline": "00523e2a8c330f1e6a1f110ae195ad14efc00b3b",
+    "before": {
+      "encoding": "o200k_base",
+      "counts": {
+        "warmBase": 486,
+        "workspaceTools": 1330,
+        "workspacePlan": 1422,
+        "simple.workspaceCore": 1330,
+        "document.workspaceCore": 1330,
+        "document.documentWorker": 1815,
+        "presentation.workspaceCore": 1330,
+        "presentation.presentationWorker": 2089,
+        "sheets.workspaceCore": 1330,
+        "sheets.sheetsWorker": 1827,
+        "mixed.workspaceCore": 1330,
+        "mixed.documentWorker": 1815,
+        "mixed.presentationWorker": 2089
+      },
+      "sourceHashes": {
+        "src/features/spectra/ai/workspace-assistant-prompt.ts": "3429c291b773a6253cbc3ac51dcbc921de8a05b65e8a5098f043d8c32632c92d",
+        "src/features/spectra/ai/tool-contract.ts": "07f5a7119bca156609c1e4296ddcce6654c76aa45188fc938ac22fecfa757604",
+        "src/app/api/spectra/run/loop/plan.ts": "f925e81a64bfbb1555d056922a9bb1013ea87c1025897af1ac12d12b847d9e67",
+        "src/features/spectra/quality/rubrics.ts": "ae09abbb2104cc8cff01aa91036e059b4391501aedc63244636a33c013f971b2",
+        "src/features/spectra/artifacts/skills/document.ts": "9b14ebc1ab272f9eea8bbc7c514e90717d86e0d20eda838a08014e86d625ab04",
+        "src/features/spectra/artifacts/skills/presentation.ts": "2e6947ee2eb79cdd5eec28fab230e372701bd5b162e11f06e49110a457f1451e",
+        "src/features/spectra/artifacts/skills/sheets.ts": "76714abb694d02769683aae487f42ae445b479a1cdc6f640be6275d4cf687207"
+      },
+      "sourceHashNewlines": "LF",
+      "checkoutHead": "e4924848d7190674c73ac7e936a492da622e157c",
+      "sourceNote": "Hashes describe the prompt source actually loaded, including any temporary baseline source. HEAD alone is not proof of working-tree contents."
+    },
+    "after": {
+      "encoding": "o200k_base",
+      "counts": {
+        "warmBase": 486,
+        "workspaceTools": 1330,
+        "workspacePlan": 1422,
+        "simple.workspaceCore": 1330,
+        "document.workspaceCore": 1330,
+        "document.documentWorker": 1932,
+        "presentation.workspaceCore": 1330,
+        "presentation.presentationWorker": 2283,
+        "sheets.workspaceCore": 1330,
+        "sheets.sheetsWorker": 1891,
+        "mixed.workspaceCore": 1330,
+        "mixed.documentWorker": 1932,
+        "mixed.presentationWorker": 2283
+      },
+      "sourceHashes": {
+        "src/features/spectra/ai/workspace-assistant-prompt.ts": "3429c291b773a6253cbc3ac51dcbc921de8a05b65e8a5098f043d8c32632c92d",
+        "src/features/spectra/ai/tool-contract.ts": "07f5a7119bca156609c1e4296ddcce6654c76aa45188fc938ac22fecfa757604",
+        "src/app/api/spectra/run/loop/plan.ts": "fc0567e2d8e2d7fd0f8644608dc720e8bf491213191030426990b2c0878e8355",
+        "src/features/spectra/quality/rubrics.ts": "4d367768a5e6a00a4e3e5280423cfbcdddff0b09e08481a6a6a47e8c9a442222",
+        "src/features/spectra/artifacts/skills/document.ts": "d04d89531aaa4f19f9b639b53fc0d25b9d79e2b3a0a3e3dba98dd1999b1aad98",
+        "src/features/spectra/artifacts/skills/presentation.ts": "af95983252584469106d61e1aa7a9420c1e1809527e379cede65e3d0f11c1fb8",
+        "src/features/spectra/artifacts/skills/sheets.ts": "c33076b2dd3b8c6174326386e06d0dba1210cdb03110474b4ea5847b47f91e4c",
+        "src/features/spectra/artifacts/skills/artifact-design.ts": "8aee6a0a1db7b0c6e702d3e5975644010184d7dc3a04099f5cc223fbf9860365"
+      },
+      "sourceHashNewlines": "LF",
+      "checkoutHead": "e4924848d7190674c73ac7e936a492da622e157c",
+      "sourceNote": "Hashes describe the prompt source actually loaded, including any temporary baseline source. HEAD alone is not proof of working-tree contents."
+    }
+  },
+  "requestCapture": {
+    "baseline": "f9b5c686b34f111f11eb7b684b265cd05bec1c04",
+    "before": {
+      "label": "before",
+      "encoding": "o200k_base",
+      "sourceHashes": {
+        "src/app/api/spectra/run/loop/plan.ts": "ae60c9e79dfabc4b76baaf5b7a60cea7f7b8da7098a8a913686ed227abe6b29c",
+        "src/features/spectra/ai/workspace-assistant-prompt.ts": "3429c291b773a6253cbc3ac51dcbc921de8a05b65e8a5098f043d8c32632c92d",
+        "src/features/spectra/tools/registry/application-tools.ts": "05996890956d15cdd3865954c777ff80f782b0dba842e2f8df1877423d38d2d1",
+        "src/features/spectra/quality/rubrics.ts": "076392162329b8dee9a16e5c9371d304a62402bedd6a6549bf6bb2a01ef0c62f"
+      },
+      "sourceHashNewlines": "LF",
+      "results": [
+        {
+          "id": "simple",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 207
+            }
+          ],
+          "toolSchemaTokens": 6259,
+          "componentTokenSum": 8851,
+          "requestJsonBytes": 42741
+        },
+        {
+          "id": "document",
+          "assignment": {
+            "blueprintKey": "document",
+            "label": "Document",
+            "clause": "Create the requested thank-you letter."
+          },
+          "systemTokens": 2053,
+          "stableFirstSystemTokens": 2053,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2053
+            },
+            {
+              "role": "user",
+              "tokens": 210
+            }
+          ],
+          "toolSchemaTokens": 1025,
+          "componentTokenSum": 3288,
+          "requestJsonBytes": 16980
+        },
+        {
+          "id": "presentation",
+          "assignment": {
+            "blueprintKey": "presentation",
+            "label": "Presentation",
+            "clause": "Create the requested comparison handout."
+          },
+          "systemTokens": 2283,
+          "stableFirstSystemTokens": 2283,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2283
+            },
+            {
+              "role": "user",
+              "tokens": 221
+            }
+          ],
+          "toolSchemaTokens": 8418,
+          "componentTokenSum": 10922,
+          "requestJsonBytes": 50895
+        },
+        {
+          "id": "sheets",
+          "assignment": null,
+          "systemTokens": 3464,
+          "stableFirstSystemTokens": 3464,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 3464
+            },
+            {
+              "role": "user",
+              "tokens": 215
+            }
+          ],
+          "toolSchemaTokens": 3426,
+          "componentTokenSum": 7105,
+          "requestJsonBytes": 33998
+        },
+        {
+          "id": "mixed",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 217
+            }
+          ],
+          "toolSchemaTokens": 6259,
+          "componentTokenSum": 8861,
+          "requestJsonBytes": 42798
+        },
+        {
+          "id": "continuation",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 6
+            },
+            {
+              "role": "assistant",
+              "tokens": 6
+            },
+            {
+              "role": "user",
+              "tokens": 209
+            }
+          ],
+          "toolSchemaTokens": 6259,
+          "componentTokenSum": 8865,
+          "requestJsonBytes": 42874
+        }
+      ],
+      "scope": "Real application request assembly with fetch intercepted before dispatch. Exact component tokenizer counts exclude provider framing/serialization. No provider usage, cache-hit, latency or saved-artifact claim."
+    },
+    "after": {
+      "label": "after",
+      "encoding": "o200k_base",
+      "sourceHashes": {
+        "src/app/api/spectra/run/loop/plan.ts": "fc0567e2d8e2d7fd0f8644608dc720e8bf491213191030426990b2c0878e8355",
+        "src/features/spectra/ai/workspace-assistant-prompt.ts": "3429c291b773a6253cbc3ac51dcbc921de8a05b65e8a5098f043d8c32632c92d",
+        "src/features/spectra/tools/registry/application-tools.ts": "1183eb163fadebd9985ef0a4c420a664bee028b1eb4a9534ce2c18276faface4",
+        "src/features/spectra/quality/rubrics.ts": "4d367768a5e6a00a4e3e5280423cfbcdddff0b09e08481a6a6a47e8c9a442222",
+        "src/features/spectra/ai/prompt-messages.ts": "d89ef6413a1247e848790cdc87bc1ebb5fd23c416b5211d24027d96f6e1de1c8",
+        "src/features/spectra/artifacts/skill-guidance.ts": "db1dfaeebb578fbf75871854afe594c3c031e71e501c77e5608fa06b35302056"
+      },
+      "sourceHashNewlines": "LF",
+      "results": [
+        {
+          "id": "simple",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 10
+            },
+            {
+              "role": "user",
+              "tokens": 188
+            }
+          ],
+          "toolSchemaTokens": 6393,
+          "componentTokenSum": 8976,
+          "requestJsonBytes": 43436
+        },
+        {
+          "id": "document",
+          "assignment": {
+            "blueprintKey": "document",
+            "label": "Document",
+            "clause": "Create the requested thank-you letter."
+          },
+          "systemTokens": 1933,
+          "stableFirstSystemTokens": 1923,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 1923
+            },
+            {
+              "role": "user",
+              "tokens": 13
+            },
+            {
+              "role": "system",
+              "tokens": 10
+            },
+            {
+              "role": "user",
+              "tokens": 188
+            }
+          ],
+          "toolSchemaTokens": 1159,
+          "componentTokenSum": 3293,
+          "requestJsonBytes": 16978
+        },
+        {
+          "id": "presentation",
+          "assignment": {
+            "blueprintKey": "presentation",
+            "label": "Presentation",
+            "clause": "Create the requested comparison handout."
+          },
+          "systemTokens": 2283,
+          "stableFirstSystemTokens": 2283,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2283
+            },
+            {
+              "role": "user",
+              "tokens": 24
+            },
+            {
+              "role": "user",
+              "tokens": 188
+            }
+          ],
+          "toolSchemaTokens": 8552,
+          "componentTokenSum": 11047,
+          "requestJsonBytes": 51535
+        },
+        {
+          "id": "sheets",
+          "assignment": null,
+          "systemTokens": 3315,
+          "stableFirstSystemTokens": 3315,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 3315
+            },
+            {
+              "role": "user",
+              "tokens": 18
+            },
+            {
+              "role": "user",
+              "tokens": 188
+            }
+          ],
+          "toolSchemaTokens": 3560,
+          "componentTokenSum": 7081,
+          "requestJsonBytes": 33812
+        },
+        {
+          "id": "mixed",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 20
+            },
+            {
+              "role": "user",
+              "tokens": 188
+            }
+          ],
+          "toolSchemaTokens": 6393,
+          "componentTokenSum": 8986,
+          "requestJsonBytes": 43493
+        },
+        {
+          "id": "continuation",
+          "assignment": null,
+          "systemTokens": 2385,
+          "stableFirstSystemTokens": 2385,
+          "messageTokens": [
+            {
+              "role": "system",
+              "tokens": 2385
+            },
+            {
+              "role": "user",
+              "tokens": 6
+            },
+            {
+              "role": "assistant",
+              "tokens": 6
+            },
+            {
+              "role": "user",
+              "tokens": 7
+            },
+            {
+              "role": "user",
+              "tokens": 193
+            }
+          ],
+          "toolSchemaTokens": 6393,
+          "componentTokenSum": 8990,
+          "requestJsonBytes": 43569
+        }
+      ],
+      "scope": "Real application request assembly with fetch intercepted before dispatch. Exact component tokenizer counts exclude provider framing/serialization. No provider usage, cache-hit, latency or saved-artifact claim."
+    }
+  },
+  "limits": [
+    "Offline request fetch intercepted before dispatch; no provider calls or cache/latency measurements.",
+    "Token component sums exclude provider framing.",
+    "Original six unassigned captures retained in request-corpus-unassigned; document/presentation did not select writer paths until assignments were explicit.",
+    "No full typecheck, transitive compiler, build, services, dependency changes, live UI/native session, or exhaustive final verification."
+  ]
+}

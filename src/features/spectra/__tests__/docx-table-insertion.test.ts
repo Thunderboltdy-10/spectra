@@ -7,6 +7,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
+import { parseXml } from "@ariadng/office/xml";
 import { unzipSync } from "fflate";
 import { docxLens, docxProjectionReadbackDigest, docxProjectionSemanticDigest } from "../lenses/docx-lens";
 import { documentBlocksFromJson, documentContentToProseMirrorJson, docxOperationsBetween, docxProjectionFromContent } from "../lenses/document-projection";
@@ -144,6 +145,42 @@ describe("Native DOCX table insertion", () => {
       expect(docxInsertTableOperationSchema.safeParse(operation).success).toBe(false);
       await expect(docxLens.mutate(base.preservedCarry, operation as never)).rejects.toThrow();
     }
+    expect(base.preservedCarry.payload).toEqual(before);
+  });
+
+  it("updates the native grid through first-column insertion and deletion", async () => {
+    const base = await blank();
+    const inserted = await docxLens.open(await docxLens.mutate(base.preservedCarry, { kind: "insert-table", rows: [["Original"]], headerRow: false }));
+    const id = inserted.projection.blocks.at(-1)!.id;
+    const nativeBefore = await Document.open(inserted.preservedCarry.payload);
+    const originalWidth = nativeBefore.tables()[0]!.element.find(WML_NAMESPACE, "tblGrid")!.elements()[0]!.getAttributeNs(WML_NAMESPACE, "w");
+    const output = await docxLens.mutate(inserted.preservedCarry, { kind: "ai-edit", operations: [
+      { kind: "insert-table-column", regionId: id, column: 0 },
+      { kind: "edit-table-cell", regionId: id, row: 0, column: 0, text: "First" },
+      { kind: "insert-table-column", regionId: id },
+      { kind: "edit-table-cell", regionId: id, row: 0, column: 2, text: "Last" },
+      { kind: "delete-table-column", regionId: id, column: 1 },
+    ] });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.at(-1)).toMatchObject({ id, rows: [["First", "Last"]], attrs: { columnCount: 2 } });
+    const native = await Document.open(output);
+    const columns = native.tables()[0]!.element.find(WML_NAMESPACE, "tblGrid")!.elements();
+    expect(columns.map((column) => column.getAttributeNs(WML_NAMESPACE, "w"))).toEqual([originalWidth, originalWidth]);
+    const oneColumn = await docxLens.open(await docxLens.mutate(reopened.preservedCarry, { kind: "delete-table-column", regionId: id, column: 0 }));
+    expect(oneColumn.projection.blocks.at(-1)).toMatchObject({ id, rows: [["Last"]], attrs: { columnCount: 1 } });
+    await expect(docxLens.mutate(oneColumn.preservedCarry, { kind: "delete-table-column", regionId: id, column: 0 })).rejects.toThrow(/at least one column/);
+    expectRetainedParts(base.preservedCarry.payload, output);
+  });
+
+  it("preserves an imported merged grid when a topology edit cannot map its cells", async () => {
+    const document = Document.create();
+    const table = document.addTable(1, 2);
+    const properties = table.cell(0, 0).element.find(WML_NAMESPACE, "tcPr")!;
+    properties.appendChild(parseXml(`<w:gridSpan xmlns:w="${WML_NAMESPACE}" w:val="2"/>`).root);
+    document._markMainDirty();
+    const base = await docxLens.open(await document.save());
+    const before = base.preservedCarry.payload.slice();
+    await expect(docxLens.mutate(base.preservedCarry, { kind: "insert-table-column", regionId: base.projection.blocks[0]!.id })).rejects.toThrow(/merged, nested or irregular/);
     expect(base.preservedCarry.payload).toEqual(before);
   });
 

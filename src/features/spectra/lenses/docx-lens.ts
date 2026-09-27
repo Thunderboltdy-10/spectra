@@ -1527,6 +1527,21 @@ function tableCells(row: XmlElement) {
   return shallowWmlChildren(row, "tc");
 }
 
+function ordinaryTableTopology(table: NativeTable) {
+  const rows = tableRows(table);
+  const columns = rows[0] ? tableCells(rows[0]).length : 0;
+  const grid = table.element.find(WML_NAMESPACE, "tblGrid");
+  const gridColumns = grid?.elements().filter((element) => element.namespaceUri() === WML_NAMESPACE && element.localName === "gridCol") ?? [];
+  const advanced = descendants(table.element).some((element) => element.namespaceUri() === WML_NAMESPACE && (
+    ["tbl", "vMerge", "hMerge"].includes(element.localName) ||
+    (element.localName === "gridSpan" && wordAttr(element, "val") !== "1") ||
+    (["gridBefore", "gridAfter"].includes(element.localName) && wordAttr(element, "val") !== "0")
+  ));
+  if (!columns || rows.some((row) => tableCells(row).length !== columns) || (grid && gridColumns.length !== columns) || advanced)
+    throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "This Word table has a merged, nested or irregular grid. Its existing structure is preserved.");
+  return { rows, columns, grid, gridColumns };
+}
+
 function emptyTableCell(template?: XmlElement) {
   const cell = new XmlElement("tc", "w");
   const properties = template?.find(WML_NAMESPACE, "tcPr");
@@ -1542,7 +1557,7 @@ function emptyTableCell(template?: XmlElement) {
 }
 
 function insertTableRow(document: Document, table: NativeTable, rowIndex?: number) {
-  const rows = tableRows(table);
+  const { rows } = ordinaryTableTopology(table);
   if (!rows.length) throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "The Word table has no row template.");
   const index = rowIndex === undefined ? rows.length : Math.min(rowIndex, rows.length);
   const template = rows[Math.max(0, index - 1)] ?? rows[0]!;
@@ -1553,7 +1568,7 @@ function insertTableRow(document: Document, table: NativeTable, rowIndex?: numbe
 }
 
 function deleteTableRow(document: Document, table: NativeTable, rowIndex: number) {
-  const rows = tableRows(table);
+  const { rows } = ordinaryTableTopology(table);
   if (rows.length <= 1 || !rows[rowIndex])
     throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "A Word table must keep at least one row.");
   table.element.removeChild(rows[rowIndex]!);
@@ -1561,23 +1576,31 @@ function deleteTableRow(document: Document, table: NativeTable, rowIndex: number
 }
 
 function insertTableColumn(document: Document, table: NativeTable, columnIndex?: number) {
-  const index = columnIndex === undefined ? table.columnCount() : Math.min(columnIndex, table.columnCount());
-  for (const row of tableRows(table)) {
+  const { rows, columns, grid, gridColumns } = ordinaryTableTopology(table);
+  const index = columnIndex === undefined ? columns : Math.min(columnIndex, columns);
+  for (const row of rows) {
     const cells = tableCells(row);
     const template = cells[Math.max(0, Math.min(index - 1, cells.length - 1))];
     row.insertBefore(emptyTableCell(template), cells[index] ?? null);
+  }
+  if (grid) {
+    const template = gridColumns[Math.max(0, index - 1)]!;
+    grid.insertBefore(template.clone(), gridColumns[index] ?? null);
   }
   document._markMainDirty();
 }
 
 function deleteTableColumn(document: Document, table: NativeTable, columnIndex: number) {
-  const rows = tableRows(table);
-  if (!rows.length || table.columnCount() <= 1)
+  const { rows, columns, grid, gridColumns } = ordinaryTableTopology(table);
+  if (columns <= 1)
     throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "A Word table must keep at least one column.");
+  if (columnIndex >= columns)
+    throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "The target Word table column no longer exists.");
   for (const row of rows) {
     const cells = tableCells(row);
     if (cells[columnIndex]) row.removeChild(cells[columnIndex]!);
   }
+  if (grid) grid.removeChild(gridColumns[columnIndex]!);
   document._markMainDirty();
 }
 

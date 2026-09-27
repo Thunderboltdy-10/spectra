@@ -59,6 +59,7 @@ import type * as memory from "../memory.js";
 import type * as memoryEmbedding from "../memoryEmbedding.js";
 import type * as metering from "../metering.js";
 import type * as nativeOfficeValidators from "../nativeOfficeValidators.js";
+import type * as nativeMaterialization from "../nativeMaterialization.js";
 import type * as notificationCenter from "../notificationCenter.js";
 import type * as operationalCounters from "../operationalCounters.js";
 import type * as operatorSessions from "../operatorSessions.js";
@@ -154,6 +155,7 @@ declare const fullApi: ApiFromModules<{
   memoryEmbedding: typeof memoryEmbedding;
   metering: typeof metering;
   nativeOfficeValidators: typeof nativeOfficeValidators;
+  nativeMaterialization: typeof nativeMaterialization;
   notificationCenter: typeof notificationCenter;
   operationalCounters: typeof operationalCounters;
   operatorSessions: typeof operatorSessions;

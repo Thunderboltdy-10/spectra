@@ -3,7 +3,7 @@ import type { NativeSaveReceipt } from "../../../../shared/native-office-contrac
 import type { NativePayloadTruth } from "./native-payload-server";
 import type { Doc } from "../../../../convex/_generated/dataModel";
 
-/** `replicas:queueMaterialization` returns the durable request state, or the
+/** Native materialization queueing returns the durable request state, or the
  * protected-original placeholder; never an arbitrary string. */
 export type QueuedNativeMaterialization = {
   requestId: string;

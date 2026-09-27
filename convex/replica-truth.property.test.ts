@@ -7,6 +7,15 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
 const modules = import.meta.glob("./**/*.ts");
+
+type HumanQueueArgs = { workId: Id<"spectraArtifacts">; payloadRef: string; contentHash: string; baseRevision: string;
+  fidelityMap: { entries: unknown[] }; regionIds: string[]; partNames: string[] };
+/** Human native writes are admitted only through the signed gateway mutation. */
+async function queueHumanMaterialization(t: { mutation: ReturnType<typeof convexTest>["mutation"] }, accountId: Id<"accounts">, queue: HumanQueueArgs) {
+  return await t.mutation(internal.nativeMaterialization.commitHuman, {
+    accountId, artifactId: queue.workId, candidate: { destination: "bridge", queue },
+  }) as { requestId: string; state: string };
+}
 const credential = "bridge-property-test-credential-0001";
 
 afterEach(() => vi.useRealTimers());
@@ -355,7 +364,7 @@ describe("replica truth model properties", () => {
             if (snapshot.local && snapshot.device?.state === "active" && snapshot.local.state !== "unavailable") {
               const targetHash = hashFor(nextRevision++);
               const payload = await insertPayload(t, fixture.accountId, targetHash);
-              await asUser.mutation(api.replicas.queueMaterialization, {
+              await queueHumanMaterialization(t, fixture.accountId, {
                 workId: fixture.workId,
                 payloadRef: String(payload.payloadId),
                 contentHash: targetHash,

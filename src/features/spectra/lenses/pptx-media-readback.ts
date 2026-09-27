@@ -1,12 +1,12 @@
 import type { PresentationObject } from "../presentation/model";
 import type { PptxProjection } from "./projection-contracts";
 
-const nativeImageLocators = new Set(["nativeShapeId", "nativeParagraphIndex", "nativeShapeKind", "nativeMediaPart", "nativeMediaType"]);
+const nativeImageLocators = new Set(["nativeShapeId", "nativeParagraphIndex", "nativeShapeKind", "nativeMediaPart", "nativeMediaType", "nativeMediaSha256"]);
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 function ordered(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(ordered);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, ordered(entry)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([key, entry]) => [key, ordered(entry)]));
   return value;
 }
 

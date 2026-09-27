@@ -18,7 +18,7 @@ import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, Len
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
 import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
 import { readPptxTransition, writePptxTransition } from "./pptx-transition";
-import { readPptxImageAsset, writePptxImage, type PptxMediaWriteOptions } from "./pptx-media";
+import { readPptxImageAsset, writePptxImage, type PptxMediaWriteOptions, type PptxMediaReadCache } from "./pptx-media";
 
 export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
@@ -281,6 +281,7 @@ async function slideObjects(
   slideId: string,
   layoutRoot?: XmlElement,
   canvas?: { width: number; height: number },
+  mediaCache?: PptxMediaReadCache,
 ): Promise<PresentationObject[]> {
   const layoutPlaceholders = new Map<string, XmlElement>();
   if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
@@ -310,7 +311,7 @@ async function slideObjects(
     const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
     const isTitle = ["title", "ctrTitle"].includes(placeholder?.getAttribute("type") ?? "");
     const type = shape.localName === "pic" ? "image" : shape.localName === "graphicFrame" ? (descendants(shape).some((node) => node.localName === "chart") ? "chart" : "table") : "text";
-    const authoredImage = type === "image" ? await readPptxImageAsset(deck, slidePartName, shape) : undefined;
+    const authoredImage = type === "image" ? await readPptxImageAsset(deck, slidePartName, shape, mediaCache) : undefined;
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
@@ -325,7 +326,7 @@ async function slideObjects(
             nativeParagraphIndex: 0,
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
             ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
-            ...(authoredImage ? authoredImage.image : {}),
+            ...(authoredImage ? { ...authoredImage.image, nativeMediaSha256: authoredImage.image.sha256 } : {}),
           };
     const nativeObjectLink = hyperlinkFor(deck, slidePartName, firstDescendant(shape, PML_NAMESPACE, "cNvPr"));
     const uniformTextLink = type === "text"
@@ -386,6 +387,7 @@ async function presentationThemeFonts(deck: Presentation) {
 
 async function projectPresentation(deck: Presentation, profile: LensCompatibilityProfile) {
   const entries: LensFidelityEntry[] = [];
+  const mediaCache: PptxMediaReadCache = new Map();
   const presentationXml = await deck.office.xml("/ppt/presentation.xml");
   const slideSize = firstDescendant(presentationXml.root, PML_NAMESPACE, "sldSz");
   const canvas = {
@@ -416,7 +418,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas, mediaCache), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["ole", /\/embeddings\//i], ["macro", /\/vbaProject\.bin$/i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {

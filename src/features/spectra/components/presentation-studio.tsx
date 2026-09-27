@@ -168,6 +168,9 @@ function nativePptxImageAsset(
   source: Record<string, unknown>,
   binding: PresentationContent["nativeBinding"],
 ): SpectraArtifactAsset | undefined {
+  // A pending replacement should preview its new durable bytes. After native
+  // readback, matching hashes make the embedded image authoritative again.
+  if (typeof source.assetId === "string" && source.sha256 !== source.nativeMediaSha256) return undefined;
   const partName =
     typeof source.nativeMediaPart === "string" ? source.nativeMediaPart : "";
   const downloadUrl = pptxNativeMediaUrl(binding, partName);

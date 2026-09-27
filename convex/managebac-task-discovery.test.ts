@@ -173,7 +173,10 @@ describe("canonical Calendar task-to-plan validation", () => {
     await f.editPlan(f.plan._id, { content: { ...f.plan.content, subtasks: [{ id: "outline", title: "Outline", done: false }] } });
     const block = await f.user.mutation(api.calendar.scheduleTask, { ...f.request, planTaskId: "outline" });
     expect(block.planTaskId).toBe("task-1");
-    await expect(f.user.mutation(api.calendar.scheduleTask, { ...f.request, planTaskId: "invented" })).rejects.toThrow("CALENDAR_PLAN_TASK_NOT_FOUND");
+    // The receipt is checked before fresh eligibility, so reusing its key for
+    // another alias is an idempotency conflict; a new key must still resolve.
+    await expect(f.user.mutation(api.calendar.scheduleTask, { ...f.request, planTaskId: "invented" })).rejects.toThrow("CALENDAR_IDEMPOTENCY_CONFLICT");
+    await expect(f.user.mutation(api.calendar.scheduleTask, { ...f.request, planTaskId: "invented", idempotencyKey: "school-discovery-invented" })).rejects.toThrow("CALENDAR_PLAN_TASK_NOT_FOUND");
   });
 
   it("denies a removed source task but recovers its active block after planner archive", async () => {

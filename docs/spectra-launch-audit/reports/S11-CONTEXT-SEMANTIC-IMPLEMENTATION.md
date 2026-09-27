@@ -1,6 +1,6 @@
 # S11 versioned semantic memory candidate
 
-Status: **source candidate; new tests, lint and typing have not run yet**. Coordinator allocated this implementation on September 25 and confirmed the composite vector partition and dispatcher contracts. Executable checks remain in the guarded slot queue. This report does not claim backend publication, live acceptance, artifact/thread indexing, 256k compaction or launch readiness.
+Status: **Focused tests and scoped lint passed on September 27; typing and live acceptance remain deferred.** The recovery owner ran 90 tests across the five memory/history/orientation files under the assigned guard; see [the exact recovery evidence and candidate dependencies](S11-CONTEXT-RECOVERY.md). Coordinator allocated this implementation on September 25 and confirmed the composite vector partition and dispatcher contracts. This report does not claim backend publication, live acceptance, artifact/thread semantic indexing, 256k compaction or launch readiness.
 
 ## Behavior and authority
 
@@ -36,8 +36,8 @@ Provider inputs are bounded to 8,192 UTF-8 bytes and 2,048 `cl100k_base` tokens.
 
 The response preserves `text`, `claims`, `selectedClaimIds`, `candidateClaimIds`, exclusions and token estimates. It adds `returnedClaimIds` and `retrieval` status/truncation/candidate-evidence metadata. ENGINE owns exposing this in `retrieve_memory` and distinguishing candidates returned from claims actually used; the historical `selectedClaimIds` name is compatibility, not proof of use. There is no ordinary-answer or greeting dispatcher in this unit. Orientation activation and restored-goal runtime integration remain ENGINE-owned.
 
-## Verification prepared, not yet run
+## Verification
 
 New deterministic tests cover retained-text/retention dedupe; source/claim/preference changes during a lease; stale lease completion; retry limits; two global slots; capture/delete admission; no embedding-only capsule rebuild; explicit bounded backfill; version separation; exact vector OR filters; literal fallback; shared authors and private exclusions; global memory after school change; inaccessible relation intermediaries; empty/oversized/disabled queries; full rendered budget; bounded returned-row measurements; provider identity/shape/response limits/timeouts; and query-cache isolation, expiry and capacity. Existing source-authority tests now freeze timers so their independently tested embedding jobs cannot run accidentally.
 
-The previous 121-test result predates this candidate and must not be represented as its validation. The restored-goal gather regression from `6121ce48` is also still pending. No new live provider experiment has run; `S11-CONTEXT-SEMANTIC.md` remains the earlier tiny synthetic ranking evidence. Expanded frozen-corpus/main-model applicability evaluation, live index readiness, effective tool-result use receipts and artifact/thread retrieval remain explicit acceptance work.
+The September 27 focused recovery run validates these deterministic cases and the restored-goal gather regression from `6121ce48`; scoped lint passed. The previous 121-test result predates this candidate and must not be represented as its validation. No new live provider experiment has run; `S11-CONTEXT-SEMANTIC.md` remains the earlier tiny synthetic ranking evidence. Expanded frozen-corpus/main-model applicability evaluation, live index readiness, effective tool-result use receipts and served artifact/thread retrieval remain explicit acceptance work.

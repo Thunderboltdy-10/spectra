@@ -1,6 +1,6 @@
 # S11 indexed thread-history candidate
 
-**Source and tests prepared; executable validation pending the guarded lane. ENGINE owns the AI tool adapter.** This backend unit is independent of the semantic-memory implementation.
+**All nine history/title-discovery tests and scoped lint passed in the September 27 guarded recovery run. ENGINE owns the AI tool adapter.** See [the exact evidence and dependencies](S11-CONTEXT-RECOVERY.md). This backend unit is independent of the semantic-memory implementation.
 
 The current AI `read_thread` adapter calls `spectraThreads.get`, keeps the last 24 messages and clips each to 3,000 characters. The backend already has authenticated chronological pagination through `listMessages`, but that continuation is not exposed by the tool. As a result an older decision or a relevant passage late in a long message cannot be reached through the AI tool.
 
@@ -12,6 +12,6 @@ This change adds a full-text index on the existing `spectraMessages.content`, fi
 
 The source preserves existing thread ownership/current-school rules, including readable archived threads. Shared workspace placement does not authorize someone else's conversation. Every page and chunk checks authority again; deletion or loss of current identity blocks the next read. Search returns messages from the existing visible role set, including historical tool text as evidence. The model must not treat historical text as current instructions.
 
-Prepared tests cover an old match more than 3,000 characters into a message and behind forty newer messages; complete search pagination; query/thread cursor mismatch; exact long-message reconstruction; revision change; missing continuation revision; foreign message identity; deleted thread and different actor denial; and database returned-row/byte comparison with one versus 301 messages. These measurements are not yet run and do not claim engine scans or billing reduction.
+Passing tests cover an old match more than 3,000 characters into a message and behind forty newer messages; complete search pagination; query/thread cursor mismatch; exact long-message reconstruction; revision change; missing continuation revision; foreign message identity; deleted thread and different actor denial; and database returned-row/byte comparison with one versus 301 messages. Both history sizes returned five database documents and 1,296 serialized bytes across five calls. This does not measure engine scans or billing reduction. The follow-up `807091cb` adds bounded owned title discovery with three additional regressions, also passed.
 
 This is indexed literal search within a known thread, not cross-thread semantic discovery or 256k compaction. RUNTIME must validate normal index readiness during coordinated publication. The live tool adapter and backend acceptance remain required before claiming the older-history AI journey works end to end.

@@ -32,7 +32,37 @@ Orientation prerequisites remain `c965e77a`, `5a08779d`, `6121ce48` (with `6f816
 
 ## Focused validation
 
-Pending the RUNTIME-R2 guarded lane. Prepared scope: `memory-retrieval.test.ts`, `memory-embeddings.test.ts`, `memory-embedding-provider.test.ts`, `spectra-thread-retrieval.test.ts`, and `gather-orientation.test.ts`, followed by scoped lint/type diagnostics. Provider calls are mocked in these tests. No service starts, backend publication or user-file mutations are included.
+**90/90 tests passed across five files at product head `807091cb`, September 27. Scoped ESLint passed with zero warnings.** The coordinator temporarily owned dispatch and granted lane 1 after PRESERVATION released it. Tests completed in 5.35 seconds; lint completed in approximately five seconds. Both phases ran serially with one worker, no file parallelism, a 4 GiB heap cap, inherited `NODE_OPTIONS` plus the preserved `2b0f` filesystem guard, and checkout-local cache/temp paths. No executable remains running. No transitive typecheck, provider experiment, service start, backend publication or user-file mutation was performed.
+
+| File | Cases passed |
+| --- | ---: |
+| `convex/memory-retrieval.test.ts` | 31 |
+| `convex/memory-embeddings.test.ts` | 23 |
+| `convex/memory-embedding-provider.test.ts` | 17 |
+| `convex/spectra-thread-retrieval.test.ts` | 9 |
+| `src/app/api/spectra/run/loop/gather-orientation.test.ts` | 10 |
+
+All provider calls in this group were mocked; the missing-key startup notice is not live-provider validation. The first command stopped before running tests because Vite's runner config loader does not inject `__dirname` into the repository's imported config. Only the ignored private wrapper was corrected to reproduce the repository test settings with explicit paths. `recovery-tests-initial.log` retains that startup failure; `recovery-tests.log` contains the successful five-file run and measurements; `recovery-lint.log` records the successful, silent lint phase. All are under `.spectra-local/launch-s11/context/`. Original predecessor failure logs remain intact. Product source needed no correction during this run.
+
+| Synthetic comparison | DB calls | Returned documents | Serialized returned bytes |
+| --- | ---: | ---: | ---: |
+| One relevant memory with 1 versus 301 total claims | 11 | 7 | 2,893 |
+| One history hit with 1 versus 301 messages | 5 | 5 | 1,296 |
+| One title hit with 2 versus 302 conversations | 4 | 4 | 22,120 |
+| Authored memory behind 21 versus 221 evidence records | 22 | 22 | 9,492 |
+
+Each row had identical result and ledger across its two corpus sizes. The title fixture deliberately carries a large `summaryLong`, illustrating the real canonical row cost even though the tool omits that summary. These measurements are returned JSON row bytes, not physical index scans, network traffic, cache hit rate, production latency or billing. No broader rerun is implied.
+
+## Exact candidate dependencies and handoff
+
+- Semantic production: `d1a63a37` then `b8b3aba8`; regression follow-up `e87637a7`. Integrate together with their additive schema/index changes and previously integrated current-source authority helpers. The full proposal/history commits are not runtime prerequisites.
+- Thread production/tests: `240a4c88` then `807091cb`. These are independent of semantic memory; the second uses the revision helper introduced by the first. Both message-content and title search indexes must be ready before live validation.
+- Restored orientation: `6121ce48`, on top of `c965e77a` and `5a08779d`; previously documented validation fixture fix `6f8167ab` remains appropriate. The restored-goal regression now passes.
+- Isolated intake nullability: `1ec55e6b`; no semantic-memory dependency. Scoped lint passes; transitive typecheck remains intentionally deferred.
+
+The exact new discovery contract is `spectraThreads.search({query, cursor?, limit?, workspaceId?, status?: "active" | "archived"})` -> `{results:[{type:"thread", id, title, summaryShort?, status, updatedAt}], nextCursor, complete, searchMode:"title"}`. It defaults to active threads and eight results, caps at sixteen, and filters only the primary workspace when supplied. `searchMessages` accepts `cursor`; chronological `listMessages` accepts `before`. `readMessage` requires `revision` for nonzero `offset` and returns `message_changed` when content differs.
+
+No remaining source blocker exists inside this owned backend unit. ENGINE's actual tool adapter, DATA's artifact/workspace discovery integration, coordinated index readiness and final live verification remain separately owned integration prerequisites. The focused backend/orientation checks do not establish that a served AI completed the cross-thread journey or used the returned memories appropriately. The lane is released with the consolidated coordinator handoff; no further scope expansion is planned.
 
 ## Deferred final verification prompt
 

@@ -10,11 +10,11 @@ The user's September 27 directive is to finish and integrate the work, using foc
 | Client performance | Body release, selected-open ordering and mounted reuse integrated through `cf30b32c`; saved 56-case pass | Release completed access decisions independently of unrelated pending reads |
 | AI execution | No ambiguous/acknowledged replay, full replacement verification, direct sanitized pre-effect errors and preparation skips integrated through `1125bbf7` | Exact acknowledged final-effect verification; authorized discovered-target compact context; clarification and steering continuity |
 | AI review/compaction | Independent bounded runtime verdict recovered | Real context compaction around 256k with durable intent, approvals, staged work and receipt continuity |
-| Authority | Existing prepared-scope source already integrated | Bounded preparation, authorized receipt-first replay, signed evidence, create/@created first-effect binding and actual sink consumption |
+| Authority | Indexed preparation, authorized receipt replay and shared hydrated evidence integrated through `49bbd3e2` | Retained cross-school invited-host consistency; create/@created first-effect binding and actual sink consumption |
 | Durability | Native reconciliation/history/ancestor transaction integrated | Atomic AI canonical/history/native intent/receipt transaction, exact source/result retention and consumer wiring |
 | Bridge | Prepared native candidate and human helper recovered | Signed atomic transport, actual AI/human promotion, public sink closure, mirror/retry protocol closeout |
 | Collaboration | Canonical admission, retained ancestry and rebase prerequisites integrated | Quarantine offline draft before provider upload, restore UI controller, exact admitted AI bytes without second append; invitation repair |
-| History | Bounded metadata history integrated | Retained placement proof/frontier fences, complete restore admission and native helper wiring |
+| History | Bounded metadata, retained placement/frontier proof and shared canonical projection integrated through `2ad4e204`; focused 27/27 | Complete restore admission and native helper wiring |
 | Office document | Academic mapping, delta policy and formatting repairs integrated | Table/reference preservation validation and final shared conversion wiring |
 | Office models | Complete-list authority baseline integrated | Readback-derived differences, transition duration/identity, native media and new slide/text identity mapping |
 | Native preservation | Full attached-subtree proof integrated | Exact transition remainder proof and atomic admission cross-review |

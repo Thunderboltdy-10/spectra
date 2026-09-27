@@ -1,6 +1,6 @@
 import { mutate } from "./io";
 import { throwIfAborted } from "./abort";
-import { uiObservationSnapshotSchema, type UiObservationSnapshot, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
+import { documentParagraphTargetSchema, uiObservationSnapshotSchema, type DocumentParagraphTarget, type UiObservationSnapshot, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
 
 type Identity = { runId: string; executionId: string; operationId: string };
 type Waiter = { identity: Identity; preparing: boolean; cancel: () => void; accept: (value: UiObservationSnapshot) => void };
@@ -25,6 +25,30 @@ export function awaitedUiOperation(runId: string, executionId: string): string |
 }
 
 export async function waitForSettingsAction(identity: Identity, signal?: AbortSignal): Promise<{ fence?: UiObservationFence; committed?: { result: unknown } }> {
+  return waitForObservedAction(identity, signal);
+}
+
+/** The sole artifact writer calls this after its region claim and before
+ * native preparation. Recheck canonical/native CAS after it resolves and pass
+ * the returned fence into that admission. The observer never applies text. */
+export async function waitForArtifactTargetReady(input: Identity & { operationDigest: string; target: DocumentParagraphTarget }, signal?: AbortSignal) {
+  const { target, operationDigest, ...identity } = input;
+  const paragraph = documentParagraphTargetSchema.parse(target);
+  const result = await waitForObservedAction(identity, signal, { paragraph, operationDigest });
+  throwIfAborted(signal);
+  if (!result.committed) {
+    const validated = uiObservationSnapshotSchema.parse(await mutate("spectraOperations:validateArtifactUiAction", { ...identity, ...(result.fence ? { fence: result.fence } : {}) }));
+    if (validated.phase === "committed") result.committed = { result: validated.result };
+  }
+  return {
+    ...result,
+    /** Call only after the canonical receipt exists; this endpoint verifies it
+     * before notifying the existing run feed. It cannot manufacture a save. */
+    notifyCommitted: () => mutate("spectraOperations:notifyArtifactUiActionCommitted", identity),
+  };
+}
+
+async function waitForObservedAction(identity: Identity, signal?: AbortSignal, preparation?: { paragraph: DocumentParagraphTarget; operationDigest: string }): Promise<{ fence?: UiObservationFence; committed?: { result: unknown } }> {
   throwIfAborted(signal);
   const waiterKey = key(identity);
   if (waiting.has(waiterKey)) throw new Error("UI_OBSERVATION_ALREADY_WAITING");
@@ -60,7 +84,7 @@ export async function waitForSettingsAction(identity: Identity, signal?: AbortSi
   waiting.set(waiterKey, waiter);
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    const prepared = uiObservationSnapshotSchema.parse(await mutate("spectraOperations:prepareUiAction", identity));
+    const prepared = uiObservationSnapshotSchema.parse(await mutate("spectraOperations:prepareUiAction", { ...identity, ...preparation }));
     waiter.preparing = false;
     waiter.accept(prepared);
     throwIfAborted(signal);

@@ -31,14 +31,14 @@ let coordinator = new AppChoreographyCoordinator();
 const artifactPerformers = new Map<string, AiPerformer>();
 const MAX_IDLE_ARTIFACT_PERFORMERS = 24;
 let claimTicker: number | null = null;
-type ControlPresentation = { actorId: string; operationId: string; element: HTMLElement };
+type ControlPresentation = { actorId: string; operationId: string; element: HTMLElement; anchor?: () => DOMRect | null };
 const controlPresentations = new Map<string, ControlPresentation>();
 const controlPresentationListeners = new Set<() => void>();
 
 /** A pointer is attached only while the registered control performs its action.
  * It cannot navigate, focus, mutate the control, or acknowledge a save. */
-export function presentAppControl(actorId: string, operationId: string, element: HTMLElement): () => void {
-  const presentation = { actorId, operationId, element };
+export function presentAppControl(actorId: string, operationId: string, element: HTMLElement, anchor?: () => DOMRect | null): () => void {
+  const presentation = { actorId, operationId, element, anchor };
   controlPresentations.set(actorId, presentation);
   for (const listener of controlPresentationListeners) listener();
   return () => {
@@ -229,9 +229,12 @@ function isAppTargetVisible(targetKey?: string, resolved?: readonly HTMLElement[
   if (!targetKey || typeof document === "undefined") return false;
   if (document.visibilityState === "hidden") return false;
   const candidates = resolved ?? findAppTargets(targetKey);
-  for (const element of candidates) {
-    if (!element.isConnected) continue;
-    const rect = element.getBoundingClientRect();
+  return candidates.some(element => isAppControlRectVisible(element, element.getBoundingClientRect()));
+}
+
+/** Measure the actual editor splice point through the same clipping rules. */
+export function isAppControlRectVisible(element: HTMLElement, rect: DOMRect): boolean {
+    if (!element.isConnected || document.visibilityState === "hidden") return false;
     let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
     let right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
     let hidden = false;
@@ -253,9 +256,7 @@ function isAppTargetVisible(targetKey?: string, resolved?: readonly HTMLElement[
         top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom);
       }
     }
-    if (!hidden && right > left && bottom > top) return true;
-  }
-  return false;
+    return !hidden && right > left && bottom > top;
 }
 
 /** Execute a prepared local performance. Completion acknowledges this callback,
@@ -398,9 +399,9 @@ export function AppChoreographyMount() {
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "style", "class"] });
         observing = true;
       }
-      const next = [...controlPresentations.values()].flatMap(({ actorId, element }) => {
-        if (!isAppTargetVisible(element.dataset.spectraAiTarget, [element])) return [];
-        const rect = element.getBoundingClientRect();
+      const next = [...controlPresentations.values()].flatMap(({ actorId, element, anchor }) => {
+        const rect = anchor ? anchor() : element.getBoundingClientRect();
+        if (!rect || !isAppControlRectVisible(element, rect)) return [];
         return [{ actorId, left: rect.left + rect.width / 2, top: rect.top + rect.height / 2 }];
       });
       setControlPointers((current) => current.length === next.length && current.every((pointer, index) =>

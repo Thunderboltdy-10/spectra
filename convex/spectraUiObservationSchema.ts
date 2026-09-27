@@ -11,11 +11,21 @@ export const vUiObserverInterests = v.object({
 export const vUiObservationFence = v.object({
   epoch: v.number(), operationDigest: v.string(), sequence: v.literal(0),
 });
+export const vDocumentParagraphTarget = v.object({
+  kind: v.literal("artifact_paragraph"),
+  artifactId: v.id("spectraArtifacts"),
+  blockId: v.string(),
+  expectedText: v.string(),
+  index: v.number(),
+  baseRevision: v.object({
+    roomId: v.id("collaborationRooms"), nextSequence: v.number(), sourceContentIdentity: v.string(),
+  }),
+});
 export const vUiObservation = v.object({
   version: v.literal(1),
   epoch: v.number(),
   operationDigest: v.string(),
-  target: v.literal("/settings/writing/smartCompletion"),
+  target: v.union(v.literal("/settings/writing/smartCompletion"), vDocumentParagraphTarget),
   sequence: v.literal(0),
   phase: v.union(v.literal("waiting"), v.literal("sealed"), v.literal("headless")),
   expiresAt: v.number(),

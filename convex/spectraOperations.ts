@@ -6,11 +6,12 @@ import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { regionDomainsIntersect } from "./regionClaims";
 import { projectTimetableSnapshot } from "./quizPrivacy";
-import { applicationWriteReceipt } from "./spectraApplicationWriteScope";
-import { vUiObserverInterest, vUiObservationFence } from "./spectraUiObservationSchema";
+import { vDocumentParagraphTarget, vUiObserverInterest, vUiObservationFence } from "./spectraUiObservationSchema";
 import {
   mergeUiObserverInterest, prepareUiObservation, acknowledgeUiObservation,
   expireUiObservation, uiObservationSnapshot, changeUiObservationInterest,
+  uiObservationReceipt, observationDigest, assertArtifactObservationTarget,
+  assertArtifactUiObservationFence, notifyArtifactObservationCommitted,
 } from "./spectraUiObservation";
 
 const uiOperationArgs = { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations") };
@@ -21,8 +22,13 @@ async function requireUiOperation(ctx: Parameters<typeof requireOwnedRun>[0], ar
   if (!operation || operation.runId !== run._id || operation.actorType !== "ai" ||
     run.executionId !== args.executionId || operation.executionId !== args.executionId)
     throw new Error("UI_OBSERVATION_STALE");
-  if (!applicationWriteReceipt(operation.output) && (run.status !== "running" || operation.status !== "executing"))
+  const receipt = uiObservationReceipt(operation);
+  if (receipt && operation.type !== "app.command" && receipt.scope !== await observationDigest(operation))
+    throw new Error("UI_OBSERVATION_STALE");
+  if (!receipt && (run.status !== "running" || operation.status !== "executing"))
     throw new Error("UI_OBSERVATION_INACTIVE");
+  if (operation.uiObservation && typeof operation.uiObservation.target !== "string")
+    await assertArtifactObservationTarget(ctx, run, operation, operation.uiObservation.target);
   return { run, operation };
 }
 
@@ -43,10 +49,28 @@ export const setUiObserverInterest = mutation({
 });
 
 export const prepareUiAction = mutation({
+  args: { ...uiOperationArgs, paragraph: v.optional(vDocumentParagraphTarget), operationDigest: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    if (args.paragraph && args.operationDigest !== await observationDigest(operation)) throw new Error("UI_OBSERVATION_STALE");
+    return prepareUiObservation(ctx, run, operation, args.paragraph);
+  },
+});
+
+export const validateArtifactUiAction = mutation({
+  args: { ...uiOperationArgs, fence: v.optional(vUiObservationFence) },
+  handler: async (ctx, args) => {
+    const { run, operation } = await requireUiOperation(ctx, args);
+    if (!uiObservationReceipt(operation)) await assertArtifactUiObservationFence(ctx, run, operation, args.fence, Date.now());
+    return uiObservationSnapshot(run, operation);
+  },
+});
+
+export const notifyArtifactUiActionCommitted = mutation({
   args: uiOperationArgs,
   handler: async (ctx, args) => {
     const { run, operation } = await requireUiOperation(ctx, args);
-    return prepareUiObservation(ctx, run, operation);
+    return notifyArtifactObservationCommitted(ctx, run, operation);
   },
 });
 

@@ -4,6 +4,7 @@ import { uniqueToken } from "@/lib/unique-token";
 import { cn } from "@/lib/utils";
 import type { JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
+import { registerDocumentParagraphEditor } from "../collaboration/document-paragraph-control";
 import {
   isLocalCollaborativeDocumentChange,
   NATIVE_PROJECTION_TRANSACTION_META,
@@ -1257,6 +1258,11 @@ export function DocumentStudio({
   useStudioViewportReady(
     Boolean(editor && !editor.isDestroyed && editor.isInitialized && editor.view),
   );
+
+  useEffect(() => {
+    if (!editor || !collaborationDocument) return;
+    return registerDocumentParagraphEditor(artifactId, editor);
+  }, [artifactId, collaborationDocument, editor]);
 
   useEffect(() => {
     if (!editor || readOnly) return;

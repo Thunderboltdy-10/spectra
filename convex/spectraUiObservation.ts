@@ -1,11 +1,14 @@
 import type { Infer } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { applicationOperationScope, applicationWriteReceipt } from "./spectraApplicationWriteScope";
 import { normalizeAiPreferencePatch } from "../src/features/spectra/settings/schema/preferences";
-import { SMART_COMPLETION_TARGET, smartCompletionValue } from "../src/features/spectra/actions/protocol/semantic-action";
+import { SMART_COMPLETION_TARGET, smartCompletionValue, documentParagraphTargetSchema } from "../src/features/spectra/actions/protocol/semantic-action";
+import { artifactOperationDigest, artifactOperationTarget, artifactSourceIdentity, artifactWriteReceipt } from "./spectraArtifactWriteScope";
+import { getActorForAccountId } from "./identityShared";
+import { requireActorArtifactCapability } from "./authorityShared";
 import { createRunItem } from "../src/features/spectra/actions/protocol/run-item";
-import type { vUiObservationFence, vUiObserverInterest, vUiObserverInterests } from "./spectraUiObservationSchema";
+import type { vDocumentParagraphTarget, vUiObservationFence, vUiObserverInterest, vUiObserverInterests } from "./spectraUiObservationSchema";
 
 export const UI_OBSERVATION_DEADLINE_MS = 15_000;
 export const MAX_UI_OBSERVERS = 8;
@@ -14,6 +17,41 @@ type Operation = Doc<"spectraOperations">;
 type Observation = NonNullable<Operation["uiObservation"]>;
 type Interest = Infer<typeof vUiObserverInterest>;
 type Fence = Infer<typeof vUiObservationFence>;
+type ParagraphTarget = Infer<typeof vDocumentParagraphTarget>;
+
+export function uiObservationReceipt(operation: Operation) {
+  const receipt = operation.type === "app.command" ? applicationWriteReceipt(operation.output) : artifactWriteReceipt(operation.output);
+  if (receipt && operation.uiObservation && operation.type !== "app.command" && receipt.scope !== operation.uiObservation.operationDigest)
+    throw new Error("UI_OBSERVATION_STALE");
+  return receipt;
+}
+
+/** Observation never grants artifact rights or a write permit. Reuse the
+ * operation's resolved target and current capability at every request. */
+export async function assertArtifactObservationTarget(ctx: QueryCtx | MutationCtx, run: Run, operation: Operation, target: ParagraphTarget, checkBase = false) {
+  documentParagraphTargetSchema.parse(target);
+  if (operation.type !== "artifact.update" || await artifactOperationTarget(ctx, operation) !== target.artifactId)
+    throw new Error("UI_OBSERVATION_TARGET_MISMATCH");
+  const actor = await getActorForAccountId(ctx, run.ownerAccountId);
+  if (!actor) throw new Error("UI_OBSERVATION_STALE");
+  const access = await requireActorArtifactCapability(ctx, actor, target.artifactId, "modify");
+  const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
+  if (artifact.blueprintKey !== "document") throw new Error("UI_OBSERVATION_UNSUPPORTED");
+  if (checkBase) {
+    const room = await ctx.db.get(target.baseRevision.roomId);
+    if (!room || room.artifactId !== artifact._id || room.nextSequence !== target.baseRevision.nextSequence ||
+      await artifactSourceIdentity(artifact) !== target.baseRevision.sourceContentIdentity)
+      throw new Error("UI_OBSERVATION_BASE_STALE");
+  }
+}
+
+/** Invoke again in the canonical/native admission transaction, after receipt
+ * replay and before the first effect. Omitting a stored fence cannot bypass it. */
+export async function assertArtifactUiObservationFence(ctx: MutationCtx, run: Run, operation: Operation, fence: Fence | undefined, now: number) {
+  await assertUiObservationFence(operation, fence, now);
+  const target = operation.uiObservation?.target;
+  if (target && typeof target !== "string") await assertArtifactObservationTarget(ctx, run, operation, target, true);
+}
 
 export function mergeUiObserverInterest(run: Run, executionId: string, interest: Interest | { clientId: string; mode: "released" }): Infer<typeof vUiObserverInterests> {
   if (!interest.clientId.trim() || interest.clientId.length > 120) throw new Error("UI_OBSERVER_ID_INVALID");
@@ -38,7 +76,8 @@ export function observedSettingsValue(operation: Pick<Operation, "type" | "input
   return smartCompletionValue(normalizeAiPreferencePatch(input.args?.patch));
 }
 
-export async function observationDigest(operation: Pick<Operation, "type" | "input">): Promise<string> {
+export async function observationDigest(operation: Operation): Promise<string> {
+  if (operation.type !== "app.command") return artifactOperationDigest(operation);
   const bytes = new TextEncoder().encode(applicationOperationScope(operation));
   return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -60,9 +99,9 @@ export async function assertUiObservationFence(operation: Operation, fence: Fenc
 
 export function uiObservationSnapshot(run: Run, operation: Operation) {
   const observation = operation.uiObservation;
-  const receipt = applicationWriteReceipt(operation.output);
+  const receipt = uiObservationReceipt(operation);
   if (receipt) {
-    if (receipt.scope !== applicationOperationScope(operation)) throw new Error("AI_APPLICATION_RECEIPT_SCOPE_MISMATCH");
+    if (operation.type === "app.command" && receipt.scope !== applicationOperationScope(operation)) throw new Error("AI_APPLICATION_RECEIPT_SCOPE_MISMATCH");
     return { phase: "committed" as const, result: receipt.result };
   }
   if (!observation) return { phase: "headless" as const };
@@ -71,8 +110,10 @@ export function uiObservationSnapshot(run: Run, operation: Operation) {
     action: {
       runId: String(run._id), executionId: operation.executionId!, operationId: String(operation._id),
       operationDigest: observation.operationDigest, epoch: observation.epoch, sequence: observation.sequence,
-      kind: "settings_toggle" as const, target: observation.target,
-      checked: observedSettingsValue(operation)!, expiresAt: observation.expiresAt,
+      ...(typeof observation.target === "string"
+        ? { kind: "settings_toggle" as const, target: observation.target, checked: observedSettingsValue(operation)! }
+        : { kind: "artifact_paragraph" as const, target: observation.target }),
+      expiresAt: observation.expiresAt,
     },
     ...(observation.ownerClientId ? { ownerClientId: observation.ownerClientId } : {}),
     participants: observation.participants,
@@ -86,7 +127,7 @@ async function appendObservationEvent(ctx: MutationCtx, run: Run, operation: Ope
   if (!current || current.executionId !== operation.executionId) throw new Error("UI_OBSERVATION_STALE");
   const sequence = (current.eventSequence ?? 0) + 1;
   const now = Date.now();
-  const runItem = createRunItem(String(run._id), sequence, key === "settings_toggle_prepared"
+  const runItem = createRunItem(String(run._id), sequence, key.endsWith("_prepared")
     ? { type: "action_start", action: payload }
     : { type: "action_progress", actionId: String(operation._id), step: payload }, now);
   await ctx.db.insert("spectraRunEvents", {
@@ -109,7 +150,7 @@ function sealIfReady(observation: Observation): Observation {
  * absolute deadline never moves; a sealed action is immutable to newcomers. */
 export async function changeUiObservationInterest(ctx: MutationCtx, run: Run, operation: Operation, interest: Interest | { clientId: string; mode: "released" }) {
   const observation = operation.uiObservation;
-  if (!observation || observation.phase !== "waiting" || observation.expiresAt <= Date.now() || applicationWriteReceipt(operation.output))
+  if (!observation || observation.phase !== "waiting" || observation.expiresAt <= Date.now() || uiObservationReceipt(operation))
     return uiObservationSnapshot(run, operation);
   const existing = observation.participants.find((entry) => entry.clientId === interest.clientId);
   if (interest.mode === "released" && existing) {
@@ -128,13 +169,13 @@ export async function changeUiObservationInterest(ctx: MutationCtx, run: Run, op
   const next = { ...observation, participants: [...observation.participants, interest] };
   await ctx.db.patch(operation._id, { uiObservation: next });
   const snapshot = uiObservationSnapshot(run, { ...operation, uiObservation: next });
-  await appendObservationEvent(ctx, run, operation, "settings_toggle_prepared", snapshot);
+  await appendObservationEvent(ctx, run, operation, typeof next.target === "string" ? "settings_toggle_prepared" : "artifact_paragraph_prepared", snapshot);
   return snapshot;
 }
 
 export async function expireUiObservation(ctx: MutationCtx, run: Run, operation: Operation, now: number) {
   const observation = operation.uiObservation;
-  if (!observation || observation.phase === "headless" || observation.expiresAt > now || applicationWriteReceipt(operation.output)) return operation;
+  if (!observation || observation.phase === "headless" || observation.expiresAt > now || uiObservationReceipt(operation)) return operation;
   const clientIds = observation.participants.map((entry) => entry.clientId);
   const next: Observation = { ...observation, epoch: observation.epoch + 1, phase: "headless", ownerClientId: undefined, participants: [] };
   await ctx.db.patch(operation._id, { uiObservation: next });
@@ -151,11 +192,14 @@ export async function expireUiObservation(ctx: MutationCtx, run: Run, operation:
   return { ...operation, uiObservation: next };
 }
 
-export async function prepareUiObservation(ctx: MutationCtx, run: Run, operation: Operation) {
-  if (applicationWriteReceipt(operation.output)) return uiObservationSnapshot(run, operation);
-  if (observedSettingsValue(operation) === undefined) throw new Error("UI_OBSERVATION_UNSUPPORTED");
+export async function prepareUiObservation(ctx: MutationCtx, run: Run, operation: Operation, paragraph?: ParagraphTarget) {
+  if (uiObservationReceipt(operation)) return uiObservationSnapshot(run, operation);
+  if (paragraph) await assertArtifactObservationTarget(ctx, run, operation, paragraph, true);
+  else if (observedSettingsValue(operation) === undefined) throw new Error("UI_OBSERVATION_UNSUPPORTED");
   if (operation.uiObservation) {
     if (operation.uiObservation.operationDigest !== await observationDigest(operation)) throw new Error("UI_OBSERVATION_STALE");
+    if (JSON.stringify(operation.uiObservation.target) !== JSON.stringify(paragraph ?? SMART_COMPLETION_TARGET))
+      throw new Error("UI_OBSERVATION_TARGET_MISMATCH");
     const current = await expireUiObservation(ctx, run, operation, Date.now());
     return uiObservationSnapshot(run, current);
   }
@@ -167,19 +211,30 @@ export async function prepareUiObservation(ctx: MutationCtx, run: Run, operation
   const participants = followers.length ? followers : interests.slice(-1);
   const observation: Observation = {
     version: 1, epoch: 1, sequence: 0, operationDigest: await observationDigest(operation),
-    target: SMART_COMPLETION_TARGET, phase: "waiting", expiresAt: Date.now() + UI_OBSERVATION_DEADLINE_MS,
+    target: paragraph ?? SMART_COMPLETION_TARGET, phase: "waiting", expiresAt: Date.now() + UI_OBSERVATION_DEADLINE_MS,
     ownerClientId: participants[0]?.clientId, participants,
   };
   await ctx.db.patch(operation._id, { uiObservation: observation });
   const snapshot = uiObservationSnapshot(run, { ...operation, uiObservation: observation });
-  await appendObservationEvent(ctx, run, operation, "settings_toggle_prepared", snapshot);
+  await appendObservationEvent(ctx, run, operation, paragraph ? "artifact_paragraph_prepared" : "settings_toggle_prepared", snapshot);
+  return snapshot;
+}
+
+export async function notifyArtifactObservationCommitted(ctx: MutationCtx, run: Run, operation: Operation) {
+  const observation = operation.uiObservation;
+  const snapshot = uiObservationSnapshot(run, operation);
+  if (snapshot.phase !== "committed") throw new Error("UI_OBSERVATION_RECEIPT_REQUIRED");
+  if (observation && typeof observation.target !== "string") await appendObservationEvent(ctx, run, operation, "artifact_paragraph_committed", {
+    runId: String(run._id), executionId: operation.executionId, operationId: String(operation._id),
+    operationDigest: observation.operationDigest, epoch: observation.epoch, sequence: observation.sequence,
+  });
   return snapshot;
 }
 
 export async function acknowledgeUiObservation(ctx: MutationCtx, run: Run, operation: Operation, args: Fence & {
   clientId: string; mode: "ordinary" | "follow"; outcome: "target_ready" | "invisible" | "released";
 }) {
-  if (applicationWriteReceipt(operation.output)) return uiObservationSnapshot(run, operation);
+  if (uiObservationReceipt(operation)) return uiObservationSnapshot(run, operation);
   const observation = operation.uiObservation;
   if (!observation || observation.epoch !== args.epoch || observation.sequence !== args.sequence ||
     observation.operationDigest !== args.operationDigest || observation.operationDigest !== await observationDigest(operation))

@@ -25,10 +25,32 @@ export const settingsToggleActionSchema = observedActionIdentitySchema.extend({
 
 export type SettingsToggleAction = z.infer<typeof settingsToggleActionSchema>;
 
+export const documentParagraphTargetSchema = z.object({
+  kind: z.literal("artifact_paragraph"),
+  artifactId: z.string().min(1).max(200),
+  blockId: z.string().min(1).max(240),
+  expectedText: z.string().max(100_000),
+  index: z.number().int().nonnegative(),
+  baseRevision: z.object({
+    roomId: z.string().min(1).max(200),
+    nextSequence: z.number().int().nonnegative(),
+    sourceContentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
+}).strict().refine(target => target.index <= target.expectedText.length, "Invalid paragraph offset");
+export type DocumentParagraphTarget = z.infer<typeof documentParagraphTargetSchema>;
+export const documentParagraphActionSchema = observedActionIdentitySchema.extend({
+  kind: z.literal("artifact_paragraph"),
+  target: documentParagraphTargetSchema,
+  expiresAt: z.number().int().positive(),
+}).strict();
+export type DocumentParagraphAction = z.infer<typeof documentParagraphActionSchema>;
+export const observedUiActionSchema = z.discriminatedUnion("kind", [settingsToggleActionSchema, documentParagraphActionSchema]);
+export type ObservedUiAction = z.infer<typeof observedUiActionSchema>;
+
 export type UiObservationFence = Pick<ObservedActionIdentity, "epoch" | "operationDigest" | "sequence">;
 export const uiObservationSnapshotSchema = z.object({
   phase: z.enum(["waiting", "sealed", "headless", "committed"]),
-  action: settingsToggleActionSchema.optional(),
+  action: observedUiActionSchema.optional(),
   ownerClientId: z.string().min(1).max(120).optional(),
   participants: z.array(z.object({
     clientId: z.string().min(1).max(120),

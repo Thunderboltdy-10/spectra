@@ -189,3 +189,65 @@ describe("full replacement verification", () => {
     await expectMismatch(update({ blueprintKey: "agent", content: withoutDate }));
   });
 });
+
+describe("ordered same-target final verification", () => {
+  const patch = (path: string, value: unknown, overrides: Record<string, unknown> = {}) =>
+    update({ content: null, contentPatch: { changes: [{ path, value }] }, ...overrides });
+  const card = (index: number) => ({
+    id: `card-${index}`, front: `Prompt ${index}`, back: `Answer ${index}`, hint: `Cue ${index}`,
+    sourceRefs: [], confidence: "unknown",
+  });
+  const deckAppend = (index: number) => update({
+    blueprintKey: "flashcard_deck", content: null,
+    contentPatch: { changes: [{ path: "/cards/-", value: { front: `Prompt ${index}`, back: `Answer ${index}` } }] },
+  });
+  const verifySequence = (operations: ReturnType<typeof update>[]) =>
+    verifyCommittedOutcomes("actor", operations.map((operation) => ({
+      operation, affected: [{ type: "artifact", id: "artifact-real" }],
+    })));
+  const expectSequenceMismatch = async (operations: ReturnType<typeof update>[]) => {
+    const result = expect(verifySequence(operations)).rejects.toThrow(
+      "The saved artifact did not contain the requested content change.",
+    );
+    await vi.runAllTimersAsync();
+    await result;
+  };
+  const withIntro = (text: string) => ({ ...requested, blocks: [{ ...requested.blocks[0]!, text }, requested.blocks[1]!] });
+
+  it("accepts a later overwrite of the same path and the same metadata field", async () => {
+    mocks.query.mockResolvedValue({ ...saved(withIntro("Light becomes chemical energy.")), title: "Second title" });
+    await verifySequence([
+      patch("/blocks/id:intro/text", "Glucose is made in daylight.", { title: "First title" }),
+      patch("/blocks/id:intro/text", "Light becomes chemical energy.", { title: "Second title" }),
+    ]);
+    expect(mocks.readLive).not.toHaveBeenCalled();
+  });
+
+  it("still requires an earlier disjoint change that was lost after a later write", async () => {
+    mocks.query.mockResolvedValue(saved({ ...requested, blocks: [requested.blocks[0]!, { ...requested.blocks[1]!, text: "Chloroplasts hold chlorophyll pigments." }] }));
+    await expectSequenceMismatch([
+      patch("/blocks/id:intro/text", "Glucose is made in daylight."),
+      patch("/blocks/id:detail/text", "Chloroplasts hold chlorophyll pigments."),
+    ]);
+  });
+
+  it("retains every successive append to the same list", async () => {
+    const existing = [card(1), card(2)];
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), card(4)] }, "flashcard_deck"));
+    await verifySequence([deckAppend(3), deckAppend(4)]);
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(4)] }, "flashcard_deck"));
+    await expectSequenceMismatch([deckAppend(3), deckAppend(4)]);
+  });
+
+  it("lets a later complete replacement supersede earlier patches but verifies it whole", async () => {
+    mocks.query.mockResolvedValue(saved(requested));
+    await verifySequence([patch("/blocks/id:intro/text", "Glucose is made in daylight."), update()]);
+    mocks.query.mockResolvedValue(saved(withIntro("Glucose is made in daylight.")));
+    await expectSequenceMismatch([patch("/blocks/id:intro/text", "Glucose is made in daylight."), update()]);
+  });
+
+  it("verifies a later patch on top of an earlier replacement", async () => {
+    mocks.query.mockResolvedValue(saved(withIntro("Light becomes chemical energy.")));
+    await verifySequence([update(), patch("/blocks/id:intro/text", "Light becomes chemical energy.")]);
+  });
+});

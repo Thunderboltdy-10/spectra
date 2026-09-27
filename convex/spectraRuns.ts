@@ -1664,7 +1664,9 @@ export const claimExecution = mutation({
       outcome: "executing",
       updatedAt: now,
     });
-    return { claimed: true, leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS };
+    return { claimed: true, leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
+      agentContextCheckpoint: run.agentContextCheckpoint?.executionId === args.executionId
+        ? { generation: run.agentContextCheckpoint.generation } : undefined };
   },
 });
 

@@ -39,6 +39,9 @@ import {
 } from "./resolve";
 import { runSpectraAgentLoop, SpectraAgentNoProgressError } from "@/features/spectra/ai/agent-loop";
 import type { SpectraAgentMessage } from "@/features/spectra/ai/agent-loop";
+import type { AgentLoopCheckpoint } from "@/features/spectra/ai/agent-loop";
+import { COMPACTED_CONTEXT_TOOL, compactedContextTool, createAgentContextController, modelAgentMessages,
+  type AgentContextPersistence } from "@/features/spectra/ai/agent-context";
 import {
   budgetForAgentPass,
   type SpectraAgentPassMode,
@@ -2955,6 +2958,7 @@ export async function executeAgentReadTool(
     key: string;
     payload?: Record<string, unknown>;
   }) => void,
+  contextPersistence?: AgentContextPersistence,
 ) {
   // Application mutations must have a durable operation id before they run.
   // The agent loop stages them below; callers of this read boundary cannot
@@ -3917,7 +3921,7 @@ export async function callModel(
         !content.trim()
       )
         return [];
-      return [{ role, content: content.slice(0, 8_000) }];
+      return [{ role, content }];
     },
   );
   // Keep the historical transcript as real ordered messages. Re-serializing
@@ -3987,12 +3991,14 @@ export async function callModel(
     ],
   };
   type RequestMode = SpectraAgentPassMode;
-  const request = (
+  let agentContext: ReturnType<typeof createAgentContextController> | undefined;
+  const request = async (
     provider: Record<string, unknown>,
     mode: RequestMode,
     repair?: { raw: string; error: unknown },
     agentMessages?: SpectraAgentMessage[],
     modelOverride?: string,
+    loopCheckpoint?: AgentLoopCheckpoint,
   ) => {
     const repairIssues =
       repair?.error instanceof ZodError
@@ -4068,6 +4074,11 @@ export async function callModel(
       (!explicitMutationOnly || updateScopeTools.has(tool.function.name)) &&
       selectedAgentAllowsModelTool(contextRecord, tool.function.name),
     );
+    if (agentMessages && loopCheckpoint && agentContext) {
+      const prepared = await agentContext.prepare(loopCheckpoint, [...agentTools, compactedContextTool]);
+      agentMessages.splice(0, agentMessages.length, ...prepared.messages);
+    }
+    const requestTools = agentContext?.active ? [...agentTools, compactedContextTool] : agentTools;
     return fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -4087,8 +4098,8 @@ export async function callModel(
         // including repair and provider-recovery paths.
         ...(agentMode
           ? {
-              messages: agentMessages,
-              tools: agentTools,
+              messages: modelAgentMessages(agentMessages!),
+              tools: requestTools,
               tool_choice:
                 agentRequiresDiscovery ||
                       (!singleCreationBlueprint && !forcedCoordination)
@@ -4777,6 +4788,21 @@ export async function callModel(
     }
     return { plan: nextPlan, result: nextResult };
   };
+  agentContext = createAgentContextController({ request: prompt, persistence: contextPersistence, signal,
+    limit: agentRuntimeBudget?.maxTotalTokens,
+    captureHarness: () => ({ acceptedAgentOperations, acceptedAgentWorkSummaries, researchBundles }),
+  });
+  if (agentContext.initialHarness) {
+    const restored = agentContext.initialHarness as { acceptedAgentOperations: unknown[];
+      acceptedAgentWorkSummaries: string[]; researchBundles: ResearchEvidenceBundle[] };
+    // Typed proposals retain their original array indexes and @created links.
+    // Authority/approval and write receipts stay in current server rows and
+    // are not accepted from presentation or restored as executable grants.
+    acceptedAgentOperations.push(...restored.acceptedAgentOperations.map(parseModelOperation));
+    acceptedAgentWorkSummaries.push(...restored.acceptedAgentWorkSummaries);
+    for (const bundle of restored.researchBundles) rememberSourceBundle(bundle);
+    assertExplicitMutationScope(acceptedAgentOperations);
+  }
   const runNativeAgentPass = async (
     messages: SpectraAgentMessage[],
     requestMode: RequestMode = "initial",
@@ -4798,9 +4824,11 @@ export async function callModel(
           }]
         : messages,
       budget: budgetForAgentPass(requestMode, agentRuntimeBudget),
+      checkpoint: { initial: requestMode === "initial" ? agentContext!.initial : undefined,
+        afterTools: state => agentContext!.persist(state) },
       signal,
       isParallelSafeTool: (call) =>
-        spectraToolRegistry.get(call.name)?.parallelSafe === true,
+        call.name === COMPACTED_CONTEXT_TOOL || spectraToolRegistry.get(call.name)?.parallelSafe === true,
       isMutationTool: (call) => spectraToolRegistry.get(call.name)?.category === "write",
       isTerminalTool: (call) =>
         call.name === "submit_plan" ||
@@ -4811,6 +4839,7 @@ export async function callModel(
       // Focus identifies a target, not the complete scope of a free-form
       // request. Let the model continue after every accepted operation.
       executeTool: async (call) => {
+        if (call.name === COMPACTED_CONTEXT_TOOL) return agentContext!.read(JSON.parse(call.arguments));
         if (isRegisteredApplicationAction(call.name)) {
           try {
             const args = JSON.parse(call.arguments) as Record<string, unknown>;
@@ -5168,13 +5197,15 @@ export async function callModel(
         }
         return toolResult;
       },
-      requestTurn: async (messages, turn) => {
+      requestTurn: async (messages, turn, loopCheckpoint) => {
         const startedAt = Date.now();
         response = await request(
           providerRouting,
           requestMode,
           undefined,
           messages,
+          undefined,
+          loopCheckpoint,
         );
         recordOpenRouterEvent("phase", {
           phase: turn === 1 ? "headers" : "agent_turn_headers",
@@ -5224,7 +5255,8 @@ export async function callModel(
       content: await buildAgentSystemContent(),
     },
     ...durableConversation,
-    { role: "user", content: userContent },
+    { role: "user", content: userContent,
+      contextPreserve: `${prompt}${contextRecord.activeGoal ? `\n\nContinuing goal and latest steering (exact):\n${safeJson(contextRecord.activeGoal)}` : ""}` },
   ];
   try {
     const agentPass = await runNativeAgentPass(initialMessages, "initial");

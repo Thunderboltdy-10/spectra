@@ -776,12 +776,11 @@ export async function buildContext(
   const conversation =
     threadDetail && typeof threadDetail === "object"
       ? rows((threadDetail as Record<string, unknown>).messages)
-          .slice(-24)
           .map((message) => ({
             role: message.role,
             content:
               typeof message.content === "string"
-                ? message.content.slice(0, 8_000)
+                ? message.content
                 : "",
           }))
       : [];
@@ -974,7 +973,7 @@ export async function buildContext(
     selectedArtifactIds: ownedSelectedArtifactIds,
     focusMode: contextFocusMode,
     currentLibraryLocation: libraryLocation,
-    packet: contextPacket,
+    packet: { ...contextPacket, activeGoal },
     memoryRetrieval:
       longTermMemory && typeof longTermMemory === "object"
         ? (longTermMemory as Record<string, unknown>)

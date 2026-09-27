@@ -4109,6 +4109,10 @@ export default defineSchema({
     heartbeatAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     contextSnapshot: v.optional(v.any()),
+    agentContextCheckpoint: v.optional(v.object({
+      executionId: v.string(), generation: v.number(), storageId: v.id("_storage"),
+      inputTokens: v.number(), compactedTokens: v.number(), createdAt: v.number(),
+    })),
     attemptCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),

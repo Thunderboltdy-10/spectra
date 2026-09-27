@@ -41,6 +41,7 @@ import {
   selectedAgentOperationApprovalReasons,
 } from "./loop/intake";
 import { act, mutate, query } from "./loop/io";
+import { durableAgentContext } from "./loop/agent-context-store";
 import { hydrateApplicationLocalFileCounts } from "./loop/authority";
 import { createAgentLoopExecution } from "./loop/orchestrator";
 import {
@@ -243,7 +244,7 @@ async function runAttempt(
     onTransition: (entry) => console.info("[spectra.agent-loop]", entry),
   });
   loop.enter("intake");
-  await mutate("spectraRuns:claimExecution", {
+  const claimed = await mutate<object, { agentContextCheckpoint?: { generation: number } }>("spectraRuns:claimExecution", {
     actorClerkId: params.actorClerkId,
     runId: params.runId,
     executionId: params.executionId,
@@ -974,6 +975,8 @@ async function runAttempt(
         }
       : callModel;
     advanceProtocolState("running_model");
+    const contextPersistence = await durableAgentContext({ runId: params.runId, executionId: params.executionId,
+      workerId: params.workerId, hasCheckpoint: Boolean(claimed.agentContextCheckpoint) });
     const modelResult = focusedToolPlan
       ? {
           plan: focusedToolPlan,
@@ -1310,7 +1313,9 @@ async function runAttempt(
               key: event.key,
               payload: event.payload,
             }),
+          contextPersistence,
         );
+    await contextPersistence.finish();
     const researchEvidence =
       "researchEvidence" in modelResult
         ? modelResult.researchEvidence

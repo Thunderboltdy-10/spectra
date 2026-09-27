@@ -9,12 +9,31 @@ import { readSnapshot, stableReadObservation, type ReadSnapshot } from "./read-s
 export type SpectraAgentMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: unknown;
+  /** Internal evidence-envelope marker; stripped before provider transport. */
+  contextPreserve?: string;
   tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
     type: "function";
     function: { name: string; arguments: string };
   }>;
+};
+
+export type AgentLoopCheckpoint = {
+  messages: SpectraAgentMessage[];
+  turns: number;
+  toolCalls: number;
+  elapsedMs: number;
+  usage?: OpenRouterUsage;
+  repeatedCalls: Array<[string, number]>;
+  savedResults: Array<[string, unknown]>;
+  savedReadResults: Array<[string, ReadSnapshot]>;
+  turnsWithoutProgress: number;
+  finalizationOnly: boolean;
+  stalled: boolean;
+  finalizationNudgeAdded: boolean;
+  finalizationTurns: number;
+  lastFinalizationText: string;
 };
 
 export type SpectraAgentLoopResult = {
@@ -97,7 +116,12 @@ export async function runSpectraAgentLoop(input: {
   requestTurn: (
     messages: SpectraAgentMessage[],
     turn: number,
+    checkpoint: AgentLoopCheckpoint,
   ) => Promise<OpenRouterAgentTurn>;
+  checkpoint?: {
+    initial?: AgentLoopCheckpoint;
+    afterTools?: (checkpoint: AgentLoopCheckpoint) => Promise<void>;
+  };
   executeTool: (call: OpenRouterAgentToolCall) => Promise<unknown>;
   isParallelSafeTool?: (call: OpenRouterAgentToolCall) => boolean;
   isMutationTool?: (call: OpenRouterAgentToolCall) => boolean;
@@ -115,25 +139,32 @@ export async function runSpectraAgentLoop(input: {
     maxTotalTokens?: number;
   };
 }) {
-  const messages = [...input.messages];
-  const repeatedCalls = new Map<string, number>();
-  const savedResults = new Map<string, unknown>();
-  const savedReadResults = new Map<string, ReadSnapshot>();
+  const restored = input.checkpoint?.initial;
+  const messages = [...(restored?.messages ?? input.messages)];
+  const repeatedCalls = new Map<string, number>(restored?.repeatedCalls);
+  const savedResults = new Map<string, unknown>(restored?.savedResults);
+  const savedReadResults = new Map<string, ReadSnapshot>(restored?.savedReadResults);
   const readRequestVersions = new Map<string, number>();
   const retryableReadFailures = new Set<string>();
   const readObservations = new Set<string>();
-  let turnsWithoutProgress = 0;
-  let usage: OpenRouterUsage | undefined;
+  let turnsWithoutProgress = restored?.turnsWithoutProgress ?? 0;
+  let usage: OpenRouterUsage | undefined = restored?.usage;
   let model: string | undefined;
   let provider: string | undefined;
-  let turns = 0;
-  let toolCalls = 0;
-  let finalizationOnly = false;
-  let stalled = false;
-  let finalizationNudgeAdded = false;
-  let finalizationTurns = 0;
-  let lastFinalizationText = "";
-  const startedAt = Date.now();
+  let turns = restored?.turns ?? 0;
+  let toolCalls = restored?.toolCalls ?? 0;
+  let finalizationOnly = restored?.finalizationOnly ?? false;
+  let stalled = restored?.stalled ?? false;
+  let finalizationNudgeAdded = restored?.finalizationNudgeAdded ?? false;
+  let finalizationTurns = restored?.finalizationTurns ?? 0;
+  let lastFinalizationText = restored?.lastFinalizationText ?? "";
+  const startedAt = Date.now() - (restored?.elapsedMs ?? 0);
+  const checkpoint = (): AgentLoopCheckpoint => ({
+    messages, turns, toolCalls, elapsedMs: Date.now() - startedAt, usage,
+    repeatedCalls: [...repeatedCalls], savedResults: [...savedResults],
+    savedReadResults: [...savedReadResults], turnsWithoutProgress, finalizationOnly,
+    stalled, finalizationNudgeAdded, finalizationTurns, lastFinalizationText,
+  });
   const maxTurns = Math.max(4, Math.min(40, input.budget?.maxTurns ?? 24));
   const maxToolCalls = Math.max(
     4,
@@ -196,16 +227,13 @@ export async function runSpectraAgentLoop(input: {
     }
     turns += 1;
     if (finalizationOnly) finalizationTurns += 1;
-    const turn = await input.requestTurn(messages, turns);
+    const turn = await input.requestTurn(messages, turns, checkpoint());
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (finalizationOnly) lastFinalizationText = turn.text;
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
-    const turnPromptTokens = turn.usage?.promptTokens ?? 0;
-    if (turnPromptTokens > maxPromptTokens)
-      throw new Error(
-        "Spectra paused this agent after its reliability context budget. Continue in the thread to resume with a narrower context.",
-      );
+    // Request assembly owns proactive pressure measurement and reduction.
+    // A successful provider response is not discarded for its token count.
     if ((usage?.totalTokens ?? 0) > maxCumulativeTokens)
       throw new Error(
         "Spectra paused this agent after its reliability token spend budget. Continue in the thread to resume safely.",
@@ -416,5 +444,7 @@ export async function runSpectraAgentLoop(input: {
       stalled = true;
       enterFinalizationOnly("four consecutive tool turns added no new information or accepted work");
     }
+    await input.checkpoint?.afterTools?.(checkpoint());
+    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   }
 }

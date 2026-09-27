@@ -1,4 +1,5 @@
 import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { pptxMediaWriteOptions } from "@/features/spectra/lenses/pptx-media-server";
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { reconcileNativeRevision } from "@/lib/native-reconciliation-server";
 import { NextResponse } from "next/server";
@@ -344,6 +345,7 @@ async function materializeOfficeArtifactAttempt(
           (baseOpened as Awaited<ReturnType<typeof pptxLens.open>>)
             .preservedCarry,
           { kind: "ai-edit", operations: update.operations as PptxOperation[] },
+          pptxMediaWriteOptions,
         )
     : materializationPayload;
   const hash = await sha256Payload(output);

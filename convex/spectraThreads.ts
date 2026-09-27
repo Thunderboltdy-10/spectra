@@ -1285,6 +1285,56 @@ type MessageSearchCursor = {
   cursor: string;
 };
 
+type ThreadSearchCursor = {
+  version: 1;
+  kind: "thread-discovery";
+  accountId: string;
+  schoolId: string;
+  queryHash: string;
+  workspaceId: string | null;
+  status: "active" | "archived";
+  cursor: string;
+};
+
+/** Compact title discovery for optional AI retrieval; never reads message bodies or related objects. */
+export const search = query({
+  args: {
+    query: v.string(), cursor: v.optional(v.string()), limit: v.optional(v.number()),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    status: v.optional(v.union(v.literal("active"), v.literal("archived"))),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const search = args.query.trim();
+    if (!search || search.length > 500) throw new Error("THREAD_QUERY_REQUIRED: Supply a complete query of 1–500 characters.");
+    if (args.cursor && args.cursor.length > 8_192) throw new Error("THREAD_CURSOR_INVALID");
+    const status = args.status ?? "active";
+    const workspaceId = args.workspaceId ?? null;
+    const queryHash = await messageContentRevision(search);
+    const cursor = args.cursor ? requireCursor<ThreadSearchCursor>(args.cursor, "conversation discovery") : null;
+    if (cursor && (cursor.version !== 1 || cursor.kind !== "thread-discovery" ||
+      cursor.accountId !== String(actor._id) || cursor.schoolId !== String(actor.schoolId) ||
+      cursor.queryHash !== queryHash || cursor.workspaceId !== workspaceId || cursor.status !== status || typeof cursor.cursor !== "string"))
+      throw new Error("THREAD_CURSOR_MISMATCH: Continue the same search and scope.");
+    const limit = Math.max(1, Math.min(16, Math.round(Number.isFinite(args.limit) ? args.limit! : 8)));
+    const page = await ctx.db.query("spectraThreads").withSearchIndex("search_title", (q) => {
+      const filtered = q.search("title", search).eq("ownerAccountId", actor._id).eq("schoolId", actor.schoolId).eq("status", status);
+      return workspaceId ? filtered.eq("workspaceId", workspaceId) : filtered;
+    }).paginate({ cursor: cursor?.cursor ?? null, numItems: limit });
+    return {
+      results: page.page.map((thread) => ({
+        type: "thread" as const, id: thread._id, title: thread.title.slice(0, 240),
+        summaryShort: thread.summaryShort?.slice(0, 640), status: thread.status, updatedAt: thread.updatedAt,
+      })),
+      nextCursor: page.isDone ? null : encodeCursor({
+        version: 1, kind: "thread-discovery", accountId: String(actor._id), schoolId: String(actor.schoolId),
+        queryHash, workspaceId, status, cursor: page.continueCursor,
+      } satisfies ThreadSearchCursor),
+      complete: page.isDone, searchMode: "title" as const,
+    };
+  },
+});
+
 /** Search indexed history without loading the conversation's entire recent or older window. */
 export const searchMessages = query({
   args: { threadId: v.id("spectraThreads"), query: v.string(), cursor: v.optional(v.string()), limit: v.optional(v.number()) },

@@ -19,8 +19,9 @@ export type ArtifactWriteScope = {
   sourceContentIdentity: string;
   baseContentDigest: string;
   resultContentDigest: string;
-  kind: "update" | "full_content_delete" | "archive";
+  kind: "create" | "update" | "full_content_delete" | "archive";
   baseProducerOperationId?: string;
+  creationSourceIdentity?: string;
 };
 
 export function artifactOutput(value: unknown): Record<string, unknown> {
@@ -36,6 +37,7 @@ export async function artifactScopeDigest(value: unknown): Promise<string> {
 export const artifactOperationDigest = (operation: Doc<"spectraOperations">) => artifactScopeDigest({
   id: operation._id, runId: operation.runId, executionId: operation.executionId,
   type: operation.type, input: operation.input,
+  planRootOperationId: operation.planRootOperationId, planIndex: operation.planIndex,
 });
 
 /** UI presence/preview timestamps do not change the authored target. */
@@ -46,12 +48,62 @@ export const artifactSourceIdentity = (artifact: Doc<"spectraArtifacts">) => art
   contentHash: artifact.contentHash, liveStateVectorHash: artifact.liveStateVectorHash,
 });
 
+/** Bootstrap may change the physical Yjs representation of a new empty
+ * allocation. Its authority/title/history identity must still remain exact;
+ * admission separately requires the actual canonical base digest to match. */
+export const artifactCreationIdentity = (artifact: Doc<"spectraArtifacts">) => artifactScopeDigest({
+  artifactId: artifact._id, ownerAccountId: artifact.ownerAccountId, schoolId: artifact.schoolId,
+  blueprintKey: artifact.blueprintKey, status: artifact.status, title: artifact.title,
+  currentVersionId: artifact.currentVersionId, operationId: artifact.createdFrom?.operationId,
+  allocationContentDigest: artifact.createdFrom?.allocationContentDigest,
+});
+
 export function preparedArtifactScope(operation: Doc<"spectraOperations">): ArtifactWriteScope | undefined {
   const scope = artifactOutput(artifactOutput(operation.output).artifactWriteScope);
-  if (scope.version !== 1 || !["update", "full_content_delete", "archive"].includes(String(scope.kind))) return undefined;
+  if (scope.version !== 1 || !["create", "update", "full_content_delete", "archive"].includes(String(scope.kind))) return undefined;
   for (const key of ["artifactId", "runId", "executionId", "operationId", "operationDigest", "sourceContentIdentity", "baseContentDigest", "resultContentDigest"])
     if (typeof scope[key] !== "string") return undefined;
   return scope as ArtifactWriteScope;
+}
+
+/** Resolve the stored reference, never a caller's @created lookup table. The
+ * first operation anchors one recordPlan batch; replans cannot retarget aliases. */
+export async function artifactOperationTarget(
+  ctx: QueryCtx | MutationCtx,
+  operation: Doc<"spectraOperations">,
+  phase: "preparation" | "effect" = "effect",
+): Promise<Id<"spectraArtifacts">> {
+  if (operation.type === "artifact.create") {
+    if (!operation.pendingArtifactId) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
+    return operation.pendingArtifactId;
+  }
+  const input = artifactOutput(operation.input);
+  const reference = String(input.artifactId ?? "");
+  const match = /^@created:(\d+)$/.exec(reference);
+  if (!match) {
+    const id = ctx.db.normalizeId("spectraArtifacts", reference);
+    if (!id) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
+    return id;
+  }
+  const index = Number(match[1]);
+  const rootId = operation.planRootOperationId;
+  if (!rootId || !Number.isSafeInteger(index) || !Number.isSafeInteger(operation.planIndex) || index >= operation.planIndex!)
+    throw new Error("AI_ARTIFACT_DEPENDENCY_SCOPE_MISMATCH");
+  const creator = index === 0 ? await ctx.db.get(rootId)
+    : await ctx.db.query("spectraOperations").withIndex("by_plan_root_index", q => q.eq("planRootOperationId", rootId).eq("planIndex", index)).unique();
+  if (!creator || creator.actorType !== "ai" || creator.type !== "artifact.create" ||
+      creator.runId !== operation.runId || creator.executionId !== operation.executionId ||
+      creator.planIndex !== index || (index !== 0 && creator.planRootOperationId !== rootId) ||
+      !creator.pendingArtifactId)
+    throw new Error("AI_ARTIFACT_DEPENDENCY_SCOPE_MISMATCH");
+  if (phase === "effect") {
+    const scope = preparedArtifactScope(creator);
+    const receipt = artifactWriteReceipt(creator.output);
+    if (!scope || scope.kind !== "create" || scope.artifactId !== creator.pendingArtifactId ||
+        !receipt || receipt.scope !== await artifactOperationDigest(creator))
+      throw new Error("AI_ARTIFACT_DEPENDENCY_NOT_COMMITTED");
+  }
+  return creator.pendingArtifactId;
 }
 
 /** Preparation and acceptance run before any operation in the plan commits. */
@@ -66,6 +118,7 @@ export async function currentArtifactApprovalScope(
   const artifact = artifactId ? await ctx.db.get(artifactId) : null;
   if (!scope || !artifact || scope.runId !== run._id || scope.operationId !== operation._id ||
       scope.executionId !== run.executionId || operation.executionId !== run.executionId ||
+      artifactId !== await artifactOperationTarget(ctx, operation, phase === "effect" ? "effect" : "preparation") ||
       scope.operationDigest !== await artifactOperationDigest(operation) ||
       !(phase === "effect"
         ? await artifactEffectSourceMatches(ctx, scope, run, await artifactSourceIdentity(artifact))
@@ -91,8 +144,8 @@ async function artifactEffectSourceMatches(
   const producerId = ctx.db.normalizeId("spectraOperations", scope.baseProducerOperationId);
   const producer = producerId ? await ctx.db.get(producerId) : null;
   const receipt = producer ? artifactWriteReceipt(producer.output) : undefined;
-  return Boolean(producer && producer.actorType === "ai" && producer.type === "artifact.update" &&
-    artifactOutput(producer.input).artifactId === scope.artifactId &&
+  return Boolean(producer && producer.actorType === "ai" && ["artifact.create", "artifact.update"].includes(producer.type) &&
+    await artifactOperationTarget(ctx, producer) === scope.artifactId &&
     producer.runId === run._id && producer.executionId === run.executionId && receipt &&
     receipt.scope === await artifactOperationDigest(producer) && receipt.sourceContentIdentity === sourceIdentity &&
     receipt.resultContentDigest === scope.baseContentDigest);
@@ -137,7 +190,7 @@ export async function lookupVerifiedAiArtifactWriteReplay(
       operation.actorType !== "ai" || operation.runId !== run._id ||
       operation.executionId !== args.aiOperation.executionId || run.executionId !== args.aiOperation.executionId)
     throw new Error("AI_ARTIFACT_OPERATION_NOT_OWNED");
-  if (operation.type !== "artifact.update" || artifactOutput(operation.input).artifactId !== args.artifactId)
+  if (!["artifact.create", "artifact.update"].includes(operation.type) || await artifactOperationTarget(ctx, operation) !== args.artifactId)
     throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
   const digest = await artifactOperationDigest(operation);
   if (args.evidence.version !== 1 || args.evidence.operationDigest !== digest || receipt.scope !== digest)
@@ -166,11 +219,16 @@ async function artifactAdmissionContext(ctx: MutationCtx, args: AdmissionIdentit
   const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
   const scope = preparedArtifactScope(operation);
   const input = artifactOutput(operation.input);
-  if (!scope || operation.type !== "artifact.update" || input.artifactId !== args.artifactId ||
+  if (!scope || !["artifact.create", "artifact.update"].includes(operation.type) ||
+      await artifactOperationTarget(ctx, operation) !== args.artifactId ||
       scope.artifactId !== args.artifactId || scope.runId !== run._id || scope.executionId !== run.executionId ||
       scope.operationId !== operation._id || scope.operationDigest !== await artifactOperationDigest(operation))
     throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
-  return { run, operation, artifact, scope, input, sourceIdentity: await artifactSourceIdentity(artifact) };
+  if (operation.type === "artifact.create" && (scope.kind !== "create" ||
+      artifact.createdFrom?.operationId !== operation._id || artifact.createdFrom.runId !== run._id))
+    throw new Error("AI_ARTIFACT_CREATION_SCOPE_MISMATCH");
+  return { run, operation, artifact, scope, input, sourceIdentity: await artifactSourceIdentity(artifact),
+    creationIdentity: scope.kind === "create" ? await artifactCreationIdentity(artifact) : undefined };
 }
 
 async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<ReturnType<typeof artifactAdmissionContext>>, evidence: AiArtifactContentEvidence) {
@@ -179,6 +237,9 @@ async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<Retu
     throw new Error("AI_ARTIFACT_EVIDENCE_SCOPE_CHANGED");
   const beforeDigest = evidence.baseContentDigest;
   const afterDigest = evidence.resultContentDigest;
+  if (scope.kind === "create" && (scope.creationSourceIdentity !== admission.creationIdentity ||
+      scope.baseContentDigest !== beforeDigest || scope.resultContentDigest !== afterDigest))
+    throw new Error("AI_ARTIFACT_CREATION_SOURCE_CHANGED");
   // On the exact prepared base/result, retain the server's classification of
   // the original authored input, before adapters manufacture blank defaults.
   // A rebase must classify again against the actual current content.
@@ -186,7 +247,9 @@ async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<Retu
     ((beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest) &&
       evidence.fullContentDeletion);
   if (destructive || operation.requiresConfirmation) {
-    const sourceMatches = await artifactEffectSourceMatches(ctx, scope, run, sourceIdentity);
+    const sourceMatches = scope.kind === "create"
+      ? scope.creationSourceIdentity === admission.creationIdentity
+      : await artifactEffectSourceMatches(ctx, scope, run, sourceIdentity);
     if (!sourceMatches || beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest ||
         (destructive && scope.kind !== "full_content_delete") || run.approval?.status !== "accepted" ||
         run.approval.executionId !== run.executionId || artifactOutput(operation.output).approvedArtifactScope !== await artifactScopeDigest(scope))

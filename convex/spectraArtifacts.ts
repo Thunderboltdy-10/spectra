@@ -1,5 +1,7 @@
 import { action, query } from "./_generated/server";
 import { makeFunctionReference } from "convex/server";
+import { artifactScopeDigest } from "./spectraArtifactWriteScope";
+import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -2234,6 +2236,8 @@ export const createPending = mutation({
     const now = Date.now();
     const title = args.title.trim() || "Creating artifact";
     const summary = `Spectra is building ${title}.`;
+    const content = defaultArtifactContent(args.blueprintKey as BlueprintKey);
+    const allocationContentDigest = await artifactScopeDigest(canonicalArtifactWriteContent(args.blueprintKey, content));
     const artifactId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: actor._id,
       schoolId: actor.schoolId,
@@ -2243,7 +2247,7 @@ export const createPending = mutation({
       ),
       title,
       summary,
-      content: defaultArtifactContent(args.blueprintKey as BlueprintKey),
+      content,
       textIndex: `${title} ${summary}`,
       tags: [],
       status: "active",
@@ -2253,6 +2257,7 @@ export const createPending = mutation({
       aiProgress: 0.05,
       createdFrom: {
         source: "ai",
+        allocationContentDigest,
         workspaceId: args.workspaceId,
         runId: args.runId,
         threadId: args.threadId,

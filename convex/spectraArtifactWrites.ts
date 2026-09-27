@@ -13,9 +13,11 @@ import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import {
   artifactOperationDigest, artifactOutput, artifactScopeDigest, artifactSourceIdentity,
   artifactWriteReceipt, currentArtifactApprovalScope, type ArtifactWriteScope,
+  artifactOperationTarget, artifactCreationIdentity,
 } from "./spectraArtifactWriteScope";
 
 const attemptArgs = { runId: v.id("spectraAiRuns"), executionId: v.string() };
+const preparationArgs = { ...attemptArgs, operationId: v.optional(v.id("spectraOperations")) };
 
 async function ownedAttempt(ctx: QueryCtx | MutationCtx, args: { runId: Id<"spectraAiRuns">; executionId: string }) {
   const actor = await getAuthenticatedActor(ctx);
@@ -29,27 +31,34 @@ async function ownedAttempt(ctx: QueryCtx | MutationCtx, args: { runId: Id<"spec
 // Storage identifiers are returned only to the action, after current capability
 // and payload binding checks. The model cannot submit a classification result.
 export const preparationContext = internalQuery({
-  args: attemptArgs,
+  args: preparationArgs,
   handler: async (ctx, args) => {
     const { actor, run } = await ownedAttempt(ctx, args);
     if (run.status !== "running") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
-    const operations = await ctx.db.query("spectraOperations")
+    const selected = args.operationId ? await ctx.db.get(args.operationId) : null;
+    if (args.operationId && (!selected || selected.runId !== run._id || selected.executionId !== args.executionId ||
+        selected.actorType !== "ai" || selected.type !== "artifact.create" || !["proposed", "executing"].includes(selected.status)))
+      throw new Error("AI_ARTIFACT_PREPARATION_CHANGED");
+    const operations = selected ? [selected] : await ctx.db.query("spectraOperations")
       .withIndex("by_run_execution_status", q => q.eq("runId", run._id).eq("executionId", args.executionId).eq("status", "proposed"))
-      .filter(q => q.or(q.eq(q.field("type"), "artifact.update"), q.eq(q.field("type"), "artifact.archive")))
+      .filter(q => q.or(q.eq(q.field("type"), "artifact.create"), q.eq(q.field("type"), "artifact.update"), q.eq(q.field("type"), "artifact.archive")))
       .collect();
     const targets = [];
+    const operationTargets: Array<{ operationId: Id<"spectraOperations">; artifactId: Id<"spectraArtifacts"> }> = [];
     const seen = new Set<string>();
     for (const operation of operations) {
-      const input = artifactOutput(operation.input);
-      // New artifacts are not existing content-wipe targets. Their later write
-      // admission must resolve the same-attempt creation receipt, not an ID guess.
-      if (operation.type === "artifact.update" && /^@created:\d+$/.test(String(input.artifactId))) continue;
-      const artifactId = typeof input.artifactId === "string" ? ctx.db.normalizeId("spectraArtifacts", input.artifactId) : null;
-      if (!artifactId) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
-      await requireActorArtifactCapability(ctx, actor, artifactId, operation.type === "artifact.archive" ? "delete" : "modify");
+      const artifactId = await artifactOperationTarget(ctx, operation, "preparation");
+      operationTargets.push({ operationId: operation._id, artifactId });
+      const access = await requireActorArtifactCapability(ctx, actor, artifactId, operation.type === "artifact.archive" ? "delete" : "modify");
+      const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
+      if (operation.type === "artifact.create" && (
+        artifact.createdFrom?.operationId !== operation._id || artifact.createdFrom.runId !== run._id ||
+        artifact.aiRunId !== run._id || artifact.aiExecutionId !== args.executionId || artifact.aiState !== "creating" ||
+        artifact.currentVersionId || !isArtifactTypeKey(artifact.blueprintKey) ||
+        !artifact.createdFrom.allocationContentDigest || artifact.createdFrom.allocationContentDigest !== await artifactScopeDigest(canonicalArtifactWriteContent(artifact.blueprintKey, artifact.content))
+      )) throw new Error("AI_ARTIFACT_CREATION_SOURCE_CHANGED");
       if (seen.has(artifactId)) continue;
       seen.add(artifactId);
-      const artifact = (await ctx.db.get(artifactId))!;
       let storageId: Id<"_storage"> | undefined;
       if (isDurableContentRef(artifact.content)) {
         const ref = artifact.content.spectraContentRef;
@@ -59,12 +68,12 @@ export const preparationContext = internalQuery({
       }
       targets.push({ artifact, sourceContentIdentity: await artifactSourceIdentity(artifact), storageId });
     }
-    return { operations, targets, prompt: run.userPrompt };
+    return { operations, operationTargets, targets, prompt: run.userPrompt };
   },
 });
 
 export const commitPreparation = internalMutation({
-  args: { ...attemptArgs, prepared: v.array(v.object({ operationId: v.id("spectraOperations"), scope: v.any(), reason: v.optional(v.string()) })) },
+  args: { ...preparationArgs, prepared: v.array(v.object({ operationId: v.id("spectraOperations"), scope: v.any(), reason: v.optional(v.string()) })) },
   handler: async (ctx, args) => {
     const { actor, run } = await ownedAttempt(ctx, args);
     if (run.status !== "running") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
@@ -73,14 +82,16 @@ export const commitPreparation = internalMutation({
       const operation = await ctx.db.get(prepared.operationId);
       const scope = prepared.scope as ArtifactWriteScope;
       const artifactId = ctx.db.normalizeId("spectraArtifacts", scope.artifactId);
-      if (!operation || operation.runId !== run._id || operation.executionId !== args.executionId || operation.status !== "proposed" ||
-          !artifactId || scope.operationDigest !== await artifactOperationDigest(operation))
+      if (!operation || operation.runId !== run._id || operation.executionId !== args.executionId ||
+          (operation.status !== "proposed" && !(args.operationId === operation._id && operation.type === "artifact.create" && operation.status === "executing")) ||
+          !artifactId || scope.operationDigest !== await artifactOperationDigest(operation) ||
+          artifactId !== await artifactOperationTarget(ctx, operation, "preparation"))
         throw new Error("AI_ARTIFACT_PREPARATION_CHANGED");
       await requireActorArtifactCapability(ctx, actor, artifactId, scope.kind === "archive" ? "delete" : "modify");
       const artifact = (await ctx.db.get(artifactId))!;
       if (scope.sourceContentIdentity !== await artifactSourceIdentity(artifact)) throw new Error("AI_ARTIFACT_PREPARATION_CHANGED");
       await ctx.db.patch(operation._id, {
-        requiresConfirmation: operation.requiresConfirmation || scope.kind !== "update",
+        requiresConfirmation: operation.requiresConfirmation || scope.kind === "archive" || scope.kind === "full_content_delete",
         output: { ...artifactOutput(operation.output), artifactWriteScope: scope },
       });
       if (prepared.reason) reasons.push(prepared.reason);
@@ -90,10 +101,11 @@ export const commitPreparation = internalMutation({
 });
 
 export const preparePlan = action({
-  args: attemptArgs,
+  args: preparationArgs,
   handler: async (ctx, args): Promise<{ approvalReasons: string[] }> => {
     const context = await ctx.runQuery(makeFunctionReference<"query">("spectraArtifactWrites:preparationContext"), args) as {
       operations: Doc<"spectraOperations">[];
+      operationTargets: Array<{ operationId: Id<"spectraOperations">; artifactId: Id<"spectraArtifacts"> }>;
       targets: Array<{ artifact: Doc<"spectraArtifacts">; sourceContentIdentity: string; storageId?: Id<"_storage"> }>;
       prompt: string;
     };
@@ -116,26 +128,30 @@ export const preparePlan = action({
       targets.set(target.artifact._id, { ...target, authoredContent: content, content: canonicalArtifactWriteContent(type, content) });
     }
     const prepared = [];
+    const resolvedTargets = new Map(context.operationTargets.map(target => [target.operationId, target.artifactId]));
     for (const operation of context.operations) {
       const input = artifactOutput(operation.input);
-      const target = targets.get(String(input.artifactId));
-      if (!target) continue; // Same-plan newly created targets have no old body.
+      const target = targets.get(String(resolvedTargets.get(operation._id)));
+      if (!target) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
       const type = target.artifact.blueprintKey;
       if (!isArtifactTypeKey(type)) throw new Error("AI_ARTIFACT_BLUEPRINT_MISMATCH");
-      if (operation.type === "artifact.update" && input.blueprintKey !== target.artifact.blueprintKey)
+      if ((operation.type === "artifact.update" || operation.type === "artifact.create") && input.blueprintKey !== target.artifact.blueprintKey)
         throw new Error("AI_ARTIFACT_BLUEPRINT_MISMATCH");
+      if (operation.type === "artifact.create" && target.previousOperationId)
+        throw new Error("AI_ARTIFACT_CREATION_SOURCE_CHANGED");
       const before = target.content;
       const resolved = operation.type === "artifact.archive" ? { content: before, resolvedContent: before }
         : resolveArtifactWriteInput(type, before, input, context.prompt);
       const after = resolved.content;
-      const wipe = operation.type === "artifact.archive" ? undefined
+      const wipe = operation.type === "artifact.archive" || operation.type === "artifact.create" ? undefined
         : classifyArtifactContentWipe(type, target.authoredContent, resolved.resolvedContent);
-      const kind = operation.type === "artifact.archive" ? "archive" as const : wipe?.fullContentDeletion ? "full_content_delete" as const : "update" as const;
+      const kind = operation.type === "artifact.create" ? "create" as const : operation.type === "artifact.archive" ? "archive" as const : wipe?.fullContentDeletion ? "full_content_delete" as const : "update" as const;
       const scope: ArtifactWriteScope = {
         version: 1, artifactId: target.artifact._id, runId: args.runId, executionId: args.executionId, operationId: operation._id,
         operationDigest: await artifactOperationDigest(operation), sourceContentIdentity: target.sourceContentIdentity,
         baseContentDigest: await artifactScopeDigest(before), resultContentDigest: await artifactScopeDigest(after), kind,
         ...(target.previousOperationId ? { baseProducerOperationId: target.previousOperationId } : {}),
+        ...(kind === "create" ? { creationSourceIdentity: await artifactCreationIdentity(target.artifact) } : {}),
       };
       prepared.push({ operationId: operation._id, scope, ...(kind === "archive" ? { reason: "Archive the selected artifact" } : wipe?.reason ? { reason: wipe.reason } : {}) });
       target.content = after;
@@ -152,7 +168,7 @@ export const archive = mutation({
     const { actor, run } = await ownedAttempt(ctx, args);
     const operation = await ctx.db.get(args.operationId);
     if (!operation || operation.actorType !== "ai" || operation.runId !== run._id || operation.executionId !== args.executionId ||
-        operation.type !== "artifact.archive" || artifactOutput(operation.input).artifactId !== args.artifactId)
+        operation.type !== "artifact.archive" || await artifactOperationTarget(ctx, operation) !== args.artifactId)
       throw new Error("AI_ARTIFACT_OPERATION_SCOPE_MISMATCH");
     const operationDigest = await artifactOperationDigest(operation);
     const receipt = artifactWriteReceipt(operation.output);

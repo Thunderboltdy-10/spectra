@@ -1821,6 +1821,8 @@ export default defineSchema({
         threadId: v.optional(v.id("spectraThreads")),
         runId: v.optional(v.id("spectraAiRuns")),
         workspaceId: v.optional(v.id("spectraWorkspaces")),
+        operationId: v.optional(v.id("spectraOperations")),
+        allocationContentDigest: v.optional(v.string()),
         sourceArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
         sourceThreadIds: v.optional(v.array(v.id("spectraThreads"))),
         sourceAttachmentNames: v.optional(v.array(v.string())),
@@ -4214,6 +4216,8 @@ export default defineSchema({
   spectraOperations: defineTable({
     runId: v.optional(v.id("spectraAiRuns")),
     executionId: v.optional(v.string()),
+    planRootOperationId: v.optional(v.id("spectraOperations")),
+    planIndex: v.optional(v.number()),
     actorType: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     type: v.string(),
     status: v.union(
@@ -4249,6 +4253,7 @@ export default defineSchema({
   })
     .index("by_run", ["runId"])
     .index("by_run_execution_status", ["runId", "executionId", "status"])
+    .index("by_plan_root_index", ["planRootOperationId", "planIndex"])
     .index("by_type_status", ["type", "status"]),
 
   spectraResultCards: defineTable({

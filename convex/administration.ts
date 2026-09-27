@@ -13,6 +13,8 @@ import { resolveActorContext } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import { bumpPolicyVersion } from "./authorityShared";
 import { releaseClaimsForAccount } from "./regionClaims";
+import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
+import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -3168,7 +3170,49 @@ const PURGE_DEPENDENT_TABLES = [
   "spectraRunEvents",
   "spectraFocusSpaces",
   "secretBridgeNonces",
+  // Native Office replicas and their sync/Bridge state hold payload
+  // references to a student's file bytes. They are keyed by the work, which
+  // still exists during this stage, so ownership resolves through it.
+  "workReplicas",
+  "syncConflicts",
+  "bridgeWriteRequests",
+  "bridgeFsRequests",
+  "syncOperations",
+  "storageStrategyTransitions",
+  "artifactIntakeReleaseReceipts",
+  "collaborationReceipts",
 ] as const;
+
+const PURGE_WORK_DEPENDENT_TABLES = new Set<string>([
+  "workReplicas",
+  "syncConflicts",
+  "bridgeWriteRequests",
+  "bridgeFsRequests",
+  "syncOperations",
+  "storageStrategyTransitions",
+  "artifactIntakeReleaseReceipts",
+]);
+
+/** Payload-reference fields a purged row can hold. Each reference is released
+ * after its row is gone, exactly as single-work deletion does, so native file
+ * bytes do not outlive the school. */
+function purgedPayloadRefs(table: string, row: Record<string, unknown>) {
+  const fields =
+    table === "workReplicas"
+      ? ["payloadRef", "pendingPayloadRef", "projectionBasePayloadRef"]
+      : table === "syncConflicts"
+        ? ["localPayloadRef", "spectraPayloadRef"]
+        : table === "bridgeWriteRequests"
+          ? ["payloadRef"]
+          : [];
+  return [
+    ...new Set(
+      fields
+        .map((field) => row[field])
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+    ),
+  ];
+}
 
 const PURGE_SCHOOL_TABLES = [
   "membershipInvitations",
@@ -3237,6 +3281,21 @@ const PURGE_SCHOOL_TABLES = [
   "workspaceImportJobs",
   "spectraArtifacts",
   "spectraWorkspaces",
+  // Personal calendars, ManageBac selections/imports and read-model/job rows
+  // all carry the school partition but were missing from the purge.
+  "calendarItems",
+  "calendarMigrations",
+  "calendarPeriodMaps",
+  "calendarItemReadModels",
+  "calendarMigrationReadModels",
+  "calendarPlanTaskReadModels",
+  "managebacClassSelections",
+  "managebacResourceImports",
+  "externalRecordIdentityMigrations",
+  "agentCompilerJobs",
+  "artifactDeletionJobs",
+  "workspaceDeletionJobs",
+  "spectraArtifactRevisionFacts",
 ] as const;
 
 async function rowBelongsToPurgedSchool(
@@ -3293,6 +3352,15 @@ async function rowBelongsToPurgedSchool(
     );
     return workspace?.schoolId === schoolId;
   }
+  if (PURGE_WORK_DEPENDENT_TABLES.has(table)) {
+    const workId = (row.workId ?? row.artifactId) as Id<"spectraArtifacts">;
+    const work = await ctx.db.get(workId);
+    return work?.schoolId === schoolId;
+  }
+  if (table === "collaborationReceipts") {
+    const room = await ctx.db.get(row.roomId as Id<"collaborationRooms">);
+    return room?.schoolId === schoolId;
+  }
   if (table === "secretBridgeNonces") {
     const membership = await ctx.db
       .query("schoolMemberships")
@@ -3344,6 +3412,17 @@ async function purgeDependentPage(
     }
     await ctx.db.delete(row._id);
     deletedRows += 1;
+    for (const ref of purgedPayloadRefs(
+      table,
+      row as unknown as Record<string, unknown>,
+    ))
+      if (
+        (await releasePayloadIfUnreferenced(ctx, ref, {
+          schoolId: progress.schoolId,
+          sourceId: String(row._id),
+        })) > 0
+      )
+        deletedStorageObjects += 1;
   }
   return {
     stage: page.isDone ? ("dependent_rows" as const) : progress.stage,
@@ -3382,8 +3461,23 @@ async function purgeSchoolRows(
     .query(table as "accessGrants")
     .filter((q) => q.eq(q.field("schoolId"), progress.schoolId))
     .take(75);
-  const deletedStorageObjects = 0;
-  for (const row of rows) await ctx.db.delete(row._id);
+  let deletedStorageObjects = 0;
+  for (const row of rows) {
+    // Published runtime bundles are stored blobs; deleting only the row
+    // would orphan the student's built code in storage.
+    const storageId = (row as unknown as { storageId?: Id<"_storage"> })
+      .storageId;
+    if (
+      table === "spectraRuntimeBuilds" &&
+      storageId &&
+      (await deleteStorageIfNoOtherBinding(ctx, storageId, {
+        table: "spectraRuntimeBuilds",
+        id: String(row._id),
+      }))
+    )
+      deletedStorageObjects += 1;
+    await ctx.db.delete(row._id);
+  }
   return {
     stage: progress.stage,
     tableIndex:
@@ -3408,16 +3502,23 @@ async function purgeStoredSchoolObjects(
       .take(40),
   ]);
   let deletedStorageObjects = 0;
+  // Unpromoted candidate bytes are as much a student's upload as the
+  // accepted original; delete both before dropping the row.
   for (const row of assets) {
-    if (row.storageId) {
-      await ctx.storage.delete(row.storageId);
+    for (const storageId of new Set([row.storageId, row.candidateStorageId])) {
+      if (!storageId || !(await ctx.db.system.get(storageId))) continue;
+      await ctx.storage.delete(storageId);
       deletedStorageObjects += 1;
     }
     await ctx.db.delete(row._id);
   }
   for (const row of imports) {
-    if (row.originalStorageId) {
-      await ctx.storage.delete(row.originalStorageId);
+    for (const storageId of new Set([
+      row.originalStorageId,
+      row.candidateStorageId,
+    ])) {
+      if (!storageId || !(await ctx.db.system.get(storageId))) continue;
+      await ctx.storage.delete(storageId);
       deletedStorageObjects += 1;
     }
     await ctx.db.delete(row._id);

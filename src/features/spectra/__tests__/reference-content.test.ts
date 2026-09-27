@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { insertOperationReference } from "../operations/reference-content";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
+import { presentationYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { workYjsOrigins } from "../work/models/yjs/origins";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
-import { createDefaultPresentationContent } from "../presentation/model";
+import { createDefaultPresentationContent, normalizePresentationContent } from "../presentation/model";
 import { presentationContentSchema } from "../artifacts/schemas";
 
 const reference = { embedId: "embed", placementOperationId: "operation", containerRegionId: "reference-region",
@@ -81,6 +82,36 @@ describe("unmounted reference content", () => {
       type: "embed",
     });
     expect(presentationContentSchema.safeParse(changed).success).toBe(true);
+  });
+
+  it("keeps the exact pinned version through presentation insertion and normalization", () => {
+    const pinned = { ...reference, versionPolicy: "pinned", pinnedVersionId: "version-old", label: "Retained work" };
+    const inserted = insertOperationReference("presentation", createDefaultPresentationContent(), pinned);
+    const saved = normalizePresentationContent(JSON.parse(JSON.stringify(inserted)));
+    const embed = saved.slides.flatMap((slide) => slide.objects).find((object) => object.id === reference.containerRegionId);
+    expect(embed).toMatchObject({
+      type: "embed",
+      sourceBinding: { live: false },
+      content: {
+        embedId: reference.embedId,
+        sourceArtifactId: reference.sourceArtifactId,
+        placementOperationId: reference.placementOperationId,
+        containerRegionId: reference.containerRegionId,
+        versionPolicy: "pinned",
+        pinnedVersionId: "version-old",
+      },
+    });
+    expect(insertOperationReference("presentation", saved, pinned)).toBe(saved);
+    const doc = new Y.Doc();
+    try {
+      presentationYjsAdapter.applyProjection(doc, saved, workYjsOrigins({ clientId: "test", kind: "ai", name: "Spectra" }).ai);
+      const projected = presentationYjsAdapter.project(doc);
+      expect(projected.slides.flatMap((slide) => slide.objects).find((object) => object.id === reference.containerRegionId)?.content).toMatchObject({
+        versionPolicy: "pinned", pinnedVersionId: "version-old", placementOperationId: reference.placementOperationId,
+      });
+    } finally {
+      doc.destroy();
+    }
   });
 
   it("rejects identity conflicts and gives unsupported hosts a supported alternative", () => {

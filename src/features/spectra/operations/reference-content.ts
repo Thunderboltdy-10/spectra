@@ -100,6 +100,10 @@ export function insertOperationReference(type: string, content: unknown, referen
         containerRegionId: reference.containerRegionId,
         label,
         sourceArtifactId: reference.sourceArtifactId,
+        versionPolicy: reference.versionPolicy,
+        ...(reference.versionPolicy === "pinned"
+          ? { pinnedVersionId: reference.pinnedVersionId }
+          : {}),
       },
       altText: `${label} · linked artifact`,
       readingOrder: nextOrder,

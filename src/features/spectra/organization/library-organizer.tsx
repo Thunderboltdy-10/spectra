@@ -15,7 +15,6 @@ import {
   Home,
   LayoutGrid,
   Link2,
-  Loader2,
   Pencil,
   RotateCcw,
   Rows3,
@@ -417,21 +416,22 @@ function LibraryOrganizerContent({
   }, []);
 
   /* Ordinary scrolling loads the next page as the reader approaches the end. */
+  const { status: pageStatus, loadMore: loadMorePage } = page;
   useEffect(() => {
     if ((board && inFolder && !searching) || !paginated || rows.length === 0) return;
-    if (page.status !== "CanLoadMore") return;
+    if (pageStatus !== "CanLoadMore") return;
     const remaining = rows.length * ROW_HEIGHT - scrollTop - viewportHeight;
     if (remaining >= ROW_HEIGHT * 12) return;
     // Convex guards loadMore once per cursor. Row count is not a cursor:
     // filtered pages can legitimately return zero additional visible rows.
-    page.loadMore(50);
+    loadMorePage(50);
   }, [
     board,
     inFolder,
     searching,
     paginated,
-    page.status,
-    page.loadMore,
+    pageStatus,
+    loadMorePage,
     rows.length,
     scrollTop,
     viewportHeight,

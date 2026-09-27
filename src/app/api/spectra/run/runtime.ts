@@ -1,4 +1,5 @@
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
+import { gatherPlanReferenceContext } from "./loop/discovery";
 import { hasNumericTableSource } from "@/features/spectra/quality/source-requirements";
 import {
   applyContentPatch,
@@ -626,9 +627,7 @@ async function runAttempt(
         },
       });
     }
-    const context = await buildContext(
-      params.actorClerkId,
-      {
+    const contextBody = {
         workspaceId: params.workspaceId,
         scopeNodeId: params.scopeNodeId,
         artifactId: params.artifactId,
@@ -644,15 +643,20 @@ async function runAttempt(
         continuationRunId: params.continuationRunId,
         batchSelections: params.batchSelections,
         executionId: params.executionId,
-      },
-      params.prompt,
-    );
+    };
+    let context = await buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation" });
     const explicitlyTargetsFocusedArtifact =
       promptExplicitlyTargetsFocusedArtifact(params.prompt, context.packet);
     const signalsFocusedEdit =
       Boolean(params.artifactId) &&
       signalsMutationIntent &&
       explicitlyTargetsFocusedArtifact;
+    // An explicit edit or direct use of the visible artifact is the demand for
+    // its current content; other requests keep identity-only orientation.
+    if (explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || promptDirectlyUsesFocusedContent(params.prompt)))
+      context = await buildContext(params.actorClerkId, contextBody, params.prompt, {
+        mode: "orientation", hydrateTargets: true,
+      });
     const ordinarySpectraRequested = requestsOrdinarySpectra(
       params.prompt,
       params.disableAgentRouting,
@@ -1343,6 +1347,7 @@ async function runAttempt(
     let targetTitlesById = new Map<string, string>();
     try {
       loop.enter("resolve");
+      context = await gatherPlanReferenceContext(params.actorClerkId, context, modelResult.plan);
       const resolved = resolveAndValidatePlan(
         modelResult.plan,
         context,
@@ -1547,28 +1552,13 @@ async function runAttempt(
       metadataWrite,
       progressiveWritesReady,
     ]);
-    // Derive destructive artifact effects from the stored plan and authorized
-    // current content; neither a model flag nor patch syntax grants approval.
-    if (plan.operations.some((operation) => operation.type === "artifact.update" || operation.type === "artifact.archive")) {
-      const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
-        "spectraArtifactWrites:preparePlan",
-        { runId: params.runId, executionId: params.executionId },
-      );
-      if (artifactPolicy.approvalReasons.length > 0) {
-        policy.requiresConfirmation = true;
-        policy.reasons.push(...artifactPolicy.approvalReasons);
-      }
-    }
     recordPhase("plan_recorded");
     const pendingArtifacts = new Map<string, string>();
     for (let index = 0; index < stored.operationIds.length; index += 1) {
       const operationId = stored.operationIds[index]!;
       const operation = plan.operations[index];
       let pendingArtifactId: string | undefined;
-      if (
-        operation?.type === "artifact.create" &&
-        !policy.requiresConfirmation
-      ) {
+      if (operation?.type === "artifact.create") {
         pendingArtifactId =
           earlyPendingBlueprintByIndex.get(index) ===
           operation.input.blueprintKey
@@ -1665,6 +1655,20 @@ async function runAttempt(
             }
           : undefined,
       });
+    }
+
+    // All create allocations must be bound to their exact stored operation
+    // before preparing creates and later @created:N consumers. Allocation is
+    // still a pending preview; approval and first-effect guards govern saves.
+    if (plan.operations.some((operation) => operation.type === "artifact.create" || operation.type === "artifact.update" || operation.type === "artifact.archive")) {
+      const artifactPolicy = await act<{ runId: string; executionId: string }, { approvalReasons: string[] }>(
+        "spectraArtifactWrites:preparePlan",
+        { runId: params.runId, executionId: params.executionId },
+      );
+      if (artifactPolicy.approvalReasons.length > 0) {
+        policy.requiresConfirmation = true;
+        policy.reasons.push(...artifactPolicy.approvalReasons);
+      }
     }
 
     if (plan.decision !== "operate") {
@@ -4353,7 +4357,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     const operations = proposed.map((row) =>
       parseModelOperation({ type: row.type, input: row.input }),
     );
-    const context = await buildContext(
+    let context = await buildContext(
       actor.clerkId,
       {
         workspaceId: state.run.workspaceId,
@@ -4367,7 +4371,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         currentView: state.run.contextSnapshot?.currentView,
       },
       state.run.userPrompt,
+      { mode: "orientation" },
     );
+    context = await gatherPlanReferenceContext(actor.clerkId, context, {
+      decision: "operate", intent, operations, presentedArtifactIds: [],
+      finalResponse: state.run.finalSummary ?? "Confirmed changes completed.",
+    });
     validatePlanAgainstIntent(
       {
         decision: "operate",

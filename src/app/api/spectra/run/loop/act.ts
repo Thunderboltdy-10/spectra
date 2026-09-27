@@ -858,6 +858,15 @@ export async function executeOperation(
       });
       pendingArtifactId = pending.artifactId;
       pendingNodeId = pending.nodeId;
+      await mutate("spectraOperations:attachPendingArtifact", {
+        actorClerkId, operationId, artifactId: pendingArtifactId, executionId: context.executionId,
+      });
+      const preparation = await act<
+        { runId: string; executionId: string; operationId: string },
+        { approvalReasons: string[] }
+      >("spectraArtifactWrites:preparePlan", { runId, executionId: context.executionId, operationId });
+      if (preparation.approvalReasons.length)
+        throw new Error("The newly allocated artifact needs confirmation before it can be saved.");
     }
     const mutationResult = await applyAiArtifactMutation({
       artifactId: pendingArtifactId,

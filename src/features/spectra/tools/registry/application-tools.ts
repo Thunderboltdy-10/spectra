@@ -88,9 +88,13 @@ export function registerApplicationTools() {
     id: "search_objects",
     title: "Search work",
     description:
-      "Search the user's permissioned Spectra work by meaning or title instead of guessing an id.",
+      "Search permissioned Spectra work or conversation titles instead of guessing an id. Thread search is literal title search, defaults to active threads, and returns a cursor for more matches; workspaceId selects the primary workspace.",
     inputSchema: z.object({
       query: z.string().min(1).max(500),
+      kind: z.enum(["artifact", "thread"]).optional(),
+      cursor: z.string().max(8192).optional(),
+      workspaceId: z.string().min(1).optional(),
+      status: z.enum(["active", "archived"]).optional(),
       blueprintKey: z.string().nullable().optional(),
       refresh: refreshRead,
     }),
@@ -132,8 +136,11 @@ export function registerApplicationTools() {
     id: "read_thread",
     title: "Read conversation",
     description:
-      "Read the recent messages and title of one permissioned Spectra conversation.",
-    inputSchema: z.object({ threadId: z.string().min(1), refresh: refreshRead }),
+      "Read permissioned conversation history. Use before for older pages, query/searchCursor for indexed search, or messageId/offset/revision for a complete message. Continue only with the exact returned cursor or revision. Pages contain at most 24 messages, search 16 hits, and chunks 6000 characters; partial content is explicit.",
+    inputSchema: z.object({ threadId: z.string().min(1), query: z.string().min(1).max(500).optional(),
+      searchCursor: z.string().max(8192).optional(), before: z.string().max(8192).optional(),
+      messageId: z.string().min(1).optional(), offset: z.number().int().min(0).optional(),
+      revision: z.string().min(1).max(128).optional(), limit: z.number().int().min(1).max(6000).optional(), refresh: refreshRead }),
   });
   define({
     ...readDefaults,
@@ -142,7 +149,8 @@ export function registerApplicationTools() {
     description:
       "Retrieve deeper permission-bound personal context when the supplied context capsule is insufficient; claims remain fallible evidence.",
     inputSchema: z.object({
-      query: z.string().min(3).max(500),
+      query: z.string().min(3).max(32768),
+      claimIds: z.array(z.string().min(1)).max(8).optional(),
       depth: z.enum(["focused", "deep"]),
       refresh: refreshRead,
     }),

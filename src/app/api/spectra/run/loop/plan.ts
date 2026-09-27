@@ -4,6 +4,8 @@ import type {
   Surface,
 } from "./contract";
 import { rows, summarizeArtifact } from "./gather";
+import { authenticatedArtifactObservations } from "./discovery";
+import { executeThreadRead } from "./thread-read";
 import { planFromAgentCompletion } from "./completion";
 import { explicitMutationScopeViolation } from "./target-scope";
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
@@ -1320,6 +1322,7 @@ export function coerceProposedOperation(
   defaultPlacement: "context" | "inbox",
   contextRecord: Record<string, unknown>,
   prompt = "",
+  artifactBlueprints?: ReadonlyMap<string, string>,
 ) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const row = { ...(raw as Record<string, unknown>) };
@@ -1374,6 +1377,8 @@ export function coerceProposedOperation(
     !Array.isArray(row.input)
   ) {
     const input = { ...(row.input as Record<string, unknown>) };
+    if (!input.blueprintKey && typeof input.artifactId === "string")
+      input.blueprintKey = artifactBlueprints?.get(input.artifactId);
     // json_object / tool callers often omit unchanged nullable fields or echo
     // JSON Patch's `op`. Both fail the strict update union as invalid_union.
     for (const field of ["title", "summary", "content", "tags"] as const) {
@@ -3039,6 +3044,15 @@ export async function executeAgentReadTool(
     if (call.name === "search_objects") {
       const search = typeof args.query === "string" ? args.query.trim() : "";
       if (!search) return { ok: false, code: "query_required", results: [] };
+      if (args.kind === "thread") {
+        const result = await readQuery<Record<string, unknown>, Record<string, unknown>>("spectraThreads:search", {
+          actorClerkId, query: search, cursor: args.cursor, workspaceId: args.workspaceId, status: args.status, limit: 16,
+        }, "your Spectra conversations");
+        return result.ok ? { ok: true, ...result.value } : result;
+      }
+      if (args.cursor !== undefined || args.workspaceId !== undefined || args.status !== undefined)
+        return { ok: false, code: "unsupported_search_scope", retryable: false,
+          message: "These pagination and workspace/status filters currently apply to thread search. Use search_library or read_workspace for scoped artifact discovery." };
       const foundRead = await readQuery<unknown & object, unknown>(
         "spectraArtifacts:list",
         {
@@ -3163,41 +3177,18 @@ export async function executeAgentReadTool(
         : { ok: false, code: "workspace_not_found" };
     }
     if (call.name === "read_thread") {
-      if (typeof args.threadId !== "string")
-        return { ok: false, code: "thread_id_required" };
-      const threadRead = await readQuery<unknown & object, unknown>(
-        "spectraThreads:get",
-        { actorClerkId, threadId: args.threadId },
-        "that Spectra thread",
-      );
-      if (!threadRead.ok) return threadRead;
-      const thread = threadRead.value;
-      if (!thread || typeof thread !== "object")
-        return { ok: false, code: "thread_not_found" };
-      const record = thread as Record<string, unknown>;
-      return {
-        ok: true,
-        thread: record.thread,
-        messages: rows(record.messages)
-          .slice(-24)
-          .map((message) => ({
-            role: message.role,
-            content:
-              typeof message.content === "string"
-                ? message.content.slice(0, 3_000)
-                : message.content,
-          })),
-      };
+      return executeThreadRead(actorClerkId, args);
     }
     if (call.name === "retrieve_memory") {
-      const search = typeof args.query === "string" ? args.query.trim() : "";
-      if (search.length < 3)
+      const search = typeof args.query === "string" ? args.query : "";
+      if (search.trim().length < 3)
         return { ok: false, code: "memory_query_required" };
       const result = await act<unknown & object, unknown>(
         "memory:contextForRun",
         {
           actorClerkId,
-          queryText: search.slice(0, 500),
+          queryText: search,
+          ...(Array.isArray(args.claimIds) ? { claimIds: args.claimIds } : {}),
           workspaceId: scope?.workspaceId,
           artifactId: scope?.artifactId,
           targetTokens: args.depth === "deep" ? 4_000 : 1_500,
@@ -3828,10 +3819,12 @@ export async function callModel(
           : {}),
       });
     }
-    for (const child of Object.values(row))
-      collectOwnedArtifactBlueprints(child, depth + 1);
   };
-  collectOwnedArtifactBlueprints(contextRecord);
+  for (const field of ["focusedArtifact", "selectedObjects", "workspaceIndex", "catalog", "inboxMap", "libraryMap"])
+    collectOwnedArtifactBlueprints(contextRecord[field]);
+  const initialWorkspace = contextRecord.workspace as Record<string, unknown> | undefined;
+  collectOwnedArtifactBlueprints(initialWorkspace?.pinned);
+  collectOwnedArtifactBlueprints(initialWorkspace?.relevant);
   const focusedTarget =
     contextRecord.focusedArtifact &&
     typeof contextRecord.focusedArtifact === "object" &&
@@ -4882,6 +4875,7 @@ export async function callModel(
                       defaultPlacement,
                       contextRecord,
                       prompt,
+                      ownedArtifactBlueprints,
                     ),
                   ),
                   prompt,
@@ -5042,6 +5036,8 @@ export async function callModel(
               ok: false,
               code: "context_reads_unavailable",
             };
+        for (const artifact of authenticatedArtifactObservations(call.name, toolResult))
+          collectOwnedArtifactBlueprints(artifact);
         const observation = committedApplicationObservation(toolResult);
         if (observation) {
           const summary = describeApplicationObservation(observation);

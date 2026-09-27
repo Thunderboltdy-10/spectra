@@ -167,6 +167,16 @@ function setup(
         selection: { key: "artifact-chemistry", title: "Lab notes" },
       };
     }
+    if (name.includes("spectraContext:getArtifact")) {
+      // The single mutable fixture also stands in for a provisional shell;
+      // the open artifact keeps its original identity while that shell exists.
+      const artifact = catalogArtifacts.find((item) => item._id === args?.artifactId) ??
+        (args?.artifactId === savedArtifact._id || args?.artifactId === "artifact-real" ? savedArtifact : undefined);
+      return artifact ? { _id: args?.artifactId, blueprintKey: artifact.blueprintKey, title: artifact.title,
+        summary: artifact.summary, updatedAt: artifact.updatedAt, contentAvailable: false } : null;
+    }
+    if (name.includes("spectraContext:getWorkspace")) return args?.workspaceId === "workspace-real"
+      ? { workspace: { _id: "workspace-real", title: "Biology" }, items: [], contentAvailable: false } : null;
     if (name.includes("spectraArtifacts:get")) return savedArtifact;
     if (name.includes("spectraArtifacts:listAgentRoutingDescriptors")) return [];
     if (name.includes("spectraArtifacts:list")) return args?.blueprintKey === "agent" ? [] : catalogArtifacts;
@@ -558,6 +568,25 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(false);
     const failure = convexMutation.mock.calls.findLast(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "failed");
     expect(failure?.[1].resultSummary).toContain("save could not be confirmed");
+  });
+
+  it("binds and prepares a fallback create allocation before its first effect", async () => {
+    const { convexMutation } = setup(deckPlan());
+    const { convexAction } = await import("@/lib/convex-server");
+    const { applyAiArtifactMutation } = await import("@/features/spectra/ai/yjs-artifact-operation");
+    const { parseModelOperation } = await import("../operations/schema");
+    const { executeOperation } = await import("@/app/api/spectra/run/loop/act");
+    await executeOperation("actor", "run-real", "fallback-create", parseModelOperation(deckPlan().operations[0]), {
+      executionId: "execution-1", surface: "chat",
+    });
+    const attached = convexMutation.mock.calls.findIndex(([name]) => String(name).includes("spectraOperations:attachPendingArtifact"));
+    const prepared = vi.mocked(convexAction).mock.calls.findIndex(([name]) => name === "spectraArtifactWrites:preparePlan");
+    expect(attached).toBeGreaterThanOrEqual(0);
+    expect(prepared).toBeGreaterThanOrEqual(0);
+    expect(convexMutation.mock.calls[attached]?.[1]).toMatchObject({ operationId: "fallback-create", executionId: "execution-1", artifactId: "artifact-pending" });
+    expect(vi.mocked(convexAction).mock.calls[prepared]?.[1]).toEqual({ runId: "run-real", executionId: "execution-1", operationId: "fallback-create" });
+    expect(convexMutation.mock.invocationCallOrder[attached]).toBeLessThan(vi.mocked(convexAction).mock.invocationCallOrder[prepared]!);
+    expect(vi.mocked(convexAction).mock.invocationCallOrder[prepared]).toBeLessThan(vi.mocked(applyAiArtifactMutation).mock.invocationCallOrder[0]!);
   });
 
   it("uses one ordinary model response for a factual answer without proposing work", async () => {
@@ -1064,7 +1093,12 @@ describe("Spectra run route", () => {
     expect(createCall).toBeTruthy();
     expect((getSavedArtifact().content as { cards: unknown[] }).cards).toHaveLength(6);
     const { convexAction } = await import("@/lib/convex-server");
-    expect(vi.mocked(convexAction).mock.calls.filter(([name]) => name === "spectraArtifactWrites:preparePlan")).toEqual([]);
+    const preparationIndex = vi.mocked(convexAction).mock.calls.findIndex(([name]) => name === "spectraArtifactWrites:preparePlan");
+    expect(preparationIndex).toBeGreaterThanOrEqual(0);
+    const attachedIndexes = convexMutation.mock.calls.flatMap(([name], index) => String(name).includes("spectraOperations:attachPendingArtifact") ? [index] : []);
+    expect(attachedIndexes.length).toBeGreaterThan(0);
+    for (const index of attachedIndexes)
+      expect(convexMutation.mock.invocationCallOrder[index]).toBeLessThan(vi.mocked(convexAction).mock.invocationCallOrder[preparationIndex]!);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("orgTree:removeFromWorkspace"))).toBe(false);
     const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
     expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "workspace", workspaceId: "workspace-real" });
@@ -1719,6 +1753,14 @@ describe("Spectra run route", () => {
         tools?: Array<{ function?: { name?: string } }>;
       };
       expect(payload.tools?.map((tool) => tool.function?.name)).toContain("request_context_target");
+      // Orientation carries only the open target; the other candidate must be
+      // discovered through an authenticated search before it can be offered.
+      if (fetchMock.mock.calls.length === 1) return new Response(JSON.stringify({
+        model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "tool_calls", message: { content: "", tool_calls: [{
+          id: "search-respiration", type: "function",
+          function: { name: "search_objects", arguments: JSON.stringify({ query: "respiration" }) },
+        }] } }],
+      }), { status: 200 });
       return new Response(JSON.stringify({
         model: "openai/gpt-5.6",
         provider: "OpenAI",
@@ -1762,7 +1804,8 @@ describe("Spectra run route", () => {
     expect(assistantMessage?.metadata?.choices).toEqual({
       question: "Which respiration document should I change?",
       options: [
-        { key: "artifact-real", title: "Respiration Notes", description: "document · Biology · A focused deck." },
+        // Orientation metadata for the open artifact carries no placement.
+        { key: "artifact-real", title: "Respiration Notes", description: "document · A focused deck." },
         { key: "artifact-other", title: "Respiration Analysis", description: "document · Biology · A second respiration document." },
       ],
     });

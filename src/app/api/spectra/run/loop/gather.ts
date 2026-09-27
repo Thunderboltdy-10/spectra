@@ -179,17 +179,24 @@ export async function buildContext(
   prompt = "",
   options: {
     mode?: "orientation" | "expanded";
+    /**
+     * Orientation normally carries identity only. An explicit edit of the
+     * visible target is the demand that justifies reading its current content
+     * up front (bounded to the visible/selected targets, never discovery).
+     */
+    hydrateTargets?: boolean;
     /** Server-restored intent already composed in full into the prompt. */
     restoredGoal?: { originalRequest: string; clarificationResponses: string[] };
   } = {},
 ) {
   const expanded = options.mode !== "orientation";
+  const readsTargetContent = expanded || options.hydrateTargets === true;
   const artifactReads = new Map<string, Promise<unknown>>();
   const readArtifact = (artifactId: string) => {
     let pending = artifactReads.get(artifactId);
     if (!pending) {
       pending = query<unknown & object, unknown>(
-        expanded ? "spectraArtifacts:get" : "spectraContext:getArtifact",
+        readsTargetContent ? "spectraArtifacts:get" : "spectraContext:getArtifact",
         { actorClerkId, artifactId },
       ).catch(() => null);
       artifactReads.set(artifactId, pending);
@@ -201,7 +208,7 @@ export async function buildContext(
       expanded ? "orgTree:listWorkspaceContents" : "spectraContext:getWorkspace",
       { actorClerkId, workspaceId, ...(expanded ? { includeDetails: false } : {}) },
     ).catch(() => null);
-  const hydrate = (artifact: Record<string, unknown>) => expanded
+  const hydrate = (artifact: Record<string, unknown>) => readsTargetContent
     ? hydrateArtifactWithLiveContent(artifact)
     : Promise.resolve(artifact);
   const explicitContextObjects = Array.isArray(body.explicitContextObjects)
@@ -1001,7 +1008,7 @@ export async function buildContext(
       contextMode: expanded ? "expanded" : "orientation",
       omitted: {
         ...contextPacket.omitted,
-        ...(expanded ? {} : { artifactContents: true, workspaceDiscovery: true, memoryRetrieval: true }),
+        ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true, memoryRetrieval: true }),
       },
     },
     memoryRetrieval:

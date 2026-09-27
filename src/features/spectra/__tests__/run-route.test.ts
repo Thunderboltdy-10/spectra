@@ -489,6 +489,13 @@ function setup(
 }
 
 describe("Spectra run route", () => {
+  it("pins its function duration instead of inheriting the hosting default", async () => {
+    // Scheduled runs execute inside this request. Without an explicit limit a
+    // non-fluid Vercel project kills every run at its 15 second default.
+    const route = await import("@/app/api/spectra/run/route");
+    expect(route.maxDuration).toBe(300);
+  });
+
   it.each([
     ["sync acknowledgement", new Error("AI_ARTIFACT_SYNC_TIMEOUT: The write was not durably acknowledged.")],
     ["unhumanized sync acknowledgement", new Error("The live artifact has not finished synchronizing.")],

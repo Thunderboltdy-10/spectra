@@ -7,6 +7,7 @@ import { encodeDurableFrontier } from "../../../../shared/collaboration-durable-
 import { readDurableRoomAnchor, recoveryRegionIds, type DurableRoomAnchor } from "../../../../shared/collaboration-recovery.mjs";
 import type {
   AdmittedUpdateDescriptor,
+  AdmittedUpdateReceipt,
   ArtifactCollaborationTransport,
   CollaborationPresence,
   CollaborationSyncState,
@@ -1318,19 +1319,29 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     });
   }
 
-  async consumeAdmittedUpdate(admitted: AdmittedUpdateDescriptor, updateDigest: string, confirmationId: string) {
+  async consumeAdmittedUpdate(admitted: AdmittedUpdateDescriptor, receipt: AdmittedUpdateReceipt, confirmationId: string) {
     const provider = this.provider;
     if (this.destroyed || !provider) throw new Error("COLLABORATION_NOT_CONNECTED");
     if (admitted.encoding === "inline") {
       const update = Uint8Array.from(atob(admitted.updateBase64), (character) => character.charCodeAt(0));
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", update)),
         (byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (!update.byteLength || digest !== updateDigest) throw new Error("COLLABORATION_ADMITTED_UPDATE_INVALID");
+      if (!update.byteLength || digest !== receipt.updateDigest) throw new Error("COLLABORATION_ADMITTED_UPDATE_INVALID");
       // Provider origin: the gateway already holds these bytes durably, so
       // Hocuspocus must not enqueue them as another local write.
       Y.applyUpdate(this.document, update, provider);
+      provider.sendStateless(JSON.stringify({ type: "spectra.canonical_refresh", confirmationId }));
+      return;
     }
     provider.sendStateless(JSON.stringify({ type: "spectra.canonical_refresh", confirmationId }));
+    // A payload or compacted-replay receipt carries no bytes, and the gateway
+    // skips that refresh merge while other edits are persisting. Display only
+    // durable canonical state proven to cover this receipt.
+    const current = await this.readRecoveryCurrent();
+    if (current.anchor.roomId !== receipt.roomId || current.anchor.nextSequence <= receipt.sequence)
+      throw new Error("COLLABORATION_ADMITTED_UPDATE_BEHIND");
+    if (this.destroyed || !this.provider) throw new Error("COLLABORATION_NOT_CONNECTED");
+    Y.applyUpdate(this.document, current.update, this.provider);
   }
 
   async flush() {

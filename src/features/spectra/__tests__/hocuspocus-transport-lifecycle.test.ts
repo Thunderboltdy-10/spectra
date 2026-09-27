@@ -23,6 +23,8 @@ const hocuspocus = vi.hoisted(() => ({
     hasUnsyncedChanges: boolean;
     synced: boolean;
   },
+  /** The gateway's durable canonical state, answered to spectra.recovery_current. */
+  canonical: null as null | { updateBase64: string; anchor: { roomId: string; nextSequence: number; frontierHash: string } },
   websocket: null as null | {
     connect: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
@@ -52,6 +54,10 @@ vi.mock("@hocuspocus/provider", () => ({
       if (request.type === "spectra.recovery_request") hocuspocus.callbacks?.onStateless({ payload: JSON.stringify({
         type: "spectra.recovery_vector", confirmationId: request.confirmationId, admitted: true, stateVector: "AA==",
       }) });
+      if (request.type === "spectra.recovery_current" && hocuspocus.canonical) queueMicrotask(() =>
+        hocuspocus.callbacks?.onStateless({ payload: JSON.stringify({
+          type: "spectra.recovery_current", confirmationId: request.confirmationId, ...hocuspocus.canonical,
+        }) }));
     });
     flushPendingUpdates = vi.fn();
     setAwarenessField = vi.fn();
@@ -72,6 +78,7 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     hocuspocus.provider = null;
     hocuspocus.websocket = null;
     hocuspocus.callbacks = null;
+    hocuspocus.canonical = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -442,17 +449,48 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     source.destroy();
     const digest = createHash("sha256").update(update).digest("hex");
     const inline = { encoding: "inline" as const, updateBase64: Buffer.from(update).toString("base64") };
-    await expect(transport.consumeAdmittedUpdate(inline, "0".repeat(64), "restore:bad")).rejects.toThrow(
+    const receipt = { roomId: "room", sequence: 4, updateDigest: digest };
+    await expect(transport.consumeAdmittedUpdate(inline, { ...receipt, updateDigest: "0".repeat(64) }, "restore:bad")).rejects.toThrow(
       "COLLABORATION_ADMITTED_UPDATE_INVALID");
     expect(transport.document.getMap("meta").get("title")).toBeUndefined();
-    await transport.consumeAdmittedUpdate(inline, digest, "restore:one");
+    await transport.consumeAdmittedUpdate(inline, receipt, "restore:one");
     expect(transport.document.getMap("meta").get("title")).toBe("Restored");
     // Provider origin: the accepted bytes are never re-sent as a local write.
     expect(hocuspocus.provider?.documentUpdateHandler).not.toHaveBeenCalled();
-    await transport.consumeAdmittedUpdate({ encoding: "replay", roomId: "room", throughSequence: 4 }, digest, "restore:two");
     const refreshes = hocuspocus.provider!.sendStateless.mock.calls.map(([payload]) => JSON.parse(payload as string))
       .filter(request => request.type === "spectra.canonical_refresh");
-    expect(refreshes.map(request => request.confirmationId)).toEqual(["restore:one", "restore:two"]);
+    expect(refreshes.map(request => request.confirmationId)).toEqual(["restore:one"]);
+    transport.destroy();
+  });
+
+  async function canonicalState(title: string, nextSequence: number) {
+    const canonical = new Y.Doc();
+    canonical.getMap("meta").set("title", title);
+    const frontier = encodeDurableFrontier(Y, canonical)!;
+    const frontierHash = createHash("sha256").update(new Uint8Array(frontier)).digest("hex");
+    const updateBase64 = Buffer.from(Y.encodeStateAsUpdate(canonical)).toString("base64");
+    canonical.destroy();
+    return { updateBase64, anchor: { roomId: "room", nextSequence, frontierHash } };
+  }
+
+  it("shows a large or compacted restore only from canonical state that covers its receipt", async () => {
+    // A payload/replay receipt carries no bytes. The gateway may skip the
+    // refresh merge while other edits persist, so a hint plus resync alone
+    // could leave the old content on screen after "restored".
+    const transport = new HocuspocusArtifactTransport("artifact-admitted-large");
+    await transport.connect();
+    hocuspocus.provider!.synced = true;
+    hocuspocus.callbacks!.onSynced({ state: true });
+    const payload = { encoding: "payload" as const, payloadRef: "payload", digest: "d".repeat(64), byteLength: 900_000 };
+    const receipt = { roomId: "room", sequence: 7, updateDigest: "d".repeat(64) };
+    hocuspocus.canonical = await canonicalState("Before restore", 7);
+    await expect(transport.consumeAdmittedUpdate(payload, receipt, "restore:behind")).rejects.toThrow(
+      "COLLABORATION_ADMITTED_UPDATE_BEHIND");
+    expect(transport.document.getMap("meta").get("title")).toBeUndefined();
+    hocuspocus.canonical = await canonicalState("Restored", 8);
+    await transport.consumeAdmittedUpdate({ encoding: "replay", roomId: "room", throughSequence: 7 }, receipt, "restore:covered");
+    expect(transport.document.getMap("meta").get("title")).toBe("Restored");
+    expect(hocuspocus.provider?.documentUpdateHandler).not.toHaveBeenCalled();
     transport.destroy();
   });
 });

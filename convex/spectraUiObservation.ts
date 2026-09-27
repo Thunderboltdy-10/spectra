@@ -83,14 +83,15 @@ async function appendObservationEvent(ctx: MutationCtx, run: Run, operation: Ope
   // Point read sees earlier event appends made in this transaction. Never reuse
   // a stale run.eventSequence when expiration and a new offer share a mutation.
   const current = await ctx.db.get(run._id);
-  if (!current || current.executionId !== operation.executionId) throw new Error("UI_OBSERVATION_STALE");
+  const executionId = operation.executionId;
+  if (!executionId || !current || current.executionId !== executionId) throw new Error("UI_OBSERVATION_STALE");
   const sequence = (current.eventSequence ?? 0) + 1;
   const now = Date.now();
   const runItem = createRunItem(String(run._id), sequence, key === "settings_toggle_prepared"
     ? { type: "action_start", action: payload }
     : { type: "action_progress", actionId: String(operation._id), step: payload }, now);
   await ctx.db.insert("spectraRunEvents", {
-    runId: run._id, executionId: operation.executionId, sequence, type: "ui_event", createdAt: now,
+    runId: run._id, executionId, sequence, type: "ui_event", createdAt: now,
     payload: { type: "ui_event", runId: String(run._id), key, payload, protocolVersion: runItem.protocolVersion, runItem },
   });
   await ctx.db.patch(run._id, { eventSequence: sequence });
@@ -141,9 +142,10 @@ export async function expireUiObservation(ctx: MutationCtx, run: Run, operation:
   await ctx.db.patch(operation._id, { uiObservation: next });
   // A dead tab cannot impose the same wait on the next operation.
   const current = await ctx.db.get(run._id);
-  if (current?.uiObserverInterests?.executionId === operation.executionId)
+  const interests = current?.uiObserverInterests;
+  if (operation.executionId && interests?.executionId === operation.executionId)
     await ctx.db.patch(run._id, { uiObserverInterests: {
-      executionId: operation.executionId!, clients: current.uiObserverInterests.clients.filter((entry) => !clientIds.includes(entry.clientId)),
+      executionId: operation.executionId, clients: interests.clients.filter((entry) => !clientIds.includes(entry.clientId)),
     } });
   await appendObservationEvent(ctx, run, operation, "settings_observer_ended", {
     operationId: String(operation._id), executionId: operation.executionId, epoch: observation.epoch,
@@ -160,7 +162,8 @@ export async function prepareUiObservation(ctx: MutationCtx, run: Run, operation
     const current = await expireUiObservation(ctx, run, operation, Date.now());
     return uiObservationSnapshot(run, current);
   }
-  const interests = run.uiObserverInterests?.executionId === operation.executionId ? run.uiObserverInterests.clients : [];
+  const registered = run.uiObserverInterests;
+  const interests = operation.executionId && registered?.executionId === operation.executionId ? registered.clients : [];
   if (!interests.length) return { phase: "headless" as const };
   const followers = interests.filter((entry) => entry.mode === "follow");
   // Ordinary observers never form a global barrier. One owns the control;

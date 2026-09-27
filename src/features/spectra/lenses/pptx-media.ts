@@ -11,6 +11,7 @@ const ASSET_EXT = "{B7B92F10-5D34-4E6D-9EE3-84C6C92F2917}";
 export type PptxMediaWriteOptions = {
   resolveAsset?: (image: PptxImageAsset) => Promise<Uint8Array | undefined>;
 };
+export type PptxMediaReadCache = Map<string, Promise<{ mediaType: PptxImageAsset["mediaType"]; sha256: string } | undefined>>;
 
 function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
@@ -47,7 +48,7 @@ function metadata(shape: XmlElement) {
 
 /** Reads durable identity from our extension but hashes the actual embedded
  * bytes. Extension metadata cannot attest that the native image was saved. */
-export async function readPptxImageAsset(deck: Presentation, slidePartName: string, shape: XmlElement) {
+export async function readPptxImageAsset(deck: Presentation, slidePartName: string, shape: XmlElement, cache?: PptxMediaReadCache) {
   const source = metadata(shape);
   const objectId = source?.getAttribute("objectId");
   const assetId = source?.getAttribute("assetId");
@@ -59,10 +60,19 @@ export async function readPptxImageAsset(deck: Presentation, slidePartName: stri
   const part = relation && relation.type === IMAGE_REL && relation.targetMode !== "External" && slidePart
     ? deck.office.package.relatedPart(slidePart, relation.id) : undefined;
   if (!part) return undefined;
-  const bytes = await part.read();
-  const mediaType = sniffOfficeRasterMedia(bytes);
-  if (!mediaType || part.contentType.toLowerCase() !== mediaType) return undefined;
-  const parsed = pptxImageAssetSchema.safeParse({ assetId, mediaType, sha256: await digest(bytes), ...(source.getAttribute("name") !== undefined ? { name: source.getAttribute("name") } : {}) });
+  let physical = cache?.get(part.name);
+  if (!physical) {
+    physical = (async () => {
+      const bytes = await part.read();
+      const mediaType = sniffOfficeRasterMedia(bytes);
+      if (!mediaType || part.contentType.toLowerCase() !== mediaType) return undefined;
+      return { mediaType, sha256: await digest(bytes) };
+    })();
+    cache?.set(part.name, physical);
+  }
+  const verified = await physical;
+  if (!verified) return undefined;
+  const parsed = pptxImageAssetSchema.safeParse({ assetId, ...verified, ...(source.getAttribute("name") !== undefined ? { name: source.getAttribute("name") } : {}) });
   return parsed.success ? { objectId, image: parsed.data } : undefined;
 }
 

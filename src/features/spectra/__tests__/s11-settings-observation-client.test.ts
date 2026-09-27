@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleSettingsObservationEvent, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
+import { handleSettingsObservationEvent, observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
 import { registerSettingsToggleControl } from "../collaboration/settings-toggle-control";
 import { __resetAppChoreographyHost, getAppChoreographyCoordinator, releaseChoreographyActor, startAppChoreographyMaintenance } from "../collaboration/app-choreography-host";
 import { __resetFollowAi, followAiActor, isFollowingAi } from "../collaboration/follow-ai";
@@ -169,6 +169,44 @@ describe("S11 settings observer through the existing event feed", () => {
     completeRead({ ok: true, json: async () => snapshots.get("run") });
     await vi.advanceTimersByTimeAsync(0);
     expect(transport).toHaveBeenCalledTimes(1);
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+  });
+
+  it("does not resume an interest response after Stop and rediscovery of the same attempt", async () => {
+    let completeInterest!: (response: unknown) => void;
+    transport.mockImplementationOnce(() => new Promise(resolve => { completeInterest = resolve; }));
+    observeUiRun("run", "attempt");
+    await vi.advanceTimersByTimeAsync(0);
+    stopObservingUiRun("run");
+    observeUiRun("run", "attempt", false);
+    const snapshot = { phase: "waiting", action: action(), participants: [uiObserverForRun("run")] };
+    completeInterest({ ok: true, json: async () => ({ observation: snapshot }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
+  });
+
+  it("does not end the new attempt's Follow when an old interest request fails", async () => {
+    let rejectInterest!: (error: Error) => void;
+    transport.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectInterest = reject; }));
+    followAiActor("run");
+    observeUiRun("run", "attempt");
+    await vi.advanceTimersByTimeAsync(0);
+    observeUiRun("run", "replacement", false);
+    rejectInterest(new Error("Disconnected old request"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(isFollowingAi()).toBe(true);
+  });
+
+  it("retires the old control callback when a replacement attempt is discovered", async () => {
+    observeUiRun("run", "attempt", false);
+    const { refresh } = mountedControl();
+    const previous = offer();
+    await vi.advanceTimersByTimeAsync(0);
+    observeUiRun("run", "replacement", false);
+    save(previous);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).not.toHaveBeenCalled();
     expect(getAppChoreographyCoordinator().snapshot()).toEqual([]);
   });
 

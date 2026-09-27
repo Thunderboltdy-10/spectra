@@ -1,5 +1,23 @@
 # S11 choreography — first bounded repair and execution-contract review
 
+## September 27 recovery and bounded closeout
+
+Current worker: `01a0e290-2b49-7db1-8067-d44bffa82c3a`; current coordinator: `01a0e289-3aa8-7ed1-bc1a-e9ede38f2dc9`. Historical task IDs below are provenance only. The actual first recovery `turn_context` records GPT-6 Astra, xhigh, danger-full-access, approval never and disabled permission profile. Every project command uses the existing `aa16/ai-school` checkout explicitly; its default primary cwd is not used. Recovered HEAD was clean `daa77c81`.
+
+The current user direction is finite implementation closeout with narrow correctness checks. Exhaustive final browser/native/Follow verification is deferred to separate prompts. No service, installation, publication or native-original mutation is part of this closeout.
+
+Recovery found one further settings lifetime race: an interest request can finish after Stop, unmount or attempt replacement. Run interest now carries local lifetime identity; a stale response cannot enqueue a control callback, and a stale error cannot disengage the replacement attempt's Follow. Replacing a discovered attempt also retires its old local callback. Three regression cases cover these races. These changes are currently pending the already-requested RUNTIME test slot, along with the inherited 12-file bundle; no new passing result is claimed here yet.
+
+### Remaining production dependency: document readiness
+
+COLLAB's current owner confirmed that `canonical-ai-update.ts` prepares the final exact delta and `yjs-artifact-operation.ts` consumes the admitted receipt. Its `AiBeforeCommit(info)` is still called after the existing choreography frames. There is **no artifact readiness acknowledgement** in that path yet. The paragraph helper `5ec890c0` has been consumed into COLLAB as `5b8508b3`, but consuming that additive helper alone does not wire its use: the recovered source has no production caller of `applyDocumentParagraphTextSplice`.
+
+The existing observer protocol is explicitly settings-only (`vUiObservation.target`, the action schema, `applicationOperationScope`, and the receipt reader). An artifact requester cannot truthfully reuse it merely by changing the target string. A complete document boundary needs an artifact action bound to run/execution/operation, artifact ID, block ID, expected text, operation digest and the current room/native revision. Persist its bounded observation on the existing operation, validate it at the actual admitted writer, and fresh-read/rebuild the semantic operation after any intervening edit. `DocumentStudio` exposes the real editor through `data-work-id` and stable `data-block-id`; an observer can resolve the unique plain top-level paragraph there without focus, selection or content writes. The server remains the only writer. One paragraph splice remains one immutable operation; no untracked typing-prefix commits or after-write animation are authorized by the helper.
+
+COLLAB owns the admission builder and `yjs-artifact-operation.ts` consumer. CHOREOGRAPHY owns the UI readiness/control side once that complete persisted writer contract is assigned. This is a genuine remaining production dependency, not deferred test coverage. Settings are the only completed production adapter in this candidate; app-wide dropdown/drag/school/calendar/library action execution remains outside this bounded slice.
+
+Deferred final scenarios: authenticated visible/invisible Smart completion changes and approval rejection; two Follow tabs, visibility changes, same-page scroll/collapse and lost feed/ACK; real editor relative selection and human undo during the paragraph splice; competing same-region/native revisions, disconnect/reconnect and exact canonical/native receipts; ordinary app-wide cursor/focus/viewport behavior. None is represented as executed by deterministic unit/component fixtures.
+
 Date: 2026-09-25. Worker: `01a0d846-54e2-71b0-86a7-1976e532e794`.
 Coordinator: `01a0d83f-92fb-7b80-9ea4-99fcecef20aa`.
 Base: `d9aabfb5735bdcd8a620af8a7bdaa85aba08d150`.

@@ -40,6 +40,9 @@ function legacyDocumentReference(value: unknown, target: PinnedPlacementTarget):
 }
 
 const documentBlockContainers = new Set(["doc", "blockquote", "callout", "listItem", "taskItem", "tableCell", "tableHeader"]);
+// Only these block nodes can lead to an embedded reference. Structural-only
+// nodes must be reached through their table/list parent, never a block slot.
+const documentReferenceBlocks = new Set(["spectraReference", "blockquote", "callout", "bulletList", "orderedList", "taskList", "table"]);
 const documentStructuralChildren: Record<string, ReadonlySet<string>> = {
   bulletList: new Set(["listItem"]), orderedList: new Set(["listItem"]), taskList: new Set(["taskItem"]),
   table: new Set(["tableRow"]), tableRow: new Set(["tableCell", "tableHeader"]),
@@ -73,6 +76,8 @@ export function containsPinnedArtifactPlacement(
       const entry = stack.pop()!;
       if (--remaining < 0 || entry.depth > limits.depth) return false;
       const node = record(entry.node);
+      if ((node.type === "listItem" || node.type === "taskItem") &&
+        (!Array.isArray(node.content) || record(node.content[0]).type !== "paragraph")) continue;
       if (node.type === "spectraReference" && documentBlockContainers.has(entry.parentType ?? "")) {
         found ||= exactReference(node.attrs, target) || legacyDocumentReference(node.attrs, target);
       }
@@ -81,7 +86,8 @@ export function containsPinnedArtifactPlacement(
       if (Array.isArray(node.content) && (documentBlockContainers.has(type) || structuralChildren)) {
         if (node.content.length > remaining) return false;
         for (const child of node.content) {
-          if (structuralChildren && !structuralChildren.has(String(record(child).type))) continue;
+          const childType = String(record(child).type);
+          if (structuralChildren ? !structuralChildren.has(childType) : !documentReferenceBlocks.has(childType)) continue;
           stack.push({ node: child, depth: entry.depth + 1, parentType: type });
         }
       }

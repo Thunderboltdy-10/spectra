@@ -130,6 +130,25 @@ describe("actual current retained-pin placement", () => {
     expect(await f.proven()).toBe(false);
   });
 
+  it("requires table/list ancestry while accepting references in their actual block slots", async () => {
+    const f = await fixture();
+    const reference = { type: "spectraReference", attrs: f.attrs };
+    const proves = (node: unknown) => containsPinnedArtifactPlacement("document", {
+      tiptap: { type: "doc", content: [node] },
+    }, f.target);
+    for (const type of ["doc", "tableCell", "tableHeader", "listItem", "taskItem"]) {
+      expect(proves({ type, content: [{ type: "paragraph" }, reference] }), type).toBe(false);
+    }
+    for (const [listType, itemType] of [["bulletList", "listItem"], ["orderedList", "listItem"], ["taskList", "taskItem"]]) {
+      expect(proves({ type: listType, content: [{ type: itemType, content: [reference] }] }), listType).toBe(false);
+      expect(proves({ type: listType, content: [{ type: itemType, content: [{ type: "paragraph" }, reference] }] }), listType).toBe(true);
+    }
+    const table = { type: "table", content: [{ type: "tableRow", content: [{ type: "tableCell", content: [reference] }] }] };
+    expect(proves(table)).toBe(true);
+    expect(proves({ type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph" }, table] }] })).toBe(true);
+    expect(proves({ type: "table", content: [{ type: "tableCell", content: [reference] }] })).toBe(false);
+  });
+
   it("requires complete typed traversal instead of accepting a truncated positive", async () => {
     const f = await fixture();
     expect(containsPinnedArtifactPlacement("document", f.content, f.target, { nodes: 1, depth: 64 })).toBe(false);

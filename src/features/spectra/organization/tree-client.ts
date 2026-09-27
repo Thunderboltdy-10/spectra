@@ -443,7 +443,11 @@ export function treeFailureMessage(error: unknown, fallback: string) {
   /* Convex prefixes thrown messages; the sentence we wrote is what a reader
      needs, not the frame around it. */
   const match = raw.match(/Uncaught Error:\s*([^\n]+)/);
-  const message = (match?.[1] ?? raw ?? "").trim();
+  /* Production Convex redacts the sentence and leaves only the frame
+     ("[CONVEX M(library:move)] [Request ID: …] Server Error Called by client").
+     A frame with no sentence has nothing for a reader; use the fallback. */
+  const frameOnly = !match && /\[CONVEX [A-Z]\(|\[Request ID:|Server Error/.test(raw);
+  const message = frameOnly ? "" : (match?.[1] ?? raw ?? "").trim();
   /* AUTH_* identity codes must win over LIBRARY_* if a frame ever carries both
      (LIBRARY catch-all must not mask sign-in / school membership failures). */
   return (

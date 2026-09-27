@@ -1,5 +1,6 @@
 "use client";
 
+import { describeFailure } from "@/components/ui/truthful-state";
 import { Check, Link2, Loader2, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "convex/react";
@@ -224,9 +225,7 @@ export function ArtifactEmbedsPanel({
           embedId: createdEmbedId as Id<"artifactEmbeds">,
         }).catch(() => undefined);
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not add this reference.",
+        describeFailure(error, { fallback: "Could not add this reference." }).message,
       );
     } finally {
       setBusy(null);
@@ -245,9 +244,7 @@ export function ArtifactEmbedsPanel({
       });
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not resize this reference.",
+        describeFailure(error, { fallback: "Could not resize this reference." }).message,
       );
     } finally {
       setBusy(null);
@@ -289,9 +286,7 @@ export function ArtifactEmbedsPanel({
       toast.success("Reference removed.");
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not remove this reference.",
+        describeFailure(error, { fallback: "Could not remove this reference." }).message,
       );
     } finally {
       setBusy(null);
@@ -310,9 +305,7 @@ export function ArtifactEmbedsPanel({
       });
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not save the reference size.",
+        describeFailure(error, { fallback: "Could not save the reference size." }).message,
       );
     }
   }
@@ -328,9 +321,7 @@ export function ArtifactEmbedsPanel({
       toast.success("Access request sent to the source owner.");
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not request source access.",
+        describeFailure(error, { fallback: "Could not request source access." }).message,
       );
     } finally {
       setBusy(null);
@@ -344,9 +335,7 @@ export function ArtifactEmbedsPanel({
       toast.success("Access request cancelled.");
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not cancel the request.",
+        describeFailure(error, { fallback: "Could not cancel the request." }).message,
       );
     } finally {
       setBusy(null);
@@ -363,9 +352,7 @@ export function ArtifactEmbedsPanel({
       toast.success("Reference restored to the live source.");
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not restore this reference.",
+        describeFailure(error, { fallback: "Could not restore this reference." }).message,
       );
     } finally {
       setBusy(null);

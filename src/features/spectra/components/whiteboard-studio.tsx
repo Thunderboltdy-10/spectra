@@ -1,5 +1,6 @@
 "use client";
 
+import { describeFailure } from "@/components/ui/truthful-state";
 import {
   AlignCenter,
   AlignLeft,
@@ -1067,9 +1068,7 @@ export function WhiteboardStudio({
       });
     } catch (error) {
       setIoNotice(
-        error instanceof Error
-          ? error.message
-          : "The live reference could not be changed.",
+        describeFailure(error, { fallback: "The live reference could not be changed." }).message,
       );
     } finally {
       setLinkingEmbed(false);
@@ -1655,9 +1654,7 @@ export function WhiteboardStudio({
       await reconcileEmbedRows(previous);
     } catch (error) {
       setIoNotice(
-        error instanceof Error
-          ? error.message
-          : "The board references could not be restored.",
+        describeFailure(error, { fallback: "The board references could not be restored." }).message,
       );
       return;
     }
@@ -1672,9 +1669,7 @@ export function WhiteboardStudio({
       await reconcileEmbedRows(next);
     } catch (error) {
       setIoNotice(
-        error instanceof Error
-          ? error.message
-          : "The board references could not be restored.",
+        describeFailure(error, { fallback: "The board references could not be restored." }).message,
       );
       return;
     }
@@ -1714,9 +1709,7 @@ export function WhiteboardStudio({
         });
       } catch (error) {
         setIoNotice(
-          error instanceof Error
-            ? error.message
-            : "The linked work could not be removed.",
+          describeFailure(error, { fallback: "The linked work could not be removed." }).message,
         );
         return;
       }

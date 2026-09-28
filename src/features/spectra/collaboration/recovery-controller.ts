@@ -19,6 +19,7 @@ import type {
 import { localRecordGeneration } from "../realtime/persistence";
 import { readNativeArtifactYjsDocument } from "../work/models/yjs/native-artifact-model";
 import { workYjsAdapter } from "../work/models/yjs/registry";
+import { readableRegionText } from "./region-text";
 
 export type RecoveryBranch = {
   id: string;
@@ -87,24 +88,8 @@ function sameAnchor(left: DurableRoomAnchor | undefined, right: DurableRoomAncho
     left.nextSequence === right.nextSequence && left.frontierHash === right.frontierHash);
 }
 
-function textLeaves(value: unknown, out: string[] = [], budget = { left: EXCERPT_CHARS }) {
-  if (budget.left <= 0) return out;
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (text && !/^[a-z0-9_-]{16,}$/i.test(text)) { out.push(text.slice(0, budget.left)); budget.left -= text.length; }
-  } else if (typeof value === "number" || typeof value === "boolean") {
-    out.push(String(value)); budget.left -= String(value).length;
-  } else if (Array.isArray(value)) {
-    for (const entry of value) textLeaves(entry, out, budget);
-  } else if (value && typeof value === "object") {
-    for (const [key, entry] of Object.entries(value)) if (key !== "id" && !key.endsWith("Id")) textLeaves(entry, out, budget);
-  }
-  return out;
-}
-
 function excerpt(value: unknown) {
-  const text = textLeaves(value).join(" ").replace(/\s+/g, " ").trim();
-  return text.length > EXCERPT_CHARS ? `${text.slice(0, EXCERPT_CHARS - 1)}…` : text;
+  return readableRegionText(value, { limit: EXCERPT_CHARS });
 }
 
 function valueAtPath(value: unknown, path: readonly (string | number)[]) {

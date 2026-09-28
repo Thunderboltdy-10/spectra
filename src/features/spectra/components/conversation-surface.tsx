@@ -23,7 +23,6 @@ import {
   GitCompareArrows,
   Loader2,
   MessageSquare,
-  PencilLine,
   ShieldCheck,
   Undo2,
   Wrench,
@@ -68,6 +67,7 @@ import { workTypeMeta } from "./artifact-card";
 import { ArtifactEmbedList } from "./artifact-embed-host";
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
+import { compareConflictRegions } from "../collaboration/region-text";
 
 function operationLabel(
   operation: SpectraThreadTrace["operations"][number],
@@ -303,18 +303,32 @@ function messageChoices(
     : null;
 }
 
-function conflictSnapshot(value: unknown) {
-  try {
-    const formatted = JSON.stringify(value, null, 2);
-    return formatted.length > 1_800
-      ? `${formatted.slice(0, 1_800)}\n…`
-      : formatted;
-  } catch {
-    return "This state could not be displayed safely.";
-  }
+/** Resolution errors come back as codes; say what the student can do. */
+export function conflictFailureText(cause: unknown, fallback: string) {
+  const message = cause instanceof Error ? cause.message : "";
+  if (/REGION_CONFLICT_STILL_OCCUPIED/.test(message))
+    return "The other edit is still going. Try again when it finishes.";
+  if (/REGION_CONFLICT_(?:NOT_RESOLVED|UNAVAILABLE|RUN_STALE|BASE_REQUIRED)/.test(message))
+    return "This choice is no longer available. Spectra has already moved on from it.";
+  if (/check your connection/i.test(message)) return message;
+  return fallback;
 }
 
-function ArtifactConflictResolution({
+function ConflictText({ text }: { text: string | undefined }) {
+  return (
+    <p className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-caption leading-5 text-[var(--text-primary)]">
+      {text === undefined ? (
+        <span className="text-[var(--text-tertiary)]">No preview available.</span>
+      ) : text ? (
+        text
+      ) : (
+        <span className="text-[var(--text-tertiary)]">Empty</span>
+      )}
+    </p>
+  );
+}
+
+export function ArtifactConflictResolution({
   operation,
 }: {
   operation: SpectraOperation;
@@ -322,12 +336,9 @@ function ArtifactConflictResolution({
   const [detail, setDetail] = useState<
     Awaited<ReturnType<typeof getSpectraOperationConflict>>["conflict"] | null
   >(null);
-  const [busy, setBusy] = useState<
-    "apply" | "keep_current" | "merge" | "cancel" | null
-  >(null);
+  const [busy, setBusy] = useState<"apply" | "keep_current" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [mergeDraft, setMergeDraft] = useState("");
+  const [reviewBoth, setReviewBoth] = useState(false);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -336,20 +347,12 @@ function ArtifactConflictResolution({
         const result = await getSpectraOperationConflict(operation._id);
         if (!active) return;
         setDetail(result.conflict);
-        setMergeDraft(
-          (current) =>
-            current || JSON.stringify(result.conflict.input, null, 2),
-        );
         setError(null);
         if (result.conflict.claimStatus === "queued")
           timer = setTimeout(load, 1_500);
       } catch (cause) {
         if (active)
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "Could not load the conflict.",
-          );
+          setError(conflictFailureText(cause, "Spectra could not load this conflict. Try again in a moment."));
       }
     };
     void load();
@@ -358,135 +361,101 @@ function ArtifactConflictResolution({
       if (timer) clearTimeout(timer);
     };
   }, [operation._id]);
-  const resolve = async (
-    resolution: "apply" | "keep_current" | "merge" | "cancel",
-  ) => {
+  const resolve = async (resolution: "apply" | "keep_current") => {
     setBusy(resolution);
     setError(null);
     try {
-      let mergedInput: unknown;
-      if (resolution === "merge") {
-        try {
-          mergedInput = JSON.parse(mergeDraft);
-        } catch {
-          throw new Error("The merged proposal is not valid JSON yet.");
-        }
-        if (
-          !mergedInput ||
-          typeof mergedInput !== "object" ||
-          Array.isArray(mergedInput)
-        ) {
-          throw new Error(
-            "The merged proposal must remain an operation object.",
-          );
-        }
-      }
-      await resolveSpectraOperationConflict(
-        operation._id,
-        resolution,
-        mergedInput,
-      );
+      await resolveSpectraOperationConflict(operation._id, resolution);
       spectraBus.emit("threads.changed", {});
       toast.success(
         resolution === "apply"
-          ? "Spectra's proposal is queued to apply."
-          : resolution === "merge"
-            ? "Your merged proposal is queued to apply."
-            : resolution === "cancel"
-              ? "The proposal was cancelled."
-              : "The current work was kept.",
+          ? "Spectra will apply its change now."
+          : "The saved version was kept. Spectra did not change it.",
       );
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not resolve the conflict.",
-      );
+      setError(conflictFailureText(cause, "Spectra could not save your choice. Try again."));
     } finally {
       setBusy(null);
     }
   };
   const available = detail?.claimStatus === "paused";
+  const rows = detail
+    ? compareConflictRegions({
+        before: detail.conflict.baseSnapshot,
+        saved: detail.currentSnapshot,
+        proposed: detail.conflict.proposedSnapshot,
+      })
+    : [];
+  const canReviewBoth = rows.some((row) => row.before !== undefined);
+  const byPerson = (detail?.conflict ?? operation.conflict)?.blockerActorKind !== "ai";
   return (
     <section
       className="mt-2 overflow-hidden rounded-card border border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_4%,var(--bg-elevated))]"
-      aria-label="Resolve work edit conflict"
+      aria-label="Choose which version to keep"
     >
       <header className="flex items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <GitCompareArrows className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
         <div className="min-w-0 flex-1">
           <div className="text-micro font-semibold text-[var(--text-primary)]">
-            Same-region edit needs your decision
+            {byPerson
+              ? "This part changed while Spectra was working"
+              : "Another Spectra edit is using this part"}
           </div>
           <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
-            {detail?.conflict.regionId ??
-              operation.conflict?.regionId ??
-              "This region"}{" "}
             {available
-              ? "is now available."
-              : "is still occupied. Spectra will not overwrite it."}
+              ? "Choose which version to keep. Nothing changes until you choose."
+              : "Spectra is waiting for the other edit to finish and won't overwrite it."}
           </p>
         </div>
       </header>
       {detail ? (
-        <div className="grid gap-px bg-[var(--border-subtle)] md:grid-cols-3">
-          <div className="bg-[var(--bg-primary)] p-2.5">
-            <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Before Spectra
-            </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
-              {conflictSnapshot(detail.conflict.baseSnapshot)}
-            </pre>
+        rows.length ? (
+          <div className="grid gap-px bg-[var(--border-subtle)]">
+            {rows.map((row) => (
+              <div key={row.regionId} className="bg-[var(--bg-primary)] px-3 py-2.5">
+                <div className="text-micro font-semibold text-[var(--text-secondary)]">
+                  {row.label}
+                </div>
+                {reviewBoth ? (
+                  <div className="mt-2">
+                    <div className="text-micro font-medium text-[var(--text-tertiary)]">
+                      Before Spectra started
+                    </div>
+                    <ConflictText text={row.before} />
+                  </div>
+                ) : null}
+                <div className="mt-2 grid min-w-0 gap-3 sm:grid-cols-2">
+                  <div className="min-w-0">
+                    <div className="text-micro font-medium text-[var(--text-tertiary)]">
+                      Saved version
+                      {reviewBoth && row.before !== undefined && row.saved === row.before
+                        ? " (unchanged)"
+                        : ""}
+                    </div>
+                    <ConflictText text={row.saved} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1 text-micro font-medium text-[var(--accent-cyan)]">
+                      <SpectraMark mono size={12} />
+                      Spectra&apos;s change
+                    </div>
+                    <ConflictText text={row.proposed} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="bg-[var(--bg-primary)] p-2.5">
-            <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Current
-            </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
-              {conflictSnapshot(detail.currentSnapshot)}
-            </pre>
-          </div>
-          <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-primary))] p-2.5">
-            <div className="mb-1.5 flex items-center gap-1 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]">
-              <SpectraMark mono size={12} />
-              Spectra proposal
-            </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
-              {conflictSnapshot(
-                detail.conflict.proposedSnapshot ?? detail.input,
-              )}
-            </pre>
-          </div>
-        </div>
-      ) : (
+        ) : (
+          <p className="px-3 py-3 text-micro text-[var(--text-secondary)]">
+            No preview is available for this part. Open the work to look at it before you choose.
+          </p>
+        )
+      ) : error ? null : (
         <div className="flex items-center gap-2 px-3 py-4 text-micro text-[var(--text-tertiary)]">
           <PrismLoader size={14} optics="working" />
-          Loading current and proposed states
+          Loading both versions
         </div>
       )}
-      {mergeOpen ? (
-        <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-3">
-          <div className="mb-2 flex items-center gap-2">
-            <PencilLine className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-            <div>
-              <div className="text-micro font-semibold text-[var(--text-primary)]">
-                Edit the merged operation
-              </div>
-              <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
-                Adjust only the proposed fields you want Spectra to apply. The
-                operation is validated again before it can touch the work.
-              </p>
-            </div>
-          </div>
-          <textarea
-            value={mergeDraft}
-            onChange={(event) => setMergeDraft(event.target.value)}
-            spellCheck={false}
-            aria-label="Merged work operation"
-            className="min-h-44 w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-micro leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
-          />
-        </div>
-      ) : null}
       {error ? (
         <p
           role="alert"
@@ -496,60 +465,36 @@ function ArtifactConflictResolution({
         </p>
       ) : null}
       <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-subtle)] px-3 py-2.5">
-        <button
-          type="button"
-          disabled={Boolean(busy)}
-          onClick={() => void resolve("cancel")}
-          className="min-h-8 rounded-control px-2.5 text-micro font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
-        >
-          Cancel proposal
-        </button>
+        {canReviewBoth ? (
+          <button
+            type="button"
+            aria-pressed={reviewBoth}
+            onClick={() => setReviewBoth((open) => !open)}
+            className="mr-auto min-h-8 rounded-control px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          >
+            {reviewBoth ? "Hide the original" : "Review both"}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("keep_current")}
           className="min-h-8 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
         >
-          {busy === "keep_current" ? "Keeping…" : "Keep current"}
+          {busy === "keep_current" ? "Keeping…" : "Keep the saved version"}
         </button>
         <button
           type="button"
-          disabled={!detail || Boolean(busy)}
-          onClick={() => {
-            setError(null);
-            setMergeOpen((open) => !open);
-          }}
-          className="min-h-8 rounded-control border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45"
+          disabled={!available || Boolean(busy)}
+          onClick={() => void resolve("apply")}
+          className="min-h-8 rounded-control bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {mergeOpen ? "Close merge" : "Edit & merge"}
+          {busy === "apply"
+            ? "Applying…"
+            : available
+              ? "Use Spectra’s change"
+              : "Waiting for the other edit"}
         </button>
-        {mergeOpen ? (
-          <button
-            type="button"
-            disabled={!available || Boolean(busy)}
-            onClick={() => void resolve("merge")}
-            className="min-h-8 rounded-control bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy === "merge"
-              ? "Queuing…"
-              : available
-                ? "Apply merged edit"
-                : "Waiting for region"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={!available || Boolean(busy)}
-            onClick={() => void resolve("apply")}
-            className="min-h-8 rounded-control bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {busy === "apply"
-              ? "Queuing…"
-              : available
-                ? "Apply proposal"
-                : "Waiting for region"}
-          </button>
-        )}
       </footer>
     </section>
   );

@@ -1,5 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyCommittedOutcomes } from "@/app/api/spectra/run/loop/verify";
+import { verifyAcknowledgedUpdate, verifyCommittedOutcomes } from "@/app/api/spectra/run/loop/verify";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { applyDocumentAcademicOperations } from "@/features/spectra/commands/office/document-academic-operations";
 import { parseModelOperation } from "@/features/spectra/operations/schema";
@@ -261,6 +263,43 @@ describe("ordered same-target final verification", () => {
     // Without an acknowledged position the last element is still required.
     mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), human] }, "flashcard_deck"));
     await expectSequenceMismatch([deckAppend(3)]);
+  });
+
+  it("records the append position through the shared acknowledgement on both run paths", async () => {
+    const existing = [card(1), card(2)];
+    const human = { ...card(9), front: "A classmate's card" };
+    const outcome = { operation: deckAppend(3), affected: [{ type: "artifact", id: "artifact-real" }] } as
+      Parameters<typeof verifyCommittedOutcomes>[1][number];
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3)] }, "flashcard_deck"));
+    await verifyAcknowledgedUpdate("actor", outcome);
+    expect(outcome.appendedAt).toEqual({ 0: 2 });
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), human] }, "flashcard_deck"));
+    await verifyCommittedOutcomes("actor", [outcome]);
+
+    // A resumed run (after an approval or clarification) acknowledges each
+    // update the same way before its final verification, instead of falling
+    // back to "the AI's element is last".
+    const runtime = fs.readFileSync(path.join(process.cwd(), "src/app/api/spectra/run/runtime.ts"), "utf8");
+    const resume = runtime.slice(runtime.indexOf("async function resumeOperationsAttempt("));
+    const perOperation = resume.indexOf("verifyAcknowledgedUpdate(params.actorClerkId, outcome");
+    const final = resume.indexOf("verifyCommittedOutcomes(params.actorClerkId, outcomes");
+    expect(perOperation).toBeGreaterThan(-1);
+    expect(final).toBeGreaterThan(perOperation);
+  });
+
+  it("gives an acknowledged update one quiet readback retry and skips other operations", async () => {
+    const outcome = { operation: deckAppend(3), affected: [{ type: "artifact", id: "artifact-real" }] } as
+      Parameters<typeof verifyCommittedOutcomes>[1][number];
+    mocks.query
+      .mockRejectedValueOnce(new TypeError("Cannot read properties of undefined"))
+      .mockResolvedValue(saved({ cards: [card(1), card(3)] }, "flashcard_deck"));
+    const retried = verifyAcknowledgedUpdate("actor", outcome);
+    await vi.runAllTimersAsync();
+    await retried;
+    expect(outcome.appendedAt).toEqual({ 0: 1 });
+    mocks.query.mockClear();
+    await verifyAcknowledgedUpdate("actor", { operation: parseModelOperation({ type: "artifact.archive", input: { artifactId: "artifact-real" } }), affected: [] });
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 
   it("keeps an earlier indexed edit required after a later append to the same list", async () => {

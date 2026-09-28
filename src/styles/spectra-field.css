@@ -766,10 +766,7 @@ html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
 
 html[data-spectra-sidebar-collapsed="true"]
   .spectra-shell-sidebar
-  [data-sidebar-recents],
-html[data-spectra-sidebar-collapsed="true"]
-  .spectra-shell-sidebar
-  [data-sidebar-workspaces] {
+  [data-sidebar-recents] {
   display: none !important;
 }
 

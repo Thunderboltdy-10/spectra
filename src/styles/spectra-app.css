@@ -363,18 +363,9 @@ body {
   > * {
   margin: 0 !important;
 }
-
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="task-blueprint"] {
-  order: 1;
-}
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="schedule"] {
   order: 2;
-}
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="linked-to"] {
-  order: 3;
 }
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="created"] {
@@ -389,10 +380,6 @@ body {
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="reminders"] {
   order: 6;
-}
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="import-&-export"] {
-  order: 7;
 }
 
 .spectra-planner-schedule-summary {
@@ -604,18 +591,9 @@ body {
   > * {
   margin: 0 !important;
 }
-
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="task-blueprint"] {
-  order: 1;
-}
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="schedule"] {
   order: 2;
-}
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="linked-to"] {
-  order: 3;
 }
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="created"] {
@@ -630,10 +608,6 @@ body {
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="reminders"] {
   order: 6;
-}
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  [data-side-card-title="import-&-export"] {
-  order: 7;
 }
 
 .spectra-planner-schedule-summary {
@@ -3999,8 +3973,7 @@ body {
   --motion-base: 0ms;
   --motion-slow: 0ms;
 }
-:root[data-spectra-motion="none"] *,
-:root[data-spectra-motion="reduced"] [data-decorative-motion="true"] {
+:root[data-spectra-motion="none"] * {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   scroll-behavior: auto !important;
@@ -11493,25 +11466,6 @@ button[data-spectra-context-trigger="true"]::after {
   font-weight: 700;
 }
 
-.spectra-flashcard-studio [data-bulk-selected="true"] {
-  border-color: color-mix(
-    in oklab,
-    #7560e8 58%,
-    var(--border-default)
-  ) !important;
-  background: color-mix(in oklab, #7560e8 9%, var(--bg-primary)) !important;
-}
-
-.spectra-flashcard-studio
-  button[data-invalid="true"]:not([data-bulk-selected="true"]) {
-  border-color: color-mix(in oklab, var(--danger) 28%, transparent);
-}
-
-.spectra-flashcard-studio
-  button[data-duplicate="true"]:not([data-bulk-selected="true"]) {
-  background: color-mix(in oklab, #d88922 3.5%, var(--bg-elevated));
-}
-
 .spectra-deck-print-sheet {
   display: none;
 }
@@ -11571,46 +11525,6 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-deck-sync-actions button:disabled {
   opacity: 0.58;
-}
-
-.spectra-flashcard-studio [data-rail-view="grid"] section > div {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-}
-
-/* A grid cell reads question over answer, so the wall is browsable rather than
-   a two-column copy of the list. Selectors are on classes, not child
-   positions, so adding the answer line cannot silently relocate the flag. */
-.spectra-flashcard-studio [data-rail-view="grid"] section > div > button {
-  position: relative;
-  min-height: 84px;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-content: start;
-  padding-bottom: 18px;
-}
-
-.spectra-flashcard-studio [data-rail-view="grid"] .spectra-deck-card-front {
-  overflow: hidden;
-  display: -webkit-box;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.spectra-flashcard-studio [data-rail-view="grid"] .spectra-deck-card-back {
-  grid-column: 2;
-  overflow: hidden;
-  display: -webkit-box;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.spectra-flashcard-studio [data-rail-view="grid"] .spectra-deck-card-flag {
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
 }
 
 .spectra-deck-empty-filter {
@@ -12901,14 +12815,6 @@ button[data-spectra-context-trigger="true"]::after {
   .code-source-body > aside {
     display: none;
   }
-  .code-source-body > aside[data-files-open="true"] {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 12;
-    display: flex;
-    width: min(82%, 260px);
-    box-shadow: 18px 0 45px rgba(28, 24, 19, 0.16);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -14135,7 +14041,6 @@ body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
 .tabular-nums,
 .spectra-artifact-identity-stats strong,
 .timetable-studio time,
-.timetable-studio [data-day-number],
 .spectra-project-metric strong,
 .spectra-overview-metric strong {
   font-family:
@@ -15342,7 +15247,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   touch-action: pan-y;
 }
 
-.spectra-artifact-main > [data-spectra-editor-root],
 .spectra-artifact-main > .presentation-studio,
 .spectra-artifact-main > .spectra-sheets-studio,
 .spectra-artifact-main > .code-studio,
@@ -16616,11 +16520,6 @@ html[data-spectra-motion="none"] * {
   }
 }
 
-.spectra-stream-active [data-stream-tail] {
-  position: relative;
-}
-
-.spectra-stream-active [data-stream-tail]::after,
 .spectra-stream-active > :last-child::after {
   content: "";
   display: inline-block;
@@ -16639,17 +16538,8 @@ html[data-spectra-motion="none"] * {
 
 html[data-spectra-tail-shimmer="false"]
   .spectra-stream-active
-  [data-stream-tail]::after,
-html[data-spectra-tail-shimmer="false"]
-  .spectra-stream-active
   > :last-child::after,
-html[data-spectra-motion="reduced"]
-  .spectra-stream-active
-  [data-stream-tail]::after,
 html[data-spectra-motion="reduced"] .spectra-stream-active > :last-child::after,
-html[data-spectra-motion="none"]
-  .spectra-stream-active
-  [data-stream-tail]::after,
 html[data-spectra-motion="none"] .spectra-stream-active > :last-child::after {
   content: none;
 }
@@ -16842,8 +16732,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
     transition: none;
   }
   /* The tail shimmer is decoration; under OS reduced motion it stops. */
-  .spectra-stream-active > :last-child::after,
-  .spectra-stream-active [data-stream-tail]::after {
+  .spectra-stream-active > :last-child::after {
     content: none;
   }
 }

@@ -31,6 +31,17 @@ import { badRequest, ok } from "@/lib/http";
 import { isNonPublicAddress } from "@/lib/network-egress";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+/**
+ * A sync runs inside this request. Pinning the duration keeps the hosting
+ * default from cutting it off, and a sync stops asking the provider for pages
+ * once SYNC_TIME_BUDGET_MS has passed. It then records a failed run, which
+ * releases the lease and schedules a retry, and there is still time left
+ * before the platform kills the request. A killed request cannot release
+ * anything: its run keeps the lease until it expires.
+ */
+export const maxDuration = 300;
+const SYNC_TIME_BUDGET_MS = 240_000;
+
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = { [key: string]: Json };
 
@@ -1432,6 +1443,7 @@ async function runSync(
       Math.max(1, Math.min(180, context.integration.requestBudgetPerMinute)),
   );
   let lastProviderRequestAt = 0;
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
   const accessibleClassIds = new Set<string>();
   const accessibleYearGroupIds = new Set<string>();
   const selectedClassIds = new Set(context.selection?.selectedClassIds ?? []);
@@ -1443,6 +1455,10 @@ async function runSync(
       0,
       minimumRequestGap - (Date.now() - lastProviderRequestAt),
     );
+    if (Date.now() + wait >= deadline)
+      throw new Error(
+        "INTEGRATION_SYNC_TIME_BUDGET: This sync reached its time limit before every route finished. Saved pages are kept and it retries shortly.",
+      );
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     lastProviderRequestAt = Date.now();
     return providerFetch(context, capability, token, input);
@@ -1636,9 +1652,12 @@ async function runSync(
           error instanceof Error
             ? error.message
             : "INTEGRATION_CAPABILITY_FAILED";
+        // These end the whole sync. Quarantining one route for them would
+        // hide a school-wide cause behind a single route.
         if (
           message.startsWith("INTEGRATION_CREDENTIAL_REJECTED") ||
-          message.startsWith("INTEGRATION_RATE_LIMITED")
+          message.startsWith("INTEGRATION_RATE_LIMITED") ||
+          message.startsWith("INTEGRATION_SYNC_TIME_BUDGET")
         )
           throw error;
         const reasonCode =

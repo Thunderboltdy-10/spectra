@@ -42,7 +42,13 @@ const EMPTY_COUNTS = {
   errors: 0,
 };
 
-const SYNC_LEASE_MS = 30 * 60_000;
+/**
+ * The request that owns a sync lives at most 300 seconds (the ManageBac
+ * route's maxDuration) and renews the lease on every committed page. A lease
+ * that outlives that request only blocks the next sync after a killed
+ * request, so it expires one page gap after the request's own limit.
+ */
+const SYNC_LEASE_MS = 6 * 60_000;
 
 function canonicalAcademicPeriodKey(value: unknown) {
   const key = text(value, 300);
@@ -1444,7 +1450,7 @@ export const claimScheduledSync = mutation({
         return null;
       }
       const workerId = text(args.workerId, 200);
-      const leaseExpiresAt = now + 30 * 60_000;
+      const leaseExpiresAt = now + SYNC_LEASE_MS;
       const leaseToken = crypto.randomUUID();
       const syncRunId = await ctx.db.insert("externalSyncRuns", {
         integrationId: integration._id,

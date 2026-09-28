@@ -365,6 +365,8 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
       return "A newer sync already replaced this one.";
     case "INTEGRATION_WORKER_LEASE_EXPIRED":
       return "This sync timed out and was stopped. Retry if you still need school updates.";
+    case "INTEGRATION_SYNC_TIME_BUDGET":
+      return "This sync ran out of time. School data it already read is saved, and it tries again shortly.";
     default:
       return run.status === "partial"
         ? "Some school data was saved. Retry to fill the gaps."

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accountErasure from "../accountErasure.js";
 import type * as accountPreferences from "../accountPreferences.js";
 import type * as administration from "../administration.js";
 import type * as agents from "../agents.js";
@@ -107,6 +108,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accountErasure: typeof accountErasure;
   accountPreferences: typeof accountPreferences;
   administration: typeof administration;
   agents: typeof agents;

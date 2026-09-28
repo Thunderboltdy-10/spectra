@@ -61,6 +61,10 @@ export const registerSelf = mutation({
     if (duplicates.some((duplicate) => duplicate._id !== existing?._id))
       throw new Error("IDENTITY_EMAIL_IN_USE: This verified email already belongs to another Spectra account.");
     if (existing) {
+      // A session token can outlive the IdP identity by a few seconds. The
+      // erased subject must not write its name and email back.
+      const erasure = await ctx.db.query("accountErasureJobs").withIndex("by_account", (query) => query.eq("accountId", existing._id)).unique();
+      if (erasure) throw new Error("IDENTITY_ACCOUNT_ERASED: This account was deleted.");
       await ctx.db.patch(existing._id, {
         email,
         emailVerified: true,

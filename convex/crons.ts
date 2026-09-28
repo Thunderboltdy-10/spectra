@@ -70,6 +70,12 @@ crons.interval(
   {},
 );
 crons.interval(
+  "resume-account-erasures",
+  { minutes: 5 },
+  internal.accountErasure.resumeStalled,
+  {},
+);
+crons.interval(
   "build-school-lifecycle-exports",
   { minutes: 2 },
   internal.administration.processLifecycleExports,

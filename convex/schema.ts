@@ -369,6 +369,36 @@ export default defineSchema({
     .index("by_job", ["jobId"])
     .index("by_stage_updated", ["stage", "updatedAt"]),
 
+  // One resumable erasure per account (convex/accountErasure.ts). The row
+  // outlives the erasure as the idempotency key for repeated IdP events.
+  accountErasureJobs: defineTable({
+    accountId: v.id("accounts"),
+    trigger: v.literal("identity_deleted"),
+    stage: v.union(
+      v.literal("works"),
+      v.literal("await_works"),
+      v.literal("account_rows"),
+      v.literal("placements"),
+      v.literal("workspaces"),
+      v.literal("finalize"),
+      v.literal("completed"),
+    ),
+    step: v.number(),
+    tableIndex: v.number(),
+    cursor: v.optional(v.string()),
+    keptWorks: v.number(),
+    deletedWorks: v.number(),
+    // Works whose own deletion job ended failed or retained (pinned elsewhere).
+    retainedWorks: v.number(),
+    deletedRows: v.number(),
+    deletedStorageObjects: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_account", ["accountId"])
+    .index("by_stage_updated", ["stage", "updatedAt"]),
+
   schoolOnboardingSagas: defineTable({
     idempotencyKey: v.string(),
     schoolId: v.id("schools"),

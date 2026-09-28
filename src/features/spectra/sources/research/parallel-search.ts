@@ -6,6 +6,11 @@ export type ParallelSearchResult = { title: string; url: string; content: string
 export type PurposefulSearch = { purpose: string; query: string };
 export type ParallelSearchCall = (search: PurposefulSearch, options: { maxResults: number; signal?: AbortSignal }) => Promise<ParallelSearchResult[]>;
 
+/** One search call's own limit. The run's signal only fires on Stop or a lost
+ * lease, so a provider that accepts the request and never answers would
+ * otherwise hold the run until the route's maxDuration kills it. */
+export const PARALLEL_SEARCH_TIMEOUT_MS = 60_000;
+
 function authority(url: string) {
   const hostname = new URL(url).hostname;
   if (/\.(?:gov|edu)$/i.test(hostname) || /(?:who\.int|un\.org|europa\.eu)$/i.test(hostname)) return "primary" as const;
@@ -20,6 +25,24 @@ export async function openRouterParallelSearch(search: PurposefulSearch, options
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("PROVIDER_UNAVAILABLE: OpenRouter is not configured.");
   const profile = getSpectraModelProfile();
+  const deadline = AbortSignal.timeout(PARALLEL_SEARCH_TIMEOUT_MS);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  try {
+    return await parallelSearchRequest(apiKey, profile, search, { ...options, signal });
+  } catch (error) {
+    // Stop keeps its own reason; only this call's deadline becomes a provider failure.
+    if (deadline.aborted && !options.signal?.aborted)
+      throw new Error("PROVIDER_UNAVAILABLE: Parallel search did not answer in time.", { cause: error });
+    throw error;
+  }
+}
+
+async function parallelSearchRequest(
+  apiKey: string,
+  profile: ReturnType<typeof getSpectraModelProfile>,
+  search: PurposefulSearch,
+  options: { maxResults: number; signal: AbortSignal },
+): Promise<ParallelSearchResult[]> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000", "X-OpenRouter-Title": "Spectra Parallel Research" },

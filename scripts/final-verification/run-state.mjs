@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import {
   createEvidenceManifest,
   validateEvidenceManifest,
-} from "../../../../scripts/reformation-evidence.mjs";
+} from "../reformation-evidence.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-export const repositoryRoot = resolve(scriptDirectory, "..", "..", "..", "..");
+export const repositoryRoot = resolve(scriptDirectory, "..", "..");
 export const evidenceRoot = resolve(
   repositoryRoot,
   ".shots",

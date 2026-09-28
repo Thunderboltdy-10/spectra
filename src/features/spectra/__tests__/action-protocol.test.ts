@@ -563,7 +563,7 @@ describe("AI Action Protocol V2", () => {
     delete process.env.SPECTRA_ATTACHMENT_STRATEGY;
     expect(getSpectraModelProfile()).toMatchObject({
       route: SPECTRA_DEFAULT_MODEL_ID,
-      reasoningProfile: "high",
+      reasoningProfile: "xhigh",
       input: { image: true, pdf: true },
     });
     expect(getSpectraAttachmentStrategy()).toBe("native");

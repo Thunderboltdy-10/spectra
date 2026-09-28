@@ -28,7 +28,7 @@
     "test:local-start": "node --test scripts/local/start-all.node.mjs",
     "test:node": "node --test scripts/local/start-all.node.mjs scripts/local/managebac-provider-fixture.node.mjs scripts/s10-security-authorization.node.mjs",
     "test:p8-foundation": "vitest run scripts/final-verification/foundation.test.mjs scripts/reformation-evidence.test.mjs",
-    "inventory:spectra": "node scripts/generate-spectra-inventory.mjs --write docs/spectra-definitive/generated/baseline-inventory.json",
+    "inventory:spectra": "node scripts/generate-spectra-inventory.mjs --write docs/archive/spectra-definitive/generated/baseline-inventory.json",
     "check:architecture": "node scripts/check-spectra-architecture.mjs",
     "check:copy": "node scripts/check-user-facing-copy.mjs",
     "check:design-tokens": "node scripts/check-design-tokens.mjs",

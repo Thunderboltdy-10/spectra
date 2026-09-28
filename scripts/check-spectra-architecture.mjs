@@ -3,13 +3,6 @@ import { relative, resolve } from "node:path";
 
 const root = process.cwd();
 const sourceRoot = resolve(root, "src");
-const baseline = JSON.parse(
-  await readFile(
-    resolve(root, "docs/spectra-definitive/generated/baseline-inventory.json"),
-    "utf8",
-  ),
-);
-const baselineEvents = new Set(baseline.customEvents);
 const ignored = new Set(["node_modules", ".next"]);
 
 async function walk(directory) {
@@ -59,6 +52,6 @@ if (violations.length) {
   process.exitCode = 1;
 } else {
   process.stdout.write(
-    `Architecture guard passed (semantic window events removed; ${baselineEvents.size} historical names remain inventoried; embedded run-route tools did not grow).\n`,
+    "Architecture guard passed (semantic window events removed; embedded run-route tools did not grow).\n",
   );
 }

@@ -14,6 +14,7 @@ import {
   allowSpectraProviderFallbacks,
   getSpectraModelId,
   getSpectraProviderRouting,
+  getSpectraReasoningProfile,
   SPECTRA_PRIMARY_PROVIDER,
 } from "@/features/spectra/ai/model-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
@@ -23,6 +24,8 @@ import {
   recordAgentModelWork,
   signAgentBridge,
 } from "../model-work";
+
+const EVALUATION_REASONING_ALLOWANCE = 32_000;
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -360,13 +363,12 @@ async function openRouterCompletion(params: {
             model: params.model,
             provider: attempt.routing,
             messages: params.messages,
-            max_tokens: params.maxTokens,
+            // Reasoning tokens count against max_tokens, so the visible
+            // answer budget sits on top of a reasoning allowance.
+            max_tokens: params.maxTokens + EVALUATION_REASONING_ALLOWANCE,
             temperature: params.temperature,
-            // Evaluation responses must spend their bounded output budget on
-            // observable answers/verdicts. Reasoning-model providers can
-            // otherwise consume the entire budget in hidden reasoning and
-            // return an empty message, making every case fail spuriously.
-            reasoning: { enabled: false, exclude: true },
+            // Test runs reason like the live agent they evaluate.
+            reasoning: { effort: getSpectraReasoningProfile(), exclude: true },
             stream: false,
           }),
         },

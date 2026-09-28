@@ -4014,8 +4014,8 @@ export async function callModel(
   const baseBody = {
     model: getSpectraModelProfile().route,
     // Reasoning-capable OpenAI routes do not accept temperature.
-    // Luna receives the configured maximum reasoning profile for broad work;
-    // repair/recovery turns may explicitly disable reasoning to minimize drift.
+    // Every turn, including repair and recovery, uses the configured maximum
+    // reasoning profile.
     reasoning: {
       effort: getSpectraReasoningProfile(),
       exclude: true,
@@ -4144,14 +4144,7 @@ export async function callModel(
                       },
             }
           : { response_format: { type: "json_object" } }),
-        ...(repair
-          ? {
-              messages: repairMessages,
-              reasoning: { enabled: false, exclude: true },
-            }
-          : mode === "fallback"
-            ? { reasoning: { enabled: false, exclude: true } }
-            : {}),
+        ...(repair ? { messages: repairMessages } : {}),
       }),
       // The run owns cancellation. Do not impose a hidden wall-clock cutoff on
       // a legitimate long task; explicit Stop remains immediate through the

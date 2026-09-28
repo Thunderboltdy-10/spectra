@@ -1,6 +1,6 @@
 export const SPECTRA_DEFAULT_MODEL_ID = "openai/gpt-5.6";
 export const SPECTRA_DEFAULT_FALLBACK_MODEL_ID = "openai/gpt-5.6-luna";
-export const SPECTRA_DEFAULT_REASONING_PROFILE = "high" as const;
+export const SPECTRA_DEFAULT_REASONING_PROFILE = "xhigh" as const;
 export const SPECTRA_DEFAULT_VISION_MODEL_ID = "xiaomi/mimo-v2.5";
 export const SPECTRA_PRIMARY_PROVIDER = "OpenAI" as const;
 export const SPECTRA_VISION_PROVIDER = "Xiaomi" as const;
@@ -54,7 +54,7 @@ export function resolveSpectraFallbackModelId(
 
 export function getSpectraReasoningProfile() {
   const value = process.env.SPECTRA_REASONING_PROFILE?.trim().toLowerCase();
-  return value && ["low", "medium", "high"].includes(value)
+  return value && ["low", "medium", "high", "xhigh"].includes(value)
     ? value
     : SPECTRA_DEFAULT_REASONING_PROFILE;
 }

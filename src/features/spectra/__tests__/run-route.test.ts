@@ -1291,7 +1291,7 @@ describe("Spectra run route", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(payload.model).toBe("openai/gpt-5.6");
     expect(payload.provider).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: false });
-    expect(payload.reasoning).toEqual({ effort: "high", exclude: true });
+    expect(payload.reasoning).toEqual({ effort: "xhigh", exclude: true });
     expect(payload.tools?.map((tool) => tool.function?.name)).toEqual(
       expect.arrayContaining([
         "retrieve_memory",

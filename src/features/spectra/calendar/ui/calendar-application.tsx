@@ -14,7 +14,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Sparkles,
   X,
   ZoomIn,
   ZoomOut,
@@ -1793,15 +1792,6 @@ function CalendarItemPanel({
           ) : null}
         </section>
       ) : null}
-      <div className="absolute bottom-5 left-5 right-5">
-        <button
-          type="button"
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] py-2.5 text-micro font-semibold hover:bg-[var(--bg-hover)]"
-        >
-          <Sparkles className="size-3.5" />
-          Ask Spectra about this time
-        </button>
-      </div>
     </aside>
   );
 }

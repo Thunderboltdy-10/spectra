@@ -67,6 +67,7 @@ import {
   publicError,
   saveAssistantMessage,
   streamCard,
+  coalesceTextDeltas,
 } from "./loop/report";
 import {
   canUndoRunWithEffects,
@@ -318,7 +319,7 @@ async function runAttempt(
       clearTimeout(eventFlushTimer);
       eventFlushTimer = null;
     }
-    const events = queuedEvents;
+    const events = coalesceTextDeltas(queuedEvents);
     queuedEvents = [];
     if (events.length === 0) return eventWrite;
     eventWrite = eventWrite
@@ -1067,7 +1068,8 @@ async function runAttempt(
             // Success-facing prose stays withheld until every guarded native
             // operation has durably committed and verified. Progress and
             // artifact presence continue live, but the assistant cannot claim
-            // completion while the actual work is still synchronizing.
+            // completion while the actual work is still synchronizing. Only
+            // the separate answer channel below is published before the end.
           },
           undefined,
           executionSignal,
@@ -1359,6 +1361,14 @@ async function runAttempt(
               runId: params.runId,
               key: event.key,
               payload: event.payload,
+            }),
+          // Answer prose streams live; the model loop sends only text written
+          // while nothing is staged, and the final text_replace stays canonical.
+          (content, mode) =>
+            publish({
+              type: mode === "replace" ? "text_replace" : "text_delta",
+              runId: params.runId,
+              content,
             }),
         );
     const researchEvidence =

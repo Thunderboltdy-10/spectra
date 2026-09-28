@@ -3755,6 +3755,8 @@ export async function callModel(
     key: string;
     payload?: Record<string, unknown>;
   }) => void,
+  /** Prose the student may see while it is written; "replace" takes it back. */
+  onAnswerText?: (content: string, mode: "delta" | "replace") => void,
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   const numericSourceRequired = hasNumericTableSource(attachments);
@@ -4477,6 +4479,17 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
       : parseAndCheckPlan(text);
   let response = new Response(null, { status: 503 });
   let emittedPublicText = "";
+  // The part of the public text the student has already seen. Only prose
+  // written while nothing is staged or committed streams, so it can only be an
+  // answer or a question, never a claim about work that has not saved yet.
+  let streamedAnswerText = "";
+  let answerRequest = 0;
+  let agentTurnRequests = 0;
+  const clearStreamedAnswer = () => {
+    if (!streamedAnswerText) return;
+    streamedAnswerText = "";
+    onAnswerText?.("", "replace");
+  };
   const emitPublic = (delta: string) => {
     emittedPublicText += delta;
     onPublicText?.(delta, "delta");
@@ -4484,6 +4497,21 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
   const replacePublic = (content: string) => {
     emittedPublicText = content;
     onPublicText?.(content, "replace");
+    clearStreamedAnswer();
+  };
+  const streamAnswerFor = (request: number) => (delta: string) => {
+    if (acceptedAgentOperations.length || committedApplicationSummaries.length) {
+      clearStreamedAnswer();
+      return;
+    }
+    // A later turn's prose replaces an earlier turn's preamble.
+    if (answerRequest !== request) {
+      if (emittedPublicText) replacePublic("");
+      answerRequest = request;
+    }
+    emitPublic(delta);
+    streamedAnswerText += delta;
+    onAnswerText?.(delta, "delta");
   };
   let result: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
   let plan: SpectraPlan | undefined;
@@ -5325,7 +5353,9 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         }
         return readOpenRouterAgentTurn(
           response,
-          undefined,
+          onAnswerText && ordinaryAgent
+            ? streamAnswerFor(++agentTurnRequests)
+            : undefined,
           onReasoningText,
           (call) => {
             if (
@@ -5767,6 +5797,8 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
   if (!emittedPublicText) onPublicText?.(plan.finalResponse);
   else if (plan.finalResponse.startsWith(emittedPublicText))
     onPublicText?.(plan.finalResponse.slice(emittedPublicText.length));
+  // Work to save reports only after its commit; take back any preamble.
+  if (plan.decision === "operate") clearStreamedAnswer();
   // A question keeps the whole staged graph, in its stable index space, for
   // the continuation that receives the answer. Nothing here is executable.
   // A restored request always re-parks, even with nothing staged, so a

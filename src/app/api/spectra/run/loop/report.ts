@@ -17,7 +17,7 @@ export function protocolItemForLegacyEvent(
     return {
       type: "text_delta",
       channel: "answer",
-      text: String(event.delta ?? event.text ?? ""),
+      text: String(event.content ?? event.delta ?? event.text ?? ""),
     };
   if (type === "progress" || type === "status")
     return {
@@ -44,6 +44,29 @@ export function protocolItemForLegacyEvent(
         240,
       ) || "Working",
   };
+}
+
+type QueuedRunEvent = { type: string; payload: Record<string, unknown> };
+const MAX_COALESCED_DELTA = 16_000;
+
+/** A streamed answer arrives as many small deltas. Consecutive ones share one
+ * durable event row, so a long answer does not write hundreds of rows. */
+export function coalesceTextDeltas(events: readonly QueuedRunEvent[]) {
+  const merged: QueuedRunEvent[] = [];
+  for (const event of events) {
+    const previous = merged.at(-1);
+    const content = `${String(previous?.payload.content ?? "")}${String(event.payload.content ?? "")}`;
+    if (event.type !== "text_delta" || previous?.type !== "text_delta" || content.length > MAX_COALESCED_DELTA) {
+      merged.push(event);
+      continue;
+    }
+    const runItem = previous.payload.runItem as Record<string, unknown> | undefined;
+    merged[merged.length - 1] = {
+      type: "text_delta",
+      payload: { ...previous.payload, content, ...(runItem ? { runItem: { ...runItem, text: content } } : {}) },
+    };
+  }
+  return merged;
 }
 
 export function legacyEventForRunItem(

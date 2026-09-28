@@ -739,6 +739,29 @@ describe("Spectra run route", () => {
     expect((assistant?.[1] as { content?: string }).content).toBe("Your notes are ready.");
   });
 
+  it.each([
+    ["rewrites the answer", "Here is a tighter summary you can paste in.", "Here is a tighter summary you can paste in."],
+    ["keeps claiming", "I've updated your notes.", "I've updated your notes.\n\n_Nothing was saved from this reply._"],
+  ])("never lets a reply that saved nothing claim a save (model %s)", async (_case, secondReply, saved) => {
+    const { fetchMock, convexMutation } = setup({});
+    const replies = ["I've updated your notes with a tighter summary.", secondReply];
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI",
+      choices: [{ finish_reason: "stop", message: { content: replies.shift() ?? secondReply } }],
+    }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Tighten my notes summary." }),
+    }))).text();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const correction = (JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body)) as {
+      messages: Array<{ role: string; content: unknown }> }).messages.at(-1);
+    expect(correction).toMatchObject({ role: "system", content: expect.stringContaining("no change was staged or saved") });
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe(saved);
+  });
+
   it("takes back a streamed answer cut off by a provider error before the retry streams", async () => {
     const { fetchMock, convexMutation } = setup({});
     const sse = (records: unknown[]) => new Response(new ReadableStream({

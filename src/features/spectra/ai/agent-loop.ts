@@ -127,6 +127,11 @@ export async function runSpectraAgentLoop(input: {
   onTurn?: (turn: OpenRouterAgentTurn, index: number) => void;
   /** Exact harness task state (staged graph, receipts) kept across compaction. */
   taskState?: () => string | undefined;
+  /**
+   * Checks a complete final answer once. A returned correction is sent back
+   * to the model, which can still act with tools or rewrite the answer.
+   */
+  reviewAnswer?: (text: string) => string | undefined;
   budget?: {
     maxTurns?: number;
     maxToolCalls?: number;
@@ -155,6 +160,7 @@ export async function runSpectraAgentLoop(input: {
   // Prose from turns that ended at the output limit, awaiting continuation.
   let answerPrefix = "";
   let lengthContinuations = 0;
+  let answerReviewed = false;
   const startedAt = Date.now();
   const maxTurns = Math.max(4, Math.min(40, input.budget?.maxTurns ?? 24));
   const maxToolCalls = Math.max(
@@ -293,6 +299,17 @@ export async function runSpectraAgentLoop(input: {
         continue;
       }
       if (stalled && !answerText.trim()) throw new SpectraAgentNoProgressError();
+      const correction = !cutOff && !finalizationOnly && !answerReviewed
+        ? input.reviewAnswer?.(answerText)
+        : undefined;
+      answerReviewed ||= !cutOff;
+      if (correction) {
+        append(
+          { role: "assistant", content: turn.text },
+          { role: "system", content: correction },
+        );
+        continue;
+      }
       return {
         text: answerText,
         model,

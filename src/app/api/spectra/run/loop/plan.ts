@@ -8,7 +8,7 @@ import type {
 import { rows, summarizeArtifact } from "./gather";
 import { authenticatedArtifactObservations } from "./discovery";
 import { executeThreadRead } from "./thread-read";
-import { planFromAgentCompletion } from "./completion";
+import { claimsUnsavedWork, planFromAgentCompletion } from "./completion";
 import { explicitMutationScopeViolation } from "./target-scope";
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
 import {
@@ -4793,10 +4793,18 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
       // through typed tools can enter the durable graph on this path.
       // An answer that still ended at the output limit after continuing says
       // so instead of reading as complete.
-      const answerText = agentResult.truncated
-        ? `${agentResult.text.trimEnd()}
-
-_This answer reached the length limit and stops here. Ask me to continue for the rest._`
+      const notes = [
+        ...(agentResult.truncated
+          ? ["_This answer reached the length limit and stops here. Ask me to continue for the rest._"]
+          : []),
+        // Still claiming saved work after its one correction turn: the reply
+        // must not read as a receipt for changes that do not exist.
+        ...(answerIsStreamable() && claimsUnsavedWork(agentResult.text)
+          ? ["_Nothing was saved from this reply._"]
+          : []),
+      ];
+      const answerText = notes.length
+        ? [agentResult.text.trimEnd(), ...notes].join("\n\n")
         : agentResult.text;
       latestPlanText = answerText;
       const completion = planFromAgentCompletion(answerText, stagedGraph());
@@ -5019,6 +5027,14 @@ _This answer reached the length limit and stops here. Ask me to continue for the
           }]
         : messages,
       budget: budgetForAgentPass(requestMode, agentRuntimeBudget),
+      // A reply that says it saved, created or updated something while no
+      // operation was staged or committed gets one turn to do the work with
+      // tools or to answer without the claim.
+      reviewAnswer: ordinaryAgent
+        ? (text) => answerIsStreamable() && claimsUnsavedWork(text)
+          ? "Your reply says something was saved, created or updated, but no change was staged or saved in this run: no write tool was called. If the request needs a change, make it now with the tools. Otherwise give the complete answer again without saying anything was saved, created or updated."
+          : undefined
+        : undefined,
       // Survives context compaction: identities of staged (unsaved) work and
       // actions this attempt already committed. Typed payloads stay in memory.
       taskState: () => acceptedAgentOperations.length || committedApplicationSummaries.length

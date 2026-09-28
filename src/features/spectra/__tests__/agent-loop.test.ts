@@ -58,6 +58,22 @@ describe("runSpectraAgentLoop", () => {
     expect(result).toMatchObject({ text: "more more more more ", truncated: true });
   });
 
+  it("sends a reviewed final answer back once, then accepts the next answer", async () => {
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "I've updated your notes.", toolCalls: [], finishReason: "stop" })
+      .mockResolvedValueOnce({ text: "Here is the corrected paragraph.", toolCalls: [], finishReason: "stop" });
+    const reviewAnswer = vi.fn().mockReturnValue("Nothing was saved; act or rewrite.");
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool: vi.fn(),
+      isTerminalTool: () => false, reviewAnswer });
+    expect(result.text).toBe("Here is the corrected paragraph.");
+    expect(reviewAnswer).toHaveBeenCalledTimes(1);
+    expect(requestTurn.mock.calls.map((call) => call[2])).toEqual([false, false]);
+    expect(requestTurn.mock.calls[1]![0]).toEqual([
+      { role: "assistant", content: "I've updated your notes." },
+      { role: "system", content: "Nothing was saved; act or rewrite." },
+    ]);
+  });
+
   it("never executes or finishes on a tool call cut off at the output limit", async () => {
     const cutPlan = { id: "plan", name: "submit_plan", arguments: '{"operations":[{"type":"artifact.cre' };
     const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"deck"}' };

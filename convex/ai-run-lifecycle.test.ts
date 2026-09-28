@@ -1119,4 +1119,22 @@ describe("AI run create and recovery lifecycle", () => {
       }),
     ).resolves.toMatchObject({ selected: true });
   });
+
+  it("appends streamed event batches and records a terminal event once", async () => {
+    const t = convexTest(schema, modules);
+    const { runId } = await seedRun(t, { status: "running" });
+    const actor = t.withIdentity(identity);
+    const append = (events: { type: string; payload: unknown }[]) =>
+      actor.mutation(api.spectraRuns.appendEvents, { runId, executionId: "execution-1", events });
+
+    await expect(append([{ type: "text", payload: { delta: "Photo" } }])).resolves.toMatchObject({ ignored: false, count: 1 });
+    await expect(append([{ type: "text", payload: { delta: "synthesis" } }])).resolves.toMatchObject({ ignored: false, count: 1 });
+    await expect(append([{ type: "final", payload: {} }])).resolves.toMatchObject({ ignored: false, count: 1 });
+    await expect(append([{ type: "final", payload: {} }])).resolves.toMatchObject({ ignored: true });
+
+    const events = await t.run((ctx) =>
+      ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", runId)).collect(),
+    );
+    expect(events.map((event) => [event.sequence, event.type])).toEqual([[1, "text"], [2, "text"], [3, "final"]]);
+  });
 });

@@ -1638,12 +1638,18 @@ export const appendEvents = mutation({
         : args.events;
     if (allowed.length === 0)
       return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+    // Streaming writes many non-terminal batches; only a batch carrying a
+    // terminal event needs the run's history to stay idempotent.
+    const needsTerminalCheck = allowed.some((event) =>
+      terminalTypes.has(event.type),
+    );
     const existingTerminalTypes = new Set(
-      (
-        await ctx.db
-          .query("spectraRunEvents")
-          .withIndex("by_run_sequence", (q) => q.eq("runId", args.runId))
-          .collect()
+      (needsTerminalCheck
+        ? await ctx.db
+            .query("spectraRunEvents")
+            .withIndex("by_run_sequence", (q) => q.eq("runId", args.runId))
+            .collect()
+        : []
       )
         .filter(
           (event) =>

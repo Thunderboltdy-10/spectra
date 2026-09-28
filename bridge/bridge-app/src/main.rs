@@ -477,7 +477,16 @@ fn mount_repair_retry_due(journal: &Journal, grant_id: &str) -> bool {
         .ok()
         .flatten()
         .and_then(|value| serde_json::from_str::<MountRepairRetry>(&value).ok())
-        .is_some_and(|retry| retry.retry_at_ms <= current_time_ms())
+        .is_some_and(|retry| {
+            let now = current_time_ms();
+            // A due time beyond any repair delay was scheduled before the wall
+            // clock was set back; do not wait out the size of the jump.
+            retry.retry_at_ms <= now
+                || retry.retry_at_ms
+                    > now.saturating_add(
+                        spectra_bridge_core::retry::retry_schedule_horizon().as_millis() as u64,
+                    )
+        })
 }
 
 fn display_retry_delay(delay_ms: u64) -> String {
@@ -3363,7 +3372,7 @@ fn main() {
 mod tests {
     use super::{
         ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
-        configured_deployment_url, mount_repair_retry_due, mount_repair_retry_key,
+        configured_deployment_url, current_time_ms, mount_repair_retry_due, mount_repair_retry_key,
         resolve_bridge_data_dir, retain_current_mounts, schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
@@ -3508,6 +3517,17 @@ mod tests {
             serde_json::from_str::<MountRepairRetry>(&journal.config(&retry_key).unwrap().unwrap())
                 .unwrap();
         assert_eq!(second.attempts, 2);
+        let skewed = MountRepairRetry {
+            attempts: second.attempts,
+            retry_at_ms: current_time_ms() + 24 * 60 * 60 * 1_000,
+        };
+        journal
+            .set_config(&retry_key, &serde_json::to_string(&skewed).unwrap())
+            .unwrap();
+        assert!(
+            mount_repair_retry_due(&journal, "grant-safe"),
+            "a retry scheduled before the clock was set back must not wait out the jump"
+        );
         clear_mount_repair_retry(&journal, "grant-safe").unwrap();
         assert!(!mount_repair_retry_due(&journal, "grant-safe"));
         assert_eq!(journal.config(&retry_key).unwrap(), None);

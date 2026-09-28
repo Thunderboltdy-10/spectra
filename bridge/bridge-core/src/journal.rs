@@ -566,17 +566,19 @@ impl Journal {
     }
     pub fn due_queue(&self, limit: usize) -> anyhow::Result<Vec<QueueItem>> {
         let connection = self.connection.lock().unwrap();
-        let mut statement = connection.prepare("SELECT id,op_id,direction,payload,attempts,available_at FROM queue WHERE available_at <= ? ORDER BY id LIMIT ?")?;
-        let rows = statement.query_map(params![unix_ms(), limit.clamp(1, 500) as i64], |row| {
-            Ok(QueueItem {
-                id: row.get(0)?,
-                op_id: row.get(1)?,
-                direction: row.get(2)?,
-                payload: row.get(3)?,
-                attempts: row.get(4)?,
-                available_at: row.get(5)?,
-            })
-        })?;
+        let mut statement = connection.prepare("SELECT id,op_id,direction,payload,attempts,available_at FROM queue WHERE available_at <= ? OR available_at > ? ORDER BY id LIMIT ?")?;
+        let (now, horizon) = due_window();
+        let rows =
+            statement.query_map(params![now, horizon, limit.clamp(1, 500) as i64], |row| {
+                Ok(QueueItem {
+                    id: row.get(0)?,
+                    op_id: row.get(1)?,
+                    direction: row.get(2)?,
+                    payload: row.get(3)?,
+                    attempts: row.get(4)?,
+                    available_at: row.get(5)?,
+                })
+            })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
     pub fn acknowledge_queue(&self, id: i64) -> anyhow::Result<()> {
@@ -629,27 +631,29 @@ impl Journal {
         let mut statement = connection.prepare(
             "SELECT id,request_id,claim_generation,claim_token,outcome,
                     actual_revision,error_code,error_message,attempts,available_at,kind,actual_relative_path
-             FROM native_ack_queue WHERE available_at <= ?
+             FROM native_ack_queue WHERE available_at <= ? OR available_at > ?
              ORDER BY id LIMIT ?",
         )?;
-        let rows = statement.query_map(params![unix_ms(), limit.clamp(1, 500) as i64], |row| {
-            Ok(NativeAckItem {
-                id: row.get(0)?,
-                kind: row.get(10)?,
-                request_id: row.get(1)?,
-                claim_generation: row
-                    .get::<_, Option<i64>>(2)?
-                    .map(|value| value.max(0) as u64),
-                claim_token: row.get(3)?,
-                outcome: row.get(4)?,
-                actual_revision: row.get(5)?,
-                actual_relative_path: row.get(11)?,
-                error_code: row.get(6)?,
-                error_message: row.get(7)?,
-                attempts: row.get::<_, i64>(8)?.max(0) as u32,
-                available_at: row.get(9)?,
-            })
-        })?;
+        let (now, horizon) = due_window();
+        let rows =
+            statement.query_map(params![now, horizon, limit.clamp(1, 500) as i64], |row| {
+                Ok(NativeAckItem {
+                    id: row.get(0)?,
+                    kind: row.get(10)?,
+                    request_id: row.get(1)?,
+                    claim_generation: row
+                        .get::<_, Option<i64>>(2)?
+                        .map(|value| value.max(0) as u64),
+                    claim_token: row.get(3)?,
+                    outcome: row.get(4)?,
+                    actual_revision: row.get(5)?,
+                    actual_relative_path: row.get(11)?,
+                    error_code: row.get(6)?,
+                    error_message: row.get(7)?,
+                    attempts: row.get::<_, i64>(8)?.max(0) as u32,
+                    available_at: row.get(9)?,
+                })
+            })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -745,6 +749,16 @@ impl Journal {
         )?;
         Ok(())
     }
+}
+
+/// Rows are due at or before now, or when scheduled beyond any retry delay
+/// the Bridge can choose (the wall clock was set back after scheduling).
+fn due_window() -> (i64, i64) {
+    let now = unix_ms();
+    (
+        now,
+        now.saturating_add(crate::retry::retry_schedule_horizon().as_millis() as i64),
+    )
 }
 
 fn unix_ms() -> i64 {
@@ -1020,6 +1034,39 @@ mod tests {
         assert!(journal.due_native_acks(10).unwrap().is_empty());
         journal.acknowledge_native_ack(queued[0].id).unwrap();
         assert!(journal.due_native_acks(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retries_scheduled_before_the_clock_was_set_back_stay_due() {
+        let journal = Journal::in_memory().unwrap();
+        journal.enqueue("op-a", "outbound-change", "{}").unwrap();
+        journal
+            .enqueue_native_ack("request-a", Some(1), Some("claim"), "verified", None, None)
+            .unwrap();
+        let change = journal.due_queue(10).unwrap().remove(0);
+        let ack = journal.due_native_acks(10).unwrap().remove(0);
+        journal
+            .retry_queue(change.id, Duration::from_secs(30))
+            .unwrap();
+        journal
+            .retry_native_ack(ack.id, Duration::from_secs(30))
+            .unwrap();
+        assert!(journal.due_queue(10).unwrap().is_empty());
+        assert!(journal.due_native_acks(10).unwrap().is_empty());
+        // The retry was scheduled while the wall clock ran a day ahead. Once
+        // the clock is corrected the rows must not wait out the whole day.
+        let skewed = unix_ms() + 24 * 60 * 60 * 1_000;
+        {
+            let connection = journal.connection.lock().unwrap();
+            connection
+                .execute("UPDATE queue SET available_at=?", [skewed])
+                .unwrap();
+            connection
+                .execute("UPDATE native_ack_queue SET available_at=?", [skewed])
+                .unwrap();
+        }
+        assert_eq!(journal.due_queue(10).unwrap().len(), 1);
+        assert_eq!(journal.due_native_acks(10).unwrap().len(), 1);
     }
 
     #[test]

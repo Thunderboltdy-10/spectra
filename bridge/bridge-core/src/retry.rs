@@ -57,6 +57,18 @@ fn retry_delay_ms_with_bounds(
         .min(max_delay_ms)
 }
 
+/// A retry is never scheduled further ahead than this. A due time beyond it
+/// was computed against a wall clock that has since been set back (manual
+/// change, NTP correction after a dead CMOS battery); treating it as due keeps
+/// the queue from stalling for the size of the jump.
+pub fn retry_schedule_horizon() -> Duration {
+    Duration::from_millis(
+        POLICY
+            .max_delay_ms
+            .max(POLICY.bridge_mount_repair_max_delay_ms),
+    ) + Duration::from_secs(60)
+}
+
 pub fn bridge_claim_lease() -> Duration {
     Duration::from_millis(POLICY.bridge_claim_lease_ms)
 }

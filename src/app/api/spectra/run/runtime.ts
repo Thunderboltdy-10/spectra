@@ -2344,7 +2344,7 @@ async function runAttempt(
     // live exchange and surfaces open-artifact cards as soon as that message
     // appears; racing the two lets the side panel look finished while Live Dock
     // is still on a running tab.
-    const completion = await mutate<unknown & object, { nativeOutcome?: string } | null>("spectraRuns:updateStatus", {
+    const completion = (await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -2361,7 +2361,7 @@ async function runAttempt(
       modelUsed: modelResult.model,
       providerUsed: modelResult.provider,
       usage: modelResult.usage,
-    });
+    })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
     const reply = replyWithNativeReceipt(plan.finalResponse, completion?.nativeOutcome);
     await saveAssistantMessage({
@@ -3253,7 +3253,7 @@ async function resumeOperationsAttempt(params: {
     loop.enter("report");
     // Same ordering as the primary operate path: terminal run status first so
     // chat/Live Dock agree on "finished" before open-artifact cards appear.
-    const completion = await mutate<unknown & object, { nativeOutcome?: string } | null>("spectraRuns:updateStatus", {
+    const completion = (await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -3284,7 +3284,7 @@ async function resumeOperationsAttempt(params: {
           : []),
       ],
       outcome: "canonical_saved",
-    });
+    })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
     const reply = replyWithNativeReceipt(finalSummary, completion?.nativeOutcome);
     await saveAssistantMessage({

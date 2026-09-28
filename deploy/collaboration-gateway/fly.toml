@@ -1,10 +1,15 @@
 # Spectra collaboration gateway — Fly.io (P5.I2 default).
-# Sticky single instance: rooms are in-memory; keep count at 1.
+# Exactly one machine. Each room (live and canonical Y.Doc, write queues,
+# open-document registry) lives in this process's memory, and Fly's proxy does
+# not route a WebSocket by room. A second machine would hold a second copy of
+# the same room, and the two would accept writes independently. `fly deploy`
+# creates two machines for a new app unless told not to, hence --ha=false.
+# Scale up (VM size), never out: `fly scale count 1`.
 # Secrets: CONVEX_URL or NEXT_PUBLIC_CONVEX_URL, SPECTRA_COLLAB_TOKEN_SECRET,
 # SPECTRA_COLLAB_BRIDGE_KEY.
 #
 # Deploy from the repository root (Docker context must include package.json):
-#   fly deploy . -c deploy/collaboration-gateway/fly.toml --dockerfile deploy/collaboration-gateway/Dockerfile
+#   fly deploy . -c deploy/collaboration-gateway/fly.toml --dockerfile deploy/collaboration-gateway/Dockerfile --ha=false
 
 app = "spectra-collaboration-gateway"
 primary_region = "mad"
@@ -15,6 +20,8 @@ primary_region = "mad"
 [env]
   SPECTRA_COLLAB_PORT = "1234"
   SPECTRA_COLLAB_HOST = "0.0.0.0"
+  # Leave headroom under the VM's memory for buffers outside the V8 heap.
+  NODE_OPTIONS = "--max-old-space-size=1536"
 
 [http_service]
   internal_port = 1234
@@ -24,10 +31,13 @@ primary_region = "mad"
   min_machines_running = 1
   processes = ["app"]
 
+  # One connection per open collaborative artifact per tab. 200 refused new
+  # editors once a few classes worked at once. These limits are provisional
+  # until `npm run collaboration:classroom-load` measures this VM.
   [http_service.concurrency]
     type = "connections"
-    hard_limit = 200
-    soft_limit = 150
+    hard_limit = 1000
+    soft_limit = 800
 
   [[http_service.checks]]
     grace_period = "10s"
@@ -36,6 +46,8 @@ primary_region = "mad"
     path = "/_spectra/health"
     timeout = "2s"
 
+# A dedicated CPU: the gateway is one Node process serving every school, and
+# a shared CPU's throttling stalls every room at once.
 [vm]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = "performance-1x"
+  memory = "2gb"

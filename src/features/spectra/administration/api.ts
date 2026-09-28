@@ -1,3 +1,5 @@
+import { requestSpectra } from "../data/request";
+
 export type AdministrationIdentity = {
   account: {
     accountId: string;
@@ -197,7 +199,7 @@ async function responseJson<T>(response: Response): Promise<T> {
         data?.message ??
           structuredError?.message ??
           (typeof data?.error === "string" ? data.error : undefined) ??
-          "The administration request failed.",
+          "Spectra could not finish this request. Try again in a moment.",
       ),
       { code: structuredError?.code },
     );
@@ -213,7 +215,7 @@ export async function getAdministration<T>(
   for (const [key, value] of Object.entries(params))
     if (value !== undefined) query.set(key, String(value));
   return responseJson<T>(
-    await fetch(`/api/spectra/administration?${query}`, {
+    await requestSpectra(`/api/spectra/administration?${query}`, {
       cache: "no-store",
     }),
   );
@@ -224,7 +226,7 @@ export async function mutateAdministration<T>(
   payload: Record<string, unknown> = {},
 ) {
   return responseJson<T>(
-    await fetch("/api/spectra/administration", {
+    await requestSpectra("/api/spectra/administration", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...payload }),

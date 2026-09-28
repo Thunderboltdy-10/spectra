@@ -7,6 +7,7 @@ import type { TimetablePersonalState } from "../timetable/model";
 import { spectraBus } from "../events";
 import { coalesceInFlight } from "@/lib/coalesce-inflight";
 import { createCatalogPageCache, type CatalogPage } from "./catalog-page-cache";
+import { requestSpectra } from "./request";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
@@ -997,25 +998,10 @@ export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
   else workspaceCache.clear();
 }
 
-/**
- * A request that never reached the server is a connection problem. The
- * browser's own wording ("Failed to fetch", "Load failed", "NetworkError when
- * attempting to fetch resource") is not something to print at a student, and
- * every caller below forwards its error message into a toast or error state.
- */
-export const SPECTRA_REQUEST_UNREACHABLE =
-  "Spectra could not reach the server. Check your connection, then try again.";
+// Connection failures are reworded in ./request; every call below uses it.
+export { SPECTRA_REQUEST_UNREACHABLE } from "./request";
 const SPECTRA_REQUEST_FAILED =
   "Spectra could not finish this request. Try again in a moment.";
-
-async function requestSpectra(input: RequestInfo | URL, init?: RequestInit) {
-  try {
-    return await globalThis.fetch(input, init);
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw error;
-    throw new Error(SPECTRA_REQUEST_UNREACHABLE, { cause: error });
-  }
-}
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => null)) as

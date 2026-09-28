@@ -14,6 +14,7 @@ import { durableFrontierHash } from "../../../../scripts/collaboration-canonical
 import { getConvexUrl } from "@/lib/env";
 import {
   collaborationDocumentName,
+  collaborationGatewayUrl,
   collaborationProtocolVersion,
   signCollaborationSession,
 } from "@/lib/collaboration-token";
@@ -625,12 +626,7 @@ async function createCollaborationSession(
     providerKind,
     level,
     policyVersion: room.policyVersion,
-    url:
-      providerKind === "cloudflare"
-        ? (process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
-          process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
-          "ws://localhost:8787")
-        : (process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234"),
+    url: collaborationGatewayUrl(providerKind),
   };
 }
 

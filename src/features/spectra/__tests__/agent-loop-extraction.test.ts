@@ -12,7 +12,8 @@ describe("Spectra agent-loop extraction", () => {
       "utf8",
     );
 
-    expect(route.split(/\r?\n/)).toHaveLength(9);
+    // Imports, runtime + maxDuration segment config, and the POST delegate.
+    expect(route.split(/\r?\n/)).toHaveLength(10);
     expect(route).toContain('from "./runtime"');
     expect(route).not.toMatch(/convex|openrouter|artifact|workspace/i);
   });

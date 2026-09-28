@@ -11,7 +11,10 @@ import { internal } from "./_generated/api";
 import { PAYLOAD_RELEASE_GRACE_MS } from "../shared/replica-truth";
 import { isDurableContentRef } from "../shared/durable-content";
 import { contentDependencyValidator, resolveContentDependencies } from "./durableContentDependencies";
+import { validateDurablePayload } from "./durablePayloadIntegrity";
 import { reconcileDurablePayloadOwners } from "./durablePayloadOwnership";
+
+export { validateDurablePayload };
 
 export async function validateContentAdoption(ctx: MutationCtx | QueryCtx, artifactId: Id<"spectraArtifacts">, accountId: Id<"accounts">, value: unknown) {
   if (!isDurableContentRef(value)) return;
@@ -40,25 +43,6 @@ export async function requireDurablePayloadAuthority(ctx: QueryCtx | MutationCtx
     (modify && !decision.capabilities.includes("modify")))
     throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
   return room;
-}
-
-export async function validateDurablePayload(ctx: QueryCtx | MutationCtx, args: {
-  payloadRef: string; digest: string; artifactId: Id<"spectraArtifacts">;
-  kind: "projection" | "yjs-update" | "yjs-snapshot"; byteLength?: number;
-  accountId?: Id<"accounts">; policyVersion?: number;
-}) {
-  const id = ctx.db.normalizeId("collaborationDurablePayloads", args.payloadRef);
-  const row = id ? await ctx.db.get(id) : null;
-  if (!row || row.status !== "active" || row.artifactId !== args.artifactId ||
-    row.kind !== args.kind || row.digest !== args.digest ||
-    (args.byteLength !== undefined && row.byteLength !== args.byteLength) ||
-    (args.accountId !== undefined && row.accountId !== args.accountId) ||
-    (args.policyVersion !== undefined && row.policyVersion !== args.policyVersion))
-    throw new Error("COLLABORATION_DURABLE_PAYLOAD_INVALID");
-  const metadata = await ctx.db.system.get(row.storageId);
-  if (!metadata || metadata.size !== row.byteLength || normalizeSha256(metadata.sha256) !== row.digest)
-    throw new Error("COLLABORATION_DURABLE_PAYLOAD_INTEGRITY");
-  return row;
 }
 
 const kind = v.union(

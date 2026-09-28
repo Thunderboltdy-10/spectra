@@ -3,6 +3,7 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
   collaborationDocumentName,
+  collaborationGatewayUrl,
   collaborationProtocolVersion,
   COLLABORATION_SESSION_TTL_MS,
   signCollaborationSession,
@@ -110,13 +111,10 @@ export async function POST(request: NextRequest) {
       : `localhost:${process.env.SPECTRA_WEB_PORT ?? "3000"}`;
     const localGatewayUrl = `${request.nextUrl.protocol === "https:" ? "wss" : "ws"}://${safeDevelopmentHost}/_spectra/realtime`;
     const collaborationUrl = cloudflareRealtime
-      ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
-        process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
-        "ws://localhost:8787"
+      ? collaborationGatewayUrl("cloudflare")
       : isLocalRequestHost
         ? localGatewayUrl
-        : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
-          "ws://localhost:1234";
+        : collaborationGatewayUrl("hocuspocus");
     logger.info("Collaboration session issued", {
       provider: cloudflareRealtime ? "cloudflare" : "hocuspocus",
       url: collaborationUrl,

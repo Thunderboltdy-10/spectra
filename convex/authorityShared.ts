@@ -1,7 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor, getActorForAccountId, type AuthenticatedActor } from "./identityShared";
-import { evaluateCurrentPinnedArtifactPlacement } from "./artifactEmbedPlacement";
+import { evaluateCurrentPinnedArtifactPlacement } from "./artifactEmbedPlacementEvidence";
 import {
   ARTIFACT_SUMMARY_READ_MODEL_VERSION,
   artifactSummaryFor,

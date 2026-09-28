@@ -2542,21 +2542,29 @@ async function lifecycleImpact(ctx: Ctx, schoolId: Id<"schools">) {
         q.eq("schoolId", schoolId).eq("status", "active"),
       )
       .collect(),
-    ctx.db.query("spectraArtifacts").collect(),
+    // Every lifecycle request (including an urgent suspend) reads this, so it
+    // must stay inside the school: a table scan read every tenant's artifact
+    // content and failed once the platform passed Convex's read limits.
+    ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId))
+      .collect(),
     ctx.db
       .query("spectraWorkspaces")
       .withIndex("by_school_status", (q) =>
         q.eq("schoolId", schoolId).eq("status", "active"),
       )
       .collect(),
-    ctx.db.query("schoolIntegrations").collect(),
+    ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_school_provider", (q) => q.eq("schoolId", schoolId))
+      .collect(),
   ]);
   return {
     activeMembers: members.length,
-    artifacts: artifacts.filter((item) => item.schoolId === schoolId).length,
+    artifacts: artifacts.length,
     workspaces: workspaces.length,
-    integrations: integrations.filter((item) => item.schoolId === schoolId)
-      .length,
+    integrations: integrations.length,
   };
 }
 
@@ -2628,11 +2636,11 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("feedbackReports")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("schoolRequests")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("limitPolicies")
@@ -2696,7 +2704,7 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("memoryClaims")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("auditEvents")
@@ -2704,15 +2712,15 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("schoolIntegrations")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_provider", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("integrationCapabilities")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("externalRecords")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_updated", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("externalRecordOverlays")

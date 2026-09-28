@@ -8,7 +8,8 @@ import { makeFunctionReference, type ApiFromModules, type FunctionArgs, type Fun
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement, loadRoomPage } from "./artifactEmbedPlacement";
+import { loadRoomPage } from "./artifactEmbedPlacement";
+import { currentPinnedPlacementHead, hasCurrentPinnedArtifactPlacement } from "./artifactEmbedPlacementEvidence";
 import { containsPinnedArtifactPlacement } from "../shared/artifact-embed-placement";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { releaseVersionIfUnpinned } from "./artifactSnapshots";

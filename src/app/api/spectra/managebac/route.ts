@@ -96,6 +96,19 @@ function identifier(value: unknown, maximum = 500) {
 }
 
 /**
+ * MANAGEBAC_API_KEY lets a local stack connect without typing a key. A
+ * deployment never reads it: there a blank admin form would silently connect
+ * the school with one shared key that belongs to no school.
+ */
+function localDevelopmentManageBacKey() {
+  const local =
+    process.env.NODE_ENV !== "production" ||
+    process.env.SPECTRA_APP_URL?.startsWith("http://localhost:");
+  const key = local ? (process.env.MANAGEBAC_API_KEY?.trim() ?? "") : "";
+  return key.length >= 16 ? key : "";
+}
+
+/**
  * School portal hosts (e.g. gcm.managebac.com) are not the Public API.
  * Map them to the regional API host documented by Faria (CA default).
  */
@@ -1921,10 +1934,7 @@ export async function GET(request: NextRequest) {
                   process.env.MANAGEBAC_BASE_URL?.trim() ||
                     "https://api.managebac.com",
                 ) || undefined,
-              envTokenAvailable: Boolean(
-                process.env.MANAGEBAC_API_KEY?.trim() &&
-                  (process.env.MANAGEBAC_API_KEY?.trim().length ?? 0) >= 16,
-              ),
+              envTokenAvailable: Boolean(localDevelopmentManageBacKey()),
             }
           : {}),
       },
@@ -1983,7 +1993,7 @@ export async function POST(request: NextRequest) {
           "AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.",
         );
       const typedToken = string(body.token, 20_000);
-      const envToken = process.env.MANAGEBAC_API_KEY?.trim() ?? "";
+      const envToken = localDevelopmentManageBacKey();
       const current = (await convexQuery("managebac:adminOverview", {})) as {
         integration?: { _id?: string; status?: string } | null;
       };

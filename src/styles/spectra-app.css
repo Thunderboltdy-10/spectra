@@ -13222,10 +13222,12 @@ body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
    of the tween reads as drag. */
 
 .spectra-presence-cursor {
+  left: 0;
+  top: 0;
   color: var(--presence-color);
-  will-change: left, top;
+  /* The travel engine writes translate + tilt as one transform each frame. */
+  will-change: transform;
   transform-origin: 4px 3px;
-  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .spectra-presence-trail {

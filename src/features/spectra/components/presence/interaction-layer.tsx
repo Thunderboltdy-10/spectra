@@ -49,6 +49,7 @@ import {
   PresentationLane,
   type FrameTravel,
 } from "../../collaboration/presentation-lane";
+import { useSpectraMotion } from "../../motion";
 
 /** Presence for an actor whose last frame is older than this is dropped. */
 const STALE_AFTER_MS = 20_000;
@@ -94,19 +95,6 @@ type ActorRuntime = {
   /** Act signature for which `completedAt` was recorded. */
   completedForSignature: string | null;
 };
-
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReduced(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
-  return reduced;
-}
 
 /**
  * Coarse pointers and small viewports get the truthful bits of presence
@@ -198,7 +186,9 @@ export const InteractionLayer = memo(function InteractionLayer({
   const anchorRef = useRef<HTMLDivElement>(null);
   const runtimesRef = useRef(new Map<string, ActorRuntime>());
   const [visuals, setVisuals] = useState<ActorVisual[]>([]);
-  const reducedMotion = usePrefersReducedMotion();
+  // The Spectra preference and the OS setting, layered: travel is JS-driven,
+  // so the CSS reduced-motion contract alone would not reach it.
+  const reducedMotion = useSpectraMotion().reduced;
   const simplified = useSimplifiedPresence();
   const reducedRef = useRef(reducedMotion);
   const quietRef = useRef(quiet);
@@ -227,10 +217,7 @@ export const InteractionLayer = memo(function InteractionLayer({
     effectsMutedRef.current = simplified || dense;
   }, [simplified, dense]);
 
-  const identity = useMemo(
-    () => actors.map(frameIdentity).join("|"),
-    [actors],
-  );
+  const identity = useMemo(() => actors.map(frameIdentity).join("|"), [actors]);
   const actorsRef = useRef(actors);
   actorsRef.current = actors;
   const scheduleMeasureRef = useRef<() => void>(() => undefined);
@@ -598,7 +585,9 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
   const style = {
     "--presence-color": color,
     opacity,
-    transition: departing ? "opacity 420ms var(--ease-standard)" : undefined,
+    transition: departing
+      ? "opacity var(--motion-slow) var(--ease-standard)"
+      : undefined,
   } as React.CSSProperties;
   const dragging = actIsDrag(state.act);
   const resizing = actIsResize(state.act);
@@ -784,10 +773,12 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
         data-mode={mode}
         data-ai={isAi ? "true" : undefined}
         data-travelling={travel === "journey" ? "true" : undefined}
+        // Positioned by transform: the body moves every frame of a journey,
+        // and a transform never re-lays out the layer.
         style={{
-          left: point.left,
-          top: point.top,
-          transform: tilt ? `rotate(${tilt}deg)` : undefined,
+          transform: `translate3d(${point.left}px, ${point.top}px, 0)${
+            tilt ? ` rotate(${tilt}deg)` : ""
+          }`,
         }}
       >
         {mode !== "caret" && mode !== "selection" && mode !== "hidden" && (

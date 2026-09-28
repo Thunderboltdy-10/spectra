@@ -569,7 +569,7 @@ button:hover .spectra-mark .spectra-prism-refractions,
    stand-in steps aside rather than doubling the object. */
 .spectra-prism-slot[data-occupied="true"] > svg {
   opacity: 0;
-  transition: opacity 320ms var(--ease-standard);
+  transition: opacity var(--motion-slow) var(--ease-standard);
 }
 html[data-spectra-motion="reduced"]
   .spectra-prism-optic[data-optics="working"]
@@ -675,7 +675,7 @@ html[data-spectra-motion="none"]
 }
 
 .spectra-editor-workbar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in oklab, var(--border-default) 40%, transparent);
 }
 
@@ -693,8 +693,8 @@ html[data-spectra-motion="none"]
   button:hover:not(:disabled):not(.spectra-workbar-primary):not([role="tab"]),
 .spectra-editor-workbar button[data-active="true"]:not([role="tab"]) {
   border-color: #d9d4fa;
-  background: #f0edff;
-  color: #5a48cf;
+  background: var(--brand-wash);
+  color: var(--brand-ink);
 }
 
 .spectra-editor-workbar button:active:not(:disabled) {

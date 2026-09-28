@@ -91,7 +91,7 @@
 }
 
 .presentation-shape[data-shape="pill"] {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .presentation-shape[data-shape="ellipse"] {
@@ -145,7 +145,7 @@
 
 .presentation-shape[data-shape="line"] {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 /* Clipped shapes lose their border, so the text inside them needs its own
@@ -279,7 +279,7 @@
   z-index: 60;
   width: 18px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: radial-gradient(
     circle,
     rgb(255 92 76 / 95%) 0 32%,

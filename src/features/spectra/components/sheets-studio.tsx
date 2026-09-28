@@ -135,6 +135,10 @@ import {
 } from "../sheets/cell-overlay";
 import { cachedFormulaCells } from "../sheets/cached-formulas";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
+import {
+  applyStudioHistory,
+  type StudioHistoryEntry,
+} from "./artifact-studio-value-utils";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { requestSpectra } from "../data/request";
@@ -918,8 +922,8 @@ export const SheetsStudio = memo(function SheetsStudio({
     scrollLeft: 0,
     scrollTop: 0,
   });
-  const undoRef = useRef<SheetsContent[]>([]);
-  const redoRef = useRef<SheetsContent[]>([]);
+  const undoRef = useRef<StudioHistoryEntry<SheetsContent>[]>([]);
+  const redoRef = useRef<StudioHistoryEntry<SheetsContent>[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const draggingRef = useRef(false);
@@ -1398,15 +1402,18 @@ export const SheetsStudio = memo(function SheetsStudio({
       if (sheetsContentEqual(current, next)) return;
       const committed =
         scope === "cells" ? applyCachedStaleness(current, next) : next;
+      // Mirror whiteboard/presentation: normalize before emit so field-drift
+      // cannot look like a remote conflict on the next round-trip.
+      const normalized = normalizeSheetsContent(committed);
       if (remember) {
-        undoRef.current = [...undoRef.current.slice(-79), current];
+        undoRef.current = [
+          ...undoRef.current.slice(-79),
+          { before: current, after: normalized },
+        ];
         redoRef.current = [];
         setCanUndo(true);
         setCanRedo(false);
       }
-      // Mirror whiteboard/presentation: normalize before emit so field-drift
-      // cannot look like a remote conflict on the next round-trip.
-      const normalized = normalizeSheetsContent(committed);
       rememberEmitted(normalized);
       workbookRef.current = normalized;
       setWorkbook(normalized);
@@ -1734,32 +1741,32 @@ export const SheetsStudio = memo(function SheetsStudio({
     setImportNotice(`Conditional formatting applied to ${selectionLabel}.`);
   }
 
-  function undo() {
+  // Undo replays only this person's edit against the current workbook, so a
+  // collaborator's (or the AI's) later cell edits survive it.
+  function stepHistory(direction: "undo" | "redo") {
     if (locked) return;
-    const previous = undoRef.current.pop();
-    if (!previous) return;
-    redoRef.current.push(workbook);
+    const from = direction === "undo" ? undoRef : redoRef;
+    const to = direction === "undo" ? redoRef : undoRef;
+    const entry = from.current.pop();
+    if (!entry) return;
+    to.current.push(entry);
     setCanUndo(undoRef.current.length > 0);
-    setCanRedo(true);
-    const normalized = normalizeSheetsContent(previous);
+    setCanRedo(redoRef.current.length > 0);
+    const normalized = normalizeSheetsContent(
+      applyStudioHistory(entry, direction, workbookRef.current),
+    );
     rememberEmitted(normalized);
     workbookRef.current = normalized;
     setWorkbook(normalized);
     onChange(normalized);
   }
 
+  function undo() {
+    stepHistory("undo");
+  }
+
   function redo() {
-    if (locked) return;
-    const next = redoRef.current.pop();
-    if (!next) return;
-    undoRef.current.push(workbook);
-    setCanUndo(true);
-    setCanRedo(redoRef.current.length > 0);
-    const normalized = normalizeSheetsContent(next);
-    rememberEmitted(normalized);
-    workbookRef.current = normalized;
-    setWorkbook(normalized);
-    onChange(normalized);
+    stepHistory("redo");
   }
 
   function moveSelection(

@@ -282,7 +282,7 @@ export function SandboxedArtifactRuntime({
           referrerPolicy="no-referrer"
           loading="lazy"
           allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
-          className="block w-full border-0 bg-[var(--bg-primary)] transition-[height] duration-300 motion-reduce:transition-none"
+          className="block w-full border-0 bg-[var(--bg-primary)] transition-[height] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
           style={{ height }}
         />
       ) : (

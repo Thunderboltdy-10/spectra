@@ -72,7 +72,7 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
     </span> : null}
     {hasSources ? <button type="button" className="inline-flex items-center gap-1 rounded-chip px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
       Based on {parts.join(" and ") || provenance.workspaceTitle}
-      <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      <ChevronDown className={`h-3 w-3 transition-transform duration-[var(--motion-base)] ease-standard ${open ? "rotate-180" : ""}`} />
     </button> : null}
     {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-fade-in">
       {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}

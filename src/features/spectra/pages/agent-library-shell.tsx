@@ -244,7 +244,7 @@ function AgentCard({
         onClick={onOpen}
       >
         <span className="flex min-w-0 items-start gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[var(--agent-soft)] text-[var(--agent-color)] transition-transform duration-300 group-hover:-rotate-2 group-hover:scale-[1.04]">
+          <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[var(--agent-soft)] text-[var(--agent-color)] transition-transform duration-[var(--motion-base)] ease-standard group-hover:-rotate-2 group-hover:scale-[1.04]">
             <Icon className="size-[19px]" strokeWidth={1.8} />
           </span>
           <span className="min-w-0 flex-1 text-left">

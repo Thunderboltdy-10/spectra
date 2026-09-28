@@ -1950,7 +1950,7 @@ export function QuizStudio({
                   aria-valuenow={answeredQuestionCount}
                 >
                   <div
-                    className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                    className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
                     style={{
                       width: `${displayedQuestions.length ? (answeredQuestionCount / displayedQuestions.length) * 100 : 0}%`,
                     }}

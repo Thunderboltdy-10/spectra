@@ -279,7 +279,7 @@ export function WorkbenchInspectorTabs({
                     <span className="shrink-0 text-micro text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}</span>
                   </div>
                   <SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-caption leading-5 text-[var(--text-secondary)]" />
-                  <button type="button" onClick={() => void revealOrReanchor(comment)} className={`mt-2 flex w-full items-center gap-1.5 rounded-chip px-2 py-1.5 text-left text-micro ${orphaned ? "bg-[color-mix(in_oklab,var(--accent-gold)_8%,var(--bg-secondary))] text-[#a96816]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
+                  <button type="button" onClick={() => void revealOrReanchor(comment)} className={`mt-2 flex w-full items-center gap-1.5 rounded-chip px-2 py-1.5 text-left text-micro ${orphaned ? "bg-[color-mix(in_oklab,var(--accent-gold)_8%,var(--bg-secondary))] text-[var(--warning)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
                     {orphaned ? <RefreshCw className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
                     <span className="min-w-0 flex-1 truncate">{orphaned ? "Target changed — attach to whole work" : (comment.anchor.fallbackExcerpt ?? comment.anchor.regionId)}</span>
                   </button>

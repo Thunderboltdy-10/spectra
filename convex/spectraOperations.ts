@@ -527,10 +527,8 @@ export const resumeAfterRegionConflict = mutation({
     resolution: v.union(
       v.literal("apply"),
       v.literal("keep_current"),
-      v.literal("merge"),
       v.literal("cancel"),
     ),
-    mergedInput: v.optional(v.any()),
     newBaseStateVectorHash: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -549,7 +547,7 @@ export const resumeAfterRegionConflict = mutation({
     )
       throw new Error("REGION_CONFLICT_RUN_STALE");
     const claim = await ctx.db.get(operation.conflict.claimId);
-    const applying = args.resolution === "apply" || args.resolution === "merge";
+    const applying = args.resolution === "apply";
     const now = Date.now();
     if (
       !claim ||
@@ -609,10 +607,6 @@ export const resumeAfterRegionConflict = mutation({
     }
     await ctx.db.patch(operation._id, {
       status: applying ? "proposed" : "cancelled",
-      input:
-        args.resolution === "merge" && args.mergedInput !== undefined
-          ? args.mergedInput
-          : operation.input,
       conflict: undefined,
     });
     await ctx.db.patch(run._id, {

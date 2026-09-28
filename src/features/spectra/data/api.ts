@@ -978,7 +978,6 @@ const CACHE_LOCAL_ACTIONS = new Set([
   "acquireRegionClaim",
   "renewRegionClaim",
   "releaseRegionClaim",
-  "resolveRegionConflict",
   "hideResultCard",
   "keepResultCard",
 ]);
@@ -1838,14 +1837,12 @@ export async function getSpectraOperationConflict(operationId: string) {
 
 export async function resolveSpectraOperationConflict(
   operationId: string,
-  resolution: "apply" | "keep_current" | "merge" | "cancel",
-  mergedInput?: unknown,
+  resolution: "apply" | "keep_current" | "cancel",
 ) {
   return postSpectra<{ runId: string; operationId: string; queued: boolean }>({
     action: "resolveAiArtifactConflict",
     operationId,
     resolution,
-    ...(mergedInput !== undefined ? { mergedInput } : {}),
   });
 }
 

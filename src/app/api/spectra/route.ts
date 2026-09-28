@@ -12,7 +12,6 @@ import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
-import { parseModelOperation } from "@/features/spectra/operations/schema";
 import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -1259,7 +1258,7 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("regionClaims:release", {
         claimId: requireString(body.claimId, "claimId"),
         clientId: requireString(body.clientId, "clientId"),
-        resolution: ["apply", "keep_current", "merge", "cancel"].includes(
+        resolution: ["apply", "keep_current", "cancel"].includes(
           String(body.resolution),
         )
           ? body.resolution
@@ -1268,76 +1267,27 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
-    if (action === "resolveRegionConflict") {
-      const resolution = requireString(body.resolution, "resolution");
-      if (!["apply", "keep_current", "merge", "cancel"].includes(resolution))
-        throw new Error("Choose a valid conflict resolution.");
-      const result = await spectraMutation("regionClaims:resolveConflict", {
-        claimId: requireString(body.claimId, "claimId"),
-        clientId: requireString(body.clientId, "clientId"),
-        resolution,
-        newBaseStateVectorHash: optionalString(body.newBaseStateVectorHash),
-      });
-      return ok(result);
-    }
-
     if (action === "resolveAiArtifactConflict") {
       const operationId = requireString(body.operationId, "operationId");
       const resolution = requireString(body.resolution, "resolution");
-      if (!["apply", "keep_current", "merge", "cancel"].includes(resolution))
+      if (!["apply", "keep_current", "cancel"].includes(resolution))
         throw new Error("Choose a valid conflict resolution.");
       const detail = (await spectraQuery(
         "spectraOperations:conflictForOperation",
         { operationId },
       )) as {
         executionId?: string;
-        operationType: string;
-        input: unknown;
-        conflict: { claimId: string; clientId: string };
         currentStateVectorHash: string;
       };
       if (!detail.executionId) throw new Error("REGION_CONFLICT_RUN_STALE");
-      let mergedInput: unknown;
-      if (resolution === "merge") {
-        const merged = parseModelOperation({
-          type: detail.operationType,
-          input: body.mergedInput,
-        });
-        if (
-          merged.type !== "artifact.update" ||
-          !detail.input ||
-          typeof detail.input !== "object" ||
-          Array.isArray(detail.input)
-        ) {
-          throw new Error(
-            "Only artifact edits can be merged in this conflict view.",
-          );
-        }
-        const original = detail.input as {
-          artifactId?: unknown;
-          blueprintKey?: unknown;
-        };
-        if (
-          merged.input.artifactId !== original.artifactId ||
-          merged.input.blueprintKey !== original.blueprintKey
-        ) {
-          throw new Error(
-            "A merged edit cannot change its target artifact or artifact type.",
-          );
-        }
-        mergedInput = merged.input;
-      }
       const result = await spectraMutation(
         "spectraOperations:resumeAfterRegionConflict",
         {
           operationId,
           executionId: detail.executionId,
           resolution,
-          mergedInput,
           newBaseStateVectorHash:
-            resolution === "apply" || resolution === "merge"
-              ? detail.currentStateVectorHash
-              : undefined,
+            resolution === "apply" ? detail.currentStateVectorHash : undefined,
         },
       );
       return ok(result);

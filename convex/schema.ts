@@ -3359,6 +3359,7 @@ export default defineSchema({
       v.union(
         v.literal("apply"),
         v.literal("keep_current"),
+        // Written only by the retired merge editor; kept so existing rows validate.
         v.literal("merge"),
         v.literal("cancel"),
         v.literal("expired"),

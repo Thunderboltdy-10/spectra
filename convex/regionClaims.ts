@@ -159,7 +159,7 @@ export const renew = mutation({
 });
 
 export const release = mutation({
-  args: { claimId: v.id("regionClaims"), clientId: v.string(), resolution: v.optional(v.union(v.literal("apply"), v.literal("keep_current"), v.literal("merge"), v.literal("cancel"))) },
+  args: { claimId: v.id("regionClaims"), clientId: v.string(), resolution: v.optional(v.union(v.literal("apply"), v.literal("keep_current"), v.literal("cancel"))) },
   handler: async (ctx, args) => {
     const claim = await ctx.db.get(args.claimId);
     if (!claim) return { released: false, promoted: [] };
@@ -169,31 +169,6 @@ export const release = mutation({
     await ctx.db.patch(claim._id, { status: args.resolution === "cancel" ? "rejected" : "released", resolution: args.resolution ?? "apply", releasedAt: now, updatedAt: now });
     const promoted = await promoteQueues(ctx, claim.artifactId, now);
     return { released: true, promoted };
-  },
-});
-
-export const resolveConflict = mutation({
-  args: { claimId: v.id("regionClaims"), clientId: v.string(), resolution: v.union(v.literal("apply"), v.literal("keep_current"), v.literal("merge"), v.literal("cancel")), newBaseStateVectorHash: v.optional(v.string()) },
-  handler: async (ctx, args) => {
-    const claim = await ctx.db.get(args.claimId);
-    if (!claim || (claim.status !== "queued" && claim.status !== "paused")) throw new Error("REGION_CONFLICT_UNAVAILABLE: This conflict is no longer pending.");
-    const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
-    if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This conflict belongs to another collaborator.");
-    const now = Date.now();
-    if (claim.leaseExpiresAt <= now) {
-      await ctx.db.patch(claim._id, { status: "released", resolution: "expired", queuePosition: undefined, releasedAt: now, updatedAt: now });
-      await promoteQueues(ctx, claim.artifactId, now);
-      throw new Error("REGION_CLAIM_EXPIRED: Reacquire the region before resolving it.");
-    }
-    if (args.resolution === "cancel" || args.resolution === "keep_current") {
-      await ctx.db.patch(claim._id, { status: "rejected", resolution: args.resolution, releasedAt: now, updatedAt: now });
-      return { status: "rejected" as const };
-    }
-    if (!args.newBaseStateVectorHash || args.newBaseStateVectorHash.length < 16) throw new Error("REGION_CONFLICT_BASE_REQUIRED: Refresh and compare the current state before applying or merging.");
-    const active = await activeClaims(ctx, claim.artifactId, now);
-    if (active.some((candidate) => regionDomainsIntersect(candidate.overlapDomains, claim.overlapDomains))) throw new Error("REGION_CONFLICT_STILL_OCCUPIED: Wait for the active edit to finish.");
-    await ctx.db.patch(claim._id, { status: "active", resolution: args.resolution, baseStateVectorHash: args.newBaseStateVectorHash, queuePosition: undefined, leaseExpiresAt: now + (claim.actorKind === "ai" ? AI_LEASE_MS : HUMAN_LEASE_MS), updatedAt: now });
-    return { status: "active" as const };
   },
 });
 

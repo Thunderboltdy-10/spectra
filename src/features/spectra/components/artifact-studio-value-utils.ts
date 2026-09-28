@@ -626,3 +626,31 @@ export function draftContentForLiveWrite(input: {
   if (input.live === undefined) return input.draft;
   return rebaseCollaborativeValue(input.baseline, input.draft, input.live).value;
 }
+
+/** One local edit a studio can undo: the value before and after it. */
+export type StudioHistoryEntry<T> = { before: T; after: T };
+
+/**
+ * Undo or redo one local edit against the studio's *current* value. A studio
+ * that restored its stored snapshot also restored every field a collaborator
+ * (or the AI) changed since, silently reverting their work. Replaying only the
+ * difference between the entry's two sides keeps everyone else's edits.
+ */
+export function applyStudioHistory<T>(
+  entry: StudioHistoryEntry<T>,
+  direction: "undo" | "redo",
+  current: T,
+): T {
+  const [from, to] =
+    direction === "undo" ? [entry.after, entry.before] : [entry.before, entry.after];
+  return rebaseCollaborativeValue(from, to, current).value as T;
+}
+
+/**
+ * A pointer gesture (drag, resize) previews on a local copy taken when it
+ * began. Committing that copy would carry the whole stale value; commit the
+ * gesture's own change onto the value that is current when it ends.
+ */
+export function commitStudioGesture<T>(origin: T, gesture: T, current: T): T {
+  return rebaseCollaborativeValue(origin, gesture, current).value as T;
+}

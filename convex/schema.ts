@@ -667,6 +667,17 @@ export default defineSchema({
       "dimensionsKey",
     ]),
 
+  // One row per school, limit category and period ("day:2026-09-28",
+  // "month:2026-09", "total"), kept by recordMeterEvent so AI admission
+  // reads a school's usage in O(1) instead of summing usageMeters.
+  schoolUsageTotals: defineTable({
+    schoolId: v.id("schools"),
+    category: v.literal("model_tokens"),
+    periodKey: v.string(),
+    quantity: v.number(),
+    updatedAt: v.number(),
+  }).index("by_school_period", ["schoolId", "category", "periodKey"]),
+
   operationalCounters: defineTable({
     schoolId: v.optional(v.id("schools")),
     day: v.string(),

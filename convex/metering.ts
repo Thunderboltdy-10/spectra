@@ -115,7 +115,93 @@ export async function recordMeterEvent(
       dimensions: args.dimensions,
       updatedAt: now,
     });
+  if (
+    args.schoolId &&
+    (args.category === "model_input_tokens" ||
+      args.category === "model_output_tokens")
+  )
+    await addSchoolModelTokens(ctx, args.schoolId, args.quantity, args.occurredAt, now);
   return { eventId, duplicate: false };
+}
+
+type LimitPeriod = "day" | "month" | "total";
+
+function periodKey(period: LimitPeriod, timestamp: number) {
+  const day = utcDay(timestamp);
+  return period === "day" ? `day:${day}` : period === "month" ? `month:${day.slice(0, 7)}` : "total";
+}
+
+async function addSchoolModelTokens(
+  ctx: MutationCtx,
+  schoolId: Id<"schools">,
+  quantity: number,
+  occurredAt: number,
+  now: number,
+) {
+  for (const period of ["day", "month", "total"] as const) {
+    const key = periodKey(period, occurredAt);
+    const row = await ctx.db
+      .query("schoolUsageTotals")
+      .withIndex("by_school_period", (q) =>
+        q.eq("schoolId", schoolId).eq("category", "model_tokens").eq("periodKey", key),
+      )
+      .unique();
+    if (row) await ctx.db.patch(row._id, { quantity: row.quantity + quantity, updatedAt: now });
+    else
+      await ctx.db.insert("schoolUsageTotals", {
+        schoolId,
+        category: "model_tokens",
+        periodKey: key,
+        quantity,
+        updatedAt: now,
+      });
+  }
+}
+
+async function effectiveLimitPolicy(ctx: IdentityCtx, schoolId: Id<"schools">) {
+  const school = await ctx.db
+    .query("limitPolicies")
+    .withIndex("by_scope_school", (q) => q.eq("scope", "school").eq("schoolId", schoolId))
+    .unique();
+  if (school) return { policy: school, source: "school" as const };
+  const fallback = await ctx.db
+    .query("limitPolicies")
+    .withIndex("by_scope_school", (q) => q.eq("scope", "platform_default").eq("schoolId", undefined))
+    .unique();
+  return { policy: fallback, source: "platform_default" as const };
+}
+
+const CEILING_MESSAGES: Record<LimitPeriod, string> = {
+  day: "Your school has reached its AI usage limit for today. Try again tomorrow, or ask a school administrator about the limit.",
+  month: "Your school has reached its AI usage limit for this month. Ask a school administrator about the limit.",
+  total: "Your school has reached its AI usage limit. Ask a school administrator about the limit.",
+};
+
+/**
+ * AI admission against the school's effective limit policy. Only an
+ * "enforced" policy blocks, only its model_tokens rules apply here, and a
+ * rule blocks once usage reaches its maximum, the same test the operator
+ * simulation shows as "would block". Periods are UTC, as meters are.
+ */
+export async function assertSchoolModelTokenCeiling(
+  ctx: MutationCtx,
+  schoolId: Id<"schools">,
+  now: number,
+) {
+  const { policy } = await effectiveLimitPolicy(ctx, schoolId);
+  if (!policy || policy.enforcement !== "enforced") return;
+  for (const rule of policy.rules) {
+    if (rule.category !== "model_tokens") continue;
+    const key = periodKey(rule.period, now);
+    const usage = await ctx.db
+      .query("schoolUsageTotals")
+      .withIndex("by_school_period", (q) =>
+        q.eq("schoolId", schoolId).eq("category", "model_tokens").eq("periodKey", key),
+      )
+      .unique();
+    if ((usage?.quantity ?? 0) >= rule.maximum)
+      throw new Error(CEILING_MESSAGES[rule.period]);
+  }
 }
 
 export const record = internalMutation({
@@ -309,23 +395,11 @@ export const effectivePolicy = query({
       throw new Error(
         "AUTH_SCHOOL_SCOPE_MISMATCH: The operational session targets another school.",
       );
-    const school = await ctx.db
-      .query("limitPolicies")
-      .withIndex("by_scope_school", (q) =>
-        q.eq("scope", "school").eq("schoolId", args.schoolId),
-      )
-      .unique();
-    const fallback = await ctx.db
-      .query("limitPolicies")
-      .withIndex("by_scope_school", (q) =>
-        q.eq("scope", "platform_default").eq("schoolId", undefined),
-      )
-      .unique();
-    const policy = school ?? fallback;
+    const { policy, source } = await effectiveLimitPolicy(ctx, args.schoolId);
     return policy
       ? {
           policyId: policy._id,
-          source: school ? ("school" as const) : ("platform_default" as const),
+          source,
           rules: policy.rules,
           enforcement: policy.enforcement,
           updatedAt: policy.updatedAt,

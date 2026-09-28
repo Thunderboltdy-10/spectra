@@ -6,6 +6,7 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { recordMeterEvent } from "./metering";
 
 const modules = import.meta.glob("./**/*.ts");
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -401,4 +402,39 @@ it("the bridge action erases only for a request signed with the server key", asy
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+it("gives back the school storage it metered for erased works and keeps what shared works still hold", async () => {
+  vi.useFakeTimers();
+  const t = setup();
+  const ids = await seed(t);
+  const asset = async (artifactId: Id<"spectraArtifacts">, text: string) => {
+    const storageId = await t.run(ctx => ctx.storage.store(new Blob([text], { type: "image/png" })));
+    return t.run(async ctx => {
+      const now = Date.now();
+      const bytes = Buffer.byteLength(text);
+      const assetId = await ctx.db.insert("artifactAssets", {
+        artifactId, schoolId: ids.schoolA, uploadedByAccountId: ids.erased, storageId, path: `${text}.png`, name: `${text}.png`,
+        mediaType: "image/png", bytes, sha256: sha(text), status: "active", createdAt: now, updatedAt: now, activatedAt: now,
+      });
+      await recordMeterEvent(ctx, {
+        schoolId: ids.schoolA, accountId: ids.erased, category: "storage_bytes", quantity: bytes, sourceType: "artifact_asset",
+        sourceId: String(assetId), idempotencyKey: `artifact-asset:${assetId}:storage:active`, occurredAt: now,
+      });
+      return bytes;
+    });
+  };
+  await asset(ids.privateWork, "a private diagram");
+  const keptBytes = await asset(ids.grantedWork, "a shared chart");
+
+  await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "erase-me" });
+  await finishErasure(t);
+
+  const storage = await t.run(ctx => ctx.db.query("meterEvents").collect())
+    .then(rows => rows.filter(row => row.category === "storage_bytes" && row.schoolId === ids.schoolA));
+  // The private work's asset is released through its deletion job; the shared
+  // work's stays metered. The run attachment and device payload were never
+  // metered in, so erasing them must not push the meter below real usage.
+  expect(storage.reduce((sum, row) => sum + row.quantity, 0)).toBe(keptBytes);
+  expect(storage.filter(row => row.quantity < 0).map(row => row.sourceType)).toEqual(["artifact_intake_release"]);
 });

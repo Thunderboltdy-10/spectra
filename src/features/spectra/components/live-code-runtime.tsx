@@ -16,6 +16,7 @@ import {
   type CodeFile,
 } from "../code/model";
 import { loadCodeRuntimeAssets } from "../code/runtime-assets-client";
+import { requestSpectra } from "../data/request";
 import {
   runPythonInIsolatedWorker,
   type PythonRuntimeEvent,
@@ -93,7 +94,7 @@ export function LiveCodeRuntime({
         );
         return;
       }
-      const response = await fetch("/api/spectra/runtime/build", {
+      const response = await requestSpectra("/api/spectra/runtime/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,

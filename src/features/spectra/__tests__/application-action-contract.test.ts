@@ -35,6 +35,16 @@ const calendarArgs: Record<string, Record<string, unknown>> = {
   resize_calendar_block: { itemId: "block", endAt: 2000, expectedRevision: 1 },
 };
 
+describe("tool titles students see in run steps", () => {
+  it("say work, never artifact", () => {
+    const titles = spectraToolRegistry.list().map((tool) => tool.title);
+    expect(titles.length).toBeGreaterThan(10);
+    expect(titles.filter((title) => /artifact/i.test(title))).toEqual([]);
+    expect(spectraToolRegistry.require("read_artifact_skill").title).toBe("Read work guidance");
+    expect(spectraToolRegistry.require("add_comment").title).toBe("Add comment");
+  });
+});
+
 describe("application action contract matrix (stubbed persistence)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

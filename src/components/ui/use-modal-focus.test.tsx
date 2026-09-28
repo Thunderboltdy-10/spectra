@@ -75,4 +75,15 @@ describe("hand-built modal dialogs", () => {
       .map(({ path }) => path);
     expect(missing).toEqual([]);
   });
+
+  it("each surface that takes the keyboard contract is announced as modal", () => {
+    const root = process.cwd();
+    const unannounced = sourceFiles(join(root, "src"))
+      .map((path) => ({ path: relative(root, path).replace(/\\/g, "/"), source: readFileSync(path, "utf8") }))
+      .filter(({ source }) =>
+        (source.match(/useModalFocus\(/g) ?? []).length >
+        (source.match(/aria-modal=/g) ?? []).length)
+      .map(({ path }) => path);
+    expect(unannounced).toEqual([]);
+  });
 });

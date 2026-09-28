@@ -1,4 +1,4 @@
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 type BridgeWriteRequest = Doc<"bridgeWriteRequests">;
@@ -94,4 +94,54 @@ export async function bridgeWriteForTarget(
       request.baseRevision === target.baseRevision &&
       request.targetRevision === target.targetRevision,
   ) ?? null;
+}
+
+function field(value: unknown, key: string): unknown {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+/** The local-file write an AI operation queued for the Bridge, read from its
+ * admission receipt. Cloud-only native saves and unchanged files queue none. */
+export function queuedLocalWrite(output: unknown): { requestId: string; state: string } | null {
+  const native = field(field(field(field(output, "artifactWriteReceipt"), "result"), "receipt"), "nativeResult");
+  const requestId = field(native, "requestId");
+  const state = field(native, "state");
+  return typeof requestId === "string" && requestId !== "protected-original" && typeof state === "string"
+    ? { requestId, state } : null;
+}
+
+export type RunNativeSyncOutcome = "native_pending" | "native_verified";
+
+/** Native truth for a run: verified only once Bridge read-back verified the
+ * newest write this run queued for every local file; queued otherwise. A later
+ * write from the same run supersedes an earlier one because it contains it. */
+export async function runNativeSyncOutcome(
+  ctx: ReplicaTruthCtx,
+  runId: Id<"spectraAiRuns">,
+): Promise<RunNativeSyncOutcome | undefined> {
+  const operations = await ctx.db.query("spectraOperations")
+    .withIndex("by_run", (q) => q.eq("runId", runId)).collect();
+  const newestByFile = new Map<string, BridgeWriteRequest | null>();
+  for (const operation of operations) {
+    const queued = queuedLocalWrite(operation.output);
+    if (!queued) continue;
+    const requestId = ctx.db.normalizeId("bridgeWriteRequests", queued.requestId);
+    const request = requestId ? await ctx.db.get(requestId) : null;
+    const file = request ? String(request.replicaId) : `missing:${queued.requestId}`;
+    const prior = newestByFile.get(file);
+    if (prior === undefined || (request && prior && request.createdAt > prior.createdAt)) newestByFile.set(file, request);
+  }
+  if (!newestByFile.size) return undefined;
+  return [...newestByFile.values()].every((request) => request?.state === "verified")
+    ? "native_verified" : "native_pending";
+}
+
+/** Bridge read-back can finish after the run did. Move a completed run from
+ * queued to verified only when every file it wrote is now verified. */
+export async function settleRunNativeOutcome(ctx: MutationCtx, runId: Id<"spectraAiRuns">) {
+  const run = await ctx.db.get(runId);
+  if (run?.status !== "completed" || run.outcome !== "native_pending") return;
+  const outcome = await runNativeSyncOutcome(ctx, runId);
+  if (outcome && outcome !== run.outcome) await ctx.db.patch(runId, { outcome });
 }

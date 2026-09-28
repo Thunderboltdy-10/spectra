@@ -49,6 +49,7 @@ export type LiveDockTabSource = {
     retryable?: boolean;
     traceDegraded?: boolean;
     userPrompt?: string;
+    outcome?: string;
   };
   card?: {
     title?: string;
@@ -102,6 +103,20 @@ export const liveDockStateCopy: Record<LiveDockTruthState, string> = {
   // The control says "Stop" and the run reports "Stopped by you": one word.
   cancelled: "Stopped",
   failed_terminal: "Could not finish",
+};
+
+/* A saved run that wrote a file on the student's computer says which of the
+   two observable states it is in: queued (the Bridge has not read the file
+   back yet) or verified (Bridge read-back matched). Nothing else is claimed. */
+const nativeSyncCopy: Record<string, { step: string; sentence: string }> = {
+  native_pending: {
+    step: "Saved in Spectra · waiting for your file to confirm",
+    sentence: "Saved in Spectra. The file on your computer hasn't confirmed this change yet.",
+  },
+  native_verified: {
+    step: "Saved and checked in the file on your computer",
+    sentence: "Saved in Spectra and checked in the file on your computer.",
+  },
 };
 
 function compactText(value: string | undefined) {
@@ -201,11 +216,19 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     (action) => action.key === "undone",
   );
   const cardSummary = distinct(source.card?.summary, title);
-  const finalSummary = distinct(source.run.finalSummary, title);
+  const nativeSync = !undone && (state === "completed" || state === "completed_limited")
+    ? nativeSyncCopy[source.run.outcome ?? ""] ?? null
+    : null;
+  const runSummary = distinct(source.run.finalSummary, title);
+  const finalSummary = nativeSync
+    ? [nativeSync.sentence, runSummary].filter(Boolean).join(" ")
+    : runSummary;
   const semanticStep = undone
     ? "Undone"
     : state === "needs_input"
       ? "Ready for your input"
+      : nativeSync
+        ? nativeSync.step
       : state === "completed" || state === "completed_limited"
         ? finalSummary ||
           cardSummary ||
@@ -238,6 +261,9 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     ).slice(0, 800),
     hoverSummary: expandedSummary.slice(0, 800),
     undone,
+    nativeSync: nativeSync
+      ? (source.run.outcome === "native_verified" ? "verified" as const : "pending" as const)
+      : null,
     recentSteps: (source.recentSteps ?? [])
       .flatMap((step) => {
         const clean = distinct(step, title);

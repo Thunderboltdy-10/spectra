@@ -178,7 +178,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     noteAiLocation({
       ...(event.runId ? { actorId: event.runId } : {}),
       artifactId: targetId,
-      note: "Opening the requested artifact",
+      note: "Opening the requested work",
     });
     return;
   }

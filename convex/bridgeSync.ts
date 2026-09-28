@@ -31,7 +31,7 @@ import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { storageHasOtherBinding } from "./durableStorageBindings";
 import { normalizeSha256 } from "../shared/intake-integrity";
-import { bridgeWriteForTarget, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
+import { bridgeWriteForTarget, settleRunNativeOutcome, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 
 type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
 
@@ -1645,6 +1645,7 @@ export const completeWrite = mutation({
           : appliedReceipt,
         updatedAt: now,
       });
+      if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
       if (!hasNewerWrite && cloud) {
         await verifyReconciledExternalOperations(ctx, {
           workId: request.workId,

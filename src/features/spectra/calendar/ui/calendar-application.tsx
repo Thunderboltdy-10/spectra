@@ -20,6 +20,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
@@ -1818,8 +1819,12 @@ function CalendarComposer({
   const [start, setStart] = useState(() => new Date(Date.now() + HOUR).toISOString().slice(0, 16));
   const [end, setEnd] = useState(() => new Date(Date.now() + 2 * HOUR).toISOString().slice(0, 16));
   const [busy, setBusy] = useState(false);
+  const surface = useRef<HTMLDivElement>(null);
+  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
     <div
+      ref={surface}
+      tabIndex={-1}
       className="fixed inset-0 z-modal grid place-items-center bg-black/25 p-4"
       role="dialog"
       aria-modal="true"

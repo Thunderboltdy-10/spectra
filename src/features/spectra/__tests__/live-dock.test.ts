@@ -45,6 +45,30 @@ describe("Live Dock V2", () => {
     expect(dock).not.toContain("autoOpenedLiveRuns");
   });
 
+  it.each([
+    { outcome: "canonical_saved", nativeSync: null, says: "Updated the essay.", never: /computer/ },
+    { outcome: "native_pending", nativeSync: "pending", says: "hasn't confirmed this change yet", never: /checked in/ },
+    { outcome: "native_verified", nativeSync: "verified", says: "checked in the file on your computer", never: /hasn't confirmed/ },
+  ])("tells the student the native file truth for $outcome", ({ outcome, nativeSync, says, never }) => {
+    const model = deriveLiveDockTab(source({
+      run: { status: "completed", phase: "completed", finalSummary: "Updated the essay.", outcome },
+    }));
+    expect(model.state).toBe("completed");
+    expect(model.nativeSync).toBe(nativeSync);
+    expect(model.finalSummary).toContain(says);
+    expect(model.finalSummary).toContain("Updated the essay.");
+    expect(`${model.finalSummary} ${model.semanticStep}`).not.toMatch(never);
+    expect(`${model.finalSummary} ${model.semanticStep}`).not.toMatch(/native|Bridge|verified|pending/i);
+  });
+
+  it("does not claim a native file state for a stopped or failed run", () => {
+    for (const status of ["cancelled", "failed"]) {
+      const model = deriveLiveDockTab(source({ run: { status, outcome: "native_verified" } }));
+      expect(model.nativeSync).toBeNull();
+      expect(model.finalSummary).not.toContain("computer");
+    }
+  });
+
   it("derives distinct title, semantic step, hover summary, targets, and attachments", () => {
     const model = deriveLiveDockTab(source());
     expect(model.title).toBe("Compare the evidence");

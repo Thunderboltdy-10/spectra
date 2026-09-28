@@ -2093,7 +2093,9 @@ async function runAttempt(
         await retainOutcomeThenVerify(operationOutcomes, retainedOutcome, async () => {
           if (operation.type === "artifact.update") {
             verificationIncomplete = true;
-            const outcome = { operation, affected };
+            // The retained outcome itself: verification records where each
+            // acknowledged append landed, and final verification reads it.
+            const outcome = retainedOutcome;
             try {
               await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
                 ...verificationOptions,

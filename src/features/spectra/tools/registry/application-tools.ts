@@ -88,7 +88,7 @@ export function registerApplicationTools() {
   define({
     ...readDefaults,
     id: "read_artifact_skill",
-    title: "Read artifact guidance",
+    title: "Read work guidance",
     description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
     inputSchema: z.object({
       blueprintKey: z.enum(ARTIFACT_TYPE_KEYS),
@@ -301,7 +301,7 @@ export function registerApplicationTools() {
   };
 
   define({ ...appActionDefaults, id: "navigate_spectra", title: "Navigate Spectra", description: "Request a registered Spectra route or work target. The user's Follow AI preference controls whether this request changes their viewport.", inputSchema: z.object({ destination: z.enum(["library", "calendar", "settings", "workspace", "artifact"]), targetId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
-  define({ ...appActionDefaults, id: "add_comment", title: "Add artifact comment", description: "Add a durable, visibly AI-attributed comment or reply through the artifact comment system. Read the target artifact first and use a precise semantic region id from that content; use work:root only for a comment about the whole artifact. Set parentCommentId only when replying to an existing thread. Do not invent a quoted excerpt.", inputSchema: z.object({ artifactId: z.string().min(1), body: z.string().trim().min(1).max(20_000), anchor: z.object({ regionId: z.string().trim().min(1).max(240), fallbackExcerpt: z.string().max(500).optional() }), parentCommentId: z.string().optional() }), authorityTarget: "content" });
+  define({ ...appActionDefaults, id: "add_comment", title: "Add comment", description: "Add a durable, visibly AI-attributed comment or reply through the artifact comment system. Read the target artifact first and use a precise semantic region id from that content; use work:root only for a comment about the whole artifact. Set parentCommentId only when replying to an existing thread. Do not invent a quoted excerpt.", inputSchema: z.object({ artifactId: z.string().min(1), body: z.string().trim().min(1).max(20_000), anchor: z.object({ regionId: z.string().trim().min(1).max(240), fallbackExcerpt: z.string().max(500).optional() }), parentCommentId: z.string().optional() }), authorityTarget: "content" });
   define({ ...appActionDefaults, id: "setup_bridge", title: "Prepare Bridge setup", description: "Open the exact Bridge settings handoff for pairing, folder selection, or a retry. The user still completes pairing, folder grants, and any write-enabling consent.", inputSchema: z.object({ action: z.enum(["pair", "select-location", "retry-connection", "retry-folder"]), grantId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
   define({ ...appActionDefaults, id: "organize_library", title: "Organize Library", description: "Create, rename, move, or link Library nodes through the canonical organization operation path.", inputSchema: z.object({ action: z.enum(["create_folder", "rename", "move", "link"]), targetIds: z.array(z.string()).max(100).default([]), destinationId: z.string().optional(), name: z.string().trim().min(1).max(200).optional() }).superRefine((value, ctx) => {
     if (value.action === "create_folder" && !value.name) ctx.addIssue({ code: "custom", path: ["name"], message: "A folder name is required." });

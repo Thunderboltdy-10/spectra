@@ -116,6 +116,22 @@ describe("server history restore admission", () => {
     expect(calls.mutation).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["ARTIFACT_RESTORE_NATIVE_BASE_LIMIT", /too many computers.*hasn't changed/],
+    ["ARTIFACT_RESTORE_NATIVE_SOURCE_UNAVAILABLE", /no longer available.*hasn't changed/],
+    ["ARTIFACT_RESTORE_NATIVE_SOURCE_INVALID", /no longer available.*hasn't changed/],
+    ["ARTIFACT_RESTORE_NATIVE_BASE_STALE", /New changes arrived/],
+    ["ARTIFACT_RESTORE_STALE: New changes arrived.", /New changes arrived/],
+  ])("tells the student in plain words why restore %s refused", async (code, copy) => {
+    calls.query.mockRejectedValue(new Error(`[Request ID: abc] Server Error Uncaught Error: ${code}`));
+    const response = await POST(new NextRequest("https://spectra.test/api/spectra", { method: "POST",
+      body: JSON.stringify({ action: "commitArtifactRestore", ...request }) }));
+    expect(response.status).toBe(409);
+    const text = JSON.stringify(await response.json());
+    expect(text).toMatch(copy);
+    expect(text).not.toMatch(/ARTIFACT_RESTORE|connection/);
+  });
+
   it("rejects malformed restore regions before preparing or admitting content", async () => {
     const response = await POST(new NextRequest("https://spectra.test/api/spectra", { method: "POST",
       body: JSON.stringify({ action: "commitArtifactRestore", ...request, regionIds: [12] }) }));

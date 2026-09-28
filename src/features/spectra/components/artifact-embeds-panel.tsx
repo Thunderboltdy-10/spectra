@@ -2,7 +2,8 @@
 
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Check, Link2, Loader2, Plus, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { useMutation } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
@@ -360,6 +361,8 @@ export function ArtifactEmbedsPanel({
   }
 
   const motionLevel = useSpectraMotion();
+  const sheetRef = useRef<HTMLElement>(null);
+  useModalFocus(sheetRef, { open, onClose });
 
   return (
     <AnimatePresence>
@@ -379,6 +382,8 @@ export function ArtifactEmbedsPanel({
         >
           <motion.aside
             key="embeds-sheet"
+            ref={sheetRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="artifact-embeds-title"

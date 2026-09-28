@@ -1565,7 +1565,7 @@ export async function POST(request: NextRequest) {
       if (body.regionIds !== undefined && (!Array.isArray(body.regionIds) ||
           body.regionIds.some((id: unknown) => typeof id !== "string")))
         return badRequest("Choose valid regions to restore.");
-      const { admitArtifactRestore } = await import("@/lib/artifact-restore-server");
+      const { admitArtifactRestore, artifactRestoreFailure } = await import("@/lib/artifact-restore-server");
       const { prepareNativeArtifactRestore } = await import("@/lib/artifact-restore-native");
       try {
         const result = await admitArtifactRestore({
@@ -1577,8 +1577,8 @@ export async function POST(request: NextRequest) {
         }, prepareNativeArtifactRestore);
         return ok(result);
       } catch (error) {
-        if (/ARTIFACT_RESTORE_STALE|MATERIALIZATION_BASE_STALE|COLLABORATION_BASE_STATE_STALE|COLLABORATION_REPLAY_GENERATION_CHANGED/.test(String(error)))
-          return badRequest("New changes arrived before restoration. Review the current version and try again.", 409);
+        const failure = artifactRestoreFailure(error);
+        if (failure) return badRequest(failure.message, failure.status);
         throw error;
       }
     }

@@ -36,6 +36,19 @@ export type PrepareNativeRestore = (input: {
 }>;
 const digest = (value: string | Uint8Array) => createHash("sha256").update(value).digest("base64url");
 
+/** Plain words for restore refusals a student can meet. Every refusal leaves
+ * the current work unchanged, so each message says so; internal codes stay in logs. */
+export function artifactRestoreFailure(error: unknown): { message: string; status: number } | null {
+  const text = String(error instanceof Error ? error.message : error);
+  if (/ARTIFACT_RESTORE_STALE|ARTIFACT_RESTORE_NATIVE_BASE_STALE|MATERIALIZATION_BASE_STALE|COLLABORATION_BASE_STATE_STALE|COLLABORATION_REPLAY_GENERATION_CHANGED/.test(text))
+    return { message: "New changes arrived before restoration. Review the current version and try again.", status: 409 };
+  if (/ARTIFACT_RESTORE_NATIVE_BASE_LIMIT/.test(text))
+    return { message: "This work is linked to too many computers for Spectra to restore it safely. Your work hasn't changed. Ask your teacher or school admin for help.", status: 409 };
+  if (/ARTIFACT_RESTORE_NATIVE_SOURCE_(UNAVAILABLE|INVALID|AMBIGUOUS)/.test(text))
+    return { message: "The saved file for this version is no longer available, so Spectra can't restore it. Your work hasn't changed.", status: 409 };
+  return null;
+}
+
 /** Reconstruct once and fence that exact base. A changed head is returned to
  * the user for review; it is never silently rebased into a different restore. */
 export async function admitArtifactRestore(request: RestoreRequest, prepareNative: PrepareNativeRestore): Promise<RestoreResult> {

@@ -89,10 +89,18 @@ let activePollSignature = "";
 const optimisticPollDemands = new Map<string, number>();
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
 
+/* A saved run whose file on the computer has not confirmed yet is watched
+   briefly, so Bridge read-back shows up without a reload. Later refreshes
+   (focus, a new run) still pick it up after the watch ends. */
+const NATIVE_CONFIRM_WATCH_MS = 10 * 60_000;
+
 function getActivePollSignature() {
+  const now = Date.now();
   const activeRuns = sharedTabs
-    .filter((tab) => activeStatuses.has(tab.run.status))
-    .map((tab) => `${tab.runId}:${tab.run.status}`)
+    .filter((tab) => activeStatuses.has(tab.run.status) ||
+      (tab.run.status === "completed" && tab.run.outcome === "native_pending" &&
+        now - tab.run.updatedAt < NATIVE_CONFIRM_WATCH_MS))
+    .map((tab) => `${tab.runId}:${tab.run.status}:${tab.run.outcome ?? ""}`)
   return [...activeRuns, ...optimisticPollDemands.keys()].sort().join("|");
 }
 

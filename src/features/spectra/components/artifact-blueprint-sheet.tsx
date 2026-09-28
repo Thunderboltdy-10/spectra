@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { workTypeMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact} from "../data/api";
 import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";
@@ -346,6 +347,11 @@ export function ArtifactBlueprintSheet({
     return { ...record(artifact?.content), ...thread, summary };
   }, [artifact?.content, blueprintKey, cards, documentDraft, questions, summary, task, thread]);
 
+  // Escape stays on the window listener below; the hook adds the focus trap
+  // and returns focus to the control that opened the sheet.
+  const sheetRef = useRef<HTMLElement>(null);
+  useModalFocus(sheetRef, {});
+
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape" && !busy) onClose();
@@ -378,6 +384,8 @@ export function ArtifactBlueprintSheet({
   return (
     <div className="fixed inset-0 z-modal bg-[var(--bg-overlay)]" onPointerDown={() => { if (!busy) onClose(); }}>
       <aside
+        ref={sheetRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={dialogTitleId}

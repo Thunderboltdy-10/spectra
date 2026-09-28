@@ -5254,7 +5254,13 @@ function ConfirmDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    // Return focus to the control that opened the confirmation.
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelRef.current?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
   }, []);
   // Portaled to the body: the studio root is a query container, and layout
   // containment makes it the containing block for fixed descendants, so a

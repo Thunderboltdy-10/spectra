@@ -10,6 +10,7 @@ import {
 import {
   __resetFollowAi,
   followAiActor,
+  getAiLocation,
   getAiSurfaceLocation,
   noteAiSurface,
   setFollowingAi,
@@ -52,6 +53,7 @@ describe("AI UI events", () => {
       payload: { destination: "artifact", targetId: "artifact-7" },
     });
     expect(opened).toEqual([]);
+    expect(getAiLocation()?.note).toBe("Opening the requested work");
 
     setFollowingAi(true);
     expect(opened).toEqual(["artifact-7"]);

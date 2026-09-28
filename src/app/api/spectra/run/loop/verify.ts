@@ -267,6 +267,10 @@ export async function verifyResearchEvidenceReadback(
 type VerifiedOutcome = {
   operation: ModelOperation;
   affected: Array<{ type: string; id: string }>;
+  /** Where each acknowledged append landed (change index -> element index),
+   * recorded when the write was verified against its own result. A person's
+   * later append then cannot hide or impersonate the AI's element. */
+  appendedAt?: Record<number, number>;
 };
 
 function verifiedArtifactId(outcome: VerifiedOutcome) {
@@ -373,10 +377,7 @@ export function finalVerificationObligations(outcomes: readonly VerifiedOutcome[
 
 export async function verifyCommittedOutcomes(
   actorClerkId: string,
-  outcomes: Array<{
-    operation: ModelOperation;
-    affected: Array<{ type: string; id: string }>;
-  }>,
+  outcomes: VerifiedOutcome[],
   options: { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean } = {},
 ) {
   const obligations = finalVerificationObligations(outcomes);
@@ -516,12 +517,18 @@ export async function verifyCommittedOutcomes(
             sheetsCanonical,
           );
           const laterAppends = obligation.laterAppends.get(changeIndex) ?? 0;
-          const appendedTo = laterAppends > 0 && canonical.path.endsWith("/-")
+          const acknowledgedAt = outcome.appendedAt?.[changeIndex];
+          const appendedTo = canonical.path.endsWith("/-") &&
+            (laterAppends > 0 || acknowledgedAt !== undefined)
             ? readContentPointer(content, canonical.path.slice(0, -2))
             : undefined;
-          // Later appends follow this one, so its element is no longer last.
+          // The acknowledged position is exact. Without it, later AI appends
+          // follow this one, so its element is no longer last.
+          const position = Array.isArray(appendedTo)
+            ? acknowledgedAt ?? appendedTo.length - (laterAppends + 1)
+            : undefined;
           const savedValue = Array.isArray(appendedTo)
-            ? appendedTo.at(-(laterAppends + 1))
+            ? appendedTo[position!]
             : readContentPointer(content, canonical.path);
           if (
             contentPatchChangeMatchesSaved(
@@ -532,7 +539,16 @@ export async function verifyCommittedOutcomes(
                 blueprintKey: operation.input.blueprintKey,
                 artifactContent: content,
               },
-            ) ||
+            )
+          ) {
+            if (canonical.path.endsWith("/-") && acknowledgedAt === undefined) {
+              const list = readContentPointer(content, canonical.path.slice(0, -2));
+              if (Array.isArray(list))
+                (outcome.appendedAt ??= {})[changeIndex] = position ?? list.length - 1;
+            }
+            continue;
+          }
+          if (
             (operation.input.blueprintKey === "document" &&
               authoredValueLandedInContent(canonical.value, content))
           ) {

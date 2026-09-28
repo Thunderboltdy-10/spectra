@@ -29,11 +29,8 @@ import {
   summarizeArtifact,
 } from "./loop/gather";
 import {
-  addDerivedVisualAttachments,
   agentCanHandleLikelyMutation,
   assertSelectedAgentAllowsOperations,
-  attachmentNeedsVisualEvidence,
-  enrichImageAttachments,
   hasNonCreationMutationIntent,
   normalizeNativeProgress,
   parallelCreationContract,
@@ -86,10 +83,7 @@ import {
 import { verifyAcknowledgedUpdate, verifyCommittedOutcomes } from "./loop/verify";
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
-import {
-  getSpectraAttachmentStrategy,
-  getSpectraModelId,
-} from "@/features/spectra/ai/model-config";
+import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import {
   AiArtifactRegionConflictError,
   applyAiArtifactMutation,
@@ -934,43 +928,7 @@ async function runAttemptInLedger(
         });
       }
     }
-    let modelAttachments = params.attachments ?? [];
-    const visualSources = modelAttachments.filter((attachment) =>
-      attachmentNeedsVisualEvidence(attachment, params.prompt),
-    );
-    if (
-      !focusedToolPlan &&
-      visualSources.length > 0 &&
-      getSpectraAttachmentStrategy() === "legacy_visual_prepass"
-    ) {
-      publish({
-        type: "progress",
-        runId: params.runId,
-        title:
-          visualSources.length === 1
-            ? `Inspecting ${visualSources[0]!.name}`
-            : `Inspecting ${visualSources.length} attached files`,
-        detail:
-          "Reading only the visuals, layout, diagrams, and relationships needed for the request",
-        activity: "inspect",
-      });
-      modelAttachments = await addDerivedVisualAttachments(
-        modelAttachments,
-        params.prompt,
-      );
-      if (
-        modelAttachments.some(
-          (attachment) =>
-            attachment.handling === "image" &&
-            attachment.data &&
-            !attachment.extractedText,
-        )
-      )
-        modelAttachments = await enrichImageAttachments(
-          modelAttachments,
-          executionSignal,
-        );
-    }
+    const modelAttachments = params.attachments ?? [];
     const invokeModel: typeof callModel = parallelCreations.length
       ? (
           surface,

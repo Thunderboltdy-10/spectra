@@ -245,6 +245,62 @@ describe("atomic AI native commit", () => {
       .toEqual(expect.arrayContaining([f.ids.sourceRef, f.ids.resultRef]));
   });
 
+  it("reports a queued local write until Bridge read-back verifies it, then settles the completed run", async () => {
+    const f = await bridgeFixture();
+    const credential = "native-ai-bridge-credential-0123456789";
+    await f.commit();
+    await f.t.run(async ctx => {
+      const local = (await ctx.db.get(f.localId))!;
+      await ctx.db.patch(local.deviceId!, { credentialHash: hash(credential) });
+      await ctx.db.patch(f.ids.operationId, { status: "executed" });
+    });
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+      runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
+    });
+    const outcome = async () => (await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome;
+    expect(await outcome()).toBe("native_pending");
+    const { request } = await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:claimWrite"), { credential });
+    const [queued] = await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect());
+    expect(await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:completeWrite"), {
+      credential, requestId: request.requestId, claimGeneration: request.claimGeneration, claimToken: request.claimToken,
+      outcome: "verified", actualRevision: queued.targetRevision,
+    })).toMatchObject({ state: "verified" });
+    expect(await outcome()).toBe("native_verified");
+  });
+
+  it("never reports a local write as verified when the Bridge could not verify it", async () => {
+    const f = await bridgeFixture();
+    const credential = "native-ai-bridge-credential-0123456789";
+    await f.commit();
+    await f.t.run(async ctx => {
+      const local = (await ctx.db.get(f.localId))!;
+      await ctx.db.patch(local.deviceId!, { credentialHash: hash(credential) });
+      await ctx.db.patch(f.ids.operationId, { status: "executed" });
+    });
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+      runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
+    });
+    const { request } = await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:claimWrite"), { credential });
+    await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:completeWrite"), {
+      credential, requestId: request.requestId, claimGeneration: request.claimGeneration, claimToken: request.claimToken,
+      outcome: "verified", actualRevision: "a".repeat(64),
+    });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome).toBe("native_pending");
+  });
+
+  it("keeps a cloud-only native save as saved in Spectra, never as a verified local file", async () => {
+    const f = await fixture();
+    await f.commit();
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { status: "executed" }));
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+      runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
+    });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome).toBe("canonical_saved");
+  });
+
   it("rolls back the outbox, history, owners and canonical append when queue admission fails after writing", async () => {
     const f = await bridgeFixture();
     injected.stage = "queue";

@@ -172,9 +172,23 @@ describe("S11 receipt truth after verification, interruption and acknowledgement
   });
 
   it.each([
-    { outcome: "canonical_saved", expected: "Earlier changes were saved", absent: "local file write was verified" },
-    { outcome: "native_pending", expected: "local file write is still pending", absent: "local file write was verified" },
-    { outcome: "native_verified", expected: "recorded local file write was verified", absent: "still pending" },
+    { state: "pending", outcome: "native_pending" },
+    { state: "claimed", outcome: "native_pending" },
+    { state: "verified", outcome: "native_verified" },
+  ])("reads a queued local-file write ($state) from the admission receipt of an interrupted run", ({ state, outcome }) => {
+    const operation = stored({ output: { artifactWriteReceipt: { scope: "scope", result: { state: "committed",
+      receipt: { roomId: "room", sequence: 2, updateDigest: "digest", nativeResult: { requestId: "request-1", state } } } } } });
+    const result = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [], operations: [operation], run: { outcome: "executing" } });
+    expect(result.outcome).toBe(outcome);
+    const cloud = stored({ output: { artifactWriteReceipt: { scope: "scope", result: { state: "committed",
+      receipt: { roomId: "room", sequence: 2, updateDigest: "digest", nativeResult: { state: "cloud_saved", operationId: "sync-1" } } } } } });
+    expect(reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [], operations: [cloud] }).outcome).toBe("canonical_saved");
+  });
+
+  it.each([
+    { outcome: "canonical_saved", expected: "Earlier changes were saved", absent: "was checked" },
+    { outcome: "native_pending", expected: "hasn't confirmed this change yet", absent: "was checked" },
+    { outcome: "native_verified", expected: "file on your computer was checked", absent: "hasn't confirmed" },
   ])("preserves $outcome truth after Stop without upgrading native evidence", ({ outcome, expected, absent }) => {
     const result = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [acknowledged], operations: [stored()], run: { outcome } });
     const summary = interruptedEffectSummary(result, "The remaining work was stopped.", { stopped: true });

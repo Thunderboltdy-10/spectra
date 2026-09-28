@@ -2,6 +2,7 @@ import {
   applicationOperationScope,
   applicationWriteReceipt,
 } from "../../../../../../convex/spectraApplicationWriteScope";
+import { queuedLocalWrite } from "../../../../../../convex/bridgeWriteOperations";
 import type { ResultAction, StoredOperation } from "./contract";
 
 type Affected = { type: string; id: string };
@@ -85,9 +86,17 @@ export function reconcileInterruptedEffects(input: {
     items.some((item) => item.type === "artifact" && item.id));
   const saved = outcomes.some(({ operation, affected: items }) => persistedOperationTypes.has(operation.type) && items.length > 0)
     || applicationReceipts.length > 0;
-  const native = record(input.run).outcome;
+  // The run row carries Bridge read-back once it completes. Before that, the
+  // admission receipts say which local-file writes were queued; only a write
+  // the Bridge had already verified counts as verified.
+  const runNative = record(input.run).outcome;
+  const queuedWrites = (input.operations ?? []).filter((operation) => effects.has(operation._id))
+    .flatMap((operation) => queuedLocalWrite(operation.output) ?? []);
+  const native = runNative === "native_pending" || runNative === "native_verified" ? runNative
+    : !queuedWrites.length ? undefined
+      : queuedWrites.every((write) => write.state === "verified") ? "native_verified" : "native_pending";
   const outcome: "canonical_saved" | "native_pending" | "native_verified" | undefined = saved
-    ? native === "native_pending" || native === "native_verified" ? native : "canonical_saved"
+    ? native ?? "canonical_saved"
     : undefined;
   return {
     outcomes, affected, applicationReceipts, undoAvailable, saved,
@@ -112,6 +121,12 @@ export function interruptedEffectActions(effects: InterruptedEffects, runId: str
   ];
 }
 
+const nativeSyncSentence = {
+  canonical_saved: "",
+  native_pending: " The file on your computer hasn't confirmed this change yet.",
+  native_verified: " The file on your computer was checked and has this change.",
+} as const;
+
 export function interruptedEffectSummary(
   effects: InterruptedEffects, message: string, options: { stopped?: boolean; verificationFailed?: boolean } = {},
 ) {
@@ -124,11 +139,7 @@ export function interruptedEffectSummary(
       : effects.ambiguous
         ? "The last action's save could not be confirmed; review it before continuing."
         : "";
-  const native = effects.outcome === "native_pending"
-    ? " The local file write is still pending."
-    : effects.outcome === "native_verified"
-      ? " The recorded local file write was verified."
-      : "";
+  const native = effects.outcome ? nativeSyncSentence[effects.outcome] : "";
   const unknownRemainder = effects.ambiguous && effects.committedCount
     ? " The last action's outcome remains unconfirmed." : "";
   return `${options.stopped ? "Stopped by you. " : ""}${facts}${native}${unknownRemainder} ${message}`.trim();

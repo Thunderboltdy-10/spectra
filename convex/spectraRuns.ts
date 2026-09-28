@@ -27,6 +27,7 @@ import {
   syncSourceNodes,
 } from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
+import { runNativeSyncOutcome } from "./bridgeWriteOperations";
 import { readContinuation, transferClarificationContinuation } from "./spectraRunContinuations";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
@@ -1428,9 +1429,14 @@ export const updateStatus = mutation({
       if (!operations.some((operation) => operation.status === "executed"))
         throw new Error("A run without a committed operation or artifact version cannot be marked as saved.");
     }
+    // A saved run that queued local-file writes reports the Bridge's truth:
+    // queued until read-back verifies them (settled later by completeWrite).
+    const nativeOutcome = args.status === "completed" && (args.outcome ?? "canonical_saved") === "canonical_saved"
+      ? await runNativeSyncOutcome(ctx, args.runId) : undefined;
     await ctx.db.patch(args.runId, {
       status: args.status,
       outcome:
+        nativeOutcome ??
         args.outcome ??
         (args.status === "awaiting_confirmation" || args.status === "awaiting_resolution"
           ? "awaiting_input"

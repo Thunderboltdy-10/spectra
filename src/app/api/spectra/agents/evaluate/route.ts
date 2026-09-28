@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   buildEvaluationSuite,
@@ -17,6 +17,12 @@ import {
   SPECTRA_PRIMARY_PROVIDER,
 } from "@/features/spectra/ai/model-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import {
+  admitAgentModelWork,
+  agentBridgeKey,
+  recordAgentModelWork,
+  signAgentBridge,
+} from "../model-work";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -562,17 +568,6 @@ async function mapConcurrent<T, TResult>(
   return results;
 }
 
-function bridgeKey() {
-  const key =
-    process.env.SPECTRA_AGENT_EVAL_BRIDGE_KEY ??
-    process.env.SPECTRA_SECRET_BRIDGE_KEY;
-  if (!key || key.length < 32)
-    throw new Error(
-      "Agent evaluation is not configured with a strong server bridge key.",
-    );
-  return key;
-}
-
 function errorResponse(error: unknown) {
   const message =
     error instanceof Error ? error.message : "The evaluation could not run.";
@@ -606,6 +601,7 @@ export async function POST(request: Request) {
       >("agents:draftForEvaluation", { agentId: body.agentId });
       if (artifact.blueprintKey !== "agent")
         throw new Error("This artifact is not an agent.");
+      await admitAgentModelWork(body.agentId);
       const generated = await openRouterCompletion({
         apiKey,
         model,
@@ -627,12 +623,17 @@ export async function POST(request: Request) {
         maxTokens: 4_000,
         temperature: 0.35,
       });
+      await recordAgentModelWork(session.userId, body.agentId, "agent_eval_generate", {
+        inputTokens: generated.inputTokens ?? 0,
+        outputTokens: generated.outputTokens ?? 0,
+      });
       return NextResponse.json({
         ok: true,
         cases: parseGeneratedCases(generated.text),
       });
     }
-    const settlementKey = bridgeKey();
+    // Fail before any model work when results could not be settled.
+    agentBridgeKey();
 
     // The suite is compiled from the agent's own mission, skills and evidence
     // so every layer §10.10 requires is present. Legacy agents with no
@@ -701,20 +702,12 @@ export async function POST(request: Request) {
     const payloadDigest = createHash("sha256")
       .update(stableJson({ results }))
       .digest("base64url");
-    const timestamp = Date.now();
-    const nonce = randomUUID();
-    const signature = createHmac("sha256", settlementKey)
-      .update(
-        [
-          "agent-eval-settle",
-          session.userId,
-          begun.evalRunId,
-          timestamp,
-          nonce,
-          payloadDigest,
-        ].join("|"),
-      )
-      .digest("base64url");
+    const { timestamp, nonce, signature } = signAgentBridge(
+      "agent-eval-settle",
+      session.userId,
+      begun.evalRunId,
+      payloadDigest,
+    );
     const settled = await convexMutation<
       {
         evalRunId: string;

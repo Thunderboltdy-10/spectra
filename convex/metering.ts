@@ -124,6 +124,46 @@ export async function recordMeterEvent(
   return { eventId, duplicate: false };
 }
 
+/**
+ * Model work of any kind (a run, Agent Foundry, an agent evaluation) meters
+ * its input and output tokens through here, so the school rollups the
+ * ceiling reads see all of it. Each category is idempotent on
+ * `${idempotencyPrefix}:${category}`.
+ */
+export async function recordModelTokenUsage(
+  ctx: MutationCtx,
+  args: {
+    schoolId?: Id<"schools">;
+    accountId?: Id<"accounts">;
+    inputTokens: number;
+    outputTokens: number;
+    sourceType: string;
+    sourceId?: string;
+    idempotencyPrefix: string;
+    dimensions?: Record<string, string | number | boolean>;
+    occurredAt: number;
+  },
+) {
+  for (const [category, quantity] of [
+    ["model_input_tokens", args.inputTokens],
+    ["model_output_tokens", args.outputTokens],
+  ] as const) {
+    const tokens = Number.isFinite(quantity) ? Math.max(0, Math.round(quantity)) : 0;
+    if (tokens <= 0) continue;
+    await recordMeterEvent(ctx, {
+      schoolId: args.schoolId,
+      accountId: args.accountId,
+      category,
+      quantity: tokens,
+      sourceType: args.sourceType,
+      sourceId: args.sourceId,
+      idempotencyKey: `${args.idempotencyPrefix}:${category}`,
+      dimensions: args.dimensions,
+      occurredAt: args.occurredAt,
+    });
+  }
+}
+
 type LimitPeriod = "day" | "month" | "total";
 
 function periodKey(period: LimitPeriod, timestamp: number) {

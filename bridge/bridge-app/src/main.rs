@@ -28,7 +28,8 @@ use spectra_bridge_core::sync::{
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
-    office_lock_exists, office_lock_paths, relative_key, scan_mount, stable_file_snapshot,
+    is_online_only, office_lock_exists, office_lock_paths, relative_key, scan_mount,
+    stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -1247,6 +1248,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let mut oversized_files = 0usize;
     let mut scan_complete = true;
     let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
+    let online_only_files = scan.online_only;
     for _failure in scan.failures {
         isolated_failures += 1;
         scan_complete = false;
@@ -1411,14 +1413,24 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .map(|_| ())
     } else {
         clear_mount_repair_retry(journal, &grant.id)?;
-        let detail = if oversized_files > 0 {
-            format!(
-                "Available in Spectra, except {oversized_files} file{} over 100 MB. {OVERSIZED_FILE_DETAIL}",
+        let mut detail = "Available in Spectra".to_owned();
+        if oversized_files > 0 {
+            detail = format!(
+                "{detail}, except {oversized_files} file{} over 100 MB. {OVERSIZED_FILE_DETAIL}",
                 if oversized_files == 1 { "" } else { "s" },
-            )
-        } else {
-            "Available in Spectra".to_owned()
-        };
+            );
+        }
+        if online_only_files > 0 {
+            detail = format!(
+                "{detail} {online_only_files} online-only file{} will sync once {} on this device.",
+                if online_only_files == 1 { "" } else { "s" },
+                if online_only_files == 1 {
+                    "it is"
+                } else {
+                    "they are"
+                },
+            );
+        }
         set_mount_status(
             journal,
             &grant.id,
@@ -2351,6 +2363,13 @@ fn spawn_grant_watcher(
                 if !path.exists() {
                     pending_files.remove(&path);
                     pending_missing.entry(path).or_insert(observed_at);
+                    continue;
+                }
+                if is_online_only(&path) {
+                    // Hashing a cloud placeholder downloads it again right
+                    // after the student chose 'Free up space'. It syncs once
+                    // the provider brings its bytes back to this device.
+                    pending_files.remove(&path);
                     continue;
                 }
                 if file_held_by_office(&path) {

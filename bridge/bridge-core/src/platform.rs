@@ -29,6 +29,14 @@ pub trait Platform: Send + Sync {
         let _ = path;
         Ok(None)
     }
+    /// Whether a file's bytes live only with a cloud provider (OneDrive Files
+    /// On-Demand, Dropbox/Google Drive online-only). Reading such a file
+    /// downloads it, so the Bridge leaves it alone until the student makes it
+    /// available on this device.
+    fn is_online_only(&self, path: &Path, metadata: &std::fs::Metadata) -> bool {
+        let _ = (path, metadata);
+        false
+    }
     fn recycle(&self, path: &Path) -> anyhow::Result<()>;
     fn store_credential(&self, account_id: &str, credential: &str) -> anyhow::Result<()>;
     fn read_credential(&self, account_id: &str) -> anyhow::Result<Option<String>>;
@@ -82,6 +90,11 @@ mod host {
 
         fn is_locked(&self, path: &Path) -> io::Result<bool> {
             Ok(self.open_stable_reader(path)?.is_none())
+        }
+
+        fn is_online_only(&self, _path: &Path, metadata: &std::fs::Metadata) -> bool {
+            use std::os::windows::fs::MetadataExt;
+            attributes_are_online_only(metadata.file_attributes())
         }
 
         fn owner_file_is_live(&self, owner_file: &Path) -> bool {
@@ -164,6 +177,20 @@ mod host {
             }
         }
     }
+}
+
+/// Cloud Files placeholders whose data is not on disk carry one of these
+/// attributes; reading their bytes recalls them from the provider.
+#[cfg(windows)]
+fn attributes_are_online_only(attributes: u32) -> bool {
+    const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+    const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+    const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+    attributes
+        & (FILE_ATTRIBUTE_OFFLINE
+            | FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        != 0
 }
 
 #[cfg(unix)]
@@ -261,6 +288,22 @@ mod host {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::attributes_are_online_only;
+
+    #[test]
+    fn only_cloud_placeholders_without_local_data_are_online_only() {
+        // FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_PINNED: hydrated and kept.
+        assert!(!attributes_are_online_only(0x20 | 0x0008_0000));
+        // OneDrive "online-only" and "free up space" placeholders.
+        assert!(attributes_are_online_only(0x20 | 0x0040_0000));
+        assert!(attributes_are_online_only(0x20 | 0x0010_0000 | 0x0040_0000));
+        assert!(attributes_are_online_only(0x1000));
+        assert!(attributes_are_online_only(0x0004_0000));
     }
 }
 

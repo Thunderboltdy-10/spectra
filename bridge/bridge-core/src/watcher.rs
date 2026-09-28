@@ -103,6 +103,10 @@ pub struct ScanPage {
     pub entries: Vec<ScanEntry>,
     pub failures: Vec<ScanFailure>,
     pub next_cursor: Option<String>,
+    /// Files whose bytes are only in a cloud provider. They are neither
+    /// entries (reading them would download them) nor failures.
+    #[serde(default)]
+    pub online_only: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -207,6 +211,7 @@ pub fn scan_page<P: Platform>(
             Vec::new()
         },
         next_cursor: (next < snapshot.entries.len()).then(|| next.to_string()),
+        online_only: if start == 0 { snapshot.online_only } else { 0 },
     })
 }
 
@@ -236,6 +241,7 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
     paths.sort_by(|a, b| a.0.cmp(&b.0));
     let mut entries = Vec::with_capacity(paths.len());
     let mut failures = Vec::new();
+    let mut online_only = 0;
     for (path, entry, walk_error) in &paths {
         if let Some(reason) = walk_error {
             failures.push(ScanFailure {
@@ -257,6 +263,10 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
             }
         };
         let is_directory = metadata.is_dir();
+        if !is_directory && platform.is_online_only(path, &metadata) {
+            online_only += 1;
+            continue;
+        }
         let resource_id = if is_directory {
             format!(
                 "dir_{}",
@@ -297,6 +307,7 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
         entries,
         failures,
         next_cursor: None,
+        online_only,
     })
 }
 
@@ -508,7 +519,9 @@ impl StabilityTracker {
     }
 
     pub fn observe(&mut self, path: &Path, now: Instant) -> anyhow::Result<Option<String>> {
-        if office_lock_exists_with(self.platform.as_ref(), path) {
+        if office_lock_exists_with(self.platform.as_ref(), path)
+            || is_online_only_with(self.platform.as_ref(), path)
+        {
             self.candidates.remove(path);
             return Ok(None);
         }
@@ -586,6 +599,17 @@ impl StabilityTracker {
             }
         }
     }
+}
+
+/// Whether the file's bytes are only in a cloud provider (see
+/// `Platform::is_online_only`). Missing files are not online-only.
+pub fn is_online_only(path: &Path) -> bool {
+    is_online_only_with(&HostPlatform, path)
+}
+
+fn is_online_only_with(platform: &dyn Platform, path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && platform.is_online_only(path, &metadata))
 }
 
 /// Returns whether Office currently owns the file through its owner lock.
@@ -668,6 +692,55 @@ mod tests {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    struct OnlineOnlyPlatform;
+    #[async_trait]
+    impl Platform for OnlineOnlyPlatform {
+        fn file_identity(&self, file: &File) -> std::io::Result<OsFileIdentity> {
+            TestPlatform.file_identity(file)
+        }
+        fn is_locked(&self, _: &Path) -> std::io::Result<bool> {
+            Ok(false)
+        }
+        fn is_online_only(&self, path: &Path, _: &std::fs::Metadata) -> bool {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("cloud-"))
+        }
+        fn recycle(&self, _: &Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn store_credential(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn read_credential(&self, _: &str) -> anyhow::Result<Option<String>> {
+            Ok(None)
+        }
+        fn enable_autostart(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn online_only_placeholders_are_neither_read_nor_failures() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("cloud-essay.docx"), b"placeholder").unwrap();
+        std::fs::write(dir.path().join("local-essay.docx"), b"bytes").unwrap();
+        let scan = scan_mount(&OnlineOnlyPlatform, dir.path()).unwrap();
+        assert_eq!(
+            scan.entries
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["local-essay.docx"]
+        );
+        assert!(
+            scan.failures.is_empty(),
+            "an online-only file must not keep the folder in repair retries"
+        );
+        assert_eq!(scan.online_only, 1);
+        assert!(!is_online_only(&dir.path().join("local-essay.docx")));
+        assert!(!is_online_only(&dir.path().join("missing.docx")));
     }
 
     #[test]

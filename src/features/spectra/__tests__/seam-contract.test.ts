@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { Workbook } from "@ariadng/office/xlsx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { mergeDocxProjections } from "@/app/api/spectra/lenses/docx/route";
-import { contentToPptx } from "@/app/api/spectra/lenses/office/route";
 import { assertPreservationKept } from "../commands/office/preservation-guard";
 import { claimHolds, inspectOfficePackage } from "../lenses/corpus-facts";
 import {
@@ -18,6 +17,7 @@ import {
 } from "../lenses/corpus-builders";
 import { docxLens, type DocxRunFormat } from "../lenses/docx-lens";
 import {
+  pptxProjectionFromContent as contentToPptx,
   pptxProjectionUpdateFromContent,
 } from "../lenses/office-content";
 import { pptxLens } from "../lenses/pptx-lens";

@@ -72,7 +72,6 @@ import type * as managebacProjectionJobs from "../managebacProjectionJobs.js";
 import type * as managebacVisibility from "../managebacVisibility.js";
 import type * as memberships from "../memberships.js";
 import type * as memory from "../memory.js";
-import type * as memoryEmbedding from "../memoryEmbedding.js";
 import type * as memoryEmbeddingPolicy from "../memoryEmbeddingPolicy.js";
 import type * as memoryEmbeddings from "../memoryEmbeddings.js";
 import type * as metering from "../metering.js";
@@ -201,7 +200,6 @@ declare const fullApi: ApiFromModules<{
   managebacVisibility: typeof managebacVisibility;
   memberships: typeof memberships;
   memory: typeof memory;
-  memoryEmbedding: typeof memoryEmbedding;
   memoryEmbeddingPolicy: typeof memoryEmbeddingPolicy;
   memoryEmbeddings: typeof memoryEmbeddings;
   metering: typeof metering;

@@ -21,6 +21,14 @@ function setup() {
 
 type T = ReturnType<typeof setup>;
 
+/** An erasure is a chain of one-page mutations plus the artifact deletion
+ * jobs it starts: more hops than convex-test's default of 100. The runtime
+ * accepts an iteration limit its type declaration omits. */
+function finishErasure(t: T) {
+  const finish = t.finishAllScheduledFunctions as (advanceTimers: () => void, maxIterations: number) => Promise<void>;
+  return finish(vi.runAllTimers, 1000);
+}
+
 async function seed(t: T) {
   const localBytes = "the student's local copy of a shared essay";
   const attachmentBlob = await t.run(ctx => ctx.storage.store(new Blob(["png"], { type: "image/png" })));
@@ -163,7 +171,7 @@ it("erases an account across two schools, keeps its shared works under a tombsto
 
   // A redelivered webhook joins the same job.
   expect((await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "erase-me" })).jobId).toBe(first.jobId);
-  await t.finishAllScheduledFunctions(vi.runAllTimers, 1000);
+  await finishErasure(t);
 
   const after = await t.run(async ctx => {
     return {
@@ -298,7 +306,7 @@ it("waits for a live AI run's lease before deleting it", async () => {
   const leaseExpiresAt = Date.now() + 30 * 60_000;
   await t.run(ctx => ctx.db.patch(ids.runId, { status: "running", leaseExpiresAt }));
   const { jobId } = await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "erase-me" });
-  await t.finishAllScheduledFunctions(vi.runAllTimers, 1000);
+  await finishErasure(t);
   expect((await t.run(ctx => ctx.db.get(jobId)))?.stage).toBe("completed");
   expect(await t.run(ctx => ctx.db.get(ids.runId))).toBeNull();
   // The run was only deleted once its lease had lapsed on the job's clock.

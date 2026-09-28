@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { POST, contentToPptx, officeLensErrorCode } from "@/app/api/spectra/lenses/office/route";
+import { POST, officeLensErrorCode } from "@/app/api/spectra/lenses/office/route";
 import {
+  pptxProjectionFromContent as contentToPptx,
   pptxProjectionUpdateFromContent,
   xlsxProjectionUpdateFromContent,
 } from "../lenses/office-content";

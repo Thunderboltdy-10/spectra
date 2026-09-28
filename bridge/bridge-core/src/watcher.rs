@@ -103,6 +103,10 @@ pub struct ScanPage {
     pub entries: Vec<ScanEntry>,
     pub failures: Vec<ScanFailure>,
     pub next_cursor: Option<String>,
+    /// Files whose bytes are only in a cloud provider. They are neither
+    /// entries (reading them would download them) nor failures.
+    #[serde(default)]
+    pub online_only: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -134,33 +138,10 @@ pub fn classify_changed_paths(
             continue;
         }
         if is_office_lock_file(&path) {
-            if let Some(parent) = path.parent() {
-                match std::fs::read_dir(parent) {
-                    Ok(entries) => {
-                        for entry in entries {
-                            match entry {
-                                Ok(entry) => {
-                                    let candidate = entry.path();
-                                    if candidate.is_file()
-                                        && !is_office_lock_file(&candidate)
-                                        && !is_bridge_staging_file(&candidate)
-                                    {
-                                        existing.insert(candidate);
-                                    }
-                                }
-                                Err(error) => failures.push(ScanFailure {
-                                    relative_path: relative_key(root, parent),
-                                    reason: error.to_string(),
-                                }),
-                            }
-                        }
-                    }
-                    Err(error) => failures.push(ScanFailure {
-                        relative_path: relative_key(root, &path),
-                        reason: error.to_string(),
-                    }),
-                }
-            }
+            // Office creating or removing its owner file changes whether its
+            // document may sync. Wake only that document: re-hashing every
+            // sibling on each open and close makes a large folder thrash.
+            existing.extend(office_lock_targets(&path));
             continue;
         }
         if path.is_dir() {
@@ -230,6 +211,7 @@ pub fn scan_page<P: Platform>(
             Vec::new()
         },
         next_cursor: (next < snapshot.entries.len()).then(|| next.to_string()),
+        online_only: if start == 0 { snapshot.online_only } else { 0 },
     })
 }
 
@@ -259,6 +241,7 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
     paths.sort_by(|a, b| a.0.cmp(&b.0));
     let mut entries = Vec::with_capacity(paths.len());
     let mut failures = Vec::new();
+    let mut online_only = 0;
     for (path, entry, walk_error) in &paths {
         if let Some(reason) = walk_error {
             failures.push(ScanFailure {
@@ -280,6 +263,10 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
             }
         };
         let is_directory = metadata.is_dir();
+        if !is_directory && platform.is_online_only(path, &metadata) {
+            online_only += 1;
+            continue;
+        }
         let resource_id = if is_directory {
             format!(
                 "dir_{}",
@@ -320,6 +307,7 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
         entries,
         failures,
         next_cursor: None,
+        online_only,
     })
 }
 
@@ -350,36 +338,50 @@ fn is_bridge_staging_file(path: &Path) -> bool {
         .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
-/// Maps an Office `~$` owner file back to the open document in the same folder.
-/// Word names the lock by replacing the first two characters of the document
-/// name; Compatibility Mode still uses that owner file even when the share
-/// lock is the signal the watcher must act on.
-pub fn office_lock_target(lock_path: &Path) -> Option<PathBuf> {
-    let name = lock_path.file_name()?.to_str()?;
-    if !name.starts_with("~$") {
-        return None;
+/// The owner-file names Office may create for a document. Excel and
+/// PowerPoint prefix the whole name with `~$`; Word replaces the first one or
+/// two characters of longer names instead, depending on the name's length.
+fn office_owner_file_names(name: &str) -> Vec<String> {
+    let mut names = Vec::with_capacity(3);
+    for skipped in 0..=2 {
+        if skipped > 0 && name.chars().count() <= skipped {
+            break;
+        }
+        let owner = format!("~${}", name.chars().skip(skipped).collect::<String>());
+        if !names.contains(&owner) {
+            names.push(owner);
+        }
     }
-    let suffix = &name[2..];
-    let dir = lock_path.parent()?;
-    let mut match_path = None;
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let candidate_name = entry.file_name();
-        let Some(candidate) = candidate_name.to_str() else {
-            continue;
-        };
-        if candidate.starts_with("~$") || !candidate.ends_with(suffix) {
-            continue;
-        }
-        if candidate.len() < suffix.len() + 2 {
-            continue;
-        }
-        if match_path.is_some() {
-            return None;
-        }
-        match_path = Some(entry.path());
-    }
-    match_path
+    names
+}
+
+/// Maps an Office `~$` owner file back to the documents in the same folder it
+/// may belong to. Every candidate is re-checked by the caller, so an ambiguous
+/// owner name (Word's truncated form) conservatively wakes each of them.
+pub fn office_lock_targets(lock_path: &Path) -> Vec<PathBuf> {
+    let Some(lock_name) = lock_path.file_name().and_then(|name| name.to_str()) else {
+        return Vec::new();
+    };
+    let (Some(dir), true) = (lock_path.parent(), lock_name.starts_with("~$")) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut targets = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            (!name.starts_with("~$")
+                && office_owner_file_names(name)
+                    .iter()
+                    .any(|owner| owner == lock_name))
+            .then(|| entry.path())
+        })
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets
 }
 
 /// Office owns the file through an exclusive writer handle. A leftover `~$`
@@ -465,7 +467,7 @@ fn stable_file_snapshot_with(
     platform: &dyn Platform,
     path: &Path,
 ) -> anyhow::Result<Option<StableFileSnapshot>> {
-    if office_lock_exists(path) {
+    if office_lock_exists_with(platform, path) {
         return Ok(None);
     }
     let Some(mut file) = (match platform.open_stable_reader(path) {
@@ -517,7 +519,9 @@ impl StabilityTracker {
     }
 
     pub fn observe(&mut self, path: &Path, now: Instant) -> anyhow::Result<Option<String>> {
-        if office_lock_exists(path) {
+        if office_lock_exists_with(self.platform.as_ref(), path)
+            || is_online_only_with(self.platform.as_ref(), path)
+        {
             self.candidates.remove(path);
             return Ok(None);
         }
@@ -597,19 +601,34 @@ impl StabilityTracker {
     }
 }
 
+/// Whether the file's bytes are only in a cloud provider (see
+/// `Platform::is_online_only`). Missing files are not online-only.
+pub fn is_online_only(path: &Path) -> bool {
+    is_online_only_with(&HostPlatform, path)
+}
+
+fn is_online_only_with(platform: &dyn Platform, path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && platform.is_online_only(path, &metadata))
+}
+
 /// Returns whether Office currently owns the file through its owner lock.
 /// This is intentionally public to the Bridge app so lock handling can stay
 /// per-file; one open Word document must not stall an entire selected mount.
 pub fn office_lock_exists(path: &Path) -> bool {
+    office_lock_exists_with(&HostPlatform, path)
+}
+
+/// An owner file left behind by an Office crash is not a live hold where the
+/// platform can prove it (Windows share modes). Otherwise it stays blocking.
+pub fn office_lock_exists_with(platform: &dyn Platform, path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    let owner_name = if name.chars().count() > 2 {
-        format!("~${}", name.chars().skip(2).collect::<String>())
-    } else {
-        format!("~${name}")
-    };
-    path.with_file_name(owner_name).exists()
+    office_owner_file_names(name).into_iter().any(|owner| {
+        let owner = path.with_file_name(owner);
+        owner.exists() && platform.owner_file_is_live(&owner)
+    })
 }
 
 pub fn office_locks_present(root: &Path) -> bool {
@@ -673,6 +692,55 @@ mod tests {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    struct OnlineOnlyPlatform;
+    #[async_trait]
+    impl Platform for OnlineOnlyPlatform {
+        fn file_identity(&self, file: &File) -> std::io::Result<OsFileIdentity> {
+            TestPlatform.file_identity(file)
+        }
+        fn is_locked(&self, _: &Path) -> std::io::Result<bool> {
+            Ok(false)
+        }
+        fn is_online_only(&self, path: &Path, _: &std::fs::Metadata) -> bool {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("cloud-"))
+        }
+        fn recycle(&self, _: &Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn store_credential(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn read_credential(&self, _: &str) -> anyhow::Result<Option<String>> {
+            Ok(None)
+        }
+        fn enable_autostart(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn online_only_placeholders_are_neither_read_nor_failures() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("cloud-essay.docx"), b"placeholder").unwrap();
+        std::fs::write(dir.path().join("local-essay.docx"), b"bytes").unwrap();
+        let scan = scan_mount(&OnlineOnlyPlatform, dir.path()).unwrap();
+        assert_eq!(
+            scan.entries
+                .iter()
+                .map(|entry| entry.relative_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["local-essay.docx"]
+        );
+        assert!(
+            scan.failures.is_empty(),
+            "an online-only file must not keep the folder in repair retries"
+        );
+        assert_eq!(scan.online_only, 1);
+        assert!(!is_online_only(&dir.path().join("local-essay.docx")));
+        assert!(!is_online_only(&dir.path().join("missing.docx")));
     }
 
     #[test]
@@ -808,11 +876,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("paper.docx");
         std::fs::write(&path, b"bytes").unwrap();
-        std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
+        // Office keeps its owner file open for writing while the document is open.
+        let owner = File::create(dir.path().join("~$paper.docx")).unwrap();
         let mut tracker = StabilityTracker::new(Duration::from_millis(1));
         let now = Instant::now();
         assert_eq!(tracker.observe(&path, now).unwrap(), None);
-        std::fs::remove_file(dir.path().join("~$per.docx")).unwrap();
+        drop(owner);
+        std::fs::remove_file(dir.path().join("~$paper.docx")).unwrap();
         assert_eq!(
             tracker
                 .observe(&path, now + Duration::from_millis(2))
@@ -864,28 +934,64 @@ mod tests {
     }
 
     #[test]
-    fn word_owner_file_name_matches_the_open_document() {
+    fn every_office_owner_file_form_maps_to_its_document() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("paper.docx");
+        // Word replaces leading characters of longer names; Excel and
+        // PowerPoint prefix the whole name.
+        let cases = [
+            ("Last-year essay.docx", "~$st-year essay.docx"),
+            ("Budget.xlsx", "~$Budget.xlsx"),
+            ("History deck.pptx", "~$History deck.pptx"),
+            ("paper.docx", "~$paper.docx"),
+            ("Überblick.docx", "~$erblick.docx"),
+        ];
+        for (document, owner) in cases {
+            let path = dir.path().join(document);
+            std::fs::write(&path, b"bytes").unwrap();
+            let owner_path = dir.path().join(owner);
+            let held = File::create(&owner_path).unwrap();
+            assert!(is_office_lock_file(&owner_path));
+            assert!(!is_office_lock_file(&path));
+            assert!(office_lock_exists(&path), "{owner} should lock {document}");
+            assert_eq!(office_lock_targets(&owner_path), vec![path.clone()]);
+            assert_eq!(
+                classify_changed_paths(dir.path(), [owner_path.clone()]).existing_files,
+                vec![path.clone()],
+                "an owner-file event wakes only its document"
+            );
+            drop(held);
+            std::fs::remove_file(&owner_path).unwrap();
+            assert!(!office_lock_exists(&path));
+            assert_eq!(
+                classify_changed_paths(dir.path(), [owner_path]).existing_files,
+                vec![path],
+                "removing the owner file wakes its document again"
+            );
+        }
+    }
+
+    #[test]
+    fn owner_file_left_by_an_office_crash_does_not_strand_the_document() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("Budget.xlsx");
         std::fs::write(&path, b"bytes").unwrap();
-        std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
-        assert!(office_lock_exists(&path));
+        std::fs::write(dir.path().join("~$Budget.xlsx"), b"owner").unwrap();
         assert!(
             !file_held_by_office(&path),
             "a leftover owner file without a writer hold is not a live lock"
         );
-        assert!(is_office_lock_file(&dir.path().join("~$per.docx")));
-        assert!(!is_office_lock_file(&path));
+        // Only a platform with share-mode proof can tell a crash leftover from
+        // a live Office session; elsewhere the owner file keeps blocking.
+        assert_eq!(office_lock_exists(&path), !cfg!(windows));
+        let mut tracker = StabilityTracker::new(Duration::from_millis(1));
+        let now = Instant::now();
+        assert_eq!(tracker.observe(&path, now).unwrap(), None);
         assert_eq!(
-            office_lock_target(&dir.path().join("~$per.docx")).as_deref(),
-            Some(path.as_path())
-        );
-        let essay = dir.path().join("Last-year essay.docx");
-        std::fs::write(&essay, b"bytes").unwrap();
-        std::fs::write(dir.path().join("~$st-year essay.docx"), b"lock").unwrap();
-        assert_eq!(
-            office_lock_target(&dir.path().join("~$st-year essay.docx")).as_deref(),
-            Some(essay.as_path())
+            tracker
+                .observe(&path, now + Duration::from_millis(2))
+                .unwrap()
+                .is_some(),
+            cfg!(windows)
         );
     }
 

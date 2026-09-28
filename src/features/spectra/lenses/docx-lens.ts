@@ -3449,6 +3449,17 @@ async function applyDelta(
   const born = new Map<string, string>();
   const resolveRegionId = (regionId: string) =>
     born.get(regionId) ?? aliases.get(regionId) ?? regionId;
+  // Only an operation on a region inserted since the last read needs a fresh
+  // fidelity entry and block. Re-reading after every insertion instead made
+  // adding a section to a long document cost one full projection per block.
+  let projectedRegions = new Set(opened.projection.blocks.map((block) => block.id));
+  const projectionFor = async (regionId: string) => {
+    if (!projectedRegions.has(regionId)) {
+      opened = await projectDocument(document, carry.profile, identity.identityStable);
+      projectedRegions = new Set(opened.projection.blocks.map((block) => block.id));
+    }
+    return opened;
+  };
 
   for (const operation of operations) {
     if (operation.kind === "insert-word-citation" || operation.kind === "edit-word-citation" || operation.kind === "remove-word-citation" || operation.kind === "regenerate-word-bibliography" || operation.kind === "insert-note" || operation.kind === "edit-note" || operation.kind === "move-note" || operation.kind === "delete-note" || operation.kind === "add-word-comment" || operation.kind === "edit-word-comment" || operation.kind === "delete-word-comment" || operation.kind === "track-text" || operation.kind === "review-revision") {
@@ -3481,10 +3492,9 @@ async function applyDelta(
       const inserted = resolved.kind === "insert-table"
         ? await insertTable(document, resolved, options)
         : await insertParagraph(document, resolved, options);
+      // Later operations may target the caller's new ID; projectionFor reads
+      // its fidelity/block entry from the current XML when they do.
       if (operation.regionId) born.set(operation.regionId, inserted);
-      // Later operations may target the caller's new ID. Resolve both its
-      // native locator and its fidelity/block entry against the current XML.
-      opened = await projectDocument(document, carry.profile, identity.identityStable);
       continue;
     }
     if (operation.kind === "reorder-regions") {
@@ -3523,7 +3533,7 @@ async function applyDelta(
     }
     if (operation.kind === "delete-region") {
       const regionId = resolveRegionId(operation.regionId);
-      assertEditable(opened.fidelityMap, regionId);
+      assertEditable((await projectionFor(regionId)).fidelityMap, regionId);
       const region = uniqueRegionById(document, regionId);
       const carrier = movableCarrier(document, region);
       carrier.parent?.removeChild(carrier);
@@ -3535,10 +3545,11 @@ async function applyDelta(
     // when the containing paragraph is otherwise preserved because the writer
     // targets one existing picture by package part and never rewrites the
     // paragraph's mixed native content.
+    const { fidelityMap, projection } = await projectionFor(regionId);
     if (!(["update-image", "insert-image", "replace-image"] as string[]).includes(operation.kind))
-      assertEditable(opened.fidelityMap, regionId);
+      assertEditable(fidelityMap, regionId);
     const region = uniqueRegionById(document, regionId);
-    const block = opened.projection.blocks.find((candidate) => candidate.id === regionId);
+    const block = projection.blocks.find((candidate) => candidate.id === regionId);
     if (!block) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} no longer exists.`);
     if (operation.kind === "replace-paragraph") {
       if (!region.paragraph)

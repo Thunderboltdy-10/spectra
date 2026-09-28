@@ -18,8 +18,8 @@ use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite,
-    DeliveredChange, DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope,
-    ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
+    DeliveredChange, DiscoveredRegistration, DiscoveredResource, MAX_NATIVE_PAYLOAD_BYTES,
+    QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
     claim_pending_payload_upload, claim_write, complete_fs_request_with_claim,
     complete_write_with_claim, detach_mount, discover_resources_page, drain_cloud_queue,
     exchange_pairing, inspect_write_target, migrate_cloud_replica_page,
@@ -28,7 +28,7 @@ use spectra_bridge_core::sync::{
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
-    office_lock_exists, office_lock_paths, office_lock_target, relative_key, scan_mount,
+    is_online_only, office_lock_exists, office_lock_paths, relative_key, scan_mount,
     stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
@@ -459,32 +459,6 @@ fn mount_repair_retry_key(grant_id: &str) -> String {
     format!("mount_repair_retry:{grant_id}")
 }
 
-fn mount_auto_sync_allowed(journal: &Journal, grant_id: &str) -> bool {
-    match journal.config(&format!("mount_double_sync:{grant_id}")) {
-        Ok(Some(value)) => value != "true",
-        Ok(None) => true,
-        Err(error) => {
-            record_runtime_error(
-                journal,
-                "Could not verify mount sync safety",
-                &error.to_string(),
-            );
-            false
-        }
-    }
-}
-
-fn pause_provider_managed_mount(journal: &Journal, grant_id: &str) {
-    let _ = set_mount_status(
-        journal,
-        grant_id,
-        "waiting",
-        "Automatic sync is paused for this provider-managed folder.",
-        0,
-        0,
-    );
-}
-
 fn current_time_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -504,7 +478,16 @@ fn mount_repair_retry_due(journal: &Journal, grant_id: &str) -> bool {
         .ok()
         .flatten()
         .and_then(|value| serde_json::from_str::<MountRepairRetry>(&value).ok())
-        .is_some_and(|retry| retry.retry_at_ms <= current_time_ms())
+        .is_some_and(|retry| {
+            let now = current_time_ms();
+            // A due time beyond any repair delay was scheduled before the wall
+            // clock was set back; do not wait out the size of the jump.
+            retry.retry_at_ms <= now
+                || retry.retry_at_ms
+                    > now.saturating_add(
+                        spectra_bridge_core::retry::retry_schedule_horizon().as_millis() as u64,
+                    )
+        })
 }
 
 fn display_retry_delay(delay_ms: u64) -> String {
@@ -1165,6 +1148,15 @@ async fn finish_delivered_change(
             Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
         );
     }
+    if delivery
+        .envelope
+        .change
+        .size
+        .is_some_and(|size| size > MAX_NATIVE_PAYLOAD_BYTES)
+    {
+        // Retrying cannot shrink the file; it would re-read it forever.
+        return journal.fail_queue(&delivery.item, "payload-too-large", OVERSIZED_FILE_DETAIL);
+    }
     let mut snapshot = match stable_file_snapshot(&target) {
         Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
@@ -1253,8 +1245,10 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let mut double_sync_risk = false;
     let mut locked_files = 0usize;
     let mut isolated_failures = 0usize;
+    let mut oversized_files = 0usize;
     let mut scan_complete = true;
     let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
+    let online_only_files = scan.online_only;
     for _failure in scan.failures {
         isolated_failures += 1;
         scan_complete = false;
@@ -1361,6 +1355,13 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 if registration.reason.as_deref() != Some("approval-required") {
                     isolated_failures += 1;
                 }
+            } else if registration.needs_payload
+                && carries_native_payload(&resource.native_format)
+                && resource.size > MAX_NATIVE_PAYLOAD_BYTES
+            {
+                // A repair retry cannot shrink the file; say so once instead
+                // of re-reading it on every repair scan.
+                oversized_files += 1;
             } else if upload_discovered_resource(
                 &deployment,
                 &credential,
@@ -1412,15 +1413,69 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .map(|_| ())
     } else {
         clear_mount_repair_retry(journal, &grant.id)?;
+        let mut detail = "Available in Spectra".to_owned();
+        if oversized_files > 0 {
+            detail = format!(
+                "{detail}, except {oversized_files} file{} over 100 MB. {OVERSIZED_FILE_DETAIL}",
+                if oversized_files == 1 { "" } else { "s" },
+            );
+        }
+        if online_only_files > 0 {
+            detail = format!(
+                "{detail} {online_only_files} online-only file{} will sync once {} on this device.",
+                if online_only_files == 1 { "" } else { "s" },
+                if online_only_files == 1 {
+                    "it is"
+                } else {
+                    "they are"
+                },
+            );
+        }
         set_mount_status(
             journal,
             &grant.id,
             "active",
-            "Available in Spectra",
-            files.len(),
+            &detail,
+            files.len() - oversized_files,
             files.len(),
         )
     }
+}
+
+const OVERSIZED_FILE_DETAIL: &str = "Files over 100 MB stay on this computer only; compress their pictures and videos to sync them.";
+
+/// Downloads a queued native package. The headers must arrive within the
+/// ordinary request budget; the body then gets a budget sized to the package,
+/// so a large deck on a slow school network finishes instead of timing out
+/// and being re-downloaded forever.
+async fn download_write_payload(url: &str) -> Result<Vec<u8>, (&'static str, String)> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|error| ("request", error.to_string()))?;
+    let response = tokio::time::timeout(
+        spectra_bridge_core::retry::bridge_payload_timeout(),
+        client.get(url).send(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            "timeout",
+            "payload download did not start in time".to_owned(),
+        )
+    })?
+    .and_then(reqwest::Response::error_for_status)
+    .map_err(|error| ("request", error.to_string()))?;
+    let budget = spectra_bridge_core::retry::bridge_payload_transfer_timeout(
+        response
+            .content_length()
+            .unwrap_or(MAX_NATIVE_PAYLOAD_BYTES),
+    );
+    let bytes = tokio::time::timeout(budget, response.bytes())
+        .await
+        .map_err(|_| ("timeout", "payload download stalled".to_owned()))?
+        .map_err(|error| ("body-read", error.to_string()))?;
+    Ok(bytes.to_vec())
 }
 
 async fn process_write_request(
@@ -1530,57 +1585,17 @@ async fn process_write_request(
         }
     };
     record_write_progress(journal, "downloading-payload", Some(&request), None);
-    let response = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .timeout(spectra_bridge_core::retry::bridge_payload_timeout())
-        .build()?
-        .get(&request.payload_url)
-        .send()
-        .await
-    {
-        Ok(response) => response.error_for_status(),
-        Err(error) => Err(error),
-    };
-    let payload = match response {
-        Ok(response) => match response.bytes().await {
-            Ok(bytes) => {
-                record_write_progress(journal, "payload-downloaded", Some(&request), None);
-                bytes.to_vec()
-            }
-            Err(error) => {
-                record_write_progress(
-                    journal,
-                    "payload-download-failed",
-                    Some(&request),
-                    Some(if error.is_timeout() {
-                        "timeout"
-                    } else {
-                        "body-read"
-                    }),
-                );
-                complete_claimed_write(
-                    deployment,
-                    credential,
-                    journal,
-                    &request,
-                    "waiting",
-                    None,
-                    Some(("payload-download-failed", &error.to_string())),
-                )
-                .await?;
-                return Ok(false);
-            }
-        },
-        Err(error) => {
+    let payload = match download_write_payload(&request.payload_url).await {
+        Ok(bytes) => {
+            record_write_progress(journal, "payload-downloaded", Some(&request), None);
+            bytes
+        }
+        Err((phase, message)) => {
             record_write_progress(
                 journal,
                 "payload-download-failed",
                 Some(&request),
-                Some(if error.is_timeout() {
-                    "timeout"
-                } else {
-                    "request"
-                }),
+                Some(phase),
             );
             complete_claimed_write(
                 deployment,
@@ -1589,7 +1604,7 @@ async fn process_write_request(
                 &request,
                 "waiting",
                 None,
-                Some(("payload-download-failed", &error.to_string())),
+                Some(("payload-download-failed", &message)),
             )
             .await?;
             return Ok(false);
@@ -1753,12 +1768,12 @@ async fn finish_pending_payload_upload(
             return Ok(false);
         }
     };
+    if !carries_native_payload(&request.native_format) || snapshot.size > MAX_NATIVE_PAYLOAD_BYTES {
+        return Ok(false);
+    }
     let bytes = snapshot.read_bytes()?;
     let hash = hex::encode(sha2::Sha256::digest(&bytes));
     drop(snapshot);
-    if !carries_native_payload(&request.native_format) {
-        return Ok(false);
-    }
     upload_resource_payload(
         deployment,
         credential,
@@ -2320,25 +2335,15 @@ fn spawn_grant_watcher(
                 .unwrap_or_default();
             let mut local_work_queued = false;
             let observed_at = std::time::Instant::now();
+            // `classify_changed_paths` already maps Office owner files to the
+            // documents they lock, so neither list contains a `~$` path.
             for path in batch.existing_files {
                 stability.mark_changed(&path);
                 pending_missing.remove(&path);
-                if is_office_lock_file(&path) {
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
-                    continue;
-                }
                 pending_files.insert(path);
             }
             for path in batch.missing_paths {
                 pending_files.remove(&path);
-                if is_office_lock_file(&path) {
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
-                    continue;
-                }
                 pending_missing.entry(path).or_insert(observed_at);
             }
             if !batch.failures.is_empty() {
@@ -2360,11 +2365,11 @@ fn spawn_grant_watcher(
                     pending_missing.entry(path).or_insert(observed_at);
                     continue;
                 }
-                if is_office_lock_file(&path) {
+                if is_online_only(&path) {
+                    // Hashing a cloud placeholder downloads it again right
+                    // after the student chose 'Free up space'. It syncs once
+                    // the provider brings its bytes back to this device.
                     pending_files.remove(&path);
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
                     continue;
                 }
                 if file_held_by_office(&path) {
@@ -2377,7 +2382,7 @@ fn spawn_grant_watcher(
                             &journal,
                             &grant.id,
                             "waiting",
-                            "Word still has a file open. Spectra will verify it after Word finishes saving.",
+                            "A file is open in Office. Spectra will sync it after Office finishes saving.",
                             0,
                             0,
                         );
@@ -2521,10 +2526,6 @@ async fn sync_grant(
     journal: &Journal,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<MountSyncOutcome, String> {
-    if !mount_auto_sync_allowed(journal, &grant.id) {
-        pause_provider_managed_mount(journal, &grant.id);
-        return Ok(MountSyncOutcome::Completed);
-    }
     let Some(_active_mount_sync) = ActiveMountSyncGuard::acquire(active_mount_syncs, &grant.id)
     else {
         return Ok(MountSyncOutcome::AlreadyRunning);
@@ -2981,11 +2982,6 @@ async fn run_sync_iteration(
         if restored_grants_reconciled.contains(&grant.id) {
             continue;
         }
-        if !mount_auto_sync_allowed(journal, &grant.id) {
-            pause_provider_managed_mount(journal, &grant.id);
-            restored_grants_reconciled.insert(grant.id);
-            continue;
-        }
         match sync_grant(&grant, journal, active_mount_syncs).await {
             Ok(MountSyncOutcome::Completed | MountSyncOutcome::RetryScheduled) => {
                 restored_grants_reconciled.insert(grant.id);
@@ -3055,11 +3051,6 @@ async fn run_sync_iteration(
                 // LibreOffice/Office disk edits can upload again.
                 restored_grants_reconciled.clear();
                 for grant in grants.device_grants() {
-                    if !mount_auto_sync_allowed(journal, &grant.id) {
-                        pause_provider_managed_mount(journal, &grant.id);
-                        restored_grants_reconciled.insert(grant.id);
-                        continue;
-                    }
                     if matches!(
                         sync_grant(&grant, journal, active_mount_syncs).await,
                         Ok(MountSyncOutcome::Completed
@@ -3318,10 +3309,6 @@ fn main() {
                 active_mount_syncs: active_mount_syncs.clone(),
             }));
             for grant in restored_grants {
-                if !mount_auto_sync_allowed(&journal, &grant.id) {
-                    pause_provider_managed_mount(&journal, &grant.id);
-                    continue;
-                }
                 spawn_grant_watcher(
                     grant,
                     grants.clone(),
@@ -3404,9 +3391,8 @@ fn main() {
 mod tests {
     use super::{
         ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
-        configured_deployment_url, mount_auto_sync_allowed, mount_repair_retry_due,
-        mount_repair_retry_key, pause_provider_managed_mount, resolve_bridge_data_dir,
-        retain_current_mounts, schedule_mount_repair_retry,
+        configured_deployment_url, current_time_ms, mount_repair_retry_due, mount_repair_retry_key,
+        resolve_bridge_data_dir, retain_current_mounts, schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
@@ -3550,32 +3536,19 @@ mod tests {
             serde_json::from_str::<MountRepairRetry>(&journal.config(&retry_key).unwrap().unwrap())
                 .unwrap();
         assert_eq!(second.attempts, 2);
+        let skewed = MountRepairRetry {
+            attempts: second.attempts,
+            retry_at_ms: current_time_ms() + 24 * 60 * 60 * 1_000,
+        };
+        journal
+            .set_config(&retry_key, &serde_json::to_string(&skewed).unwrap())
+            .unwrap();
+        assert!(
+            mount_repair_retry_due(&journal, "grant-safe"),
+            "a retry scheduled before the clock was set back must not wait out the jump"
+        );
         clear_mount_repair_retry(&journal, "grant-safe").unwrap();
         assert!(!mount_repair_retry_due(&journal, "grant-safe"));
         assert_eq!(journal.config(&retry_key).unwrap(), None);
-    }
-
-    #[test]
-    fn provider_managed_mounts_are_not_automatically_resumed() {
-        let journal = Journal::in_memory().unwrap();
-        assert!(mount_auto_sync_allowed(&journal, "grant-safe"));
-        journal
-            .set_config("mount_double_sync:grant-provider", "true")
-            .unwrap();
-        assert!(!mount_auto_sync_allowed(&journal, "grant-provider"));
-        pause_provider_managed_mount(&journal, "grant-provider");
-        let status: serde_json::Value = serde_json::from_str(
-            &journal
-                .config("mount_status:grant-provider")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(status["state"], "waiting");
-        assert!(status["detail"].as_str().unwrap().contains("paused"));
-        journal
-            .set_config("mount_double_sync:grant-provider", "false")
-            .unwrap();
-        assert!(mount_auto_sync_allowed(&journal, "grant-provider"));
     }
 }

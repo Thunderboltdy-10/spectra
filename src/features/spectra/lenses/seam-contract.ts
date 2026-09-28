@@ -1,11 +1,11 @@
 import { comparePackages } from "@ariadng/office/preservation";
 import { contentProjection } from "@/app/api/spectra/lenses/docx/route";
-import { contentToPptx } from "@/app/api/spectra/lenses/office/route";
 import { assertNativePreservationKept } from "./preservation-proof";
 import { docxProjectionFromContent } from "./document-projection";
 import { docxLens, type DocxProjection } from "./docx-lens";
 import {
   pptxArtifactContent,
+  pptxProjectionFromContent,
   pptxProjectionUpdateFromContent,
   xlsxArtifactContent,
   xlsxProjectionUpdateFromContent,
@@ -178,7 +178,7 @@ export async function runPptxProductionSeam(
   );
   const afterYjs = presentationYjsAdapter.project(document);
   const update = pptxProjectionUpdateFromContent(afterYjs, opened.projection, { objectLists: "complete" });
-  const merged = contentToPptx(afterYjs, opened.projection);
+  const merged = pptxProjectionFromContent(afterYjs, opened.projection);
   const output = update.operations.length
     ? await pptxLens.mutate(opened.preservedCarry, {
         kind: "ai-edit",

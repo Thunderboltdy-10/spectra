@@ -2,7 +2,7 @@ use crate::journal::{Journal, QueueItem, ResourceRecord};
 use crate::platform::Platform;
 use crate::protocol::PairingOffer;
 use crate::retry::retry_delay_ms;
-use crate::watcher::office_lock_exists;
+use crate::watcher::office_lock_exists_with;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -71,7 +71,7 @@ pub fn inspect_write_target<P: Platform>(
         }
         return ClaimPrecondition::Missing;
     }
-    if office_lock_exists(path) {
+    if office_lock_exists_with(platform, path) {
         return ClaimPrecondition::Locked;
     }
     match platform.is_locked(path) {
@@ -512,6 +512,9 @@ pub async fn reconcile_missing_resources(
     Ok(())
 }
 
+/// The largest native package the cloud accepts (`bridgeSync.beginPayloadUpload`).
+pub const MAX_NATIVE_PAYLOAD_BYTES: u64 = 100 * 1024 * 1024;
+
 pub async fn upload_resource_payload(
     deployment_url: &str,
     credential: &str,
@@ -521,7 +524,7 @@ pub async fn upload_resource_payload(
     media_type: &str,
 ) -> anyhow::Result<String> {
     anyhow::ensure!(
-        bytes.len() <= 100 * 1024 * 1024,
+        bytes.len() as u64 <= MAX_NATIVE_PAYLOAD_BYTES,
         "payload exceeds the 100 MB safety ceiling"
     );
     let intent: PayloadUploadIntent = mutation(
@@ -544,7 +547,9 @@ pub async fn upload_resource_payload(
             .ok_or_else(|| anyhow::anyhow!("payload upload URL missing"))?;
         let response = cloud_client()?
             .post(upload_url)
-            .timeout(crate::retry::bridge_payload_timeout())
+            .timeout(crate::retry::bridge_payload_transfer_timeout(
+                bytes.len() as u64
+            ))
             .header(reqwest::header::CONTENT_TYPE, media_type)
             .body(bytes.to_vec())
             .send()

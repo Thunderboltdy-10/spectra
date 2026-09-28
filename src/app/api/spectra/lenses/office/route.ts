@@ -65,13 +65,6 @@ import { refreshPresentationLinkedCharts } from "@/features/spectra/presentation
 import type { SpectraArtifact } from "@/features/spectra/data/api";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 
-// Compatibility exports for existing callers. The implementation lives in the
-// canonical office-content module; routes only re-export the shared transform.
-export {
-  pptxProjectionFromContent as contentToPptx,
-  xlsxProjectionFromContent as contentToXlsx,
-} from "@/features/spectra/lenses/office-content";
-
 export const runtime = "nodejs";
 
 const schema = z.discriminatedUnion("action", [
@@ -101,21 +94,6 @@ type ArtifactTruth = Pick<SpectraArtifact, "content" | "status" | "blueprintKey"
 type OfficeProjection = XlsxProjection | PptxProjection;
 
 const spreadsheetFormats = new Set(["xlsx", "xlsm", "xltx", "xltm", "xlam"]);
-/* native media types are supplied by the retained payload; the route never rewrites them */
-const _mediaTypes: Record<string, string> = {
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
-  xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
-  xltm: "application/vnd.ms-excel.template.macroEnabled.12",
-  xlam: "application/vnd.ms-excel.addin.macroEnabled.12",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  pptm: "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-  potx: "application/vnd.openxmlformats-officedocument.presentationml.template",
-  potm: "application/vnd.ms-powerpoint.template.macroEnabled.12",
-  ppsx: "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
-  ppsm: "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
-  ppam: "application/vnd.ms-powerpoint.addin.macroEnabled.12",
-};
 
 function id(value: string) {
   return value as Id<"spectraArtifacts">;

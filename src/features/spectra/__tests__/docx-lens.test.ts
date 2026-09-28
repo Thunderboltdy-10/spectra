@@ -242,6 +242,43 @@ describe("DOCX preservation lens", () => {
     expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
   });
 
+  it("adds a long section to a long document without re-reading Word for every inserted block", async () => {
+    const sourceDocument = Document.create();
+    for (let index = 0; index < 600; index += 1) sourceDocument.addParagraph(`Existing paragraph ${index}.`);
+    const opened = await docxLens.open(await sourceDocument.save());
+    const latex = String.raw`rac{a}{b}`;
+    const blocks = opened.projection.blocks.flatMap((block, index) => [
+      { ...block, ...(index % 3 === 0 ? { text: `${block.text} Revised.` } : {}) },
+      { id: `new-${index}`, type: "paragraph" as const, text: `Inserted paragraph ${index}.` },
+    ]);
+    // An operation on a block born in this same save still sees its fresh fidelity entry.
+    blocks.push({
+      id: "new-equation",
+      type: "equation",
+      text: latex,
+      latex,
+      inlineContent: [{ kind: "equation", latex, display: "block" }],
+      attrs: { display: "block", alignment: "left" },
+    } as (typeof blocks)[number]);
+    const update = docxProjectionFromContent({ ...opened.projection, nativeProjectionComplete: true, blocks }, opened.projection);
+    expect(update.operations.filter((operation) => operation.kind === "insert-paragraph")).toHaveLength(601);
+    expect(update.operations.map((operation) => operation.kind)).toContain("set-equation-layout");
+    const started = performance.now();
+    const output = await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations: update.operations });
+    expect(performance.now() - started).toBeLessThan(10_000);
+    const readback = await docxLens.open(output);
+    expect(readback.projection.blocks).toHaveLength(1_201);
+    expect(readback.projection.blocks.slice(0, 3).map((block) => block.text)).toEqual([
+      "Existing paragraph 0. Revised.",
+      "Inserted paragraph 0.",
+      "Existing paragraph 1.",
+    ]);
+    expect(readback.projection.blocks.at(-1)).toMatchObject({ type: "equation", attrs: { display: "block", alignment: "left" } });
+    expect(await docxProjectionReadbackDigest(readback.projection, update.projection)).toBe(
+      await docxProjectionSemanticDigest(update.projection),
+    );
+  }, 120_000);
+
   it("ignores Word padding spaces in paragraph readback while preserving other whitespace", async () => {
     const opened = await docxLens.open(await fixture("complex-structure.docx"));
     const targetIndex = opened.projection.blocks.findIndex(

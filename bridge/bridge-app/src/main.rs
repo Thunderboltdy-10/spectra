@@ -458,32 +458,6 @@ fn mount_repair_retry_key(grant_id: &str) -> String {
     format!("mount_repair_retry:{grant_id}")
 }
 
-fn mount_auto_sync_allowed(journal: &Journal, grant_id: &str) -> bool {
-    match journal.config(&format!("mount_double_sync:{grant_id}")) {
-        Ok(Some(value)) => value != "true",
-        Ok(None) => true,
-        Err(error) => {
-            record_runtime_error(
-                journal,
-                "Could not verify mount sync safety",
-                &error.to_string(),
-            );
-            false
-        }
-    }
-}
-
-fn pause_provider_managed_mount(journal: &Journal, grant_id: &str) {
-    let _ = set_mount_status(
-        journal,
-        grant_id,
-        "waiting",
-        "Automatic sync is paused for this provider-managed folder.",
-        0,
-        0,
-    );
-}
-
 fn current_time_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2503,10 +2477,6 @@ async fn sync_grant(
     journal: &Journal,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<MountSyncOutcome, String> {
-    if !mount_auto_sync_allowed(journal, &grant.id) {
-        pause_provider_managed_mount(journal, &grant.id);
-        return Ok(MountSyncOutcome::Completed);
-    }
     let Some(_active_mount_sync) = ActiveMountSyncGuard::acquire(active_mount_syncs, &grant.id)
     else {
         return Ok(MountSyncOutcome::AlreadyRunning);
@@ -2963,11 +2933,6 @@ async fn run_sync_iteration(
         if restored_grants_reconciled.contains(&grant.id) {
             continue;
         }
-        if !mount_auto_sync_allowed(journal, &grant.id) {
-            pause_provider_managed_mount(journal, &grant.id);
-            restored_grants_reconciled.insert(grant.id);
-            continue;
-        }
         match sync_grant(&grant, journal, active_mount_syncs).await {
             Ok(MountSyncOutcome::Completed | MountSyncOutcome::RetryScheduled) => {
                 restored_grants_reconciled.insert(grant.id);
@@ -3037,11 +3002,6 @@ async fn run_sync_iteration(
                 // LibreOffice/Office disk edits can upload again.
                 restored_grants_reconciled.clear();
                 for grant in grants.device_grants() {
-                    if !mount_auto_sync_allowed(journal, &grant.id) {
-                        pause_provider_managed_mount(journal, &grant.id);
-                        restored_grants_reconciled.insert(grant.id);
-                        continue;
-                    }
                     if matches!(
                         sync_grant(&grant, journal, active_mount_syncs).await,
                         Ok(MountSyncOutcome::Completed
@@ -3300,10 +3260,6 @@ fn main() {
                 active_mount_syncs: active_mount_syncs.clone(),
             }));
             for grant in restored_grants {
-                if !mount_auto_sync_allowed(&journal, &grant.id) {
-                    pause_provider_managed_mount(&journal, &grant.id);
-                    continue;
-                }
                 spawn_grant_watcher(
                     grant,
                     grants.clone(),
@@ -3386,9 +3342,8 @@ fn main() {
 mod tests {
     use super::{
         ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
-        configured_deployment_url, mount_auto_sync_allowed, mount_repair_retry_due,
-        mount_repair_retry_key, pause_provider_managed_mount, resolve_bridge_data_dir,
-        retain_current_mounts, schedule_mount_repair_retry,
+        configured_deployment_url, mount_repair_retry_due, mount_repair_retry_key,
+        resolve_bridge_data_dir, retain_current_mounts, schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
@@ -3535,29 +3490,5 @@ mod tests {
         clear_mount_repair_retry(&journal, "grant-safe").unwrap();
         assert!(!mount_repair_retry_due(&journal, "grant-safe"));
         assert_eq!(journal.config(&retry_key).unwrap(), None);
-    }
-
-    #[test]
-    fn provider_managed_mounts_are_not_automatically_resumed() {
-        let journal = Journal::in_memory().unwrap();
-        assert!(mount_auto_sync_allowed(&journal, "grant-safe"));
-        journal
-            .set_config("mount_double_sync:grant-provider", "true")
-            .unwrap();
-        assert!(!mount_auto_sync_allowed(&journal, "grant-provider"));
-        pause_provider_managed_mount(&journal, "grant-provider");
-        let status: serde_json::Value = serde_json::from_str(
-            &journal
-                .config("mount_status:grant-provider")
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(status["state"], "waiting");
-        assert!(status["detail"].as_str().unwrap().contains("paused"));
-        journal
-            .set_config("mount_double_sync:grant-provider", "false")
-            .unwrap();
-        assert!(mount_auto_sync_allowed(&journal, "grant-provider"));
     }
 }

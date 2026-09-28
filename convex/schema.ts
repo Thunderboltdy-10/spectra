@@ -4201,6 +4201,16 @@ export default defineSchema({
       }),
     ),
     usage: v.optional(v.any()),
+    // Tokens already metered for the current execution. Usage arrives more
+    // than once (heartbeat snapshot, Stop, the worker's own final report), so
+    // each report meters only what this total has not yet counted.
+    meteredUsage: v.optional(
+      v.object({
+        executionId: v.string(),
+        inputTokens: v.number(),
+        outputTokens: v.number(),
+      }),
+    ),
     sessionId: v.optional(v.string()),
     submissionKey: v.optional(v.string()),
     executionId: v.optional(v.string()),

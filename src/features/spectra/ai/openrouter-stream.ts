@@ -1,3 +1,5 @@
+import { recordProviderUsage } from "./run-usage";
+
 export type OpenRouterUsage = {
   promptTokens?: number;
   promptCacheHitTokens?: number;
@@ -99,7 +101,10 @@ export function extractCompleteJsonArrayItems(source: string, field: string) {
   return values;
 }
 
+// Every provider response passes through here exactly once, so this is where
+// its tokens join the run's usage ledger (see run-usage.ts).
 function normalizeUsage(value: unknown, elapsedMs: number): OpenRouterUsage | undefined {
+  recordProviderUsage(value);
   if (!value || typeof value !== "object") return elapsedMs > 0 ? { elapsedMs } : undefined;
   const usage = value as Record<string, unknown>;
   const details = usage.completion_tokens_details && typeof usage.completion_tokens_details === "object"
@@ -401,13 +406,14 @@ export async function readOpenRouterResponse(
   // streaming the complete structured response. The response can be fenced or
   // have trailing transport text, so inspect the balanced JSON object rather
   // than requiring the entire raw stream to be directly parseable.
+  const usage = normalizeUsage(rawUsage, Date.now() - startedAt);
   if (trailingError) {
     const hasPlanFields = text.includes('"operations"') && text.includes('"finalResponse"');
     const hasCompleteOperations = extractCompleteJsonArrayItems(text, "operations").length > 0
       || /"operations"\s*:\s*\[\s*\]/.test(text);
     if (!containsCompleteJsonObject(text) && !(hasPlanFields && hasCompleteOperations)) throw trailingError;
   }
-  return { text, model, provider, usage: normalizeUsage(rawUsage, Date.now() - startedAt) };
+  return { text, model, provider, usage };
 }
 
 // Agent turns must preserve tool-call identity. Concatenating every streamed
@@ -628,6 +634,7 @@ export async function readOpenRouterAgentTurn(
   // cut off. Returning them would save a truncated reply as a complete answer,
   // so only a turn the provider reported as finished survives a trailing error.
   // OpenRouter reports a mid-stream failure as finish_reason "error".
+  const usage = normalizeUsage(rawUsage, Date.now() - startedAt);
   if (trailingError && finishReason !== "stop" && finishReason !== "tool_calls")
     throw trailingError;
   return {
@@ -639,6 +646,6 @@ export async function readOpenRouterAgentTurn(
     finishReason,
     model,
     provider,
-    usage: normalizeUsage(rawUsage, Date.now() - startedAt),
+    usage,
   };
 }

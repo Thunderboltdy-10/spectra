@@ -224,3 +224,44 @@ it("an operator backfill rebuilds totals that predate the rollup, exactly and wi
   await useTokens(ids.capped, ids.student, 1, 1);
   expect(await totals(ids.capped)).toMatchObject({ "day:2026-09-28": 17, "month:2026-09": 117, total: 1_117 });
 });
+
+it("meters a stopped run from its heartbeat usage, then only the growth the worker reports afterwards", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-28T10:00:00Z"));
+  const { t, ids, begin } = await fixture();
+  const student = t.withIdentity({ subject: "capped-student", email: "capped-student@example.test", emailVerified: true });
+  const run = await begin("capped-student");
+  const target = { runId: run.runId, executionId: run.executionId };
+  await student.mutation(api.spectraRuns.claimExecution, { ...target, workerId: "worker-a" });
+  // The heartbeat stores usage only when it renews the lease.
+  vi.setSystemTime(new Date("2026-09-28T10:01:05Z"));
+  await student.mutation(api.spectraRuns.heartbeat, { ...target, workerId: "worker-a", usage: { promptTokens: 300, completionTokens: 100 } });
+  const totals = async () => (await t.run((ctx) => ctx.db.query("schoolUsageTotals")
+    .withIndex("by_school_period", (q) => q.eq("schoolId", ids.capped)).collect())).find((row) => row.periodKey === "total")?.quantity;
+  await student.mutation(api.spectraRuns.stopRun, target);
+  expect(await totals()).toBe(400);
+  // The worker notices Stop after one more model call and reports its final total.
+  const final = { ...target, status: "cancelled" as const, usage: { promptTokens: 500, completionTokens: 150 } };
+  await student.mutation(api.spectraRuns.updateStatus, final);
+  expect(await totals()).toBe(650);
+  await student.mutation(api.spectraRuns.updateStatus, final);
+  expect(await totals()).toBe(650);
+});
+
+it("meters the stored usage of a run whose worker died", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-28T10:00:00Z"));
+  const { t, ids, begin } = await fixture();
+  const student = t.withIdentity({ subject: "capped-student", email: "capped-student@example.test", emailVerified: true });
+  const run = await begin("capped-student");
+  const target = { runId: run.runId, executionId: run.executionId };
+  await student.mutation(api.spectraRuns.claimExecution, { ...target, workerId: "worker-a" });
+  vi.setSystemTime(new Date("2026-09-28T10:01:05Z"));
+  await student.mutation(api.spectraRuns.heartbeat, { ...target, workerId: "worker-a", usage: { promptTokens: 700, completionTokens: 200 } });
+  vi.setSystemTime(new Date("2026-09-28T10:10:00Z"));
+  await t.mutation(internal.spectraRuns.reconcileStaleRuns, {});
+  const rows = await t.run((ctx) => ctx.db.query("schoolUsageTotals")
+    .withIndex("by_school_period", (q) => q.eq("schoolId", ids.capped)).collect());
+  expect(rows.find((row) => row.periodKey === "total")?.quantity).toBe(900);
+  expect((await t.run((ctx) => ctx.db.get(run.runId)))?.status).toBe("failed");
+});

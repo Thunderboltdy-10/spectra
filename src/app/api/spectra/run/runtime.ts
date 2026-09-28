@@ -120,6 +120,7 @@ import { RunStateMachine } from "@/features/spectra/runs/state";
 import type { RunProtocolState } from "@/features/spectra/runs/state";
 import { classifyRunAttemptAbort } from "@/features/spectra/ai/run-lifecycle";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
+import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-usage";
 import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./loop/ui-observation";
 import { handleUiObserverRequest, uiObserverSchema } from "./loop/ui-observer-request";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
@@ -212,7 +213,14 @@ function composeRestoredRequest(restored: RestoredClarification) {
   ].join("\n\n");
 }
 
-async function runAttempt(
+// Every provider call made while this attempt runs (repair and fallback
+// passes, parallel workers, research) lands in one usage ledger. Each status
+// write and heartbeat reports that cumulative total for metering.
+function runAttempt(...args: Parameters<typeof runAttemptInLedger>) {
+  return withRunUsageLedger(() => runAttemptInLedger(...args));
+}
+
+async function runAttemptInLedger(
   params: {
     actorClerkId: string;
     runId: string;
@@ -301,11 +309,13 @@ async function runAttempt(
     : leaseController.signal;
   const heartbeat = setInterval(() => {
     const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    const usage = runUsageSnapshot();
     void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
       ...(awaitedOperationId ? { awaitedOperationId } : {}),
+      ...(usage ? { usage } : {}),
     })
       .then((result) => {
         if (!result.alive) { leaseController.abort(); cancelUiObservation(params.runId, params.executionId); }
@@ -1768,7 +1778,7 @@ async function runAttempt(
         provenance,
         modelUsed: modelResult.model,
         providerUsed: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       stopHeartbeat();
       await saveAssistantMessage({
@@ -1780,7 +1790,7 @@ async function runAttempt(
         decision: plan.decision,
         model: modelResult.model,
         provider: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
         choices: plan.choices,
       });
       await queueSilentMemoryMaintenance({
@@ -1852,7 +1862,7 @@ async function runAttempt(
         provenance,
         modelUsed: modelResult.model,
         providerUsed: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       stopHeartbeat();
       await Promise.all([
@@ -1883,7 +1893,7 @@ async function runAttempt(
         awaitingConfirmation: true,
         model: modelResult.model,
         provider: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       card = await latestCard(params.actorClerkId, params.runId);
       publish({
@@ -2166,7 +2176,7 @@ async function runAttempt(
             provenance,
             modelUsed: modelResult.model,
             providerUsed: modelResult.provider,
-            usage: modelResult.usage,
+            usage: runUsageSnapshot(modelResult.usage),
           });
           stopHeartbeat();
           await Promise.all([
@@ -2340,7 +2350,7 @@ async function runAttempt(
       outcome: "canonical_saved",
       modelUsed: modelResult.model,
       providerUsed: modelResult.provider,
-      usage: modelResult.usage,
+      usage: runUsageSnapshot(modelResult.usage),
     })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
     const reply = replyWithNativeReceipt(plan.finalResponse, completion?.nativeOutcome);
@@ -2354,7 +2364,7 @@ async function runAttempt(
       affected: allAffected,
       model: modelResult.model,
       provider: modelResult.provider,
-      usage: modelResult.usage,
+      usage: runUsageSnapshot(modelResult.usage),
     });
     await queueSilentMemoryMaintenance({
       actorClerkId: params.actorClerkId,
@@ -2476,6 +2486,7 @@ async function runAttempt(
         runId: params.runId,
         executionId: params.executionId,
         status: "cancelled",
+        usage: runUsageSnapshot(),
         resultTitle: "Stopped",
         resultSummary: interruptedEffectSummary(effects,
           recovery.retryable ? "You can retry the remaining request." : "Continue in this conversation for the remaining work.",
@@ -2584,6 +2595,7 @@ async function runAttempt(
       executionId: params.executionId,
       workerId: params.workerId,
       status: "failed",
+      usage: runUsageSnapshot(),
       phase: preservedOutcome ? "partial" : "failed",
       outcome: effects.outcome,
       error: message,
@@ -2926,11 +2938,13 @@ async function resumeOperationsAttempt(params: {
   );
   const heartbeat = setInterval(() => {
     const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    const usage = runUsageSnapshot();
     void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
       ...(awaitedOperationId ? { awaitedOperationId } : {}),
+      ...(usage ? { usage } : {}),
     }).then((result) => {
       if (!result.alive) cancelUiObservation(params.runId, params.executionId);
       if (awaitedOperationId && result.observation)

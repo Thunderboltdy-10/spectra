@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { createHash, createHmac } from "node:crypto";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
@@ -435,6 +435,26 @@ describe("ManageBac account isolation", () => {
 
   afterEach(() => {
     delete process.env.SPECTRA_CONNECTOR_BRIDGE_KEY;
+    vi.useRealTimers();
+  });
+
+  it("lets a new sync start soon after the request that owned a lease was killed", async () => {
+    // The owning request lives at most 300 seconds. A lease that outlives it
+    // by half an hour kept every Sync press busy after one killed request.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t = setupTest();
+    await seedFixture(t);
+    const killed = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" });
+    vi.setSystemTime(Date.now() + 60_000);
+    await expect(
+      t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" }),
+    ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" });
+    expect(replacement.syncRunId).not.toBe(killed.syncRunId);
+    expect(await t.run((ctx) => ctx.db.get(killed.syncRunId as Id<"externalSyncRuns">))).toMatchObject({
+      status: "failed", stage: "lease_expired",
+    });
   });
 
   it("reclaims an expired account sync and fences its late provider response", async () => {

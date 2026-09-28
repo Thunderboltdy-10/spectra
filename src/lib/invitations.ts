@@ -14,6 +14,13 @@ export type InviteEmailResult =
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string };
 
+/** Connect, greeting and idle-socket limits for one invitation delivery. */
+export const SMTP_TIMEOUTS = {
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 20_000,
+} as const;
+
 function normalizeMailbox(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -87,6 +94,11 @@ export async function sendInvitationEmail(params: InviteEmailParams): Promise<In
         user: smtpUser,
         pass: smtpPass,
       },
+      // The invite request waits for this. Nodemailer's defaults allow two
+      // minutes to connect and ten minutes of socket silence, far past the
+      // route's own limit, so a stalled SMTP host hung the invite instead of
+      // reporting a failed delivery the admin can retry.
+      ...SMTP_TIMEOUTS,
     });
 
     await transporter.verify();

@@ -4,6 +4,13 @@ import { createHash, createHmac } from "node:crypto";
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 
+/**
+ * Each callback route pins maxDuration = 300, so an answer later than that
+ * plus a connection margin never comes. Without a limit, a stalled connection
+ * held this action until Convex's ten-minute action limit.
+ */
+export const SCHEDULED_CALLBACK_TIMEOUT_MS = 330_000;
+
 function callbackUrl() {
   const value = process.env.SPECTRA_APP_URL?.trim();
   if (!value) throw new Error("SPECTRA_APP_URL is required for scheduled work.");
@@ -40,6 +47,7 @@ async function postSigned(
       [`x-${headerPrefix}-signature`]: signature,
     },
     body: rawBody,
+    signal: AbortSignal.timeout(SCHEDULED_CALLBACK_TIMEOUT_MS),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");

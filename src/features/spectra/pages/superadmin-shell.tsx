@@ -157,6 +157,7 @@ type LifecycleJob = {
   impact: {
     activeMembers: number;
     artifacts: number;
+    artifactsAtLeast?: boolean;
     workspaces: number;
     integrations: number;
   };
@@ -2199,6 +2200,11 @@ function SecuritySurface({
   const [cancelJob, setCancelJob] = useState<LifecycleJob | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [busy, setBusy] = useState("");
+  const [exportLinks, setExportLinks] = useState<{
+    jobId: string;
+    url: string;
+    parts: { index: number; section: string; url: string }[];
+  } | null>(null);
   const now = useNow(30_000);
   useEffect(() => {
     setLoading(true);
@@ -2291,7 +2297,9 @@ function SecuritySurface({
                     </td>
                     <td className="py-3 text-[var(--text-secondary)]">
                       {job.impact.activeMembers} members ·{" "}
-                      {job.impact.artifacts} artifacts · {job.impact.workspaces}{" "}
+                      {job.impact.artifacts}
+                      {job.impact.artifactsAtLeast ? "+" : ""} artifacts ·{" "}
+                      {job.impact.workspaces}{" "}
                       workspaces
                     </td>
                     <td className="py-3">{job.approvalCount}/2</td>
@@ -2353,20 +2361,47 @@ function SecuritySurface({
                         </AdminButton>
                       ) : job.type === "export" &&
                         job.status === "completed" ? (
+                        exportLinks?.jobId === job.jobId ? (
+                          <ul className="grid gap-1 text-micro">
+                            {[
+                              { label: "Manifest", url: exportLinks.url },
+                              ...exportLinks.parts.map((part) => ({
+                                label: `Part ${part.index + 1}: ${part.section}`,
+                                url: part.url,
+                              })),
+                            ].map((link) => (
+                              <li key={link.url}>
+                                <a
+                                  className="text-[var(--accent-cyan)] underline-offset-2 hover:underline"
+                                  href={link.url}
+                                  rel="noopener noreferrer"
+                                  target="_blank"
+                                >
+                                  {link.label}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
                         <AdminButton
                           disabled={busy === job.jobId}
                           onClick={() => {
                             setBusy(job.jobId);
-                            void getAdministration<{ url: string }>(
-                              "lifecycleExport",
-                              { jobId: job.jobId },
-                            )
-                              .then(({ url }) => {
-                                window.open(
-                                  url,
-                                  "_blank",
-                                  "noopener,noreferrer",
-                                );
+                            void getAdministration<{
+                              url: string;
+                              parts?: { index: number; section: string; url: string }[];
+                            }>("lifecycleExport", { jobId: job.jobId })
+                              .then(({ url, parts = [] }) => {
+                                // A large export is a manifest plus parts, so
+                                // list every file instead of opening one.
+                                if (parts.length > 0)
+                                  setExportLinks({ jobId: job.jobId, url, parts });
+                                else
+                                  window.open(
+                                    url,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  );
                               })
                               .catch((error) =>
                                 toast.error(
@@ -2380,6 +2415,7 @@ function SecuritySurface({
                         >
                           Download export
                         </AdminButton>
+                        )
                       ) : (
                         <span className="text-micro text-[var(--text-tertiary)]">
                           {job.errorSummary ?? "No action required"}

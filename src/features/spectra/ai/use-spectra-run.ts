@@ -15,6 +15,7 @@ import {
   type SpectraResultCard,
   type SpectraRunTab,
 } from "../data/api";
+import { requestSpectra, spectraFailureMessage } from "../data/request";
 import type { CommandAttachment } from "../components/command-bar";
 import { mergeContinuationAttachments } from "./continuation-context";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
@@ -316,6 +317,12 @@ function appendStep(
     ].slice(-8),
   };
 }
+
+/** A failed Stop says what happened and what to do, never a raw body. */
+const STOP_FAILURE_COPY = {
+  fallback: "This run can no longer be stopped safely.",
+  signedOut: "Sign in again to stop this run.",
+};
 
 export function useSpectraRun({
   surface,
@@ -782,7 +789,7 @@ export function useSpectraRun({
         runId: null,
         exchangeId: requestExchangeId,
       });
-      const response = await fetch("/api/spectra/run", {
+      const response = await requestSpectra("/api/spectra/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -790,8 +797,11 @@ export function useSpectraRun({
       });
       if (!response.ok || !response.body)
         throw new Error(
-          (await response.text().catch(() => "")) ||
-            `Spectra run failed (${response.status}).`,
+          await spectraFailureMessage(response, {
+            fallback:
+              "Spectra could not start this run. Check your connection, then try again.",
+            signedOut: "Sign in again to run Spectra.",
+          }),
         );
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -1270,7 +1280,7 @@ export function useSpectraRun({
         const target = displayedRunTabs.current.get(runId);
         if (mode === "cancel_current_action") {
           const version = await resolveDisplayedRunVersion(runId, true);
-          const response = await fetch("/api/spectra/run", {
+          const response = await requestSpectra("/api/spectra/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1282,8 +1292,7 @@ export function useSpectraRun({
           });
           if (!response.ok && response.status !== 409)
             throw new Error(
-              (await response.text().catch(() => "")) ||
-                "This run could not be stopped safely.",
+              await spectraFailureMessage(response, STOP_FAILURE_COPY),
             );
           spectraBus.emit("threads.changed", {});
           queuedSteering.current.delete(runId);
@@ -1305,7 +1314,7 @@ export function useSpectraRun({
         // before starting the continuation. Starting immediately made the
         // continuation race `beginRun` and surface a misleading 409.
         let version = await resolveDisplayedRunVersion(runId, true);
-        let stopResponse = await fetch("/api/spectra/run", {
+        let stopResponse = await requestSpectra("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1328,7 +1337,7 @@ export function useSpectraRun({
             currentStatus === "awaiting_resolution";
           if (active) {
             version = await resolveDisplayedRunVersion(runId, true);
-            stopResponse = await fetch("/api/spectra/run", {
+            stopResponse = await requestSpectra("/api/spectra/run", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1342,8 +1351,10 @@ export function useSpectraRun({
         }
         if (!stopResponse.ok && stopResponse.status !== 409)
           throw new Error(
-            (await stopResponse.text().catch(() => "")) ||
-              "This run could not be redirected safely.",
+            await spectraFailureMessage(stopResponse, {
+              fallback: "This run could not be redirected safely.",
+              signedOut: "Sign in again to redirect this run.",
+            }),
           );
         let settled = false;
         for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -1486,7 +1497,7 @@ export function useSpectraRun({
         setActiveRequestCount((count) => count + 1);
         try {
           const version = await resolveDisplayedRunVersion(card.runId, true);
-          const response = await fetch("/api/spectra/run", {
+          const response = await requestSpectra("/api/spectra/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1498,8 +1509,10 @@ export function useSpectraRun({
           });
           if (!response.ok)
             throw new Error(
-              (await response.text().catch(() => "")) ||
-                "Could not undo this run.",
+              await spectraFailureMessage(response, {
+                fallback: "Could not undo this run. Try again in a moment.",
+                signedOut: "Sign in again to undo this run.",
+              }),
             );
           toast.success("Restored the earlier copy of this work.");
           spectraBus.emit("threads.changed", {});
@@ -1662,7 +1675,7 @@ export function useSpectraRun({
           executionId = displayed.executionId;
           attemptId = displayed.attemptId;
         }
-        const response = await fetch("/api/spectra/run", {
+        const response = await requestSpectra("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1686,8 +1699,7 @@ export function useSpectraRun({
             return;
           }
           throw new Error(
-            (await response.text().catch(() => "")) ||
-              "This run can no longer be stopped safely.",
+            await spectraFailureMessage(response, STOP_FAILURE_COPY),
           );
         }
         spectraBus.emit("threads.changed", {});

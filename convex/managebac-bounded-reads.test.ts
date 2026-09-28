@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { resolveConflict } from "./managebac";
+import { resolveConflict, RESOLVE_INLINE_PROJECTIONS } from "./managebac";
 import { OPEN_CONFLICT_COUNT_LIMIT, syncRunOutcome } from "./managebacProjectionJobs";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 import { bridgeKey, calendarFixture, identity } from "../scripts/test-fixtures/managebac-calendar";
@@ -16,11 +16,14 @@ const resolveHandler = Reflect.get(resolveConflict, "_handler") as (
 ) => Promise<{ pending: boolean }>;
 
 beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
 
 /** One shared class resource projected to the student and many classmates. */
-async function sharedRecordFixture() {
-  const f = await calendarFixture(modules);
+async function sharedRecordFixture(role: "student" | "school_admin" = "student") {
+  const f = await calendarFixture(modules, role);
   const ids = await f.t.run(async ctx => {
     const now = Date.now();
     const { schoolId, integrationId, accountId, syncRunId } = f.seed;
@@ -52,7 +55,12 @@ async function sharedRecordFixture() {
       kind: "source_changed", oldSource: payload, newSource: payload, affectedLinks: ["resource-projection-0"],
       suggestedActions: ["detach"], status: "open", createdAt: now, updatedAt: now,
     });
-    return { recordId, ownId, classmateIds, conflictId };
+    const schoolConflictId = await ctx.db.insert("externalSyncConflicts", {
+      syncRunId, integrationId, schoolId, recordId, projectionType: "resource", projectionId: "resource-projection-0",
+      kind: "source_changed", oldSource: payload, newSource: payload, affectedLinks: [],
+      suggestedActions: ["detach"], status: "open", createdAt: now, updatedAt: now,
+    });
+    return { recordId, ownId, classmateIds, conflictId, schoolConflictId };
   });
   return { ...f, ...ids };
 }
@@ -98,5 +106,39 @@ describe("ManageBac conflict reads stay bounded for a large class", () => {
     expect(after.own).toMatchObject({ state: "detached" });
     expect(after.classmates.every(row => row?.state === "conflicted")).toBe(true);
     expect(after.conflict).toMatchObject({ status: "resolved", resolution: "detach" });
+  });
+
+  it("resolves a school-wide conflict in bounded batches instead of one transaction", async () => {
+    vi.useFakeTimers();
+    const f = await sharedRecordFixture("school_admin");
+    const measured = await f.t.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const auth = { getUserIdentity: async () => ({ ...identity, tokenIdentifier: `fixture|${identity.subject}`, issuer: "fixture" }) };
+      const result = await resolveHandler({ ...ctx, db: observer.db, auth }, { conflictId: f.schoolConflictId, resolution: "detach" });
+      return { result, ...observer.snapshot() };
+    });
+    // 241 projections: the request reads one bounded page and hands off.
+    expect(measured.result).toMatchObject({ pending: true });
+    expect(scanned(measured.reads, "externalProjections")).toBeLessThanOrEqual(RESOLVE_INLINE_PROJECTIONS + 1);
+    expect(await f.t.run(ctx => ctx.db.get(f.schoolConflictId))).toMatchObject({ status: "open", projectionResolution: "detach" });
+
+    await f.t.finishAllScheduledFunctions(vi.runAllTimers);
+    const after = await f.t.run(async ctx => ({
+      projections: await Promise.all([f.ownId, ...f.classmateIds].map(id => ctx.db.get(id))),
+      conflict: await ctx.db.get(f.schoolConflictId),
+    }));
+    expect(after.projections.every(row => row?.state === "detached")).toBe(true);
+    expect(after.conflict).toMatchObject({ status: "resolved", resolution: "detach", projectionWorkRemaining: 0 });
+    expect(after.conflict?.projectionResolution).toBeUndefined();
+  });
+
+  it("keeps a school-wide conflict pending so a second resolution cannot race the batches", async () => {
+    vi.useFakeTimers();
+    const f = await sharedRecordFixture("school_admin");
+    const auth = { getUserIdentity: async () => ({ ...identity, tokenIdentifier: `fixture|${identity.subject}`, issuer: "fixture" }) };
+    await f.t.run(ctx => resolveHandler({ ...ctx, auth }, { conflictId: f.schoolConflictId, resolution: "detach" }));
+    await expect(
+      f.t.run(ctx => resolveHandler({ ...ctx, auth }, { conflictId: f.schoolConflictId, resolution: "detach" })),
+    ).rejects.toThrow("INTEGRATION_CONFLICT_PENDING");
   });
 });

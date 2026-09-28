@@ -122,6 +122,7 @@ import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./
 import { handleUiObserverRequest, uiObserverSchema } from "./loop/ui-observer-request";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
+import { errorStatus } from "@/lib/route-handler";
 import { withWorkerConvexToken } from "@/lib/convex-worker-context";
 import { createClerkClient } from "@clerk/backend";
 import { NextRequest } from "next/server";
@@ -3635,7 +3636,15 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     }
   }
 
-  const actor = await requireActor();
+  // A signed-out or suspended caller gets its real status and a plain
+  // message. Unhandled, the throw became a 500 and Stop reported that the run
+  // could not be stopped safely.
+  let actor: Awaited<ReturnType<typeof requireActor>>;
+  try {
+    actor = await requireActor();
+  } catch (error) {
+    return new Response(publicError(error), { status: errorStatus(error) });
+  }
 
   if (action === "ui_observer" || action === "ui_observer_ack")
     return handleUiObserverRequest(action, body.payload);
@@ -4133,10 +4142,15 @@ export async function handleSpectraRunRequest(request: NextRequest) {
   }
 
   if (action === "revert") {
-    const state = await query<
-      { actorClerkId: string; runId: string },
-      RunDetail
-    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    let state: RunDetail;
+    try {
+      state = await query<{ actorClerkId: string; runId: string }, RunDetail>(
+        "spectraRuns:get",
+        { actorClerkId: actor.clerkId, runId },
+      );
+    } catch (error) {
+      return new Response(publicError(error), { status: errorStatus(error) });
+    }
     const effects = reconcileInterruptedEffects({
       executionId: state.run.executionId ?? "", acknowledged: [],
       operations: state.operations, run: state.run,
@@ -4146,23 +4160,26 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         "Undo is available after Spectra finishes this run.",
         { status: 409 },
       );
-    const plan = await mutate<
-      { runId: string },
-      {
-        restored: Array<{
-          artifactId: string;
-          snapshot: {
-            title?: string;
-            summary?: string | null;
-            content?: unknown;
-            tags?: string[];
-          };
-        }>;
-        blocked: Array<{ artifactId: string; reason: string }>;
-      }
-    >("changeGroups:revertPlanForRun", {
-      runId,
-    });
+    let plan: {
+      restored: Array<{
+        artifactId: string;
+        snapshot: {
+          title?: string;
+          summary?: string | null;
+          content?: unknown;
+          tags?: string[];
+        };
+      }>;
+      blocked: Array<{ artifactId: string; reason: string }>;
+    };
+    try {
+      plan = await mutate<{ runId: string }, typeof plan>(
+        "changeGroups:revertPlanForRun",
+        { runId },
+      );
+    } catch (error) {
+      return new Response(publicError(error), { status: errorStatus(error) });
+    }
     if (plan.restored.length === 0) {
       const blocked = plan.blocked[0]?.reason;
       return new Response(

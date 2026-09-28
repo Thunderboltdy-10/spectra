@@ -234,7 +234,7 @@ export type SpectraManageBacOverview = {
     integration: SpectraManageBacIntegration | null;
     /** Non-secret admin hint from MANAGEBAC_BASE_URL when no integration exists. */
     envBaseUrlHint?: string;
-    /** True when MANAGEBAC_API_KEY is present server-side for temporary testing. */
+    /** True only on a local stack whose server has MANAGEBAC_API_KEY; deployments never use it. */
     envTokenAvailable?: boolean;
     school?: { _id: string; name: string } | null;
     periodMaps?: Array<{

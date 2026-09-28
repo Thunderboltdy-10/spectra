@@ -20,6 +20,7 @@ import { SpectraToolExecutor } from "@/features/spectra/tools/execution";
 import {
   conductParallelResearch,
   openRouterParallelSearch,
+  PARALLEL_SEARCH_TIMEOUT_MS,
   type ParallelSearchResult,
 } from "@/features/spectra/sources/research";
 import {
@@ -461,6 +462,34 @@ describe("AI Action Protocol V2", () => {
     ]);
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previousKey;
+  });
+
+  it("gives a silent Parallel search its own deadline and keeps Stop distinct", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    // A provider that accepts the request and never answers until aborted.
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    })));
+    const deadlines: AbortController[] = [];
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const controller = new AbortController();
+      deadlines.push(controller);
+      return controller.signal;
+    });
+    const search = { purpose: "Find primary evidence", query: "verified topic" };
+
+    const silent = openRouterParallelSearch(search, { maxResults: 5, signal: new AbortController().signal });
+    expect(timeout).toHaveBeenCalledWith(PARALLEL_SEARCH_TIMEOUT_MS);
+    deadlines[0]!.abort(new DOMException("The operation timed out.", "TimeoutError"));
+    await expect(silent).rejects.toThrow("PROVIDER_UNAVAILABLE: Parallel search did not answer in time.");
+
+    const run = new AbortController();
+    const stopped = openRouterParallelSearch(search, { maxResults: 5, signal: run.signal });
+    run.abort(new Error("RUN_CANCELLED"));
+    await expect(stopped).rejects.toThrow("RUN_CANCELLED");
+    timeout.mockRestore();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("enforces purposeful research depth, full result requests, and early stop", async () => {

@@ -12,7 +12,6 @@ import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { QueryCtx } from "../convex/_generated/server";
 import { adminOverview, recordsForPurpose } from "../convex/managebac";
-import { agentGovernance } from "../convex/administration";
 import { observeDatabase, serializedBytes } from "./perf-read-ledger";
 
 const modules = import.meta.glob("../convex/**/*.ts");
@@ -25,9 +24,6 @@ const purposeHandler = Reflect.get(recordsForPurpose, "_handler") as (
 const adminHandler = Reflect.get(adminOverview, "_handler") as (
   ctx: QueryCtx, args: Record<string, never>,
 ) => Promise<FunctionReturnType<typeof api.managebac.adminOverview>>;
-const governanceHandler = Reflect.get(agentGovernance, "_handler") as (
-  ctx: QueryCtx, args: Record<string, never>,
-) => Promise<FunctionReturnType<typeof api.administration.agentGovernance>>;
 
 async function setup(role: "student" | "school_admin" = "student") {
   const t = convexTest(schema, modules);
@@ -224,51 +220,6 @@ describe("S10 School known-failure audit witnesses", () => {
     }));
     expect(measured.result.records.map(row => row.id)).toEqual([laterId, earliestId]);
     observations.push({ case: "deadlineAt order", chronologicalOrderBudgetPassed: false, measurement: summarize(measured) });
-  });
-
-  it("reproduces agent governance reading unrelated school artifact bodies", async () => {
-    const fixture = await setup("school_admin");
-    const artifactFields = {
-      ownerAccountId: fixture.accountId, schoolId: fixture.schoolId,
-      title: "Shared agent", blueprintKey: "agent", content: {}, tags: [],
-      status: "active" as const, createdAt: fixture.now, updatedAt: fixture.now,
-    };
-    const agentId = await fixture.t.run(async ctx => {
-      const id = await ctx.db.insert("spectraArtifacts", artifactFields);
-      await ctx.db.insert("accessGrants", {
-        schoolId: fixture.schoolId, resourceType: "agent", resourceId: id,
-        principalType: "school", principalId: fixture.schoolId, level: "read", capabilities: ["read", "use"],
-        source: "direct", createdByAccountId: fixture.accountId, createdAt: fixture.now, updatedAt: fixture.now,
-      });
-      return id;
-    });
-    const read = () => observe(fixture, ctx => governanceHandler(ctx, {}));
-    const before = await read();
-    expect(before.result.agents.map(row => row.agentId)).toEqual([agentId]);
-    const unrelated: Id<"spectraArtifacts">[] = [];
-    let twenty: Awaited<ReturnType<typeof read>> | undefined;
-    for (const count of [20, 180]) {
-      unrelated.push(...await fixture.t.run(async ctx => {
-        const ids = [];
-        for (let index = 0; index < count; index++) ids.push(await ctx.db.insert("spectraArtifacts", {
-          ...artifactFields, title: "Private document", blueprintKey: "document", content: { body: "x".repeat(128) },
-        }));
-        return ids;
-      }));
-      if (count === 20) twenty = await read();
-    }
-    const twoHundred = await read();
-    expect(twoHundred.result).toEqual(before.result);
-    expect(twoHundred.ledger.reads.find(row => row.table === "spectraArtifacts")?.documentsReturned).toBe(201);
-    await fixture.t.run(async ctx => {
-      for (const id of unrelated) await ctx.db.patch(id, { content: { body: "x".repeat(8_192) } });
-    });
-    const grown = await read();
-    expect(grown.result).toEqual(before.result);
-    expect(grown.ledger.serializedDocumentBytes).toBeGreaterThan(twoHundred.ledger.serializedDocumentBytes * 5);
-    observations.push({ case: "agent governance", visibleAgents: 1, offTypeDensityBudgetPassed: false,
-      bodyIndependenceBudgetPassed: false, before: summarize(before), after20: summarize(twenty!),
-      after200: summarize(twoHundred), bodyGrowth: summarize(grown) });
   });
 });
 

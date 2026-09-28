@@ -32,4 +32,24 @@ describe("hosted gateway package startup", () => {
     }
     expect([...copied.keys()].some((path) => path.includes(".env"))).toBe(false);
   });
+
+  it("deploys one right-sized machine because rooms live in process memory", async () => {
+    const fly = await readFile(resolve(root, "deploy/collaboration-gateway/fly.toml"), "utf8");
+    const setting = (name) => fly.match(new RegExp(`^\\s*${name}\\s*=\\s*"?([^"\\r\\n]+)"?`, "m"))?.[1];
+    // A second machine would split a room; `fly deploy` adds one unless told not to.
+    expect(fly).toMatch(/fly deploy [^\n]*--ha=false/);
+    expect(fly).toContain("fly scale count 1");
+    const railway = await readFile(resolve(root, "deploy/collaboration-gateway/railway.toml"), "utf8");
+    expect(railway).toMatch(/numReplicas\s*=\s*1\b/);
+    expect(setting("size")).toBe("performance-1x");
+    const memoryMb = Number(setting("memory").replace(/gb$/i, "")) * (/gb$/i.test(setting("memory")) ? 1024 : 1);
+    expect(memoryMb).toBeGreaterThanOrEqual(2048);
+    const heapMb = Number(setting("NODE_OPTIONS").match(/--max-old-space-size=(\d+)/)?.[1]);
+    expect(heapMb).toBeGreaterThan(0);
+    expect(heapMb).toBeLessThanOrEqual(memoryMb * 0.8);
+    const hard = Number(setting("hard_limit"));
+    const soft = Number(setting("soft_limit"));
+    expect(hard).toBeGreaterThanOrEqual(1000);
+    expect(soft).toBeLessThan(hard);
+  });
 });

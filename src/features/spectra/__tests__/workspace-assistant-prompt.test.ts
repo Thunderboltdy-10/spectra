@@ -13,4 +13,13 @@ describe("workspace assistant recovery instructions", () => {
       "preserve compatible requirements, source evidence, and the full conversation context",
     );
   });
+
+  it("knows its audience is students and teachers without over-refusing coursework", () => {
+    // Without this the shared prompt never told the model that most readers
+    // are school students, many of them minors.
+    expect(WORKSPACE_ASSISTANT_PROMPT).toContain("school students, many of them minors, and their teachers");
+    expect(WORKSPACE_ASSISTANT_PROMPT).toContain("age-appropriate without refusing ordinary coursework topics");
+    expect(WORKSPACE_ASSISTANT_PROMPT).toContain("honest and specific feedback rather than flattery");
+    expect(WORKSPACE_ASSISTANT_PROMPT).toContain("say plainly when you are unsure or evidence is missing");
+  });
 });

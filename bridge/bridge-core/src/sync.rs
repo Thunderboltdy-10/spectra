@@ -2,7 +2,7 @@ use crate::journal::{Journal, QueueItem, ResourceRecord};
 use crate::platform::Platform;
 use crate::protocol::PairingOffer;
 use crate::retry::retry_delay_ms;
-use crate::watcher::office_lock_exists;
+use crate::watcher::office_lock_exists_with;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -71,7 +71,7 @@ pub fn inspect_write_target<P: Platform>(
         }
         return ClaimPrecondition::Missing;
     }
-    if office_lock_exists(path) {
+    if office_lock_exists_with(platform, path) {
         return ClaimPrecondition::Locked;
     }
     match platform.is_locked(path) {

@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::journal::{Journal, OpState};
 use crate::platform::Platform;
-use crate::watcher::office_lock_exists;
+use crate::watcher::office_lock_exists_with;
 
 #[derive(Debug, Error)]
 pub enum FsError {
@@ -323,7 +323,10 @@ impl<P: Platform> SafeWriter<P> {
             )?;
             return Err(FsError::StaleRevision);
         }
-        if target.exists() && (office_lock_exists(&target) || self.platform.is_locked(&target)?) {
+        if target.exists()
+            && (office_lock_exists_with(self.platform.as_ref(), &target)
+                || self.platform.is_locked(&target)?)
+        {
             return Err(FsError::FileLocked);
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
@@ -356,7 +359,9 @@ impl<P: Platform> SafeWriter<P> {
                 return Err(FsError::StaleRevision);
             }
             if target.exists() {
-                if office_lock_exists(&target) || self.platform.is_locked(&target)? {
+                if office_lock_exists_with(self.platform.as_ref(), &target)
+                    || self.platform.is_locked(&target)?
+                {
                     return Err(FsError::FileLocked);
                 }
                 if sha256_file(&target)? != request.base_revision {
@@ -459,7 +464,9 @@ impl<P: Platform> SafeWriter<P> {
                 .transition(&op.op_id, OpState::Verified, None, None)?;
             return Ok(op.op_id);
         }
-        if office_lock_exists(&target) || self.platform.is_locked(&target)? {
+        if office_lock_exists_with(self.platform.as_ref(), &target)
+            || self.platform.is_locked(&target)?
+        {
             return Err(FsError::FileLocked);
         }
         if let Some(expected) = expected_revision {
@@ -580,7 +587,9 @@ impl<P: Platform> SafeWriter<P> {
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
         fs::create_dir_all(parent)?;
-        if office_lock_exists(&source) || self.platform.is_locked(&source)? {
+        if office_lock_exists_with(self.platform.as_ref(), &source)
+            || self.platform.is_locked(&source)?
+        {
             return Err(FsError::FileLocked);
         }
         if target.exists() {

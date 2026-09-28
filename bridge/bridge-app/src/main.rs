@@ -28,8 +28,7 @@ use spectra_bridge_core::sync::{
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
-    office_lock_exists, office_lock_paths, office_lock_target, relative_key, scan_mount,
-    stable_file_snapshot,
+    office_lock_exists, office_lock_paths, relative_key, scan_mount, stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -2320,25 +2319,15 @@ fn spawn_grant_watcher(
                 .unwrap_or_default();
             let mut local_work_queued = false;
             let observed_at = std::time::Instant::now();
+            // `classify_changed_paths` already maps Office owner files to the
+            // documents they lock, so neither list contains a `~$` path.
             for path in batch.existing_files {
                 stability.mark_changed(&path);
                 pending_missing.remove(&path);
-                if is_office_lock_file(&path) {
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
-                    continue;
-                }
                 pending_files.insert(path);
             }
             for path in batch.missing_paths {
                 pending_files.remove(&path);
-                if is_office_lock_file(&path) {
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
-                    continue;
-                }
                 pending_missing.entry(path).or_insert(observed_at);
             }
             if !batch.failures.is_empty() {
@@ -2360,13 +2349,6 @@ fn spawn_grant_watcher(
                     pending_missing.entry(path).or_insert(observed_at);
                     continue;
                 }
-                if is_office_lock_file(&path) {
-                    pending_files.remove(&path);
-                    if let Some(target) = office_lock_target(&path) {
-                        pending_files.insert(target);
-                    }
-                    continue;
-                }
                 if file_held_by_office(&path) {
                     if enqueue_locked_path(&grant, &journal, &path)
                         .map(|queued| queued > 0)
@@ -2377,7 +2359,7 @@ fn spawn_grant_watcher(
                             &journal,
                             &grant.id,
                             "waiting",
-                            "Word still has a file open. Spectra will verify it after Word finishes saving.",
+                            "A file is open in Office. Spectra will sync it after Office finishes saving.",
                             0,
                             0,
                         );

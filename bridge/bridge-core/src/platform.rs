@@ -14,6 +14,13 @@ pub struct OsFileIdentity {
 pub trait Platform: Send + Sync {
     fn file_identity(&self, file: &File) -> io::Result<OsFileIdentity>;
     fn is_locked(&self, path: &Path) -> io::Result<bool>;
+    /// Whether an Office `~$` owner file belongs to a running Office session.
+    /// Platforms without share-mode semantics cannot tell a live owner file
+    /// from one left behind by a crash, so they conservatively treat it as live.
+    fn owner_file_is_live(&self, owner_file: &Path) -> bool {
+        let _ = owner_file;
+        true
+    }
     /// Opens a reader that proves no writer owns the file for the lifetime of
     /// the returned handle. Platforms with mandatory share semantics override
     /// this; platforms that cannot offer a writer-completion proof fail closed
@@ -75,6 +82,16 @@ mod host {
 
         fn is_locked(&self, path: &Path) -> io::Result<bool> {
             Ok(self.open_stable_reader(path)?.is_none())
+        }
+
+        fn owner_file_is_live(&self, owner_file: &Path) -> bool {
+            // Office keeps its owner file open for writing while the document
+            // is open. One left behind by a crash has no writer, and must not
+            // keep the document out of sync until the student reopens it.
+            match self.is_locked(owner_file) {
+                Ok(held) => held,
+                Err(error) => error.kind() != io::ErrorKind::NotFound,
+            }
         }
 
         fn open_stable_reader(&self, path: &Path) -> io::Result<Option<File>> {

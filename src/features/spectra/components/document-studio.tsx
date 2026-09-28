@@ -150,6 +150,7 @@ import {
   imageEmuAttributes,
   materializeJsonImages,
 } from "../organization/library-import";
+import { requestSpectra } from "../data/request";
 
 type ReferenceDocument = {
   descendants: (
@@ -1883,7 +1884,7 @@ export function DocumentStudio({
           throw new Error(
             "The latest Word changes could not be saved. The download was cancelled.",
           );
-        const response = await fetch("/api/spectra/lenses/docx", {
+        const response = await requestSpectra("/api/spectra/lenses/docx", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "download-copy", artifactId }),
@@ -1898,7 +1899,7 @@ export function DocumentStudio({
       const editorJson = editor.getJSON();
       const resolveAsset: DocxAssetResolver = async ({ assetId }) => {
         if (!assetId) return undefined;
-        const response = await fetch(
+        const response = await requestSpectra(
           `/api/spectra/assets/content?assetId=${encodeURIComponent(assetId)}`,
           { cache: "no-store" },
         );

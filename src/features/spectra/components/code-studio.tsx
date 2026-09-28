@@ -140,6 +140,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
+import { requestSpectra } from "../data/request";
 
 type CodeProblem = {
   id: string;
@@ -1285,7 +1286,7 @@ export function CodeStudio({
       );
       if (workbook.runtime === "browser") {
         try {
-          const response = await fetch("/api/spectra/runtime/build", {
+          const response = await requestSpectra("/api/spectra/runtime/build", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1396,7 +1397,7 @@ export function CodeStudio({
         return;
       }
       try {
-        const response = await fetch("/api/spectra/runtime/build", {
+        const response = await requestSpectra("/api/spectra/runtime/build", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

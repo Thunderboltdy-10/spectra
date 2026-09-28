@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
+import { requestSpectra } from "../data/request";
 
 type PublicArtifact = {
   artifactId: string;
@@ -493,7 +494,7 @@ export function PublicShareShell() {
     }
     if (!background) setState("loading");
     try {
-      const response = await fetch("/api/spectra/public", {
+      const response = await requestSpectra("/api/spectra/public", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),

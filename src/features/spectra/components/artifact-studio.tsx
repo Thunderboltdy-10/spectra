@@ -251,6 +251,7 @@ import {
   formatShortDate,
   linkedArtifacts,
 } from "./spectra-view-model";
+import { requestSpectra } from "../data/request";
 function StudioTypePlaceholder() {
   return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
@@ -628,7 +629,7 @@ function ReadonlyCodeSnapshot({
     }
     if (code.runtime === "browser") {
       try {
-        const response = await fetch("/api/spectra/runtime/build", {
+        const response = await requestSpectra("/api/spectra/runtime/build", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -682,7 +683,7 @@ function ReadonlyCodeSnapshot({
       return;
     }
     try {
-      const response = await fetch("/api/spectra/runtime/build", {
+      const response = await requestSpectra("/api/spectra/runtime/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3410,7 +3411,7 @@ function ArtifactStudioEditor({
     setNativeRecoveryBusy("download");
     setNativeRecoveryError(undefined);
     try {
-      const response = await fetch(
+      const response = await requestSpectra(
         `/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`,
         { cache: "no-store" },
       );
@@ -3450,7 +3451,7 @@ function ArtifactStudioEditor({
     setNativeRecoveryBusy("materialize");
     setNativeRecoveryError(undefined);
     try {
-      const response = await fetch("/api/spectra/native", {
+      const response = await requestSpectra("/api/spectra/native", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ artifactId: artifact._id, deviceId, mountId, fileName }),

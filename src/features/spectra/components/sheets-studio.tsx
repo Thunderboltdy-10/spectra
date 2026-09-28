@@ -137,6 +137,7 @@ import { cachedFormulaCells } from "../sheets/cached-formulas";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
+import { requestSpectra } from "../data/request";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -896,7 +897,7 @@ export const SheetsStudio = memo(function SheetsStudio({
   const refuseFormulaLiteralization = useCallback(
     (speculative: SheetsContent) => {
       setNotice({ tone: "warning", message: FORMULA_LITERALIZATION_MESSAGE });
-      void contentForDurableRequest(artifactId, speculative).then(content => fetch("/api/spectra/lenses/office", {
+      void contentForDurableRequest(artifactId, speculative).then(content => requestSpectra("/api/spectra/lenses/office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

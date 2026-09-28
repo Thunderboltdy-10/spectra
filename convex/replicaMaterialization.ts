@@ -7,7 +7,7 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import { validateContentAdoption } from "./collaborationDurablePayload";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { activeReplicaWriteTarget, chooseLiveBridgeDeviceId, chooseLiveLocalReplica, latestActiveWriteForReplica } from "./bridgeIdentity";
-import { bridgeWriteForTarget, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
+import { bridgeWriteForTarget, settleRunNativeOutcome, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
 import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { BRIDGE_WRITE_EXPIRES_MS, deriveSyncIdempotencyKey, localMaterializationTarget } from "../shared/replica-truth";
@@ -412,6 +412,8 @@ async function supersedeWriteRequest(
   const operation = await syncOperationForBridgeWrite(ctx, request);
   if (operation && (operation.state === "pending" || operation.state === "applied"))
     await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+  // The run that queued this write may already be done and waiting on it.
+  if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
   const resolving = await ctx.db.query("syncConflicts")
     .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
     .take(50);

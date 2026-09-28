@@ -92,10 +92,10 @@ export function reconcileInterruptedEffects(input: {
   const runNative = record(input.run).outcome;
   const queuedWrites = (input.operations ?? []).filter((operation) => effects.has(operation._id))
     .flatMap((operation) => queuedLocalWrite(operation.output) ?? []);
-  const native = runNative === "native_pending" || runNative === "native_verified" ? runNative
+  const native = runNative === "native_pending" || runNative === "native_verified" || runNative === "native_superseded" ? runNative
     : !queuedWrites.length ? undefined
       : queuedWrites.every((write) => write.state === "verified") ? "native_verified" : "native_pending";
-  const outcome: "canonical_saved" | "native_pending" | "native_verified" | undefined = saved
+  const outcome: "canonical_saved" | "native_pending" | "native_verified" | "native_superseded" | undefined = saved
     ? native ?? "canonical_saved"
     : undefined;
   return {
@@ -125,6 +125,7 @@ const nativeSyncSentence = {
   canonical_saved: "",
   native_pending: " The file on your computer hasn't confirmed this change yet.",
   native_verified: " The file on your computer was checked and has this change.",
+  native_superseded: " A newer edit replaced this change before the file on your computer confirmed it.",
 } as const;
 
 /** The model writes its closing reply before the Bridge reads a local file back,

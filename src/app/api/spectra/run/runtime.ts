@@ -83,7 +83,7 @@ import {
   reconcileExplicitDocumentRegions,
   resolveAndValidatePlan,
 } from "./loop/resolve";
-import { verifyCommittedOutcomes } from "./loop/verify";
+import { verifyAcknowledgedUpdate, verifyCommittedOutcomes } from "./loop/verify";
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
 import {
@@ -2089,27 +2089,10 @@ async function runAttempt(
         unacknowledgedOperationId = undefined;
         const retainedOutcome = { operationId, operation, affected, acknowledged: lastApplyAcknowledged };
         await retainOutcomeThenVerify(operationOutcomes, retainedOutcome, async () => {
-          if (operation.type === "artifact.update") {
-            verificationIncomplete = true;
-            // The retained outcome itself: verification records where each
-            // acknowledged append landed, and final verification reads it.
-            const outcome = retainedOutcome;
-            try {
-              await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-                ...verificationOptions,
-              });
-            } catch (firstVerifyError) {
-              if (!isQuietRetryableApplyFailure(firstVerifyError))
-                throw firstVerifyError;
-              // An acknowledged edit may already have been changed by a
-              // collaborator. Retry readback only; a verification mismatch
-              // cannot authorize overwriting newer state or replaying inserts.
-              await new Promise((resolve) => setTimeout(resolve, 400));
-              await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
-                ...verificationOptions,
-              });
-            }
-          }
+          // The retained outcome itself: verification records where each
+          // acknowledged append landed, and final verification reads it.
+          verificationIncomplete = operation.type === "artifact.update";
+          await verifyAcknowledgedUpdate(params.actorClerkId, retainedOutcome, verificationOptions);
           verificationIncomplete = false;
         });
         allAffected.push(...affected);
@@ -2955,6 +2938,11 @@ async function resumeOperationsAttempt(params: {
     }).catch(() => null);
   }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
   const stopHeartbeat = () => clearInterval(heartbeat);
+  const verificationOptions = {
+    requireResearchEvidence: Boolean(state.run.contextSnapshot?.researchEvidence),
+    prompt: state.run.userPrompt,
+    numericSourceRequired: state.run.contextSnapshot?.qualityRequirements?.numericSourceRequired === true,
+  };
   try {
     for (let index = 0; index < operations.length; index += 1) {
       const row = operations[index]!;
@@ -3113,8 +3101,14 @@ async function resumeOperationsAttempt(params: {
         // markExecuted here races the already-executed row and turns a durable
         // workspace/artifact save into a false failed run.
         allAffected.push(...affected);
-        outcomes.push({ operationId: row._id, operation, affected });
+        const outcome = { operationId: row._id, operation, affected };
+        outcomes.push(outcome);
         unacknowledgedOperationId = undefined;
+        // As on the first attempt: verify the acknowledged update now, which
+        // records where each append landed for final verification.
+        verificationIncomplete = operation.type === "artifact.update";
+        await verifyAcknowledgedUpdate(params.actorClerkId, outcome, verificationOptions);
+        verificationIncomplete = false;
         if (operation.type === "artifact.create") {
           const artifactId = affected.find(
             (item) => item.type === "artifact",
@@ -3184,11 +3178,6 @@ async function resumeOperationsAttempt(params: {
       }
     }
     loop.enter("verify");
-    const requireResearchEvidence = Boolean(
-      state.run.contextSnapshot?.researchEvidence,
-    );
-    const verificationOptions = { requireResearchEvidence, prompt: state.run.userPrompt,
-      numericSourceRequired: state.run.contextSnapshot?.qualityRequirements?.numericSourceRequired === true };
     verificationIncomplete = true;
     try {
       await verifyCommittedOutcomes(params.actorClerkId, outcomes, {

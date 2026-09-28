@@ -20,6 +20,7 @@ import {
   hollowCreateFailureMessage,
   isHollowCreateContent,
 } from "@/features/spectra/operations/hollow-content";
+import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
 import { SPECTRA_BLUEPRINT_KEYS } from "@/features/spectra/operations/schema";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { assertArtifactQuality } from "@/features/spectra/quality/rubrics";
@@ -375,10 +376,35 @@ export function finalVerificationObligations(outcomes: readonly VerifiedOutcome[
   return obligations;
 }
 
+type VerificationOptions = { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean };
+
+/**
+ * Verify one acknowledged update against its own result right after it was
+ * applied, on the first run and on a resumed one alike. This is where each
+ * acknowledged append's landing position is recorded, so a person's later
+ * append to the same list cannot fail final verification. An acknowledged
+ * edit may already have been changed by a collaborator, so one quiet readback
+ * retry follows; a mismatch never authorizes overwriting or replaying.
+ */
+export async function verifyAcknowledgedUpdate(
+  actorClerkId: string,
+  outcome: VerifiedOutcome,
+  options: VerificationOptions = {},
+) {
+  if (outcome.operation.type !== "artifact.update") return;
+  try {
+    await verifyCommittedOutcomes(actorClerkId, [outcome], options);
+  } catch (firstVerifyError) {
+    if (!isQuietRetryableApplyFailure(firstVerifyError)) throw firstVerifyError;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await verifyCommittedOutcomes(actorClerkId, [outcome], options);
+  }
+}
+
 export async function verifyCommittedOutcomes(
   actorClerkId: string,
   outcomes: VerifiedOutcome[],
-  options: { requireResearchEvidence?: boolean; prompt?: string; numericSourceRequired?: boolean } = {},
+  options: VerificationOptions = {},
 ) {
   const obligations = finalVerificationObligations(outcomes);
   for (const [outcomeIndex, outcome] of outcomes.entries()) {

@@ -111,11 +111,25 @@ export function queuedLocalWrite(output: unknown): { requestId: string; state: s
     ? { requestId, state } : null;
 }
 
-export type RunNativeSyncOutcome = "native_pending" | "native_verified";
+export type RunNativeSyncOutcome = "native_pending" | "native_verified" | "native_superseded";
+
+/** Error codes the Bridge write paths use when a newer edit retired a queued
+ * write before read-back. The retired write will never be verified. */
+export const SUPERSEDED_WRITE_CODES: ReadonlySet<string> = new Set([
+  "superseded-by-newer-cloud-revision",
+  "external-save-during-write",
+  "superseded-by-newer-write",
+]);
+
+function supersededWrite(request: BridgeWriteRequest | null) {
+  return request?.state === "failed" && SUPERSEDED_WRITE_CODES.has(request.errorCode ?? "");
+}
 
 /** Native truth for a run: verified only once Bridge read-back verified the
  * newest write this run queued for every local file; queued otherwise. A later
- * write from the same run supersedes an earlier one because it contains it. */
+ * write from the same run supersedes an earlier one because it contains it.
+ * When a newer edit from elsewhere retired the run's newest write before
+ * read-back, nothing will ever confirm it: that is settled, not queued. */
 export async function runNativeSyncOutcome(
   ctx: ReplicaTruthCtx,
   runId: Id<"spectraAiRuns">,
@@ -133,12 +147,15 @@ export async function runNativeSyncOutcome(
     if (prior === undefined || (request && prior && request.createdAt > prior.createdAt)) newestByFile.set(file, request);
   }
   if (!newestByFile.size) return undefined;
-  return [...newestByFile.values()].every((request) => request?.state === "verified")
-    ? "native_verified" : "native_pending";
+  const newest = [...newestByFile.values()];
+  if (newest.every((request) => request?.state === "verified")) return "native_verified";
+  if (newest.every((request) => request?.state === "verified" || supersededWrite(request))) return "native_superseded";
+  return "native_pending";
 }
 
-/** Bridge read-back can finish after the run did. Move a completed run from
- * queued to verified only when every file it wrote is now verified. */
+/** Bridge read-back (or a newer edit retiring the write) can finish after the
+ * run did. Move a completed run off queued only once every file it wrote is
+ * verified or retired. */
 export async function settleRunNativeOutcome(ctx: MutationCtx, runId: Id<"spectraAiRuns">) {
   const run = await ctx.db.get(runId);
   if (run?.status !== "completed" || run.outcome !== "native_pending") return;

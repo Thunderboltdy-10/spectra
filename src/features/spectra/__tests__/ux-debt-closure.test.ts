@@ -80,6 +80,32 @@ describe("P6.I1 UX debt closure", () => {
     expect(shell).not.toContain("Unexpected server error");
   });
 
+  it("offers no calendar button that does nothing when pressed", () => {
+    const calendar = read(
+      "src/features/spectra/calendar/ui/calendar-application.tsx",
+    );
+    const inert: string[] = [];
+    for (const match of calendar.matchAll(/<button\b/g)) {
+      let end = match.index + match[0].length;
+      let depth = 0;
+      for (; end < calendar.length; end += 1) {
+        const char = calendar[end];
+        if (char === "{") depth += 1;
+        else if (char === "}") depth -= 1;
+        else if (char === ">" && depth === 0 && calendar[end - 1] !== "=") break;
+      }
+      const tag = calendar.slice(match.index, end + 1);
+      const before = calendar.slice(Math.max(0, match.index - 40), match.index);
+      const acts =
+        tag.includes("onClick=") ||
+        tag.includes('type="submit"') ||
+        tag.includes("{...") ||
+        /asChild>\s*$/.test(before);
+      if (!acts) inert.push(tag.replace(/\s+/g, " ").slice(0, 120));
+    }
+    expect(inert).toEqual([]);
+  });
+
   it("maps load failures through ProductErrorState without server jargon", () => {
     const school = read("src/features/spectra/pages/school-data-shell.tsx");
     const calendar = read(

@@ -31,7 +31,7 @@ import { runNativeSyncOutcome } from "./bridgeWriteOperations";
 import { readContinuation, transferClarificationContinuation } from "./spectraRunContinuations";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
-import { assertSchoolModelTokenCeiling, recordMeterEvent } from "./metering";
+import { assertSchoolModelTokenCeiling, recordModelTokenUsage } from "./metering";
 import { writeAuditEvent } from "./auditShared";
 import {
   shouldRenewSpectraRunLease,
@@ -77,37 +77,17 @@ async function recordRunModelMeters(
   occurredAt: number,
 ) {
   const { inputTokens, outputTokens } = usageTokenCounts(usage);
-  if (inputTokens <= 0 && outputTokens <= 0) return;
-  const dimensions = {
-    surface: run.sourceSurface,
-    status: run.status,
-  };
-  if (inputTokens > 0) {
-    await recordMeterEvent(ctx, {
-      schoolId: run.schoolId,
-      accountId: run.ownerAccountId,
-      category: "model_input_tokens",
-      quantity: inputTokens,
-      sourceType: "spectra_run",
-      sourceId: String(run._id),
-      idempotencyKey: `spectra-run:${run._id}:${run.executionId}:model_input_tokens`,
-      dimensions,
-      occurredAt,
-    });
-  }
-  if (outputTokens > 0) {
-    await recordMeterEvent(ctx, {
-      schoolId: run.schoolId,
-      accountId: run.ownerAccountId,
-      category: "model_output_tokens",
-      quantity: outputTokens,
-      sourceType: "spectra_run",
-      sourceId: String(run._id),
-      idempotencyKey: `spectra-run:${run._id}:${run.executionId}:model_output_tokens`,
-      dimensions,
-      occurredAt,
-    });
-  }
+  await recordModelTokenUsage(ctx, {
+    schoolId: run.schoolId,
+    accountId: run.ownerAccountId,
+    inputTokens,
+    outputTokens,
+    sourceType: "spectra_run",
+    sourceId: String(run._id),
+    idempotencyPrefix: `spectra-run:${run._id}:${run.executionId}`,
+    dimensions: { surface: run.sourceSurface, status: run.status },
+    occurredAt,
+  });
 }
 
 const vSurface = v.union(
@@ -1315,6 +1295,7 @@ export const updateStatus = mutation({
         v.literal("canonical_saved"),
         v.literal("native_pending"),
         v.literal("native_verified"),
+        v.literal("native_superseded"),
         v.literal("cancelled"),
         v.literal("failed"),
       ),
@@ -1452,7 +1433,7 @@ export const updateStatus = mutation({
                 : args.status === "completed"
                   ? (committedArtifactId
                     ? "canonical_saved"
-                    : run.outcome === "native_pending" || run.outcome === "native_verified"
+                    : run.outcome === "native_pending" || run.outcome === "native_verified" || run.outcome === "native_superseded"
                       ? run.outcome
                       : "answer_only")
                   : run.outcome),
@@ -3059,6 +3040,9 @@ export const resetForRetry = mutation({
       );
     }
     const now = Date.now();
+    // A retry is new model work: the same admission as a new request.
+    await assertRunAdmission(ctx, run.ownerAccountId, now);
+    if (run.schoolId) await assertSchoolModelTokenCeiling(ctx, run.schoolId, now);
     await Promise.all(
       priorOperations
         .filter((operation) => operation.status === "proposed")
@@ -3097,6 +3081,9 @@ export const resetForRetry = mutation({
       attemptId: executionId,
       outcome: "proposed",
       lastRetryKey: args.retryKey,
+      // The earlier attempt's usage is already metered under its own
+      // execution; carrying it over would meter it again for this one.
+      usage: undefined,
       phase: "created",
       heartbeatAt: now,
       workerId: undefined,

@@ -291,6 +291,33 @@ describe("atomic AI native commit", () => {
     expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome).toBe("native_pending");
   });
 
+  it("settles a completed run whose queued local write a newer edit replaced before read-back", async () => {
+    const f = await bridgeFixture();
+    const credential = "native-ai-bridge-credential-0123456789";
+    await f.commit();
+    await f.t.run(async ctx => {
+      const local = (await ctx.db.get(f.localId))!;
+      await ctx.db.patch(local.deviceId!, { credentialHash: hash(credential) });
+      await ctx.db.patch(f.ids.operationId, { status: "executed" });
+    });
+    const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
+    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+      runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
+    });
+    const outcome = async () => (await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome;
+    expect(await outcome()).toBe("native_pending");
+    // Word saved the file on the computer before the Bridge wrote the AI change.
+    const saved = "the student saved this in Word first";
+    const storageId = await f.t.run(ctx => ctx.storage.store(new Blob([saved], { type: "application/octet-stream" })));
+    await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:commitPayloadUpload"), {
+      credential, replicaId: f.localId, hash: hash(saved), bytes: saved.length, mediaType: "application/octet-stream", storageId,
+    });
+    const [queued] = await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect());
+    expect(queued).toMatchObject({ state: "failed", errorCode: "external-save-during-write" });
+    // Nothing will ever confirm the retired write, so the run no longer waits.
+    expect(await outcome()).toBe("native_superseded");
+  });
+
   it("keeps a cloud-only native save as saved in Spectra, never as a verified local file", async () => {
     const f = await fixture();
     await f.commit();

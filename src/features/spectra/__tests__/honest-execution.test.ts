@@ -127,9 +127,13 @@ describe("P4.I3 honest execution and authority", () => {
   it("journals AI sync-policy changes as ai and meters each execution", () => {
     const act = read("src/app/api/spectra/run/loop/act.ts");
     expect(act).toContain('actorKind: "ai"');
+    // Keyed per execution; the shared helper appends `:model_input_tokens`.
     const meters = read("convex/spectraRuns.ts");
     expect(meters).toContain(
-      "spectra-run:${run._id}:${run.executionId}:model_input_tokens",
+      "idempotencyPrefix: `spectra-run:${run._id}:${run.executionId}`",
+    );
+    expect(read("convex/metering.ts")).toContain(
+      "idempotencyKey: `${args.idempotencyPrefix}:${category}`",
     );
   });
 

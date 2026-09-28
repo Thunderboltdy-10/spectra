@@ -24,6 +24,12 @@ import {
 } from "@/features/spectra/ai/model-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
+  admitAgentModelWork,
+  openRouterTokens,
+  recordAgentModelWork,
+  type ModelTokens,
+} from "../model-work";
+import {
   assessSufficiency,
   COMPILER_STAGES,
   detectSecurityConcerns,
@@ -71,6 +77,8 @@ async function completion(params: {
   system: string;
   user: string;
   maxTokens: number;
+  /** Accumulates what the provider reports it billed, for school metering. */
+  spent: ModelTokens;
 }) {
   const attempts = [
     {
@@ -118,6 +126,9 @@ async function completion(params: {
             : `The model request failed (${response.status}).`,
         );
       }
+      const tokens = openRouterTokens(body.usage);
+      params.spent.inputTokens += tokens.inputTokens;
+      params.spent.outputTokens += tokens.outputTokens;
       const choice = Array.isArray(body.choices) ? record(body.choices[0]) : {};
       const message = record(choice.message);
       if (typeof message.content !== "string" || !message.content.trim()) {
@@ -798,6 +809,9 @@ function normalizeExtraction(
 }
 
 export async function POST(request: Request) {
+  // Tokens this request spent, metered once it ends however it ends.
+  const spent: ModelTokens = { inputTokens: 0, outputTokens: 0 };
+  let meterFor: { userId: string; agentId: string } | undefined;
   try {
     const session = await auth();
     if (!session.userId) throw new Error("AUTH_NOT_SIGNED_IN");
@@ -819,6 +833,8 @@ export async function POST(request: Request) {
 
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) throw new Error("OpenRouter is not configured.");
+    await admitAgentModelWork(body.agentId);
+    meterFor = { userId: session.userId, agentId: body.agentId };
     const model = getSpectraModelId();
     const now = Date.now();
 
@@ -849,6 +865,7 @@ export async function POST(request: Request) {
       const raw = await completion({
         apiKey,
         model,
+        spent,
         system: FOUNDATION_SYSTEM,
         user: `What should this agent do?\n${objective}\n\nHow should it feel to work with?\n${interaction || "(not answered)"}`,
         maxTokens: 4_000,
@@ -886,6 +903,7 @@ export async function POST(request: Request) {
       const raw = await completion({
         apiKey,
         model,
+        spent,
         system: SECTION_SYSTEM,
         user: `Agent mission:\n${missionDigest(mission)}\n\nAlready established:\n${answeredDigest(content.foundry.state.sections)}\n\nNext aspect to establish: ${plan.facet}\nWhy: ${plan.rationale}\nGuidance: ${facetGuidance(plan.facet)}\nInput shape: ${plan.suggestedKind}`,
         maxTokens: 2_000,
@@ -964,6 +982,7 @@ export async function POST(request: Request) {
       const raw = await completion({
         apiKey,
         model,
+        spent,
         system: EXTRACT_SYSTEM,
         user: `Agent mission:\n${missionDigest(mission)}\n\nSource kind: ${kind}\n\nSource content:\n<<<SOURCE\n${text.slice(0, 120_000)}\nSOURCE`,
         maxTokens: 8_000,
@@ -1092,6 +1111,7 @@ export async function POST(request: Request) {
         raw = await completion({
           apiKey,
           model,
+          spent,
           system: COMPILE_SYSTEM,
           user: `Agent mission:\n${missionDigest(mission)}\n\nCreator's answers:\n${answeredDigest(content.foundry.state.sections)}\n\nExtracted evidence:\n${evidenceDigest || "(no evidence supplied)"}`,
           maxTokens: 16_000,
@@ -1214,5 +1234,8 @@ export async function POST(request: Request) {
     throw new Error("Unknown Foundry operation.");
   } catch (error) {
     return errorResponse(error);
+  } finally {
+    if (meterFor)
+      await recordAgentModelWork(meterFor.userId, meterFor.agentId, "agent_foundry", spent);
   }
 }

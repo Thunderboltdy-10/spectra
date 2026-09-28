@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import {
@@ -139,6 +139,7 @@ export function PlanStudio({
   const boardAddRef = useRef<HTMLInputElement>(null);
   const autoOpenedTaskKeyRef = useRef<string | undefined>(undefined);
   const bulkConfirmRef = useRef<HTMLDivElement>(null);
+  const bulkConfirmId = useId();
   useModalFocus(bulkConfirmRef, {
     open: Boolean(pendingBulk?.bulk.confirmation),
     onClose: () => setPendingBulk(undefined),
@@ -1483,10 +1484,18 @@ export function PlanStudio({
       ) : null}
 
       {pendingBulk?.bulk.confirmation ? (
-        <div ref={bulkConfirmRef} tabIndex={-1} className="spectra-plan-confirm" role="alertdialog">
+        <div
+          ref={bulkConfirmRef}
+          tabIndex={-1}
+          className="spectra-plan-confirm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby={`${bulkConfirmId}-title`}
+          aria-describedby={`${bulkConfirmId}-body`}
+        >
           <div>
-            <strong>{pendingBulk.bulk.confirmation.title}</strong>
-            <p>{pendingBulk.bulk.confirmation.body}</p>
+            <strong id={`${bulkConfirmId}-title`}>{pendingBulk.bulk.confirmation.title}</strong>
+            <p id={`${bulkConfirmId}-body`}>{pendingBulk.bulk.confirmation.body}</p>
             <footer>
               <button type="button" onClick={() => setPendingBulk(undefined)}>
                 Keep them

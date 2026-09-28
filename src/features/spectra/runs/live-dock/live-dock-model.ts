@@ -106,8 +106,10 @@ export const liveDockStateCopy: Record<LiveDockTruthState, string> = {
 };
 
 /* A saved run that wrote a file on the student's computer says which of the
-   two observable states it is in: queued (the Bridge has not read the file
-   back yet) or verified (Bridge read-back matched). Nothing else is claimed. */
+   observable states it is in: queued (the Bridge has not read the file back
+   yet), verified (Bridge read-back matched) or replaced (a newer edit retired
+   the write before read-back, so nothing will confirm it). Nothing else is
+   claimed. */
 const nativeSyncCopy: Record<string, { step: string; sentence: string }> = {
   native_pending: {
     step: "Saved in Spectra · waiting for your file to confirm",
@@ -116,6 +118,10 @@ const nativeSyncCopy: Record<string, { step: string; sentence: string }> = {
   native_verified: {
     step: "Saved and checked in the file on your computer",
     sentence: "Saved in Spectra and checked in the file on your computer.",
+  },
+  native_superseded: {
+    step: "Saved in Spectra · replaced by a newer edit",
+    sentence: "Saved in Spectra. A newer edit replaced this change before the file on your computer confirmed it.",
   },
 };
 
@@ -262,7 +268,9 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     hoverSummary: expandedSummary.slice(0, 800),
     undone,
     nativeSync: nativeSync
-      ? (source.run.outcome === "native_verified" ? "verified" as const : "pending" as const)
+      ? (source.run.outcome === "native_verified" ? "verified" as const
+        : source.run.outcome === "native_superseded" ? "superseded" as const
+          : "pending" as const)
       : null,
     recentSteps: (source.recentSteps ?? [])
       .flatMap((step) => {

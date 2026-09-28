@@ -189,6 +189,7 @@ describe("S11 receipt truth after verification, interruption and acknowledgement
     { outcome: "canonical_saved", expected: "Earlier changes were saved", absent: "was checked" },
     { outcome: "native_pending", expected: "hasn't confirmed this change yet", absent: "was checked" },
     { outcome: "native_verified", expected: "file on your computer was checked", absent: "hasn't confirmed" },
+    { outcome: "native_superseded", expected: "A newer edit replaced this change", absent: "hasn't confirmed" },
   ])("preserves $outcome truth after Stop without upgrading native evidence", ({ outcome, expected, absent }) => {
     const result = reconcileInterruptedEffects({ executionId: "attempt-1", acknowledged: [acknowledged], operations: [stored()], run: { outcome } });
     const summary = interruptedEffectSummary(result, "The remaining work was stopped.", { stopped: true });

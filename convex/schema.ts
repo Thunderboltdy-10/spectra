@@ -422,10 +422,24 @@ export default defineSchema({
       v.literal("workspaces"),
       v.literal("finalize"),
       v.literal("completed"),
+      // Restarted too often without progress; parked for an operator, who
+      // resumes it at `resumeStage` (accountErasure:resumeNeedsAttention).
+      v.literal("failed_needs_attention"),
     ),
     step: v.number(),
     tableIndex: v.number(),
     cursor: v.optional(v.string()),
+    // Cron restarts since the job last made progress (backoff and alerting).
+    stalledRestarts: v.optional(v.number()),
+    resumeStage: v.optional(v.union(
+      v.literal("works"),
+      v.literal("await_works"),
+      v.literal("account_rows"),
+      v.literal("placements"),
+      v.literal("workspaces"),
+      v.literal("finalize"),
+    )),
+    needsAttentionAt: v.optional(v.number()),
     keptWorks: v.number(),
     deletedWorks: v.number(),
     // Works whose own deletion job ended failed or retained (pinned elsewhere).
@@ -4200,6 +4214,7 @@ export default defineSchema({
         v.literal("canonical_saved"),
         v.literal("native_pending"),
         v.literal("native_verified"),
+        v.literal("native_superseded"),
         v.literal("cancelled"),
         v.literal("failed"),
       ),
@@ -4638,6 +4653,7 @@ export default defineSchema({
             v.literal("canonical_saved"),
             v.literal("native_pending"),
             v.literal("native_verified"),
+            v.literal("native_superseded"),
             v.literal("cancelled"),
             v.literal("failed"),
           ),

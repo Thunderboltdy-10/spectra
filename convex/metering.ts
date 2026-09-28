@@ -1,5 +1,6 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { resolveActorContext } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import type { Id } from "./_generated/dataModel";
@@ -124,6 +125,46 @@ export async function recordMeterEvent(
   return { eventId, duplicate: false };
 }
 
+/**
+ * Model work of any kind (a run, Agent Foundry, an agent evaluation) meters
+ * its input and output tokens through here, so the school rollups the
+ * ceiling reads see all of it. Each category is idempotent on
+ * `${idempotencyPrefix}:${category}`.
+ */
+export async function recordModelTokenUsage(
+  ctx: MutationCtx,
+  args: {
+    schoolId?: Id<"schools">;
+    accountId?: Id<"accounts">;
+    inputTokens: number;
+    outputTokens: number;
+    sourceType: string;
+    sourceId?: string;
+    idempotencyPrefix: string;
+    dimensions?: Record<string, string | number | boolean>;
+    occurredAt: number;
+  },
+) {
+  for (const [category, quantity] of [
+    ["model_input_tokens", args.inputTokens],
+    ["model_output_tokens", args.outputTokens],
+  ] as const) {
+    const tokens = Number.isFinite(quantity) ? Math.max(0, Math.round(quantity)) : 0;
+    if (tokens <= 0) continue;
+    await recordMeterEvent(ctx, {
+      schoolId: args.schoolId,
+      accountId: args.accountId,
+      category,
+      quantity: tokens,
+      sourceType: args.sourceType,
+      sourceId: args.sourceId,
+      idempotencyKey: `${args.idempotencyPrefix}:${category}`,
+      dimensions: args.dimensions,
+      occurredAt: args.occurredAt,
+    });
+  }
+}
+
 type LimitPeriod = "day" | "month" | "total";
 
 function periodKey(period: LimitPeriod, timestamp: number) {
@@ -217,6 +258,138 @@ export const record = internalMutation({
     occurredAt: v.number(),
   },
   handler: recordMeterEvent,
+});
+
+// ------------------------------------------------ school usage totals backfill
+
+const USAGE_TOTALS_BACKFILL_KEY = "school-usage-totals";
+const USAGE_TOTALS_BACKFILL_VERSION = 1;
+const USAGE_TOTALS_METER_PAGE = 50;
+const TOKEN_METER_CATEGORIES = ["model_input_tokens", "model_output_tokens"] as const;
+
+type UsageTotalsBackfillCursor = {
+  /** Cursor over schools; null before the first school. */
+  schools: string | null;
+  schoolId?: Id<"schools">;
+  /** 0 and 1 walk the token meter categories; 2 rolls days up. */
+  step?: number;
+  meters?: string | null;
+};
+
+async function setSchoolUsageTotal(ctx: MutationCtx, schoolId: Id<"schools">, periodKey: string, quantity: number, now: number) {
+  const row = await ctx.db
+    .query("schoolUsageTotals")
+    .withIndex("by_school_period", (q) => q.eq("schoolId", schoolId).eq("category", "model_tokens").eq("periodKey", periodKey))
+    .unique();
+  if (row) {
+    if (row.quantity !== quantity) await ctx.db.patch(row._id, { quantity, updatedAt: now });
+    return row.quantity !== quantity;
+  }
+  if (quantity === 0) return false;
+  await ctx.db.insert("schoolUsageTotals", { schoolId, category: "model_tokens", periodKey, quantity, updatedAt: now });
+  return true;
+}
+
+/** A day's total is exactly the school's token meters for that day. Reading
+ * the meters and writing the total in one transaction keeps it exact while
+ * new usage keeps arriving: a concurrent meter write conflicts and retries. */
+async function rebuildSchoolUsageDay(ctx: MutationCtx, schoolId: Id<"schools">, day: string, now: number) {
+  let quantity = 0;
+  for (const tokenCategory of TOKEN_METER_CATEGORIES)
+    for (const meter of await ctx.db
+      .query("usageMeters")
+      .withIndex("by_school_category_day", (q) => q.eq("schoolId", schoolId).eq("category", tokenCategory).eq("day", day))
+      .collect())
+      quantity += meter.quantity;
+  return setSchoolUsageTotal(ctx, schoolId, `day:${day}`, quantity, now);
+}
+
+/**
+ * One-off operator repair for per-school model-token totals that predate the
+ * rollup (convex/metering.ts addSchoolModelTokens): usage metered before it
+ * shipped is missing from the day, month and total rows the ceiling reads.
+ *
+ * It rebuilds rather than adds, so it never double counts and may be re-run:
+ * each day row is set from `usageMeters` (which keeps the full history), then
+ * month and total rows are set from the day rows. Work is one bounded page
+ * per mutation, chained through the scheduler, with progress in
+ * `spectraReadModelMigrations` under the key "school-usage-totals".
+ *
+ * Operator step (once, after deploying this version):
+ *   npx convex run metering:backfillSchoolUsageTotals '{}'
+ * Re-run after completion with '{"restart":true}'. Progress:
+ *   the spectraReadModelMigrations row with key "school-usage-totals".
+ */
+export const backfillSchoolUsageTotals = internalMutation({
+  args: { restart: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const migration = await ctx.db
+      .query("spectraReadModelMigrations")
+      .withIndex("by_key", (q) => q.eq("key", USAGE_TOTALS_BACKFILL_KEY))
+      .unique();
+    if (migration?.state === "complete" && !args.restart) return { state: "complete" as const, scanned: migration.scanned, repaired: migration.repaired };
+    const fresh = !migration || (migration.state === "complete" && args.restart === true);
+    const cursor: UsageTotalsBackfillCursor = !fresh && migration?.cursor
+      ? (JSON.parse(migration.cursor) as UsageTotalsBackfillCursor)
+      : { schools: null };
+    let scanned = 0;
+    let repaired = 0;
+    let complete = false;
+
+    if (!cursor.schoolId) {
+      const schools = await ctx.db.query("schools").paginate({ cursor: cursor.schools, numItems: 1 });
+      const school = schools.page[0];
+      if (school) Object.assign(cursor, { schoolId: school._id, step: 0, meters: null });
+      cursor.schools = schools.continueCursor;
+      complete = !school && schools.isDone;
+    } else if ((cursor.step ?? 0) < TOKEN_METER_CATEGORIES.length) {
+      const schoolId = cursor.schoolId;
+      const tokenCategory = TOKEN_METER_CATEGORIES[cursor.step ?? 0];
+      const meters = await ctx.db
+        .query("usageMeters")
+        .withIndex("by_school_category_day", (q) => q.eq("schoolId", schoolId).eq("category", tokenCategory))
+        .paginate({ cursor: cursor.meters ?? null, numItems: USAGE_TOTALS_METER_PAGE });
+      scanned += meters.page.length;
+      for (const day of new Set(meters.page.map((meter) => meter.day)))
+        if (await rebuildSchoolUsageDay(ctx, schoolId, day, now)) repaired += 1;
+      Object.assign(cursor, meters.isDone
+        ? { step: (cursor.step ?? 0) + 1, meters: null }
+        : { meters: meters.continueCursor });
+    } else {
+      // A school has one day row per day it used AI: bounded by its age.
+      const schoolId = cursor.schoolId;
+      const days = await ctx.db
+        .query("schoolUsageTotals")
+        .withIndex("by_school_period", (q) => q.eq("schoolId", schoolId).eq("category", "model_tokens").gte("periodKey", "day:").lt("periodKey", "day;"))
+        .collect();
+      scanned += days.length;
+      const months = new Map<string, number>();
+      let total = 0;
+      for (const day of days) {
+        const month = `month:${day.periodKey.slice(4, 11)}`;
+        months.set(month, (months.get(month) ?? 0) + day.quantity);
+        total += day.quantity;
+      }
+      for (const [month, quantity] of months)
+        if (await setSchoolUsageTotal(ctx, schoolId, month, quantity, now)) repaired += 1;
+      if (await setSchoolUsageTotal(ctx, schoolId, "total", total, now)) repaired += 1;
+      Object.assign(cursor, { schoolId: undefined, step: undefined, meters: undefined });
+    }
+
+    const progress = {
+      version: USAGE_TOTALS_BACKFILL_VERSION,
+      state: complete ? ("complete" as const) : ("running" as const),
+      cursor: complete ? undefined : JSON.stringify(cursor),
+      scanned: (fresh ? 0 : (migration?.scanned ?? 0)) + scanned,
+      repaired: (fresh ? 0 : (migration?.repaired ?? 0)) + repaired,
+      updatedAt: now,
+    };
+    if (migration) await ctx.db.patch(migration._id, progress);
+    else await ctx.db.insert("spectraReadModelMigrations", { key: USAGE_TOTALS_BACKFILL_KEY, createdAt: now, ...progress });
+    if (!complete) await ctx.scheduler.runAfter(0, internal.metering.backfillSchoolUsageTotals, {});
+    return { state: progress.state, scanned: progress.scanned, repaired: progress.repaired };
+  },
 });
 
 async function requireUsageViewer(ctx: IdentityCtx, schoolId: Id<"schools">) {

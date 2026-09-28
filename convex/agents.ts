@@ -7,6 +7,7 @@ import {
   requireSpectraActor,
 } from "./spectraShared";
 import { writeAuditEvent } from "./auditShared";
+import { assertSchoolModelTokenCeiling, recordModelTokenUsage } from "./metering";
 import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
 
 const vEvalResult = v.object({
@@ -87,11 +88,23 @@ export async function agentDraftHash(artifact: Doc<"spectraArtifacts">) {
   });
 }
 
-async function verifyEvalBridge(
+/** What the route signs for a model-work report; mirrored in the route. */
+function agentModelWorkDigest(input: { purpose: string; inputTokens: number; outputTokens: number }) {
+  return `${input.purpose}:${input.inputTokens}:${input.outputTokens}`;
+}
+
+/**
+ * The agent routes run model work on the server and report its results back
+ * under the signed-in user's session. The server-held bridge key signs what
+ * the route reports (evaluation results, token counts), so a browser calling
+ * the same mutation cannot invent or alter them, and a nonce stops replay.
+ */
+async function verifyAgentBridge(
   ctx: MutationCtx,
   actor: Awaited<ReturnType<typeof requireSpectraActor>>,
+  operation: "agent-eval-settle" | "agent-model-work",
+  subjectId: string,
   input: {
-    evalRunId: Id<"agentEvalRuns">;
     payloadDigest: string;
     timestamp: number;
     nonce: string;
@@ -103,22 +116,22 @@ async function verifyEvalBridge(
     process.env.SPECTRA_SECRET_BRIDGE_KEY;
   if (!key || key.length < 32)
     throw new Error(
-      "AGENT_EVAL_BRIDGE_CONFIG_MISSING: Configure a strong evaluation bridge key.",
+      "AGENT_BRIDGE_CONFIG_MISSING: Configure a strong agent bridge key.",
     );
   if (Math.abs(Date.now() - input.timestamp) > 60_000)
-    throw new Error("AGENT_EVAL_BRIDGE_EXPIRED: Evaluation result expired.");
+    throw new Error("AGENT_BRIDGE_EXPIRED: The server report expired.");
   const replay = await ctx.db
     .query("secretBridgeNonces")
     .withIndex("by_nonce", (q) => q.eq("nonce", input.nonce))
     .unique();
   if (replay)
     throw new Error(
-      "AGENT_EVAL_BRIDGE_REPLAYED: Evaluation result was already used.",
+      "AGENT_BRIDGE_REPLAYED: This server report was already used.",
     );
   const canonicalInput = [
-    "agent-eval-settle",
+    operation,
     actor.clerkId,
-    input.evalRunId,
+    subjectId,
     input.timestamp,
     input.nonce,
     input.payloadDigest,
@@ -138,11 +151,11 @@ async function verifyEvalBridge(
   );
   if (!valid)
     throw new Error(
-      "AGENT_EVAL_BRIDGE_INVALID: Evaluation authorization failed.",
+      "AGENT_BRIDGE_INVALID: Server authorization failed.",
     );
   await ctx.db.insert("secretBridgeNonces", {
     nonce: input.nonce,
-    operation: "agent-eval-settle",
+    operation,
     accountId: actor.accountId,
     expiresAt: input.timestamp + 60_000,
     createdAt: Date.now(),
@@ -168,6 +181,8 @@ export const beginEvalRun = mutation({
     );
     if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
       throw new Error("AGENT_EVAL_INVALID: This artifact is not an agent.");
+    // An evaluation is model work billed to the school, like a run.
+    await assertSchoolModelTokenCeiling(ctx, actor.schoolId, Date.now());
     const content =
       artifact.content &&
       typeof artifact.content === "object" &&
@@ -232,6 +247,56 @@ export const beginEvalRun = mutation({
   },
 });
 
+/**
+ * Admission for agent model work that is not a Spectra run (Agent Foundry and
+ * the evaluation suite generator): the school model-token ceiling beginRun
+ * applies. The route asks before each model call.
+ */
+export const admitModelWork = mutation({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(ctx, args.agentId, "modify");
+    if (artifact.blueprintKey !== "agent")
+      throw new Error("AGENT_INVALID: This artifact is not an agent.");
+    await assertSchoolModelTokenCeiling(ctx, actor.schoolId, Date.now());
+    return { admitted: true as const };
+  },
+});
+
+/** The tokens the route actually spent, signed by the server, metered to the
+ * signed-in user's school. */
+export const recordModelWork = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    purpose: v.union(v.literal("agent_foundry"), v.literal("agent_eval_generate")),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    timestamp: v.number(),
+    nonce: v.string(),
+    signature: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    await verifyAgentBridge(ctx, actor, "agent-model-work", args.agentId, {
+      payloadDigest: agentModelWorkDigest(args),
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+    });
+    await recordModelTokenUsage(ctx, {
+      schoolId: actor.schoolId,
+      accountId: actor.accountId,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      sourceType: args.purpose,
+      sourceId: args.agentId,
+      idempotencyPrefix: `agent-model-work:${args.nonce}`,
+      occurredAt: Date.now(),
+    });
+    return { recorded: true as const };
+  },
+});
+
 export const draftForEvaluation = query({
   args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
@@ -278,7 +343,7 @@ export const settleEvalRun = mutation({
       throw new Error(
         "AGENT_EVAL_PAYLOAD_INVALID: Results changed in transit.",
       );
-    await verifyEvalBridge(ctx, actor, args);
+    await verifyAgentBridge(ctx, actor, "agent-eval-settle", args.evalRunId, args);
     if (args.results.length !== run.caseCount)
       throw new Error(
         "AGENT_EVAL_RESULT_COUNT_INVALID: Every evaluation case must settle.",
@@ -353,6 +418,18 @@ export const settleEvalRun = mutation({
       verificationStrength,
       completedAt: now,
       updatedAt: now,
+    });
+    // The per-case counts include the judge's; they arrive signed with the
+    // results, so they meter the school's model tokens as a run's do.
+    await recordModelTokenUsage(ctx, {
+      schoolId: run.schoolId,
+      accountId: actor.accountId,
+      inputTokens: results.reduce((sum, result) => sum + (result.inputTokens ?? 0), 0),
+      outputTokens: results.reduce((sum, result) => sum + (result.outputTokens ?? 0), 0),
+      sourceType: "agent_evaluation",
+      sourceId: String(run._id),
+      idempotencyPrefix: `agent-eval:${run._id}`,
+      occurredAt: now,
     });
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,

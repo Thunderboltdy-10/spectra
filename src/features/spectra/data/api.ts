@@ -1289,10 +1289,24 @@ export async function resolveSpectraManageBacIdentity() {
   });
 }
 
+/** Requests one sync may take to finish a large school's pass. */
+const MANAGEBAC_SYNC_REQUESTS = 12;
+
 export async function syncSpectraManageBac(
   kind: "manual" | "bootstrap" | "reconciliation" = "manual",
 ) {
-  return postManageBac<Record<string, unknown>>({ action: "sync", kind });
+  // Each request stops at the route's time budget and leaves the pass saved;
+  // the next request continues it, so a large school finishes in a few.
+  let result = await postManageBac<Record<string, unknown>>({ action: "sync", kind });
+  for (
+    let request = 1;
+    request < MANAGEBAC_SYNC_REQUESTS &&
+    result.suspended === true &&
+    result.errorCode === "INTEGRATION_SYNC_TIME_BUDGET";
+    request += 1
+  )
+    result = await postManageBac<Record<string, unknown>>({ action: "sync", kind });
+  return result;
 }
 
 export async function selectSpectraManageBacClasses(input: {

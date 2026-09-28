@@ -126,6 +126,7 @@ describe("ManageBac Keep lifecycle", () => {
       capabilityId: sharedRun.capabilityId,
       records,
       pageNumber: 1,
+      progress: FULL_ROUTE_PAGE,
     });
     await t.withIdentity(admin).mutation(api.managebac.commitNormalizedPage, {
       integrationId: f.integrationId,
@@ -133,6 +134,7 @@ describe("ManageBac Keep lifecycle", () => {
       capabilityId: sharedRun.capabilityId,
       records,
       pageNumber: 1,
+      progress: FULL_ROUTE_PAGE,
       timestamp,
       payloadDigest,
       nonce: "shared-update",
@@ -152,15 +154,17 @@ describe("ManageBac Keep lifecycle", () => {
     expect((await t.run((ctx) => ctx.db.get(seeded.bobItemId)))?.title).toBe(
       "Shared updated",
     );
-    const payload = {
-      seenProviderKeys: [],
-      reconciledCapabilityIds: [sharedRun.capabilityId],
-    };
-    const completeDigest = digest(payload);
+    // A later school pass reads the route and finds it empty.
+    const emptyRun = await insertTimetableRun(t, f, f.adminId);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(emptyRun.syncRunId, { accountId: undefined });
+      await ctx.db.patch(emptyRun.capabilityId, { scope: "school" });
+    });
+    await commitEmptyPage(t, admin, f, emptyRun, "shared-empty");
+    const completeDigest = digest({});
     await t.withIdentity(admin).mutation(api.managebac.completeSync, {
       integrationId: f.integrationId,
-      syncRunId: sharedRun.syncRunId,
-      ...payload,
+      syncRunId: emptyRun.syncRunId,
       timestamp,
       payloadDigest: completeDigest,
       nonce: "shared-complete",
@@ -168,7 +172,7 @@ describe("ManageBac Keep lifecycle", () => {
         "sync-complete",
         admin,
         f.integrationId,
-        sharedRun.syncRunId,
+        emptyRun.syncRunId,
         timestamp,
         "shared-complete",
         completeDigest,
@@ -265,11 +269,8 @@ describe("ManageBac Keep lifecycle", () => {
         selectionRevision: deselected.selectionRevision,
       });
     });
-    const payload = {
-      seenProviderKeys: [],
-      reconciledCapabilityIds: [next.capabilityId],
-      selectionRevision: deselected.selectionRevision,
-    };
+    await commitEmptyPage(t, alice, f, next, "keep-empty", deselected.selectionRevision);
+    const payload = { selectionRevision: deselected.selectionRevision };
     const timestamp = Date.now();
     const payloadDigest = digest(payload);
     await user.mutation(api.managebac.completeSync, {
@@ -339,6 +340,16 @@ const admin: TestIdentity = {
   subject: "managebac-isolation-admin",
   email: "admin@managebac-isolation.example.test",
   emailVerified: true,
+};
+
+/** Progress for a page that is the last page of its whole route. */
+const FULL_ROUTE_PAGE = {
+  binding: "",
+  page: 1,
+  bindingDone: true,
+  capabilityDone: true,
+  classIds: [],
+  yearGroupIds: [],
 };
 
 const emptyCounts = {
@@ -608,6 +619,7 @@ async function commitTimetablePage(
     capabilityId: timetable.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
   });
   return t.withIdentity(alice).mutation(api.managebac.commitNormalizedPage, {
     integrationId: fixture.integrationId,
@@ -615,6 +627,7 @@ async function commitTimetablePage(
     capabilityId: timetable.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
     payloadDigest,
     timestamp,
     nonce,
@@ -623,6 +636,43 @@ async function commitTimetablePage(
       alice,
       fixture.integrationId,
       timetable.syncRunId,
+      timestamp,
+      nonce,
+      payloadDigest,
+    ),
+  });
+}
+
+/** One signed empty page that finishes the run's route. */
+async function commitEmptyPage(
+  t: ReturnType<typeof setupTest>,
+  identity: TestIdentity,
+  fixture: Awaited<ReturnType<typeof seedFixture>>,
+  run: Awaited<ReturnType<typeof insertTimetableRun>>,
+  nonce: string,
+  selectionRevision?: number,
+) {
+  const payload = {
+    capabilityId: run.capabilityId,
+    records: [],
+    pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
+    ...(selectionRevision !== undefined ? { selectionRevision } : {}),
+  };
+  const timestamp = Date.now();
+  const payloadDigest = digest(payload);
+  return t.withIdentity(identity).mutation(api.managebac.commitNormalizedPage, {
+    integrationId: fixture.integrationId,
+    syncRunId: run.syncRunId,
+    ...payload,
+    payloadDigest,
+    timestamp,
+    nonce,
+    signature: signature(
+      "sync-page",
+      identity,
+      fixture.integrationId,
+      run.syncRunId,
       timestamp,
       nonce,
       payloadDigest,

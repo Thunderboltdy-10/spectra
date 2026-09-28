@@ -1199,6 +1199,22 @@ export default defineSchema({
     .index("by_sync_run", ["syncRunId"])
     .index("by_capability_created", ["capabilityId", "createdAt"]),
 
+  /**
+   * One row per record a sync pass saw, written with the page that saw it.
+   * A pass can span several requests, so the reconciliation that removes
+   * records the provider no longer lists reads these rows instead of a key
+   * set carried by one request. Deleted when the pass closes.
+   */
+  externalSyncSeenKeys: defineTable({
+    syncRunId: v.id("externalSyncRuns"),
+    schoolId: v.id("schools"),
+    sourceIdentityKey: v.string(),
+    providerRecordKey: v.string(),
+  })
+    .index("by_run_identity", ["syncRunId", "sourceIdentityKey"])
+    .index("by_run_provider", ["syncRunId", "providerRecordKey"])
+    .index("by_school", ["schoolId"]),
+
   externalSyncConflicts: defineTable({
     /** An accepted resolution still applying: rebase/keep to canonical rooms,
      * or any resolution across a school-wide record's projections in batches. */

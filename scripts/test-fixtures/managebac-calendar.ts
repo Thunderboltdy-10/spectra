@@ -93,6 +93,7 @@ export async function calendarFixture(modules: Record<string, () => Promise<unkn
   const editPlan = (artifactId: Id<"spectraArtifacts">, patch: Partial<Doc<"spectraArtifacts">>) =>
     t.mutation(makeFunctionReference<"mutation">("schoolCalendarFixture:editPlan"), { artifactId, patch });
   let sequence = 0;
+  const FULL_ROUTE_PAGE = { binding: "", page: 1, bindingDone: true, capabilityDone: true, classIds: [], yearGroupIds: [] };
   const sync = async (normalized = initialSource, sourceHash = "v1", academicPeriodKey = "2026-27", recordNumber = 1) => {
     const records = [{
       providerRecordId: `assignment-${recordNumber}`, providerRecordKey: `assignment:${recordNumber}`, providerClassId: "class-1",
@@ -101,21 +102,30 @@ export async function calendarFixture(modules: Record<string, () => Promise<unkn
     }];
     const timestamp = Date.now();
     const nonce = `calendar-fixture-${++sequence}`;
-    const payloadDigest = createHash("sha256").update(canonicalJson({ capabilityId: seed.capabilityId, records, pageNumber: sequence })).digest("base64url");
+    const progress = FULL_ROUTE_PAGE;
+    const payloadDigest = createHash("sha256").update(canonicalJson({ capabilityId: seed.capabilityId, records, pageNumber: sequence, progress })).digest("base64url");
     const signature = createHmac("sha256", bridgeKey).update([
       "sync-page", identity.subject, seed.integrationId, seed.syncRunId, timestamp, nonce, payloadDigest,
     ].join("|")).digest("base64url");
     return user.mutation(api.managebac.commitNormalizedPage, {
       integrationId: seed.integrationId, syncRunId: seed.syncRunId, capabilityId: seed.capabilityId,
-      records, pageNumber: sequence, timestamp, nonce, payloadDigest, signature,
+      records, pageNumber: sequence, progress, timestamp, nonce, payloadDigest, signature,
     });
   };
-  /** Signed full reconciliation; omitted provider keys are tombstoned. */
+  /**
+   * Signed full reconciliation, as if a fresh pass had just read only
+   * `seenProviderKeys`: the pass's other seen keys are dropped and it starts
+   * now, so every record committed before is eligible for removal.
+   */
   const complete = async (seenProviderKeys: string[] = ["assignment:1"]) => {
-    const seenSourceIdentityKeys = await t.run(async ctx => (await ctx.db.query("externalRecords").collect())
-      .filter(row => seenProviderKeys.includes(row.providerRecordKey) && row.sourceIdentityKey)
-      .map(row => row.sourceIdentityKey!));
-    const payload = { seenProviderKeys, seenSourceIdentityKeys, reconciledCapabilityIds: [seed.capabilityId] };
+    await t.run(async ctx => {
+      const run = (await ctx.db.get(seed.syncRunId))!;
+      for (const row of await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", q => q.eq("syncRunId", seed.syncRunId)).collect())
+        if (!seenProviderKeys.includes(row.providerRecordKey)) await ctx.db.delete(row._id);
+      const pass = run.cursorState && typeof run.cursorState === "object" ? run.cursorState : {};
+      await ctx.db.patch(seed.syncRunId, { cursorState: { ...pass, startedAt: Date.now() } });
+    });
+    const payload = {};
     const timestamp = Date.now();
     const nonce = `calendar-fixture-${++sequence}`;
     const payloadDigest = createHash("sha256").update(canonicalJson(payload)).digest("base64url");

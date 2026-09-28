@@ -334,6 +334,14 @@ function syncStageLabel(
       return "Class choices changed";
     case "lease_expired":
       return "Sync timed out";
+    case "suspended":
+      return "Paused part-way";
+    case "resuming":
+      return "Continuing where it stopped";
+    case "reconciling":
+      return "Checking for removed items";
+    case "restarted":
+      return "Replaced by a fresh sync";
     default:
       if (run.stage.startsWith("syncing:")) return "Reading school data";
       if (run.stage.startsWith("quarantined:")) return "Data needs review";
@@ -364,9 +372,15 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
     case "INTEGRATION_SYNC_FENCED":
       return "A newer sync already replaced this one.";
     case "INTEGRATION_WORKER_LEASE_EXPIRED":
-      return "This sync timed out and was stopped. Retry if you still need school updates.";
+      return run.stage === "suspended"
+        ? "This sync stopped part-way. The next sync continues from its last saved page."
+        : "This sync timed out and was stopped. Retry if you still need school updates.";
     case "INTEGRATION_SYNC_TIME_BUDGET":
-      return "This sync ran out of time. School data it already read is saved, and it tries again shortly.";
+      return "This sync paused to stay within its time limit. School data it already read is saved, and the next sync continues from where it stopped.";
+    case "INTEGRATION_SYNC_RESTARTED":
+      return "The connection, routes or followed classes changed, so a fresh sync replaced this one.";
+    case "INTEGRATION_SYNC_STATE_TOO_LARGE":
+      return "This school follows more classes than one sync can track. Follow fewer classes, then sync again.";
     default:
       return run.status === "partial"
         ? "Some school data was saved. Retry to fill the gaps."

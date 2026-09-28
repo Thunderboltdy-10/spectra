@@ -41,7 +41,7 @@ export async function executeReferenceInsertion(input: {
   await applyAiArtifactMutation({
     artifactId: input.hostWorkId, runId: input.runId, executionId: input.executionId, operationId: input.operationId,
     signal: input.signal, operations: [host.blueprintKey === "document" ? "document.insert.reference" : "app.reference.insert"],
-    beforeCommit: async () => { throwIfAborted(input.signal); },
+    beforeCommit: async () => { throwIfAborted(input.signal); }, receipt: "placement",
     resolveDesired: (current) => ({ ...current, content: insertOperationReference(host.blueprintKey, current.content, reference) }),
   });
   // The existing change-group writer confirms placements in the transaction

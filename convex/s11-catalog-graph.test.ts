@@ -190,6 +190,31 @@ describe("S11 actor graph prototype", () => {
     if (process.env.SPECTRA_S11_GRAPH_EVIDENCE === "write") writeFileSync(".spectra-local/launch-s11/data/workspace-caller-comparison.json",
       JSON.stringify({ kind: "Actual old handler versus complete graph traversal, fixed64expired invitations; convex-test returned-row bytes, not hosted engine or billing.", before, after }, null, 2));
   });
+  it("marks the reader's own workspaces they have shared, with one bounded read per status", async () => {
+    const f = await fixture();
+    const ids = await f.t.run(async ctx => {
+      const invite = (resourceId: string, status: Doc<"shareInvitations">["status"], expiresAt?: number) =>
+        ctx.db.insert("shareInvitations", { schoolId: f.ids.schoolId, resourceType: "workspace", resourceId,
+          inviterAccountId: f.ids.readerId, inviteeAccountId: f.ids.ownerId, level: "read", status,
+          ...(expiresAt ? { expiresAt } : {}), createdAt: 1, updatedAt: 1 });
+      const accepted = await f.workspace(ctx, "Accepted", { ownerAccountId: f.ids.readerId, lastActivityAt: 4 });
+      await invite(accepted, "revoked");
+      await invite(accepted, "accepted");
+      const pending = await f.workspace(ctx, "Pending", { ownerAccountId: f.ids.readerId, lastActivityAt: 3 });
+      await invite(pending, "pending", Date.now() + 60_000);
+      const lapsed = await f.workspace(ctx, "Lapsed", { ownerAccountId: f.ids.readerId, lastActivityAt: 2 });
+      await invite(lapsed, "pending", 1);
+      await invite(lapsed, "revoked");
+      const privateOne = await f.workspace(ctx, "Private", { ownerAccountId: f.ids.readerId, lastActivityAt: 1 });
+      return { accepted, pending, lapsed, privateOne };
+    });
+    const { found } = await traverse(cursor => f.workspacePage({ cursor }));
+    const shared = Object.fromEntries(found.map(item => [item._id, item.isShared === true]));
+    expect(shared).toEqual({ [ids.accepted]: true, [ids.pending]: true, [ids.lapsed]: false, [ids.privateOne]: false });
+    const selected = await f.user.query(api.catalogGraph.workspaceMetadata, { workspaceId: ids.accepted });
+    expect(selected.workspace).toMatchObject({ ownership: "owned", isShared: true });
+  });
+
   it("keeps complete traversal independent of unrelated private density", async () => {
     const f = await fixture();
     const ids = await basicGraph(f);

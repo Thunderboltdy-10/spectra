@@ -11,10 +11,12 @@ export type NativeAiCommitWireRequest = Omit<NativeAiCommitArgs, "append"> & {
 };
 
 /** The existing bridge transport retries this exact immutable business request.
- * Rebuilding a native package or authored Yjs delta is not a transport retry. */
+ * Rebuilding a native package or authored Yjs delta is not a transport retry.
+ * A live artifact without a native binding omits the native source/candidate
+ * and is admitted by the same sink, history and receipt. */
 export async function commitPreparedNativeAiRequest(request: NativeAiCommitWireRequest): Promise<AdmittedAiCommit> {
   const retained = structuredClone(request);
-  retained.nativeCandidate = await retainNativeCandidate(retained.nativeCandidate);
+  if (retained.nativeCandidate) retained.nativeCandidate = await retainNativeCandidate(retained.nativeCandidate);
   retained.requestDigest = await nativeAiRequestDigest(retained);
   const bridge = createCollaborationGatewayBridgeClient({
     convexUrl: getConvexUrl(),

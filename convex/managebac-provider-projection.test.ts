@@ -328,6 +328,22 @@ describe("ManageBac provider projection through canonical history", () => {
     expect(after.run).toMatchObject({ status: "completed", projectionWorkRemaining: 0 });
     expect(after.versions.filter(version => version.source === "import")).toHaveLength(1);
   });
+
+  it("degrades the connection when a staged update fails after the sync reported complete", async () => {
+    const f = await calendarFixture(modules);
+    await f.sync();
+    const { planId } = await openRoomWithPersonalEdit(f, content => { content.progressNote = "Personal"; });
+    await f.sync(changedSource, "v2");
+    const { projection } = await state(f, planId);
+    expect(await f.complete()).toMatchObject({ status: "running" });
+    const integration = () => f.t.run(async ctx => (await ctx.db.get(f.seed.integrationId))!);
+    expect((await integration()).status).toBe("connected");
+    await f.t.mutation(internal.managebacProjectionJobs.failed, {
+      projectionId: projection._id, operationId: projection.pendingProvider!.operationId, error: "MANAGEBAC_PROJECTION_TOO_LARGE",
+    });
+    expect((await state(f, planId)).run).toMatchObject({ status: "partial", projectionWorkRemaining: 0 });
+    expect((await integration()).status).toBe("degraded");
+  });
 });
 
 function canonicalJson(value: unknown): string {

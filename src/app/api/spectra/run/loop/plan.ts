@@ -31,6 +31,7 @@ import {
   mapOperationArtifactReferences,
   mergeStagedOperations,
   StagedGraphError,
+  type StagedDisposition,
   stagedDependents,
   validateOperationDependencies,
 } from "@/features/spectra/operations/dependencies";
@@ -3528,22 +3529,27 @@ export function promptDirectlyUsesFocusedContent(prompt: string) {
 }
 
 /** Parse the runtime's authenticated restoration. A candidate that no longer
- * parses under the current operation schema cannot be staged; the request is
- * kept and the continuation is told to prepare that work again. */
+ * parses under the current operation schema cannot be staged. Positions (and
+ * @created:N identities and carried evidence) are stable, and a producer
+ * always precedes its consumers, so the parseable prefix before it is kept
+ * intact; that position and every later one are prepared again. */
 function restoredClarificationFrom(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const restored = value as RestoredClarification;
-  try {
-    const candidates = (Array.isArray(restored.candidates) ? restored.candidates : []).map((candidate) => ({
-      operation: parseModelOperation(candidate.operation),
-      disposition: candidate.disposition === "withdrawn" || candidate.disposition === "accepted"
-        ? candidate.disposition : "needs_revalidation" as const,
-    }));
-    validateOperationDependencies(candidates.map(({ operation }) => operation));
-    return { candidates, candidatesOmitted: restored.candidatesOmitted === true };
-  } catch {
-    return { candidates: [], candidatesOmitted: true };
+  const candidates: Array<{ operation: ModelOperation; disposition: StagedDisposition }> = [];
+  let omitted = restored.candidatesOmitted === true;
+  for (const candidate of Array.isArray(restored.candidates) ? restored.candidates : []) {
+    try {
+      const operation = parseModelOperation(candidate.operation);
+      validateOperationDependencies([...candidates.map((entry) => entry.operation), operation]);
+      candidates.push({ operation, disposition: candidate.disposition === "withdrawn" || candidate.disposition === "accepted"
+        ? candidate.disposition : "needs_revalidation" });
+    } catch {
+      omitted = true;
+      break;
+    }
   }
+  return { candidates, candidatesOmitted: omitted };
 }
 
 export function buildAgentOrientation(context: unknown, prompt: string) {
@@ -4179,7 +4185,7 @@ export async function callModel(
   const restoredStagedMessage = () => [
     "This request resumed after the user answered a clarification question. The complete original request and every answer are in the current User request.",
     restoredClarification?.candidatesOmitted
-      ? "Work staged earlier in this request was too large to keep while waiting for the answer. Prepare it again from the request and the current sources."
+      ? "Some or all work staged earlier in this request could not be kept while waiting for the answer. Prepare the missing work again from the request and the current sources."
       : "",
     acceptedAgentOperations.length
       ? `The typed operations below were staged earlier in this same request; none is saved. Accepted positions are applied with your final response unless you change them: when the answer changes or cancels one, call revise_staged_operation to replace or withdraw that position. Positions marked needs_revalidation were prepared before their source changed and are not accepted: read the current target, then replace or withdraw each. Indexes and @created:N identities stay stable. Do not repeat staged operations; complete every remaining part of the request and finish normally.

@@ -5326,7 +5326,7 @@ function ArtifactStudioEditor({
       const requestId = pendingRestoreRequestRef.current.requestId;
       const result = await postSpectra<{
         state: "committed" | "unchanged";
-        receipt: { versionId?: string; updateDigest?: string };
+        receipt: { versionId?: string; roomId?: string; sequence?: number; updateDigest?: string };
         admitted?: AdmittedUpdateDescriptor;
       }>({
         action: "commitArtifactRestore",
@@ -5344,8 +5344,9 @@ function ArtifactStudioEditor({
         // Consume the exact admitted server delta through the provider path,
         // which does not create another authored restore or another append.
         try {
-          if (result.state === "committed" && result.admitted && result.receipt.updateDigest)
-            await live.transport.consumeAdmittedUpdate?.(result.admitted, result.receipt.updateDigest, `restore:${requestId}`);
+          const { roomId, sequence, updateDigest } = result.receipt;
+          if (result.state === "committed" && result.admitted && roomId && sequence && updateDigest)
+            await live.transport.consumeAdmittedUpdate?.(result.admitted, { roomId, sequence, updateDigest }, `restore:${requestId}`);
           await live.transport.retry();
         }
         catch { setLiveConflict({ message: "This version was restored. Reconnect to display the latest changes." }); }

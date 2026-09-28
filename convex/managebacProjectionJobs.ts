@@ -192,6 +192,12 @@ async function settleProviderWork(ctx: MutationCtx, owner: WorkOwner, committed:
       stage: outcome.status === "awaiting_review" ? "review_conflicts" : "complete",
       counts: { ...run.counts, conflicts: outcome.conflicts }, completedAt: now, updatedAt: now,
     });
+    // Sync completion already reported the connection before this staged
+    // work drained; a failure recorded since then must not stay "connected".
+    if (outcome.status === "partial") {
+      const integration = await ctx.db.get(run.integrationId);
+      if (integration?.status === "connected") await ctx.db.patch(integration._id, { status: "degraded", updatedAt: now });
+    }
   } else {
     await ctx.db.patch(run._id, { projectionWorkRemaining: remaining, updatedAt: now });
   }

@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { DOCUMENT_YJS_FRAGMENT, documentYjsAdapter } from "../work/models/yjs/document-adapter";
-import { applyDocumentParagraphTextSplice } from "../work/models/yjs/document-text-splice";
+import { applyDocumentParagraphTextSplice } from "../work/models/yjs/document-adapter";
 import { workYjsOrigins } from "../work/models/yjs/origins";
+import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "../work/models/yjs/native-artifact-model";
+import { initializeNativeArtifactDocument } from "../../../../scripts/collaboration-native-projection.mjs";
+import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
 
 const human = { clientId: "human", kind: "human" as const };
 const ai = workYjsOrigins({ clientId: "ai", kind: "ai", runId: "run", operationId: "splice" }).ai;
@@ -115,5 +118,64 @@ describe("S11 single-operation plain paragraph splice", () => {
     console.info("S11 synthetic paragraph splice update bytes", { unrelatedCharacters: [20, 1_000_000], updateBytes: sizes });
     expect(sizes.every(size => size > 0 && size < 128)).toBe(true);
     expect(Math.abs(sizes[1]! - sizes[0]!)).toBeLessThan(16);
+  });
+});
+
+describe("AI paragraph edits through the live planner (the splice's real caller)", () => {
+  const aiActor = { clientId: "ai", kind: "ai" as const, runId: "run", operationId: "edit" };
+  function live(first: string) {
+    const doc = new Y.Doc();
+    initializeNativeArtifactDocument(doc, { typeKey: "document", schemaVersion: 4, title: "Work", tags: [],
+      content: { blocks: [{ id: "p1", type: "paragraph", text: first }, { id: "p2", type: "paragraph", text: "Other" }] } });
+    const current = readNativeArtifactYjsDocument(doc, "document")!;
+    return { doc, current, fragment: doc.getXmlFragment(DOCUMENT_YJS_FRAGMENT) };
+  }
+  function edit(doc: Y.Doc, current: ArtifactLiveValue, text: string) {
+    const blocks = (current.content as { blocks: Array<Record<string, unknown>> }).blocks
+      .map((block) => block.id === "p1" ? { ...block, text } : block);
+    const plan = planNativeArtifactYjsMutation(doc, "document", { ...current, content: { ...(current.content as Record<string, unknown>), blocks } }, aiActor);
+    const vector = Y.encodeStateVector(doc);
+    doc.transact(plan.apply, workYjsOrigins(aiActor).ai);
+    return Y.encodeStateAsUpdate(doc, vector);
+  }
+
+  it("splices the existing paragraph text so a collaborator's caret and the node identity survive", () => {
+    const { doc, current, fragment } = live("Hello world");
+    const paragraph = fragment.get(0) as Y.XmlElement;
+    const text = paragraph.get(0) as Y.XmlText;
+    const caret = Y.createRelativePositionFromTypeIndex(text, 8);
+    edit(doc, current, "Hello bright world");
+    expect(fragment.get(0)).toBe(paragraph);
+    expect(paragraph.get(0)).toBe(text);
+    expect(text.toString()).toBe("Hello bright world");
+    expect(Y.createAbsolutePositionFromRelativePosition(caret, doc)).toMatchObject({ type: text, index: 15 });
+    doc.destroy();
+  });
+
+  it("admits an append whose bytes do not grow with the paragraph it extends", () => {
+    const sizes = [20, 100_000].map((size) => {
+      const { doc, current } = live("x".repeat(size));
+      const bytes = edit(doc, current, `${"x".repeat(size)} appended`).byteLength;
+      doc.destroy();
+      return bytes;
+    });
+    expect(sizes[1]! - sizes[0]!).toBeLessThan(16);
+  });
+
+  it("never splits a surrogate pair when two emoji share their high half", () => {
+    const { doc, current, fragment } = live("A\u{1F600}B");
+    edit(doc, current, "A\u{1F601}B");
+    expect(((fragment.get(0) as Y.XmlElement).get(0) as Y.XmlText).toString()).toBe("A\u{1F601}B");
+    doc.destroy();
+  });
+
+  it("keeps formatted paragraphs on the lossless node path", () => {
+    const { doc, fragment } = live("Hello world");
+    ((fragment.get(0) as Y.XmlElement).get(0) as Y.XmlText).format(0, 5, { bold: {} });
+    const formatted = readNativeArtifactYjsDocument(doc, "document")!;
+    edit(doc, formatted, "Hello brave world");
+    expect(readNativeArtifactYjsDocument(doc, "document")!.content).toMatchObject({ blocks: [{ id: "p1" }, { id: "p2", text: "Other" }] });
+    expect(fragment.toString()).toContain("brave");
+    doc.destroy();
   });
 });

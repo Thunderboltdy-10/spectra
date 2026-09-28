@@ -40,7 +40,8 @@ const hash = (value: string | Uint8Array) => createHash("sha256").update(value).
 const wire = (value: string | Uint8Array) => createHash("sha256").update(value).digest("base64url");
 const body = (text: string) => ({ blocks: [{ id: "body", type: "paragraph", text }] });
 
-async function fixture(kind: "update" | "create" = "update") {
+async function fixture(kind: "update" | "create" = "update", options: { native?: boolean } = {}) {
+  const native = options.native !== false;
   const t = convexTest(schema, modules);
   for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
   const seeded = await t.run(async ctx => {
@@ -59,7 +60,7 @@ async function fixture(kind: "update" | "create" = "update") {
     const baseVector = Y.encodeStateVector(document);
     const baseHash = wire(baseVector);
     const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, schoolId,
-      blueprintKey: "document", schemaVersion: 2, resourceClass: "artifact", nativeFormat: "docx", title: before.title,
+      blueprintKey: "document", schemaVersion: 2, resourceClass: "artifact", ...(native ? { nativeFormat: "docx" } : {}), title: before.title,
       tags: before.tags, content: before.content, textIndex: "Before", contentHash: hash(JSON.stringify(before)),
       liveStateVectorHash: baseHash, status: "active", createdAt: now, updatedAt: now });
     const roomId = await ctx.db.insert("collaborationRooms", { artifactId, schoolId, typeKey: "document", partitionKey: "root",
@@ -123,6 +124,10 @@ async function fixture(kind: "update" | "create" = "update") {
           preservedPartNames: [], state: "cloud_saved",
         } } },
     };
+    if (!native) {
+      delete args.nativeCandidate;
+      delete args.expected.nativeSource;
+    }
     return { args, ids: { artifactId, roomId, runId, operationId, cloudId, claimId, membershipId,
       sourceRef: String(payloads[0]), resultRef: String(payloads[1]) }, before, after };
   });
@@ -135,7 +140,7 @@ async function fixture(kind: "update" | "create" = "update") {
 
 async function bridgeFixture() {
   const f = await fixture();
-  const source = f.args.expected.nativeSource;
+  const source = f.args.expected.nativeSource!;
   const localId = await f.t.run(async ctx => {
     const now = Date.now();
     const deviceId = await ctx.db.insert("bridgeDevices", { accountId: f.args.append.accountId,
@@ -149,7 +154,7 @@ async function bridgeFixture() {
       payloadRef: source.payloadRef, contentHash: source.hash, revision: source.revision, nativeFormat: "docx",
       state: "current", lastVerifiedAt: now, updatedAt: now });
   });
-  if (f.args.nativeCandidate.destination !== "cloud") throw new Error("Invalid fixture");
+  if (f.args.nativeCandidate?.destination !== "cloud") throw new Error("Invalid fixture");
   const cloud = f.args.nativeCandidate.cloud;
   f.args.nativeCandidate = { destination: "bridge", queue: { ...cloud, localReplicaId: localId,
     regionIds: cloud.nativeReceipt.targets.regionIds, partNames: cloud.nativeReceipt.targets.partNames,
@@ -348,10 +353,56 @@ describe("atomic AI native commit", () => {
 
   it("rejects an unchanged claim with different result bytes", async () => {
     const f = await fixture();
-    const cloud = f.args.nativeCandidate.destination === "cloud" ? f.args.nativeCandidate.cloud : null;
+    const cloud = f.args.nativeCandidate?.destination === "cloud" ? f.args.nativeCandidate.cloud : null;
     f.args.nativeCandidate = { destination: "none", unchanged: { sourcePayloadRef: f.ids.sourceRef,
-      sourceHash: f.args.expected.nativeSource.hash, resultPayloadRef: f.ids.resultRef, resultHash: cloud!.contentHash,
+      sourceHash: f.args.expected.nativeSource!.hash, resultPayloadRef: f.ids.resultRef, resultHash: cloud!.contentHash,
       readbackProjectionHash: cloud!.projectionContentHash, preservationEvidence: { ...cloud!.nativeReceipt, state: "unchanged" } } };
     await expect(f.commit()).rejects.toThrow("AI_NATIVE_UNCHANGED_UNVERIFIED");
+  });
+
+  it("rejects an envelope that carries only half of a native binding", async () => {
+    const f = await fixture();
+    delete f.args.nativeCandidate;
+    await expect(f.commit()).rejects.toThrow("AI_NATIVE_ENVELOPE_INVALID");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(2);
+  });
+});
+
+describe("atomic AI admission without a native binding", () => {
+  it("admits the exact live delta, AI history and receipt, then replays instead of writing over later human work", async () => {
+    const f = await fixture("update", { native: false });
+    const original = await f.commit();
+    expect(original).toMatchObject({ state: "committed", duplicate: false,
+      receipt: { sequence: 2, nativeResult: null }, admitted: { encoding: "inline" } });
+    expect(original.receipt.versionId).toBeTruthy();
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(f.after.content);
+    const version = await f.t.run(ctx => ctx.db.get(original.receipt.versionId as never));
+    expect(version).toMatchObject({ source: "ai" });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.operationId)))?.output.artifactWriteReceipt.result.receipt).toEqual(original.receipt);
+    await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("Later human work") }));
+    // A lost acknowledgement retried with a freshly prepared candidate
+    // consumes the original receipt; it never appends the new bytes.
+    f.args.append.update = new Uint8Array([0, 0]).buffer;
+    f.args.append.idempotencyKey = "native-ai:retry-candidate";
+    const replay = await f.commit();
+    expect(replay).toMatchObject({ duplicate: true, receipt: original.receipt, admitted: original.admitted });
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(3);
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(body("Later human work"));
+  });
+
+  it("enforces the approval scope at the sink before any effect", async () => {
+    const f = await fixture("update", { native: false });
+    await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { requiresConfirmation: true }));
+    await expect(f.commit()).rejects.toThrow("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.roomId)))?.nextSequence).toBe(2);
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(f.before.content);
+    expect(await f.t.run(ctx => ctx.db.query("spectraArtifactVersions").collect())).toEqual([]);
+  });
+
+  it("refuses a stale room sequence so a newer human edit is never overwritten", async () => {
+    const f = await fixture("update", { native: false });
+    await f.t.run(ctx => ctx.db.patch(f.ids.roomId, { nextSequence: 3 }));
+    await expect(f.commit()).rejects.toThrow("AI_NATIVE_CANONICAL_STALE");
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.operationId)))?.output.artifactWriteReceipt).toBeUndefined();
   });
 });

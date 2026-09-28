@@ -10,6 +10,7 @@ import { AiDurableAckGate } from "@/features/spectra/ai/ai-durable-ack";
 import { applyAdmittedProviderUpdate, type AiBeforeCommit } from "./admitted-ai-update";
 import { assertPreparedAiCommit, loadAdmittedAiUpdate, prepareCanonicalAiUpdate, retryCanonicalAiMutation, type NativeAiHead, type AiCanonicalBridge } from "./canonical-ai-update";
 import { createCollaborationGatewayBridgeClient } from "../../../../scripts/collaboration-gateway-bridge-client.mjs";
+import { commitPreparedNativeAiRequest, type NativeAiCommitWireRequest } from "@/lib/native-ai-commit-server";
 import { durableFrontierHash } from "../../../../scripts/collaboration-canonical-room.mjs";
 import { getConvexUrl } from "@/lib/env";
 import {
@@ -949,6 +950,9 @@ async function synchronizeMutation(params: {
   beforeCommit?: AiBeforeCommit;
   nativeHead?: NativeAiHead;
   canonicalBridge?: AiCanonicalBridge;
+  /** Resolve this operation against the fenced durable base when no native
+   * package fixes the result; the admitted delta is prepared from that base. */
+  admittedDesired?: (fencedBase: ArtifactLiveValue) => ArtifactLiveValue;
   /**
    * Re-read the live model after a human-held target becomes free. A queued
    * operation may have waited through several collaborator transactions; its
@@ -1480,26 +1484,37 @@ async function synchronizeMutation(params: {
         "nativeAiCommit:head", { artifactId: params.session.artifact._id, aiOperation: {
           runId: params.runId, executionId: params.executionId, operationId: params.operationId,
         } });
+      // A native package is prepared for one exact base. Without one, the
+      // operation is resolved against whatever fenced base admission reads.
       if (fresh.committedResult || fresh.operationDigest !== finalHead.operationDigest ||
-          fresh.sourceContentIdentity !== finalHead.sourceContentIdentity ||
-          fresh.room?._id !== finalHead.room?._id || fresh.room?.nextSequence !== finalHead.room?.nextSequence)
+          (params.beforeCommit && (fresh.sourceContentIdentity !== finalHead.sourceContentIdentity ||
+          fresh.room?._id !== finalHead.room?._id || fresh.room?.nextSequence !== finalHead.room?.nextSequence)))
         throw new Error("AI_NATIVE_CANONICAL_STALE");
       // Preview metadata changes updatedAt without changing authored content.
       finalHead = fresh;
     }
-    const admitted = await params.beforeCommit?.({
+    const prepareAdmittedUpdate = async (normalizedDesired: ArtifactLiveValue | ((fencedBase: ArtifactLiveValue) => ArtifactLiveValue)) => {
+      if (!finalHead || !params.canonicalBridge || !params.provider.applyCommittedUpdate)
+        throw new Error("AI_NATIVE_ADMISSION_UNAVAILABLE");
+      if (preparation) throw new Error("AI_NATIVE_UPDATE_ALREADY_PREPARED");
+      preparation = prepareCanonicalAiUpdate({ head: finalHead, bridge: params.canonicalBridge,
+        authoredFrontier, desired: normalizedDesired, clientId: params.session.clientId, operationId: params.operationId });
+      preparedResult = await preparation;
+      return preparedResult.prepared;
+    };
+    let admitted = await params.beforeCommit?.({
       desired,
       changedRegionIds: plan.regions.map((region) => region.regionId),
-      prepareAdmittedUpdate: async (normalizedDesired) => {
-        if (!finalHead || !params.canonicalBridge || !params.provider.applyCommittedUpdate)
-          throw new Error("AI_NATIVE_ADMISSION_UNAVAILABLE");
-        if (preparation) throw new Error("AI_NATIVE_UPDATE_ALREADY_PREPARED");
-        preparation = prepareCanonicalAiUpdate({ head: finalHead, bridge: params.canonicalBridge,
-          authoredFrontier, desired: normalizedDesired, clientId: params.session.clientId, operationId: params.operationId });
-        preparedResult = await preparation;
-        return preparedResult.prepared;
-      },
+      prepareAdmittedUpdate,
     });
+    if (!admitted && finalHead && !preparation) {
+      // No native package: the same single admission appends the exact delta,
+      // AI history and operation receipt. The live socket never authors it.
+      const prepared = await prepareAdmittedUpdate(params.admittedDesired ?? desired);
+      const request = { ...prepared, requestDigest: "", aiOperation: { runId: params.runId,
+        executionId: params.executionId, operationId: params.operationId } } as NativeAiCommitWireRequest;
+      admitted = await commitPreparedNativeAiRequest(request);
+    }
     let acceptedFrontier: { artifactId: string; runId: string; executionId: string; operationId: string;
       sequence: number; before: ArtifactLiveValue; after: ArtifactLiveValue } | undefined;
     if (admitted) {
@@ -1518,13 +1533,8 @@ async function synchronizeMutation(params: {
         before: preparedResult.before, after: preparedResult.after,
       };
     } else {
-      // A prepared native candidate may never fall through to a second plan.
-      if (preparation) throw new Error("AI_NATIVE_COMMIT_RECEIPT_REQUIRED");
-      // A native-aware callback may decline a metadata-only edit. Its ordinary
-      // gateway path still needs the human history boundary skipped above.
-      if (params.nativeHead) await convexMutation("changeGroups:checkpointBeforeAi", {
-        artifactId: params.session.artifact._id, runId: params.runId, executionId: params.executionId,
-      });
+      // A prepared candidate may never fall through to a second, unadmitted plan.
+      if (preparation || finalHead) throw new Error("AI_NATIVE_COMMIT_RECEIPT_REQUIRED");
       params.provider.beginDurableTransaction?.();
       params.document.transact(plan.apply, { kind: "spectra-ai-operation", runId: params.runId, operationId: params.operationId });
     }
@@ -1691,6 +1701,12 @@ async function applyAiArtifactMutationAttempt(params: {
   replacePendingCreate?: boolean;
   operations?: string[];
   beforeCommit?: AiBeforeCommit;
+  /**
+   * Durable proof of this write. Artifact create/update operations are
+   * admitted with an operation write receipt. A live reference insertion
+   * (an application command) is proven by its own placement receipt instead.
+   */
+  receipt?: "artifact-write" | "placement";
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1714,11 +1730,16 @@ async function applyAiArtifactMutationAttempt(params: {
     claimActorKind,
   );
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
-  const nativeHead = params.beforeCommit && claimActorKind === "ai"
-    ? await convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
-      "nativeAiCommit:head", { artifactId: params.artifactId, aiOperation: {
-        runId: params.runId, executionId: params.executionId, operationId: params.operationId,
-      } }) : undefined;
+  // Every AI artifact write is admitted once by the signed sink. Only the
+  // self-hosted gateway room is that sink's canonical store; an explicitly
+  // opted-in Cloudflare room keeps its own transport acknowledgement.
+  const admitsArtifactWrite = claimActorKind === "ai" && params.receipt !== "placement" &&
+    (Boolean(params.beforeCommit) || session.providerKind === "hocuspocus");
+  const readHead = () => convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
+    "nativeAiCommit:head", { artifactId: params.artifactId, aiOperation: {
+      runId: params.runId, executionId: params.executionId, operationId: params.operationId,
+    } });
+  let nativeHead = admitsArtifactWrite ? await readHead() : undefined;
   const canonicalBridge: AiCanonicalBridge | undefined = nativeHead
     ? createCollaborationGatewayBridgeClient({ convexUrl: getConvexUrl(), bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY! }) : undefined;
   if (!params.replacePendingCreate && !nativeHead?.committedResult) {
@@ -1889,6 +1910,8 @@ async function applyAiArtifactMutationAttempt(params: {
         ),
       });
       current = readLiveYjsDocument(document, typeKey);
+      // The baseline advanced the durable room this head described.
+      if (nativeHead) nativeHead = await readHead();
     }
     if (!current)
       throw new Error(
@@ -2031,6 +2054,7 @@ async function applyAiArtifactMutationAttempt(params: {
       beforeCommit: params.beforeCommit,
       nativeHead,
       canonicalBridge,
+      admittedDesired: pendingCreate ? () => normalizedDesired : resolveValidatedValue,
       baseSnapshot,
       proposedSnapshot,
       rebaseAfterHumanWait: async () => {

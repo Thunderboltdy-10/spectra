@@ -38,6 +38,43 @@ describe("runSpectraAgentLoop", () => {
     expect(requestTurn).toHaveBeenCalledTimes(7); // one useful read, four stalled turns, two finalization attempts
   });
 
+  it("continues an answer cut off at the output limit instead of saving it as final", async () => {
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "Photosynthesis has two stages: the light", toolCalls: [], finishReason: "length" })
+      .mockResolvedValueOnce({ text: "-dependent reactions and the Calvin cycle.", toolCalls: [], finishReason: "stop" });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool: vi.fn(), isTerminalTool: () => false });
+    expect(result.text).toBe("Photosynthesis has two stages: the light-dependent reactions and the Calvin cycle.");
+    expect(result.truncated).toBeUndefined();
+    expect(requestTurn.mock.calls.map((call) => call[2])).toEqual([false, true]);
+    expect(requestTurn.mock.calls[1]![0]).toContainEqual(expect.objectContaining({
+      role: "user", content: expect.stringContaining("cut off by the output limit"),
+    }));
+  });
+
+  it("reports an answer that stays cut off after every continuation", async () => {
+    const requestTurn = vi.fn().mockResolvedValue({ text: "more ", toolCalls: [], finishReason: "length" });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool: vi.fn(), isTerminalTool: () => false });
+    expect(requestTurn).toHaveBeenCalledTimes(4);
+    expect(result).toMatchObject({ text: "more more more more ", truncated: true });
+  });
+
+  it("never executes or finishes on a tool call cut off at the output limit", async () => {
+    const cutPlan = { id: "plan", name: "submit_plan", arguments: '{"operations":[{"type":"artifact.cre' };
+    const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"deck"}' };
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read, cutPlan], finishReason: "length" })
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ ...cutPlan, id: "plan-2", arguments: "{}" }], finishReason: "tool_calls" });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool,
+      isParallelSafeTool: (call) => call.name === "read_artifact",
+      isTerminalTool: (call) => call.name === "submit_plan" });
+    expect(executeTool.mock.calls.map(([call]) => call.id)).toEqual(["read"]);
+    expect(requestTurn.mock.calls[1]![0]).toContainEqual(expect.objectContaining({
+      role: "tool", tool_call_id: "plan", content: expect.stringContaining("output_truncated"),
+    }));
+    expect(result.terminalTool?.id).toBe("plan-2");
+  });
+
   it("retries one transient read failure with identical arguments", async () => {
     const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"guide"}' };
     const requestTurn = vi.fn()

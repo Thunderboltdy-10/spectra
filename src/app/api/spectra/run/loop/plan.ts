@@ -4732,12 +4732,19 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     if (!agentResult.terminalTool && ordinaryAgent) {
       // Prose is never parsed as executable JSON. Only operations accepted
       // through typed tools can enter the durable graph on this path.
-      latestPlanText = agentResult.text;
-      const completion = planFromAgentCompletion(agentResult.text, stagedGraph());
+      // An answer that still ended at the output limit after continuing says
+      // so instead of reading as complete.
+      const answerText = agentResult.truncated
+        ? `${agentResult.text.trimEnd()}
+
+_This answer reached the length limit and stops here. Ask me to continue for the rest._`
+        : agentResult.text;
+      latestPlanText = answerText;
+      const completion = planFromAgentCompletion(answerText, stagedGraph());
       return {
         plan: parseAndCheckPlan(JSON.stringify(completion)),
         result: {
-          text: agentResult.text,
+          text: answerText,
           model: agentResult.model,
           provider: agentResult.provider,
           usage: agentResult.usage,
@@ -5323,7 +5330,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         }
         return toolResult;
       },
-      requestTurn: async (messages, turn) => {
+      requestTurn: async (messages, turn, continuesAnswer) => {
         const startedAt = Date.now();
         response = await request(
           providerRouting,
@@ -5347,7 +5354,8 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         return readOpenRouterAgentTurn(
           response,
           onAnswerText && ordinaryAgent
-            ? streamAnswerFor(++agentTurnRequests)
+            ? // A continuation extends the visible answer instead of replacing it.
+              streamAnswerFor(continuesAnswer ? agentTurnRequests : ++agentTurnRequests)
             : undefined,
           onReasoningText,
           (call) => {

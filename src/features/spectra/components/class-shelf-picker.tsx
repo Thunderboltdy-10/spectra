@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProductEmptyState } from "./product-state";
 import { cn } from "@/lib/utils";
+import { requestSpectra } from "../data/request";
 
 export type ClassShelfCandidate = {
   recordId: string;
@@ -45,7 +46,7 @@ export async function fetchMyClassCandidates(): Promise<{
   lastSyncAt?: number;
   nextSyncAt?: number;
 }> {
-  const response = await fetch("/api/spectra/managebac?action=myClasses");
+  const response = await requestSpectra("/api/spectra/managebac?action=myClasses");
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(payload?.error?.message ?? "Could not load classes.");

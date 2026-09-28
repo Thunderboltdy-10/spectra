@@ -131,36 +131,6 @@ export const access = query({
   },
 });
 
-export const listGrants = query({
-  args: { resourceType, resourceId: v.string() },
-  handler: async (ctx, args) => {
-    await requireCapability(ctx, args.resourceType, args.resourceId, "share");
-    const now = Date.now();
-    const grants = await ctx.db
-      .query("accessGrants")
-      .withIndex("by_resource", (q) =>
-        q
-          .eq("resourceType", args.resourceType)
-          .eq("resourceId", args.resourceId),
-      )
-      .collect();
-    return grants
-      .filter(
-        (grant) =>
-          !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now),
-      )
-      .map((grant) => ({
-        grantId: grant._id,
-        principalType: grant.principalType,
-        principalId: grant.principalId,
-        level: grant.level,
-        source: grant.source,
-        expiresAt: grant.expiresAt,
-        createdAt: grant.createdAt,
-      }));
-  },
-});
-
 export const invite = mutation({
   args: {
     resourceType,

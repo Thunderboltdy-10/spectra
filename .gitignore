@@ -50,7 +50,7 @@ next-env.d.ts
 opencode*.json
 
 # Browser automation runtime and generated output. Reusable P8 probes live in
-# docs/spectra-reformation/final-verification/scripts/playwright/ and remain tracked.
+# scripts/final-verification/playwright/ and remain tracked.
 .playwright-cli/
 .playwright/
 playwright-report/

@@ -28,6 +28,7 @@ import {
   collaborationAccessRevoked,
   collaborationNeedsSignIn,
 } from "./auth-session";
+import { requestSpectra } from "../data/request";
 
 type SessionResponse = {
   token: string;
@@ -210,7 +211,7 @@ async function fetchCollaborationSession(
     controller.abort();
   }, SYNC_RETRY_POLICY.collaborationConnectTimeoutMs);
   try {
-    const response = await fetch("/api/spectra/collaboration/token", {
+    const response = await requestSpectra("/api/spectra/collaboration/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

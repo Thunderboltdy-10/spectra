@@ -123,6 +123,10 @@ import {
   resolveLinkedChart,
 } from "../presentation/linked-chart";
 import { pptxNativeMediaUrl } from "../lenses/office-content";
+import {
+  artifactBlobSha256,
+  downloadDocumentBlob,
+} from "./artifact-studio-file-utils";
 
 /**
  * Slides and Notes are the deck's two views; both come from `work/registry`
@@ -424,23 +428,8 @@ function cloneDeck<T>(value: T): T {
   return structuredClone(value);
 }
 
-async function sha256Blob(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  downloadDocumentBlob(name, blob);
 }
 
 function presentationFileStem(value: string) {
@@ -2614,7 +2603,7 @@ export function PresentationStudio({
         throw new Error("Choose a PNG or JPEG picture for this PowerPoint file.");
       if (file.size > 100_000_000)
         throw new Error("Presentation media cannot exceed 100 MB per asset.");
-      const sha256 = await sha256Blob(file);
+      const sha256 = await artifactBlobSha256(file);
       const uploaded = await uploadArtifactAsset({
         artifactId,
         path: `media/${Date.now().toString(36)}-${crypto
@@ -2681,7 +2670,7 @@ export function PresentationStudio({
         name: file.name,
         mimeType: file.type || "application/octet-stream",
         bytes: file.size,
-        sha256: await sha256Blob(file),
+        sha256: await artifactBlobSha256(file),
       });
       jobId = beginning.jobId;
       try {
@@ -2733,7 +2722,7 @@ export function PresentationStudio({
             path: `imports/${jobId}/${media.archivePath}`,
             name: media.name,
             mediaType: media.mediaType,
-            sha256: await sha256Blob(blob),
+            sha256: await artifactBlobSha256(blob),
             blob,
           });
           retainedMedia.set(media.archivePath, uploaded.assetId);

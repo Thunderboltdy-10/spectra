@@ -65,22 +65,13 @@ import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { projectBindingsFromIr } from "../capabilities/derivations";
 import { ArtifactWorkbar, type CommandBinding } from "./artifact-workbar";
+import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 
 const HOUR_HEIGHT = 68;
 const DAY_MS = 86_400_000;
 
 function clone<T>(value: T): T {
   return structuredClone(value);
-}
-
-async function sha256Blob(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function dateKey(date: Date) {
@@ -729,7 +720,7 @@ export function TimetableStudio({
         name: file.name,
         mimeType: file.type || "application/octet-stream",
         bytes: file.size,
-        sha256: await sha256Blob(file),
+        sha256: await artifactBlobSha256(file),
       });
       jobId = beginning.jobId;
       try {

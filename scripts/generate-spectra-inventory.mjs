@@ -147,7 +147,7 @@ const inventory = {
 const serialized = `${JSON.stringify(inventory, null, 2)}\n`;
 const writeIndex = process.argv.indexOf("--write");
 if (writeIndex >= 0) {
-  const destination = resolve(root, process.argv[writeIndex + 1] ?? "docs/spectra-definitive/generated/baseline-inventory.json");
+  const destination = resolve(root, process.argv[writeIndex + 1] ?? "docs/archive/spectra-definitive/generated/baseline-inventory.json");
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, serialized, "utf8");
 } else {

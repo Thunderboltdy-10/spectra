@@ -115,6 +115,30 @@ describe("Spectra API route", () => {
     });
   });
 
+  it("resolves an AI edit conflict only as apply, keep_current or cancel", async () => {
+    const convexQuery = vi.fn().mockResolvedValue({ executionId: "exec_1", currentStateVectorHash: "current-state-vector-hash" });
+    const convexMutation = vi.fn().mockResolvedValue({ runId: "run_1", operationId: "operation_1", queued: true });
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+    const route = await import("@/app/api/spectra/route");
+    const post = (body: Record<string, unknown>) => route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify(body) }));
+
+    // The merge editor is retired: a merged proposal is refused before any read or write.
+    const merged = await post({ action: "resolveAiArtifactConflict", operationId: "operation_1", resolution: "merge", mergedInput: { artifactId: "a" } });
+    expect(merged.status).toBeGreaterThanOrEqual(400);
+    expect(convexQuery).not.toHaveBeenCalled();
+    expect(convexMutation).not.toHaveBeenCalled();
+
+    expect((await post({ action: "resolveAiArtifactConflict", operationId: "operation_1", resolution: "apply" })).status).toBe(200);
+    expect(convexMutation).toHaveBeenLastCalledWith("spectraOperations:resumeAfterRegionConflict", {
+      operationId: "operation_1", executionId: "exec_1", resolution: "apply", newBaseStateVectorHash: "current-state-vector-hash",
+    });
+    expect((await post({ action: "resolveAiArtifactConflict", operationId: "operation_1", resolution: "keep_current" })).status).toBe(200);
+    expect(convexMutation).toHaveBeenLastCalledWith("spectraOperations:resumeAfterRegionConflict", {
+      operationId: "operation_1", executionId: "exec_1", resolution: "keep_current", newBaseStateVectorHash: undefined,
+    });
+  });
+
   it("creates and archives workspaces through Spectra CRUD functions", async () => {
     const convexQuery = vi.fn();
     const convexMutation = vi

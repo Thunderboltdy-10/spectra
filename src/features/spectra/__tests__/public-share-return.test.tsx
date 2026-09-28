@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicShareShell } from "../pages/public-share-shell";
+import { SPECTRA_REQUEST_UNREACHABLE } from "../data/request";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -76,7 +77,8 @@ describe("public share auth return", () => {
       .mockImplementation(async () => success());
     vi.stubGlobal("fetch", fetchMock);
     render(<PublicShareShell />);
-    await screen.findByText("Temporary read failure");
+    // A request that never reached the server speaks the shared connection copy.
+    await screen.findByText(SPECTRA_REQUEST_UNREACHABLE);
     expect(window.sessionStorage.getItem(returnKey)).toBe(token);
     await act(async () => window.dispatchEvent(new Event("focus")));
     await screen.findByText("Shared lesson");

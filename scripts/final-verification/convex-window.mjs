@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-export const repositoryRoot = resolve(scriptDirectory, "..", "..", "..", "..");
+export const repositoryRoot = resolve(scriptDirectory, "..", "..");
 const numericUsageFields = Object.freeze([
   "databaseIoReadBytes",
   "databaseIoWriteBytes",

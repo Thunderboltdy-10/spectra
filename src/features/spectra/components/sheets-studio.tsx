@@ -69,6 +69,7 @@ import {
 import {
   downloadDocumentBlob,
   downloadDocumentText,
+  artifactBlobSha256,
 } from "./artifact-studio-file-utils";
 import {
   abortArtifactImportUpload,
@@ -136,6 +137,7 @@ import { cachedFormulaCells } from "../sheets/cached-formulas";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
+import { requestSpectra } from "../data/request";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -251,16 +253,6 @@ function useShellContract(): StudioContract | null {
   } catch {
     return null;
   }
-}
-
-async function sheetsBlobSha256(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 type Viewport = {
@@ -905,7 +897,7 @@ export const SheetsStudio = memo(function SheetsStudio({
   const refuseFormulaLiteralization = useCallback(
     (speculative: SheetsContent) => {
       setNotice({ tone: "warning", message: FORMULA_LITERALIZATION_MESSAGE });
-      void contentForDurableRequest(artifactId, speculative).then(content => fetch("/api/spectra/lenses/office", {
+      void contentForDurableRequest(artifactId, speculative).then(content => requestSpectra("/api/spectra/lenses/office", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2589,7 +2581,7 @@ export const SheetsStudio = memo(function SheetsStudio({
                 ? "application/vnd.oasis.opendocument.spreadsheet"
                 : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         bytes: file.size,
-        sha256: await sheetsBlobSha256(file),
+        sha256: await artifactBlobSha256(file),
       });
       jobId = beginning.jobId;
       await uploadArtifactImportOriginal(jobId, file);

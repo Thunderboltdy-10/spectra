@@ -5,7 +5,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-export const repositoryRoot = resolve(scriptDirectory, "..", "..", "..", "..");
+export const repositoryRoot = resolve(scriptDirectory, "..", "..");
 
 function outputIsInsideRoot(output, root) {
   const relation = relative(root, output);

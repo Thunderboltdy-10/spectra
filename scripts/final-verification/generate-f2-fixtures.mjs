@@ -9,8 +9,6 @@ const root = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
-  "..",
-  "..",
   ".spectra-local",
   "p8v1-f2-fixtures",
 );

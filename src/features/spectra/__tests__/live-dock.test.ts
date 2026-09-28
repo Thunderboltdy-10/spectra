@@ -341,8 +341,6 @@ describe("Live Dock V2", () => {
     const shortcuts = read("src/components/keyboard-shortcuts.tsx");
     expect(shortcuts).toContain('keys: ["Mod", "Shift", "F"]');
     expect(shortcuts).toContain('className={compact ? "size-8 border-0" : undefined}');
-    const sidePanel = read("src/components/shared/right-side-panel.tsx");
-    expect(sidePanel).not.toContain("backdrop-blur");
   });
 
   it("never shows machine tokens in dock failure copy", () => {

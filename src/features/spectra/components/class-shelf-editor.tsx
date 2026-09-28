@@ -12,9 +12,10 @@ import {
   type ClassShelfLoadState,
   type ClassShelfRetention,
 } from "./class-shelf-picker";
+import { requestSpectra } from "../data/request";
 
 async function manageBacPost(body: Record<string, unknown>) {
-  const response = await fetch("/api/spectra/managebac", {
+  const response = await requestSpectra("/api/spectra/managebac", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

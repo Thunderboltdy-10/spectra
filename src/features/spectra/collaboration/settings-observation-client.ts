@@ -9,6 +9,7 @@ import { currentViewportSnapshot, getAppChoreographyCoordinator, performAppChore
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import { settingsToggleControls } from "./settings-toggle-control";
 import { disengageFollowAi, getFollowedAiActorId, isFollowingAi, noteAiSurface, subscribeFollowAi } from "./follow-ai";
+import { requestSpectra } from "../data/request";
 
 let clientId: string | undefined;
 const runs = new Map<string, { executionId: string }>();
@@ -26,7 +27,7 @@ export function uiObserverForRun(runId: string) {
 }
 
 async function request(action: "ui_observer" | "ui_observer_ack", payload: Record<string, unknown>) {
-  const response = await fetch("/api/spectra/run", {
+  const response = await requestSpectra("/api/spectra/run", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload }),
     signal: AbortSignal.timeout(5_000),
   });

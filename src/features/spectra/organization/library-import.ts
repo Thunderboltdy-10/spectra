@@ -3,6 +3,7 @@ import type { ArtifactTypeKey } from "../artifacts/types";
 import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { uploadArtifactAsset } from "../data/api";
 import { artifactBlobSha256 } from "../components/artifact-studio-file-utils";
+import { requestSpectra } from "../data/request";
 
 function imagePixelDimensions(
   bytes: Uint8Array,
@@ -373,7 +374,7 @@ export async function importLibraryResourceFile(
   if (options?.workspaceId) body.set("workspaceId", options.workspaceId);
   if (options?.parentNodeId) body.set("parentNodeId", options.parentNodeId);
   body.set("mimeType", file.type || "application/octet-stream");
-  const response = await fetch("/api/spectra/resources", {
+  const response = await requestSpectra("/api/spectra/resources", {
     method: "POST",
     body,
   });
@@ -408,7 +409,7 @@ export async function projectOfficeImportWithLens(file: File, artifactId: string
   const body = new FormData();
   body.set("file", file, file.name);
   body.set("artifactId", artifactId);
-  const response = await fetch("/api/spectra/imports/office", {
+  const response = await requestSpectra("/api/spectra/imports/office", {
     method: "POST",
     body,
   });

@@ -158,17 +158,6 @@ export const recordPlan = mutation({
   },
 });
 
-export const listForRun = query({
-  args: { runId: v.id("spectraAiRuns") },
-  handler: async (ctx, args) => {
-    await requireOwnedRun(ctx, args.runId);
-    return ctx.db
-      .query("spectraOperations")
-      .withIndex("by_run", (q) => q.eq("runId", args.runId))
-      .collect();
-  },
-});
-
 export const conflictForOperation = query({
   args: { operationId: v.id("spectraOperations") },
   handler: async (ctx, args) => {
@@ -527,10 +516,8 @@ export const resumeAfterRegionConflict = mutation({
     resolution: v.union(
       v.literal("apply"),
       v.literal("keep_current"),
-      v.literal("merge"),
       v.literal("cancel"),
     ),
-    mergedInput: v.optional(v.any()),
     newBaseStateVectorHash: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -549,7 +536,7 @@ export const resumeAfterRegionConflict = mutation({
     )
       throw new Error("REGION_CONFLICT_RUN_STALE");
     const claim = await ctx.db.get(operation.conflict.claimId);
-    const applying = args.resolution === "apply" || args.resolution === "merge";
+    const applying = args.resolution === "apply";
     const now = Date.now();
     if (
       !claim ||
@@ -609,10 +596,6 @@ export const resumeAfterRegionConflict = mutation({
     }
     await ctx.db.patch(operation._id, {
       status: applying ? "proposed" : "cancelled",
-      input:
-        args.resolution === "merge" && args.mergedInput !== undefined
-          ? args.mergedInput
-          : operation.input,
       conflict: undefined,
     });
     await ctx.db.patch(run._id, {

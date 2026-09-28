@@ -381,16 +381,6 @@ describe("one field engine", () => {
     }
   });
 
-  it("the landing prism renders on demand from the shared story clock", () => {
-    const source = readFileSync(
-      "src/app/landing/prism3d/PrismCanvas.tsx",
-      "utf8",
-    );
-    expect(source).toContain('frameloop="demand"');
-    expect(source).toContain("onStoryFrame(() => invalidate())");
-    expect(source).not.toContain('frameloop="always"');
-  });
-
   it("the landing prism renders on the shared demand clock and wakes after visibility returns", () => {
     const prismCanvas = readFileSync(
       "src/app/landing/prism3d/PrismCanvas.tsx",

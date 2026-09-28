@@ -42,6 +42,7 @@ import {
   fetchMyClassCandidates,
   type ClassShelfCandidate,
 } from "../components/class-shelf-picker";
+import { requestSpectra } from "../data/request";
 
 type Capability = {
   _id: string;
@@ -314,7 +315,7 @@ export function SchoolDataShell() {
     setError("");
     try {
       const [overviewResponse, classResult] = await Promise.all([
-        fetch("/api/spectra/managebac"),
+        requestSpectra("/api/spectra/managebac"),
         fetchMyClassCandidates().then(
           (result) => ({ ok: true as const, result }),
           (caught) => ({

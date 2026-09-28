@@ -77,8 +77,4 @@ export class ArtifactRegionController {
     await this.transport.flush();
     return { applied: true as const, claims: [] as RegionClaimResult[] };
   }
-
-  async resolve(claimId: string, resolution: "apply" | "keep_current" | "merge" | "cancel") {
-    return postSpectra({ action: "resolveRegionConflict", claimId, clientId: this.transport.clientId, resolution, newBaseStateVectorHash: resolution === "apply" || resolution === "merge" ? await stateVectorHash(this.transport) : undefined });
-  }
 }

@@ -158,17 +158,6 @@ export const recordPlan = mutation({
   },
 });
 
-export const listForRun = query({
-  args: { runId: v.id("spectraAiRuns") },
-  handler: async (ctx, args) => {
-    await requireOwnedRun(ctx, args.runId);
-    return ctx.db
-      .query("spectraOperations")
-      .withIndex("by_run", (q) => q.eq("runId", args.runId))
-      .collect();
-  },
-});
-
 export const conflictForOperation = query({
   args: { operationId: v.id("spectraOperations") },
   handler: async (ctx, args) => {

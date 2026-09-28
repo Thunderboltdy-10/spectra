@@ -3346,27 +3346,6 @@ export const hideResultCard = mutation({
   },
 });
 
-export const unhideResultCard = mutation({
-  args: { resultCardId: v.id("spectraResultCards") },
-  handler: async (ctx, args) => {
-    const actor = await requireActor(ctx);
-    const card = await ctx.db.get(args.resultCardId);
-    if (!card) throw new Error("Result card not found");
-    const run = await ctx.db.get(card.runId);
-    if (
-      !run ||
-      run.ownerAccountId !== actor._id ||
-      run.schoolId !== actor.schoolId
-    )
-      throw new Error("Result card not found");
-    await ctx.db.patch(args.resultCardId, {
-      hiddenAt: undefined,
-      updatedAt: Date.now(),
-    });
-    return { resultCardId: args.resultCardId };
-  },
-});
-
 export const keepResultCard = mutation({
   args: { resultCardId: v.id("spectraResultCards") },
   handler: async (ctx, args) => {

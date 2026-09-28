@@ -372,33 +372,6 @@ export const getPublished = query({
   },
 });
 
-export const getForVersion = query({
-  args: {
-    artifactId: v.id("spectraArtifacts"),
-    artifactVersionId: v.id("spectraArtifactVersions"),
-  },
-  handler: async (ctx, args) => {
-    await requireArtifactCapability(ctx, args.artifactId, "read");
-    const builds = await ctx.db
-      .query("spectraRuntimeBuilds")
-      .withIndex("by_artifact_version", (q) =>
-        q
-          .eq("artifactId", args.artifactId)
-          .eq("artifactVersionId", args.artifactVersionId),
-      )
-      .collect();
-    const build = builds
-      .filter(
-        (candidate) =>
-          (candidate.status === "published" ||
-            candidate.status === "superseded") &&
-          candidate.storageId,
-      )
-      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
-    return build ? projection(ctx, build) : null;
-  },
-});
-
 export const unpublish = mutation({
   args: { artifactId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {

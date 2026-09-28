@@ -659,28 +659,6 @@ export const commitIdle = internalMutation({
   },
 });
 
-export const commitBeforeAi = internalMutation({
-  args: {
-    artifactId: v.id("spectraArtifacts"),
-    actorAccountId: v.id("accounts"),
-    runId: v.id("spectraAiRuns"),
-  },
-  handler: async (ctx, args) => {
-    const run = await ctx.db.get(args.runId);
-    if (
-      !run ||
-      run.ownerAccountId !== args.actorAccountId ||
-      run.status !== "running"
-    )
-      throw new Error("CHANGE_GROUP_AI_RUN_INVALID");
-    return commitHumanCheckpoint(
-      ctx,
-      args.artifactId,
-      "Your work before Spectra edited",
-    );
-  },
-});
-
 export const commitCurrent = mutation({
   args: {
     artifactId: v.id("spectraArtifacts"),

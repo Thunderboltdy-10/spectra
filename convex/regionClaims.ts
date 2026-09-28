@@ -186,21 +186,3 @@ export const listForArtifact = query({
   },
 });
 
-export const getOwned = query({
-  args: { claimId: v.id("regionClaims"), clientId: v.string() },
-  handler: async (ctx, args) => {
-    const claim = await ctx.db.get(args.claimId);
-    if (!claim) return null;
-    const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "read");
-    if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
-    const expired = claim.leaseExpiresAt <= Date.now() && (claim.status === "active" || claim.status === "queued" || claim.status === "paused");
-    return {
-      claimId: claim._id,
-      status: expired ? "released" as const : claim.status,
-      queuePosition: expired ? undefined : claim.queuePosition,
-      leaseExpiresAt: claim.leaseExpiresAt,
-      resolution: expired ? "expired" as const : claim.resolution,
-      conflictRegionId: claim.regionId,
-    };
-  },
-});

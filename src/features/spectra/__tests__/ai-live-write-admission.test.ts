@@ -19,6 +19,7 @@ vi.mock("@/lib/env", () => ({ getConvexUrl: () => "https://convex.invalid" }));
 vi.mock("@/lib/collaboration-token", () => ({
   collaborationDocumentName: () => "artifact:root", collaborationProtocolVersion: () => 1,
   signCollaborationSession: async () => "token",
+  collaborationGatewayUrl: () => "ws://localhost:1234",
 }));
 vi.mock("../../../../scripts/collaboration-gateway-bridge-client.mjs", () => ({
   createCollaborationGatewayBridgeClient: () => seams.bridge,

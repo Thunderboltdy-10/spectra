@@ -239,6 +239,17 @@ describe("ordered same-target final verification", () => {
     await expectSequenceMismatch([deckAppend(3), deckAppend(4)]);
   });
 
+  it("keeps an earlier indexed edit required after a later append to the same list", async () => {
+    // An append creates a new last element; it cannot supersede an existing index.
+    const edit = update({ blueprintKey: "flashcard_deck", content: null,
+      contentPatch: { changes: [{ path: "/cards/0/front", value: "Edited prompt" }] } });
+    const existing = [card(1), card(2)];
+    mocks.query.mockResolvedValue(saved({ cards: [{ ...existing[0]!, front: "Edited prompt" }, existing[1], card(3)] }, "flashcard_deck"));
+    await verifySequence([edit, deckAppend(3)]);
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3)] }, "flashcard_deck"));
+    await expectSequenceMismatch([edit, deckAppend(3)]);
+  });
+
   it("lets a later complete replacement supersede earlier patches but verifies it whole", async () => {
     mocks.query.mockResolvedValue(saved(requested));
     await verifySequence([patch("/blocks/id:intro/text", "Glucose is made in daylight."), update()]);

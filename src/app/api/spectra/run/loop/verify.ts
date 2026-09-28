@@ -293,7 +293,9 @@ function patchPathsOverlap(earlier: string[], later: string[]) {
     const left = earlier[index]!;
     const right = later[index]!;
     if (left === "-" && right === "-") return false;
-    if (left !== right && left !== "-" && right !== "-") return false;
+    // A later append adds a new last element and cannot reach an existing
+    // index; a later index may still name the element an earlier append made.
+    if (left !== right && left !== "-") return false;
   }
   return true;
 }

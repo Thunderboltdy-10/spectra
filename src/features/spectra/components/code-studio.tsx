@@ -139,7 +139,10 @@ import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
-import { artifactBlobSha256 } from "./artifact-studio-file-utils";
+import {
+  artifactBlobSha256,
+  downloadDocumentBlob,
+} from "./artifact-studio-file-utils";
 import { requestSpectra } from "../data/request";
 
 type CodeProblem = {
@@ -257,12 +260,7 @@ function formatBytes(value: number) {
 }
 
 function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  downloadDocumentBlob(filename, blob);
 }
 
 function safeFilename(value: string) {

@@ -109,7 +109,10 @@ import {
 import { projectBindingsFromIr } from "../capabilities";
 import { enforcePdfInput } from "../../../../shared/parser-limits";
 import { ArtifactEmbedById } from "./artifact-embed-host";
-import { artifactBlobSha256 } from "./artifact-studio-file-utils";
+import {
+  artifactBlobSha256,
+  downloadDocumentBlob,
+} from "./artifact-studio-file-utils";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -2119,17 +2122,8 @@ export function WhiteboardStudio({
     }
   }
 
-  function downloadBlob(name: string, blob: Blob) {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = name;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
-
   function downloadBoard(name: string, type: string, body: string) {
-    downloadBlob(name, new Blob([body], { type }));
+    downloadDocumentBlob(name, new Blob([body], { type }));
   }
 
   function exportScope() {
@@ -2231,7 +2225,7 @@ export function WhiteboardStudio({
               "image/png",
             ),
           );
-          downloadBlob(exportName("png"), blob);
+          downloadDocumentBlob(exportName("png"), blob);
         } else {
           const { jsPDF } = await import("jspdf");
           const orientation = width >= height ? "landscape" : "portrait";

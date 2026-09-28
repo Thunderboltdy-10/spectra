@@ -123,7 +123,10 @@ import {
   resolveLinkedChart,
 } from "../presentation/linked-chart";
 import { pptxNativeMediaUrl } from "../lenses/office-content";
-import { artifactBlobSha256 } from "./artifact-studio-file-utils";
+import {
+  artifactBlobSha256,
+  downloadDocumentBlob,
+} from "./artifact-studio-file-utils";
 
 /**
  * Slides and Notes are the deck's two views; both come from `work/registry`
@@ -426,12 +429,7 @@ function cloneDeck<T>(value: T): T {
 }
 
 function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  downloadDocumentBlob(name, blob);
 }
 
 function presentationFileStem(value: string) {

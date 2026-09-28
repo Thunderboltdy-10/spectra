@@ -79,14 +79,77 @@ export function yToPlain(value: unknown): unknown {
   return value;
 }
 
+/** Above this many middle-segment comparisons the order is replaced whole. */
+const ARRAY_DIFF_CELL_LIMIT = 4_000_000;
+
+function longestCommonSubsequence<T>(left: readonly T[], right: readonly T[]) {
+  const columns = right.length + 1;
+  const lengths = new Uint32Array((left.length + 1) * columns);
+  for (let i = left.length - 1; i >= 0; i -= 1)
+    for (let j = right.length - 1; j >= 0; j -= 1)
+      lengths[i * columns + j] = Object.is(left[i], right[j])
+        ? lengths[(i + 1) * columns + j + 1]! + 1
+        : Math.max(lengths[(i + 1) * columns + j]!, lengths[i * columns + j + 1]!);
+  const pairs: Array<[number, number]> = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    if (Object.is(left[i], right[j])) {
+      pairs.push([i, j]);
+      i += 1;
+      j += 1;
+    } else if (lengths[(i + 1) * columns + j]! >= lengths[i * columns + j + 1]!) i += 1;
+    else j += 1;
+  }
+  return pairs;
+}
+
+/**
+ * Make `array` equal `values` with the smallest edit: entries both sides keep
+ * are left in place, so a concurrent insert or delete by another collaborator
+ * merges instead of both clients rewriting (and so duplicating) the whole list.
+ */
 export function replaceYArray<T>(array: Y.Array<T>, values: readonly T[]) {
-  if (
-    array.length === values.length &&
-    values.every((value, index) => Object.is(array.get(index), value))
+  const current = array.toArray();
+  let start = 0;
+  while (
+    start < current.length &&
+    start < values.length &&
+    Object.is(current[start], values[start])
   )
-    return;
-  if (array.length) array.delete(0, array.length);
-  if (values.length) array.push([...values]);
+    start += 1;
+  let currentEnd = current.length;
+  let valuesEnd = values.length;
+  while (
+    currentEnd > start &&
+    valuesEnd > start &&
+    Object.is(current[currentEnd - 1], values[valuesEnd - 1])
+  ) {
+    currentEnd -= 1;
+    valuesEnd -= 1;
+  }
+  if (start === currentEnd && start === valuesEnd) return;
+  const removed = current.slice(start, currentEnd);
+  const added = values.slice(start, valuesEnd);
+  const kept =
+    removed.length * added.length <= ARRAY_DIFF_CELL_LIMIT
+      ? longestCommonSubsequence(removed, added)
+      : [];
+  // Walk the kept anchors from the end so earlier indexes stay valid.
+  const anchors: Array<[number, number]> = [
+    [-1, -1],
+    ...kept,
+    [removed.length, added.length],
+  ];
+  for (let index = anchors.length - 1; index > 0; index -= 1) {
+    const [previousRemoved, previousAdded] = anchors[index - 1]!;
+    const [nextRemoved, nextAdded] = anchors[index]!;
+    const at = start + previousRemoved + 1;
+    const deleteCount = nextRemoved - previousRemoved - 1;
+    if (deleteCount > 0) array.delete(at, deleteCount);
+    const inserted = added.slice(previousAdded + 1, nextAdded);
+    if (inserted.length) array.insert(at, inserted);
+  }
 }
 
 export function createHeadlessBinding(

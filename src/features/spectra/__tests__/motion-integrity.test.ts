@@ -32,7 +32,6 @@ const NEW_KEYFRAMES = [
   "spectra-presence-flag-decay",
   "spectra-completion-ring",
   "spectra-target-pulse",
-  "spectra-fade-up",
   "spectra-panel-enter",
   "spectra-panel-exit",
   "spectra-panel-handoff",

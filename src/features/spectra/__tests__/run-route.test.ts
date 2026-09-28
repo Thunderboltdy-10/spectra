@@ -620,6 +620,24 @@ describe("Spectra run route", () => {
       .toEqual([expect.arrayContaining([expect.any(String), expect.objectContaining({ operations: [] })])]);
   });
 
+  it("writes only the status changes a student can see before the first model call", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: "Hello!" } }],
+    }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "hi" }),
+    }))).text();
+    const firstModelCall = fetchMock.mock.invocationCallOrder[0]!;
+    const statusWritesBefore = convexMutation.mock.calls.flatMap(([name, args], index) =>
+      String(name).includes("spectraRuns:updateStatus") && convexMutation.mock.invocationCallOrder[index]! < firstModelCall
+        ? [(args as { phase?: string }).phase] : []);
+    // claimExecution already marks the run running; a separate "planning"
+    // write replaced a moment later by "reading" only delayed the first token.
+    expect(statusWritesBefore).toEqual(["reading", "retrieving"]);
+  });
+
   it("streams an answer while it is written and stores it in few durable rows", async () => {
     const { fetchMock, convexMutation } = setup({});
     fetchMock.mockImplementation(async () => new Response(new ReadableStream({

@@ -400,20 +400,6 @@ async function runAttempt(
     // Staged positions are revised by index in the ordinary agent; shortcut
     // planners and early shells would bypass that restored graph.
     const restoredStagedWork = (restoredClarification?.candidates.length ?? 0) > 0;
-    await mutate("spectraRuns:updateStatus", {
-      actorClerkId: params.actorClerkId,
-      runId: params.runId,
-      executionId: params.executionId,
-      status: "running",
-      phase: "planning",
-      resultTitle: "Spectra",
-      resultSummary: params.artifactId
-        ? "Loading workspace context"
-        : params.workspaceId
-          ? "Loading the active workspace map"
-          : "Resolving the requested objects",
-      resultActions: [],
-    });
     const immediatePlan =
       params.agentId || params.continuedThread
         ? null

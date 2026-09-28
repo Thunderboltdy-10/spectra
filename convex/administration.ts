@@ -64,37 +64,12 @@ export const agentGovernance = query({
   args: { operatorSessionId: v.optional(v.id("operatorSchoolSessions")) },
   handler: async (ctx, args) => {
     const { school } = await schoolScope(ctx, args.operatorSessionId);
-    const [agents, schoolGrants, usage, feedback, evaluations, releases] =
-      await Promise.all([
-        ctx.db
-          .query("spectraArtifacts")
-          .withIndex("by_school_status", (q) =>
-            q.eq("schoolId", school._id).eq("status", "active"),
-          )
-          .collect(),
-        ctx.db
-          .query("accessGrants")
-          .withIndex("by_school", (q) =>
-            q.eq("schoolId", school._id).eq("resourceType", "agent"),
-          )
-          .collect(),
-        ctx.db
-          .query("agentUsageAggregates")
-          .withIndex("by_school_day", (q) => q.eq("schoolId", school._id))
-          .collect(),
-        ctx.db
-          .query("agentFeedback")
-          .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
-          .collect(),
-        ctx.db
-          .query("agentEvalRuns")
-          .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
-          .collect(),
-        ctx.db
-          .query("agentReleases")
-          .withIndex("by_school_published", (q) => q.eq("schoolId", school._id))
-          .collect(),
-      ]);
+    const schoolGrants = await ctx.db
+      .query("accessGrants")
+      .withIndex("by_school", (q) =>
+        q.eq("schoolId", school._id).eq("resourceType", "agent"),
+      )
+      .collect();
     const now = Date.now();
     const visibleAgentIds = new Set(
       schoolGrants
@@ -107,9 +82,55 @@ export const agentGovernance = query({
         )
         .map((grant) => grant.resourceId),
     );
-    const visible = agents.filter(
-      (artifact) =>
-        artifact.blueprintKey === "agent" && visibleAgentIds.has(artifact._id),
+    // Read the shared agents and their own aggregates by agent. Collecting
+    // every active artifact in the school, content included, to find the
+    // few agents failed on a large school.
+    const ofSchool = <T extends { schoolId: Id<"schools"> }>(rows: T[]) =>
+      rows.filter((row) => row.schoolId === school._id);
+    const perAgent = await Promise.all(
+      [...visibleAgentIds].map(async (resourceId) => {
+        const agentId = ctx.db.normalizeId("spectraArtifacts", resourceId);
+        if (!agentId) return null;
+        const [artifact, usage, feedback, evaluations, releases] =
+          await Promise.all([
+            ctx.db.get(agentId),
+            ctx.db
+              .query("agentUsageAggregates")
+              .withIndex("by_agent_day", (q) => q.eq("agentId", agentId))
+              .collect(),
+            ctx.db
+              .query("agentFeedback")
+              .withIndex("by_agent_created", (q) => q.eq("agentId", agentId))
+              .collect(),
+            ctx.db
+              .query("agentEvalRuns")
+              .withIndex("by_agent_created", (q) => q.eq("agentId", agentId))
+              .collect(),
+            ctx.db
+              .query("agentReleases")
+              .withIndex("by_agent_number", (q) => q.eq("agentId", agentId))
+              .collect(),
+          ]);
+        return {
+          artifact,
+          usage: ofSchool(usage),
+          feedback: ofSchool(feedback),
+          evaluations: ofSchool(evaluations),
+          releases: ofSchool(releases),
+        };
+      }),
+    );
+    const usage = perAgent.flatMap((row) => row?.usage ?? []);
+    const feedback = perAgent.flatMap((row) => row?.feedback ?? []);
+    const evaluations = perAgent.flatMap((row) => row?.evaluations ?? []);
+    const releases = perAgent.flatMap((row) => row?.releases ?? []);
+    const visible = perAgent.flatMap((row) =>
+      row?.artifact &&
+      row.artifact.schoolId === school._id &&
+      row.artifact.status === "active" &&
+      row.artifact.blueprintKey === "agent"
+        ? [row.artifact]
+        : [],
     );
     const summaries = visible.map((artifact) => {
       const agentUsage = usage.filter((row) => row.agentId === artifact._id);

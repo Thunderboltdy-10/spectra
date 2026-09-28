@@ -127,6 +127,14 @@ const nativeSyncSentence = {
   native_verified: " The file on your computer was checked and has this change.",
 } as const;
 
+/** The model writes its closing reply before the Bridge reads a local file back,
+ * so a saved run's reply carries the receipt's file state instead of letting
+ * "I updated your document" stand for the file on the student's computer. */
+export function replyWithNativeReceipt(reply: string, nativeOutcome: unknown) {
+  if (nativeOutcome !== "native_pending" && nativeOutcome !== "native_verified") return reply;
+  return `${reply.trimEnd()}\n\n${nativeSyncSentence[nativeOutcome].trim()}`;
+}
+
 export function interruptedEffectSummary(
   effects: InterruptedEffects, message: string, options: { stopped?: boolean; verificationFailed?: boolean } = {},
 ) {

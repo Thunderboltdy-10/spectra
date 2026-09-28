@@ -2750,6 +2750,28 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.type === "error" || event.type === "final")).toBe(true);
   });
 
+  it("does not let the chat reply claim a local file change the Bridge has not confirmed", async () => {
+    const { convexMutation } = setup(deckPlan());
+    // Convex reports the Bridge receipt state for a saved run that queued a
+    // local-file write; the model wrote its reply before that write existed.
+    const recordCompletion = convexMutation.getMockImplementation()!;
+    convexMutation.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      const result = await recordCompletion(name, args);
+      return String(name).includes("spectraRuns:updateStatus") && args.status === "completed"
+        ? { ...(result as object), nativeOutcome: "native_pending" } as unknown as typeof result
+        : result;
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string; summary?: string });
+    const reply = "Created a 6-card photosynthesis deck with memory cues.\n\nThe file on your computer hasn't confirmed this change yet.";
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe(reply);
+    expect(events.findLast((event) => event.type === "text_replace")?.content).toBe(reply);
+    expect(events.find((event) => event.type === "final")?.summary).toBe(reply);
+  });
+
   it("applies a native document update once after atomic admission", async () => {
     const original = {
       blocks: [{ id: "p1", type: "paragraph", text: "Variable: new_name Scope: Local" }],

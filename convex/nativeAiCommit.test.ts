@@ -255,9 +255,10 @@ describe("atomic AI native commit", () => {
       await ctx.db.patch(f.ids.operationId, { status: "executed" });
     });
     const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
-    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+    // The runner words the chat reply from the returned receipt state.
+    expect(await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
       runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
-    });
+    })).toEqual({ runId: f.ids.runId, nativeOutcome: "native_pending" });
     const outcome = async () => (await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome;
     expect(await outcome()).toBe("native_pending");
     const { request } = await f.t.mutation(makeFunctionReference<"mutation">("bridgeSync:claimWrite"), { credential });
@@ -295,9 +296,9 @@ describe("atomic AI native commit", () => {
     await f.commit();
     await f.t.run(ctx => ctx.db.patch(f.ids.operationId, { status: "executed" }));
     const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });
-    await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
+    expect(await client.mutation(makeFunctionReference<"mutation">("spectraRuns:updateStatus"), {
       runId: f.ids.runId, executionId: "attempt", status: "completed", outcome: "canonical_saved",
-    });
+    })).toEqual({ runId: f.ids.runId });
     expect((await f.t.run(ctx => ctx.db.get(f.ids.runId)))?.outcome).toBe("canonical_saved");
   });
 

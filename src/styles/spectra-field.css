@@ -423,16 +423,6 @@
   }
 }
 
-/* Surfaces that host a field need a stacking context and content above it. */
-.spectra-field-host {
-  position: relative;
-  isolation: isolate;
-}
-.spectra-field-host > *:not(.spectra-field) {
-  position: relative;
-  z-index: 1;
-}
-
 /* The work surface hosts the activity field behind its content
    (`StudioActivityField` mounts with `behind`). Isolation keeps the field's
    negative z-index inside the section — without it the lattice would slip
@@ -581,16 +571,6 @@ button:hover .spectra-mark .spectra-prism-refractions,
   opacity: 0;
   transition: opacity 320ms var(--ease-standard);
 }
-
-/* Static but communicative: refraction and state colour remain. */
-html[data-spectra-motion="reduced"] .spectra-prism-body,
-html[data-spectra-motion="reduced"] .spectra-prism-pool,
-html[data-spectra-motion="reduced"] .spectra-prism-ray,
-html[data-spectra-motion="none"] .spectra-prism-body,
-html[data-spectra-motion="none"] .spectra-prism-pool,
-html[data-spectra-motion="none"] .spectra-prism-ray {
-  animation: none;
-}
 html[data-spectra-motion="reduced"]
   .spectra-prism-optic[data-optics="working"]
   .spectra-prism-pool,
@@ -601,31 +581,8 @@ html[data-spectra-motion="none"]
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectra-prism-body,
-  .spectra-prism-pool,
-  .spectra-prism-ray {
-    animation: none;
-  }
   .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
     opacity: 0.8;
-  }
-}
-
-html[data-spectra-motion="reduced"] .spectra-field-rest,
-html[data-spectra-motion="none"] .spectra-field-rest,
-html[data-spectra-motion="reduced"] .spectra-field-wake::before,
-html[data-spectra-motion="none"] .spectra-field-wake::before {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spectra-field-rest,
-  .spectra-field-wake::before,
-  .spectra-field[data-depth="true"] .spectra-field-rest::after {
-    animation: none;
-  }
-  .spectra-field-wake {
-    transition: opacity 200ms linear;
   }
 }
 
@@ -860,21 +817,4 @@ html[data-spectra-sidebar-collapsed="true"]
 
 .code-editor-grid > section {
   min-height: 0 !important;
-}
-
-/* Mission Control cards size from the remaining canvas, not the viewport.
-   Opening a side panel therefore produces fewer, wider cards instead of four
-   desktop columns squeezed into unreadable slivers. */
-.spectra-mission-control-workspaces .spectra-workspace-card-grid {
-  grid-template-columns: repeat(
-    auto-fit,
-    minmax(min(270px, 100%), 1fr)
-  ) !important;
-  align-items: start;
-}
-
-.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
-  min-width: 0;
-  height: auto;
-  align-self: start;
 }

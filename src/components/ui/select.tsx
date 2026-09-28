@@ -88,7 +88,7 @@ const SelectContent = React.forwardRef<
         position={position}
         sideOffset={4}
         className={cn(
-          "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] spectra-float origin-[var(--radix-select-content-transform-origin)]",
           LAYER_CLASS[layer],
           className,
         )}

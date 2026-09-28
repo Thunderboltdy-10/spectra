@@ -41,7 +41,7 @@ const PopoverContent = React.forwardRef<
         className={cn(
           "max-h-[min(70dvh,32rem)] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none",
           LAYER_CLASS[layer],
-          "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "spectra-float origin-[var(--radix-popover-content-transform-origin)]",
           className,
         )}
         {...props}

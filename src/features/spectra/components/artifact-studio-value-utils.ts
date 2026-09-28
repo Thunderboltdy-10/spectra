@@ -469,6 +469,49 @@ function rebaseKeyedCollaborativeArray(
   };
 }
 
+function textSplice(before: string, after: string) {
+  let start = 0;
+  const limit = Math.min(before.length, after.length);
+  while (start < limit && before[start] === after[start]) start += 1;
+  let suffix = 0;
+  while (
+    suffix < before.length - start &&
+    suffix < after.length - start &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  )
+    suffix += 1;
+  return {
+    start,
+    end: before.length - suffix,
+    insert: after.slice(start, after.length - suffix),
+  };
+}
+
+/**
+ * Two people typing in different places of the same text field is ordinary
+ * collaboration, not a conflict. Each side is one contiguous splice of the
+ * shared ancestor; when the splices do not touch, both apply.
+ */
+export function mergeConcurrentText(
+  baseline: string,
+  local: string,
+  incoming: string,
+): string | null {
+  const ours = textSplice(baseline, local);
+  const theirs = textSplice(baseline, incoming);
+  const [first, second] =
+    ours.start <= theirs.start ? [ours, theirs] : [theirs, ours];
+  if (first.end > second.start || (first.end === second.start && first.start === second.start))
+    return null;
+  return (
+    baseline.slice(0, first.start) +
+    first.insert +
+    baseline.slice(first.end, second.start) +
+    second.insert +
+    baseline.slice(second.end)
+  );
+}
+
 export function rebaseCollaborativeValue(
   baseline: unknown,
   local: unknown,
@@ -478,6 +521,15 @@ export function rebaseCollaborativeValue(
   if (studioValuesEqual(local, baseline)) return { value: incoming, conflicts: [] };
   if (studioValuesEqual(incoming, baseline) || studioValuesEqual(local, incoming))
     return { value: local, conflicts: [] };
+
+  if (
+    typeof baseline === "string" &&
+    typeof local === "string" &&
+    typeof incoming === "string"
+  ) {
+    const merged = mergeConcurrentText(baseline, local, incoming);
+    if (merged !== null) return { value: merged, conflicts: [] };
+  }
 
   const localRecord =
     local && typeof local === "object" && !Array.isArray(local)
@@ -557,4 +609,20 @@ export function rebaseCollaborativeSnapshot<T extends Record<string, unknown>>(
     snapshot: merged.value as T,
     conflicts: merged.conflicts,
   };
+}
+
+/**
+ * The body a structured studio writes into the live room. React holds the
+ * draft; the room may already hold a collaborator's newer edit that React has
+ * not absorbed yet (projection is coalesced and reconciliation runs a render
+ * later). Writing the draft as-is would silently revert that edit, so the
+ * draft's own changes since `baseline` are replayed onto the live value.
+ */
+export function draftContentForLiveWrite(input: {
+  baseline: unknown;
+  draft: unknown;
+  live: unknown;
+}) {
+  if (input.live === undefined) return input.draft;
+  return rebaseCollaborativeValue(input.baseline, input.draft, input.live).value;
 }

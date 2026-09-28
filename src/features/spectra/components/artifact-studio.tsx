@@ -225,6 +225,7 @@ import {
   createReconciliationSnapshotKey,
   incomingReconciliationKey,
   rebaseCollaborativeSnapshot,
+  draftContentForLiveWrite,
   studioIncomingSource,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
@@ -3043,6 +3044,8 @@ function ArtifactStudioEditor({
   const [baseline, setBaseline] = useState(() =>
     artifactEditorSnapshot(artifact),
   );
+  const baselineRef = useRef(baseline);
+  baselineRef.current = baseline;
   const [dirty, setDirty] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -3587,12 +3590,25 @@ function ArtifactStudioEditor({
             // creating the Bridge write request.
           }
         }
+        // Sheets plan cell writes against the room itself, and document/code
+        // bodies are bound natively; every other body is replayed onto the
+        // room's current value so a peer's unabsorbed edit is not reverted.
+        const liveContent =
+          nativeBodyBinding ||
+          artifact.blueprintKey === "sheets" ||
+          !live.modelSnapshot.initialized
+            ? undefined
+            : (live.flushSnapshot?.() ?? undefined)?.content;
         const nextLiveValue = {
           title: persistableTitle(snapshot.title),
           ...(snapshot.summary.trim()
             ? { summary: snapshot.summary.trim() }
             : {}),
-          content: snapshot.content,
+          content: draftContentForLiveWrite({
+            baseline: baselineRef.current.content,
+            draft: snapshot.content,
+            live: liveContent,
+          }),
           tags: tagsFromDraft(snapshot.tagDraft),
         };
         // Document and code bodies are already committed through their native

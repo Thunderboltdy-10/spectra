@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { flashcardDeckYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { workYjsOrigins } from "../work/models/yjs/origins";
+import {
+  draftContentForLiveWrite,
+  mergeConcurrentText,
+  rebaseCollaborativeValue,
+} from "../components/artifact-studio-value-utils";
 
 const actor = (clientId: string) => ({ clientId, kind: "human" as const });
 const card = (id: string, front = `front ${id}`) => ({ id, front, back: `back ${id}` });
@@ -62,5 +67,43 @@ describe("structured Yjs collections that become empty", () => {
     exchange(left, right);
     expect(ids(left)).toEqual(["x"]);
     expect(ids(right)).toEqual(["x"]);
+  });
+});
+
+describe("writing a studio draft into a room a peer already changed", () => {
+  it("keeps the peer's unabsorbed card edit and the local edit", () => {
+    const base = { title: "Deck", cards: [card("a"), card("b")] };
+    const { left, right } = pair(base);
+    // The peer edits card b and the update reaches this room first.
+    flashcardDeckYjsAdapter.applyProjection(right, { ...base, cards: [card("a"), card("b", "peer front")] } as never, workYjsOrigins(actor("r")).localHuman);
+    exchange(left, right);
+    // React still shows the baseline and the student typed into card a.
+    const draft = { ...base, cards: [card("a", "local front"), card("b")] };
+    const live = flashcardDeckYjsAdapter.project(left);
+    const content = draftContentForLiveWrite({ baseline: flashcardDeckYjsAdapter.project(pair(base).left), draft, live });
+    flashcardDeckYjsAdapter.applyProjection(left, content as never, workYjsOrigins(actor("l")).localHuman);
+    exchange(left, right);
+    const fronts = (doc: Y.Doc) => (flashcardDeckYjsAdapter.project(doc) as { cards: Array<{ front: string }> }).cards.map((entry) => entry.front);
+    expect(fronts(left)).toEqual(["local front", "peer front"]);
+    expect(fronts(right)).toEqual(["local front", "peer front"]);
+  });
+
+  it("merges two people typing in different places of the same field", () => {
+    expect(mergeConcurrentText("The cell divides.", "The animal cell divides.", "The cell divides by mitosis.")).toBe(
+      "The animal cell divides by mitosis.",
+    );
+    expect(
+      rebaseCollaborativeValue({ text: "abc def" }, { text: "abc XYZ def" }, { text: "abc def ghi" }),
+    ).toEqual({ value: { text: "abc XYZ def ghi" }, conflicts: [] });
+  });
+
+  it("still reports overlapping edits of the same words and keeps the local side", () => {
+    expect(mergeConcurrentText("colour", "color", "colours")).toBe("colors");
+    expect(mergeConcurrentText("the cat sat", "the cut sat", "the cot sat")).toBeNull();
+    expect(mergeConcurrentText("ab", "aXb", "aYb")).toBeNull();
+    expect(rebaseCollaborativeValue({ text: "the cat" }, { text: "the cut" }, { text: "the cot" })).toEqual({
+      value: { text: "the cut" },
+      conflicts: ["/text"],
+    });
   });
 });

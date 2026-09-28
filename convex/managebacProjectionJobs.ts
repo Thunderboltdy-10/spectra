@@ -147,7 +147,7 @@ export async function syncRunOutcome(ctx: MutationCtx, run: Doc<"externalSyncRun
 
 type WorkOwner = { syncRunId: Id<"externalSyncRuns">; conflictId?: Id<"externalSyncConflicts"> };
 
-async function addProviderWork(ctx: MutationCtx, owner: WorkOwner) {
+export async function addProviderWork(ctx: MutationCtx, owner: WorkOwner) {
   const now = Date.now();
   if (owner.conflictId) {
     const conflict = await ctx.db.get(owner.conflictId);
@@ -161,7 +161,7 @@ async function addProviderWork(ctx: MutationCtx, owner: WorkOwner) {
 /** Settle one unit of staged provider work. A run finishes only after its
  * ingestion completed and every staged unit drained; an explicit resolution
  * resolves its conflict only when all of its effects committed. */
-async function settleProviderWork(ctx: MutationCtx, owner: WorkOwner, committed: boolean) {
+export async function settleProviderWork(ctx: MutationCtx, owner: WorkOwner, committed: boolean) {
   const now = Date.now();
   if (owner.conflictId) {
     const conflict = await ctx.db.get(owner.conflictId);

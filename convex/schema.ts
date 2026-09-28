@@ -1159,8 +1159,17 @@ export default defineSchema({
     .index("by_capability_created", ["capabilityId", "createdAt"]),
 
   externalSyncConflicts: defineTable({
-    /** An accepted rebase/keep resolution still applying to canonical rooms. */
-    projectionResolution: v.optional(v.union(v.literal("rebase"), v.literal("keep_overlay"))),
+    /** An accepted resolution still applying: rebase/keep to canonical rooms,
+     * or any resolution across a school-wide record's projections in batches. */
+    projectionResolution: v.optional(
+      v.union(
+        v.literal("rebase"),
+        v.literal("keep_overlay"),
+        v.literal("detach"),
+        v.literal("archive_projection"),
+        v.literal("link_existing"),
+      ),
+    ),
     projectionWorkRemaining: v.optional(v.number()),
     syncRunId: v.id("externalSyncRuns"),
     integrationId: v.id("schoolIntegrations"),

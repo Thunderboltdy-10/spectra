@@ -25,8 +25,8 @@ import {
 import { upsertSourceCalendarItem } from "./calendarShared";
 import { managebacPlainText as plainText, managebacText as text } from "../shared/planner-provider-refresh";
 import {
-  applyPlannerProviderUpdate, inlinePlannerProjections, recordProviderConflict, scheduleProviderFanout, syncRunOutcome,
-  PROVIDER_INLINE_PLANNERS,
+  addProviderWork, applyPlannerProviderUpdate, inlinePlannerProjections, recordProviderConflict, scheduleProviderFanout,
+  settleProviderWork, syncRunOutcome, PROVIDER_INLINE_PLANNERS,
 } from "./managebacProjectionJobs";
 
 const EMPTY_COUNTS = {
@@ -3609,16 +3609,121 @@ export const setOverlay = mutation({
   },
 });
 
+const conflictResolution = v.union(
+  v.literal("rebase"),
+  v.literal("keep_overlay"),
+  v.literal("detach"),
+  v.literal("archive_projection"),
+  v.literal("link_existing"),
+);
+type ConflictResolution = NonNullable<Doc<"externalSyncConflicts">["resolution"]>;
+
+/** A school-wide conflict resolves inline only for this many projections. A
+ * record shared with a whole school has one projection per member, and each
+ * one is a write, so beyond this the resolution continues in batches. */
+export const RESOLVE_INLINE_PROJECTIONS = 64;
+const RESOLVE_BATCH = 64;
+
+function conflictRebaseFailed() {
+  return new Error(
+    "INTEGRATION_CONFLICT_REBASE_FAILED: The source projection is unavailable or no longer has a compatible shape.",
+  );
+}
+
+async function patchProjectionForResolution(
+  ctx: MutationCtx,
+  projection: Doc<"externalProjections">,
+  resolution: ConflictResolution,
+  linkProjectionId: string | undefined,
+  now: number,
+) {
+  if (resolution === "detach")
+    await ctx.db.patch(projection._id, { state: "detached", updatedAt: now });
+  else if (resolution === "archive_projection")
+    await ctx.db.patch(projection._id, { state: "tombstoned", updatedAt: now });
+  else
+    await ctx.db.patch(projection._id, {
+      state: "active",
+      projectionId:
+        resolution === "link_existing" && linkProjectionId
+          ? linkProjectionId
+          : projection.projectionId,
+      updatedAt: now,
+    });
+}
+
+/** Rebase a non-planner projection onto the current source. */
+async function refreshConflictProjection(
+  ctx: MutationCtx,
+  projection: Doc<"externalProjections">,
+  source: Doc<"externalRecords">,
+  now: number,
+) {
+  const refreshed = await safelyRefreshProjection(ctx, projection, projection.sourceHash, source, true);
+  if (!refreshed) return false;
+  await ctx.db.patch(projection._id, { sourceHash: source.sourceHash, state: "active", updatedAt: now });
+  return true;
+}
+
+/**
+ * One batch of a school-wide resolution. The conflict stays open, marked with
+ * its accepted resolution, until every batch and any planner fanout settle.
+ * A projection that cannot be rebased settles the work as failed: the
+ * conflict stays open for the administrator instead of resolving half-done.
+ */
+export const resolveConflictProjections = internalMutation({
+  args: {
+    conflictId: v.id("externalSyncConflicts"),
+    resolution: conflictResolution,
+    linkProjectionId: v.optional(v.string()),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const conflict = await ctx.db.get(args.conflictId);
+    if (!conflict) return;
+    const owner = { syncRunId: conflict.syncRunId, conflictId: conflict._id };
+    if (conflict.status !== "open" || conflict.projectionResolution !== args.resolution || !conflict.resolvedByAccountId)
+      return settleProviderWork(ctx, owner, false);
+    const source = await ctx.db.get(conflict.recordId);
+    const refreshing = args.resolution === "rebase" || args.resolution === "keep_overlay";
+    const now = Date.now();
+    const page = await ctx.db
+      .query("externalProjections")
+      .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
+      .paginate({ cursor: args.cursor, numItems: RESOLVE_BATCH });
+    for (const projection of page.page) {
+      if (projection.schoolId !== conflict.schoolId || projection.integrationId !== conflict.integrationId) continue;
+      await patchProjectionForResolution(ctx, projection, args.resolution, args.linkProjectionId, now);
+      if (!source || !refreshing) continue;
+      if (projection.projectionType === "planner_task") {
+        // Planners with provider facts are rebased by the fanout below.
+        if (source.tombstone)
+          await ctx.db.patch(projection._id, { sourceHash: source.sourceHash, state: "active", updatedAt: now });
+        continue;
+      }
+      if (!(await refreshConflictProjection(ctx, projection, source, now)))
+        return settleProviderWork(ctx, owner, false);
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.managebac.resolveConflictProjections, {
+        ...args, cursor: page.continueCursor,
+      });
+      return;
+    }
+    if (source && !source.tombstone && (args.resolution === "rebase" || args.resolution === "keep_overlay"))
+      await scheduleProviderFanout(ctx, {
+        recordId: source._id, expectedSourceHash: source.sourceHash, mode: args.resolution,
+        syncRunId: conflict.syncRunId, conflictId: conflict._id, importerAccountId: conflict.resolvedByAccountId,
+        previousNormalized: conflict.oldSource,
+      });
+    await settleProviderWork(ctx, owner, true);
+  },
+});
+
 export const resolveConflict = mutation({
   args: {
     conflictId: v.id("externalSyncConflicts"),
-    resolution: v.union(
-      v.literal("rebase"),
-      v.literal("keep_overlay"),
-      v.literal("detach"),
-      v.literal("archive_projection"),
-      v.literal("link_existing"),
-    ),
+    resolution: conflictResolution,
     linkProjectionId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -3645,18 +3750,19 @@ export const resolveConflict = mutation({
     // A personal conflict touches only that account's projections. Reading
     // every account's projection of a shared record made each student's
     // resolution O(class size) and conflict with every classmate's write.
-    const projections = (
-      await (conflict.accountId
-        ? ctx.db
-            .query("externalProjections")
-            .withIndex("by_account_record", (q) =>
-              q.eq("accountId", conflict.accountId).eq("recordId", conflict.recordId),
-            )
-        : ctx.db
-            .query("externalProjections")
-            .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
-      ).collect()
-    ).filter(
+    // A school-wide conflict reads a bounded set and batches beyond it.
+    const candidates = conflict.accountId
+      ? await ctx.db
+          .query("externalProjections")
+          .withIndex("by_account_record", (q) =>
+            q.eq("accountId", conflict.accountId).eq("recordId", conflict.recordId),
+          )
+          .collect()
+      : await ctx.db
+          .query("externalProjections")
+          .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
+          .take(RESOLVE_INLINE_PROJECTIONS + 1);
+    const projections = candidates.filter(
       (projection) =>
         projection.schoolId === actor.schoolId &&
         projection.integrationId === conflict.integrationId &&
@@ -3686,27 +3792,26 @@ export const resolveConflict = mutation({
           "INTEGRATION_CONFLICT_LINK_FORBIDDEN: Target projection is unavailable.",
         );
     }
-    for (const projection of projections) {
-      if (args.resolution === "detach")
-        await ctx.db.patch(projection._id, {
-          state: "detached",
-          updatedAt: now,
-        });
-      else if (args.resolution === "archive_projection")
-        await ctx.db.patch(projection._id, {
-          state: "tombstoned",
-          updatedAt: now,
-        });
-      else
-        await ctx.db.patch(projection._id, {
-          state: "active",
-          projectionId:
-            args.resolution === "link_existing" && args.linkProjectionId
-              ? args.linkProjectionId
-              : projection.projectionId,
-          updatedAt: now,
-        });
+    if (!conflict.accountId && candidates.length > RESOLVE_INLINE_PROJECTIONS) {
+      const source = await ctx.db.get(conflict.recordId);
+      // A withdrawn source has no provider facts to rebase onto.
+      if (source?.tombstone && args.resolution === "rebase") throw conflictRebaseFailed();
+      await ctx.db.patch(conflict._id, {
+        projectionResolution: args.resolution,
+        resolvedByAccountId: actor.accountId,
+        updatedAt: now,
+      });
+      await addProviderWork(ctx, { syncRunId: conflict.syncRunId, conflictId: conflict._id });
+      await ctx.scheduler.runAfter(0, internal.managebac.resolveConflictProjections, {
+        conflictId: conflict._id,
+        resolution: args.resolution,
+        ...(args.linkProjectionId ? { linkProjectionId: args.linkProjectionId } : {}),
+        cursor: null,
+      });
+      return { conflictId: conflict._id, resolution: args.resolution, pending: true };
     }
+    for (const projection of projections)
+      await patchProjectionForResolution(ctx, projection, args.resolution, args.linkProjectionId, now);
     const overlay = conflict.accountId
       ? await ctx.db
           .query("externalRecordOverlays")
@@ -3718,9 +3823,7 @@ export const resolveConflict = mutation({
           .unique()
       : null;
     const source = await ctx.db.get(conflict.recordId);
-    const rebaseFailed = () => new Error(
-      "INTEGRATION_CONFLICT_REBASE_FAILED: The source projection is unavailable or no longer has a compatible shape.",
-    );
+    const rebaseFailed = conflictRebaseFailed;
     if (
       source &&
       (args.resolution === "rebase" || args.resolution === "keep_overlay")
@@ -3757,19 +3860,8 @@ export const resolveConflict = mutation({
           if (outcome === "unavailable" || outcome === "conflict") throw rebaseFailed();
           continue;
         }
-        const refreshed = await safelyRefreshProjection(
-          ctx,
-          projection,
-          projection.sourceHash,
-          source,
-          true,
-        );
-        if (!refreshed) throw rebaseFailed();
-        await ctx.db.patch(projection._id, {
-          sourceHash: source.sourceHash,
-          state: "active",
-          updatedAt: now,
-        });
+        if (!(await refreshConflictProjection(ctx, projection, source, now)))
+          throw rebaseFailed();
       }
       const staged = await ctx.db.get(conflict._id);
       if ((staged?.projectionWorkRemaining ?? 0) > 0)

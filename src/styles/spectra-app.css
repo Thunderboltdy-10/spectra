@@ -3681,6 +3681,42 @@ html[data-spectra-motion="none"] *::after {
   animation: spectra-float-out var(--motion-fast) var(--ease-standard) forwards;
 }
 
+/* The modal veil only fades; an edge sheet travels in from its edge. */
+@keyframes spectra-veil-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes spectra-veil-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes spectra-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes spectra-sheet-out {
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+.spectra-veil[data-state="open"] {
+  animation: spectra-veil-in var(--motion-base) var(--ease-standard);
+}
+.spectra-veil[data-state="closed"] {
+  animation: spectra-veil-out var(--motion-fast) var(--ease-standard) forwards;
+}
+.spectra-sheet[data-state="open"] {
+  animation: spectra-sheet-in var(--motion-slow) var(--ease-out-expo);
+}
+.spectra-sheet[data-state="closed"] {
+  animation: spectra-sheet-out var(--motion-base) var(--ease-standard) forwards;
+}
+
 .dark {
   --brand-primary: #9a87ff;
   --brand-accent: #38d6a0;

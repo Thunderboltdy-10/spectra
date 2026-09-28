@@ -355,17 +355,23 @@ impl Journal {
         path_prefix: &str,
     ) -> anyhow::Result<Vec<ResourceRecord>> {
         let exact = path_prefix.trim_end_matches('/');
-        let prefix = format!("{exact}/%");
+        // An exact, case-sensitive prefix. LIKE would treat `_` and `%` in a
+        // folder name as wildcards and ignore ASCII case, so removing
+        // `Unit_1` (or renaming `notes` to `Notes`) marked the files of
+        // `Unit 1` (or of the renamed folder itself) unavailable.
+        let prefix = format!("{exact}/");
         let connection = self.connection.lock().unwrap();
         let mut statement = connection.prepare(
             "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
              FROM resources
-             WHERE grant_id=? AND (path_key=? OR path_key LIKE ?)
+             WHERE grant_id=? AND (path_key=? OR substr(path_key, 1, ?)=?)
              ORDER BY path_key",
         )?;
-        let rows =
-            statement.query_map(params![grant_id, exact, prefix], Self::resource_from_row)?;
+        let rows = statement.query_map(
+            params![grant_id, exact, prefix.chars().count() as i64, prefix],
+            Self::resource_from_row,
+        )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -1034,6 +1040,45 @@ mod tests {
         assert!(journal.due_native_acks(10).unwrap().is_empty());
         journal.acknowledge_native_ack(queued[0].id).unwrap();
         assert!(journal.due_native_acks(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn path_prefix_is_exact_and_case_sensitive() {
+        let journal = Journal::in_memory().unwrap();
+        for (id, path) in [
+            ("lr_a", "Unit_1/essay.docx"),
+            ("lr_b", "Unit 1/essay.docx"),
+            ("lr_c", "Unit-1/Übung.docx"),
+            ("lr_d", "Notes/plan.docx"),
+            ("lr_e", "Unit_1.docx"),
+        ] {
+            journal
+                .upsert_resource(&ResourceRecord {
+                    local_resource_id: id.into(),
+                    grant_id: "grant".into(),
+                    path_key: path.into(),
+                    volume: None,
+                    file_index: None,
+                    content_hash: None,
+                    revision: None,
+                    available: true,
+                    unavailable_reason: None,
+                    last_seen_generation: 1,
+                })
+                .unwrap();
+        }
+        let ids = |prefix: &str| {
+            journal
+                .resources_with_path_prefix("grant", prefix)
+                .unwrap()
+                .into_iter()
+                .map(|resource| resource.local_resource_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids("Unit_1"), vec!["lr_a"]);
+        assert_eq!(ids("Unit-1"), vec!["lr_c"]);
+        assert!(ids("notes").is_empty());
+        assert_eq!(ids("Unit_1.docx"), vec!["lr_e"]);
     }
 
     #[test]

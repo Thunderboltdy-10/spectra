@@ -156,7 +156,9 @@ export default defineSchema({
   })
     .index("by_group", ["groupId", "createdAt"])
     .index("by_group_account", ["groupId", "accountId"])
-    .index("by_account", ["accountId", "createdAt"]),
+    .index("by_account", ["accountId", "createdAt"])
+    // School export pages through one school's rows instead of every tenant's.
+    .index("by_school", ["schoolId", "createdAt"]),
 
   schoolAnnouncements: defineTable({
     schoolId: v.id("schools"),
@@ -331,12 +333,39 @@ export default defineSchema({
     reason: v.string(),
     typedConfirmation: v.optional(v.string()),
     impact: v.object({
+      // Set when the artifact count stopped at its read budget: it is a floor.
+      artifactsAtLeast: v.optional(v.boolean()),
       activeMembers: v.number(),
       artifacts: v.number(),
       workspaces: v.number(),
       integrations: v.number(),
     }),
+    // A version 2 export stores its manifest here and its rows in `schoolExportParts`.
     exportStorageId: v.optional(v.id("_storage")),
+    // A resumable export position. A school is exported in bounded pages
+    // across several actions, and the position only advances with a committed part.
+    exportProgress: v.optional(
+      v.object({
+        position: v.union(
+          v.object({
+            section: v.number(),
+            range: v.number(),
+            cursor: v.union(v.string(), v.null()),
+            // Nested sections page their parents, then each parent's rows.
+            parentCursor: v.optional(v.union(v.string(), v.null())),
+            parentsDone: v.optional(v.boolean()),
+            pendingParents: v.optional(v.array(v.string())),
+          }),
+          v.null(),
+        ),
+        parts: v.number(),
+        rows: v.number(),
+        bytes: v.number(),
+        leaseId: v.string(),
+        leaseExpiresAt: v.number(),
+        takeovers: v.number(),
+      }),
+    ),
     prerequisiteExportJobId: v.optional(v.id("schoolLifecycleJobs")),
     reversibleUntil: v.optional(v.number()),
     errorSummary: v.optional(v.string()),
@@ -347,6 +376,17 @@ export default defineSchema({
   })
     .index("by_school_created", ["schoolId", "createdAt"])
     .index("by_status_created", ["status", "createdAt"]),
+
+  schoolExportParts: defineTable({
+    jobId: v.id("schoolLifecycleJobs"),
+    schoolId: v.id("schools"),
+    index: v.number(),
+    section: v.string(),
+    rows: v.number(),
+    bytes: v.number(),
+    storageId: v.id("_storage"),
+    createdAt: v.number(),
+  }).index("by_job_index", ["jobId", "index"]),
 
   schoolPurgeProgress: defineTable({
     jobId: v.id("schoolLifecycleJobs"),
@@ -1008,7 +1048,9 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_record_account", ["recordId", "accountId"])
-    .index("by_account_updated", ["accountId", "updatedAt"]),
+    .index("by_account_updated", ["accountId", "updatedAt"])
+    // School export pages through one school's rows instead of every tenant's.
+    .index("by_school", ["schoolId", "updatedAt"]),
 
   externalSyncRuns: defineTable({
     integrationId: v.id("schoolIntegrations"),
@@ -3738,7 +3780,9 @@ export default defineSchema({
     .index("by_candidate_storage", ["candidateStorageId"])
     .index("by_artifact_path", ["artifactId", "path"])
     .index("by_artifact_digest", ["artifactId", "sha256"])
-    .index("by_uploader_created", ["uploadedByAccountId", "createdAt"]),
+    .index("by_uploader_created", ["uploadedByAccountId", "createdAt"])
+    // School purge deletes one school's assets instead of scanning every tenant's.
+    .index("by_school", ["schoolId"]),
 
   spectraArtifactLinks: defineTable({
     ownerAccountId: v.id("accounts"),

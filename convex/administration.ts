@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
+import type { PaginationOptions, PaginationResult } from "convex/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { resolveActorContext } from "./identityShared";
@@ -2545,10 +2546,17 @@ async function lifecycleImpact(ctx: Ctx, schoolId: Id<"schools">) {
     // Every lifecycle request (including an urgent suspend) reads this, so it
     // must stay inside the school: a table scan read every tenant's artifact
     // content and failed once the platform passed Convex's read limits.
+    // Collecting the school's own artifacts failed the same way for a large
+    // school, so the count stops at a read budget and is marked as a floor.
     ctx.db
       .query("spectraArtifacts")
       .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId))
-      .collect(),
+      .paginate({
+        cursor: null,
+        numItems: 10_000,
+        maximumRowsRead: 10_000,
+        maximumBytesRead: 4_000_000,
+      }),
     ctx.db
       .query("spectraWorkspaces")
       .withIndex("by_school_status", (q) =>
@@ -2562,297 +2570,651 @@ async function lifecycleImpact(ctx: Ctx, schoolId: Id<"schools">) {
   ]);
   return {
     activeMembers: members.length,
-    artifacts: artifacts.length,
+    artifacts: artifacts.page.length,
+    ...(artifacts.isDone ? {} : { artifactsAtLeast: true }),
     workspaces: workspaces.length,
     integrations: integrations.length,
   };
 }
 
-export const buildLifecycleExport = internalQuery({
-  args: { jobId: v.id("schoolLifecycleJobs") },
+/* A school export is written as a series of parts. Each section streams one
+   kind of row through index ranges scoped to the school, and a nested section
+   streams each parent's children. The old export read the whole school in one
+   query. That broke Convex's per-query read limits, so a real school could not
+   be exported, and therefore could not be purged either.
+   Now a page read stays well inside those limits: one `.paginate()` per query,
+   with bounded rows and bytes. The action commits each part together with the
+   position it covers, so a killed action resumes from its last committed part
+   instead of starting over. */
+type ExportRow = { _id: string } & Record<string, unknown>;
+type ExportStream = {
+  paginate(options: PaginationOptions): Promise<PaginationResult<ExportRow>>;
+  take(count: number): Promise<ExportRow[]>;
+};
+type ExportRange = (
+  db: QueryCtx["db"],
+  schoolId: Id<"schools">,
+) => ExportStream;
+type ExportSection = {
+  name: string;
+  ranges: ExportRange[];
+  map?: (ctx: QueryCtx, row: ExportRow) => Promise<unknown> | unknown;
+  children?: (db: QueryCtx["db"], parentId: string) => ExportStream;
+};
+type ExportPosition = {
+  section: number;
+  range: number;
+  cursor: string | null;
+  parentCursor?: string | null;
+  parentsDone?: boolean;
+  pendingParents?: string[];
+};
+
+const exportStream = (query: unknown) => query as ExportStream;
+// Each query reads at most this many bytes through `.paginate()`. The small
+// parents read after the first add at most EXPORT_SMALL_PARENT + 1 documents
+// each, so a page stays far below the 16 MiB read and return limits.
+const EXPORT_PAGE_BYTES = 2_000_000;
+const EXPORT_PAGE_ROWS = 2_000;
+const EXPORT_PARENT_PAGE = 64;
+const EXPORT_SMALL_PARENT = 4;
+const EXPORT_PART_BYTES = 4_000_000;
+const EXPORT_LEASE_MS = 6 * 60_000;
+const EXPORT_ACTION_BUDGET_MS = 4 * 60_000;
+const EXPORT_MAX_TAKEOVERS = 5;
+const EXPORT_START: ExportPosition = { section: 0, range: 0, cursor: null };
+
+const memberships: ExportRange = (db, schoolId) =>
+  exportStream(
+    db
+      .query("schoolMemberships")
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId)),
+  );
+const workspaceRanges: ExportRange[] = (["active", "archived"] as const).map(
+  (status) => (db, schoolId) =>
+    exportStream(
+      db
+        .query("spectraWorkspaces")
+        .withIndex("by_school_status", (q) =>
+          q.eq("schoolId", schoolId).eq("status", status),
+        ),
+    ),
+);
+const artifactRanges: ExportRange[] = (
+  ["active", "draft", "archived", "deleted"] as const
+).map(
+  (status) => (db, schoolId) =>
+    exportStream(
+      db
+        .query("spectraArtifacts")
+        .withIndex("by_school_status", (q) =>
+          q.eq("schoolId", schoolId).eq("status", status),
+        ),
+    ),
+);
+const threadRanges: ExportRange[] = (
+  ["active", "archived", "deleted"] as const
+).map(
+  (status) => (db, schoolId) =>
+    exportStream(
+      db
+        .query("spectraThreads")
+        .withIndex("by_school_status", (q) =>
+          q.eq("schoolId", schoolId).eq("status", status),
+        ),
+    ),
+);
+
+/** Exactly the rows of the version 1 export, in the same groups. */
+const EXPORT_SECTIONS: ExportSection[] = [
+  { name: "identity.memberships", ranges: [memberships] },
+  {
+    name: "identity.accounts",
+    ranges: [memberships],
+    map: (ctx, row) => ctx.db.get(row.accountId as Id<"accounts">),
+  },
+  {
+    name: "identity.invitations",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("membershipInvitations")
+            .withIndex("by_school_status", (q) =>
+              q.eq("schoolId", schoolId).eq("status", "pending"),
+            ),
+        ),
+    ],
+    map: (_ctx, { tokenHash: _tokenHash, ...invitation }) => invitation,
+  },
+  {
+    name: "identity.groups",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolGroups")
+            .withIndex("by_school_status", (q) =>
+              q.eq("schoolId", schoolId).eq("status", "active"),
+            ),
+        ),
+    ],
+  },
+  {
+    name: "identity.groupMembers",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolGroupMembers")
+            .withIndex("by_school", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "administration.announcements",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolAnnouncements")
+            .withIndex("by_school_created", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "administration.deliveries",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolAnnouncementDeliveries")
+            .withIndex("by_school_created", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "administration.feedback",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("feedbackReports")
+            .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "administration.requests",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolRequests")
+            .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "administration.limits",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("limitPolicies")
+            .withIndex("by_scope_school", (q) =>
+              q.eq("scope", "school").eq("schoolId", schoolId),
+            ),
+        ),
+    ],
+  },
+  {
+    name: "administration.auditEvents",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("auditEvents")
+            .withIndex("by_school_created", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  { name: "product.workspaces", ranges: workspaceRanges },
+  {
+    name: "product.orgNodes",
+    ranges: workspaceRanges,
+    children: (db, workspaceId) =>
+      exportStream(
+        db
+          .query("orgNodes")
+          .withIndex("by_workspace_context", (q) =>
+            q.eq("workspaceContextId", workspaceId as Id<"spectraWorkspaces">),
+          ),
+      ),
+  },
+  { name: "product.artifacts", ranges: artifactRanges },
+  {
+    name: "product.artifactVersions",
+    ranges: artifactRanges,
+    children: (db, artifactId) =>
+      exportStream(
+        db
+          .query("spectraArtifactVersions")
+          .withIndex("by_artifact_created", (q) =>
+            q.eq("artifactId", artifactId as Id<"spectraArtifacts">),
+          ),
+      ),
+  },
+  { name: "product.threads", ranges: threadRanges },
+  {
+    name: "product.messages",
+    ranges: threadRanges,
+    children: (db, threadId) =>
+      exportStream(
+        db
+          .query("spectraMessages")
+          .withIndex("by_thread", (q) =>
+            q.eq("threadId", threadId as Id<"spectraThreads">),
+          ),
+      ),
+  },
+  {
+    name: "product.memoryClaims",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("memoryClaims")
+            .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "integrations.integrations",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("schoolIntegrations")
+            .withIndex("by_school_provider", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "integrations.capabilities",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("integrationCapabilities")
+            .withIndex("by_school_status", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "integrations.externalRecords",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("externalRecords")
+            .withIndex("by_school_updated", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "integrations.overlays",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("externalRecordOverlays")
+            .withIndex("by_school", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+  {
+    name: "usage",
+    ranges: [
+      (db, schoolId) =>
+        exportStream(
+          db
+            .query("usageMeters")
+            .withIndex("by_school_day", (q) => q.eq("schoolId", schoolId)),
+        ),
+    ],
+  },
+];
+
+const exportPositionValidator = v.object({
+  section: v.number(),
+  range: v.number(),
+  cursor: v.union(v.string(), v.null()),
+  parentCursor: v.optional(v.union(v.string(), v.null())),
+  parentsDone: v.optional(v.boolean()),
+  pendingParents: v.optional(v.array(v.string())),
+});
+
+function nextRange(position: ExportPosition): ExportPosition | null {
+  const section = EXPORT_SECTIONS[position.section]!;
+  if (position.range + 1 < section.ranges.length)
+    return { section: position.section, range: position.range + 1, cursor: null };
+  return position.section + 1 < EXPORT_SECTIONS.length
+    ? { section: position.section + 1, range: 0, cursor: null }
+    : null;
+}
+
+const pageOptions = (cursor: string | null, numItems: number) => ({
+  cursor,
+  numItems,
+  maximumRowsRead: numItems,
+  maximumBytesRead: EXPORT_PAGE_BYTES,
+});
+
+/** One bounded page of one section, and the position after it. */
+export const exportPage = internalQuery({
+  args: { schoolId: v.id("schools"), position: exportPositionValidator },
   handler: async (ctx, args) => {
-    const job = await ctx.db.get(args.jobId);
-    if (!job || job.type !== "export" || job.status !== "running")
-      throw new Error(
-        "LIFECYCLE_EXPORT_UNAVAILABLE: The export job is not running.",
+    const position = args.position;
+    const section = EXPORT_SECTIONS[position.section];
+    const range = section?.ranges[position.range];
+    if (!section || !range)
+      throw new Error("LIFECYCLE_EXPORT_POSITION: The export position is invalid.");
+    if (!section.children) {
+      const page = await range(ctx.db, args.schoolId).paginate(
+        pageOptions(position.cursor, EXPORT_PAGE_ROWS),
       );
-    const school = await ctx.db.get(job.schoolId);
-    if (!school)
-      throw new Error("LIFECYCLE_EXPORT_SCHOOL_MISSING: School unavailable.");
-    const [
-      memberships,
-      invitations,
-      groups,
-      groupMembers,
-      announcements,
-      deliveries,
-      feedback,
-      requests,
-      limits,
-      workspacesActive,
-      workspacesArchived,
-      artifactsActive,
-      artifactsDraft,
-      artifactsArchived,
-      artifactsDeleted,
-      threadsActive,
-      threadsArchived,
-      threadsDeleted,
-      memoryClaims,
-      auditEvents,
-      integrations,
-      capabilities,
-      externalRecords,
-      overlays,
-      usage,
-    ] = await Promise.all([
-      ctx.db
-        .query("schoolMemberships")
-        .withIndex("by_school", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("membershipInvitations")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "pending"),
-        )
-        .collect(),
-      ctx.db
-        .query("schoolGroups")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "active"),
-        )
-        .collect(),
-      ctx.db
-        .query("schoolGroupMembers")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
-        .collect(),
-      ctx.db
-        .query("schoolAnnouncements")
-        .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("schoolAnnouncementDeliveries")
-        .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("feedbackReports")
-        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("schoolRequests")
-        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("limitPolicies")
-        .withIndex("by_scope_school", (q) =>
-          q.eq("scope", "school").eq("schoolId", school._id),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraWorkspaces")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "active"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraWorkspaces")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "archived"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "active"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "draft"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "archived"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "deleted"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraThreads")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "active"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraThreads")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "archived"),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraThreads")
-        .withIndex("by_school_status", (q) =>
-          q.eq("schoolId", school._id).eq("status", "deleted"),
-        )
-        .collect(),
-      ctx.db
-        .query("memoryClaims")
-        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("auditEvents")
-        .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("schoolIntegrations")
-        .withIndex("by_school_provider", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("integrationCapabilities")
-        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("externalRecords")
-        .withIndex("by_school_updated", (q) => q.eq("schoolId", school._id))
-        .collect(),
-      ctx.db
-        .query("externalRecordOverlays")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
-        .collect(),
-      ctx.db
-        .query("usageMeters")
-        .withIndex("by_school_day", (q) => q.eq("schoolId", school._id))
-        .collect(),
-    ]);
-    const accounts = (
-      await Promise.all(
-        memberships.map((membership) => ctx.db.get(membership.accountId)),
-      )
-    ).filter(Boolean);
-    const workspaces = [...workspacesActive, ...workspacesArchived];
-    const orgNodes = (
-      await Promise.all(
-        workspaces.map((workspace) =>
-          ctx.db
-            .query("orgNodes")
-            .withIndex("by_workspace_context", (q) =>
-              q.eq("workspaceContextId", workspace._id),
-            )
-            .collect(),
-        ),
-      )
-    ).flat();
-    const artifacts = [
-      ...artifactsActive,
-      ...artifactsDraft,
-      ...artifactsArchived,
-      ...artifactsDeleted,
-    ];
-    const artifactVersions = (
-      await Promise.all(
-        artifacts.map((artifact) =>
-          ctx.db
-            .query("spectraArtifactVersions")
-            .withIndex("by_artifact_created", (q) =>
-              q.eq("artifactId", artifact._id),
-            )
-            .collect(),
-        ),
-      )
-    ).flat();
-    const threads = [...threadsActive, ...threadsArchived, ...threadsDeleted];
-    const messages = (
-      await Promise.all(
-        threads.map((thread) =>
-          ctx.db
-            .query("spectraMessages")
-            .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
-            .collect(),
-        ),
-      )
-    ).flat();
+      const rows = section.map
+        ? (await Promise.all(page.page.map((row) => section.map!(ctx, row)))).filter(
+            (row) => row !== null && row !== undefined,
+          )
+        : page.page;
+      return {
+        section: section.name,
+        rows,
+        next: page.isDone
+          ? nextRange(position)
+          : { ...position, cursor: page.continueCursor },
+      };
+    }
+    const pending = position.pendingParents ?? [];
+    if (pending.length === 0) {
+      if (position.parentsDone)
+        return { section: section.name, rows: [], next: nextRange(position) };
+      const parents = await range(ctx.db, args.schoolId).paginate(
+        pageOptions(position.parentCursor ?? null, EXPORT_PARENT_PAGE),
+      );
+      return {
+        section: section.name,
+        rows: [],
+        next: {
+          section: position.section,
+          range: position.range,
+          cursor: null,
+          parentCursor: parents.continueCursor,
+          parentsDone: parents.isDone,
+          pendingParents: parents.page.map((parent) => parent._id),
+        },
+      };
+    }
+    // The first pending parent pages through its rows; a large one spans
+    // several pages. Later parents join this page only when they are small.
+    const first = await section
+      .children(ctx.db, pending[0]!)
+      .paginate(pageOptions(position.cursor, EXPORT_PAGE_ROWS));
+    const rows: ExportRow[] = [...first.page];
+    if (!first.isDone)
+      return {
+        section: section.name,
+        rows,
+        next: { ...position, cursor: first.continueCursor },
+      };
+    let bytes = JSON.stringify(rows).length;
+    let consumed = 1;
+    while (
+      consumed < pending.length &&
+      bytes < EXPORT_PAGE_BYTES &&
+      rows.length < EXPORT_PAGE_ROWS
+    ) {
+      const children = await section
+        .children(ctx.db, pending[consumed]!)
+        .take(EXPORT_SMALL_PARENT + 1);
+      if (children.length > EXPORT_SMALL_PARENT) break;
+      rows.push(...children);
+      bytes += JSON.stringify(children).length;
+      consumed += 1;
+    }
     return {
-      format: "spectra-school-export",
-      version: 1,
-      generatedAt: Date.now(),
-      school,
-      identity: {
-        accounts,
-        memberships,
-        invitations: invitations.map(
-          ({ tokenHash: _tokenHash, ...invitation }) => invitation,
-        ),
-        groups,
-        groupMembers,
+      section: section.name,
+      rows,
+      next: {
+        ...position,
+        cursor: null,
+        pendingParents: pending.slice(consumed),
       },
-      administration: {
-        announcements,
-        deliveries,
-        feedback,
-        requests,
-        limits,
-        auditEvents,
-      },
-      product: {
-        workspaces,
-        orgNodes,
-        artifacts,
-        artifactVersions,
-        threads,
-        messages,
-        memoryClaims,
-      },
-      integrations: {
-        integrations,
-        capabilities,
-        externalRecords,
-        overlays,
-      },
-      usage,
-      exclusions: [
-        "Secret ciphertext and credential material",
-        "Platform-operator configuration",
-        "Other schools' records",
-      ],
     };
   },
 });
 
+/** Claims an export: continues its own lease, takes over an expired lease,
+ * or starts the oldest queued export. */
 export const claimLifecycleExport = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const job = await ctx.db
+  args: {
+    jobId: v.optional(v.id("schoolLifecycleJobs")),
+    leaseId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const claim = async (job: Doc<"schoolLifecycleJobs">, takeover: boolean) => {
+      const school = await ctx.db.get(job.schoolId);
+      const previous = job.exportProgress;
+      const takeovers = (previous?.takeovers ?? 0) + (takeover ? 1 : 0);
+      if (!school || takeovers > EXPORT_MAX_TAKEOVERS) {
+        await ctx.db.patch(job._id, {
+          status: "failed",
+          errorSummary: school
+            ? "The export stopped repeatedly before it finished."
+            : "School no longer exists.",
+          completedAt: now,
+          updatedAt: now,
+        });
+        await ctx.scheduler.runAfter(
+          0,
+          internal.administration.deleteLifecycleExportParts,
+          { jobId: job._id },
+        );
+        await writeAuditEvent(ctx, {
+          actorAccountId: job.requestedByAccountId,
+          schoolId: job.schoolId,
+          action: "school.export.failed",
+          targetType: "lifecycle_job",
+          targetId: job._id,
+          metadata: { storageObjectCreated: false, takeovers },
+          retentionClass: "legal",
+        });
+        return null;
+      }
+      const leaseId = crypto.randomUUID();
+      const progress = {
+        position: previous ? previous.position : EXPORT_START,
+        parts: previous?.parts ?? 0,
+        rows: previous?.rows ?? 0,
+        bytes: previous?.bytes ?? 0,
+        leaseId,
+        leaseExpiresAt: now + EXPORT_LEASE_MS,
+        takeovers,
+      };
+      await ctx.db.patch(job._id, {
+        status: "running",
+        startedAt: job.startedAt ?? now,
+        exportProgress: progress,
+        updatedAt: now,
+      });
+      return {
+        jobId: job._id,
+        leaseId,
+        school,
+        startedAt: job.startedAt ?? now,
+        position: progress.position,
+        parts: progress.parts,
+      };
+    };
+    if (args.jobId) {
+      const job = await ctx.db.get(args.jobId);
+      if (
+        !job ||
+        job.type !== "export" ||
+        job.status !== "running" ||
+        job.exportProgress?.leaseId !== args.leaseId
+      )
+        return null;
+      return claim(job, false);
+    }
+    // Running exports are few, so this reads a small index prefix.
+    const running = await ctx.db
+      .query("schoolLifecycleJobs")
+      .withIndex("by_status_created", (q) => q.eq("status", "running"))
+      .filter((q) => q.eq(q.field("type"), "export"))
+      .take(20);
+    const stalled = running.find(
+      (job) => (job.exportProgress?.leaseExpiresAt ?? 0) <= now,
+    );
+    if (stalled) return claim(stalled, true);
+    const queued = await ctx.db
       .query("schoolLifecycleJobs")
       .withIndex("by_status_created", (q) => q.eq("status", "queued"))
       .filter((q) => q.eq(q.field("type"), "export"))
       .first();
-    if (!job) return null;
+    return queued ? claim(queued, false) : null;
+  },
+});
+
+/** Records one written part and the position it covers, only for the lease
+ * holder, and optionally schedules the next action. */
+export const commitLifecycleExportPart = internalMutation({
+  args: {
+    jobId: v.id("schoolLifecycleJobs"),
+    leaseId: v.string(),
+    expectedParts: v.number(),
+    part: v.optional(
+      v.object({
+        storageId: v.id("_storage"),
+        section: v.string(),
+        rows: v.number(),
+        bytes: v.number(),
+      }),
+    ),
+    position: v.union(exportPositionValidator, v.null()),
+    continueAfter: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    const progress = job?.exportProgress;
+    if (
+      !job ||
+      job.type !== "export" ||
+      job.status !== "running" ||
+      !progress ||
+      progress.leaseId !== args.leaseId ||
+      progress.parts !== args.expectedParts
+    )
+      return false;
     const now = Date.now();
+    if (args.part)
+      await ctx.db.insert("schoolExportParts", {
+        jobId: job._id,
+        schoolId: job.schoolId,
+        index: progress.parts,
+        section: args.part.section,
+        rows: args.part.rows,
+        bytes: args.part.bytes,
+        storageId: args.part.storageId,
+        createdAt: now,
+      });
     await ctx.db.patch(job._id, {
-      status: "running",
-      startedAt: now,
+      exportProgress: {
+        ...progress,
+        position: args.position,
+        parts: progress.parts + (args.part ? 1 : 0),
+        rows: progress.rows + (args.part?.rows ?? 0),
+        bytes: progress.bytes + (args.part?.bytes ?? 0),
+        leaseExpiresAt: now + EXPORT_LEASE_MS,
+      },
       updatedAt: now,
     });
-    return { jobId: job._id };
+    if (args.continueAfter)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.administration.processLifecycleExports,
+        { jobId: job._id, leaseId: args.leaseId },
+      );
+    return true;
+  },
+});
+
+export const lifecycleExportPartsPage = internalQuery({
+  args: {
+    jobId: v.id("schoolLifecycleJobs"),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("schoolExportParts")
+      .withIndex("by_job_index", (q) => q.eq("jobId", args.jobId))
+      .paginate({ cursor: args.cursor, numItems: 500 });
+    return {
+      parts: page.page.map(({ index, section, rows, bytes, storageId }) => ({
+        index,
+        section,
+        rows,
+        bytes,
+        storageId,
+      })),
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});
+
+/** Removes the part objects of an export that failed or was cancelled. */
+export const deleteLifecycleExportParts = internalMutation({
+  args: { jobId: v.id("schoolLifecycleJobs") },
+  handler: async (ctx, args) => {
+    const parts = await ctx.db
+      .query("schoolExportParts")
+      .withIndex("by_job_index", (q) => q.eq("jobId", args.jobId))
+      .take(100);
+    for (const part of parts) {
+      if (await ctx.db.system.get(part.storageId))
+        await ctx.storage.delete(part.storageId);
+      await ctx.db.delete(part._id);
+    }
+    if (parts.length === 100)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.administration.deleteLifecycleExportParts,
+        args,
+      );
+    return parts.length;
   },
 });
 
 export const settleLifecycleExport = internalMutation({
   args: {
     jobId: v.id("schoolLifecycleJobs"),
+    leaseId: v.string(),
     storageId: v.optional(v.id("_storage")),
     errorSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.type !== "export" || job.status !== "running") return false;
+    if (
+      !job ||
+      job.type !== "export" ||
+      job.status !== "running" ||
+      job.exportProgress?.leaseId !== args.leaseId
+    )
+      return false;
     const now = Date.now();
     const succeeded = Boolean(args.storageId);
     await ctx.db.patch(job._id, {
@@ -2864,13 +3226,23 @@ export const settleLifecycleExport = internalMutation({
       completedAt: now,
       updatedAt: now,
     });
+    if (!succeeded)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.administration.deleteLifecycleExportParts,
+        { jobId: job._id },
+      );
     await writeAuditEvent(ctx, {
       actorAccountId: job.requestedByAccountId,
       schoolId: job.schoolId,
       action: succeeded ? "school.export.completed" : "school.export.failed",
       targetType: "lifecycle_job",
       targetId: job._id,
-      metadata: { storageObjectCreated: succeeded },
+      metadata: {
+        storageObjectCreated: succeeded,
+        parts: job.exportProgress?.parts ?? 0,
+        rows: job.exportProgress?.rows ?? 0,
+      },
       retentionClass: "legal",
     });
     return true;
@@ -2878,29 +3250,161 @@ export const settleLifecycleExport = internalMutation({
 });
 
 export const processLifecycleExports = internalAction({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    jobId: v.optional(v.id("schoolLifecycleJobs")),
+    leaseId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
     const claimed = await ctx.runMutation(
       internal.administration.claimLifecycleExport,
-      {},
+      { jobId: args.jobId, leaseId: args.leaseId },
     );
     if (!claimed) return { processed: 0 };
+    const { jobId, leaseId, school } = claimed;
+    const deadline = Date.now() + EXPORT_ACTION_BUDGET_MS;
+    let parts = claimed.parts;
+    let buffer: { section: string; rows: string[]; bytes: number } | null =
+      null;
+    // Writes the buffered rows as one part and records the position after
+    // them. False means another action now holds this export.
+    const commit = async (
+      position: ExportPosition | null,
+      continueAfter: boolean,
+    ) => {
+      const pending = buffer;
+      const storageId = pending
+        ? await ctx.storage.store(
+            new Blob(
+              [
+                `{"format":"spectra-school-export-part","version":2,"jobId":${JSON.stringify(jobId)},"schoolId":${JSON.stringify(school._id)},"index":${parts},"section":${JSON.stringify(pending.section)},"rows":[${pending.rows.join(",")}]}`,
+              ],
+              { type: "application/json" },
+            ),
+          )
+        : undefined;
+      const committed = await ctx.runMutation(
+        internal.administration.commitLifecycleExportPart,
+        {
+          jobId,
+          leaseId,
+          expectedParts: parts,
+          part:
+            pending && storageId
+              ? {
+                  storageId,
+                  section: pending.section,
+                  rows: pending.rows.length,
+                  bytes: pending.bytes,
+                }
+              : undefined,
+          position,
+          continueAfter,
+        },
+      );
+      if (!committed) {
+        if (storageId) await ctx.storage.delete(storageId);
+        return false;
+      }
+      if (storageId) parts += 1;
+      buffer = null;
+      return true;
+    };
     try {
-      const bundle = await ctx.runQuery(
-        internal.administration.buildLifecycleExport,
-        { jobId: claimed.jobId },
-      );
+      let position: ExportPosition | null = claimed.position;
+      while (position) {
+        if (Date.now() > deadline) {
+          await commit(position, true);
+          return { processed: 1 };
+        }
+        const page: {
+          section: string;
+          rows: unknown[];
+          next: ExportPosition | null;
+        } = await ctx.runQuery(internal.administration.exportPage, {
+          schoolId: school._id,
+          position,
+        });
+        if (page.rows.length > 0) {
+          if (buffer && buffer.section !== page.section)
+            if (!(await commit(position, false))) return { processed: 0 };
+          const target: { section: string; rows: string[]; bytes: number } =
+            buffer ?? { section: page.section, rows: [], bytes: 0 };
+          for (const row of page.rows) {
+            const json = JSON.stringify(row);
+            target.rows.push(json);
+            target.bytes += json.length;
+          }
+          buffer = target;
+        }
+        position = page.next;
+        if (buffer && buffer.bytes >= EXPORT_PART_BYTES)
+          if (!(await commit(position, false))) return { processed: 0 };
+      }
+      if (!(await commit(null, false))) return { processed: 0 };
+      const written: {
+        index: number;
+        section: string;
+        rows: number;
+        bytes: number;
+        storageId: Id<"_storage">;
+      }[] = [];
+      for (let cursor: string | null = null, done = false; !done; ) {
+        const page: {
+          parts: typeof written;
+          continueCursor: string;
+          isDone: boolean;
+        } = await ctx.runQuery(
+          internal.administration.lifecycleExportPartsPage,
+          { jobId, cursor },
+        );
+        written.push(...page.parts);
+        cursor = page.continueCursor;
+        done = page.isDone;
+      }
+      const manifest = {
+        format: "spectra-school-export",
+        version: 2,
+        generatedAt: Date.now(),
+        startedAt: claimed.startedAt,
+        school,
+        sections: EXPORT_SECTIONS.map(({ name }) => {
+          const sectionParts = written.filter((part) => part.section === name);
+          return {
+            name,
+            rows: sectionParts.reduce((sum, part) => sum + part.rows, 0),
+            parts: sectionParts.map((part) => part.index),
+          };
+        }),
+        parts: written.map(({ index, section, rows, bytes }) => ({
+          index,
+          section,
+          rows,
+          bytes,
+        })),
+        consistency:
+          "Rows were read in pages between startedAt and generatedAt. Suspend the school first for a point-in-time copy.",
+        exclusions: [
+          "Secret ciphertext and credential material",
+          "Platform-operator configuration",
+          "Other schools' records",
+        ],
+      };
       const storageId = await ctx.storage.store(
-        new Blob([JSON.stringify(bundle)], { type: "application/json" }),
+        new Blob([JSON.stringify(manifest)], { type: "application/json" }),
       );
-      await ctx.runMutation(internal.administration.settleLifecycleExport, {
-        jobId: claimed.jobId,
-        storageId,
-      });
+      if (
+        !(await ctx.runMutation(internal.administration.settleLifecycleExport, {
+          jobId,
+          leaseId,
+          storageId,
+        }))
+      )
+        await ctx.storage.delete(storageId);
       return { processed: 1 };
     } catch (error) {
       await ctx.runMutation(internal.administration.settleLifecycleExport, {
-        jobId: claimed.jobId,
+        jobId,
+        leaseId,
         errorSummary:
           error instanceof Error ? error.message : "School export failed.",
       });
@@ -2931,6 +3435,22 @@ export const lifecycleExportUrl = mutation({
       throw new Error(
         "LIFECYCLE_EXPORT_UNAVAILABLE: The export object expired or was removed.",
       );
+    // A version 2 export is a manifest plus its parts. A part row holds only
+    // metadata; the exported rows stay in storage.
+    const partRows = await ctx.db
+      .query("schoolExportParts")
+      .withIndex("by_job_index", (q) => q.eq("jobId", job._id))
+      .collect();
+    const parts = await Promise.all(
+      partRows.map(async (part) => {
+        const partUrl = await ctx.storage.getUrl(part.storageId);
+        if (!partUrl)
+          throw new Error(
+            "LIFECYCLE_EXPORT_UNAVAILABLE: An export part expired or was removed.",
+          );
+        return { index: part.index, section: part.section, url: partUrl };
+      }),
+    );
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: job.schoolId,
@@ -2940,7 +3460,7 @@ export const lifecycleExportUrl = mutation({
       requestId: args.requestId,
       retentionClass: "legal",
     });
-    return { url };
+    return { url, parts };
   },
 });
 
@@ -3134,6 +3654,12 @@ export const cancelLifecycleJob = mutation({
       const exportJob = await ctx.db.get(job.prerequisiteExportJobId);
       if (exportJob?.exportStorageId)
         await ctx.storage.delete(exportJob.exportStorageId);
+      if (exportJob)
+        await ctx.scheduler.runAfter(
+          0,
+          internal.administration.deleteLifecycleExportParts,
+          { jobId: exportJob._id },
+        );
       if (
         exportJob &&
         ["queued", "running", "completed", "failed"].includes(exportJob.status)

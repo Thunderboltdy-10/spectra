@@ -142,6 +142,54 @@ describe("OpenRouter public response streaming", () => {
     ]);
   });
 
+  it("rejects an agent turn whose answer was cut off by a provider error", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Photosynthesis turns light into"}}]}\n\n',
+      'data: {"error":{"message":"Internal Server Error"},"choices":[{"delta":{},"finish_reason":"error"}]}\n\n',
+    ];
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+    await expect(readOpenRouterAgentTurn(response)).rejects.toThrow("Internal Server Error");
+  });
+
+  it("rejects half-streamed tool calls cut off by a provider error", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_artifact","arguments":"{\\"artifact"}}]}}]}\n\n',
+      'data: {"error":{"message":"Upstream reset"}}\n\n',
+    ];
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+    await expect(readOpenRouterAgentTurn(response)).rejects.toThrow("Upstream reset");
+  });
+
+  it("keeps a finished agent turn when a provider error trails it", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}\n\n',
+      'data: {"error":{"message":"Internal Server Error"}}\n\n',
+    ];
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
+        controller.close();
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+    await expect(readOpenRouterAgentTurn(response)).resolves.toMatchObject({
+      text: "Done.",
+      finishReason: "stop",
+    });
+  });
+
   it("processes a final SSE record when the stream closes without a newline", async () => {
     const response = new Response(new ReadableStream({
       start(controller) {

@@ -489,6 +489,53 @@ function setup(
 }
 
 describe("Spectra run route", () => {
+  it.each([
+    ["signed out", new Error("AUTH_NOT_SIGNED_IN: Sign in to continue."), 401],
+    ["without a school", new Error("AUTH_NO_SCHOOL: Join a school to continue."), 403],
+  ])("answers Stop from a caller who is %s with the auth status, not a server failure", async (_label, error, status) => {
+    setup(deckPlan());
+    vi.doMock("@/lib/auth-server", () => ({ requireActor: vi.fn().mockRejectedValue(error) }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "stop", runId: "run-real", executionId: "execution-1" }),
+    }));
+    expect(response.status).toBe(status);
+    const text = await response.text();
+    expect(text).not.toMatch(/AUTH_|Error:/);
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["the run read", "spectraRuns:get"],
+    ["the undo plan", "changeGroups:revertPlanForRun"],
+  ])("answers Undo with the auth status when Convex rejects %s", async (_label, failing) => {
+    // The session can lapse between the route's own sign-in check and Convex.
+    // Unhandled, that rejection surfaced as a server failure with no wording.
+    const rejection = new Error(
+      "[Request ID: 5d1e] Server Error\nUncaught Error: AUTH_NOT_SIGNED_IN: Sign in to continue.\n    at requireActor (../convex/lib/auth.ts:12:5)",
+    );
+    const { convexQuery, convexMutation } = setup(deckPlan());
+    for (const mock of [convexQuery, convexMutation] as Array<typeof convexQuery>) {
+      const original = mock.getMockImplementation()!;
+      mock.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+        if (String(name).includes(failing)) throw rejection;
+        const value = await original(name, args);
+        // A finished run is the only one Undo plans against.
+        if (!String(name).includes("spectraRuns:get")) return value;
+        const detail = value as Record<string, unknown> & { run: Record<string, unknown> };
+        return { ...detail, run: { ...detail.run, status: "completed" } };
+      });
+    }
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "revert", runId: "run-real", executionId: "execution-1", attemptId: "execution-1" }),
+    }));
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toMatch(/Request ID|Uncaught|AUTH_|auth.ts/);
+  });
+
   it("pins its function duration instead of inheriting the hosting default", async () => {
     // Scheduled runs execute inside this request. Without an explicit limit a
     // non-fluid Vercel project kills every run at its 15 second default.

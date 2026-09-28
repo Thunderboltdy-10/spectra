@@ -77,6 +77,14 @@ function unwrapConvexError(rawMessage: string) {
     .trim();
 }
 
+/** The HTTP status for a thrown error, after Convex's envelope is removed.
+ * Routes that answer in plain text use the same mapping as JSON routes. */
+export function errorStatus(error: unknown) {
+  return normalizeErrorStatus(
+    unwrapConvexError(error instanceof Error ? error.message : String(error)),
+  );
+}
+
 function parseCodeAndMessage(rawMessage: string) {
   const normalized = unwrapConvexError(rawMessage);
   const [prefix, ...rest] = normalized.split(":");

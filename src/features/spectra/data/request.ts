@@ -19,3 +19,25 @@ export async function requestSpectra(
     throw new Error(SPECTRA_REQUEST_UNREACHABLE, { cause: error });
   }
 }
+
+/**
+ * Plain copy for a Spectra route that answered with a failure. A short
+ * plain-text sentence from the route itself (a 4xx such as "Undo is available
+ * after Spectra finishes this run.") is shown as written. A sign-in failure
+ * says what to do. A platform error page, a JSON envelope or a server failure
+ * becomes the caller's own copy, never raw HTML or an HTTP status.
+ */
+export async function spectraFailureMessage(
+  response: Response,
+  copy: { fallback: string; signedOut: string },
+) {
+  if (response.status === 401) return copy.signedOut;
+  if (response.status >= 500) return copy.fallback;
+  const plain = (response.headers.get("content-type") ?? "").startsWith(
+    "text/plain",
+  );
+  const text = plain ? (await response.text().catch(() => "")).trim() : "";
+  return text && text.length <= 600 && !text.startsWith("<")
+    ? text
+    : copy.fallback;
+}

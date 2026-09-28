@@ -179,9 +179,23 @@ async function decode(cursor: string | undefined, scope: string, maxStage: numbe
   }
 }
 
-function project(row: Source, actor: AuthenticatedActor): Record<string, unknown> {
+/** The owner's own workspace is shared while an invitation they sent is
+ * accepted or pending. One newest row per status on the exact index prefix:
+ * revoked, declined and expired history is never read. */
+async function sharedByOwner(ctx: QueryCtx, budget: Budget, actor: AuthenticatedActor, row: Source) {
+  if ("artifactId" in row || row.ownerAccountId !== actor.accountId) return false;
+  for (const status of ["accepted", "pending"] as const) {
+    const invitation = await budget.read(1, () => ctx.db.query("shareInvitations").withIndex("by_resource_inviter_status", q =>
+      q.eq("resourceType", "workspace").eq("resourceId", row._id).eq("inviterAccountId", row.ownerAccountId).eq("status", status))
+      .order("desc").first());
+    if (invitation && (!invitation.expiresAt || invitation.expiresAt > Date.now())) return true;
+  }
+  return false;
+}
+
+function project(row: Source, actor: AuthenticatedActor, sharedOwned = false): Record<string, unknown> {
   const owned = row.ownerAccountId === actor.accountId;
-  const ownership = { ownership: owned ? "owned" : "shared", ...(owned ? {} : { isShared: true }) };
+  const ownership = { ownership: owned ? "owned" : "shared", ...(owned && !sharedOwned ? {} : { isShared: true }) };
   if ("artifactId" in row) return { ...row.projection, ...ownership };
   return { _id: row._id, _creationTime: row._creationTime, ownerAccountId: row.ownerAccountId, schoolId: row.schoolId,
     title: row.title.slice(0, 200), description: row.description?.slice(0, 2_000), icon: row.icon, color: row.color,
@@ -317,7 +331,7 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   const emitted = rows.slice(0, limit);
   const items = [];
   for (const row of emitted) {
-    const projected = project(row, actor);
+    const projected = project(row, actor, await sharedByOwner(ctx, budget, actor, row));
     if (args.agentCards && "artifactId" in row) {
       const owner = await budget.read(1, () => ctx.db.get(row.ownerAccountId));
       // Legacy absent rollout is published. Neither creation order nor an
@@ -371,6 +385,7 @@ export const workspaceMetadata = query({
   args: { workspaceId: v.id("spectraWorkspaces") },
   handler: async (ctx, { workspaceId }) => {
     const { actor, workspace } = await requireWorkspaceCapability(ctx, workspaceId, "read");
-    return { workspace: workspace.status === "active" ? project(workspace, actor) : null };
+    return { workspace: workspace.status === "active"
+      ? project(workspace, actor, await sharedByOwner(ctx, new Budget(), actor, workspace)) : null };
   },
 });

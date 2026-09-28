@@ -2634,11 +2634,11 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("feedbackReports")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("schoolRequests")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("limitPolicies")
@@ -2702,7 +2702,7 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("memoryClaims")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("auditEvents")
@@ -2710,15 +2710,15 @@ export const buildLifecycleExport = internalQuery({
         .collect(),
       ctx.db
         .query("schoolIntegrations")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_provider", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("integrationCapabilities")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_status", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("externalRecords")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_updated", (q) => q.eq("schoolId", school._id))
         .collect(),
       ctx.db
         .query("externalRecordOverlays")

@@ -4,7 +4,7 @@ import { convexTest } from "convex-test";
 import schema from "./schema";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { requestLifecycleJob } from "./administration";
+import { buildLifecycleExport, requestLifecycleJob } from "./administration";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -12,6 +12,11 @@ const identity = { subject: "platform-fixture", email: "platform-fixture@example
 const requestHandler = Reflect.get(requestLifecycleJob, "_handler") as (
   ctx: MutationCtx,
   args: { schoolId: Id<"schools">; type: "suspend"; reason: string },
+) => Promise<unknown>;
+
+const exportHandler = Reflect.get(buildLifecycleExport, "_handler") as (
+  ctx: MutationCtx,
+  args: { jobId: Id<"schoolLifecycleJobs"> },
 ) => Promise<unknown>;
 
 afterEach(() => vi.unstubAllEnvs());
@@ -49,10 +54,23 @@ async function tenantsFixture() {
     await integration(target);
     for (let index = 0; index < 4; index += 1) {
       const other = await school(`other-school-${index}`);
-      await integration(other);
-      for (let row = 0; row < 60; row += 1) await artifact(other, "active", "x".repeat(8_000));
+      const integrationId = await integration(other);
+      for (let row = 0; row < 60; row += 1) {
+        await artifact(other, "active", "x".repeat(8_000));
+        await ctx.db.insert("externalRecords", {
+          integrationId, schoolId: other, providerRecordId: `record-${row}`, providerRecordKey: `task:${row}`,
+          recordType: "task", classification: "class", audienceScope: "class_members",
+          normalized: { description: "x".repeat(4_000) }, payloadVersion: "fixture-v1", sourceHash: "v1",
+          tombstone: false, fetchedAt: now, createdAt: now, updatedAt: now,
+        });
+      }
     }
-    return { target };
+    const exportJobId = await ctx.db.insert("schoolLifecycleJobs", {
+      schoolId: target, type: "export", status: "running", requestedByAccountId: operatorId,
+      approvedByAccountIds: [operatorId], reason: "Legal export before purge",
+      impact: { activeMembers: 0, artifacts: 2, workspaces: 0, integrations: 1 }, createdAt: now, updatedAt: now,
+    });
+    return { target, exportJobId };
   });
   return { t, ...ids };
 }
@@ -74,6 +92,21 @@ describe("school lifecycle impact", () => {
     });
     expect(measured.impact).toEqual({ activeMembers: 0, artifacts: 2, workspaces: 0, integrations: 1 });
     expect(scanned(measured.reads, "spectraArtifacts")).toBe(2);
+    expect(scanned(measured.reads, "schoolIntegrations")).toBe(1);
+  });
+
+  it("exports one school without scanning other tenants' provider records", async () => {
+    const f = await tenantsFixture();
+    const measured = await f.t.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      await exportHandler({ ...ctx, db: observer.db }, { jobId: f.exportJobId });
+      return observer.snapshot();
+    });
+    // Post-filter reads only report matches, so assert the scan itself is
+    // bounded by a school index rather than the whole table.
+    const schoolTables = ["feedbackReports", "schoolRequests", "memoryClaims", "schoolIntegrations", "integrationCapabilities", "externalRecords"];
+    const unindexed = measured.reads.filter(row => schoolTables.includes(row.table) && !row.index).map(row => row.table);
+    expect(unindexed).toEqual([]);
     expect(scanned(measured.reads, "schoolIntegrations")).toBe(1);
   });
 });

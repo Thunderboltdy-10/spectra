@@ -182,7 +182,7 @@ function JoinSchoolContent() {
             Spectra
           </span>
         </div>
-        <span className="mt-8 grid size-12 place-items-center rounded-surface bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
+        <span className="mt-8 grid size-12 place-items-center rounded-surface bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
           {status === "accepted" ? <Check size={22} /> : <School size={22} />}
         </span>
         <h1 className="mt-5 font-[var(--font-serif)] text-display font-medium tracking-[-.025em]">
@@ -194,14 +194,14 @@ function JoinSchoolContent() {
         {status === "error" ? (
           <div
             role="alert"
-            className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]"
+            className="mt-5 rounded-control border border-[color-mix(in_oklab,var(--accent-coral)_28%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-coral)_8%,var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]"
           >
             <p>{error}</p>
             {previewRetryable && previewState === "error" ? (
               <button
                 type="button"
                 onClick={retryPreview}
-                className="mt-2 inline-flex h-8 items-center rounded-control border border-current px-2.5 text-micro font-medium hover:bg-[color-mix(in oklab,var(--accent-coral)_10%,transparent)]"
+                className="mt-2 inline-flex h-8 items-center rounded-control border border-current px-2.5 text-micro font-medium hover:bg-[color-mix(in_oklab,var(--accent-coral)_10%,transparent)]"
               >
                 Retry invitation check
               </button>

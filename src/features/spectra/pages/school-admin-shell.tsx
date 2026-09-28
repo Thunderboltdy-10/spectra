@@ -652,7 +652,7 @@ export function SchoolAdminShell() {
   return (
     <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
       {overview.operatorSession ? (
-        <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in oklab, var(--accent-cyan) 16%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-cyan) 8%, var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
+        <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
           <span className="flex items-center gap-2">
             <KeyRound size={13} />
             <strong>{overview.operatorSession.label}</strong>
@@ -1228,7 +1228,7 @@ function GroupsSurface({
                 className="rounded-control border border-[var(--border-subtle)] p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <span className="grid size-9 place-items-center rounded-card bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
+                  <span className="grid size-9 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
                     <UsersRound size={16} />
                   </span>
                   <StatusBadge tone="neutral">
@@ -2073,7 +2073,7 @@ function GovernanceSurface() {
               className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]">
                   <Icon size={15} />
                 </span>
                 <StatusBadge tone="healthy">Always available</StatusBadge>

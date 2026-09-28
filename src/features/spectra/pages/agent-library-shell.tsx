@@ -1115,7 +1115,7 @@ export function AgentLibraryShell({
             aria-labelledby="public-agent-title"
           >
             <header className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
+              <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
                 <Bot className="size-5" />
               </span>
               <div className="min-w-0 flex-1">

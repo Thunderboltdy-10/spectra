@@ -35,6 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { ProductSectionNav } from "../components/product-section-nav";
 import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
 import { ProductPageHeader } from "../components/product-page-header";
@@ -162,12 +163,12 @@ function StatusPill({
     <span
       className={cn(
         "inline-flex h-5 items-center gap-1 rounded-chip px-2 text-micro font-medium",
-        state === "good" && "bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]",
-        state === "warning" && "bg-[color-mix(in oklab, var(--accent-gold) 18%, var(--bg-elevated))] text-[var(--accent-gold)]",
-        state === "danger" && "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]",
+        state === "good" && "bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]",
+        state === "warning" && "bg-[color-mix(in_oklab,var(--accent-gold)_18%,var(--bg-elevated))] text-[var(--accent-gold)]",
+        state === "danger" && "bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] text-[var(--accent-coral)]",
         state === "neutral" &&
           "bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
-        state === "blue" && "bg-[color-mix(in oklab, var(--accent-cyan) 10%, var(--bg-elevated))] text-[var(--accent-cyan)]",
+        state === "blue" && "bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-elevated))] text-[var(--accent-cyan)]",
       )}
     >
       {children}
@@ -510,7 +511,7 @@ function PeriodMapPanel({
               <article key={period._id} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]">
                 <span className="grid size-8 shrink-0 place-items-center text-micro font-bold text-[var(--accent-mint)]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
                 <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-micro">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] hover:text-[var(--accent-coral)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] hover:text-[var(--accent-coral)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
               </article>
             ))}
           </div>
@@ -548,7 +549,7 @@ function PeriodMapPanel({
           <label className="text-micro font-medium text-[var(--text-secondary)]">End<input required type="time" value={draft.end} onChange={(event) => setDraft((current) => ({ ...current, end: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" /></label>
         </div>
         <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" placeholder="Europe/Madrid" /></label>
-        <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[var(--accent-mint)] bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
+        <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[var(--accent-mint)] bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
         <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-mint)] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
       </form> : null}
       </section>
@@ -735,7 +736,7 @@ export function ManageBacIntegrationShell() {
         <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
           {error ? (
             <div
-              className="mb-2 flex items-start gap-2 rounded-lg border border-[color-mix(in oklab, var(--accent-coral) 22%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] px-3 py-2.5 text-micro leading-5 text-[var(--danger)]"
+              className="mb-2 flex items-start gap-2 rounded-lg border border-[color-mix(in_oklab,var(--accent-coral)_22%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-coral)_8%,var(--bg-elevated))] px-3 py-2.5 text-micro leading-5 text-[var(--danger)]"
               role="alert"
             >
               <AlertTriangle className="mt-0.5 shrink-0" size={14} />
@@ -743,7 +744,7 @@ export function ManageBacIntegrationShell() {
               <button
                 type="button"
                 onClick={() => setError("")}
-                className="grid size-5 place-items-center rounded hover:bg-[color-mix(in oklab, var(--accent-coral) 18%, var(--bg-elevated))]"
+                className="grid size-5 place-items-center rounded hover:bg-[color-mix(in_oklab,var(--accent-coral)_18%,var(--bg-elevated))]"
                 aria-label="Dismiss error"
               >
                 <X size={12} />
@@ -863,7 +864,7 @@ export function ManageBacIntegrationShell() {
                 tab !== "history" &&
                 tab !== "provenance" ? (
                 <div className="mx-auto flex min-h-[390px] max-w-lg flex-col items-center justify-center text-center">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-[color-mix(in oklab, var(--accent-cyan) 8%, var(--bg-elevated))] text-[var(--accent-cyan)]">
+                  <span className="grid size-12 place-items-center rounded-2xl bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] text-[var(--accent-cyan)]">
                     <UserCheck size={22} />
                   </span>
                   <h2 className="mt-4 font-display text-xl font-semibold">
@@ -1367,7 +1368,7 @@ function ConflictList({
         return (
           <article key={conflict._id} className="rounded-xl px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
             <div className="flex items-start gap-2.5">
-              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[color-mix(in oklab, var(--accent-gold) 18%, var(--bg-elevated))] text-[var(--accent-gold)]">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-gold)_18%,var(--bg-elevated))] text-[var(--accent-gold)]">
                 <AlertCircle size={12} />
               </span>
               <div className="min-w-0 flex-1">
@@ -1838,12 +1839,12 @@ function SettingsDialog({
               }
             />
           </label>
-          <div className="rounded-control border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3 text-micro leading-4 text-[var(--accent-mint)]">
+          <div className="rounded-control border border-[color-mix(in_oklab,var(--accent-mint)_18%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] p-3 text-micro leading-4 text-[var(--accent-mint)]">
             Sync cadence, how the school API token is sent, and conflict policy
             are fixed by Spectra. Individual users cannot supply their own
             ManageBac keys.
           </div>
-          <section className="rounded-lg border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3">
+          <section className="rounded-lg border border-[color-mix(in_oklab,var(--accent-mint)_18%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] p-3">
             <div className="flex gap-2">
               <ShieldCheck
                 size={15}
@@ -1959,7 +1960,7 @@ function ManifestDialog({
               '{\n  "providerVersion": "tenant reference version",\n  "capabilities": [\n    {\n      "category": "Classes",\n      "name": "My classes",\n      "recordType": "class",\n      "path": "/verified/tenant/path",\n      "purpose": "Import the authenticated user’s current classes",\n      "scope": "personal",\n      "minimumRole": "student",\n      "pagination": "page",\n      "changeStrategy": "full_reconciliation",\n      "freshnessSlaMinutes": 120,\n      "contractVersion": "…",\n      "responseSchemaHash": "…",\n      "permissionState": "read_only",\n      "verificationStatus": "verified",\n      "routeSource": "tenant_reference",\n      "normalization": { "recordsPath": "…", "idPath": "…" }\n    }\n  ]\n}'
             }
           />
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-[color-mix(in oklab, var(--accent-gold) 10%, var(--bg-elevated))] px-3 py-2.5 text-micro leading-4 text-[var(--accent-gold)]">
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-[color-mix(in_oklab,var(--accent-gold)_10%,var(--bg-elevated))] px-3 py-2.5 text-micro leading-4 text-[var(--accent-gold)]">
             <TriangleAlert className="mt-0.5 shrink-0" size={13} />
             Do not paste the API token, raw student responses, or copied payload
             contents. The manifest contains contracts and mappings only.
@@ -2001,24 +2002,29 @@ function DisconnectDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const surface = useRef<HTMLDivElement>(null);
+  // Escape is "Keep connected"; it does nothing while the disconnect runs.
+  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
     <div
+      ref={surface}
+      tabIndex={-1}
       className="fixed inset-0 z-dropdown grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="alertdialog"
       aria-modal="true"
       aria-label="Disconnect ManageBac"
     >
       <div className="w-full max-w-[430px] rounded-surface border border-white/70 bg-[var(--bg-primary)] p-5 shadow-[var(--shadow-lg)]">
-        <span className="grid size-10 place-items-center rounded-xl bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]">
+        <span className="grid size-10 place-items-center rounded-xl bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] text-[var(--accent-coral)]">
           <AlertTriangle size={18} />
         </span>
         <h2 className="mt-4 font-display text-xl font-semibold">
           Disconnect ManageBac?
         </h2>
         <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
-          The server-side token will be revoked, scheduled runs will stop, and
-          identity mappings will be cleared. Imported work and user
-          overlays remain intact with stale or removed-source provenance.
+          Spectra will give up its ManageBac access, stop scheduled syncs and
+          unlink accounts. Imported work and everyone&apos;s own notes on it stay
+          in Spectra, marked as no longer syncing.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button

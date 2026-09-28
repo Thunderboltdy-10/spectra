@@ -8,7 +8,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { convexAction } from "@/lib/convex-server";
+import { convexAction, convexPublicAction } from "@/lib/convex-server";
 import {
   INTAKE_ATTESTATION_PURPOSE,
   INTAKE_ATTESTATION_VERSION,
@@ -144,7 +144,7 @@ function envelopeDigest(envelope?: {
 }
 
 async function bridgeArgs(
-  operation: "read" | "use" | "status" | "write" | "revoke",
+  operation: "read" | "use" | "status" | "write" | "revoke" | "erase-account",
   schoolId: string,
   purpose: string,
   envelope?: {
@@ -178,6 +178,19 @@ async function bridgeArgs(
     .update(canonical)
     .digest("base64url");
   return { timestamp, nonce, signature };
+}
+
+/**
+ * Ask Convex to erase the account of an identity Clerk deleted. Only the
+ * svix-verified webhook calls this; the bridge key is the authority because
+ * no session exists for a deleted user.
+ */
+export async function requestIdentityErasure(clerkId: string) {
+  const bridge = await bridgeArgs("erase-account", "-", "clerk-user-deleted", undefined, clerkId);
+  return convexPublicAction<Record<string, unknown>, { status: "running" | "completed" }>(
+    "secretBridge:eraseDeletedIdentity",
+    { clerkId, ...bridge },
+  );
 }
 
 export async function storeSchoolSecret(input: {

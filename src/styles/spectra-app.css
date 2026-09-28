@@ -1293,7 +1293,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-primary);
-  color: #24312c;
+  color: var(--text-primary);
 }
 
 .whiteboard-presenter-bar button {
@@ -1607,7 +1607,7 @@ body {
   position: absolute;
   top: -29px;
   left: 2px;
-  color: #536059;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -1764,7 +1764,7 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #6d7771;
+  color: var(--text-secondary);
 }
 
 .whiteboard-panel > input {
@@ -1772,10 +1772,10 @@ body {
   height: 36px;
   margin: 12px;
   padding: 0 10px;
-  border: 1px solid #dfe3dd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
   outline: 0;
-  color: #2f3a35;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
@@ -1795,7 +1795,7 @@ body {
   margin: 4px 8px;
   padding: 9px 10px;
   border-radius: var(--control-radius);
-  color: #53605a;
+  color: var(--text-secondary);
   text-align: left;
 }
 
@@ -1811,7 +1811,7 @@ body {
 .whiteboard-page-list > button:hover,
 .whiteboard-page-list > button[data-active="true"] {
   background: #f2f0fc;
-  color: #5547bd;
+  color: var(--brand-ink);
 }
 
 .whiteboard-panel button strong {
@@ -1823,14 +1823,14 @@ body {
 }
 
 .whiteboard-panel button small {
-  color: #89918c;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
 .whiteboard-layer-list {
   margin: 10px 8px;
   padding-top: 10px;
-  border-top: 1px solid #eceeea;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .whiteboard-layer-list > div {
@@ -1843,7 +1843,7 @@ body {
 }
 
 .whiteboard-layer-list > div:hover {
-  background: #f7f8f5;
+  background: var(--bg-secondary);
 }
 
 .whiteboard-layer-list span {
@@ -1859,14 +1859,14 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #77817b;
+  color: var(--text-tertiary);
 }
 
 .whiteboard-panel .whiteboard-panel-add {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  color: #6253c9;
+  color: var(--brand-ink);
   font-size: 11px;
   font-weight: 650;
 }
@@ -1883,7 +1883,7 @@ body {
   gap: 10px;
   align-items: center;
   padding: 8px;
-  border: 1px solid #e5e8e2;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   text-align: left;
   transition:
@@ -1904,7 +1904,8 @@ body {
     radial-gradient(circle at 20% 25%, #86c4a6 0 4px, transparent 5px),
     radial-gradient(circle at 80% 24%, #e6b872 0 4px, transparent 5px),
     radial-gradient(circle at 22% 78%, #e89aac 0 4px, transparent 5px),
-    radial-gradient(circle at 80% 76%, #ead263 0 4px, transparent 5px), #f7f7f3;
+    radial-gradient(circle at 80% 76%, #ead263 0 4px, transparent 5px),
+    var(--bg-secondary);
 }
 
 .whiteboard-template-list i[data-template="study"] {
@@ -1921,7 +1922,7 @@ body {
     linear-gradient(#dff0e4 0 0) 4px 7px / 16px 31px no-repeat,
     linear-gradient(#fff0bd 0 0) 23px 7px / 16px 31px no-repeat,
     linear-gradient(#e9e2fb 0 0) 42px 7px / 16px 31px no-repeat,
-    #f7f7f3;
+    var(--bg-secondary);
 }
 
 .whiteboard-template-list span {
@@ -1940,7 +1941,7 @@ body {
   width: 224px;
   gap: 10px;
   padding: 13px;
-  border: 1px solid #e3e6e0;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 13px 34px rgba(39, 52, 45, 0.11);
@@ -1957,10 +1958,10 @@ body {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid #dedfdc;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.96);
-  color: #59645f;
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
   box-shadow: 0 8px 22px rgba(39, 52, 45, 0.09);
@@ -1975,7 +1976,7 @@ body {
 .whiteboard-inspector-trigger[aria-expanded="true"] {
   border-color: #cfc8ef;
   background: #f7f5ff;
-  color: #5f4fd0;
+  color: var(--brand-ink);
 }
 
 .whiteboard-multi-toolbar {
@@ -1988,7 +1989,7 @@ body {
   align-items: center;
   gap: 3px;
   padding: 4px 5px 4px 11px;
-  border: 1px solid #dedfdc;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 12px 30px rgba(39, 52, 45, 0.12);
@@ -1998,7 +1999,7 @@ body {
 
 .whiteboard-multi-toolbar strong {
   margin-right: 6px;
-  color: #3f4944;
+  color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 720;
   white-space: nowrap;
@@ -2011,15 +2012,15 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #6d7772;
+  color: var(--text-secondary);
   transition:
     background var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard);
 }
 
 .whiteboard-multi-toolbar button:hover:not(:disabled) {
-  background: #f0eefb;
-  color: #5d4cc5;
+  background: var(--brand-wash);
+  color: var(--brand-ink);
 }
 
 .whiteboard-multi-toolbar button:disabled {
@@ -2032,7 +2033,7 @@ body {
   align-items: center;
   gap: 4px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #eceeea;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .whiteboard-inspector > div:first-child strong {
@@ -2050,18 +2051,18 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #68736d;
+  color: var(--text-secondary);
 }
 
 .whiteboard-inspector button:hover {
-  background: #f0eefb;
-  color: #5d4cc5;
+  background: var(--brand-wash);
+  color: var(--brand-ink);
 }
 
 .whiteboard-inspector label {
   display: grid;
   gap: 5px;
-  color: #77817b;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -2078,11 +2079,11 @@ body {
   min-width: 0;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid #dfe3dd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
   outline: 0;
-  background: #fff;
-  color: #344039;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 11px;
   letter-spacing: normal;
   text-transform: none;
@@ -2103,9 +2104,9 @@ body {
   width: 100%;
   height: 30px;
   padding: 3px;
-  border: 1px solid #dfe3dd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .whiteboard-asset-error {
@@ -2127,7 +2128,7 @@ body {
 }
 
 .whiteboard-io-progress {
-  border-color: #c9deda;
+  border-color: var(--border-strong);
   background: #f3fbf8;
   color: #2d6d61;
 }
@@ -2217,7 +2218,7 @@ body {
     bottom: 6px;
     left: 6px;
     width: min(270px, calc(100% - 36px));
-    border-right: 1px solid #e4e7e1;
+    border-right: 1px solid var(--border-default);
     border-radius: var(--surface-radius);
     box-shadow: 12px 0 36px rgba(34, 47, 40, 0.14);
   }
@@ -2249,8 +2250,8 @@ body {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  background: #fbfbf8;
-  color: #28342f;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .timetable-personal-sync {
@@ -2264,11 +2265,11 @@ body {
   align-items: center;
   gap: 7px;
   padding: 6px 10px;
-  border: 1px solid #dfe4de;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 8px 22px rgba(37, 50, 42, 0.09);
-  color: #66716b;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 650;
   backdrop-filter: blur(12px);
@@ -2290,22 +2291,22 @@ body {
 .timetable-body > main {
   min-width: 0;
   overflow: auto;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .timetable-overview {
   overflow-y: auto;
   padding: 12px;
-  border-left: 1px solid #e7e9e4;
-  background: #fafaf7;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-secondary);
 }
 
 .timetable-overview > section {
   margin-bottom: 10px;
   padding: 12px;
-  border: 1px solid #e5e8e2;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .timetable-overview section > header {
@@ -2313,11 +2314,11 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 9px;
-  color: #69736e;
+  color: var(--text-secondary);
 }
 
 .timetable-overview section > header strong {
-  color: #36423c;
+  color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 760;
   letter-spacing: 0.055em;
@@ -2336,7 +2337,7 @@ body {
 }
 
 .timetable-overview > section > button:hover {
-  background: #f4f5f1;
+  background: var(--bg-tertiary);
 }
 
 .timetable-overview > section > button > i {
@@ -2353,7 +2354,7 @@ body {
 
 .timetable-overview > section > button strong {
   overflow: hidden;
-  color: #34413a;
+  color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 650;
   text-overflow: ellipsis;
@@ -2363,12 +2364,12 @@ body {
 .timetable-overview > section > button small,
 .timetable-focus-progress small {
   margin-top: 2px;
-  color: #8b938f;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
 .timetable-focus-progress header span {
-  color: #66716b;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
 }
 
@@ -2377,7 +2378,7 @@ body {
   overflow: hidden;
   margin: 8px 0 5px;
   border-radius: var(--radius-pill);
-  background: #edf0eb;
+  background: var(--bg-tertiary);
 }
 
 .timetable-focus-progress > div i {
@@ -2402,7 +2403,7 @@ body {
   z-index: 12;
   top: 0;
   min-height: 51px;
-  border-bottom: 1px solid #e5e8e2;
+  border-bottom: 1px solid var(--border-default);
   background: rgba(255, 255, 255, 0.97);
 }
 
@@ -2411,8 +2412,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-left: 1px solid #eef0ec;
-  color: #67716c;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .timetable-week-header > button span {
@@ -2428,24 +2429,24 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
-  color: #39453f;
+  color: var(--text-primary);
   font-size: 11px;
 }
 
 .timetable-week-header > button[data-today="true"] strong {
-  background: #755fe6;
+  background: var(--brand-primary);
   color: #fff;
   box-shadow: 0 4px 10px rgba(85, 67, 187, 0.22);
 }
 
 .timetable-all-day {
   min-height: 54px;
-  border-bottom: 1px solid #e3e6e0;
+  border-bottom: 1px solid var(--border-default);
 }
 
 .timetable-all-day > span {
   padding: 12px 8px;
-  color: #7b8580;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   text-align: right;
 }
@@ -2453,7 +2454,7 @@ body {
 .timetable-all-day > div {
   min-width: 0;
   padding: 6px 5px;
-  border-left: 1px solid #eef0ec;
+  border-left: 1px solid var(--border-subtle);
 }
 
 .timetable-time-grid {
@@ -2463,21 +2464,21 @@ body {
 
 .timetable-hours {
   position: relative;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .timetable-hours time {
   position: absolute;
   right: 9px;
-  color: #7d8782;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   transform: translateY(-50%);
 }
 
 .timetable-day-column {
   position: relative;
-  border-left: 1px solid #e9ece7;
-  background: #fff;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-elevated);
 }
 
 .timetable-day-column > i {
@@ -2485,7 +2486,7 @@ body {
   right: 0;
   left: 0;
   height: 1px;
-  background: #edf0eb;
+  background: var(--bg-tertiary);
 }
 
 .timetable-day-column:hover {
@@ -2516,7 +2517,7 @@ body {
   border-left: 2px solid var(--event-color);
   border-radius: var(--chip-radius);
   background: color-mix(in oklab, var(--event-color) 10%, white);
-  color: color-mix(in oklab, var(--event-color) 76%, #26332d);
+  color: color-mix(in oklab, var(--event-color) 76%, var(--text-primary));
   text-align: left;
   box-shadow: inset 0 0 0 1px
     color-mix(in oklab, var(--event-color) 12%, transparent);
@@ -2633,7 +2634,7 @@ body {
   min-height: 690px;
   grid-template-columns: repeat(7, minmax(96px, 1fr));
   grid-template-rows: 34px repeat(6, minmax(105px, 1fr));
-  background: #e9ece7;
+  background: var(--bg-tertiary);
   gap: 1px;
 }
 
@@ -2641,8 +2642,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
-  color: #78827d;
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -2652,11 +2653,11 @@ body {
   min-width: 0;
   overflow: hidden;
   padding: 5px;
-  background: #fff;
+  background: var(--bg-elevated);
 }
 
 .timetable-month > section[data-outside="true"] {
-  background: #fafaf7;
+  background: var(--bg-secondary);
   opacity: 0.58;
 }
 
@@ -2668,13 +2669,13 @@ body {
   justify-content: center;
   margin-bottom: 3px;
   border-radius: var(--radius-pill);
-  color: #56615c;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 680;
 }
 
 .timetable-month > section[data-today="true"] > button:first-child {
-  background: #755fe6;
+  background: var(--brand-primary);
   color: #fff;
 }
 
@@ -2687,7 +2688,7 @@ body {
 .timetable-month > section > small {
   display: block;
   padding-left: 5px;
-  color: #747e79;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 650;
 }
@@ -2695,7 +2696,7 @@ body {
 .timetable-agenda {
   min-height: 660px;
   padding: 18px clamp(16px, 4vw, 52px) 40px;
-  background: #fbfbf8;
+  background: var(--bg-primary);
 }
 
 .timetable-agenda > section {
@@ -2708,7 +2709,7 @@ body {
   justify-content: space-between;
   margin-bottom: 7px;
   padding: 0 4px 8px;
-  border-bottom: 1px solid #e4e7e1;
+  border-bottom: 1px solid var(--border-default);
 }
 
 .timetable-agenda > section > header strong {
@@ -2717,7 +2718,7 @@ body {
 }
 
 .timetable-agenda > section > header span {
-  color: #89918d;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
@@ -2728,12 +2729,12 @@ body {
   gap: 11px;
   align-items: center;
   padding: 10px 8px;
-  border-bottom: 1px solid #eef0ec;
+  border-bottom: 1px solid var(--border-subtle);
   text-align: left;
 }
 
 .timetable-agenda > section > button:hover {
-  background: #f4f5f1;
+  background: var(--bg-tertiary);
 }
 
 .timetable-agenda > section > button > i {
@@ -2743,7 +2744,7 @@ body {
 }
 
 .timetable-agenda time {
-  color: #64706a;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 650;
 }
@@ -2756,12 +2757,12 @@ body {
 }
 
 .timetable-agenda button strong {
-  color: #34413a;
+  color: var(--text-primary);
   font-size: 11px;
 }
 
 .timetable-agenda button small {
-  color: #858e89;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
@@ -2772,12 +2773,12 @@ body {
   justify-content: center;
   flex-direction: column;
   gap: 7px;
-  color: #818b85;
+  color: var(--text-tertiary);
   text-align: center;
 }
 
 .timetable-empty strong {
-  color: #425049;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
@@ -2788,8 +2789,8 @@ body {
 
 .timetable-linked-work {
   padding: 14px;
-  border-top: 1px solid #e7e9e4;
-  background: #fafaf7;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-secondary);
 }
 
 .timetable-linked-work > header {
@@ -2805,7 +2806,7 @@ body {
 }
 
 .timetable-linked-work > header span {
-  color: #8a928e;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
@@ -2822,10 +2823,10 @@ body {
   align-items: center;
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid #e2e5df;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
-  background: #fff;
-  color: #537069;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
   text-align: left;
 }
 
@@ -2837,14 +2838,14 @@ body {
 
 .timetable-linked-work button strong {
   overflow: hidden;
-  color: #34413a;
+  color: var(--text-primary);
   font-size: var(--text-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .timetable-linked-work button small {
-  color: #89918d;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   text-transform: capitalize;
 }
@@ -2858,7 +2859,7 @@ body {
   right: 160px;
   width: 250px;
   padding: 10px;
-  border: 1px solid #e0e3dd;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 42px rgba(35, 47, 40, 0.14);
@@ -2899,7 +2900,7 @@ body {
 }
 
 .timetable-layers-popover > label:hover {
-  background: #f4f5f1;
+  background: var(--bg-tertiary);
 }
 
 .timetable-layers-popover > label > i {
@@ -2915,12 +2916,12 @@ body {
 }
 
 .timetable-layers-popover > label strong {
-  color: #3d4943;
+  color: var(--text-primary);
   font-size: var(--text-micro);
 }
 
 .timetable-layers-popover > label small {
-  color: #8a928e;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   text-transform: capitalize;
 }
@@ -2932,8 +2933,8 @@ body {
   gap: 7px;
   margin-top: 6px;
   padding: 8px 6px;
-  border-top: 1px solid #eceeea;
-  color: #5e4fc2;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--brand-ink);
   font-size: var(--text-micro);
   font-weight: 650;
 }
@@ -2951,12 +2952,12 @@ body {
   align-items: center;
   padding: 9px 7px;
   border-radius: var(--control-radius);
-  color: #6253c9;
+  color: var(--brand-ink);
   text-align: left;
 }
 
 .timetable-add-popover > button:hover {
-  background: #f4f2fc;
+  background: var(--brand-wash);
 }
 
 .timetable-add-popover span {
@@ -2966,12 +2967,12 @@ body {
 }
 
 .timetable-add-popover strong {
-  color: #35413b;
+  color: var(--text-primary);
   font-size: var(--text-micro);
 }
 
 .timetable-add-popover small {
-  color: #87908b;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
 }
 
@@ -3001,14 +3002,14 @@ body {
 
 .timetable-import-report small {
   margin-top: 2px;
-  color: #78827d;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   line-height: 1.4;
 }
 
 .timetable-import-report ul {
   margin: 8px 0 0 24px;
-  color: #707a75;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   line-height: 1.5;
 }
@@ -3025,7 +3026,7 @@ body {
   gap: 11px;
   overflow-y: auto;
   padding: 14px;
-  border: 1px solid #e1e4de;
+  border: 1px solid var(--border-default);
   border-radius: var(--surface-radius);
   background: rgba(255, 255, 255, 0.985);
   box-shadow: -12px 0 42px rgba(35, 47, 40, 0.15);
@@ -3037,7 +3038,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 9px;
-  border-bottom: 1px solid #eceeea;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .timetable-event-editor > header span {
@@ -3064,13 +3065,13 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #707a74;
+  color: var(--text-secondary);
 }
 
 .timetable-event-editor > label {
   display: grid;
   gap: 5px;
-  color: #727d77;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 720;
   letter-spacing: 0.04em;
@@ -3087,11 +3088,11 @@ body {
 .timetable-event-editor textarea {
   width: 100%;
   min-width: 0;
-  border: 1px solid #dfe3dd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
   outline: 0;
-  background: #fff;
-  color: #34413a;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 450;
   letter-spacing: normal;
@@ -3120,7 +3121,7 @@ body {
 .timetable-event-date-fields label {
   display: grid;
   gap: 5px;
-  color: #727d77;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 720;
   letter-spacing: 0.04em;
@@ -3145,9 +3146,9 @@ body {
   height: 31px;
   align-items: center;
   padding: 0 9px;
-  border: 1px solid #e0e3de;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
-  color: #68736d;
+  color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 650;
 }
@@ -3155,7 +3156,7 @@ body {
 .timetable-color-field button:hover:not(:disabled) {
   border-color: #cbc4f3;
   background: #f4f2ff;
-  color: #5d4abf;
+  color: var(--brand-ink);
 }
 
 .timetable-color-field button:disabled {
@@ -3167,7 +3168,7 @@ body {
   flex-direction: column;
   gap: 9px;
   padding: 10px;
-  border: 1px solid #d9e4de;
+  border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
   background: #f7fbf8;
 }
@@ -3178,7 +3179,7 @@ body {
 
 .timetable-source-overlay-time p {
   margin: 0;
-  color: #79837d;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   line-height: 1.45;
 }
@@ -3213,8 +3214,8 @@ body {
   gap: 5px;
   padding: 5px 7px;
   border-radius: var(--control-radius);
-  background: #f1f3ef;
-  color: #53615a;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   font-size: var(--text-micro);
 }
 
@@ -3275,7 +3276,7 @@ body {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
-    border-top: 1px solid #e7e9e4;
+    border-top: 1px solid var(--border-default);
     border-left: 0;
   }
 
@@ -3321,7 +3322,7 @@ body {
   .timetable-body > main {
     display: block;
     overflow: visible;
-    background: #fff;
+    background: var(--bg-elevated);
   }
 }
 

@@ -36,6 +36,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { createPortal } from "react-dom";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
@@ -610,6 +611,10 @@ export function FlashcardStudio({
     if (document.fullscreenElement)
       void document.exitFullscreen().catch(() => undefined);
   };
+  // Escape stays on the dialog's own key handler; the hook moves focus into
+  // the session, keeps Tab inside it and returns focus when it closes.
+  const studyDialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(studyDialogRef, { open: studyOpen && studyQueue.length > 0 });
   const beginStudySessionRef = useRef(beginStudySession);
   useEffect(() => {
     beginStudySessionRef.current = beginStudySession;
@@ -3173,6 +3178,8 @@ export function FlashcardStudio({
       {studyOpen && studyQueue.length && typeof document !== "undefined"
         ? createPortal(
             <div
+              ref={studyDialogRef}
+              tabIndex={-1}
               className="spectra-deck-study"
               role="dialog"
               aria-modal="true"

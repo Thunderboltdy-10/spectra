@@ -64,6 +64,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -700,6 +701,11 @@ export function WhiteboardStudio({
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
   const [presenting, setPresenting] = useState(false);
+  const presenterRef = useRef<HTMLDivElement>(null);
+  useModalFocus(presenterRef, {
+    open: presenting && canPresent,
+    onClose: () => setPresenting(false),
+  });
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
   const [assetsLoading, setAssetsLoading] = useState(true);
@@ -3735,9 +3741,12 @@ export function WhiteboardStudio({
           // window. Present is a full-window activity, so it renders to the body.
           createPortal(
             <div
+              ref={presenterRef}
+              tabIndex={-1}
               className="whiteboard-presenter"
               role="dialog"
               aria-modal="true"
+              aria-label="Whiteboard presentation"
             >
               <div className="whiteboard-presenter-bar">
                 <strong>{page.name}</strong>

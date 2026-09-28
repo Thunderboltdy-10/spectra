@@ -48,6 +48,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { createPortal } from "react-dom";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import {
@@ -1631,6 +1632,15 @@ export function PresentationStudio({
     slideDurations: number[];
     totalMs: number;
   }>();
+  const rehearsalReportRef = useRef<HTMLDivElement>(null);
+  const presenterRef = useRef<HTMLDivElement>(null);
+  useModalFocus(rehearsalReportRef, {
+    open: Boolean(rehearsalReport && !presentedDeck),
+    onClose: () => setRehearsalReport(undefined),
+  });
+  // Present mode keeps its own window key handler (Escape stops presenting);
+  // the hook traps Tab inside and returns focus when presenting ends.
+  useModalFocus(presenterRef, { open: Boolean(presentedDeck) });
   // One responsive contract, measured once by the shell: the rail keeps its
   // previews while the pane is at its preferred size and collapses to the
   // shared slide selector below it. The studio no longer runs its own observer
@@ -4878,6 +4888,8 @@ export function PresentationStudio({
       {rehearsalReport && !presentedDeck && typeof document !== "undefined"
         ? createPortal(
             <div
+              ref={rehearsalReportRef}
+              tabIndex={-1}
               className="presentation-rehearsal-report"
               role="dialog"
               aria-modal="true"
@@ -4887,7 +4899,7 @@ export function PresentationStudio({
                 <span>
                   <Clock3 className="h-4 w-4" /> Private rehearsal
                 </span>
-                <button type="button" onClick={() => setRehearsalReport(undefined)}>
+                <button type="button" aria-label="Close rehearsal report" onClick={() => setRehearsalReport(undefined)}>
                   <X className="h-4 w-4" />
                 </button>
               </header>
@@ -4948,6 +4960,8 @@ export function PresentationStudio({
       {presentedDeck && typeof document !== "undefined"
         ? createPortal(
             <div
+              ref={presenterRef}
+              tabIndex={-1}
               className="presentation-presenter"
               data-layout={presentLayout}
               data-chrome={presentChrome || undefined}

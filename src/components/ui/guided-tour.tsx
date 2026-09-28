@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "./use-modal-focus";
 import { Button } from "@/components/ui/button";
 
 export type GuidedTourStep = {
@@ -218,6 +219,9 @@ export function GuidedTour({
     return resolveTooltipPosition(syntheticRect, step.position, viewport);
   }, [highlightedRect, step.position, viewport]);
 
+  const card = useRef<HTMLDivElement>(null);
+  useModalFocus(card, { open: open && Boolean(step), onClose });
+
   if (!open || !step) return null;
 
   return (
@@ -241,6 +245,8 @@ export function GuidedTour({
       )}
 
       <div
+        ref={card}
+        tabIndex={-1}
         className="pointer-events-auto fixed w-[min(90vw,340px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]"
         style={{ left: cardPosition.left, top: cardPosition.top }}
         role="dialog"

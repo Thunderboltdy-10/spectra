@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import {
   AlertCircle,
@@ -137,6 +138,11 @@ export function PlanStudio({
   const quickAddRef = useRef<HTMLInputElement>(null);
   const boardAddRef = useRef<HTMLInputElement>(null);
   const autoOpenedTaskKeyRef = useRef<string | undefined>(undefined);
+  const bulkConfirmRef = useRef<HTMLDivElement>(null);
+  useModalFocus(bulkConfirmRef, {
+    open: Boolean(pendingBulk?.bulk.confirmation),
+    onClose: () => setPendingBulk(undefined),
+  });
   const [columnDraft, setColumnDraft] = useState<
     Partial<Record<PlanStatus, string>>
   >({});
@@ -1477,7 +1483,7 @@ export function PlanStudio({
       ) : null}
 
       {pendingBulk?.bulk.confirmation ? (
-        <div className="spectra-plan-confirm" role="alertdialog">
+        <div ref={bulkConfirmRef} tabIndex={-1} className="spectra-plan-confirm" role="alertdialog">
           <div>
             <strong>{pendingBulk.bulk.confirmation.title}</strong>
             <p>{pendingBulk.bulk.confirmation.body}</p>

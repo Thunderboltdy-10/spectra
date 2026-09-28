@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -101,6 +102,10 @@ export function UniversalKBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
+  // Escape and focus return stay on the bar's own handlers; the hook keeps Tab
+  // inside the open bar.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, { open });
   useEffect(() => spectraBus.subscribe("run.active", ({ runIds }) => {
     setActiveRunIds(runIds);
   }), []);
@@ -394,6 +399,8 @@ export function UniversalKBar() {
           }}
         >
           <div
+            ref={dialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="Spectra command bar"

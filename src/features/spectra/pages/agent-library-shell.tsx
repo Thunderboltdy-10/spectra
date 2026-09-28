@@ -31,6 +31,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { toast } from "sonner";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
 import {
@@ -422,6 +423,16 @@ export function AgentLibraryShell({
   const [publicPreview, setPublicPreview] = useState<SpectraPublicAgent | null>(
     null,
   );
+  const placementDialogRef = useRef<HTMLElement>(null);
+  const publicPreviewDialogRef = useRef<HTMLElement>(null);
+  useModalFocus(placementDialogRef, {
+    open: Boolean(placementTarget),
+    onClose: () => setPlacementTarget(null),
+  });
+  useModalFocus(publicPreviewDialogRef, {
+    open: Boolean(publicPreview),
+    onClose: () => setPublicPreview(null),
+  });
   const [panelWidth, setPanelWidth] = useState(780);
   const openedQueryRef = useRef<string | null>(null);
   const studio = useArtifactStudioState(
@@ -1027,6 +1038,8 @@ export function AgentLibraryShell({
         >
           <section
             className="agent-library-dialog"
+            ref={placementDialogRef}
+            tabIndex={-1}
             onPointerDown={(event) => event.stopPropagation()}
             aria-modal="true"
             role="dialog"
@@ -1109,6 +1122,8 @@ export function AgentLibraryShell({
         >
           <section
             className="agent-library-dialog max-w-[560px]"
+            ref={publicPreviewDialogRef}
+            tabIndex={-1}
             onPointerDown={(event) => event.stopPropagation()}
             aria-modal="true"
             role="dialog"

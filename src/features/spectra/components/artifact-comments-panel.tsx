@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { toast } from "sonner";
 import {
   getSpectraArtifactCommentPreference,
@@ -178,6 +179,11 @@ export function ArtifactCommentsPanel({
     }, 220);
     return () => window.clearTimeout(timeout);
   }, [mentionSearch, open]);
+
+  // Escape stays on the window listener below; the hook adds the focus trap
+  // and returns focus to the control that opened the panel.
+  const panelRef = useRef<HTMLElement>(null);
+  useModalFocus(panelRef, { open });
 
   useEffect(() => {
     if (!open) return;
@@ -357,7 +363,7 @@ export function ArtifactCommentsPanel({
   if (!open) return null;
   return (
     <div className="absolute inset-0 z-panel flex justify-end" onPointerDown={onClose}>
-      <aside role="dialog" aria-modal="true" aria-labelledby="artifact-comments-title" className="flex h-full w-full max-w-[410px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]" onPointerDown={(event) => event.stopPropagation()}>
+      <aside ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="artifact-comments-title" className="flex h-full w-full max-w-[410px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]" onPointerDown={(event) => event.stopPropagation()}>
         <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-4 py-4">
           <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><h2 id="artifact-comments-title" className="font-display text-heading font-semibold text-[var(--text-primary)]">Comments</h2><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>
           <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="h-4 w-4" /></button></div>

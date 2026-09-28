@@ -1769,8 +1769,12 @@ function SettingsDialog({
     "h-9 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-micro outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
   const canConnectWithoutTypedToken =
     !connected && envTokenAvailable && config.token.length === 0;
+  const surface = useRef<HTMLDivElement>(null);
+  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
     <div
+      ref={surface}
+      tabIndex={-1}
       className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="dialog"
       aria-modal="true"
@@ -1920,8 +1924,12 @@ function ManifestDialog({
   onClose: () => void;
   onImport: () => void;
 }) {
+  const surface = useRef<HTMLDivElement>(null);
+  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
     <div
+      ref={surface}
+      tabIndex={-1}
       className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="dialog"
       aria-modal="true"

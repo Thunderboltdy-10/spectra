@@ -314,6 +314,70 @@ it("waits for a live AI run's lease before deleting it", async () => {
   expect(Date.now()).toBeGreaterThanOrEqual(leaseExpiresAt);
 });
 
+it("backs off a job that never makes progress, then parks it for an operator with an audit record", async () => {
+  vi.useFakeTimers();
+  const t = setup();
+  const accountId = await t.run(ctx => ctx.db.insert("accounts", {
+    clerkId: "stuck", email: "stuck@example.test", emailVerified: true, name: "Stuck Student",
+    status: "active", createdAt: Date.now(), updatedAt: Date.now(),
+  }));
+  const { jobId } = await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "stuck" });
+  // A page that fails every time: here the account row the job needs is gone,
+  // so no page of this job can ever commit.
+  await t.run(ctx => ctx.db.delete(accountId));
+  const minutes = (count: number) => vi.setSystemTime(Date.now() + count * 60_000);
+  const sweep = () => t.mutation(internal.accountErasure.resumeStalled, {});
+  const job = () => t.run(ctx => ctx.db.get(jobId));
+
+  minutes(11);
+  expect(await sweep()).toEqual({ resumed: 1, parked: 0 });
+  expect((await job())?.stalledRestarts).toBe(1);
+  // Backoff: the next restart waits twice as long, not another ten minutes.
+  minutes(11);
+  expect(await sweep()).toEqual({ resumed: 0, parked: 0 });
+  for (const wait of [10, 40, 80, 160]) {
+    minutes(wait);
+    expect(await sweep()).toEqual({ resumed: 1, parked: 0 });
+  }
+  expect((await job())?.stalledRestarts).toBe(5);
+  minutes(320);
+  expect(await sweep()).toEqual({ resumed: 0, parked: 1 });
+  expect(await job()).toMatchObject({ stage: "failed_needs_attention", resumeStage: "works" });
+  const alerts = await t.run(ctx => ctx.db.query("auditEvents").collect());
+  expect(alerts.filter(event => event.action === "account.erasure.needs_attention")).toEqual([
+    expect.objectContaining({ targetId: accountId, retentionClass: "legal", metadata: expect.objectContaining({ stage: "works", restarts: 5 }) }),
+  ]);
+  // Parked means parked: neither the cron nor a redelivered webhook restarts it.
+  minutes(24 * 60);
+  expect(await sweep()).toEqual({ resumed: 0, parked: 0 });
+  await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "stuck" });
+  expect((await job())?.stage).toBe("failed_needs_attention");
+}, 60_000);
+
+it("an operator resumes a parked job where it stopped and it completes", async () => {
+  vi.useFakeTimers();
+  const t = setup();
+  const ids = await seed(t);
+  const { jobId } = await t.mutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: "erase-me" });
+  // Parked before any page ran (as the cron would after repeated failures).
+  await t.run(ctx => ctx.db.patch(jobId, { stage: "failed_needs_attention", resumeStage: "works", stalledRestarts: 5, needsAttentionAt: Date.now() }));
+  await finishErasure(t);
+  expect((await t.run(ctx => ctx.db.get(jobId)))?.stage).toBe("failed_needs_attention");
+  expect(await t.mutation(internal.accountErasure.resumeNeedsAttention, { jobId })).toEqual({ stage: "works", resumed: true });
+  await finishErasure(t);
+  const after = await t.run(async ctx => ({
+    job: await ctx.db.get(jobId),
+    account: await ctx.db.get(ids.erased),
+    resumed: (await ctx.db.query("auditEvents").collect()).filter(event => event.action === "account.erasure.resumed"),
+  }));
+  expect(after.job).toMatchObject({ stage: "completed", stalledRestarts: 0 });
+  expect(after.job?.resumeStage).toBeUndefined();
+  expect(after.account).toMatchObject({ name: "Former member", email: "" });
+  expect(after.resumed).toHaveLength(1);
+  // Resuming a job that is not parked is a no-op.
+  expect(await t.mutation(internal.accountErasure.resumeNeedsAttention, { jobId })).toEqual({ stage: "completed", resumed: false });
+}, 60_000);
+
 it("the bridge action erases only for a request signed with the server key", async () => {
   const key = "bridge-key-fixture-with-at-least-32-characters";
   vi.stubEnv("SPECTRA_SECRET_BRIDGE_KEY", key);

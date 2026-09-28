@@ -50,6 +50,10 @@ const NODE_PAGE = 50;
 const WAIT_FOR_WORKS_MS = 30_000;
 const WAIT_FOR_RUN_MS = 60_000;
 const STALLED_AFTER_MS = 10 * 60_000;
+// Restarts without progress before the job is parked for an operator. With
+// the doubling backoff below the job is parked about ten hours after its
+// last progress.
+const MAX_STALLED_RESTARTS = 5;
 const NONE: Counts = { deletedRows: 0, deletedStorageObjects: 0 };
 
 function add(a: Counts, b: Counts): Counts {
@@ -627,6 +631,7 @@ async function runStage(ctx: MutationCtx, job: Job, account: Doc<"accounts">): P
     case "finalize":
       return finalize(ctx, job, account);
     case "completed":
+    case "failed_needs_attention":
       return { cursor: undefined };
   }
 }
@@ -639,7 +644,8 @@ export const process = internalMutation({
   args: { jobId: v.id("accountErasureJobs"), step: v.number() },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
-    if (!job || job.stage === "completed" || job.step !== args.step) return null;
+    if (!job || job.stage === "completed" || job.stage === "failed_needs_attention" || job.step !== args.step)
+      return null;
     const account = await ctx.db.get(job.accountId);
     if (!account) throw new Error("ACCOUNT_ERASURE_ACCOUNT_MISSING");
     const advance = await runStage(ctx, job, account);
@@ -657,6 +663,8 @@ export const process = internalMutation({
       deletedRows: job.deletedRows + counts.deletedRows,
       deletedStorageObjects: job.deletedStorageObjects + counts.deletedStorageObjects,
       updatedAt: now,
+      // A page committed: the job is making progress again.
+      ...(job.stalledRestarts ? { stalledRestarts: 0 } : {}),
       ...(stage === "completed" ? { completedAt: now } : {}),
     });
     if (stage !== "completed")
@@ -696,7 +704,8 @@ export const requestForDeletedIdentity = internalMutation({
     }
     const existing = await ctx.db.query("accountErasureJobs").withIndex("by_account", (q) => q.eq("accountId", account._id)).unique();
     if (existing) {
-      if (existing.stage !== "completed")
+      // A parked job waits for an operator; a redelivered event cannot unpark it.
+      if (existing.stage !== "completed" && existing.stage !== "failed_needs_attention")
         await ctx.scheduler.runAfter(0, internal.accountErasure.process, { jobId: existing._id, step: existing.step });
       return { status: existing.stage === "completed" ? ("completed" as const) : ("running" as const), jobId: existing._id };
     }
@@ -738,21 +747,82 @@ function emptyJob(accountId: Id<"accounts">, now: number) {
 
 const ACTIVE_STAGES = ["works", "await_works", "account_rows", "placements", "workspaces", "finalize"] as const;
 
-/** Cron: restart any job whose chain stopped (a failed page, a lost schedule). */
+/**
+ * Cron: restart any job whose chain stopped (a failed page, a lost schedule).
+ * A page that fails every time (say, schema drift in a drained table) never
+ * commits, so the job stops making progress. Each restart without progress
+ * doubles the wait before the next one; after MAX_STALLED_RESTARTS the job is
+ * parked as `failed_needs_attention` with an audit record the platform
+ * security log shows, instead of retrying forever unseen.
+ */
 export const resumeStalled = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const cutoff = Date.now() - STALLED_AFTER_MS;
+    const now = Date.now();
+    const cutoff = now - STALLED_AFTER_MS;
     let resumed = 0;
+    let parked = 0;
     for (const stage of ACTIVE_STAGES)
       for (const job of await ctx.db
         .query("accountErasureJobs")
         .withIndex("by_stage_updated", (q) => q.eq("stage", stage).lt("updatedAt", cutoff))
-        .take(10)) {
-        await ctx.db.patch(job._id, { updatedAt: Date.now() });
+        .take(25)) {
+        const restarts = job.stalledRestarts ?? 0;
+        if (now - job.updatedAt < STALLED_AFTER_MS * 2 ** restarts) continue;
+        if (restarts >= MAX_STALLED_RESTARTS) {
+          await ctx.db.patch(job._id, {
+            stage: "failed_needs_attention",
+            resumeStage: stage,
+            needsAttentionAt: now,
+            updatedAt: now,
+          });
+          await writeAuditEvent(ctx, {
+            actorAccountId: job.accountId,
+            action: "account.erasure.needs_attention",
+            targetType: "account",
+            targetId: job.accountId,
+            metadata: { jobId: job._id, stage, step: job.step, restarts },
+            retentionClass: "legal",
+          });
+          console.error("[account-erasure] parked for an operator", { jobId: job._id, stage, restarts });
+          parked += 1;
+          continue;
+        }
+        await ctx.db.patch(job._id, { updatedAt: now, stalledRestarts: restarts + 1 });
         await ctx.scheduler.runAfter(0, internal.accountErasure.process, { jobId: job._id, step: job.step });
         resumed += 1;
       }
-    return { resumed };
+    return { resumed, parked };
+  },
+});
+
+/**
+ * Operator: after fixing the cause, resume a parked job where it stopped.
+ * `npx convex run accountErasure:resumeNeedsAttention '{"jobId":"..."}'`
+ */
+export const resumeNeedsAttention = internalMutation({
+  args: { jobId: v.id("accountErasureJobs") },
+  handler: async (ctx, { jobId }) => {
+    const job = await ctx.db.get(jobId);
+    if (!job) throw new Error("ACCOUNT_ERASURE_JOB_MISSING");
+    if (job.stage !== "failed_needs_attention") return { stage: job.stage, resumed: false };
+    const stage = job.resumeStage ?? "works";
+    await ctx.db.patch(job._id, {
+      stage,
+      resumeStage: undefined,
+      needsAttentionAt: undefined,
+      stalledRestarts: 0,
+      updatedAt: Date.now(),
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: job.accountId,
+      action: "account.erasure.resumed",
+      targetType: "account",
+      targetId: job.accountId,
+      metadata: { jobId: job._id, stage, step: job.step, by: "operator" },
+      retentionClass: "legal",
+    });
+    await ctx.scheduler.runAfter(0, internal.accountErasure.process, { jobId: job._id, step: job.step });
+    return { stage, resumed: true };
   },
 });

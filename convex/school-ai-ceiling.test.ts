@@ -182,3 +182,45 @@ it("admits Agent Foundry and evaluation work under the ceiling and meters only s
     vi.unstubAllEnvs();
   }
 });
+
+it("an operator backfill rebuilds totals that predate the rollup, exactly and without double counting", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-28T10:00:00Z"));
+  const { t, ids, useTokens } = await fixture();
+  // Usage metered before the rollup shipped: meters exist, totals do not.
+  await t.run(async (ctx) => {
+    const meter = (schoolId: Id<"schools">, accountId: Id<"accounts">, category: "model_input_tokens" | "model_output_tokens" | "storage_bytes", day: string, quantity: number, dimensionsKey = "") =>
+      ctx.db.insert("usageMeters", { schoolId, accountId, category, day, dimensionsKey, quantity, updatedAt: Date.now() });
+    await meter(ids.capped, ids.student, "model_input_tokens", "2026-08-30", 700);
+    await meter(ids.capped, ids.student, "model_output_tokens", "2026-08-30", 300);
+    await meter(ids.capped, ids.student, "model_input_tokens", "2026-09-27", 40, "model=a");
+    await meter(ids.capped, ids.student, "model_input_tokens", "2026-09-27", 60, "model=b");
+    await meter(ids.other, ids.neighbour, "model_output_tokens", "2026-09-01", 5);
+    await meter(ids.capped, ids.student, "storage_bytes", "2026-09-27", 9_999);
+  });
+  // Usage after the rollup is already in the totals, and must stay counted once.
+  await useTokens(ids.capped, ids.student, 10, 5);
+  const totals = (schoolId: Id<"schools">) => t.run(async (ctx) => Object.fromEntries(
+    (await ctx.db.query("schoolUsageTotals").withIndex("by_school_period", (q) => q.eq("schoolId", schoolId).eq("category", "model_tokens")).collect())
+      .map((row) => [row.periodKey, row.quantity]),
+  ));
+  expect(await totals(ids.capped)).toEqual({ "day:2026-09-28": 15, "month:2026-09": 15, total: 15 });
+
+  await t.mutation(internal.metering.backfillSchoolUsageTotals, {});
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  const expected = {
+    "day:2026-08-30": 1_000, "day:2026-09-27": 100, "day:2026-09-28": 15,
+    "month:2026-08": 1_000, "month:2026-09": 115, total: 1_115,
+  };
+  expect(await totals(ids.capped)).toEqual(expected);
+  expect(await totals(ids.other)).toEqual({ "day:2026-09-01": 5, "month:2026-09": 5, total: 5 });
+
+  // Finished: a second call is a no-op, and a deliberate re-run changes nothing.
+  expect(await t.mutation(internal.metering.backfillSchoolUsageTotals, {})).toMatchObject({ state: "complete" });
+  await t.mutation(internal.metering.backfillSchoolUsageTotals, { restart: true });
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  expect(await totals(ids.capped)).toEqual(expected);
+  // New usage keeps adding on top of the rebuilt totals.
+  await useTokens(ids.capped, ids.student, 1, 1);
+  expect(await totals(ids.capped)).toMatchObject({ "day:2026-09-28": 17, "month:2026-09": 117, total: 1_117 });
+});

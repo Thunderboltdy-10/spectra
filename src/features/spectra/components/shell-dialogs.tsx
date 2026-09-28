@@ -128,8 +128,7 @@ export function WorkspaceDeleteDialog({
       <DialogContent className="max-w-[min(480px,calc(100vw-32px))] gap-0 p-5">
         <DialogTitle>Permanently remove {workspaceTitle}?</DialogTitle>
         <DialogDescription className="mt-2">
-          This removes the workspace and its placements. Artifacts, threads, and
-          AI run history remain available and are never deleted with their
+          This removes the workspace and its placements. Your work, threads, and AI run history remain available and are never deleted with their
           workspace.
         </DialogDescription>
         <div className="mt-4">

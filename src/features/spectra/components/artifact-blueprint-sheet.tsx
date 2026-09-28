@@ -397,7 +397,7 @@ export function ArtifactBlueprintSheet({
                 </div>
               </div>
             </div>
-            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose} aria-label="Close artifact detail">
+            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose} aria-label="Close details">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -426,7 +426,7 @@ export function ArtifactBlueprintSheet({
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_250px]">
             <section className="min-w-0 space-y-4">
               <Field label="Title">
-                <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass()} placeholder="Artifact title" />
+                <input value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass()} placeholder="Title" />
               </Field>
               <Field label="Summary">
                 <LocalAutocompleteTextarea surface="description" value={summary} onValueChange={setSummary} className="w-full" textareaClassName={textareaClass("min-h-[78px]")} placeholder="Short useful summary" />
@@ -456,7 +456,7 @@ export function ArtifactBlueprintSheet({
               </div>
               <div className="rounded-control border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_54%,transparent)] p-4 text-caption leading-5 text-[var(--text-secondary)]">
                 <Sparkles className="mb-2 h-4 w-4 text-[var(--text-tertiary)]" />
-                Changes stay in this draft until you save. You can keep working across every section without losing the rest of the artifact.
+                Changes stay in this draft until you save. You can keep working across every section without losing the rest of your work.
               </div>
             </aside>
           </div>
@@ -464,7 +464,7 @@ export function ArtifactBlueprintSheet({
         <footer className="flex items-center justify-between gap-4 border-t border-[var(--border-default)] px-6 py-4">
           <div className="hidden items-center gap-2 text-caption text-[var(--text-secondary)] sm:flex">
             <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-            Saves to the shared artifact object.
+            Saves the copy everyone with access sees.
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button type="button" className={secondaryButtonClass()} onClick={onClose}>Cancel</button>

@@ -9,6 +9,7 @@ import {
   type CalendarPagination,
   type CalendarStream,
 } from "../../../../../shared/calendar-pagination";
+import { requestSpectra } from "../../data/request";
 
 const STREAMS = Object.keys(CALENDAR_CURSOR_ARGS) as CalendarStream[];
 const EMPTY_PAGINATION: CalendarPagination = {
@@ -101,10 +102,11 @@ export async function fetchCalendarOverview(
           CALENDAR_CURSOR_ARGS[stream],
           cursors[stream] ?? CALENDAR_DONE_CURSOR,
         );
-    const response = await fetch(`/api/spectra/calendar?${params}`, {
+    const response = await requestSpectra(`/api/spectra/calendar?${params}`, {
       signal: options.signal,
     });
-    const payload = await response.json();
+    // A proxy error page is HTML; its parse error is not a Calendar message.
+    const payload = await response.json().catch(() => null);
     options.signal?.throwIfAborted();
     if (!response.ok)
       throw new Error(payload?.error?.message ?? "Could not load Calendar.");

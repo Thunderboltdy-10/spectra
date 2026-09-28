@@ -4326,6 +4326,18 @@ body {
   scroll-behavior: auto !important;
   transition-duration: 0ms !important;
 }
+/* Loaders always carry a text label, so under reduced motion (the OS setting
+   or Spectra's own) they stop moving instead of spinning or pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse {
+    animation: none;
+  }
+}
+:root[data-spectra-motion="reduced"] .animate-spin,
+:root[data-spectra-motion="reduced"] .animate-pulse {
+  animation: none;
+}
 
 .dark {
   --brand-primary: #9a87ff;

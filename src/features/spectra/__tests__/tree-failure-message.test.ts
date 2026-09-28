@@ -28,6 +28,17 @@ describe("treeFailureMessage LIBRARY_* humanization", () => {
     ).toBe("Select something first.");
   });
 
+  it("uses the fallback for a redacted production Convex frame", () => {
+    expect(
+      treeFailureMessage(
+        new Error(
+          "[CONVEX M(libraryTree:move)] [Request ID: 5c2b1e0f9a] Server Error\n  Called by client",
+        ),
+        "Could not move.",
+      ),
+    ).toBe("Could not move.");
+  });
+
   it("maps unknown LIBRARY_* codes to a generic Library sentence", () => {
     expect(
       treeFailureMessage(new Error("LIBRARY_SOMETHING_NEW"), "fallback"),

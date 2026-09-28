@@ -1,3 +1,5 @@
+import { requestSpectra } from "../data/request";
+
 export type AdministrationIdentity = {
   account: {
     accountId: string;
@@ -189,11 +191,17 @@ async function responseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const structuredError =
       data?.error && typeof data.error === "object" ? data.error : null;
-    throw new Error(
-      data?.message ??
-        structuredError?.message ??
-        (typeof data?.error === "string" ? data.error : undefined) ??
-        "The administration request failed.",
+    // The route strips the machine code from the sentence; keep it beside the
+    // message so callers can branch on it (for example, a final invitation
+    // decision must not be offered as a retry) without showing it to anyone.
+    throw Object.assign(
+      new Error(
+        data?.message ??
+          structuredError?.message ??
+          (typeof data?.error === "string" ? data.error : undefined) ??
+          "Spectra could not finish this request. Try again in a moment.",
+      ),
+      { code: structuredError?.code },
     );
   }
   return data as T;
@@ -207,7 +215,7 @@ export async function getAdministration<T>(
   for (const [key, value] of Object.entries(params))
     if (value !== undefined) query.set(key, String(value));
   return responseJson<T>(
-    await fetch(`/api/spectra/administration?${query}`, {
+    await requestSpectra(`/api/spectra/administration?${query}`, {
       cache: "no-store",
     }),
   );
@@ -218,7 +226,7 @@ export async function mutateAdministration<T>(
   payload: Record<string, unknown> = {},
 ) {
   return responseJson<T>(
-    await fetch("/api/spectra/administration", {
+    await requestSpectra("/api/spectra/administration", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...payload }),

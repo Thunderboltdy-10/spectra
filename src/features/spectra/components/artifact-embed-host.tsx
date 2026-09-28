@@ -1,5 +1,6 @@
 "use client";
 
+import { describeFailure } from "@/components/ui/truthful-state";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -76,9 +77,7 @@ export function ArtifactEmbedById({
           void update({ embedId: embedId as Id<"artifactEmbeds">, mode })
             .catch((error) =>
               toast.error(
-                error instanceof Error
-                  ? error.message
-                  : "The reference size could not be changed.",
+                describeFailure(error, { fallback: "The reference size could not be changed." }).message,
               ),
             )
             .finally(() => setBusy(false));
@@ -93,9 +92,7 @@ export function ArtifactEmbedById({
                   .then(() => onRemove())
                   .catch((error) =>
                     toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "The reference could not be removed.",
+                      describeFailure(error, { fallback: "The reference could not be removed." }).message,
                     ),
                   )
                   .finally(() => setBusy(false));
@@ -153,9 +150,7 @@ export function ArtifactEmbedList({
                     embedId: embed.embedId as Id<"artifactEmbeds">,
                   }).catch((error) =>
                     toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "The reference could not be removed.",
+                      describeFailure(error, { fallback: "The reference could not be removed." }).message,
                     ),
                   )
               : undefined

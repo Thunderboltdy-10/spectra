@@ -47,6 +47,7 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import { requestSpectra } from "../../data/request";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -379,7 +380,7 @@ function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
 }
 
 async function calendarPost(body: Record<string, unknown>) {
-  const response = await fetch("/api/spectra/calendar", {
+  const response = await requestSpectra("/api/spectra/calendar", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

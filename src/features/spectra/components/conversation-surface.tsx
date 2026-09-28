@@ -67,6 +67,7 @@ import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
 import { ArtifactEmbedList } from "./artifact-embed-host";
 import { publicSpectraFailureText } from "../runs/live-dock";
+import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 
 function operationLabel(
   operation: SpectraThreadTrace["operations"][number],
@@ -300,206 +301,6 @@ function messageChoices(
     options.length <= 6
     ? { question: row.question, options, selectedTitle }
     : null;
-}
-
-function ChoiceBlock({
-  question,
-  options,
-  selectedTitle,
-  onChoose,
-  onSkip,
-}: {
-  question: string;
-  options: ConversationChoice[];
-  selectedTitle?: string | null;
-  onChoose?: (
-    choice: ConversationChoice,
-    index: number,
-  ) => Promise<void> | void;
-  onSkip?: () => Promise<void> | void;
-}) {
-  const [pending, setPending] = useState<string | null>(null);
-  const selected = selectedTitle ?? pending;
-  if (selectedTitle)
-    return (
-      <section
-        className="mt-4 border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] py-1 pl-3"
-        data-conversation-action="choice-answered"
-        aria-label="Answered question"
-      >
-        <div className="text-caption font-semibold text-[var(--text-primary)]">
-          {question}
-        </div>
-        <p className="mt-1 text-micro text-[var(--text-secondary)]">
-          {selectedTitle === "Skipped"
-            ? "Skipped"
-            : `Answered: ${selectedTitle}`}
-        </p>
-      </section>
-    );
-  return (
-    <section
-      className="mt-4 overflow-hidden rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
-      data-conversation-action="choice"
-      aria-label="Choose one response"
-    >
-      <div className="mb-2 text-caption font-semibold text-[var(--text-primary)]">
-        {question}
-      </div>
-      <div
-        className={`grid gap-2 ${options.length === 2 ? "sm:grid-cols-2" : "grid-cols-1"}`}
-      >
-        {options.map((option, index) => (
-          <button
-            key={`${option.title}:${index}`}
-            type="button"
-            disabled={Boolean(selected)}
-            aria-pressed={selected === option.title}
-            onClick={() => {
-              setPending(option.title);
-              Promise.resolve(onChoose?.(option, index)).catch((error) => {
-                setPending(null);
-                toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : "Could not save that choice.",
-                );
-              });
-            }}
-            className={`group min-h-11 rounded-card border px-3 py-2.5 text-left transition ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] hover:shadow-[0_5px_18px_rgba(27,20,12,0.06)] disabled:opacity-55"}`}
-          >
-            <span className="block text-caption font-semibold text-[var(--text-primary)]">
-              {option.title}
-            </span>
-            {option.description ? (
-              <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
-                {option.description}
-              </span>
-            ) : null}
-          </button>
-        ))}
-      </div>
-      {onSkip ? (
-        <button
-          type="button"
-          disabled={Boolean(selected)}
-          onClick={() => {
-            setPending("Skipped");
-            Promise.resolve(onSkip()).catch(() => setPending(null));
-          }}
-          className="mt-2 h-7 rounded-chip px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] disabled:opacity-45"
-        >
-          Skip for now
-        </button>
-      ) : null}
-    </section>
-  );
-}
-
-function BatchedChoiceBlock({
-  questions,
-  selectedTitle,
-  onSubmit,
-}: {
-  questions: Array<{
-    id: string;
-    question: string;
-    options: ConversationChoice[];
-  }>;
-  selectedTitle?: string | null;
-  onSubmit: (answer: string, selections: ConversationBatchSelection[]) => Promise<void> | void;
-}) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState(false);
-  if (selectedTitle)
-    return (
-      <section
-        className="mt-4 border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] py-1 pl-3"
-        data-conversation-action="choice-batch-answered"
-        aria-label="Answered questions"
-      >
-        <p className="text-caption font-semibold text-[var(--text-primary)]">
-          {questions.length} questions asked
-        </p>
-        <p className="mt-1 text-micro text-[var(--text-secondary)]">
-          {selectedTitle}
-        </p>
-      </section>
-    );
-  const complete = questions.every((question) => answers[question.id]);
-  return (
-    <section
-      className="mt-4 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
-      aria-label="Answer multiple questions"
-    >
-      <p className="mb-2 text-caption font-bold text-[var(--text-primary)]">
-        A few quick questions
-      </p>
-      <div className="max-h-72 space-y-3 overflow-y-auto pr-1 [scrollbar-width:thin]">
-        {questions.map((question, index) => (
-          <fieldset key={question.id}>
-            <legend className="text-micro font-semibold leading-4 text-[var(--text-primary)]">
-              {index + 1}. {question.question}
-            </legend>
-            <div className="mt-1 grid gap-1 sm:grid-cols-2">
-              {question.options.map((option) => (
-                <button
-                  key={option.key ?? option.title}
-                  type="button"
-                  aria-pressed={answers[question.id] === option.key}
-                  onClick={() =>
-                    setAnswers((current) => ({
-                      ...current,
-                      [question.id]: option.key ?? "",
-                    }))
-                  }
-                  className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${answers[question.id] === option.key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
-                >
-                  {option.title}
-                </button>
-              ))}
-              <button
-                type="button"
-                aria-pressed={answers[question.id] === "skip"}
-                onClick={() =>
-                  setAnswers((current) => ({
-                    ...current,
-                    [question.id]: "skip",
-                  }))
-                }
-                className="rounded-chip px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-              >
-                Skip this question
-              </button>
-            </div>
-          </fieldset>
-        ))}
-      </div>
-      <button
-        type="button"
-        disabled={!complete || pending}
-        onClick={() => {
-          const selections = questions.map((question) => {
-            const choiceKey = answers[question.id] ?? "skip";
-            const choice = question.options.find((option) => option.key === choiceKey);
-            return {
-              questionId: question.id,
-              choiceKey,
-              choiceTitle: choice?.title ?? "Skipped",
-            };
-          });
-          const answer = selections
-            .map((selection, index) => `${index + 1}) ${selection.choiceTitle}`)
-            .join("; ");
-          setPending(true);
-          void Promise.resolve(onSubmit(answer, selections)).catch(() => setPending(false));
-        }}
-        className="mt-3 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
-      >
-        Continue with these answers
-      </button>
-    </section>
-  );
 }
 
 function conflictSnapshot(value: unknown) {
@@ -1594,8 +1395,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
               onChange={(event) => setShareComment(event.target.checked)}
             />
             Share this comment with the agent creator. The rating and category
-            are aggregated; your prompt, thread, memory, and artifacts are never
-            shared.
+            are aggregated; your prompt, thread, memory, and work are never shared.
           </label>
           <div className="flex justify-end gap-1.5">
             <button

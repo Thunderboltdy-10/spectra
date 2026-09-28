@@ -827,7 +827,7 @@ export function CollaborationPresenceIndicator({
         <div className="absolute right-0 top-[calc(100%+8px)] z-panel w-64 overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover">
           <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
             <span className="text-micro font-semibold text-[var(--text-primary)]">
-              In this artifact
+              People here
             </span>
             <button
               type="button"

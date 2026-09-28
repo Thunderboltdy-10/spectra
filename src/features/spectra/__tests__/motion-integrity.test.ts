@@ -127,4 +127,13 @@ describe("motion integrity", () => {
     expect(globals).toContain("animation-duration: 0.01ms !important");
     expect(globals).toContain("transition-duration: 0.01ms !important");
   });
+
+  it("stops Tailwind loaders under OS or Spectra reduced motion", () => {
+    expect(globals).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.animate-spin,\s*\.animate-pulse \{\s*animation: none;/,
+    );
+    expect(globals).toMatch(
+      /:root\[data-spectra-motion="reduced"\] \.animate-spin,\s*:root\[data-spectra-motion="reduced"\] \.animate-pulse \{\s*animation: none;/,
+    );
+  });
 });

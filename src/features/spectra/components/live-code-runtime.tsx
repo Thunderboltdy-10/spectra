@@ -44,7 +44,7 @@ export function LiveCodeRuntime({
   const content = useMemo(() => normalizeCodeContent(rawContent), [rawContent]);
   const [state, setState] = useState<RuntimeState>("loading");
   const [message, setMessage] = useState(
-    "Preparing the live artifact safely...",
+    "Preparing the live preview…",
   );
   const [previewFiles, setPreviewFiles] = useState<CodeFile[] | null>(null);
   const [assets, setAssets] = useState<SpectraSandboxAsset[]>([]);
@@ -62,7 +62,7 @@ export function LiveCodeRuntime({
     workerRef.current?.cancel();
     workerRef.current = null;
     setState("loading");
-    setMessage("Preparing the live artifact safely...");
+    setMessage("Preparing the live preview…");
     setPreviewFiles(null);
     setAssets([]);
     setPythonState("idle");
@@ -149,7 +149,7 @@ export function LiveCodeRuntime({
             ],
       );
       setState("ready");
-      setMessage("Live preview rebuilt from the current artifact state.");
+      setMessage("Live preview rebuilt from your latest code.");
     })().catch((error) => {
       if (controller.signal.aborted || generation !== generationRef.current)
         return;
@@ -157,7 +157,7 @@ export function LiveCodeRuntime({
       setMessage(
         error instanceof Error
           ? error.message
-          : "The live artifact could not be opened safely.",
+          : "The live preview could not open. Try again in a moment.",
       );
     });
     return () => controller.abort();
@@ -341,7 +341,7 @@ export function LiveCodeRuntime({
               <p className="mx-auto max-w-md py-8 text-center text-micro leading-4 text-[var(--text-tertiary)]">
                 {allowInteraction
                   ? "Run the current source in a fresh disposable worker. Network and ambient credentials remain unavailable."
-                  : "This embed is view-only. Open the source artifact to inspect its Python files."}
+                  : "This embed is view-only. Open the original code to see its Python files."}
               </p>
             )}
             {pythonState === "error" ? (

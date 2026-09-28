@@ -512,7 +512,7 @@ function PlatformOverviewSurface({
                   <strong>{formatCompact(value as number | undefined)}</strong>
                 </div>
                 <div className="mt-1 h-1 rounded-full bg-[var(--bg-secondary)]">
-                  <div className="h-full w-2/3 rounded-full bg-[color-mix(in oklab, var(--accent-coral) 32%, var(--bg-elevated))]" />
+                  <div className="h-full w-2/3 rounded-full bg-[color-mix(in_oklab,var(--accent-coral)_32%,var(--bg-elevated))]" />
                 </div>
               </div>
             ))}
@@ -1143,7 +1143,7 @@ function SchoolsSurface({
                   >
                     <td className="py-3">
                       <div className="flex items-center gap-2">
-                        <span className="grid size-8 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
+                        <span className="grid size-8 place-items-center rounded-control bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
                           <School size={14} />
                         </span>
                         <span>
@@ -1738,8 +1738,8 @@ function OperationsSurface({
                     className={cn(
                       "grid size-8 place-items-center rounded-control",
                       incident.severity === "critical"
-                        ? "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]"
-                        : "bg-[color-mix(in oklab, var(--accent-gold) 12%, var(--bg-elevated))] text-[var(--accent-gold)]",
+                        ? "bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] text-[var(--accent-coral)]"
+                        : "bg-[color-mix(in_oklab,var(--accent-gold)_12%,var(--bg-elevated))] text-[var(--accent-gold)]",
                     )}
                   >
                     <AlertTriangle size={14} />
@@ -1987,7 +1987,7 @@ function RequestsSurface({
                   className={cn(
                     "grid size-8 shrink-0 place-items-center rounded-control",
                     request.priority === "urgent"
-                      ? "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]"
+                      ? "bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] text-[var(--accent-coral)]"
                       : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
                   )}
                 >
@@ -2142,7 +2142,7 @@ function PlatformGovernanceSurface() {
               className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]">
                   <Icon size={15} />
                 </span>
                 <StatusBadge tone="healthy">Platform guarantee</StatusBadge>
@@ -2566,7 +2566,7 @@ function SecuritySurface({
           />
           {type === "offboard" || type === "purge" ? (
             <>
-              <div className="rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-4 text-[var(--danger)]">
+              <div className="rounded-control border border-[color-mix(in_oklab,var(--accent-coral)_28%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-coral)_8%,var(--bg-elevated))] p-3 text-micro leading-4 text-[var(--danger)]">
                 This operation affects school access, integrations, and retained
                 data. It remains blocked until a different platform operator
                 approves it.

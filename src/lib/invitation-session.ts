@@ -57,14 +57,28 @@ export function authHrefForRedirect(path: "/sign-in" | "/sign-up", redirectUrl?:
 
 export const INVITATION_PREVIEW_MAX_RETRIES = 2;
 
+/** Invitation and membership decisions are final; only transport failures retry. */
+const FINAL_INVITATION_FAILURE = /\b(?:INVITATION|MEMBERSHIP)_[A-Z_]+/;
+
 export function invitationPreviewCanRetry(
   message: string,
   attempt = 0,
 ) {
   return (
     attempt < INVITATION_PREVIEW_MAX_RETRIES &&
-    !/INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
-      message,
-    )
+    !FINAL_INVITATION_FAILURE.test(message)
   );
+}
+
+/**
+ * The administration client carries the route's machine code beside the
+ * sentence. Rejoin them so invitation decisions can be recognised; the code is
+ * never rendered.
+ */
+export function invitationFailureText(error: unknown) {
+  if (!(error instanceof Error)) return "";
+  const code = (error as Error & { code?: unknown }).code;
+  return typeof code === "string" && code && !error.message.startsWith(code)
+    ? `${code}: ${error.message}`
+    : error.message;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertCircle,
@@ -15,6 +15,7 @@ import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import { ProductEmptyState, ProductErrorState } from "@/features/spectra/components/product-state";
 import { Button } from "@/components/ui/button";
+import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { SelectField } from "@/components/ui/select";
 import {
   MetricValue,
@@ -256,6 +257,8 @@ export function AdminDialog({
   footer?: ReactNode;
   danger?: boolean;
 }) {
+  const surface = useRef<HTMLElement>(null);
+  useModalFocus(surface, { open, onClose });
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div
@@ -266,6 +269,8 @@ export function AdminDialog({
       }}
     >
       <section
+        ref={surface}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -314,8 +319,8 @@ export function AdminDialog({
 
 export function LoadingPanel({ label = "Loading" }: { label?: string }) {
   return (
-    <div className="flex min-h-56 items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
-      <LoaderCircle size={16} className="animate-spin" />
+    <div role="status" className="flex min-h-56 items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
+      <LoaderCircle size={16} aria-hidden="true" className="animate-spin" />
       {label}
     </div>
   );

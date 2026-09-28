@@ -395,10 +395,10 @@ export function ShareDialog({
       await onChanged?.();
       toast.success(
         next === "none"
-          ? "Workspace access removed for this artifact."
+          ? "Workspace members can no longer open this."
           : next === "read"
-            ? "Access limited to read-only for this artifact."
-            : "Workspace access restored for this artifact.",
+            ? "Workspace members can now only view this."
+            : "Workspace members can open this again.",
       );
     } catch (error) {
       toast.error(
@@ -541,8 +541,7 @@ export function ShareDialog({
                     Access requests
                   </h3>
                   <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
-                    People who encountered this artifact through a permitted
-                    embed. Approval gives direct access immediately.
+                    People who found this through an embed you allowed. Approval gives direct access immediately.
                   </p>
                 </div>
               </div>
@@ -731,8 +730,7 @@ export function ShareDialog({
                     Access through workspaces
                   </h3>
                   <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
-                    These people inherit access from a workspace containing this
-                    artifact. You can narrow or remove it here without changing
+                    These people inherit access from a workspace that contains this. You can narrow or remove it here without changing
                     the workspace.
                   </p>
                 </div>

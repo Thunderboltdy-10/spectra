@@ -1400,8 +1400,7 @@ function HistoryComparisonOverlay({
                 {artifact.title}
               </h2>
               <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                Historical state is inert; the current artifact remains live and
-                editable after comparison closes.
+                This earlier version is for reference only. Your current work stays editable after you close the comparison.
               </p>
             </div>
             <button
@@ -1410,7 +1409,7 @@ function HistoryComparisonOverlay({
               className={`h-8 rounded-control border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
             >
               {showChanges
-                ? "Show artifact comparison"
+                ? "Show comparison"
                 : `${changes.length} changed ${changes.length === 1 ? "field" : "fields"}`}
             </button>
           </div>
@@ -1465,7 +1464,7 @@ function HistoryComparisonOverlay({
                 ))}
                 {changes.length === 0 ? (
                   <div className="flex min-h-[260px] items-center justify-center text-micro text-[var(--text-secondary)]">
-                    This version matches the current artifact.
+                    This version matches your current work.
                   </div>
                 ) : null}
               </div>
@@ -1801,7 +1800,7 @@ function humanFieldLabel(path: string[]) {
     return `Document block ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   if (clean[0] === "subtasks" && /^\d+$/.test(clean[1] ?? ""))
     return `Subtask ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
-  return clean.map(humanizeKey).join(" · ") || "Artifact";
+  return clean.map(humanizeKey).join(" · ") || "Work";
 }
 
 function humanDiff(
@@ -6890,9 +6889,7 @@ function ThreadReferenceStudio({ content }: { content: unknown }) {
             Conversation unavailable
           </h3>
           <p className="mt-2 text-ui leading-6 text-[var(--text-secondary)]">
-            This older artifact is a disconnected reference, not a conversation.
-            Keep a current run or place a chat thread to create a working thread
-            artifact.
+            This older item is a saved reference, not a conversation. Start a new chat to keep working on it.
           </p>
         </div>
       </div>
@@ -7042,7 +7039,7 @@ function StudioDetails({
         targetArtifactId: target._id,
         relationType: "related",
         workspaceId: placements[0]?.workspaceId,
-        explanation: "Confirmed from a related-artifact suggestion",
+        explanation: "Confirmed from a suggested link",
       });
       const result = await getSpectraArtifactLinks(artifact._id);
       setDurableLinks(result.links);
@@ -7172,7 +7169,7 @@ function StudioDetails({
               </div>
             </SideCard>
           ) : null}
-          <SideCard title="Linked artifacts">
+          <SideCard title="Linked work">
             <div className="space-y-2">
               {durableLinks.slice(0, 8).map((link) =>
                 link.artifact ? (
@@ -7231,7 +7228,7 @@ function StudioDetails({
                 onClick={() => setLinkPickerOpen((open) => !open)}
                 aria-expanded={linkPickerOpen}
               >
-                <Plus className="h-3 w-3" /> Link artifact
+                <Plus className="h-3 w-3" /> Link work
               </button>
               {linkPickerOpen ? (
                 <div className="space-y-1 border-t border-[var(--border-subtle)] pt-2">

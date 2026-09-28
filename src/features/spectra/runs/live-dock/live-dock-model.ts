@@ -84,7 +84,7 @@ const phaseSteps: Record<string, string> = {
   interrupted: "Reconnecting to continue",
   partial: "Completed with limitations",
   stopped: "Stopped",
-  failed: "Recovery exhausted",
+  failed: "Could not finish",
   completed: "Completed",
 };
 
@@ -99,8 +99,9 @@ export const liveDockStateCopy: Record<LiveDockTruthState, string> = {
   completed_limited: "Completed with limits",
   paused: "Paused",
   reconnecting: "Reconnecting",
-  cancelled: "Cancelled",
-  failed_terminal: "Recovery exhausted",
+  // The control says "Stop" and the run reports "Stopped by you": one word.
+  cancelled: "Stopped",
+  failed_terminal: "Could not finish",
 };
 
 function compactText(value: string | undefined) {
@@ -121,8 +122,8 @@ export function publicSpectraFailureText(
   retryable = true,
 ) {
   const fallback = retryable
-    ? "Spectra paused after trying to recover. Retry when you’re ready."
-    : "Spectra could not finish after exhausting its recovery options.";
+    ? "Spectra paused before finishing. Select Retry when you’re ready."
+    : "Spectra could not finish this request. Ask again, or rephrase it with more detail.";
   const clean = compactText(value);
   if (!clean) return fallback;
   return humanizePublicFailure(clean);

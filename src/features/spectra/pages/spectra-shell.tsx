@@ -546,7 +546,7 @@ function WorkspaceHeader({
               {workspace?.isShared ? (
                 <Share2
                   className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]"
-                  aria-label="Shared workspace"
+                  role="img" aria-label="Shared workspace"
                 />
               ) : null}
             </div>
@@ -3160,7 +3160,7 @@ export function SpectraShell({
       .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
       .slice(0, 24);
     if (selectedIds.length === 0) {
-      toast.message("Select one or more artifacts first.");
+      toast.message("Select one or more items first.");
       return;
     }
     setTileObjects(
@@ -3890,7 +3890,7 @@ export function SpectraShell({
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not archive artifact." })
+        describeFailure(error, { fallback: "Could not archive this work. Try again." })
           .message,
       );
     } finally {
@@ -3915,7 +3915,7 @@ export function SpectraShell({
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not delete artifact." })
+        describeFailure(error, { fallback: "Could not delete this work. Try again." })
           .message,
       );
     } finally {

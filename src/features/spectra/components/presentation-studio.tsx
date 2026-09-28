@@ -1272,7 +1272,7 @@ function PresentationObjectInspector({
       {object.type === "chart" || object.type === "embed" ? (
         <div className="presentation-source-binding">
           <SelectField
-            label="Source artifact"
+            label="Source work"
             size="sm"
             value={object.sourceBinding?.artifactId ?? NO_SELECTION}
             disabled={readOnly}

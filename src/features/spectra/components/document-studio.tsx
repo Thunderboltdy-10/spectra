@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import { cn } from "@/lib/utils";
 import type { JSONContent } from "@tiptap/core";
@@ -1124,9 +1125,7 @@ export function DocumentStudio({
             })
             .catch((error) =>
               toast.error(
-                error instanceof Error
-                  ? error.message
-                  : "The live reference could not be added.",
+                describeFailure(error, { fallback: "The live reference could not be added." }).message,
               ),
             );
           return true;
@@ -1155,9 +1154,7 @@ export function DocumentStudio({
                 }),
               ).catch((error) =>
                 toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : "The reference could not be removed.",
+                  describeFailure(error, { fallback: "The reference could not be removed." }).message,
                 ),
               );
           for (const embedId of after)
@@ -1168,9 +1165,7 @@ export function DocumentStudio({
                 }),
               ).catch((error) =>
                 toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : "The reference could not be restored.",
+                  describeFailure(error, { fallback: "The reference could not be restored." }).message,
                 ),
               );
         }

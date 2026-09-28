@@ -127,7 +127,7 @@ describe("Wave 4 controlled operation engine", () => {
     const policy = evaluatePlanPolicy(plan.operations, { intent });
     expect(policy.requiresConfirmation).toBe(true);
     expect(policy.reasons.join(" ")).toMatch(/workspace/i);
-    expect(policy.reasons.join(" ")).toMatch(/2 visible artifacts/i);
+    expect(policy.reasons.join(" ")).toMatch(/2 new work items/i);
   });
 
   it("accepts an owned archive request but always requires confirmation", () => {

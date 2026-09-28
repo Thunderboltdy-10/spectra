@@ -925,10 +925,14 @@ function ShellNavigation() {
                       {workspace.title}
                     </span>
                     {workspace.isShared || workspace.ownership === "shared" ? (
-                      <UsersRound
-                        size={14}
-                        className="text-[var(--text-tertiary)]"
-                      />
+                      <>
+                        <UsersRound
+                          size={14}
+                          aria-hidden="true"
+                          className="text-[var(--text-tertiary)]"
+                        />
+                        <span className="sr-only">Shared</span>
+                      </>
                     ) : null}
                   </Link>
                 );

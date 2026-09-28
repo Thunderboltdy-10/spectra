@@ -666,6 +666,130 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraOperations:recordPlan")))
       .toEqual([expect.arrayContaining([expect.any(String), expect.objectContaining({ operations: [] })])]);
   });
+
+  it("writes only the status changes a student can see before the first model call", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: "Hello!" } }],
+    }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "hi" }),
+    }))).text();
+    const firstModelCall = fetchMock.mock.invocationCallOrder[0]!;
+    const statusWritesBefore = convexMutation.mock.calls.flatMap(([name, args], index) =>
+      String(name).includes("spectraRuns:updateStatus") && convexMutation.mock.invocationCallOrder[index]! < firstModelCall
+        ? [(args as { phase?: string }).phase] : []);
+    // claimExecution already marks the run running; a separate "planning"
+    // write replaced a moment later by "reading" only delayed the first token.
+    expect(statusWritesBefore).toEqual(["reading", "retrieving"]);
+  });
+
+  it("streams an answer while it is written and stores it in few durable rows", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    fetchMock.mockImplementation(async () => new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const piece of ["The Moon ", "reflects ", "sunlight."])
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ delta: { content: piece } }] })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Why can we see the Moon?" }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
+    const deltas = events.filter((event) => event.type === "text_delta");
+    expect(deltas.map((event) => event.content)).toEqual(["The Moon ", "reflects ", "sunlight."]);
+    // The live text arrives before the run's closing writes, not after them.
+    const firstDelta = events.findIndex((event) => event.type === "text_delta");
+    expect(firstDelta).toBeLessThan(events.findIndex((event) => event.type === "final"));
+    const persisted = convexMutation.mock.calls
+      .filter(([name]) => String(name).includes("spectraRuns:appendEvents"))
+      .flatMap(([, args]) => (args as { events: Array<{ type: string; payload: { content?: string; runItem?: { text?: string } } }> }).events)
+      .filter((event) => event.type === "text_delta");
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.payload).toMatchObject({ content: "The Moon reflects sunlight.", runItem: { text: "The Moon reflects sunlight." } });
+  });
+
+  it("takes back a streamed answer cut off by a provider error before the retry streams", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    const sse = (records: unknown[]) => new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const record of records) controller.enqueue(encoder.encode(`data: ${JSON.stringify(record)}\n\n`));
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } });
+    fetchMock
+      .mockImplementationOnce(async () => sse([
+        { model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ delta: { content: "The Moon glows because" } }] },
+        { error: { message: "Internal Server Error" }, choices: [{ delta: {}, finish_reason: "error" }] },
+      ]))
+      .mockImplementation(async () => sse([
+        { model: "openai/gpt-5.6-luna", provider: "OpenAI", choices: [{ delta: { content: "The Moon reflects sunlight." } }] },
+        { choices: [{ delta: {}, finish_reason: "stop" }] },
+      ]));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Why can we see the Moon?" }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
+    const text = events.filter((event) => event.type === "text_delta" || event.type === "text_replace")
+      .map((event) => `${event.type}:${event.content}`);
+    expect(text.slice(0, 3)).toEqual([
+      "text_delta:The Moon glows because", "text_replace:", "text_delta:The Moon reflects sunlight.",
+    ]);
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe("The Moon reflects sunlight.");
+  });
+
+  it("takes back streamed preamble once work is staged and reports only after the commit", async () => {
+    const { convexMutation, fetchMock, getSavedArtifact } = setup({});
+    const operation = {
+      type: "artifact.update",
+      input: {
+        artifactId: "artifact-real", blueprintKey: "flashcard_deck", title: null,
+        summary: "Six focused memory cues for durable photosynthesis recall.",
+        content: null, contentPatch: null, tags: null,
+      },
+    };
+    fetchMock.mockImplementation(async (_url, init) => {
+      const payload = JSON.parse(String((init as RequestInit).body)) as { messages?: Array<{ role?: string }> };
+      if (payload.messages?.some((message) => message.role === "tool")) return new Response(JSON.stringify({
+        model: "openai/gpt-5.6", provider: "OpenAI",
+        choices: [{ finish_reason: "stop", message: { content: "I updated the deck summary." } }],
+      }), { status: 200 });
+      return new Response(JSON.stringify({
+        model: "openai/gpt-5.6", provider: "OpenAI",
+        choices: [{ finish_reason: "tool_calls", message: { content: "Let me tighten that summary.", tool_calls: [{
+          id: "stage-summary", type: "function", function: { name: "propose_operation",
+            arguments: JSON.stringify({ workSummary: "Refining the deck summary", fulfillsRequest: true, operation }) },
+        }] } }],
+      }), { status: 200 });
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", artifactId: "artifact-real",
+        prompt: "Rewrite the open deck summary to better explain how its six memory cues support recall." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
+    expect(getSavedArtifact().summary).toBe(operation.input.summary);
+    const textEvents = events.filter((event) => event.type === "text_delta" || event.type === "text_replace");
+    // The completion claim is never streamed ahead of the save.
+    expect(textEvents.some((event) => event.type === "text_delta" && event.content?.includes("updated"))).toBe(false);
+    const takenBack = events.findIndex((event) => event.type === "text_replace" && event.content === "");
+    expect(takenBack).toBeGreaterThan(events.findIndex((event) => event.type === "text_delta" && event.content === "Let me tighten that summary."));
+    const closing = events.findLastIndex((event) => event.type === "text_replace");
+    expect(events[closing]?.content).toContain("I updated the deck summary.");
+    expect(takenBack).toBeLessThan(closing);
+    expect(convexMutation.mock.calls.some(([name, args]) =>
+      String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed")).toBe(true);
+  });
   it.each(["human edit", "non-idempotent insertion"] as const)(
     "does not replay an acknowledged operation after %s changes the verification target",
     async (scenario) => {
@@ -2795,6 +2919,28 @@ describe("Spectra run route", () => {
       ),
     ).toHaveLength(0);
     expect(events.some((event) => event.type === "error" || event.type === "final")).toBe(true);
+  });
+
+  it("does not let the chat reply claim a local file change the Bridge has not confirmed", async () => {
+    const { convexMutation } = setup(deckPlan());
+    // Convex reports the Bridge receipt state for a saved run that queued a
+    // local-file write; the model wrote its reply before that write existed.
+    const recordCompletion = convexMutation.getMockImplementation()!;
+    convexMutation.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      const result = await recordCompletion(name, args);
+      return String(name).includes("spectraRuns:updateStatus") && args.status === "completed"
+        ? { ...(result as object), nativeOutcome: "native_pending" } as unknown as typeof result
+        : result;
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string; summary?: string });
+    const reply = "Created a 6-card photosynthesis deck with memory cues.\n\nThe file on your computer hasn't confirmed this change yet.";
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe(reply);
+    expect(events.findLast((event) => event.type === "text_replace")?.content).toBe(reply);
+    expect(events.find((event) => event.type === "final")?.summary).toBe(reply);
   });
 
   it("applies a native document update once after atomic admission", async () => {

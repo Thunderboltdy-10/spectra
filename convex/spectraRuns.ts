@@ -1548,7 +1548,9 @@ export const updateStatus = mutation({
         occurredAt: now,
       });
 
-    return { runId: args.runId };
+    // The runner words its closing reply from this, so the chat never says a
+    // local file changed when the Bridge has not confirmed it.
+    return { runId: args.runId, ...(nativeOutcome ? { nativeOutcome } : {}) };
   },
 });
 

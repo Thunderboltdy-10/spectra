@@ -624,7 +624,12 @@ export async function readOpenRouterAgentTurn(
     }
     if (done || trailingError) break;
   }
-  if (trailingError && !text && calls.size === 0) throw trailingError;
+  // A provider error before the turn finished means the text or tool calls are
+  // cut off. Returning them would save a truncated reply as a complete answer,
+  // so only a turn the provider reported as finished survives a trailing error.
+  // OpenRouter reports a mid-stream failure as finish_reason "error".
+  if (trailingError && finishReason !== "stop" && finishReason !== "tool_calls")
+    throw trailingError;
   return {
     text,
     toolCalls: [...calls.entries()]

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  canUndoRunWithEffects, interruptedEffectActions, interruptedEffectSummary, reconcileInterruptedEffects, retainOutcomeThenVerify,
+  canUndoRunWithEffects, interruptedEffectActions, interruptedEffectSummary, reconcileInterruptedEffects, replyWithNativeReceipt, retainOutcomeThenVerify,
   type AcknowledgedOutcome,
 } from "@/app/api/spectra/run/loop/receipt-report";
 import type { StoredOperation } from "@/app/api/spectra/run/loop/contract";
@@ -196,5 +196,16 @@ describe("S11 receipt truth after verification, interruption and acknowledgement
     expect(summary).toContain(expected);
     expect(summary).not.toContain(absent);
     expect(interruptedEffectActions(result, "run-1")).toContainEqual(expect.objectContaining({ key: "revert" }));
+  });
+});
+
+describe("P2 closing reply carries the local-file receipt", () => {
+  it("adds the receipt's file state to the model's reply and nothing for a Spectra-only save", () => {
+    expect(replyWithNativeReceipt("I updated your essay.", "native_pending"))
+      .toBe("I updated your essay.\n\nThe file on your computer hasn't confirmed this change yet.");
+    expect(replyWithNativeReceipt("I updated your essay.", "native_verified"))
+      .toBe("I updated your essay.\n\nThe file on your computer was checked and has this change.");
+    expect(replyWithNativeReceipt("I updated your essay.", undefined)).toBe("I updated your essay.");
+    expect(replyWithNativeReceipt("I updated your essay.", "canonical_saved")).toBe("I updated your essay.");
   });
 });

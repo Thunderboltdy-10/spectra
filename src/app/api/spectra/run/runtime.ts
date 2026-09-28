@@ -67,12 +67,14 @@ import {
   publicError,
   saveAssistantMessage,
   streamCard,
+  coalesceTextDeltas,
 } from "./loop/report";
 import {
   canUndoRunWithEffects,
   interruptedEffectActions,
   interruptedEffectSummary,
   reconcileInterruptedEffects,
+  replyWithNativeReceipt,
   retainOutcomeThenVerify,
 } from "./loop/receipt-report";
 import {
@@ -318,7 +320,7 @@ async function runAttempt(
       clearTimeout(eventFlushTimer);
       eventFlushTimer = null;
     }
-    const events = queuedEvents;
+    const events = coalesceTextDeltas(queuedEvents);
     queuedEvents = [];
     if (events.length === 0) return eventWrite;
     eventWrite = eventWrite
@@ -399,20 +401,6 @@ async function runAttempt(
     // Staged positions are revised by index in the ordinary agent; shortcut
     // planners and early shells would bypass that restored graph.
     const restoredStagedWork = (restoredClarification?.candidates.length ?? 0) > 0;
-    await mutate("spectraRuns:updateStatus", {
-      actorClerkId: params.actorClerkId,
-      runId: params.runId,
-      executionId: params.executionId,
-      status: "running",
-      phase: "planning",
-      resultTitle: "Spectra",
-      resultSummary: params.artifactId
-        ? "Loading workspace context"
-        : params.workspaceId
-          ? "Loading the active workspace map"
-          : "Resolving the requested objects",
-      resultActions: [],
-    });
     const immediatePlan =
       params.agentId || params.continuedThread
         ? null
@@ -1067,7 +1055,8 @@ async function runAttempt(
             // Success-facing prose stays withheld until every guarded native
             // operation has durably committed and verified. Progress and
             // artifact presence continue live, but the assistant cannot claim
-            // completion while the actual work is still synchronizing.
+            // completion while the actual work is still synchronizing. Only
+            // the separate answer channel below is published before the end.
           },
           undefined,
           executionSignal,
@@ -1359,6 +1348,14 @@ async function runAttempt(
               runId: params.runId,
               key: event.key,
               payload: event.payload,
+            }),
+          // Answer prose streams live; the model loop sends only text written
+          // while nothing is staged, and the final text_replace stays canonical.
+          (content, mode) =>
+            publish({
+              type: mode === "replace" ? "text_replace" : "text_delta",
+              runId: params.runId,
+              content,
             }),
         );
     const researchEvidence =
@@ -2344,7 +2341,7 @@ async function runAttempt(
     // live exchange and surfaces open-artifact cards as soon as that message
     // appears; racing the two lets the side panel look finished while Live Dock
     // is still on a running tab.
-    await mutate("spectraRuns:updateStatus", {
+    const completion = (await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -2361,14 +2358,15 @@ async function runAttempt(
       modelUsed: modelResult.model,
       providerUsed: modelResult.provider,
       usage: modelResult.usage,
-    });
+    })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
+    const reply = replyWithNativeReceipt(plan.finalResponse, completion?.nativeOutcome);
     await saveAssistantMessage({
       actorClerkId: params.actorClerkId,
       threadId: params.threadId,
       runId: params.runId,
       executionId: params.executionId,
-      content: plan.finalResponse,
+      content: reply,
       decision: plan.decision,
       affected: allAffected,
       model: modelResult.model,
@@ -2389,12 +2387,12 @@ async function runAttempt(
     publish({
       type: "text_replace",
       runId: params.runId,
-      content: plan.finalResponse,
+      content: reply,
     });
     publish({
       type: "final",
       runId: params.runId,
-      summary: plan.finalResponse,
+      summary: reply,
       card: streamCard(card),
     });
     await flushEvents();
@@ -3252,7 +3250,7 @@ async function resumeOperationsAttempt(params: {
     loop.enter("report");
     // Same ordering as the primary operate path: terminal run status first so
     // chat/Live Dock agree on "finished" before open-artifact cards appear.
-    await mutate("spectraRuns:updateStatus", {
+    const completion = (await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -3283,14 +3281,15 @@ async function resumeOperationsAttempt(params: {
           : []),
       ],
       outcome: "canonical_saved",
-    });
+    })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
+    const reply = replyWithNativeReceipt(finalSummary, completion?.nativeOutcome);
     await saveAssistantMessage({
       actorClerkId: params.actorClerkId,
       threadId: state.run.threadId,
       runId: params.runId,
       executionId: params.executionId,
-      content: finalSummary,
+      content: reply,
       decision: state.run.decision,
       affected: allAffected,
     });
@@ -3299,7 +3298,7 @@ async function resumeOperationsAttempt(params: {
       runId: params.runId,
       executionId: params.executionId,
       type: "final",
-      payload: { type: "final", runId: params.runId, summary: finalSummary },
+      payload: { type: "final", runId: params.runId, summary: reply },
     });
   } catch (error) {
     if (loop.currentStage() !== "report")

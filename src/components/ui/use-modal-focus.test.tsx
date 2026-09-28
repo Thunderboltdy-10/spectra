@@ -52,7 +52,6 @@ describe("useModalFocus", () => {
  * with their own key handlers. Anything else must use useModalFocus. */
 const OWN_KEYBOARD_CONTRACT = new Set([
   "src/features/spectra/components/chat-browser-panel.tsx",
-  "src/features/spectra/components/code-studio.tsx",
   "src/features/spectra/components/context-controls.tsx",
 ]);
 

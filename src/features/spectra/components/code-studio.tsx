@@ -55,7 +55,6 @@ import {
 import {
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -63,6 +62,7 @@ import {
 import { createPortal } from "react-dom";
 import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type OverflowItem } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
 import {
@@ -3226,6 +3226,7 @@ export function CodeStudio({
 
       {deleteFileId ? (
         <ConfirmDialog
+          open
           title={`Delete ${
             workbook.files.find((file) => file.id === deleteFileId)?.path ??
             "this file"
@@ -3237,7 +3238,7 @@ export function CodeStudio({
           }
           confirmLabel="Delete file"
           destructive
-          disabled={workbook.files.length === 1}
+          confirmDisabled={workbook.files.length === 1}
           onCancel={() => setDeleteFileId(null)}
           onConfirm={deleteFile}
         />
@@ -5161,6 +5162,7 @@ function CodeSettings({
       </div>
       {pendingAssetRevocation ? (
         <ConfirmDialog
+          open
           title="Revoke this asset everywhere?"
           detail={`${pendingAssetRevocation.label} will stop loading in the current work, retained history, and every published or embedded build. This security action cannot be undone.`}
           confirmLabel={
@@ -5169,7 +5171,7 @@ function CodeSettings({
               : "Revoke everywhere"
           }
           destructive
-          disabled={Boolean(revokingAssetId)}
+          pending={Boolean(revokingAssetId)}
           onCancel={() => {
             if (!revokingAssetId) setPendingAssetRevocation(null);
           }}
@@ -5219,111 +5221,5 @@ function Notice({
         <X className="h-3.5 w-3.5" />
       </button>
     </div>
-  );
-}
-
-function ConfirmDialog({
-  title,
-  detail,
-  confirmLabel,
-  destructive,
-  disabled,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  detail: string;
-  confirmLabel: string;
-  destructive?: boolean;
-  disabled?: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const titleId = useId();
-  const detailId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    // Return focus to the control that opened the confirmation.
-    const opener =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    cancelRef.current?.focus();
-    return () => {
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
-  // Portaled to the body: the studio root is a query container, and layout
-  // containment makes it the containing block for fixed descendants, so a
-  // modal rendered in place would be clipped to the editor pane.
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-center justify-center bg-black/20 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      aria-describedby={detailId}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget && !disabled) onCancel();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !disabled) {
-          event.preventDefault();
-          onCancel();
-          return;
-        }
-        if (event.key !== "Tab") return;
-        const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled),[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])',
-        );
-        if (!controls?.length) return;
-        const first = controls[0]!;
-        const last = controls[controls.length - 1]!;
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }}
-    >
-      <div
-        ref={dialogRef}
-        className="w-full max-w-[380px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-lg)]"
-      >
-        <h3
-          id={titleId}
-          className="font-display text-heading font-semibold text-[var(--text-primary)]"
-        >
-          {title}
-        </h3>
-        <p
-          id={detailId}
-          className="mt-2 text-micro leading-5 text-[var(--text-secondary)]"
-        >
-          {detail}
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            ref={cancelRef}
-            onClick={onCancel}
-            disabled={disabled}
-            className="rounded-control border border-[var(--border-default)] px-3 py-2 text-micro font-semibold"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onConfirm}
-            className={`rounded-control px-3 py-2 text-micro font-semibold text-white disabled:opacity-40 ${destructive ? "bg-[var(--danger)]" : "bg-[var(--text-primary)]"}`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
   );
 }

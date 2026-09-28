@@ -14952,65 +14952,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   color: var(--accent-cyan);
 }
 
-.spectra-plan-confirm {
-  position: absolute;
-  z-index: 60;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: var(--bg-overlay);
-}
-
-.spectra-plan-confirm > div {
-  display: flex;
-  width: min(360px, 100%);
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: 0 22px 56px rgba(30, 40, 35, 0.24);
-}
-
-.spectra-plan-confirm strong {
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 620;
-}
-
-.spectra-plan-confirm p {
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-
-.spectra-plan-confirm footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-top: 4px;
-}
-
-.spectra-plan-confirm footer > button {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 7px;
-  font-size: 12px;
-  font-weight: 550;
-}
-
-.spectra-plan-confirm footer > button:first-child {
-  color: var(--text-secondary);
-}
-
-.spectra-plan-confirm footer > button:first-child:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
 /* A side panel keeps every view, but the task panel covers the width it has
    instead of leaving a two-column layout nothing can read. */
 .spectra-plan-studio[data-mode="split"] .spectra-plan-detail {

@@ -24,14 +24,14 @@ const SheetContent = React.forwardRef<
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
       className={cn(
-        "fixed inset-0 bg-[var(--bg-overlay)] xl:hidden",
+        "spectra-veil fixed inset-0 bg-[var(--bg-overlay)] xl:hidden",
         LAYER_CLASS[layer],
       )}
     />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-y-0 right-0 flex h-dvh w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none xl:hidden",
+        "spectra-sheet fixed inset-y-0 right-0 flex h-dvh w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none xl:hidden",
         LAYER_CLASS[layer],
         className,
       )}

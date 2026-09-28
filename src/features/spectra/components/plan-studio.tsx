@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import {
   AlertCircle,
@@ -138,12 +138,6 @@ export function PlanStudio({
   const quickAddRef = useRef<HTMLInputElement>(null);
   const boardAddRef = useRef<HTMLInputElement>(null);
   const autoOpenedTaskKeyRef = useRef<string | undefined>(undefined);
-  const bulkConfirmRef = useRef<HTMLDivElement>(null);
-  const bulkConfirmId = useId();
-  useModalFocus(bulkConfirmRef, {
-    open: Boolean(pendingBulk?.bulk.confirmation),
-    onClose: () => setPendingBulk(undefined),
-  });
   const [columnDraft, setColumnDraft] = useState<
     Partial<Record<PlanStatus, string>>
   >({});
@@ -1484,32 +1478,16 @@ export function PlanStudio({
       ) : null}
 
       {pendingBulk?.bulk.confirmation ? (
-        <div
-          ref={bulkConfirmRef}
-          tabIndex={-1}
-          className="spectra-plan-confirm"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby={`${bulkConfirmId}-title`}
-          aria-describedby={`${bulkConfirmId}-body`}
-        >
-          <div>
-            <strong id={`${bulkConfirmId}-title`}>{pendingBulk.bulk.confirmation.title}</strong>
-            <p id={`${bulkConfirmId}-body`}>{pendingBulk.bulk.confirmation.body}</p>
-            <footer>
-              <button type="button" onClick={() => setPendingBulk(undefined)}>
-                Keep them
-              </button>
-              <button
-                type="button"
-                className="spectra-plan-danger"
-                onClick={confirmBulk}
-              >
-                {pendingBulk.bulk.confirmation.confirmLabel}
-              </button>
-            </footer>
-          </div>
-        </div>
+        <ConfirmDialog
+          open
+          title={pendingBulk.bulk.confirmation.title}
+          detail={pendingBulk.bulk.confirmation.body}
+          cancelLabel="Keep them"
+          confirmLabel={pendingBulk.bulk.confirmation.confirmLabel}
+          destructive
+          onCancel={() => setPendingBulk(undefined)}
+          onConfirm={confirmBulk}
+        />
       ) : null}
       </div>
     </div>

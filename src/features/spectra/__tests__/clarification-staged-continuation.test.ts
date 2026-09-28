@@ -57,6 +57,21 @@ describe("restored clarification staged work", () => {
       .toContain("staged earlier in this same request");
   });
 
+  it("keeps the valid staged prefix when a later position no longer parses", async () => {
+    const fetchMock = vi.fn().mockImplementation(turn("I set the progress note; the study block will last 60 minutes."));
+    vi.stubGlobal("fetch", fetchMock);
+    const context = restored("accepted");
+    context.stagedContinuation.candidates.push({ operation: { type: "artifact.retired_operation", input: {} } as never,
+      disposition: "accepted" });
+    const result = await callModel("artifact", REQUEST, context, []);
+    expect(result.plan.operations).toEqual([expect.objectContaining({
+      type: "artifact.update", input: expect.objectContaining({ contentPatch: note.input.contentPatch }),
+    })]);
+    // Positions after the first unparsable one are prepared again, never guessed.
+    expect(JSON.stringify(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)).messages))
+      .toContain("Prepare the missing work again");
+  });
+
   it("withdraws a staged position the answer cancelled", async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(turn("", "revise_staged_operation", {

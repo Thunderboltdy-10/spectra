@@ -239,6 +239,30 @@ describe("ordered same-target final verification", () => {
     await expectSequenceMismatch([deckAppend(3), deckAppend(4)]);
   });
 
+  it("verifies an acknowledged append at its own position after a person appends to the same list", async () => {
+    const existing = [card(1), card(2)];
+    const human = { ...card(9), front: "A classmate's card" };
+    const outcome = { operation: deckAppend(3), affected: [{ type: "artifact", id: "artifact-real" }] } as
+      Parameters<typeof verifyCommittedOutcomes>[1][number];
+    // Acknowledgement: the run verifies its own write and records where it landed.
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3)] }, "flashcard_deck"));
+    await verifyCommittedOutcomes("actor", [outcome]);
+    expect(outcome.appendedAt).toEqual({ 0: 2 });
+    // Final verification after the person's append: still the AI's card at index 2.
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), human] }, "flashcard_deck"));
+    await verifyCommittedOutcomes("actor", [outcome]);
+    // Not loosened: a lost AI card is still a failure, even when the person's card sits there.
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, human] }, "flashcard_deck"));
+    const lost = expect(verifyCommittedOutcomes("actor", [outcome])).rejects.toThrow(
+      "The saved artifact did not contain the requested content change.",
+    );
+    await vi.runAllTimersAsync();
+    await lost;
+    // Without an acknowledged position the last element is still required.
+    mocks.query.mockResolvedValue(saved({ cards: [...existing, card(3), human] }, "flashcard_deck"));
+    await expectSequenceMismatch([deckAppend(3)]);
+  });
+
   it("keeps an earlier indexed edit required after a later append to the same list", async () => {
     // An append creates a new last element; it cannot supersede an existing index.
     const edit = update({ blueprintKey: "flashcard_deck", content: null,

@@ -3496,6 +3496,7 @@ body {
 
   /* Motion grammar — durations and easings shared by CSS and the
      motion module in features/spectra/motion. */
+  --motion-instant: 80ms;
   --motion-fast: 120ms;
   --motion-base: 220ms;
   --motion-slow: 360ms;
@@ -3626,6 +3627,7 @@ body {
    persistence and run completion never depend on animation (INV-22). */
 :root[data-spectra-motion="reduced"],
 :root[data-spectra-motion="none"] {
+  --motion-instant: 0ms;
   --motion-fast: 0ms;
   --motion-base: 0ms;
   --motion-slow: 0ms;
@@ -3648,6 +3650,7 @@ html[data-spectra-motion="none"] *::after {
 }
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --motion-instant: 0ms;
     --motion-fast: 0ms;
     --motion-base: 0ms;
     --motion-slow: 0ms;

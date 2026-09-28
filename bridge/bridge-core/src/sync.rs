@@ -512,6 +512,9 @@ pub async fn reconcile_missing_resources(
     Ok(())
 }
 
+/// The largest native package the cloud accepts (`bridgeSync.beginPayloadUpload`).
+pub const MAX_NATIVE_PAYLOAD_BYTES: u64 = 100 * 1024 * 1024;
+
 pub async fn upload_resource_payload(
     deployment_url: &str,
     credential: &str,
@@ -521,7 +524,7 @@ pub async fn upload_resource_payload(
     media_type: &str,
 ) -> anyhow::Result<String> {
     anyhow::ensure!(
-        bytes.len() <= 100 * 1024 * 1024,
+        bytes.len() as u64 <= MAX_NATIVE_PAYLOAD_BYTES,
         "payload exceeds the 100 MB safety ceiling"
     );
     let intent: PayloadUploadIntent = mutation(
@@ -544,7 +547,9 @@ pub async fn upload_resource_payload(
             .ok_or_else(|| anyhow::anyhow!("payload upload URL missing"))?;
         let response = cloud_client()?
             .post(upload_url)
-            .timeout(crate::retry::bridge_payload_timeout())
+            .timeout(crate::retry::bridge_payload_transfer_timeout(
+                bytes.len() as u64
+            ))
             .header(reqwest::header::CONTENT_TYPE, media_type)
             .body(bytes.to_vec())
             .send()

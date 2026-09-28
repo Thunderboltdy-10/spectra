@@ -18,8 +18,8 @@ use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite,
-    DeliveredChange, DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope,
-    ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
+    DeliveredChange, DiscoveredRegistration, DiscoveredResource, MAX_NATIVE_PAYLOAD_BYTES,
+    QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
     claim_pending_payload_upload, claim_write, complete_fs_request_with_claim,
     complete_write_with_claim, detach_mount, discover_resources_page, drain_cloud_queue,
     exchange_pairing, inspect_write_target, migrate_cloud_replica_page,
@@ -1138,6 +1138,15 @@ async fn finish_delivered_change(
             Backoff::delay_for_attempt(delivery.item.attempts, &delivery.item.op_id),
         );
     }
+    if delivery
+        .envelope
+        .change
+        .size
+        .is_some_and(|size| size > MAX_NATIVE_PAYLOAD_BYTES)
+    {
+        // Retrying cannot shrink the file; it would re-read it forever.
+        return journal.fail_queue(&delivery.item, "payload-too-large", OVERSIZED_FILE_DETAIL);
+    }
     let mut snapshot = match stable_file_snapshot(&target) {
         Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
@@ -1226,6 +1235,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let mut double_sync_risk = false;
     let mut locked_files = 0usize;
     let mut isolated_failures = 0usize;
+    let mut oversized_files = 0usize;
     let mut scan_complete = true;
     let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
     for _failure in scan.failures {
@@ -1334,6 +1344,13 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 if registration.reason.as_deref() != Some("approval-required") {
                     isolated_failures += 1;
                 }
+            } else if registration.needs_payload
+                && carries_native_payload(&resource.native_format)
+                && resource.size > MAX_NATIVE_PAYLOAD_BYTES
+            {
+                // A repair retry cannot shrink the file; say so once instead
+                // of re-reading it on every repair scan.
+                oversized_files += 1;
             } else if upload_discovered_resource(
                 &deployment,
                 &credential,
@@ -1385,15 +1402,59 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .map(|_| ())
     } else {
         clear_mount_repair_retry(journal, &grant.id)?;
+        let detail = if oversized_files > 0 {
+            format!(
+                "Available in Spectra, except {oversized_files} file{} over 100 MB. {OVERSIZED_FILE_DETAIL}",
+                if oversized_files == 1 { "" } else { "s" },
+            )
+        } else {
+            "Available in Spectra".to_owned()
+        };
         set_mount_status(
             journal,
             &grant.id,
             "active",
-            "Available in Spectra",
-            files.len(),
+            &detail,
+            files.len() - oversized_files,
             files.len(),
         )
     }
+}
+
+const OVERSIZED_FILE_DETAIL: &str = "Files over 100 MB stay on this computer only; compress their pictures and videos to sync them.";
+
+/// Downloads a queued native package. The headers must arrive within the
+/// ordinary request budget; the body then gets a budget sized to the package,
+/// so a large deck on a slow school network finishes instead of timing out
+/// and being re-downloaded forever.
+async fn download_write_payload(url: &str) -> Result<Vec<u8>, (&'static str, String)> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|error| ("request", error.to_string()))?;
+    let response = tokio::time::timeout(
+        spectra_bridge_core::retry::bridge_payload_timeout(),
+        client.get(url).send(),
+    )
+    .await
+    .map_err(|_| {
+        (
+            "timeout",
+            "payload download did not start in time".to_owned(),
+        )
+    })?
+    .and_then(reqwest::Response::error_for_status)
+    .map_err(|error| ("request", error.to_string()))?;
+    let budget = spectra_bridge_core::retry::bridge_payload_transfer_timeout(
+        response
+            .content_length()
+            .unwrap_or(MAX_NATIVE_PAYLOAD_BYTES),
+    );
+    let bytes = tokio::time::timeout(budget, response.bytes())
+        .await
+        .map_err(|_| ("timeout", "payload download stalled".to_owned()))?
+        .map_err(|error| ("body-read", error.to_string()))?;
+    Ok(bytes.to_vec())
 }
 
 async fn process_write_request(
@@ -1503,57 +1564,17 @@ async fn process_write_request(
         }
     };
     record_write_progress(journal, "downloading-payload", Some(&request), None);
-    let response = match reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .timeout(spectra_bridge_core::retry::bridge_payload_timeout())
-        .build()?
-        .get(&request.payload_url)
-        .send()
-        .await
-    {
-        Ok(response) => response.error_for_status(),
-        Err(error) => Err(error),
-    };
-    let payload = match response {
-        Ok(response) => match response.bytes().await {
-            Ok(bytes) => {
-                record_write_progress(journal, "payload-downloaded", Some(&request), None);
-                bytes.to_vec()
-            }
-            Err(error) => {
-                record_write_progress(
-                    journal,
-                    "payload-download-failed",
-                    Some(&request),
-                    Some(if error.is_timeout() {
-                        "timeout"
-                    } else {
-                        "body-read"
-                    }),
-                );
-                complete_claimed_write(
-                    deployment,
-                    credential,
-                    journal,
-                    &request,
-                    "waiting",
-                    None,
-                    Some(("payload-download-failed", &error.to_string())),
-                )
-                .await?;
-                return Ok(false);
-            }
-        },
-        Err(error) => {
+    let payload = match download_write_payload(&request.payload_url).await {
+        Ok(bytes) => {
+            record_write_progress(journal, "payload-downloaded", Some(&request), None);
+            bytes
+        }
+        Err((phase, message)) => {
             record_write_progress(
                 journal,
                 "payload-download-failed",
                 Some(&request),
-                Some(if error.is_timeout() {
-                    "timeout"
-                } else {
-                    "request"
-                }),
+                Some(phase),
             );
             complete_claimed_write(
                 deployment,
@@ -1562,7 +1583,7 @@ async fn process_write_request(
                 &request,
                 "waiting",
                 None,
-                Some(("payload-download-failed", &error.to_string())),
+                Some(("payload-download-failed", &message)),
             )
             .await?;
             return Ok(false);
@@ -1726,12 +1747,12 @@ async fn finish_pending_payload_upload(
             return Ok(false);
         }
     };
+    if !carries_native_payload(&request.native_format) || snapshot.size > MAX_NATIVE_PAYLOAD_BYTES {
+        return Ok(false);
+    }
     let bytes = snapshot.read_bytes()?;
     let hash = hex::encode(sha2::Sha256::digest(&bytes));
     drop(snapshot);
-    if !carries_native_payload(&request.native_format) {
-        return Ok(false);
-    }
     upload_resource_payload(
         deployment,
         credential,

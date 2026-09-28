@@ -65,6 +65,18 @@ pub fn bridge_payload_timeout() -> Duration {
     Duration::from_millis(POLICY.bridge_payload_timeout_ms)
 }
 
+/// Slowest link a native package transfer must still complete on: a crowded
+/// school network or a phone hotspot. Only a stalled transfer should time out.
+const MIN_PAYLOAD_BYTES_PER_SECOND: u64 = 256 * 1024;
+
+/// Whole-transfer budget for a native package of `bytes`. A fixed budget let
+/// only small files through: a 40 MB deck never finished uploading or
+/// downloading on an ordinary school connection and retried forever.
+pub fn bridge_payload_transfer_timeout(bytes: u64) -> Duration {
+    bridge_payload_timeout()
+        + Duration::from_millis(bytes.saturating_mul(1_000) / MIN_PAYLOAD_BYTES_PER_SECOND)
+}
+
 pub fn bridge_write_retention() -> Duration {
     Duration::from_millis(POLICY.bridge_write_retention_ms)
 }
@@ -90,6 +102,15 @@ mod tests {
         assert!(retry_delay_ms(1, "work-a") >= 800);
         assert!(retry_delay_ms(1, "work-a") <= 1_200);
         assert!(retry_delay_ms(100, "work-a") <= 60_000);
+    }
+
+    #[test]
+    fn payload_transfer_budget_grows_with_the_package() {
+        assert_eq!(bridge_payload_transfer_timeout(0), bridge_payload_timeout());
+        assert!(bridge_payload_transfer_timeout(64 * 1024) < Duration::from_secs(16));
+        // A 40 MB deck at 2 Mbit/s needs ~160 s; the budget must allow it.
+        assert!(bridge_payload_transfer_timeout(40 * 1024 * 1024) >= Duration::from_secs(160));
+        assert!(bridge_payload_transfer_timeout(100 * 1024 * 1024) <= Duration::from_secs(20 * 60));
     }
 
     #[test]

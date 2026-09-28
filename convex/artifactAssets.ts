@@ -1,7 +1,6 @@
 import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
 import { recordMeterEvent } from "./metering";
 import { requireArtifactCapability } from "./spectraShared";
@@ -10,14 +9,13 @@ import { canReadPinnedContent } from "./retainedContentAccess";
 import { isDurableContentRef } from "../shared/durable-content";
 import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestation";
 import type { IntakeAttestation } from "../shared/intake-attestation";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { MAX_ASSET_BYTES } from "../shared/intake-limits";
 import {
   normalizeMediaType,
   normalizeSha256,
   isSafeIntakeMediaType,
-  verifyContentSignature,
 } from "../shared/intake-integrity";
 
 // Technical abuse/integrity ceilings, not commercial product quotas. Metering and
@@ -210,24 +208,6 @@ export const beginUpload = mutation({
   },
 });
 
-export const storeAuthorized = action({
-  args: {
-    artifactId: v.id("spectraArtifacts"), path: v.string(), name: v.string(), mediaType: v.string(), bytes: v.bytes(), sha256: v.string(),
-    width: v.optional(v.number()), height: v.optional(v.number()), altText: v.optional(v.string()), sourceRef: v.optional(v.string()),
-  },
-  handler: async (ctx, args): Promise<{ assetId: string; status?: string; storageId?: string; reused?: boolean; committed?: boolean; errorCode?: string }> => {
-    if (args.bytes.byteLength < 1) throw new Error("ASSET_SIZE_INVALID");
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", args.bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
-    if (digest !== cleanDigest(args.sha256)) throw new Error("ASSET_DIGEST_MISMATCH");
-    const mediaType = cleanMediaType(args.mediaType);
-    verifyContentSignature(mediaType, new Uint8Array(args.bytes));
-    const beginning: { assetId: string; reused: boolean; uploadReceipt?: string } = await ctx.runMutation(api.artifactAssets.beginUpload, { artifactId: args.artifactId, path: args.path, name: args.name, mediaType: args.mediaType, bytes: args.bytes.byteLength, sha256: digest, ...(args.width !== undefined ? { width: args.width } : {}), ...(args.height !== undefined ? { height: args.height } : {}), ...(args.altText !== undefined ? { altText: args.altText } : {}), ...(args.sourceRef !== undefined ? { sourceRef: args.sourceRef } : {}) });
-    if (beginning.reused) return { assetId: beginning.assetId, reused: true as const };
-    const storageId = await ctx.storage.store(new Blob([args.bytes], { type: mediaType }), { sha256: digest });
-    return ctx.runMutation(internal.artifactAssets.finalizeStoredUpload, { assetId: beginning.assetId as Id<"artifactAssets">, storageId, uploadReceipt: beginning.uploadReceipt! });
-  },
-});
-
 export const getUploadIntent = query({
   args: { assetId: v.id("artifactAssets"), uploadReceipt: v.string(), expectedStorageId: v.optional(v.id("_storage")) },
   handler: async (ctx, args) => {
@@ -241,30 +221,6 @@ export const getUploadIntent = query({
     if (args.expectedStorageId && asset.status !== "uploading" && asset.storageId !== args.expectedStorageId && asset.candidateStorageId !== args.expectedStorageId)
       return { assetId: asset._id, bytes: asset.bytes, sha256: asset.sha256, mediaType: asset.mediaType, path: asset.path, name: asset.name, status: asset.status, storageId: asset.storageId ?? null, candidateStorageId: asset.candidateStorageId ?? null, uploadedByAccountId: asset.uploadedByAccountId };
     return { assetId: asset._id, bytes: asset.bytes, sha256: asset.sha256, mediaType: asset.mediaType, path: asset.path, name: asset.name, status: asset.status, storageId: asset.storageId ?? null, candidateStorageId: asset.candidateStorageId ?? null, uploadedByAccountId: asset.uploadedByAccountId };
-  },
-});
-
-export const finalizeStoredUpload = internalMutation({
-  args: { assetId: v.id("artifactAssets"), storageId: v.id("_storage"), uploadReceipt: v.string() },
-  handler: async (ctx, args) => {
-    const asset = await ctx.db.get(args.assetId);
-    if (!asset || asset.status !== "uploading" || asset.uploadReceipt !== args.uploadReceipt) throw new Error("ASSET_UPLOAD_RECEIPT_INVALID");
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor || actor.accountId !== asset.uploadedByAccountId) throw new Error("ASSET_UPLOAD_UPLOADER_INVALID");
-    const { artifact } = await requireArtifactCapability(ctx, asset.artifactId, "modify");
-    if (artifact.status !== "active") throw new Error("ASSET_ARTIFACT_INVALID");
-    const metadata = await ctx.db.system.get("_storage", args.storageId);
-    let storedMediaType = "";
-    try { storedMediaType = cleanMediaType(metadata?.contentType ?? ""); } catch { /* quarantine below */ }
-    if (!metadata || metadata.size !== asset.bytes || normalizeSha256(metadata.sha256) !== asset.sha256 || (metadata.contentType && storedMediaType !== asset.mediaType)) {
-      await ctx.db.patch(asset._id, { status: "quarantined", candidateStorageId: args.storageId, quarantineReason: "The server-created bytes did not match the declared asset.", updatedAt: Date.now() });
-      return { assetId: asset._id, status: "quarantined" as const, committed: true as const, errorCode: "ASSET_UPLOAD_INTEGRITY_FAILED" as const };
-    }
-    const now = Date.now();
-    await ctx.db.patch(asset._id, { storageId: args.storageId, status: "active", activatedAt: now, updatedAt: now });
-    await recordMeterEvent(ctx, { schoolId: artifact.schoolId, accountId: asset.uploadedByAccountId, category: "storage_bytes", quantity: asset.bytes, sourceType: "artifact_asset", sourceId: String(asset._id), idempotencyKey: `artifact-asset:${asset._id}:storage:active`, dimensions: { mediaType: asset.mediaType }, occurredAt: now });
-    await writeAuditEvent(ctx, { actorAccountId: asset.uploadedByAccountId, schoolId: artifact.schoolId, action: "artifact.asset.uploaded", targetType: "artifact_asset", targetId: String(asset._id), metadata: { artifactId: String(artifact._id), path: asset.path, mediaType: asset.mediaType, bytes: asset.bytes }, retentionClass: "operational" });
-    return { assetId: asset._id, status: "active" as const, committed: true as const, storageId: args.storageId };
   },
 });
 
@@ -310,114 +266,6 @@ export const commitVerifiedUpload = internalMutation({
     await recordMeterEvent(ctx, { schoolId: artifact.schoolId, accountId: asset.uploadedByAccountId, category: "storage_bytes", quantity: asset.bytes, sourceType: "artifact_asset", sourceId: String(asset._id), idempotencyKey: `artifact-asset:${asset._id}:storage:active`, dimensions: { mediaType: asset.mediaType }, occurredAt: now });
     await writeAuditEvent(ctx, { actorAccountId: asset.uploadedByAccountId, schoolId: artifact.schoolId, action: "artifact.asset.uploaded", targetType: "artifact_asset", targetId: String(asset._id), metadata: { artifactId: String(artifact._id), path: asset.path, mediaType: asset.mediaType, bytes: asset.bytes }, retentionClass: "operational" });
     return { assetId: asset._id, status: "active" as const, committed: true as const, storageId: args.storageId };
-  },
-});
-
-export const finalizeUpload = mutation({
-  args: {
-    assetId: v.id("artifactAssets"),
-    storageId: v.id("_storage"),
-    uploadReceipt: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const asset = await ctx.db.get(args.assetId);
-    if (!asset) throw new Error("ASSET_UPLOAD_NOT_ACTIVE");
-    if (!asset.uploadReceipt || asset.uploadReceipt !== args.uploadReceipt)
-      throw new Error("ASSET_UPLOAD_RECEIPT_INVALID");
-    const { actor, artifact } = await requireArtifactCapability(
-      ctx,
-      asset.artifactId,
-      "modify",
-    );
-    if (asset.status === "active" && asset.storageId)
-      return { assetId: asset._id, status: "active" as const, committed: true as const };
-    if (asset.status !== "uploading")
-      return { assetId: asset._id, status: asset.status, committed: true as const };
-    if (asset.candidateStorageId !== args.storageId)
-      throw new Error("ASSET_UPLOAD_ORIGIN_INVALID");
-    const metadata = await ctx.db.system.get("_storage", args.storageId);
-    let storedMediaType = "";
-    try {
-      storedMediaType = cleanMediaType(metadata?.contentType ?? "");
-    } catch {
-      storedMediaType = "";
-    }
-    if (
-      !metadata ||
-      metadata.size !== asset.bytes ||
-      typeof metadata.sha256 !== "string" ||
-      normalizeSha256(metadata.sha256) !== asset.sha256 ||
-      storedMediaType !== asset.mediaType
-    ) {
-      await ctx.db.patch(asset._id, {
-        status: "quarantined",
-        quarantineReason:
-          "The uploaded bytes did not match the declared asset.",
-        candidateStorageId: args.storageId,
-        updatedAt: Date.now(),
-      });
-      return { assetId: asset._id, status: "quarantined" as const, committed: true as const, errorCode: "ASSET_UPLOAD_INTEGRITY_FAILED" as const };
-    }
-    const now = Date.now();
-    await ctx.db.patch(asset._id, {
-      storageId: args.storageId,
-      status: "active",
-      activatedAt: now,
-      updatedAt: now,
-    });
-    await recordMeterEvent(ctx, {
-      schoolId: artifact.schoolId,
-      accountId: actor.accountId,
-      category: "storage_bytes",
-      quantity: asset.bytes,
-      sourceType: "artifact_asset",
-      sourceId: String(asset._id),
-      idempotencyKey: `artifact-asset:${asset._id}:storage:active`,
-      dimensions: { mediaType: asset.mediaType },
-      occurredAt: now,
-    });
-    await writeAuditEvent(ctx, {
-      actorAccountId: actor.accountId,
-      schoolId: artifact.schoolId,
-      action: "artifact.asset.uploaded",
-      targetType: "artifact_asset",
-      targetId: String(asset._id),
-      metadata: {
-        artifactId: String(artifact._id),
-        path: asset.path,
-        mediaType: asset.mediaType,
-        bytes: asset.bytes,
-      },
-      retentionClass: "operational",
-    });
-    return { assetId: asset._id, status: "active" as const, committed: true as const };
-  },
-});
-
-export const failUpload = mutation({
-  args: {
-    assetId: v.id("artifactAssets"),
-    reason: v.string(),
-    storageId: v.optional(v.id("_storage")),
-  },
-  handler: async (ctx, args) => {
-    const asset = await ctx.db.get(args.assetId);
-    if (!asset || asset.status !== "uploading") return { failed: false };
-    const { actor } = await requireArtifactCapability(
-      ctx,
-      asset.artifactId,
-      "modify",
-    );
-    if (asset.uploadedByAccountId !== actor.accountId) return { failed: false };
-    // A caller-supplied storage id is never promoted into cleanup authority.
-    // Only the server-owned action records candidateStorageId after it creates
-    // the object itself.
-    await ctx.db.patch(asset._id, {
-      status: "quarantined",
-      quarantineReason: args.reason.trim().slice(0, 1_000) || "Upload failed.",
-      updatedAt: Date.now(),
-    });
-    return { failed: true };
   },
 });
 

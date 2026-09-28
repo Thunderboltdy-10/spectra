@@ -59,7 +59,87 @@ describe("mergeThreeWay", () => {
     expect(result.conflicts).toEqual([]);
     expect(result.value.map((value) => value.id)).toEqual(["a", "ours", "b", "theirs"]);
   });
+
+  it("orders random concurrent edits exactly as the reference weave does", () => {
+    let seed = 7;
+    const random = () => ((seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31) / 2 ** 31);
+    const edit = (base: string[], prefix: string) => {
+      const kept = base.filter(() => random() > 0.15);
+      if (random() < 0.3) kept.reverse();
+      const out: string[] = [];
+      kept.forEach((regionId, index) => {
+        if (random() < 0.25) out.push(`${prefix}${index}`);
+        out.push(regionId);
+      });
+      if (random() < 0.5) out.push(`${prefix}end`);
+      return out;
+    };
+    for (let round = 0; round < 400; round += 1) {
+      const base = Array.from({ length: Math.floor(random() * 12) }, (_, index) => `b${index}`);
+      const ours = edit(base, "o");
+      const theirs = edit(base, "t");
+      for (const conflictResolution of [undefined, "ours", "theirs"] as const) {
+        const wrap = (ids: string[]) => ids.map((regionId) => ({ id: regionId }));
+        const result = mergeThreeWay({ base: wrap(base), ours: wrap(ours), theirs: wrap(theirs), id, conflictResolution });
+        expect(result.value.map(id)).toEqual(referenceOrder(base, ours, theirs, conflictResolution));
+      }
+    }
+  });
+
+  it("merges a thesis-length document with thousands of insertions on both sides", () => {
+    const base = Array.from({ length: 5_000 }, (_, index) => ({ id: `b${index}` }));
+    const ours = [...base, ...Array.from({ length: 5_000 }, (_, index) => ({ id: `o${index}` }))];
+    const theirs = base.flatMap((block, index) => [block, { id: `t${index}` }]);
+    const started = performance.now();
+    const result = mergeThreeWay({ base, ours, theirs, id });
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(result.conflicts).toEqual([]);
+    expect(result.value.slice(0, 4).map(id)).toEqual(["b0", "t0", "b1", "t1"]);
+    expect(result.value.slice(-2).map(id)).toEqual(["o4998", "o4999"]);
+    expect(result.value).toHaveLength(15_000);
+  });
 });
+
+/** The original array-splice weave, kept as an oracle for the linked-list one. */
+function referenceOrder(base: string[], ours: string[], theirs: string[], resolution?: "ours" | "theirs") {
+  const baseSet = new Set(base);
+  const inOurs = new Set(ours);
+  const inTheirs = new Set(theirs);
+  const selected = new Set([...base, ...ours, ...theirs].filter((regionId) => {
+    const oursChanged = baseSet.has(regionId) !== inOurs.has(regionId);
+    const theirsChanged = baseSet.has(regionId) !== inTheirs.has(regionId);
+    if (oursChanged && theirsChanged && inOurs.has(regionId) !== inTheirs.has(regionId))
+      return resolution === "ours" ? inOurs.has(regionId) : resolution === "theirs" ? inTheirs.has(regionId) : false;
+    return oursChanged ? inOurs.has(regionId) : theirsChanged ? inTheirs.has(regionId) : baseSet.has(regionId);
+  }));
+  const oursOrder = ours.filter((regionId) => selected.has(regionId));
+  const theirsOrder = theirs.filter((regionId) => selected.has(regionId));
+  const survivors = base.filter((regionId) => selected.has(regionId));
+  const oursBackbone = oursOrder.filter((regionId) => baseSet.has(regionId));
+  const theirsBackbone = theirsOrder.filter((regionId) => baseSet.has(regionId));
+  const oursMoved = oursBackbone.join() !== survivors.join();
+  const theirsMoved = theirsBackbone.join() !== survivors.join();
+  let order = survivors;
+  if (oursMoved && theirsMoved && oursBackbone.join() !== theirsBackbone.join())
+    order = resolution === "ours" ? oursBackbone : resolution === "theirs" ? theirsBackbone : survivors;
+  else if (oursMoved) order = oursBackbone;
+  else if (theirsMoved) order = theirsBackbone;
+  const weave = (source: string[]) => {
+    for (const regionId of source) {
+      if (order.includes(regionId) || !selected.has(regionId)) continue;
+      const at = source.indexOf(regionId);
+      const nextAnchor = source.slice(at + 1).find((candidate) => order.includes(candidate));
+      if (nextAnchor) { order.splice(order.indexOf(nextAnchor), 0, regionId); continue; }
+      const previousAnchor = source.slice(0, at).reverse().find((candidate) => order.includes(candidate));
+      if (previousAnchor) order.splice(order.indexOf(previousAnchor) + 1, 0, regionId);
+      else order.push(regionId);
+    }
+  };
+  weave(oursOrder);
+  weave(theirsOrder);
+  weave([...base, ...ours, ...theirs].filter((regionId, index, all) => all.indexOf(regionId) === index && selected.has(regionId)));
+  return order;
+}
 
 const binding = {
   version: 1 as const,

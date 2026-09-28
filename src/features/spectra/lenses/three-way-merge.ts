@@ -98,30 +98,50 @@ export function mergeThreeWay<T>({
     order = theirsBackbone;
   }
 
+  // The chosen order is a linked list so each insertion is O(1); a document
+  // with thousands of blocks inserted on both sides must not stall the server.
+  const next = new Map<string, string | undefined>();
+  const previous = new Map<string, string | undefined>();
+  let head: string | undefined;
+  let tail: string | undefined;
+  const link = (regionId: string, before: string | undefined, after: string | undefined) => {
+    previous.set(regionId, before);
+    next.set(regionId, after);
+    if (before === undefined) head = regionId;
+    else next.set(before, regionId);
+    if (after === undefined) tail = regionId;
+    else previous.set(after, regionId);
+  };
+  for (const regionId of order) link(regionId, tail, undefined);
+
+  // Each region is anchored before the nearest following region of its source
+  // that was already placed when the pass began (later regions cannot have
+  // been placed during it), else after the nearest preceding placed region.
   const weaveInsertions = (source: readonly string[]) => {
-    for (const regionId of source) {
-      if (order.includes(regionId) || !selected.has(regionId)) continue;
-      const sourceIndex = source.indexOf(regionId);
-      const nextAnchor = source
-        .slice(sourceIndex + 1)
-        .find((candidate) => order.includes(candidate));
-      if (nextAnchor) {
-        order.splice(order.indexOf(nextAnchor), 0, regionId);
-        continue;
-      }
-      const previousAnchor = source
-        .slice(0, sourceIndex)
-        .reverse()
-        .find((candidate) => order.includes(candidate));
-      if (previousAnchor) order.splice(order.indexOf(previousAnchor) + 1, 0, regionId);
-      else order.push(regionId);
+    const nextAnchor: Array<string | undefined> = new Array(source.length);
+    let following: string | undefined;
+    for (let index = source.length - 1; index >= 0; index -= 1) {
+      nextAnchor[index] = following;
+      if (next.has(source[index])) following = source[index];
     }
+    let preceding: string | undefined;
+    source.forEach((regionId, index) => {
+      if (!next.has(regionId) && selected.has(regionId)) {
+        const anchor = nextAnchor[index];
+        if (anchor !== undefined) link(regionId, previous.get(anchor), anchor);
+        else if (preceding !== undefined) link(regionId, preceding, next.get(preceding));
+        else link(regionId, tail, undefined);
+      }
+      if (next.has(regionId)) preceding = regionId;
+    });
   };
   weaveInsertions(oursOrder);
   weaveInsertions(theirsOrder);
   weaveInsertions([...selected.keys()]);
+  const woven: string[] = [];
+  for (let regionId = head; regionId !== undefined; regionId = next.get(regionId)) woven.push(regionId);
   return {
-    value: order.flatMap((regionId) => {
+    value: woven.flatMap((regionId) => {
       const value = selected.get(regionId);
       return value === undefined ? [] : [value];
     }),

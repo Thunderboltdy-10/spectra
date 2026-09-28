@@ -1295,6 +1295,7 @@ export const updateStatus = mutation({
         v.literal("canonical_saved"),
         v.literal("native_pending"),
         v.literal("native_verified"),
+        v.literal("native_superseded"),
         v.literal("cancelled"),
         v.literal("failed"),
       ),
@@ -1432,7 +1433,7 @@ export const updateStatus = mutation({
                 : args.status === "completed"
                   ? (committedArtifactId
                     ? "canonical_saved"
-                    : run.outcome === "native_pending" || run.outcome === "native_verified"
+                    : run.outcome === "native_pending" || run.outcome === "native_verified" || run.outcome === "native_superseded"
                       ? run.outcome
                       : "answer_only")
                   : run.outcome),

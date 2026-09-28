@@ -1050,6 +1050,8 @@ export const commitPayloadUpload = mutation({
             errorCode: "external-save-during-write",
             updatedAt: now,
           });
+        if (pendingOperation?.actorKind === "ai" && pendingOperation.runId)
+          await settleRunNativeOutcome(ctx, pendingOperation.runId);
         const resolving = await ctx.db.query("syncConflicts")
           .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "resolving-spectra"))
           .take(50);
@@ -1567,6 +1569,7 @@ export const completeWrite = mutation({
         });
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, errorCode, now, "conflicted");
+        if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
         return completion("failed", { ignored: true, reason: errorCode });
       }
       await ctx.db.patch(request.replicaId, {

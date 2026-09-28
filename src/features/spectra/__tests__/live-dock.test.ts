@@ -49,6 +49,7 @@ describe("Live Dock V2", () => {
     { outcome: "canonical_saved", nativeSync: null, says: "Updated the essay.", never: /computer/ },
     { outcome: "native_pending", nativeSync: "pending", says: "hasn't confirmed this change yet", never: /checked in/ },
     { outcome: "native_verified", nativeSync: "verified", says: "checked in the file on your computer", never: /hasn't confirmed/ },
+    { outcome: "native_superseded", nativeSync: "superseded", says: "A newer edit replaced this change", never: /hasn't confirmed|checked in/ },
   ])("tells the student the native file truth for $outcome", ({ outcome, nativeSync, says, never }) => {
     const model = deriveLiveDockTab(source({
       run: { status: "completed", phase: "completed", finalSummary: "Updated the essay.", outcome },

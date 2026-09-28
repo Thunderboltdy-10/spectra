@@ -3633,7 +3633,7 @@ export const cancelLifecycleJob = mutation({
         });
       const integrations = await ctx.db
         .query("schoolIntegrations")
-        .filter((q) => q.eq(q.field("schoolId"), school._id))
+        .withIndex("by_school_provider", (q) => q.eq("schoolId", school._id))
         .collect();
       for (const integration of integrations.filter(
         (item) =>
@@ -3748,7 +3748,7 @@ function purgedPayloadRefs(table: string, row: Record<string, unknown>) {
   ];
 }
 
-const PURGE_SCHOOL_TABLES = [
+export const PURGE_SCHOOL_TABLES = [
   "membershipInvitations",
   "schoolGroups",
   "schoolGroupMembers",
@@ -3831,6 +3831,49 @@ const PURGE_SCHOOL_TABLES = [
   "workspaceDeletionJobs",
   "spectraArtifactRevisionFacts",
 ] as const;
+
+/** School-leading index for each purge table that has one. A table left out
+ * has no index that starts with schoolId and is walked once with a cursor. */
+export const PURGE_SCHOOL_INDEXES: Partial<
+  Record<(typeof PURGE_SCHOOL_TABLES)[number], string>
+> = {
+  membershipInvitations: "by_school_status",
+  schoolGroups: "by_school_status",
+  schoolGroupMembers: "by_school",
+  schoolAnnouncements: "by_school_created",
+  schoolAnnouncementDeliveries: "by_school_created",
+  feedbackReports: "by_school_status",
+  schoolRequests: "by_school_status",
+  schoolOnboardingSagas: "by_school",
+  accessGrants: "by_school",
+  resourcePolicies: "by_school",
+  secretRecords: "by_school_purpose",
+  schoolIntegrations: "by_school_provider",
+  integrationCapabilities: "by_school_status",
+  externalIdentityMappings: "by_school_status",
+  externalRecordOverlays: "by_school",
+  externalRecords: "by_school_updated",
+  externalSyncRuns: "by_school_created",
+  memoryPreferences: "by_school_updated",
+  memoryCapsules: "by_school_updated",
+  memoryRetrievalEvents: "by_school_created",
+  memoryEvaluationRuns: "by_school_created",
+  memoryClaims: "by_school_status",
+  agentReleases: "by_school_published",
+  agentEvalRuns: "by_school_created",
+  agentFeedback: "by_school_created",
+  agentUsageAggregates: "by_school_day",
+  agentImprovementProposals: "by_school_created",
+  agentFollows: "by_school_status",
+  artifactSnapshotObjects: "by_school_hash",
+  collaborationRooms: "by_school_status",
+  spectraMessages: "by_school_created",
+  spectraThreads: "by_school_status",
+  spectraArtifacts: "by_school_status",
+  spectraWorkspaces: "by_school_status",
+  calendarPeriodMaps: "by_school_updated",
+  managebacResourceImports: "by_school_updated",
+};
 
 async function rowBelongsToPurgedSchool(
   ctx: MutationCtx,
@@ -3976,6 +4019,7 @@ async function purgeSchoolRows(
     return {
       stage: "finalize" as const,
       tableIndex: 0,
+      cursor: undefined,
       deletedRows: 0,
       deletedStorageObjects: 0,
     };
@@ -3984,17 +4028,43 @@ async function purgeSchoolRows(
     return {
       stage: progress.stage,
       tableIndex: progress.tableIndex + 1,
+      cursor: undefined,
       deletedRows: 0,
       deletedStorageObjects: 0,
     };
   }
-  // Every table in this list has a schoolId field. Casting to one member of
-  // that structurally identical family keeps the query typed while the runtime
-  // table name remains the explicit allowlist above.
-  const rows = await ctx.db
-    .query(table as "accessGrants")
-    .filter((q) => q.eq(q.field("schoolId"), progress.schoolId))
-    .take(75);
+  // Every table in this list has a schoolId field. A filter scan read every
+  // tenant's rows on each batch and, once the school's rows were gone, the
+  // whole table, which exceeds the read limit on a large table. A table with a
+  // school index now reads only this school's rows. A table without one is
+  // walked once with a bounded cursor.
+  const index = PURGE_SCHOOL_INDEXES[table];
+  const schoolRows = ctx.db.query(table as "accessGrants") as unknown as {
+    withIndex(
+      name: string,
+      range: (q: { eq(field: "schoolId", value: Id<"schools">): unknown }) => unknown,
+    ): { take(count: number): Promise<Doc<"accessGrants">[]> };
+    paginate(options: {
+      cursor: string | null;
+      numItems: number;
+      maximumRowsRead: number;
+      maximumBytesRead: number;
+    }): Promise<PaginationResult<Doc<"accessGrants">>>;
+  };
+  const walked = index
+    ? null
+    : await schoolRows.paginate({
+        cursor: progress.cursor ?? null,
+        numItems: 200,
+        maximumRowsRead: 200,
+        maximumBytesRead: 4_000_000,
+      });
+  const rows = walked
+    ? walked.page.filter((row) => row.schoolId === progress.schoolId)
+    : await schoolRows
+        .withIndex(index!, (q) => q.eq("schoolId", progress.schoolId))
+        .take(75);
+  const tableDone = walked ? walked.isDone : rows.length === 0;
   let deletedStorageObjects = 0;
   for (const row of rows) {
     // Published runtime bundles are stored blobs; deleting only the row
@@ -4014,8 +4084,8 @@ async function purgeSchoolRows(
   }
   return {
     stage: progress.stage,
-    tableIndex:
-      rows.length === 0 ? progress.tableIndex + 1 : progress.tableIndex,
+    tableIndex: tableDone ? progress.tableIndex + 1 : progress.tableIndex,
+    cursor: walked && !walked.isDone ? walked.continueCursor : undefined,
     deletedRows: rows.length,
     deletedStorageObjects,
   };
@@ -4026,13 +4096,15 @@ async function purgeStoredSchoolObjects(
   schoolId: Id<"schools">,
 ) {
   const [assets, imports] = await Promise.all([
+    // School indexes: a filter scan read every tenant's rows, and the whole
+    // table once this school's rows were gone.
     ctx.db
       .query("artifactAssets")
-      .filter((q) => q.eq(q.field("schoolId"), schoolId))
+      .withIndex("by_school", (q) => q.eq("schoolId", schoolId))
       .take(40),
     ctx.db
       .query("artifactImportJobs")
-      .filter((q) => q.eq(q.field("schoolId"), schoolId))
+      .withIndex("by_school_created", (q) => q.eq("schoolId", schoolId))
       .take(40),
   ]);
   let deletedStorageObjects = 0;
@@ -4104,7 +4176,7 @@ async function processPurgeBatch(
     await ctx.db.patch(progress._id, {
       stage: result.stage,
       tableIndex: result.tableIndex,
-      cursor: undefined,
+      cursor: result.cursor,
       deletedRows: progress.deletedRows + result.deletedRows,
       deletedStorageObjects:
         progress.deletedStorageObjects + result.deletedStorageObjects,
@@ -4172,22 +4244,45 @@ async function processPurgeBatch(
   return true;
 }
 
+/** Runs one purge batch and schedules the next while the purge is running.
+ * The cron still runs a batch every tick, so a chain that stops on an error
+ * falls back to the cron's pace. */
+export const advanceSchoolPurge = internalMutation({
+  args: { jobId: v.id("schoolLifecycleJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.type !== "purge" || job.status !== "running") return false;
+    if (!(await processPurgeBatch(ctx, job))) return false;
+    if ((await ctx.db.get(job._id))?.status === "running")
+      await ctx.scheduler.runAfter(
+        0,
+        internal.administration.advanceSchoolPurge,
+        args,
+      );
+    return true;
+  },
+});
+
 export const processLifecycleJobs = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const runningPurge = (
-      await ctx.db
-        .query("schoolLifecycleJobs")
-        .withIndex("by_status_created", (q) => q.eq("status", "running"))
-        .take(20)
-    ).find((job) => job.type === "purge");
+    // Exports stay "running" across several actions now, so a purge is looked
+    // up by type: twenty running exports must not hide it.
+    const runningPurge = await ctx.db
+      .query("schoolLifecycleJobs")
+      .withIndex("by_status_created", (q) => q.eq("status", "running"))
+      .filter((q) => q.eq(q.field("type"), "purge"))
+      .first();
     if (runningPurge) {
       await processPurgeBatch(ctx, runningPurge);
       return { completed: 0, purging: true };
     }
+    // Queued exports belong to processLifecycleExports. Skipping them here
+    // after taking twenty let twenty queued exports stall every suspend.
     const jobs = await ctx.db
       .query("schoolLifecycleJobs")
       .withIndex("by_status_created", (q) => q.eq("status", "queued"))
+      .filter((q) => q.neq(q.field("type"), "export"))
       .take(20);
     const now = Date.now();
     let completed = 0;
@@ -4202,7 +4297,6 @@ export const processLifecycleJobs = internalMutation({
         });
         continue;
       }
-      if (job.type === "export") continue;
       if (job.type === "purge") {
         const exportJob = job.prerequisiteExportJobId
           ? await ctx.db.get(job.prerequisiteExportJobId)
@@ -4230,7 +4324,9 @@ export const processLifecycleJobs = internalMutation({
           });
         const integrations = await ctx.db
           .query("schoolIntegrations")
-          .filter((q) => q.eq(q.field("schoolId"), school._id))
+          .withIndex("by_school_provider", (q) =>
+            q.eq("schoolId", school._id),
+          )
           .collect();
         for (const integration of integrations)
           await ctx.db.patch(integration._id, {
@@ -4272,6 +4368,13 @@ export const processLifecycleJobs = internalMutation({
             createdAt: now,
             updatedAt: now,
           });
+        // One batch per two-minute cron could not purge a real school; the
+        // purge now continues batch after batch until it completes.
+        await ctx.scheduler.runAfter(
+          0,
+          internal.administration.advanceSchoolPurge,
+          { jobId: job._id },
+        );
         continue;
       }
       await ctx.db.patch(job._id, {
@@ -4302,10 +4405,15 @@ export const processLifecycleJobs = internalMutation({
             status: "suspended",
             updatedAt: now,
           });
-        const integrations = await ctx.db.query("schoolIntegrations").collect();
-        for (const integration of integrations.filter(
-          (item) => item.schoolId === school._id,
-        ))
+        // Only this school's integrations. A whole-table read grew with
+        // every tenant on the platform.
+        const integrations = await ctx.db
+          .query("schoolIntegrations")
+          .withIndex("by_school_provider", (q) =>
+            q.eq("schoolId", school._id),
+          )
+          .collect();
+        for (const integration of integrations)
           await ctx.db.patch(integration._id, {
             status: "revoked",
             blockedReason: "School offboarding is in progress.",

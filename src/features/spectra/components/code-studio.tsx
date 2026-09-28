@@ -139,6 +139,7 @@ import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
+import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 
 type CodeProblem = {
   id: string;
@@ -252,16 +253,6 @@ function formatBytes(value: number) {
   if (value < 1_000) return `${value} B`;
   if (value < 1_000_000) return `${(value / 1_000).toFixed(1)} KB`;
   return `${(value / 1_000_000).toFixed(1)} MB`;
-}
-
-async function sha256Blob(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -1812,7 +1803,7 @@ export function CodeStudio({
         name: recovery.name,
         mimeType: recovery.mimeType,
         bytes: recovery.blob.size,
-        sha256: await sha256Blob(recovery.blob),
+        sha256: await artifactBlobSha256(recovery.blob),
       });
       importJobId = beginning.jobId;
       try {
@@ -1832,7 +1823,7 @@ export function CodeStudio({
           const blob = new Blob([asset.bytes.slice().buffer], {
             type: asset.mediaType,
           });
-          const sha256 = await sha256Blob(blob);
+          const sha256 = await artifactBlobSha256(blob);
           const uploaded = await uploadArtifactAsset({
             artifactId,
             path: asset.path,
@@ -3781,7 +3772,7 @@ function CodeSettings({
       if (file.size > 8_000_000)
         throw new Error("A live Code asset cannot exceed 8 MB.");
       const path = normalizeCodePath(`assets/${file.name}`);
-      const sha256 = await sha256Blob(file);
+      const sha256 = await artifactBlobSha256(file);
       const uploaded = await uploadArtifactAsset({
         artifactId,
         path,

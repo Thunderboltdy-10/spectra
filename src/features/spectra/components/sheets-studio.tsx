@@ -69,6 +69,7 @@ import {
 import {
   downloadDocumentBlob,
   downloadDocumentText,
+  artifactBlobSha256,
 } from "./artifact-studio-file-utils";
 import {
   abortArtifactImportUpload,
@@ -251,16 +252,6 @@ function useShellContract(): StudioContract | null {
   } catch {
     return null;
   }
-}
-
-async function sheetsBlobSha256(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 type Viewport = {
@@ -2589,7 +2580,7 @@ export const SheetsStudio = memo(function SheetsStudio({
                 ? "application/vnd.oasis.opendocument.spreadsheet"
                 : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         bytes: file.size,
-        sha256: await sheetsBlobSha256(file),
+        sha256: await artifactBlobSha256(file),
       });
       jobId = beginning.jobId;
       await uploadArtifactImportOriginal(jobId, file);

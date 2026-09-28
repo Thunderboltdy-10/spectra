@@ -109,6 +109,7 @@ import {
 import { projectBindingsFromIr } from "../capabilities";
 import { enforcePdfInput } from "../../../../shared/parser-limits";
 import { ArtifactEmbedById } from "./artifact-embed-host";
+import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -260,16 +261,6 @@ function visual(
     .find((value) => typeof value === typeof fallback) as
     string | number | undefined;
   return styleValue(node, key, fromContent ?? fallback);
-}
-
-async function sha256Blob(blob: Blob) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    await blob.arrayBuffer(),
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 /**
@@ -2087,7 +2078,7 @@ export function WhiteboardStudio({
         path: `whiteboard/${uniqueToken()}-${file.name}`,
         name: file.name,
         mediaType: file.type || "application/octet-stream",
-        sha256: await sha256Blob(file),
+        sha256: await artifactBlobSha256(file),
         blob: file,
       });
       const layer = layers.find(
@@ -2341,7 +2332,7 @@ export function WhiteboardStudio({
           path: `imports/${importJobId}/pdf-pages/${name}`,
           name,
           mediaType: "image/png",
-          sha256: await sha256Blob(blob),
+          sha256: await artifactBlobSha256(blob),
           blob,
         });
         const displayWidth = 480;
@@ -2412,7 +2403,7 @@ export function WhiteboardStudio({
         name: file.name,
         mimeType: file.type || "application/octet-stream",
         bytes: file.size,
-        sha256: await sha256Blob(file),
+        sha256: await artifactBlobSha256(file),
       });
       jobId = beginning.jobId;
       try {

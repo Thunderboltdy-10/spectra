@@ -100,6 +100,10 @@ import type { ReferenceNode } from "../references";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { useStudioContract } from "./artifact-studio-shell";
+import {
+  applyStudioHistory,
+  type StudioHistoryEntry,
+} from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
@@ -692,8 +696,12 @@ export function WhiteboardStudio({
   >("none");
   const [pageRailCollapsed, setPageRailCollapsed] = useState(false);
   const [search, setSearch] = useState("");
-  const [undo, setUndo] = useState<WhiteboardContent[]>([]);
-  const [redo, setRedo] = useState<WhiteboardContent[]>([]);
+  const [undo, setUndo] = useState<StudioHistoryEntry<WhiteboardContent>[]>(
+    [],
+  );
+  const [redo, setRedo] = useState<StudioHistoryEntry<WhiteboardContent>[]>(
+    [],
+  );
   const [presenting, setPresenting] = useState(false);
   const presenterRef = useRef<HTMLDivElement>(null);
   useModalFocus(presenterRef, {
@@ -833,7 +841,10 @@ export function WhiteboardStudio({
     (next: WhiteboardContent, record = true) => {
       if (readOnly) return;
       if (record) {
-        setUndo((stack) => [...stack.slice(-79), clone(board)]);
+        setUndo((stack) => [
+          ...stack.slice(-79),
+          { before: clone(board), after: next },
+        ]);
         setRedo([]);
       }
       // Re-normalize so zOrder/settings match the collaborative projection
@@ -1595,7 +1606,10 @@ export function WhiteboardStudio({
     // nothing: the bar's Undo used to walk back through identical states.
     if (drag.mode !== "node" && drag.mode !== "resize") return;
     if (!drag.moved) return;
-    setUndo((stack) => [...stack.slice(-79), drag.snapshot]);
+    setUndo((stack) => [
+      ...stack.slice(-79),
+      { before: drag.snapshot, after: clone(board) },
+    ]);
     setRedo([]);
   }
   function wheel(event: ReactWheelEvent<HTMLDivElement>) {
@@ -1647,9 +1661,12 @@ export function WhiteboardStudio({
       throw error;
     }
   }
+  // History replays one local edit onto the current board, so undoing your
+  // sticky never reverts what a collaborator drew since.
   async function undoAction() {
-    const previous = undo.at(-1);
-    if (!previous || readOnly) return;
+    const entry = undo.at(-1);
+    if (!entry || readOnly) return;
+    const previous = applyStudioHistory(entry, "undo", board);
     try {
       await reconcileEmbedRows(previous);
     } catch (error) {
@@ -1659,12 +1676,13 @@ export function WhiteboardStudio({
       return;
     }
     setUndo((stack) => stack.slice(0, -1));
-    setRedo((stack) => [...stack.slice(-79), clone(board)]);
+    setRedo((stack) => [...stack.slice(-79), entry]);
     onChange(normalizeWhiteboardContent(previous));
   }
   async function redoAction() {
-    const next = redo.at(-1);
-    if (!next || readOnly) return;
+    const entry = redo.at(-1);
+    if (!entry || readOnly) return;
+    const next = applyStudioHistory(entry, "redo", board);
     try {
       await reconcileEmbedRows(next);
     } catch (error) {
@@ -1674,7 +1692,7 @@ export function WhiteboardStudio({
       return;
     }
     setRedo((stack) => stack.slice(0, -1));
-    setUndo((stack) => [...stack.slice(-79), clone(board)]);
+    setUndo((stack) => [...stack.slice(-79), entry]);
     onChange(normalizeWhiteboardContent(next));
   }
   function updateSelected(recipe: (node: WhiteboardNode) => void) {

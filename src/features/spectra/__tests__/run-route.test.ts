@@ -714,6 +714,31 @@ describe("Spectra run route", () => {
     expect(persisted[0]?.payload).toMatchObject({ content: "The Moon reflects sunlight.", runItem: { text: "The Moon reflects sunlight." } });
   });
 
+  it("never streams an internal id, even one split across chunks", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    const id = "k17abcdefghijklmnopqrstuvwxyz012";
+    fetchMock.mockImplementation(async () => new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const piece of ["Your notes ", `(id: ${id.slice(0, 12)}`, `${id.slice(12)}) `, "are ready."])
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ delta: { content: piece } }] })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Are my notes ready?" }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
+    const streamed = events.filter((event) => event.type === "text_delta" || event.type === "text_replace");
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(streamed.some((event) => event.content?.includes("k17"))).toBe(false);
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe("Your notes are ready.");
+  });
+
   it("takes back a streamed answer cut off by a provider error before the retry streams", async () => {
     const { fetchMock, convexMutation } = setup({});
     const sse = (records: unknown[]) => new Response(new ReadableStream({
@@ -739,8 +764,9 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
     const text = events.filter((event) => event.type === "text_delta" || event.type === "text_replace")
       .map((event) => `${event.type}:${event.content}`);
+    // The word still being written when the stream broke is never shown.
     expect(text.slice(0, 3)).toEqual([
-      "text_delta:The Moon glows because", "text_replace:", "text_delta:The Moon reflects sunlight.",
+      "text_delta:The Moon glows ", "text_replace:", "text_delta:The Moon reflects ",
     ]);
     const assistant = convexMutation.mock.calls.find(([name, args]) =>
       String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");

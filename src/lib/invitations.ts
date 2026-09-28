@@ -5,6 +5,8 @@ type InviteEmailParams = {
   role: string;
   joinUrl: string;
   orgName?: string;
+  /** Logged instead of the recipient when delivery fails. */
+  invitationId?: string;
 };
 
 export type InviteEmailResult =
@@ -115,9 +117,11 @@ export async function sendInvitationEmail(params: InviteEmailParams): Promise<In
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown email transport failure";
+    // Invitees are often minors: the log names the invitation, never the
+    // address, and SMTP errors that echo the address are redacted.
     console.warn("[invite-email] smtp delivery threw", {
-      to: params.to,
-      reason,
+      invitationId: params.invitationId ?? "unknown",
+      reason: reason.replace(/[^\s<>@"']+@[^\s<>@"']+/g, "[address]"),
     });
     return {
       status: "failed",

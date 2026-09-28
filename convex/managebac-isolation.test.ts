@@ -32,6 +32,16 @@ const admin: TestIdentity = {
   emailVerified: true,
 };
 
+/** Progress for a page that is the last page of its whole route. */
+const FULL_ROUTE_PAGE = {
+  binding: "",
+  page: 1,
+  bindingDone: true,
+  capabilityDone: true,
+  classIds: [],
+  yearGroupIds: [],
+};
+
 const emptyCounts = {
   fetched: 0,
   created: 0,
@@ -293,6 +303,7 @@ async function commitPage(
     capabilityId: fixture.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
   });
   return t.withIdentity(identity).mutation(api.managebac.commitNormalizedPage, {
     integrationId: fixture.integrationId,
@@ -300,6 +311,7 @@ async function commitPage(
     capabilityId: fixture.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
     payloadDigest,
     timestamp,
     nonce,
@@ -383,8 +395,9 @@ async function commitTimetablePage(
   title: string,
   sourceHash: string,
   nonce: string,
+  omitted = false,
 ) {
-  const records = [
+  const records = omitted ? [] : [
     {
       providerRecordId: "timetable-event-1",
       providerRecordKey: "timetable:math-1",
@@ -406,6 +419,7 @@ async function commitTimetablePage(
     capabilityId: timetable.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
   });
   return t.withIdentity(alice).mutation(api.managebac.commitNormalizedPage, {
     integrationId: fixture.integrationId,
@@ -413,6 +427,7 @@ async function commitTimetablePage(
     capabilityId: timetable.capabilityId,
     records,
     pageNumber: 1,
+    progress: FULL_ROUTE_PAGE,
     payloadDigest,
     timestamp,
     nonce,
@@ -450,10 +465,13 @@ describe("ManageBac account isolation", () => {
       t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" }),
     ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
     vi.setSystemTime(Date.now() + 6 * 60_000);
+    // The killed request's pass is not thrown away: the next request takes
+    // it over under a fresh lease and continues from its last saved page.
     const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" });
-    expect(replacement.syncRunId).not.toBe(killed.syncRunId);
+    expect(replacement.syncRunId).toBe(killed.syncRunId);
+    expect(replacement.leaseToken).not.toBe(killed.leaseToken);
     expect(await t.run((ctx) => ctx.db.get(killed.syncRunId as Id<"externalSyncRuns">))).toMatchObject({
-      status: "failed", stage: "lease_expired",
+      status: "leased", stage: "resuming", cursorState: { requests: 2 },
     });
   });
 
@@ -512,6 +530,7 @@ describe("ManageBac account isolation", () => {
       capabilityId: fixture.capabilityId,
       records: [],
       pageNumber: 1,
+      progress: FULL_ROUTE_PAGE,
       leaseToken: "old-lease",
       selectionRevision: 0,
     });
@@ -522,6 +541,7 @@ describe("ManageBac account isolation", () => {
         capabilityId: fixture.capabilityId,
         records: [],
         pageNumber: 1,
+        progress: FULL_ROUTE_PAGE,
         leaseToken: "old-lease",
         selectionRevision: 0,
         payloadDigest,
@@ -1103,17 +1123,14 @@ describe("ManageBac account isolation", () => {
     );
     expect(repeated).toHaveLength(1);
 
+    // The provider now lists no timetable: the pass reads one empty page.
     const removeRun = await insertTimetableRun(t, fixture, fixture.aliceId);
-    const removePayload = {
-      seenProviderKeys: [] as string[],
-      reconciledCapabilityIds: [removeRun.capabilityId],
-    };
+    await commitTimetablePage(t, fixture, removeRun, "", "", "timetable-empty-page", true);
     const timestamp = Date.now();
-    const payloadDigest = digest(removePayload);
+    const payloadDigest = digest({});
     await t.withIdentity(alice).mutation(api.managebac.completeSync, {
       integrationId: fixture.integrationId,
       syncRunId: removeRun.syncRunId,
-      ...removePayload,
       payloadDigest,
       timestamp,
       nonce: "timetable-remove-1",
@@ -1770,6 +1787,7 @@ describe("ManageBac account isolation", () => {
       capabilityId: fixture.capabilityId,
       records,
       pageNumber: 1,
+      progress: FULL_ROUTE_PAGE,
       leaseToken: "overlay-notes-lease",
     });
     await asAlice.mutation(api.managebac.commitNormalizedPage, {
@@ -1778,6 +1796,7 @@ describe("ManageBac account isolation", () => {
       capabilityId: fixture.capabilityId,
       records,
       pageNumber: 1,
+      progress: FULL_ROUTE_PAGE,
       payloadDigest,
       timestamp,
       nonce: "overlay-notes-nonce",

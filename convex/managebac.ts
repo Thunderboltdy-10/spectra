@@ -193,10 +193,25 @@ async function activeRunForScope(
           completedAt: now,
           updatedAt: now,
         });
+        await closePass(ctx, row._id);
         continue;
       }
     }
     if (row.leaseExpiresAt && row.leaseExpiresAt > now) return row;
+    const pass = syncPass(row);
+    if (pass && !pass.reconcile) {
+      // The request that owned this pass was killed after its last saved
+      // page. The pass keeps its place for the next request to continue.
+      await ctx.db.patch(row._id, {
+        status: "partial",
+        stage: "suspended",
+        errorCode: "INTEGRATION_WORKER_LEASE_EXPIRED",
+        errorSummary: "The request running this sync stopped. The next sync continues from its last saved page.",
+        leaseExpiresAt: undefined,
+        updatedAt: now,
+      });
+      continue;
+    }
     // Rows written before scoped leases were introduced cannot safely accept
     // a late response, so close them before allowing a replacement claim.
     await ctx.db.patch(row._id, {
@@ -207,8 +222,281 @@ async function activeRunForScope(
       completedAt: now,
       updatedAt: now,
     });
+    await closePass(ctx, row._id);
   }
   return null;
+}
+
+/*
+ * A full sync pass can need more than one request: each request stops asking
+ * the provider for pages at the route's time budget. The pass keeps its place
+ * in `cursorState` and the records it saw in `externalSyncSeenKeys`, so the
+ * next request for the same scope continues it instead of starting again.
+ * Records the provider no longer lists are removed only after the request
+ * that finishes the whole pass calls completeSync; a partial pass removes
+ * nothing.
+ */
+const SYNC_RESUME_DELAY_MS = 30_000;
+/** A pass that cannot finish within these is dropped and a fresh one starts. */
+const MAX_PASS_REQUESTS = 40;
+const MAX_PASS_AGE_MS = 24 * 60 * 60_000;
+const MAX_PASS_FANOUT_IDS = 5_000;
+const RECONCILE_BATCH = 100;
+const SEEN_KEY_PURGE_BATCH = 500;
+
+type PassPosition = {
+  capabilityId: string;
+  /** The fan-out value (a class or year group id); "" for an unbound route. */
+  binding: string;
+  /** The last committed page and the cursor that requested it. */
+  page: number;
+  cursor?: string;
+  bindingDone: boolean;
+};
+
+type PassReconcile = {
+  streams: Array<{ scope: "personal" | "shared"; recordType: string }>;
+  stream: number;
+  /** The `_creationTime` of the last record read in the current stream. */
+  after: number | null;
+  tombstoned: number;
+  importerAccountId: Id<"accounts">;
+};
+
+type SyncPass = {
+  version: 1;
+  startedAt: number;
+  requests: number;
+  personalOnly: boolean;
+  /** What must not change for a pass to continue: the fan-out selection,
+   * the connection and the capability manifest it started with. */
+  selectionDigest: string;
+  connectionKey: string;
+  manifestVersion: number;
+  completedCapabilityIds: string[];
+  position?: PassPosition;
+  classIds: string[];
+  yearGroupIds: string[];
+  reconcile?: PassReconcile;
+};
+
+type PassIdentity = Pick<
+  SyncPass,
+  "personalOnly" | "selectionDigest" | "connectionKey" | "manifestVersion"
+>;
+
+const vPassProgress = v.object({
+  binding: v.string(),
+  page: v.number(),
+  cursor: v.optional(v.string()),
+  bindingDone: v.boolean(),
+  capabilityDone: v.boolean(),
+  classIds: v.array(v.string()),
+  yearGroupIds: v.array(v.string()),
+});
+
+function syncPass(run: Doc<"externalSyncRuns">): SyncPass | undefined {
+  const state = record(run.cursorState);
+  return state.version === 1 ? (state as unknown as SyncPass) : undefined;
+}
+
+async function passIdentity(
+  ctx: Ctx,
+  integration: Doc<"schoolIntegrations">,
+  selectionAccountId: Id<"accounts">,
+  personalOnly: boolean,
+): Promise<PassIdentity> {
+  const selection = await selectionSnapshot(ctx, integration._id, selectionAccountId);
+  return {
+    personalOnly,
+    selectionDigest: await exactDigest([...selection.selectedClassIds].sort()),
+    connectionKey: await exactDigest([
+      integration.baseUrl,
+      integration.authHeaderName,
+      integration.authScheme,
+      integration.credentialFingerprint ?? "",
+    ]),
+    manifestVersion: integration.manifestVersion,
+  };
+}
+
+function newPass(identity: PassIdentity, now: number): SyncPass {
+  return {
+    version: 1,
+    startedAt: now,
+    requests: 1,
+    ...identity,
+    completedCapabilityIds: [],
+    classIds: [],
+    yearGroupIds: [],
+  };
+}
+
+/** What the route needs to continue a pass where the last request stopped. */
+function passForRoute(pass: SyncPass) {
+  return {
+    requests: pass.requests,
+    completedCapabilityIds: pass.completedCapabilityIds,
+    ...(pass.position ? { position: pass.position } : {}),
+    classIds: pass.classIds,
+    yearGroupIds: pass.yearGroupIds,
+  };
+}
+
+/** The newest run of this scope, if it is a pass waiting to continue. */
+async function suspendedPass(
+  ctx: MutationCtx,
+  integrationId: Id<"schoolIntegrations">,
+  accountId: Id<"accounts"> | undefined,
+) {
+  const latest = await ctx.db
+    .query("externalSyncRuns")
+    .withIndex("by_integration_account_status", (q) =>
+      q.eq("integrationId", integrationId).eq("accountId", accountId).eq("status", "partial"),
+    )
+    .order("desc")
+    .first();
+  const pass = latest && latest.stage === "suspended" ? syncPass(latest) : undefined;
+  return latest && pass ? { run: latest, pass } : null;
+}
+
+/** Why a newer sync request starts a fresh pass instead of continuing. */
+function passRestartReason(
+  run: Doc<"externalSyncRuns">,
+  pass: SyncPass,
+  identity: PassIdentity,
+  readableIds: Array<Id<"integrationCapabilities">>,
+  now: number,
+  selectionRevision?: number,
+) {
+  if (pass.personalOnly !== identity.personalOnly)
+    return "A different kind of sync was requested.";
+  if (pass.connectionKey !== identity.connectionKey)
+    return "The ManageBac connection changed.";
+  if (pass.manifestVersion !== identity.manifestVersion ||
+      readableIds.some((id) => !run.capabilityIds.includes(id)))
+    return "The readable ManageBac routes changed.";
+  if (pass.selectionDigest !== identity.selectionDigest ||
+      (selectionRevision !== undefined && run.selectionRevision !== selectionRevision))
+    return "The followed classes changed.";
+  if (now - pass.startedAt >= MAX_PASS_AGE_MS || pass.requests >= MAX_PASS_REQUESTS)
+    return "The earlier sync could not finish in time.";
+  return null;
+}
+
+async function resumePass(
+  ctx: MutationCtx,
+  run: Doc<"externalSyncRuns">,
+  pass: SyncPass,
+  leaseOwner: string,
+  now: number,
+) {
+  const leaseToken = crypto.randomUUID();
+  const resumed = { ...pass, requests: pass.requests + 1 };
+  await ctx.db.patch(run._id, {
+    status: "leased",
+    stage: "resuming",
+    leaseOwner,
+    leaseToken,
+    leaseExpiresAt: now + SYNC_LEASE_MS,
+    cursorState: resumed,
+    attemptCount: run.attemptCount + 1,
+    errorCode: undefined,
+    errorSummary: undefined,
+    completedAt: undefined,
+    updatedAt: now,
+  });
+  return { leaseToken, pass: resumed };
+}
+
+async function abandonPass(
+  ctx: MutationCtx,
+  run: Doc<"externalSyncRuns">,
+  reason: string,
+  now: number,
+) {
+  await ctx.db.patch(run._id, {
+    status: "cancelled",
+    stage: "restarted",
+    errorCode: "INTEGRATION_SYNC_RESTARTED",
+    errorSummary: reason,
+    completedAt: now,
+    updatedAt: now,
+  });
+  await closePass(ctx, run._id);
+}
+
+/** A closed pass never reconciles; its seen keys are deleted in batches. */
+async function closePass(ctx: MutationCtx, syncRunId: Id<"externalSyncRuns">) {
+  await ctx.scheduler.runAfter(0, internal.managebac.purgeSyncSeenKeys, { syncRunId });
+}
+
+export const purgeSyncSeenKeys = internalMutation({
+  args: { syncRunId: v.id("externalSyncRuns") },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("externalSyncSeenKeys")
+      .withIndex("by_run_identity", (q) => q.eq("syncRunId", args.syncRunId))
+      .take(SEEN_KEY_PURGE_BATCH);
+    for (const row of rows) await ctx.db.delete(row._id);
+    if (rows.length === SEEN_KEY_PURGE_BATCH)
+      await ctx.scheduler.runAfter(0, internal.managebac.purgeSyncSeenKeys, args);
+    return { deleted: rows.length };
+  },
+});
+
+/** Merges one committed page into the pass and records what it saw. */
+async function recordPassPage(
+  ctx: MutationCtx,
+  syncRun: Doc<"externalSyncRuns">,
+  integration: Doc<"schoolIntegrations">,
+  capabilityId: Id<"integrationCapabilities">,
+  progress: {
+    binding: string;
+    page: number;
+    cursor?: string;
+    bindingDone: boolean;
+    capabilityDone: boolean;
+    classIds: string[];
+    yearGroupIds: string[];
+  },
+  seenKeys: Array<{ sourceIdentityKey: string; providerRecordKey: string }>,
+) {
+  // Runs created before passes existed start theirs at their first page.
+  const pass = syncPass(syncRun) ?? newPass({
+    personalOnly: false,
+    selectionDigest: "",
+    connectionKey: "",
+    manifestVersion: integration.manifestVersion,
+  }, syncRun.startedAt ?? syncRun.createdAt);
+  const merge = (current: string[], added: string[]) => {
+    const merged = [...new Set([...current, ...added.map((item) => text(item, 500)).filter(Boolean)])];
+    if (merged.length > MAX_PASS_FANOUT_IDS)
+      throw new Error("INTEGRATION_SYNC_STATE_TOO_LARGE: This sync follows more classes than one pass can track.");
+    return merged;
+  };
+  for (const key of seenKeys)
+    await ctx.db.insert("externalSyncSeenKeys", {
+      syncRunId: syncRun._id,
+      schoolId: syncRun.schoolId,
+      ...key,
+    });
+  return {
+    ...pass,
+    completedCapabilityIds:
+      progress.capabilityDone && !pass.completedCapabilityIds.includes(capabilityId)
+        ? [...pass.completedCapabilityIds, capabilityId]
+        : pass.completedCapabilityIds,
+    position: {
+      capabilityId,
+      binding: text(progress.binding, 500),
+      page: Math.max(1, Math.floor(progress.page)),
+      ...(progress.cursor ? { cursor: text(progress.cursor, 1_000) } : {}),
+      bindingDone: progress.bindingDone,
+    },
+    classIds: merge(pass.classIds, progress.classIds),
+    yearGroupIds: merge(pass.yearGroupIds, progress.yearGroupIds),
+  } satisfies SyncPass;
 }
 
 function scheduleSync(
@@ -844,15 +1132,23 @@ export const disconnect = mutation({
         revokedAt: now,
         updatedAt: now,
       });
-    for (const run of activeRuns.filter((item) =>
-      ["queued", "leased", "running", "awaiting_review"].includes(item.status),
-    ))
+    // A suspended pass is still open: cancelling it stops a later request
+    // from continuing it, and its saved reading position is discarded.
+    const cancelledRuns = activeRuns.filter((item) =>
+      ["queued", "leased", "running", "awaiting_review"].includes(item.status) ||
+      (item.status === "partial" && item.stage === "suspended"),
+    );
+    for (const run of cancelledRuns) {
       await ctx.db.patch(run._id, {
         status: "cancelled",
         stage: "integration_disconnected",
+        cursorState: undefined,
+        leaseExpiresAt: undefined,
         completedAt: now,
         updatedAt: now,
       });
+      await closePass(ctx, run._id);
+    }
     const sources = await ctx.db
       .query("externalRecords")
       .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
@@ -882,11 +1178,7 @@ export const disconnect = mutation({
       targetId: integration._id,
       metadata: {
         mappingsRevoked: mappings.length,
-        runsCancelled: activeRuns.filter((item) =>
-          ["queued", "leased", "running", "awaiting_review"].includes(
-            item.status,
-          ),
-        ).length,
+        runsCancelled: cancelledRuns.length,
       },
       retentionClass: "security",
     });
@@ -1450,37 +1742,54 @@ export const claimScheduledSync = mutation({
         return null;
       }
       const workerId = text(args.workerId, 200);
-      const leaseExpiresAt = now + SYNC_LEASE_MS;
-      const leaseToken = crypto.randomUUID();
-      const syncRunId = await ctx.db.insert("externalSyncRuns", {
-        integrationId: integration._id,
-        schoolId: integration.schoolId,
-        kind: "scheduled",
-        status: "leased",
-        trigger: "schedule",
-        stage: "claimed",
-        capabilityIds: readable.map((item) => item._id),
-        counts: EMPTY_COUNTS,
-        leaseOwner: workerId,
-        leaseToken,
-        leaseExpiresAt,
-        attemptCount: 1,
-        nextAttemptAt: now,
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
-      for (const capability of readable)
-        await ctx.db.insert("externalSyncCapabilityRuns", {
-          syncRunId,
+      const identity = await passIdentity(ctx, integration, actor.accountId, false);
+      // A school pass that stopped at its time budget continues here.
+      const suspended = await suspendedPass(ctx, integration._id, undefined);
+      const restartReason = suspended
+        ? passRestartReason(suspended.run, suspended.pass, identity, readable.map((item) => item._id), now)
+        : null;
+      if (suspended && restartReason)
+        await abandonPass(ctx, suspended.run, restartReason, now);
+      let syncRunId: Id<"externalSyncRuns">;
+      let leaseToken: string;
+      let pass: SyncPass;
+      if (suspended && !restartReason) {
+        syncRunId = suspended.run._id;
+        ({ leaseToken, pass } = await resumePass(ctx, suspended.run, suspended.pass, workerId, now));
+      } else {
+        leaseToken = crypto.randomUUID();
+        pass = newPass(identity, now);
+        syncRunId = await ctx.db.insert("externalSyncRuns", {
           integrationId: integration._id,
-          capabilityId: capability._id,
-          status: "queued",
-          pageCount: 0,
-          recordCount: 0,
+          schoolId: integration.schoolId,
+          kind: "scheduled",
+          status: "leased",
+          trigger: "schedule",
+          stage: "claimed",
+          capabilityIds: readable.map((item) => item._id),
+          cursorState: pass,
+          counts: EMPTY_COUNTS,
+          leaseOwner: workerId,
+          leaseToken,
+          leaseExpiresAt: now + SYNC_LEASE_MS,
+          attemptCount: 1,
+          nextAttemptAt: now,
+          startedAt: now,
           createdAt: now,
           updatedAt: now,
         });
+        for (const capability of readable)
+          await ctx.db.insert("externalSyncCapabilityRuns", {
+            syncRunId,
+            integrationId: integration._id,
+            capabilityId: capability._id,
+            status: "queued",
+            pageCount: 0,
+            recordCount: 0,
+            createdAt: now,
+            updatedAt: now,
+          });
+      }
       const nextSyncAt =
         now + integration.syncPolicy.frequencyMinutes * 60_000;
       await ctx.db.patch(integration._id, {
@@ -1494,6 +1803,7 @@ export const claimScheduledSync = mutation({
         syncRunId,
         leaseToken,
         selectionRevision: 0,
+        pass: passForRoute(pass),
         schoolId: integration.schoolId,
         serviceSubject: actor.clerkId,
         actor: {
@@ -1666,6 +1976,31 @@ export const beginSync = mutation({
     const selection = accountId
       ? await selectionSnapshot(ctx, integration._id, accountId)
       : undefined;
+    const identity = await passIdentity(ctx, integration, actor.accountId, args.kind === "bootstrap");
+    if (args.kind !== "identity") {
+      // A newer request continues a pass that stopped part-way, unless what
+      // the pass depends on changed; then that pass is dropped unreconciled.
+      const suspended = await suspendedPass(ctx, integration._id, accountId);
+      const readableIds = readable
+        .filter((item) => accountId !== undefined || item.scope !== "personal")
+        .map((item) => item._id);
+      const restartReason = suspended
+        ? passRestartReason(suspended.run, suspended.pass, identity, readableIds, now, selection?.revision)
+        : null;
+      if (suspended && !restartReason) {
+        const resumed = await resumePass(ctx, suspended.run, suspended.pass, actor.clerkId, now);
+        return {
+          syncRunId: suspended.run._id,
+          integrationId: integration._id,
+          leaseToken: resumed.leaseToken,
+          selectionRevision: suspended.run.selectionRevision ?? 0,
+          pass: passForRoute(resumed.pass),
+        };
+      }
+      if (suspended && restartReason)
+        await abandonPass(ctx, suspended.run, restartReason, now);
+    }
+    const pass = args.kind === "identity" ? undefined : newPass(identity, now);
     const leaseToken = crypto.randomUUID();
     const syncRunId = await ctx.db.insert("externalSyncRuns", {
       integrationId: integration._id,
@@ -1692,6 +2027,7 @@ export const beginSync = mutation({
               )
               .map((item) => item._id)
           : readable.map((item) => item._id),
+      cursorState: pass,
       counts: EMPTY_COUNTS,
       leaseOwner: actor.clerkId,
       leaseToken,
@@ -1718,6 +2054,7 @@ export const beginSync = mutation({
       integrationId: integration._id,
       leaseToken,
       selectionRevision: selection?.revision ?? 0,
+      ...(pass ? { pass: passForRoute(pass) } : {}),
     };
   },
 });
@@ -2759,6 +3096,7 @@ export const commitNormalizedPage = mutation({
     records: v.array(vNormalizedRecord),
     nextCursor: v.optional(v.string()),
     pageNumber: v.number(),
+    progress: vPassProgress,
     leaseToken: v.optional(v.string()),
     selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
@@ -2801,6 +3139,7 @@ export const commitNormalizedPage = mutation({
       records: args.records,
       ...(args.nextCursor ? { nextCursor: args.nextCursor } : {}),
       pageNumber: args.pageNumber,
+      progress: args.progress,
       ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
       ...(args.selectionRevision !== undefined
         ? { selectionRevision: args.selectionRevision }
@@ -2832,11 +3171,8 @@ export const commitNormalizedPage = mutation({
     const counts = { ...syncRun.counts };
     counts.fetched += args.records.length;
     const followsClass = classFollowPolicy(ctx, integration._id);
+    const seenKeys: Array<{ sourceIdentityKey: string; providerRecordKey: string }> = [];
     for (const input of args.records) {
-      if (!await followsClass(syncRun.accountId, { ...input, recordType: capability.recordType })) {
-        counts.skipped += 1;
-        continue;
-      }
       const mappedAccountId =
         input.audienceScope === "mapped_user" ? syncRun.accountId : undefined;
       const canonicalKey = sourceIdentityKey(integration._id, mappedAccountId, {
@@ -2844,6 +3180,16 @@ export const commitNormalizedPage = mutation({
         audienceScope: input.audienceScope,
         academicPeriodKey: input.academicPeriodKey,
       });
+      // Every listed record counts as seen, followed or not, exactly as the
+      // reconciliation compares them.
+      seenKeys.push({
+        sourceIdentityKey: canonicalKey,
+        providerRecordKey: input.providerRecordKey.slice(0, 700),
+      });
+      if (!await followsClass(syncRun.accountId, { ...input, recordType: capability.recordType })) {
+        counts.skipped += 1;
+        continue;
+      }
       const canonicalMatches = await ctx.db
         .query("externalRecords")
         .withIndex("by_source_identity", (q) =>
@@ -2999,22 +3345,21 @@ export const commitNormalizedPage = mutation({
     ).find((item) => item.capabilityId === capability._id);
     if (capabilityRun)
       await ctx.db.patch(capabilityRun._id, {
-        status: args.nextCursor ? "running" : "completed",
+        status: args.progress.capabilityDone ? "completed" : "running",
         pageCount: capabilityRun.pageCount + 1,
         recordCount: capabilityRun.recordCount + args.records.length,
         cursor: args.nextCursor,
         schemaHash: capability.responseSchemaHash,
         startedAt: capabilityRun.startedAt ?? now,
-        completedAt: args.nextCursor ? undefined : now,
+        completedAt: args.progress.capabilityDone ? now : undefined,
         updatedAt: now,
       });
+    const pass = await recordPassPage(ctx, syncRun, integration, capability._id, args.progress, seenKeys);
     await ctx.db.patch(syncRun._id, {
       status: "running",
       stage: `syncing:${capability.category}`,
       currentCapabilityId: capability._id,
-      cursorState: args.nextCursor
-        ? { capabilityId: capability._id, cursor: args.nextCursor }
-        : undefined,
+      cursorState: pass,
       counts,
       startedAt: syncRun.startedAt ?? now,
       leaseExpiresAt: syncRun.leaseToken
@@ -3277,7 +3622,91 @@ export const failSync = mutation({
       if (args.errorCode !== "INTEGRATION_CREDENTIAL_REJECTED")
         await scheduleSync(ctx, integration._id, retryAt);
     }
+    // A failed pass is not continued: the next sync starts a fresh one.
+    await closePass(ctx, syncRun._id);
     return { failed: true, partial };
+  },
+});
+
+/**
+ * The route stopped a pass before it finished (its time budget, or the
+ * provider asked it to wait). The pass keeps every committed page and its
+ * place; the lease is released so the next sync for this scope continues it.
+ * Nothing is marked unavailable and nothing is removed.
+ */
+export const suspendSync = mutation({
+  args: {
+    integrationId: v.id("schoolIntegrations"),
+    syncRunId: v.id("externalSyncRuns"),
+    serviceSubject: v.optional(v.string()),
+    errorCode: v.string(),
+    errorSummary: v.string(),
+    resumeAfterAt: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    selectionRevision: v.optional(v.number()),
+    payloadDigest: v.string(),
+    timestamp: v.number(),
+    nonce: v.string(),
+    signature: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActorOrService(ctx, args.serviceSubject);
+    const integration = await requireIntegration(ctx, actor, args.integrationId);
+    const syncRun = await ctx.db.get(args.syncRunId);
+    if (
+      !syncRun ||
+      syncRun.integrationId !== integration._id ||
+      (syncRun.accountId &&
+        syncRun.accountId !== actor.accountId &&
+        actor.schoolRole !== "school_admin")
+    )
+      throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
+    const expectedDigest = await exactDigest({
+      errorCode: args.errorCode,
+      errorSummary: args.errorSummary,
+      ...(args.resumeAfterAt !== undefined ? { resumeAfterAt: args.resumeAfterAt } : {}),
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
+      ...(args.selectionRevision !== undefined
+        ? { selectionRevision: args.selectionRevision }
+        : {}),
+    });
+    if (expectedDigest !== args.payloadDigest)
+      throw new Error("INTEGRATION_PAYLOAD_INVALID: Suspension payload changed.");
+    await verifyBridge(ctx, actor, {
+      operation: "sync-suspend",
+      integrationId: integration._id,
+      syncRunId: syncRun._id,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      payloadDigest: args.payloadDigest,
+      signature: args.signature,
+    });
+    const now = Date.now();
+    const resumeAt = Math.max(
+      now + SYNC_RESUME_DELAY_MS,
+      Math.min(now + 30 * 60_000, args.resumeAfterAt ?? 0),
+    );
+    await ctx.db.patch(syncRun._id, {
+      status: "partial",
+      stage: "suspended",
+      cursorState: syncPass(syncRun) ?? newPass(
+        await passIdentity(ctx, integration, actor.accountId, syncRun.kind === "bootstrap"),
+        syncRun.startedAt ?? now,
+      ),
+      errorCode: text(args.errorCode, 200),
+      errorSummary: text(args.errorSummary, 500),
+      nextAttemptAt: resumeAt,
+      leaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+    // A school pass continues through the scheduled worker; a personal pass
+    // continues on that person's next sync.
+    if (!syncRun.accountId) {
+      await ctx.db.patch(integration._id, { nextSyncAt: resumeAt, updatedAt: now });
+      await scheduleSync(ctx, integration._id, resumeAt);
+    }
+    return { suspended: true, resumeAt };
   },
 });
 
@@ -3286,9 +3715,6 @@ export const completeSync = mutation({
     integrationId: v.id("schoolIntegrations"),
     syncRunId: v.id("externalSyncRuns"),
     serviceSubject: v.optional(v.string()),
-    seenProviderKeys: v.array(v.string()),
-    seenSourceIdentityKeys: v.optional(v.array(v.string())),
-    reconciledCapabilityIds: v.array(v.id("integrationCapabilities")),
     leaseToken: v.optional(v.string()),
     selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
@@ -3321,11 +3747,6 @@ export const completeSync = mutation({
         "INTEGRATION_SELECTION_CHANGED: This completion belongs to an older class selection.",
       );
     const expectedDigest = await exactDigest({
-      seenProviderKeys: args.seenProviderKeys,
-      ...(args.seenSourceIdentityKeys
-        ? { seenSourceIdentityKeys: args.seenSourceIdentityKeys }
-        : {}),
-      reconciledCapabilityIds: args.reconciledCapabilityIds,
       ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
       ...(args.selectionRevision !== undefined
         ? { selectionRevision: args.selectionRevision }
@@ -3344,15 +3765,19 @@ export const completeSync = mutation({
       payloadDigest: args.payloadDigest,
       signature: args.signature,
     });
-    const seen = new Set(args.seenProviderKeys.slice(0, 100_000));
-    const seenSourceIdentities = new Set(
-      (args.seenSourceIdentityKeys ?? []).slice(0, 100_000),
-    );
+    // The route calls this only after every route of the pass was read, so
+    // the pass's own record of finished routes decides what is reconciled.
+    const pass = syncPass(syncRun) ?? newPass({
+      personalOnly: false,
+      selectionDigest: "",
+      connectionKey: "",
+      manifestVersion: integration.manifestVersion,
+    }, syncRun.startedAt ?? syncRun.createdAt);
     const capabilities = (
       await Promise.all(
-        args.reconciledCapabilityIds
+        pass.completedCapabilityIds
           .slice(0, 500)
-          .map((capabilityId) => ctx.db.get(capabilityId)),
+          .map((capabilityId) => ctx.db.get(capabilityId as Id<"integrationCapabilities">)),
       )
     ).filter((capability): capability is Doc<"integrationCapabilities"> =>
       Boolean(
@@ -3362,52 +3787,21 @@ export const completeSync = mutation({
         capability.changeStrategy === "full_reconciliation",
       ),
     );
-    const personalTypes = new Set(
-      capabilities
-        .filter((capability) => capability.scope === "personal")
-        .map((capability) => capability.recordType),
-    );
-    const sharedTypes = new Set(
-      capabilities
-        .filter((capability) => capability.scope !== "personal")
-        .map((capability) => capability.recordType),
-    );
-    const personalRecords =
-      syncRun.accountId && personalTypes.size
-        ? (
-            await ctx.db
-              .query("externalRecords")
-              .withIndex("by_account_type", (q) =>
-                q.eq("mappedAccountId", syncRun.accountId),
-              )
-              .collect()
-          ).filter(
-            (item) =>
-              item.integrationId === integration._id &&
-              item.schoolId === integration.schoolId &&
-              personalTypes.has(item.recordType),
-          )
-        : [];
-    const sharedRecords =
-      actor.schoolRole === "school_admin" && sharedTypes.size
-        ? (
-            await Promise.all(
-              [...sharedTypes].map((recordType) =>
-                ctx.db
-                  .query("externalRecords")
-                  .withIndex("by_integration_type", (q) =>
-                    q
-                      .eq("integrationId", integration._id)
-                      .eq("recordType", recordType),
-                  )
-                  .collect(),
-              ),
-            )
-          )
-            .flat()
-            .filter((item) => !item.mappedAccountId)
-        : [];
-    const currentRecords = [...personalRecords, ...sharedRecords];
+    const typesFor = (personal: boolean) => [
+      ...new Set(
+        capabilities
+          .filter((capability) => (capability.scope === "personal") === personal)
+          .map((capability) => capability.recordType),
+      ),
+    ];
+    const streams = [
+      ...(syncRun.accountId
+        ? typesFor(true).map((recordType) => ({ scope: "personal" as const, recordType }))
+        : []),
+      ...(actor.schoolRole === "school_admin"
+        ? typesFor(false).map((recordType) => ({ scope: "shared" as const, recordType }))
+        : []),
+    ];
     const now = Date.now();
     const capabilityRuns = await ctx.db
       .query("externalSyncCapabilityRuns")
@@ -3425,103 +3819,204 @@ export const completeSync = mutation({
         completedAt: now,
         updatedAt: now,
       });
-    let tombstoned = 0;
-    const followsClass = classFollowPolicy(ctx, integration._id);
-    for (const source of currentRecords) {
-      if (
-        source.tombstone ||
-        !await followsClass(source.mappedAccountId ?? syncRun.accountId, source) ||
-        (source.sourceIdentityKey !== undefined
-          ? seenSourceIdentities.has(source.sourceIdentityKey)
-          : seen.has(source.providerRecordKey))
-      )
-        continue;
-      await ctx.db.patch(source._id, {
-        tombstone: true,
-        tombstonedAt: now,
-        sourceState: "missing",
-        sourceStateAt: now,
-        sourceStateReason: "The provider omitted this record from a complete reconciliation.",
-        fetchedAt: now,
-        updatedAt: now,
-      });
-      const removed = (await ctx.db.get(source._id))!;
-      const current = await projectionsForRecord(ctx, source._id, syncRun.accountId);
-      const following = await Promise.all(current.rows.map(projection => followsClass(projection.accountId, source)));
-      const projections = current.rows.filter((_, index) => following[index]);
-      for (const projection of projections) {
-        if (projection.projectionType === "planner_task")
-          await applyPlannerProviderUpdate(ctx, projection, removed, {
-            mode: "removed", syncRunId: syncRun._id, importerAccountId: actor.accountId,
-            previousSourceHash: projection.sourceHash,
-          });
-        else await markProjectionSourceRemoved(ctx, projection);
-        await ctx.db.patch(projection._id, {
-          state: "tombstoned",
-          updatedAt: now,
-        });
-      }
-      if (current.fanout)
-        await scheduleProviderFanout(ctx, {
-          recordId: source._id, expectedSourceHash: removed.sourceHash, mode: "removed",
-          syncRunId: syncRun._id, importerAccountId: actor.accountId,
-        });
-      if (projections.length || current.fanout)
-        await ctx.db.insert("externalSyncConflicts", {
-          syncRunId: syncRun._id,
-          integrationId: integration._id,
-          schoolId: integration.schoolId,
-          accountId: syncRun.accountId,
-          recordId: source._id,
-          projectionType: projections[0]?.projectionType ?? "planner_task",
-          projectionId: projections[0]?.projectionId,
-          kind: "source_removed",
-          oldSource: source.normalized,
-          newSource: null,
-          affectedLinks: projections.map((item) => item.projectionId),
-          suggestedActions: ["detach", "archive_projection"],
-          status: "open",
-          createdAt: now,
-          updatedAt: now,
-        });
-      tombstoned += 1;
-    }
-    // Staged provider effects keep the run pending; the last one to drain
-    // records the final status from the then-current errors and conflicts.
-    const latestRun = (await ctx.db.get(syncRun._id))!;
-    const outcome = await syncRunOutcome(ctx, latestRun);
-    const pendingProjections = (latestRun.projectionWorkRemaining ?? 0) > 0;
-    const status = pendingProjections ? ("running" as const) : outcome.status;
-    const counts = {
-      ...latestRun.counts,
-      tombstoned: latestRun.counts.tombstoned + tombstoned,
-      conflicts: outcome.conflicts,
-      skipped: latestRun.counts.skipped + unfinishedCapabilityRuns.length,
-    };
+    // A fresh token fences the route's lease: from here the pass belongs to
+    // its reconciliation, which renews the lease until it finishes.
+    const reconcileToken = crypto.randomUUID();
+    const { position: _position, ...finished } = pass;
     await ctx.db.patch(syncRun._id, {
-      status,
-      stage: pendingProjections ? "applying_projections"
-        : status === "awaiting_review" ? "review_conflicts" : "complete",
-      projectionIngestionComplete: true,
+      status: "running",
+      stage: "reconciling",
       currentCapabilityId: undefined,
-      cursorState: undefined,
-      counts,
-      leaseExpiresAt: undefined,
-      completedAt: pendingProjections ? undefined : now,
+      leaseToken: reconcileToken,
+      leaseExpiresAt: now + SYNC_LEASE_MS,
+      cursorState: {
+        ...finished,
+        reconcile: { streams, stream: 0, after: null, tombstoned: 0, importerAccountId: actor.accountId },
+      } satisfies SyncPass,
+      counts: {
+        ...syncRun.counts,
+        skipped: syncRun.counts.skipped + unfinishedCapabilityRuns.length,
+      },
       updatedAt: now,
     });
-    const nextSyncAt =
-      now + integration.syncPolicy.frequencyMinutes * 60_000;
-    await ctx.db.patch(integration._id, {
-      status: syncRun.counts.errors > 0 ? "degraded" : "connected",
-      lastSyncAt: now,
-      nextSyncAt,
-      updatedAt: now,
-    });
-    await scheduleSync(ctx, integration._id, nextSyncAt);
-    return { status, counts };
+    return reconcileSyncPass(ctx, syncRun._id, reconcileToken);
   },
 });
+
+export const continueSyncReconciliation = internalMutation({
+  args: { syncRunId: v.id("externalSyncRuns"), leaseToken: v.string() },
+  handler: (ctx, args) => reconcileSyncPass(ctx, args.syncRunId, args.leaseToken),
+});
+
+/**
+ * One bounded batch of the end-of-pass reconciliation: a record of a fully
+ * read route that the pass did not see is tombstoned and its projections are
+ * marked removed. Each call reads at most one page of records and continues
+ * itself; the last one closes the pass.
+ */
+async function reconcileSyncPass(
+  ctx: MutationCtx,
+  syncRunId: Id<"externalSyncRuns">,
+  leaseToken: string,
+) {
+  const syncRun = await ctx.db.get(syncRunId);
+  const pass = syncRun ? syncPass(syncRun) : undefined;
+  const state = pass?.reconcile;
+  const integration = syncRun ? await ctx.db.get(syncRun.integrationId) : null;
+  // A disconnected connection or a replaced run stops here, removing nothing more.
+  if (!syncRun || !pass || !state || !integration || syncRun.status !== "running" ||
+      syncRun.stage !== "reconciling" || syncRun.leaseToken !== leaseToken)
+    return { status: syncRun?.status ?? ("cancelled" as const), counts: syncRun?.counts ?? EMPTY_COUNTS };
+  const now = Date.now();
+  let { stream, after, tombstoned } = state;
+  let budget = RECONCILE_BATCH;
+  const followsClass = classFollowPolicy(ctx, integration._id);
+  while (budget > 0 && stream < state.streams.length) {
+    const current = state.streams[stream]!;
+    const from = after;
+    const rows = await (current.scope === "personal"
+      ? ctx.db.query("externalRecords").withIndex("by_account_type", (q) => {
+          const range = q.eq("mappedAccountId", syncRun.accountId!).eq("recordType", current.recordType);
+          return from === null ? range : range.gt("_creationTime", from);
+        })
+      : ctx.db.query("externalRecords").withIndex("by_integration_type", (q) => {
+          const range = q.eq("integrationId", integration._id).eq("recordType", current.recordType);
+          return from === null ? range : range.gt("_creationTime", from);
+        })
+    ).take(budget);
+    budget -= rows.length;
+    for (const source of rows) {
+      const inScope = current.scope === "personal"
+        ? source.integrationId === integration._id && source.schoolId === integration.schoolId
+        : !source.mappedAccountId;
+      if (inScope && await removeUnseenSource(ctx, integration, syncRun, pass, state.importerAccountId, source, followsClass, now))
+        tombstoned += 1;
+    }
+    if (budget > 0) {
+      stream += 1;
+      after = null;
+    } else after = rows.at(-1)?._creationTime ?? after;
+  }
+  if (stream < state.streams.length) {
+    await ctx.db.patch(syncRun._id, {
+      cursorState: { ...pass, reconcile: { ...state, stream, after, tombstoned } } satisfies SyncPass,
+      leaseExpiresAt: now + SYNC_LEASE_MS,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.managebac.continueSyncReconciliation, { syncRunId, leaseToken });
+    return { status: "running" as const, counts: syncRun.counts };
+  }
+  // Staged provider effects keep the run pending; the last one to drain
+  // records the final status from the then-current errors and conflicts.
+  const latestRun = (await ctx.db.get(syncRun._id))!;
+  const outcome = await syncRunOutcome(ctx, latestRun);
+  const pendingProjections = (latestRun.projectionWorkRemaining ?? 0) > 0;
+  const status = pendingProjections ? ("running" as const) : outcome.status;
+  const counts = {
+    ...latestRun.counts,
+    tombstoned: latestRun.counts.tombstoned + tombstoned,
+    conflicts: outcome.conflicts,
+  };
+  await ctx.db.patch(syncRun._id, {
+    status,
+    stage: pendingProjections ? "applying_projections"
+      : status === "awaiting_review" ? "review_conflicts" : "complete",
+    projectionIngestionComplete: true,
+    cursorState: undefined,
+    counts,
+    leaseExpiresAt: undefined,
+    completedAt: pendingProjections ? undefined : now,
+    updatedAt: now,
+  });
+  await closePass(ctx, syncRun._id);
+  const nextSyncAt =
+    now + integration.syncPolicy.frequencyMinutes * 60_000;
+  await ctx.db.patch(integration._id, {
+    status: syncRun.counts.errors > 0 ? "degraded" : "connected",
+    lastSyncAt: now,
+    nextSyncAt,
+    updatedAt: now,
+  });
+  await scheduleSync(ctx, integration._id, nextSyncAt);
+  return { status, counts };
+}
+
+/** Tombstones one source the finished pass did not see. Returns whether it did. */
+async function removeUnseenSource(
+  ctx: MutationCtx,
+  integration: Doc<"schoolIntegrations">,
+  syncRun: Doc<"externalSyncRuns">,
+  pass: SyncPass,
+  importerAccountId: Id<"accounts">,
+  source: Doc<"externalRecords">,
+  followsClass: ReturnType<typeof classFollowPolicy>,
+  now: number,
+) {
+  if (source.tombstone || !await followsClass(source.mappedAccountId ?? syncRun.accountId, source))
+    return false;
+  const seen = source.sourceIdentityKey !== undefined
+    ? await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", (q) =>
+        q.eq("syncRunId", syncRun._id).eq("sourceIdentityKey", source.sourceIdentityKey!)).first()
+    : await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_provider", (q) =>
+        q.eq("syncRunId", syncRun._id).eq("providerRecordKey", source.providerRecordKey)).first();
+  if (seen) return false;
+  // A pass reads the provider over time. A record another sync created or
+  // saw after this pass began is present, even though this pass read its
+  // page before it appeared; it is not removed.
+  if (source.createdAt > pass.startedAt ||
+      ((source.sourceState === "available" || source.sourceState === "changed") &&
+        (source.sourceStateAt ?? 0) > pass.startedAt))
+    return false;
+  await ctx.db.patch(source._id, {
+    tombstone: true,
+    tombstonedAt: now,
+    sourceState: "missing",
+    sourceStateAt: now,
+    sourceStateReason: "The provider omitted this record from a complete reconciliation.",
+    fetchedAt: now,
+    updatedAt: now,
+  });
+  const removed = (await ctx.db.get(source._id))!;
+  const current = await projectionsForRecord(ctx, source._id, syncRun.accountId);
+  const following = await Promise.all(current.rows.map(projection => followsClass(projection.accountId, source)));
+  const projections = current.rows.filter((_, index) => following[index]);
+  for (const projection of projections) {
+    if (projection.projectionType === "planner_task")
+      await applyPlannerProviderUpdate(ctx, projection, removed, {
+        mode: "removed", syncRunId: syncRun._id, importerAccountId,
+        previousSourceHash: projection.sourceHash,
+      });
+    else await markProjectionSourceRemoved(ctx, projection);
+    await ctx.db.patch(projection._id, {
+      state: "tombstoned",
+      updatedAt: now,
+    });
+  }
+  if (current.fanout)
+    await scheduleProviderFanout(ctx, {
+      recordId: source._id, expectedSourceHash: removed.sourceHash, mode: "removed",
+      syncRunId: syncRun._id, importerAccountId,
+    });
+  if (projections.length || current.fanout)
+    await ctx.db.insert("externalSyncConflicts", {
+      syncRunId: syncRun._id,
+      integrationId: integration._id,
+      schoolId: integration.schoolId,
+      accountId: syncRun.accountId,
+      recordId: source._id,
+      projectionType: projections[0]?.projectionType ?? "planner_task",
+      projectionId: projections[0]?.projectionId,
+      kind: "source_removed",
+      oldSource: source.normalized,
+      newSource: null,
+      affectedLinks: projections.map((item) => item.projectionId),
+      suggestedActions: ["detach", "archive_projection"],
+      status: "open",
+      createdAt: now,
+      updatedAt: now,
+    });
+  return true;
+}
 
 export const setOverlay = mutation({
   args: {

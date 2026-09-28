@@ -93,7 +93,7 @@ async function scheduledSyncWithEndlessPages() {
   return { commits, provider };
 }
 
-it("stops a scheduled sync at its time budget and releases the lease for a retry", async () => {
+it("pauses a scheduled sync at its time budget so the next request continues it", async () => {
   const { commits, provider } = await scheduledSyncWithEndlessPages();
   const route = await import("@/app/api/spectra/managebac/route");
   expect(route.maxDuration).toBe(300);
@@ -103,13 +103,21 @@ it("stops a scheduled sync at its time budget and releases the lease for a retry
   // A minute per page inside a four-minute budget: the fifth page is never
   // requested, instead of paging on until the platform kills the request.
   expect(provider).toHaveBeenCalledTimes(4);
-  expect(commits.filter(commit => commit.name === "managebac:commitNormalizedPage")).toHaveLength(4);
-  const failed = commits.find(commit => commit.name === "managebac:failSync");
-  expect(failed?.args).toMatchObject({
+  const pages = commits.filter(commit => commit.name === "managebac:commitNormalizedPage");
+  expect(pages).toHaveLength(4);
+  // Each page saves where the pass stands, so a later request resumes there.
+  expect(pages.map(commit => commit.args.progress)).toEqual([1, 2, 3, 4].map(page => ({
+    binding: "", page, ...(page > 1 ? { cursor: String(page) } : {}), bindingDone: false,
+    capabilityDone: false, classIds: [], yearGroupIds: [],
+  })));
+  // Running out of time pauses the pass rather than failing it.
+  const suspended = commits.find(commit => commit.name === "managebac:suspendSync");
+  expect(suspended?.args).toMatchObject({
     syncRunId: "sync-1", leaseToken: "lease-1", errorCode: "INTEGRATION_SYNC_TIME_BUDGET",
   });
-  // The whole sync stopped; the route itself is not quarantined for it.
+  expect(commits.some(commit => commit.name === "managebac:failSync")).toBe(false);
   expect(commits.some(commit => commit.name === "managebac:commitQuarantine")).toBe(false);
   expect(commits.some(commit => commit.name === "managebac:completeSync")).toBe(false);
-  expect(response.status).toBe(500);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ worked: true, suspended: true });
 });

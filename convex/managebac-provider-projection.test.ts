@@ -375,9 +375,10 @@ describe("ManageBac shared-source fanout", () => {
       const records = [{ providerRecordId: "school-event", providerRecordKey: "event:school", classification: "school" as const,
         audienceScope: "school" as const, normalized, payloadVersion: "fixture-v1", sourceHash }];
       const pageNumber = nonce + 1;
-      const payloadDigest = createHash("sha256").update(canonicalJson({ capabilityId: f.seed.capabilityId, records, pageNumber })).digest("base64url");
+      const progress = { binding: "", page: 1, bindingDone: true, capabilityDone: true, classIds: [], yearGroupIds: [] };
+      const payloadDigest = createHash("sha256").update(canonicalJson({ capabilityId: f.seed.capabilityId, records, pageNumber, progress })).digest("base64url");
       return f.user.mutation(api.managebac.commitNormalizedPage, { integrationId: f.seed.integrationId, syncRunId: runId,
-        capabilityId: f.seed.capabilityId, records, pageNumber, ...signed("sync-page", payloadDigest) });
+        capabilityId: f.seed.capabilityId, records, pageNumber, progress, ...signed("sync-page", payloadDigest) });
     };
     await page(initialSource, "v1");
     const seeded = await f.t.run(async ctx => {
@@ -412,7 +413,7 @@ describe("ManageBac shared-source fanout", () => {
     // The admitting page wrote no planner: every one of them needs the chain.
     expect((await plans()).filter(plan => hashOf(plan) === "v2")).toHaveLength(0);
     expect(await f.t.run(ctx => ctx.db.get(runId))).toMatchObject({ projectionWorkRemaining: 1 });
-    const completion = { seenProviderKeys: ["event:school"], reconciledCapabilityIds: [f.seed.capabilityId] };
+    const completion = {};
     const completed = await f.user.mutation(api.managebac.completeSync, { integrationId: f.seed.integrationId, syncRunId: runId,
       ...completion, ...signed("sync-complete", createHash("sha256").update(canonicalJson(completion)).digest("base64url")) });
     expect(completed.status).toBe("running");

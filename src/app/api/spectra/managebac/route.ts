@@ -144,27 +144,6 @@ function digest(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("base64url");
 }
 
-function sourceIdentityKeyForRoute(
-  integrationId: string,
-  accountId: string | undefined,
-  input: {
-    providerRecordKey: string;
-    audienceScope: string;
-    academicPeriodKey?: string;
-  },
-) {
-  const owner =
-    input.audienceScope === "mapped_user"
-      ? `account:${accountId ?? "unknown"}`
-      : `scope:${input.audienceScope}`;
-  return [
-    integrationId,
-    owner,
-    `period:${string(input.academicPeriodKey, 300) || "unknown"}`,
-    input.providerRecordKey.trim().slice(0, 700),
-  ].join("|");
-}
-
 function officialPersonalCapabilities() {
   const shared = {
     scope: "personal" as const,
@@ -1263,7 +1242,12 @@ async function signedCommit(
   actor: ConnectorActor,
   input: {
     operation:
-      "identity" | "sync-page" | "quarantine" | "sync-fail" | "sync-complete";
+            | "identity"
+      | "sync-page"
+      | "quarantine"
+      | "sync-fail"
+      | "sync-suspend"
+      | "sync-complete";
     integrationId: string;
     syncRunId: string;
     payload: Record<string, unknown>;
@@ -1411,6 +1395,7 @@ async function runSync(
     serviceSubject: string;
     leaseToken?: string;
     selectionRevision?: number;
+    pass?: unknown;
   },
   options: { personalOnly?: boolean } = {},
 ) {
@@ -1428,9 +1413,23 @@ async function runSync(
       { syncRunId: string; integrationId: string }
      >("managebac:beginSync", { kind }));
   const startedRecord = object(started);
-  const seen = new Set<string>();
-  const seenSourceIdentityKeys = new Set<string>();
-  const reconciledCapabilityIds: string[] = [];
+  // A pass that an earlier request left part-way continues from its last
+  // committed page; what that request learned about classes is restored.
+  const pass = object(startedRecord.pass);
+  const completedCapabilityIds = new Set(
+    Array.isArray(pass.completedCapabilityIds)
+      ? pass.completedCapabilityIds.map(String)
+      : [],
+  );
+  const position = pass.position ? object(pass.position) : undefined;
+  const leaseAndSelection = {
+    ...(startedRecord.leaseToken
+      ? { leaseToken: string(startedRecord.leaseToken, 300) }
+      : {}),
+    ...(startedRecord.selectionRevision !== undefined
+      ? { selectionRevision: Number(startedRecord.selectionRevision) }
+      : {}),
+  };
   const summaries: Array<{
     capabilityId: string;
     name: string;
@@ -1457,9 +1456,13 @@ async function runSync(
   );
   let lastProviderRequestAt = 0;
   const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
-  const accessibleClassIds = new Set<string>();
-  const accessibleYearGroupIds = new Set<string>();
   const selectedClassIds = new Set(context.selection?.selectedClassIds ?? []);
+  const accessibleClassIds = new Set<string>(
+    Array.isArray(pass.classIds) ? pass.classIds.map(String) : [],
+  );
+  const accessibleYearGroupIds = new Set<string>(
+    Array.isArray(pass.yearGroupIds) ? pass.yearGroupIds.map(String) : [],
+  );
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -1470,7 +1473,7 @@ async function runSync(
     );
     if (Date.now() + wait >= deadline)
       throw new Error(
-        "INTEGRATION_SYNC_TIME_BUDGET: This sync reached its time limit before every route finished. Saved pages are kept and it retries shortly.",
+        "INTEGRATION_SYNC_TIME_BUDGET: This sync reached its time limit before every route finished. It continues from the last saved page shortly.",
       );
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     lastProviderRequestAt = Date.now();
@@ -1479,6 +1482,16 @@ async function runSync(
   try {
     for (const capability of ordered) {
       const capabilityConfig = object(capability.normalization);
+      if (completedCapabilityIds.has(capability._id)) {
+        summaries.push({
+          capabilityId: capability._id,
+          name: capability.name,
+          pages: 0,
+          records: 0,
+          skipped: "Read earlier in this sync.",
+        });
+        continue;
+      }
       if (
         capabilityConfig.identityOnly === true ||
         capabilityConfig.onDemand === true ||
@@ -1554,11 +1567,14 @@ async function runSync(
                 accessibleClassIds.has(classId),
               ),
             );
-      const routeBindings = fanOutParameter
-        ? [...fanOutIds].map((value) => ({
-            [fanOutParameter]: value,
-          }))
-        : [{} as Record<string, string>];
+      // A fixed order lets a later request skip the bindings already read.
+      const bindingValues = fanOutParameter ? [...fanOutIds].sort() : [""];
+      const routeBindings = bindingValues.map((binding) => ({
+        binding,
+        routeParameters: (fanOutParameter
+          ? { [fanOutParameter]: binding }
+          : {}) as Record<string, string>,
+      }));
       if (fanOutParameter && routeBindings.length === 0) {
         summaries.push({
           capabilityId: capability._id,
@@ -1578,10 +1594,29 @@ async function runSync(
       let recordCount = 0;
       let lastPayloadShape: unknown;
       try {
-        for (const routeParameters of routeBindings) {
+        const resumeAt =
+          position?.capabilityId === capability._id ? position : undefined;
+        for (const [bindingIndex, { binding, routeParameters }] of routeBindings.entries()) {
           let cursor: string | undefined;
           let page = 1;
+          if (resumeAt) {
+            const resumeBinding = String(resumeAt.binding ?? "");
+            if (
+              binding < resumeBinding ||
+              (binding === resumeBinding && resumeAt.bindingDone === true)
+            )
+              continue;
+            // The last committed page is read again: records that moved up a
+            // page while the pass waited are not skipped.
+            if (binding === resumeBinding) {
+              page = Math.max(1, Number(resumeAt.page) || 1);
+              cursor =
+                typeof resumeAt.cursor === "string" ? resumeAt.cursor : undefined;
+            }
+          }
           do {
+            const requestedCursor = cursor;
+            const requestedPage = page;
             const providerPayload = await pacedFetch(capability, {
               providerUserId: context.mapping.providerUserId,
               cursor,
@@ -1595,14 +1630,14 @@ async function runSync(
               capability.scope === "personal" ? actor.accountId : undefined,
               routeParameters,
             );
+            const pageClassIds = new Set<string>();
+            const pageYearGroupIds = new Set<string>();
             for (const item of normalized.records) {
-              seen.add(item.providerRecordKey);
-              seenSourceIdentityKeys.add(
-                sourceIdentityKeyForRoute(context.integration._id, item.mappedAccountId ??
-                  (item.audienceScope === "mapped_user" ? actor.accountId : undefined), item),
-              );
-              if (item.providerClassId)
+              if (item.providerClassId) {
                 accessibleClassIds.add(item.providerClassId);
+                if (selectedClassIds.has(item.providerClassId))
+                  pageClassIds.add(item.providerClassId);
+              }
               const normalizedRecord =
                 item.normalized &&
                 typeof item.normalized === "object" &&
@@ -1615,9 +1650,12 @@ async function runSync(
                   normalizedRecord?.grade,
                 500,
               );
-              if (yearGroupId && /^\d+$/.test(yearGroupId))
+              if (yearGroupId && /^\d+$/.test(yearGroupId)) {
                 accessibleYearGroupIds.add(yearGroupId);
+                pageYearGroupIds.add(yearGroupId);
+              }
             }
+            const bindingDone = !normalized.nextCursor;
             const commitPayload = {
               capabilityId: capability._id,
               records: normalized.records.map(
@@ -1626,13 +1664,18 @@ async function runSync(
               ...(normalized.nextCursor
                 ? { nextCursor: normalized.nextCursor }
                 : {}),
-              pageNumber: pageCount + 1,
-              ...(startedRecord.leaseToken
-                ? { leaseToken: string(startedRecord.leaseToken, 300) }
-                : {}),
-              ...(startedRecord.selectionRevision !== undefined
-                ? { selectionRevision: Number(startedRecord.selectionRevision) }
-                : {}),
+              pageNumber: requestedPage,
+              progress: {
+                binding,
+                page: requestedPage,
+                ...(requestedCursor ? { cursor: requestedCursor } : {}),
+                bindingDone,
+                capabilityDone:
+                  bindingDone && bindingIndex === routeBindings.length - 1,
+                classIds: [...pageClassIds],
+                yearGroupIds: [...pageYearGroupIds],
+              },
+              ...leaseAndSelection,
             };
             await signedCommit(actor, {
               operation: "sync-page",
@@ -1658,8 +1701,6 @@ async function runSync(
           pages: pageCount,
           records: recordCount,
         });
-        if (capability.changeStrategy === "full_reconciliation")
-          reconciledCapabilityIds.push(capability._id);
       } catch (error) {
         const message =
           error instanceof Error
@@ -1697,12 +1738,7 @@ async function runSync(
             `${capability._id}:${capability.path}:${pageCount + 1}`,
           ),
           sanitizedSample,
-          ...(startedRecord.leaseToken
-            ? { leaseToken: string(startedRecord.leaseToken, 300) }
-            : {}),
-          ...(startedRecord.selectionRevision !== undefined
-            ? { selectionRevision: Number(startedRecord.selectionRevision) }
-            : {}),
+          ...leaseAndSelection,
         };
         await signedCommit(actor, {
           operation: "quarantine",
@@ -1725,17 +1761,7 @@ async function runSync(
       operation: "sync-complete",
       integrationId: context.integration._id,
       syncRunId: started.syncRunId,
-      payload: {
-        seenProviderKeys: [...seen],
-        seenSourceIdentityKeys: [...seenSourceIdentityKeys],
-        reconciledCapabilityIds,
-        ...(startedRecord.leaseToken
-          ? { leaseToken: string(startedRecord.leaseToken, 300) }
-          : {}),
-        ...(startedRecord.selectionRevision !== undefined
-          ? { selectionRevision: Number(startedRecord.selectionRevision) }
-          : {}),
-      },
+      payload: leaseAndSelection,
       mutation: "managebac:completeSync",
       serviceSubject: scheduled?.serviceSubject,
     });
@@ -1746,6 +1772,34 @@ async function runSync(
     const errorCode =
       message.match(/^([A-Z0-9_]+)/)?.[1] ?? "INTEGRATION_SYNC_FAILED";
     const errorSummary = message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500);
+    // Running out of time or provider requests only pauses the pass: its
+    // saved pages stand and the next request continues it.
+    if (
+      errorCode === "INTEGRATION_SYNC_TIME_BUDGET" ||
+      errorCode === "INTEGRATION_RATE_LIMITED"
+    ) {
+      await signedCommit(actor, {
+        operation: "sync-suspend",
+        integrationId: context.integration._id,
+        syncRunId: started.syncRunId,
+        payload: {
+          errorCode,
+          errorSummary,
+          ...(errorCode === "INTEGRATION_RATE_LIMITED"
+            ? { resumeAfterAt: Date.now() + 60_000 }
+            : {}),
+          ...leaseAndSelection,
+        },
+        mutation: "managebac:suspendSync",
+        serviceSubject: scheduled?.serviceSubject,
+      });
+      return {
+        syncRunId: started.syncRunId,
+        summaries,
+        suspended: true as const,
+        errorCode,
+      };
+    }
     await signedCommit(actor, {
       operation: "sync-fail",
       integrationId: context.integration._id,
@@ -1753,16 +1807,8 @@ async function runSync(
       payload: {
         errorCode,
         errorSummary,
-          ...(errorCode === "INTEGRATION_RATE_LIMITED"
-            ? { retryAfterAt: Date.now() + 60_000 }
-            : {}),
-          ...(startedRecord.leaseToken
-            ? { leaseToken: string(startedRecord.leaseToken, 300) }
-            : {}),
-          ...(startedRecord.selectionRevision !== undefined
-            ? { selectionRevision: Number(startedRecord.selectionRevision) }
-            : {}),
-        },
+        ...leaseAndSelection,
+      },
       mutation: "managebac:failSync",
       serviceSubject: scheduled?.serviceSubject,
     }).catch(() => undefined);
@@ -1829,6 +1875,7 @@ async function runScheduledSync(workerId: string) {
       serviceSubject: string;
       leaseToken?: string;
       selectionRevision?: number;
+      pass?: unknown;
       actor: ConnectorActor;
     } | null
   >("managebac:claimScheduledSync", {
@@ -1869,6 +1916,7 @@ async function runScheduledSync(workerId: string) {
           typeof claimed.selectionRevision === "number"
             ? claimed.selectionRevision
             : undefined,
+        pass: claimed.pass,
       },
     );
     return {
@@ -1876,7 +1924,9 @@ async function runScheduledSync(workerId: string) {
       integrationId: claimed.integrationId,
       syncRunId: claimed.syncRunId,
       summaries: result.summaries,
-      completion: result.completion,
+      ..."completion" in result
+        ? { completion: result.completion }
+        : { suspended: true, errorCode: result.errorCode },
     };
   } catch (error) {
     const message =

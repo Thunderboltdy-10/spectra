@@ -382,7 +382,8 @@ const ACCOUNT_TABLES: TableStep[] = [
     async (ctx, row) => {
       const capabilities = await drainChildren(ctx, ctx.db.query("externalSyncCapabilityRuns").withIndex("by_sync_run", (q) => q.eq("syncRunId", row._id)).take(CHILD_PAGE));
       const quarantined = await drainChildren(ctx, ctx.db.query("externalQuarantineRecords").withIndex("by_sync_run", (q) => q.eq("syncRunId", row._id)).take(CHILD_PAGE));
-      return { deletedRows: capabilities.deleted + quarantined.deleted, deletedStorageObjects: 0, pending: capabilities.more || quarantined.more };
+      const seen = await drainChildren(ctx, ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", (q) => q.eq("syncRunId", row._id)).take(CHILD_PAGE));
+      return { deletedRows: capabilities.deleted + quarantined.deleted + seen.deleted, deletedStorageObjects: 0, pending: capabilities.more || quarantined.more || seen.more };
     },
   ),
   drain((ctx, id, n) => ctx.db.query("externalSyncConflicts").withIndex("by_account_status", (q) => q.eq("accountId", id)).take(n)),

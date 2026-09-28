@@ -1310,7 +1310,7 @@ function SchoolsSurface({
         open={Boolean(limitSchool)}
         onClose={() => setLimitSchool(null)}
         title={`Usage policy · ${limitSchool?.name ?? ""}`}
-        detail="Inspect and simulate rules now. Enforcement stays disabled unless you deliberately enable it through this audited temporary manage elevation."
+        detail="Inspect and simulate rules now. Enforcement stays disabled unless you deliberately enable it through this audited temporary manage elevation. When enforced, new AI requests stop once a model-token maximum is reached (UTC day, month or all time); storage, bandwidth, render and collaboration rules are reported but never block."
         footer={
           <>
             <AdminButton onClick={() => setLimitSchool(null)}>
@@ -1368,7 +1368,7 @@ function SchoolsSurface({
               },
               {
                 value: "enforced",
-                label: "Enforced · block at configured maximums",
+                label: "Enforced · stop new AI requests at the model-token maximum",
               },
             ]}
           />

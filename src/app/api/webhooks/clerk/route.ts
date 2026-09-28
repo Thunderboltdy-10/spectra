@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
+import { requestIdentityErasure } from "@/lib/server-secrets";
 
 type ClerkWebhookEvent = {
   type: string;
@@ -57,6 +58,23 @@ export async function POST(request: NextRequest) {
     event = webhook.verify(payload, getSvixHeaders(request)) as ClerkWebhookEvent;
   } catch {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 400 });
+  }
+
+  if (event.type === "user.deleted") {
+    const deletedId = event.data?.id;
+    if (!deletedId) {
+      return NextResponse.json({ error: "Missing Clerk user id in webhook payload." }, { status: 400 });
+    }
+    // Erasure is idempotent, so svix redelivery after a failure is the retry.
+    try {
+      const result = await requestIdentityErasure(deletedId);
+      return NextResponse.json({ ok: true, type: event.type, erasure: result.status });
+    } catch (error) {
+      console.error("[clerk-webhook] account erasure request failed", {
+        reason: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+      });
+      return NextResponse.json({ error: "Account erasure could not be started." }, { status: 500 });
+    }
   }
 
   if (event.type !== "user.created" && event.type !== "user.updated") {

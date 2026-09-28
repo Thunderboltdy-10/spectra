@@ -296,3 +296,30 @@ export const revoke = action({
     });
   },
 });
+
+const ACCOUNT_ERASURE_OPERATION = "erase-account";
+const ACCOUNT_ERASURE_PURPOSE = "clerk-user-deleted";
+
+/**
+ * The Clerk webhook route (after its svix check) asks for a deleted
+ * identity's erasure. There is no user session, so the server-held bridge
+ * key signs the subject. Erasure is idempotent, so a replay inside the
+ * signature window changes nothing and needs no nonce reservation.
+ */
+export const eraseDeletedIdentity = action({
+  args: { clerkId: v.string(), timestamp: v.number(), nonce: v.string(), signature: v.string() },
+  handler: async (ctx, args): Promise<{ status: "running" | "completed" }> => {
+    verify({
+      operation: ACCOUNT_ERASURE_OPERATION,
+      subject: args.clerkId,
+      schoolId: "-",
+      purpose: ACCOUNT_ERASURE_PURPOSE,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: "-",
+    });
+    const result = await ctx.runMutation(internal.accountErasure.requestForDeletedIdentity, { clerkId: args.clerkId });
+    return { status: result.status };
+  },
+});

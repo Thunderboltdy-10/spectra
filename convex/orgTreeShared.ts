@@ -1566,14 +1566,7 @@ export async function purgeAccountSourceNodes(
   let purged = 0;
   for (const node of nodes) {
     if (options?.keepProjecting && node.accessProjection === true) continue;
-    for (const link of await findNodesForSource(ctx, "link", node._id)) {
-      await ctx.db.delete(link._id);
-      if (link.deletedAt === undefined)
-        await adjustChildCount(ctx, link.parentId, -1);
-    }
-    await ctx.db.delete(node._id);
-    if (node.deletedAt === undefined)
-      await adjustChildCount(ctx, node.parentId, -1);
+    await purgeNode(ctx, node);
     purged += 1;
   }
   return purged;
@@ -1666,17 +1659,23 @@ export async function purgeSourceNodes(
   sourceId: string,
 ) {
   const nodes = await findNodesForSource(ctx, kind, sourceId);
-  for (const node of nodes) {
-    for (const link of await findNodesForSource(ctx, "link", node._id)) {
-      await ctx.db.delete(link._id);
-      if (link.deletedAt === undefined)
-        await adjustChildCount(ctx, link.parentId, -1);
-    }
-    await ctx.db.delete(node._id);
-    if (node.deletedAt === undefined)
-      await adjustChildCount(ctx, node.parentId, -1);
-  }
+  for (const node of nodes) await purgeNode(ctx, node);
   return nodes.length;
+}
+
+/** Delete one node and the links that target it, keeping live child counts.
+ * Returns the number of rows deleted. */
+export async function purgeNode(ctx: OrgWriteCtx, node: OrgNode) {
+  const links = await findNodesForSource(ctx, "link", node._id);
+  for (const link of links) {
+    await ctx.db.delete(link._id);
+    if (link.deletedAt === undefined)
+      await adjustChildCount(ctx, link.parentId, -1);
+  }
+  await ctx.db.delete(node._id);
+  if (node.deletedAt === undefined)
+    await adjustChildCount(ctx, node.parentId, -1);
+  return links.length + 1;
 }
 
 const TRASH_PURGE_BATCH = 200;

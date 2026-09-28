@@ -30,7 +30,7 @@ import { releaseClaimsForRun } from "./regionClaims";
 import { readContinuation, transferClarificationContinuation } from "./spectraRunContinuations";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
-import { recordMeterEvent } from "./metering";
+import { assertSchoolModelTokenCeiling, recordMeterEvent } from "./metering";
 import { writeAuditEvent } from "./auditShared";
 import {
   shouldRenewSpectraRunLease,
@@ -660,6 +660,7 @@ export const beginRun = mutation({
       };
     }
     await assertRunAdmission(ctx, actor._id, Date.now());
+    await assertSchoolModelTokenCeiling(ctx, actor.schoolId, Date.now());
 
     let thread = args.threadId ? await ctx.db.get(args.threadId) : null;
     if (

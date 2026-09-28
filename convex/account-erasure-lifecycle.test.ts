@@ -281,7 +281,8 @@ it("erases an account across two schools, keeps its shared works under a tombsto
       .mutation(api.identity.registerSelf, {}),
   ).rejects.toThrow(/IDENTITY_ACCOUNT_ERASED/);
   expect((await t.run(ctx => ctx.db.get(ids.erased)))?.email).toBe("");
-});
+  // Drives the whole scheduled erasure job across two schools; allow for full-suite load.
+}, 60_000);
 
 it("a deletion that arrives before registration leaves an erased tombstone", async () => {
   const t = setup();

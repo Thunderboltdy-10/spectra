@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useClerk } from "@clerk/nextjs";
 import { Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -268,6 +269,37 @@ function PrivacySettings() {
   );
 }
 
+/** The only place in Spectra to leave a device signed out. */
+function AccountSettings() {
+  const { openUserProfile, signOut } = useClerk();
+  const [signingOut, setSigningOut] = useState(false);
+  return (
+    <SettingGroup title="Account" description="Your sign-in details, and signing out of this device.">
+      <SettingRow label="Account details" description="Name, email, password and sign-in methods." control={<Button size="sm" variant="secondary" onClick={() => openUserProfile()}>Manage account</Button>} />
+      <SettingRow
+        label="Sign out of this device"
+        description="Your work stays in your account. Sign out on a shared or school computer."
+        control={
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={signingOut}
+            onClick={() => {
+              setSigningOut(true);
+              void signOut({ redirectUrl: "/" }).catch(() => {
+                setSigningOut(false);
+                toast.error("Spectra could not sign you out. Try again.");
+              });
+            }}
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </Button>
+        }
+      />
+    </SettingGroup>
+  );
+}
+
 export function SettingsApplication({ initialSection = "ai" }: { initialSection?: string }) {
   const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
   const { preferences, hydrated, saveError, saving, update, reset, refreshConfirmedPreferences } = useSpectraPreferences();
@@ -280,7 +312,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     devices: <BridgeSettings />,
-    privacy: <PrivacySettings />,
+    privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,
   };
   return (
     <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]" data-spectra-app-surface="true">

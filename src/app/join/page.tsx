@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, LoaderCircle, School, ShieldCheck } from "lucide-react";
 import { SpectraLogo } from "@/components/spectra-logo";
@@ -37,6 +38,7 @@ type InvitationPreview = {
 
 function JoinSchoolContent() {
   const router = useRouter();
+  const { signOut } = useClerk();
   const searchParams = useSearchParams();
   const token = resolveJoinToken(
     searchParams.toString(),
@@ -229,15 +231,26 @@ function JoinSchoolContent() {
               )}
               {buttonLabel}
             </button>
+            {/* Anyone on this page is already signed in, so a "Sign in" link
+                came straight back here. Switching means signing out first;
+                the invitation link is kept for the sign-in that follows. */}
             <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
-              If Spectra asks you to sign in, use the invited address and
-              return to this page.{" "}
-              <Link
-                href={authHrefForRedirect("/sign-in", joinHrefForToken(token))}
+              Signed in with a different email than the one invited?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  persistJoinTokenCookie(token, document);
+                  void signOut({
+                    redirectUrl: authHrefForRedirect(
+                      "/sign-in",
+                      joinHrefForToken(token),
+                    ),
+                  });
+                }}
                 className="font-medium text-[var(--text-primary)] underline"
               >
-                Sign in
-              </Link>
+                Use a different account
+              </button>
             </div>
           </>
         ) : (

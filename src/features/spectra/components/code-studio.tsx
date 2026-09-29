@@ -10,11 +10,11 @@ import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { openSearchPanel } from "@codemirror/search";
-import { Prec } from "@codemirror/state";
+import { Prec, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import { Awareness } from "y-protocols/awareness";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import {
   AlertTriangle,
   Box,
@@ -225,21 +225,36 @@ function uid(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+const fileCollaboration = new WeakMap<
+  Y.Text,
+  { awareness: Awareness; extension: Extension[] }
+>();
+
 /**
  * The collaboration binding for one file's editor, with undo scoped to this
  * person. CodeMirror's own history records every transaction, including the
  * ones y-codemirror dispatches for a collaborator's typing, so its Ctrl+Z
  * reverted peers. yCollab's Y.UndoManager tracks only local-origin edits; its
  * keymap takes Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while the file is shared.
+ *
+ * One binding, and so one undo history, per file. A fresh one per render gave
+ * the undo command an empty manager after the first re-render, and the editor
+ * is remounted on every file switch, which discarded that file's history.
  */
 export function codeEditorCollaboration(
   sharedText: Y.Text,
   awareness: Awareness,
 ) {
-  return [
-    yCollab(sharedText, awareness),
+  const cached = fileCollaboration.get(sharedText);
+  if (cached?.awareness === awareness) return cached.extension;
+  const extension = [
+    yCollab(sharedText, awareness, {
+      undoManager: new Y.UndoManager(sharedText),
+    }),
     Prec.high(keymap.of(yUndoManagerKeymap)),
   ];
+  fileCollaboration.set(sharedText, { awareness, extension });
+  return extension;
 }
 
 /** basicSetup for the source editor: CodeMirror history only when not shared. */

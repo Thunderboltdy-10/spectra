@@ -38,6 +38,8 @@ import {
   mutateWorkbookAxis,
   normalizeRange,
   normalizeSheetsContent,
+  sheetsByAddress,
+  sheetsByIdentity,
   parseAddress,
   parseDelimited,
   parseRange,
@@ -738,6 +740,28 @@ function SheetsFillHandle({
         handlersRef.current.onFillHandlePointerDown(event, selection, cells)
       }
     />
+  );
+}
+
+/**
+ * Undo or redo one sheets edit against the current workbook. Cells are
+ * matched by row and column identity, so undoing a row or column insert moves
+ * a collaborator's later edit back with its row instead of losing it at a
+ * stale address.
+ */
+export function applySheetsHistory(
+  entry: StudioHistoryEntry<SheetsContent>,
+  direction: "undo" | "redo",
+  current: SheetsContent,
+) {
+  return normalizeSheetsContent(
+    sheetsByAddress(
+      applyStudioHistory(
+        { before: sheetsByIdentity(entry.before), after: sheetsByIdentity(entry.after) },
+        direction,
+        sheetsByIdentity(current),
+      ),
+    ),
   );
 }
 
@@ -1758,9 +1782,7 @@ export const SheetsStudio = memo(function SheetsStudio({
     to.current.push(entry);
     setCanUndo(undoRef.current.length > 0);
     setCanRedo(redoRef.current.length > 0);
-    const normalized = normalizeSheetsContent(
-      applyStudioHistory(entry, direction, workbookRef.current),
-    );
+    const normalized = applySheetsHistory(entry, direction, workbookRef.current);
     rememberEmitted(normalized);
     workbookRef.current = normalized;
     setWorkbook(normalized);

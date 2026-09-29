@@ -237,3 +237,33 @@ describe("a read the tool already bounded reaches the model whole", () => {
     expect(bounded).not.toHaveProperty("gone");
   });
 });
+
+describe("a document too large for one read can be navigated", () => {
+  const blocks = Array.from({ length: 500 }, (_, index) => ({
+    id: `blk-${index}`, type: index % 50 === 0 ? "heading" : "paragraph",
+    ...(index % 50 === 0 ? { heading: `Section ${index / 50}` } : {}), text: `Para ${index} ${"w".repeat(280)}`,
+  }));
+  const essay = { _id: "big", blueprintKey: "document", title: "Thesis", content: { blocks } };
+
+  it("lists the id of every block the read did not return", async () => {
+    const { boundedArtifactRead } = await import("../ai/bounded-artifact-read");
+    const read = boundedArtifactRead(essay) as unknown as {
+      content: { blocks: Array<{ id: string }> }; blockOutline: Array<{ id: string }>;
+      contentCoverage: { complete: boolean; totalBlocks: number; shownBlocks: number };
+    };
+    const seen = new Set([...read.content.blocks, ...read.blockOutline].map((block) => block.id));
+    expect(seen.has("blk-499")).toBe(true);
+    expect(seen.size).toBe(500);
+    expect(read.contentCoverage).toMatchObject({ complete: false, totalBlocks: 500, shownBlocks: read.content.blocks.length });
+    expect(new TextEncoder().encode(JSON.stringify(read)).byteLength).toBeLessThan(72 * 1024);
+  });
+
+  it("returns a requested long block instead of silently dropping it", async () => {
+    const { boundedArtifactRead } = await import("../ai/bounded-artifact-read");
+    const long = { id: "long", type: "paragraph", text: "L".repeat(5_000) };
+    const read = boundedArtifactRead({ ...essay, content: { blocks: [...blocks, long] } }, { blockIds: ["long", "blk-420"] }) as unknown as {
+      content: { blocks: Array<{ id: string }> };
+    };
+    expect(read.content.blocks.map((block) => block.id)).toEqual(["blk-420", "long"]);
+  });
+});

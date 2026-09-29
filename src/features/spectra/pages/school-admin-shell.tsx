@@ -613,29 +613,34 @@ export function SchoolAdminShell() {
     [router, searchParams],
   );
 
+  /* One answer per action: the success toast (or none, `success: null`, when
+     the caller words its own outcome) or the failure toast. It never rejects,
+     so a caller's `void mutate(...)` cannot become an unhandled rejection;
+     null means the action failed and has already been reported. It refreshes
+     every surface itself, so callers do not refresh again. */
   const mutate = useCallback(
     async <T,>(
       label: string,
       action: string,
       payload: Record<string, unknown>,
-      success: string,
-    ) => {
+      success: string | null,
+    ): Promise<{ result: T } | null> => {
       setBusy(label);
       try {
         const result = await mutateAdministration<T>(action, {
           ...payload,
           operatorSessionId,
         });
-        toast.success(success);
+        if (success) toast.success(success);
         setRefreshKey((value) => value + 1);
-        return result;
+        return { result };
       } catch (nextError) {
         toast.error(
           humanizePublicFailure(
             nextError instanceof Error ? nextError.message : "Action failed.",
           ),
         );
-        throw nextError;
+        return null;
       } finally {
         setBusy("");
       }
@@ -672,7 +677,9 @@ export function SchoolAdminShell() {
                 "endOperatorSession",
                 {},
                 "Operator session ended.",
-              ).then(() => router.push("/superadmin?tab=schools"))
+              ).then((done) => {
+                if (done) router.push("/superadmin?tab=schools");
+              })
             }
           >
             End session
@@ -738,8 +745,8 @@ function SchoolAdminTab({
     label: string,
     action: string,
     payload: Record<string, unknown>,
-    success: string,
-  ) => Promise<T>;
+    success: string | null,
+  ) => Promise<{ result: T } | null>;
   refreshKey: number;
   onRefresh: () => void;
 }) {
@@ -825,48 +832,74 @@ function PeopleSurface({
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("student");
   const [manualInvitationUrl, setManualInvitationUrl] = useState("");
+  /* The member search asks the server once typing settles, not per key, and
+     the table stays on screen while it does; invitations do not depend on
+     the search, so typing never refetches them. */
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    void Promise.all([
-      getAdministration<{ people: Person[] }>("people", {
-        operatorSessionId,
-        search,
-      }),
-      getAdministration<{ invitations: Invitation[] }>("invitations", {
-        operatorSessionId,
-      }),
-    ])
-      .then(([members, invites]) => {
-        if (!active) return;
-        setPeople(members.people);
-        setInvitations(invites.invitations);
+    void getAdministration<{ people: Person[] }>("people", {
+      operatorSessionId,
+      search: query,
+    })
+      .then((members) => {
+        if (active) setPeople(members.people);
       })
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "People failed."),
-      )
-      .finally(() => active && setLoading(false));
+      .catch((error) => {
+        if (active)
+          toast.error(
+            describeFailure(error, { fallback: "Members could not load." })
+              .message,
+          );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
-  }, [operatorSessionId, refreshKey, search]);
+  }, [operatorSessionId, refreshKey, query]);
+  useEffect(() => {
+    let active = true;
+    void getAdministration<{ invitations: Invitation[] }>("invitations", {
+      operatorSessionId,
+    })
+      .then((invites) => {
+        if (active) setInvitations(invites.invitations);
+      })
+      .catch((error) => {
+        if (active)
+          toast.error(
+            describeFailure(error, { fallback: "Invitations could not load." })
+              .message,
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [operatorSessionId, refreshKey]);
 
   async function invite(event: FormEvent) {
     event.preventDefault();
-    const result = await mutate<{
+    const invited = email;
+    const done = await mutate<{
       delivery: { status: "sent" | "skipped" | "failed"; reason?: string };
       manualInvitationUrl?: string;
-    }>("invite", "invite", { email, role }, `Invitation created for ${email}.`);
+    }>("invite", "invite", { email, role }, null);
+    if (!done) return;
     setEmail("");
     setInviteOpen(false);
-    if (result.manualInvitationUrl) {
-      setManualInvitationUrl(result.manualInvitationUrl);
+    if (done.result.manualInvitationUrl) {
+      setManualInvitationUrl(done.result.manualInvitationUrl);
       toast.warning(
-        result.delivery.reason ??
+        done.result.delivery.reason ??
           "Email delivery is unavailable. Share the secure invitation manually.",
       );
-    } else toast.success("Invitation email accepted by the mail provider.");
-    onRefresh();
+    } else toast.success(`Invitation sent to ${invited}.`);
   }
 
   return (
@@ -978,7 +1011,7 @@ function PeopleSurface({
                             "changeMember",
                             { membershipId: person.membershipId, role },
                             "Member role updated.",
-                          ).then(onRefresh)
+                          )
                         }
                         options={MEMBER_ROLE_OPTIONS}
                         size="sm"
@@ -996,7 +1029,7 @@ function PeopleSurface({
                             "changeMember",
                             { membershipId: person.membershipId, status },
                             "Member status updated.",
-                          ).then(onRefresh)
+                          )
                         }
                         options={MEMBER_STATUS_OPTIONS}
                         size="sm"
@@ -1059,7 +1092,7 @@ function PeopleSurface({
                         "revokeInvitation",
                         { invitationId: invite.invitationId },
                         "Invitation revoked.",
-                      ).then(onRefresh)
+                      )
                     }
                   >
                     Revoke
@@ -1143,7 +1176,13 @@ function PeopleSurface({
               onClick={() =>
                 void navigator.clipboard
                   .writeText(manualInvitationUrl)
-                  .then(() => toast.success("Invitation link copied."))
+                  .then(
+                    () => toast.success("Invitation link copied."),
+                    () =>
+                      toast.error(
+                        "Copying was blocked. Select the link and copy it.",
+                      ),
+                  )
               }
             >
               Copy secure link
@@ -1166,7 +1205,6 @@ function GroupsSurface({
   busy,
   mutate,
   refreshKey,
-  onRefresh,
 }: Pick<
   SchoolAdminTabProps,
   "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
@@ -1252,7 +1290,7 @@ function GroupsSurface({
                           "updateGroup",
                           { groupId: group.groupId, archived: true },
                           "Group archived.",
-                        ).then(onRefresh)
+                        )
                       }
                     >
                       <Archive size={11} />
@@ -1295,12 +1333,12 @@ function GroupsSurface({
                     memberAccountIds: members,
                   },
                   "Group created.",
-                ).then(() => {
+                ).then((done) => {
+                  if (!done) return;
                   setOpen(false);
                   setName("");
                   setDescription("");
                   setMembers([]);
-                  onRefresh();
                 })
               }
             >
@@ -1370,7 +1408,6 @@ function CommunicationSurface({
   busy,
   mutate,
   refreshKey,
-  onRefresh,
 }: Pick<
   SchoolAdminTabProps,
   "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
@@ -1478,7 +1515,7 @@ function CommunicationSurface({
                               "cancelAnnouncement",
                               { announcementId: row.announcementId },
                               "Announcement cancelled.",
-                            ).then(onRefresh)
+                            )
                           }
                         >
                           Cancel
@@ -1528,12 +1565,12 @@ function CommunicationSurface({
                       : new Date(scheduledAt).getTime(),
                   },
                   sendNow ? "Announcement sent." : "Announcement scheduled.",
-                ).then(() => {
+                ).then((done) => {
+                  if (!done) return;
                   setOpen(false);
                   setTitle("");
                   setBody("");
                   setTargetIds([]);
-                  onRefresh();
                 })
               }
             >
@@ -2111,7 +2148,6 @@ function FeedbackSurface({
   busy,
   mutate,
   refreshKey,
-  onRefresh,
 }: Pick<
   SchoolAdminTabProps,
   "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
@@ -2213,9 +2249,9 @@ function FeedbackSurface({
                     response,
                   },
                   "Feedback updated.",
-                ).then(() => {
+                ).then((done) => {
+                  if (!done) return;
                   setSelected(null);
-                  onRefresh();
                 })
               }
             >

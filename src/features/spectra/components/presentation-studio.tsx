@@ -1607,7 +1607,6 @@ export function PresentationStudio({
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
   const [draggingSlideId, setDraggingSlideId] = useState<string>();
-  const [_dropTargetSlideId, setDropTargetSlideId] = useState<string>();
   const [undoStack, setUndoStack] = useState<
     StudioHistoryEntry<PresentationContent>[]
   >([]);
@@ -3908,10 +3907,7 @@ export function PresentationStudio({
                 canEdit={!readOnly}
                 draggingId={draggingSlideId}
                 onDragStart={setDraggingSlideId}
-                onDragEnd={() => {
-                  setDraggingSlideId(undefined);
-                  setDropTargetSlideId(undefined);
-                }}
+                onDragEnd={() => setDraggingSlideId(undefined)}
                 onMove={(from, to) => {
                   // The rail can be filtered by a find, so a drop maps through
                   // the list a person is actually looking at.

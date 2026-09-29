@@ -487,28 +487,6 @@ function semanticPathToPointer(path: readonly (string | number)[]) {
     .join("/")}`;
 }
 
-function _aiPreviewSections(artifact: SpectraArtifact) {
-  const content = record(artifact.aiPreview?.content);
-  const rows = Array.isArray(content.blocks)
-    ? content.blocks
-    : Array.isArray(content.cards)
-      ? content.cards
-      : Array.isArray(content.questions)
-        ? content.questions
-        : [];
-  return rows.slice(0, 4).flatMap((row): string[] => {
-    const item = record(row);
-    const label = [
-      item.title,
-      item.heading,
-      item.front,
-      item.prompt,
-      item.text,
-    ].find((value) => typeof value === "string" && value.trim());
-    return typeof label === "string" ? [label.trim().slice(0, 90)] : [];
-  });
-}
-
 type ArtifactSnapshot = {
   title: string;
   summary?: string;

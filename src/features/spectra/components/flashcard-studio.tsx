@@ -163,29 +163,8 @@ export function FlashcardStudio({
   const [activeSection, setActiveSection] = useState(
     cards[0]?.section ?? "Section 1",
   );
-  const [_collapsedSections, _setCollapsedSections] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [deckSearch, setDeckSearch] = useState("");
-  const [deckFilter, _setDeckFilter] = useState<
-    | "all"
-    | "incomplete"
-    | "duplicate"
-    | "easy"
-    | "medium"
-    | "hard"
-    | "due"
-    | "unstudied"
-    | "struggling"
-    | "changed"
-  >("all");
-  const [_railView, _setRailView] = useState<"list" | "grid">("list");
-  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [draggedCardId, setDraggedCardId] = useState<string>();
-  const [_renamingSection, setRenamingSection] = useState<string>();
-  const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
   /**
@@ -363,35 +342,6 @@ export function FlashcardStudio({
         .includes(query)
     )
       return false;
-    if (deckFilter === "incomplete")
-      return !card.front.trim() || !card.back.trim();
-    if (deckFilter === "duplicate")
-      return duplicateKeys.has(
-        `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
-      );
-    // Progress filters read personal study state and never the card's own
-    // fields, so filtering by "due" says something about this person rather
-    // than about the deck everyone shares (§11B).
-    if (deckFilter === "due") {
-      const state = studyStates.get(deckStudyKey(card.id, "forward"));
-      return !state || state.nextDueAt <= (studyClock || currentTimeMs());
-    }
-    if (deckFilter === "unstudied")
-      return !studyStates.has(deckStudyKey(card.id, "forward"));
-    if (deckFilter === "struggling") {
-      const state = studyStates.get(deckStudyKey(card.id, "forward"));
-      return Boolean(state && (state.lapses > 1 || state.ease < 2.1));
-    }
-    if (deckFilter === "changed")
-      return Boolean(
-        studyStates.get(deckStudyKey(card.id, "forward"))?.changedSinceStudied,
-      );
-    if (
-      deckFilter === "easy" ||
-      deckFilter === "medium" ||
-      deckFilter === "hard"
-    )
-      return (card.difficulty ?? "medium") === deckFilter;
     return true;
   });
   const studyCards = cards.filter(
@@ -530,12 +480,6 @@ export function FlashcardStudio({
         ? current
         : (nextCards[0]?.id ?? ""),
     );
-    setSelectedCardIds(
-      (current) =>
-        new Set(
-          [...current].filter((id) => nextCards.some((card) => card.id === id)),
-        ),
-    );
   }, [content]);
 
   useEffect(() => {
@@ -654,25 +598,6 @@ export function FlashcardStudio({
       settings: record(content).settings ?? {
         shuffle: true,
         revealMode: "click",
-      },
-    });
-  }
-
-  function _updateDeckSettings(
-    patch: Partial<{
-      shuffle: boolean;
-      revealMode: "click" | "type";
-      showHints: boolean;
-    }>,
-  ) {
-    onChange({
-      ...record(content),
-      cards,
-      settings: {
-        shuffle: deckSettings.shuffle !== false,
-        revealMode: deckSettings.revealMode === "type" ? "type" : "click",
-        showHints: deckSettings.showHints !== false,
-        ...patch,
       },
     });
   }
@@ -869,26 +794,6 @@ export function FlashcardStudio({
     focusCardIdRef.current = card.id;
   }
 
-  function _toggleCardSelection(cardId: string) {
-    setSelectedCardIds((current) => {
-      const next = new Set(current);
-      if (next.has(cardId)) next.delete(cardId);
-      else next.add(cardId);
-      return next;
-    });
-  }
-
-  function _moveSelectedCards(section: string) {
-    if (!selectedCardIds.size) return;
-    commit(
-      cards.map((card) =>
-        selectedCardIds.has(card.id) ? { ...card, section } : card,
-      ),
-    );
-    setActiveSection(section);
-    setSelectedCardIds(new Set());
-  }
-
   function releaseUnusedDeckMedia(
     removedCards: DeckCard[],
     remainingCards: DeckCard[],
@@ -915,38 +820,6 @@ export function FlashcardStudio({
     ).then(() =>
       setDeckAssets((current) =>
         current.filter((asset) => !removable.includes(asset.assetId)),
-      ),
-    );
-  }
-
-  function _deleteSelectedCards() {
-    if (!selectedCardIds.size) return;
-    const removed = cards.filter((card) => selectedCardIds.has(card.id));
-    const remaining = cards.filter((card) => !selectedCardIds.has(card.id));
-    const next = remaining.length
-      ? remaining
-      : [
-          {
-            id: id("card"),
-            front: "",
-            back: "",
-            hint: "",
-            section: activeSection,
-            confidence: "unknown" as const,
-            difficulty: "medium" as const,
-          },
-        ];
-    commit(next);
-    releaseUnusedDeckMedia(removed, next);
-    setActiveCardId(next[0]!.id);
-    setSelectedCardIds(new Set());
-  }
-
-  function _setSelectedDifficulty(difficulty: "easy" | "medium" | "hard") {
-    if (!selectedCardIds.size) return;
-    commit(
-      cards.map((card) =>
-        selectedCardIds.has(card.id) ? { ...card, difficulty } : card,
       ),
     );
   }
@@ -985,25 +858,6 @@ export function FlashcardStudio({
     });
     commit(next);
     setActiveCardId(cardId);
-  }
-
-  function _renameSection(section: string, requestedName = sectionNameDraft) {
-    const proposed = requestedName.trim();
-    if (!proposed || proposed === section) return;
-    if (sections.includes(proposed)) {
-      setDeckImportError("A section with that name already exists.");
-      return;
-    }
-    commit(
-      cards.map((card) =>
-        (card.section || "Section 1") === section
-          ? { ...card, section: proposed }
-          : card,
-      ),
-    );
-    setActiveSection(proposed);
-    setRenamingSection(undefined);
-    setSectionNameDraft("");
   }
 
   async function importCards(file: File) {

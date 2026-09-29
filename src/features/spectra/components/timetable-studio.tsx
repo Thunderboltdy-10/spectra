@@ -566,16 +566,28 @@ export function TimetableStudio({
     : [];
   const timetableNowMinutes = Number(nowHour) * 60 + Number(nowMinute);
 
+  // The timetable as it is now. An import finishes after several awaits
+  // (original upload, parsing), when the render that started it holds a stale
+  // timetable; building on that would drop every event edited meanwhile.
+  const latestTimetableRef = useRef({ timetable, personalState, sharedTimetable });
+  latestTimetableRef.current = { timetable, personalState, sharedTimetable };
+
   function emit(recipe: (draft: TimetableContent) => void) {
     if (!personalReady) return;
-    const next = clone(timetable);
+    const latest = latestTimetableRef.current;
+    const next = clone(latest.timetable);
     recipe(next);
     const partitioned = partitionTimetableState(next);
-    if (JSON.stringify(partitioned.personal) !== JSON.stringify(personalState))
+    latestTimetableRef.current = {
+      timetable: next,
+      personalState: partitioned.personal,
+      sharedTimetable: readOnly ? latest.sharedTimetable : partitioned.shared,
+    };
+    if (JSON.stringify(partitioned.personal) !== JSON.stringify(latest.personalState))
       savePersonalState(partitioned.personal);
     if (
       !readOnly &&
-      JSON.stringify(partitioned.shared) !== JSON.stringify(sharedTimetable)
+      JSON.stringify(partitioned.shared) !== JSON.stringify(latest.sharedTimetable)
     )
       onChange(partitioned.shared);
   }

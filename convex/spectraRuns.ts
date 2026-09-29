@@ -73,27 +73,38 @@ function usageTokenCounts(usage: unknown) {
 /**
  * Meters a run's cumulative usage for its current execution. Usage is reported
  * several times per execution (the heartbeat snapshot, Stop, stale-lease
- * recovery, the worker's own final status), so only the growth over
- * `meteredUsage` is recorded. The first report keeps the execution-keyed
- * idempotency prefix; later growth is keyed by the total it starts from, so a
- * retried mutation never meters the same growth twice.
+ * recovery, the worker's own final status), so only the growth over what was
+ * already metered is recorded. Each worker's usage counts from zero, so a
+ * replacement worker after a lease takeover is metered against its own total
+ * (it used to be metered only once it passed the first worker's total). The
+ * first worker keeps the execution-keyed idempotency prefix; later growth is
+ * keyed by the total it starts from, so a retried mutation never meters the
+ * same growth twice.
  */
 async function recordRunModelMeters(
   ctx: MutationCtx,
   run: Doc<"spectraAiRuns">,
   usage: unknown,
   occurredAt: number,
+  reporterWorkerId?: string,
 ) {
   if (!run.executionId) return;
   const { inputTokens, outputTokens } = usageTokenCounts(usage);
-  const metered =
-    run.meteredUsage?.executionId === run.executionId
-      ? run.meteredUsage
-      : { executionId: run.executionId, inputTokens: 0, outputTokens: 0 };
+  const current =
+    run.meteredUsage?.executionId === run.executionId ? run.meteredUsage : undefined;
+  const lastWorkerId = current?.workers?.at(-1)?.workerId;
+  const workerId = reporterWorkerId ?? run.workerId ?? lastWorkerId ?? "worker";
+  // A total metered before per-worker tracking belongs to one worker.
+  const workers = current?.workers ?? (current
+    ? [{ workerId, inputTokens: current.inputTokens, outputTokens: current.outputTokens }]
+    : []);
+  const index = workers.findIndex((entry) => entry.workerId === workerId);
+  const metered = index >= 0 ? workers[index]! : { workerId, inputTokens: 0, outputTokens: 0 };
   const inputGrowth = Math.max(0, inputTokens - metered.inputTokens);
   const outputGrowth = Math.max(0, outputTokens - metered.outputTokens);
   if (inputGrowth === 0 && outputGrowth === 0) return;
-  const executionPrefix = `spectra-run:${run._id}:${run.executionId}`;
+  const firstWorker = index === 0 || workers.length === 0;
+  const executionPrefix = `spectra-run:${run._id}:${run.executionId}${firstWorker ? "" : `:worker:${workerId}`}`;
   await recordModelTokenUsage(ctx, {
     schoolId: run.schoolId,
     accountId: run.ownerAccountId,
@@ -108,11 +119,20 @@ async function recordRunModelMeters(
     dimensions: { surface: run.sourceSurface, status: run.status },
     occurredAt,
   });
+  const updated = {
+    workerId,
+    inputTokens: Math.max(inputTokens, metered.inputTokens),
+    outputTokens: Math.max(outputTokens, metered.outputTokens),
+  };
+  const nextWorkers = index >= 0
+    ? workers.map((entry, position) => (position === index ? updated : entry))
+    : [...workers, updated];
   await ctx.db.patch(run._id, {
     meteredUsage: {
       executionId: run.executionId,
-      inputTokens: Math.max(inputTokens, metered.inputTokens),
-      outputTokens: Math.max(outputTokens, metered.outputTokens),
+      inputTokens: nextWorkers.reduce((sum, entry) => sum + entry.inputTokens, 0),
+      outputTokens: nextWorkers.reduce((sum, entry) => sum + entry.outputTokens, 0),
+      workers: nextWorkers,
     },
   });
 }
@@ -1338,7 +1358,7 @@ export const updateStatus = mutation({
     const reportedUsage =
       args.usage ?? (isTerminalRunStatus(args.status) ? run.usage : undefined);
     if (reportedUsage)
-      await recordRunModelMeters(ctx, run, reportedUsage, Date.now());
+      await recordRunModelMeters(ctx, run, reportedUsage, Date.now(), args.workerId);
     if (args.workerId && run.workerId !== args.workerId)
       return { ignored: true, status: run.status };
     // A confirmation event can reach the browser just before the durable
@@ -1726,7 +1746,15 @@ export const claimExecution = mutation({
       .replace(/[^a-zA-Z0-9:_-]/g, "")
       .slice(0, 160);
     if (!workerId) throw new Error("Execution worker identity is required.");
+    // A new worker (a takeover or a re-queued continuation): the stored
+    // heartbeat usage belongs to the previous worker. Meter
+    // it as theirs and clear it, so it is never counted against the new
+    // worker's own usage, which starts from zero.
+    const takeover = run.workerId !== workerId;
+    if (takeover && run.usage)
+      await recordRunModelMeters(ctx, run, run.usage, now, run.workerId);
     await ctx.db.patch(args.runId, {
+      ...(takeover ? { usage: undefined } : {}),
       // Confirmation continuations are deliberately re-queued so they can
       // acquire a fresh worker lease. Claiming that lease is also the durable
       // hand-off back into the mutation path; leaving the run in `queued`

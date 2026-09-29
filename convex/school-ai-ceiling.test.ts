@@ -265,3 +265,28 @@ it("meters the stored usage of a run whose worker died", async () => {
   expect(rows.find((row) => row.periodKey === "total")?.quantity).toBe(900);
   expect((await t.run((ctx) => ctx.db.get(run.runId)))?.status).toBe("failed");
 });
+
+it("meters a replacement worker's own usage after a lease takeover", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-28T10:00:00Z"));
+  const { t, ids, begin } = await fixture();
+  const student = t.withIdentity({ subject: "capped-student", email: "capped-student@example.test", emailVerified: true });
+  const run = await begin("capped-student");
+  const target = { runId: run.runId, executionId: run.executionId };
+  const totals = async () => (await t.run((ctx) => ctx.db.query("schoolUsageTotals")
+    .withIndex("by_school_period", (q) => q.eq("schoolId", ids.capped)).collect())).find((row) => row.periodKey === "total")?.quantity;
+  await student.mutation(api.spectraRuns.claimExecution, { ...target, workerId: "worker-a" });
+  await student.mutation(api.spectraRuns.updateStatus, { ...target, workerId: "worker-a", status: "running", usage: { promptTokens: 300, completionTokens: 100 } });
+  vi.setSystemTime(new Date("2026-09-28T10:01:05Z"));
+  await student.mutation(api.spectraRuns.heartbeat, { ...target, workerId: "worker-a", usage: { promptTokens: 500, completionTokens: 120 } });
+  expect(await totals()).toBe(400);
+  // worker-a dies; worker-b takes the expired lease and starts counting from zero.
+  vi.setSystemTime(new Date("2026-09-28T10:20:00Z"));
+  await student.mutation(api.spectraRuns.claimExecution, { ...target, workerId: "worker-b" });
+  expect(await totals()).toBe(620);
+  const final = { ...target, workerId: "worker-b", status: "completed" as const, usage: { promptTokens: 200, completionTokens: 50 } };
+  await student.mutation(api.spectraRuns.updateStatus, final);
+  expect(await totals()).toBe(870);
+  await student.mutation(api.spectraRuns.updateStatus, final);
+  expect(await totals()).toBe(870);
+});

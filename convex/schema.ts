@@ -4225,6 +4225,17 @@ export default defineSchema({
         executionId: v.string(),
         inputTokens: v.number(),
         outputTokens: v.number(),
+        // Per worker: a replacement worker reports its own cumulative usage
+        // from zero, so each worker is metered against its own total.
+        workers: v.optional(
+          v.array(
+            v.object({
+              workerId: v.string(),
+              inputTokens: v.number(),
+              outputTokens: v.number(),
+            }),
+          ),
+        ),
       }),
     ),
     sessionId: v.optional(v.string()),

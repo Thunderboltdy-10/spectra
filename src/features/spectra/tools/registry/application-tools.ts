@@ -136,6 +136,8 @@ export function registerApplicationTools() {
   define({
     ...readDefaults,
     id: "read_artifact",
+    // boundedArtifactRead caps content at 64 KB and labels partial coverage.
+    selfBoundedOutputCharacters: 96_000,
     title: "Read work",
     description:
       "Read current canonical content and metadata, permission-checking the exact artifact id even when it is not open or selected. Large items return explicit partial coverage; request cellAddresses/sheetId or blockIds to inspect more regions.",
@@ -151,6 +153,8 @@ export function registerApplicationTools() {
   define({
     ...readDefaults,
     id: "read_thread",
+    // Pages hold at most 24 excerpts of 3,000 characters; chunks 6,000.
+    selfBoundedOutputCharacters: 80_000,
     title: "Read conversation",
     description:
       "Read permissioned conversation history. Use before for older pages, query/searchCursor for indexed search, or messageId/offset/revision for a complete message. Continue only with the exact returned cursor or revision. Pages contain at most 24 messages, search 16 hits, and chunks 6000 characters; partial content is explicit.",
@@ -322,7 +326,8 @@ export function registerApplicationTools() {
   define({ ...appActionDefaults, id: "import_managebac_resource", title: "Import school resource", description: "Open the selected ManageBac class shelf to import a permissioned resource into Library through the human school flow.", inputSchema: z.object({ sourceRecordId: z.string().min(1), refresh: z.boolean().optional(), requestKey: z.string().min(8).max(240).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_resource_import", aiAvailability: "prohibited", prohibitionReason: "AI resource import is unavailable. Open the selected ManageBac class shelf and use Import resource there; the school route verifies provider identity and saves an import receipt." });
   define({ ...appActionDefaults, id: "change_managebac_mapping", title: "Change ManageBac mapping", description: "ManageBac mapping changes use the dedicated human admin flow; AI mapping mutation is deferred until that typed path is exposed.", inputSchema: z.object({ mappingId: z.string(), patch: jsonObject }), risk: "high", approval: "always", authorityTarget: "managebac_mapping", aiAvailability: "prohibited", prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow." });
   define({ ...appActionDefaults, id: "insert_reference", title: "Insert reference", description: "Insert a reference through the shared work/reference command path.", inputSchema: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional() }), risk: "medium", approval: "policy", authorityTarget: "content" });
-  define({ ...readDefaults, id: "read_embeds", title: "Read embeds", description: "Read live or pinned embeds and their source identities without mutating the source.", inputSchema: z.object({ hostWorkId: z.string(), refresh: refreshRead }) });
+  // embedForModel bounds each embed by its contextPolicy.
+  define({ ...readDefaults, id: "read_embeds", title: "Read embeds", description: "Read live or pinned embeds and their source identities without mutating the source. Each embed shares only what its context policy allows.", selfBoundedOutputCharacters: 96_000, inputSchema: z.object({ hostWorkId: z.string(), refresh: refreshRead }) });
   /* W9-02's copy is formatting-only here; retain W9-01's shared registry, including resource import.
   define({
     ...appActionDefaults,

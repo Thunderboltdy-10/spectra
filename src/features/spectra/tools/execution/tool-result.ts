@@ -24,26 +24,60 @@ export type ToolResult<T = unknown> =
       telemetry?: ToolTelemetry;
     };
 
-/** Keep arbitrary provider/database payloads bounded before the next model turn. */
-export function boundedToolData(value: unknown, maximumCharacters = 24_000) {
+/**
+ * Keep arbitrary provider/database payloads bounded before the next model turn.
+ *
+ * A tool that already bounds its own output for the model (read_artifact's
+ * 64 KB read with explicit partial coverage, read_thread's 6,000-character
+ * chunks) declares `selfBounded` with its budget. Its structure then passes
+ * whole: the generic 40-item, 80-key, 4,000-character and depth-7 cuts used
+ * to drop document blocks past the 40th, sheet cells past the 80th key, table
+ * cells and code past 4,000 characters with no sign anything was missing.
+ * Every cut that remains is labelled.
+ */
+export function boundedToolData(
+  value: unknown,
+  maximumCharacters = 24_000,
+  options: { selfBounded?: boolean } = {},
+) {
   let remaining = Math.max(1_000, maximumCharacters);
+  const stringCharacters = options.selfBounded ? Number.POSITIVE_INFINITY : 4_000;
+  const arrayItems = options.selfBounded ? Number.POSITIVE_INFINITY : 40;
+  const objectKeys = options.selfBounded ? Number.POSITIVE_INFINITY : 80;
+  const maximumDepth = options.selfBounded ? 48 : 7;
   const visit = (input: unknown, depth: number): unknown => {
     if (remaining <= 0) return "[context limit reached]";
+    // An absent field stays absent (as JSON would); it used to become the
+    // string "undefined", which reads as a real id or version.
+    if (input === undefined || typeof input === "function" || typeof input === "symbol") return undefined;
     if (input === null || typeof input === "number" || typeof input === "boolean") return input;
     if (typeof input === "string") {
-      const bounded = input.replace(/\u0000/g, "").slice(0, Math.min(4_000, remaining));
+      const clean = input.replace(/\u0000/g, "");
+      const bounded = clean.slice(0, Math.min(stringCharacters, remaining));
       remaining -= bounded.length;
-      return bounded.length < input.length ? `${bounded}...` : bounded;
+      return bounded.length < clean.length
+        ? `${bounded}... [${(clean.length - bounded.length).toLocaleString("en-US")} more characters not shown]`
+        : bounded;
     }
-    if (depth >= 7) return "[nested value omitted]";
-    if (Array.isArray(input)) return input.slice(0, 40).map((entry) => visit(entry, depth + 1));
+    if (depth >= maximumDepth) return "[nested value omitted]";
+    if (Array.isArray(input)) {
+      const shown = input.slice(0, arrayItems).map((entry) => visit(entry, depth + 1));
+      return shown.length < input.length
+        ? [...shown, `[${input.length - shown.length} more items not shown]`]
+        : shown;
+    }
     if (typeof input === "object") {
       const output: Record<string, unknown> = {};
-      for (const [key, entry] of Object.entries(input).slice(0, 80)) {
+      const entries = Object.entries(input).filter(([, entry]) => entry !== undefined && typeof entry !== "function" && typeof entry !== "symbol");
+      let shownKeys = 0;
+      for (const [key, entry] of entries.slice(0, objectKeys)) {
         if (remaining <= 0) break;
         remaining -= key.length;
         output[key] = visit(entry, depth + 1);
+        shownKeys += 1;
       }
+      if (shownKeys < entries.length)
+        output["[omitted]"] = `${entries.length - shownKeys} more fields not shown`;
       return output;
     }
     const bounded = String(input).slice(0, Math.min(500, remaining));

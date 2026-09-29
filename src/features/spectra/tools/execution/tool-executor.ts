@@ -94,7 +94,9 @@ export class SpectraToolExecutor {
           const summary = definition.summarizeOutput(parsed);
           return {
             ok: true as const,
-            data: boundedToolData(parsed) as T,
+            data: (definition.selfBoundedOutputCharacters
+              ? boundedToolData(parsed, definition.selfBoundedOutputCharacters, { selfBounded: true })
+              : boundedToolData(parsed)) as T,
             summary: boundedToolSummary(summary.text),
             ...(summary.handles?.length ? { workHandles: summary.handles.map((workId) => ({ workId })) } : {}),
             telemetry: { durationMs: Date.now() - startedAt, attempts: attempt },

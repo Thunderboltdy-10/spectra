@@ -17,6 +17,7 @@ import {
   prepareContentPatchEvidence,
 } from "@/features/spectra/ai/source-evidence-content";
 import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, attachmentManifestPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
+import { embedForModel } from "@/features/spectra/ai/embed-context";
 import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
@@ -3316,7 +3317,9 @@ export async function executeAgentReadTool(
       return {
         ok: true,
         hostWorkId,
-        embeds: embedsRead.value,
+        // Each embed's contextPolicy decides how much of its source the AI
+        // sees; the raw projection carried every full snapshot regardless.
+        embeds: rows((embedsRead.value as { embeds?: unknown } | null)?.embeds).map(embedForModel),
         warning:
           "References are permission-bound projections. Preserve unavailable or stale source state and never treat an embed as a copy of the source work.",
       };

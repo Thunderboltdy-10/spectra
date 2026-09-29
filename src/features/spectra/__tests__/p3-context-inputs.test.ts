@@ -158,3 +158,82 @@ describe("the orientation says when earlier conversation was left out", () => {
     expect(orientation.conversationHistory).toEqual({ shownMessages: 1, earlierMessagesOmitted: true });
   });
 });
+
+describe("read_embeds honours each embed's contextPolicy", () => {
+  const secret = "SECRET BODY TEXT";
+  const blocks = Array.from({ length: 400 }, (_, index) => ({
+    id: `b${index}`, type: "paragraph", text: `${index === 0 ? secret : "filler"} ${"x".repeat(300)}`,
+  }));
+  const embed = (embedId: string, contextPolicy: string, versionPolicy = "live") => ({
+    embedId, containerType: "artifact", containerId: "host", containerRegionId: "r", sourceArtifactId: `src-${embedId}`,
+    mode: "compact", interaction: "read", versionPolicy, contextPolicy, state: "ready", canConfigure: true,
+    runtimeResources: { signedUrl: "https://example.invalid/x" },
+    source: { artifactId: `src-${embedId}`, title: `Source ${embedId}`, summary: "A chapter summary", blueprintKey: "document",
+      tags: [], updatedAt: 1, snapshot: { title: `Source ${embedId}`, summary: "A chapter summary", tags: [], content: { blocks } } },
+  });
+  const readEmbeds = async () => {
+    seams.readQuery.mockResolvedValue({ ok: true, value: { canConfigure: true, embeds: [
+      embed("none", "none"), embed("summary", "summary"), embed("visible", "visible_region"), embed("pinned", "summary", "pinned"),
+    ] } });
+    return (await executeAgentReadTool("actor", { name: "read_embeds", arguments: JSON.stringify({ hostWorkId: "host" }) })) as unknown as {
+      embeds: Array<Record<string, unknown> & { source: Record<string, unknown> }>;
+    };
+  };
+
+  it("withholds the content of a none embed", async () => {
+    const { embeds } = await readEmbeds();
+    const none = embeds.find((item) => item.embedId === "none")!;
+    expect(JSON.stringify(none)).not.toContain(secret);
+    expect(JSON.stringify(none)).not.toContain("A chapter summary");
+    expect(none.contentWithheld).toEqual(expect.any(String));
+    expect(none.source).toMatchObject({ title: "Source none" });
+  });
+
+  it("gives a summary embed its summary card and how to read the rest, not the whole snapshot", async () => {
+    const { embeds } = await readEmbeds();
+    const summary = embeds.find((item) => item.embedId === "summary")!;
+    expect(summary.source).toMatchObject({ summary: "A chapter summary", excerpt: expect.stringContaining(secret) });
+    expect(JSON.stringify(summary).length).toBeLessThan(20_000);
+    expect(summary.fullContent).toContain("read_artifact");
+    expect(embeds.find((item) => item.embedId === "pinned")!.fullContent).toContain("pinned version");
+  });
+
+  it("gives a visible_region embed a bounded, labelled read of what it renders", async () => {
+    const { embeds } = await readEmbeds();
+    const visible = embeds.find((item) => item.embedId === "visible")!;
+    expect(JSON.stringify(visible).length).toBeLessThan(80_000);
+    expect(visible.source.contentCoverage).toMatchObject({ complete: false });
+    expect(JSON.stringify(embeds)).not.toContain("signedUrl");
+  });
+});
+
+describe("a read the tool already bounded reaches the model whole", () => {
+  it("returns every block of a mid-sized document, not the first 40", async () => {
+    const blocks = Array.from({ length: 60 }, (_, index) => ({ id: `b${index}`, type: "paragraph", text: `P${index} ${"y".repeat(450)}` }));
+    seams.readQuery.mockResolvedValue({ ok: true, value: { _id: "d", blueprintKey: "document", title: "Essay", accessLevel: "modify", ownership: "owned", content: { blocks } } });
+    seams.readLive.mockResolvedValue(null);
+    const result = (await readArtifact({ artifactId: "d" })) as unknown as { artifact: { content: { blocks: unknown[] }; currentVersionId?: unknown } };
+    expect(result.artifact.content.blocks).toHaveLength(60);
+    expect(JSON.stringify(result)).toContain("P59");
+    expect(result.artifact).not.toHaveProperty("currentVersionId");
+  });
+
+  it("keeps a whole long code file and a sheet's cells past the 80th", async () => {
+    const source = `export const x = 1;\n${"// line\n".repeat(1_500)}export const END = true;`;
+    const cells = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`A${index + 1}`, { value: index }]));
+    seams.readLive.mockResolvedValue(null);
+    seams.readQuery.mockResolvedValue({ ok: true, value: { _id: "c", blueprintKey: "code", title: "App", accessLevel: "modify", ownership: "owned", content: { files: [{ path: "a.ts", content: source }] } } });
+    expect(JSON.stringify(await readArtifact({ artifactId: "c" }))).toContain("END = true");
+    seams.readQuery.mockResolvedValue({ ok: true, value: { _id: "s", blueprintKey: "spreadsheet", title: "Budget", accessLevel: "modify", ownership: "owned", content: { sheets: [{ id: "s1", name: "S", cells }] } } });
+    const sheet = (await readArtifact({ artifactId: "s" })) as unknown as { artifact: { content: { sheets: Array<{ cells: Record<string, { value: number }> }> } } };
+    expect(sheet.artifact.content.sheets[0]!.cells.A120).toEqual({ value: 119 });
+  });
+
+  it("labels every cut the generic bound still makes", async () => {
+    const { boundedToolData } = await import("../tools/execution/tool-result");
+    const bounded = boundedToolData({ list: Array.from({ length: 50 }, (_, index) => index), text: "z".repeat(5_000), gone: undefined }) as Record<string, unknown>;
+    expect((bounded.list as unknown[]).at(-1)).toBe("[10 more items not shown]");
+    expect(bounded.text).toContain("[1,000 more characters not shown]");
+    expect(bounded).not.toHaveProperty("gone");
+  });
+});

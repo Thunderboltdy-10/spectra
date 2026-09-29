@@ -177,3 +177,43 @@ describe("saved memory reaches every run", () => {
     expect(context.packet.longTermMemory).toBeNull();
   });
 });
+
+describe("earlier conversation reaches the model complete or labelled", () => {
+  const threadId = "current-thread";
+  const withMessages = (messages: Record<string, unknown>[], hasOlder = false) =>
+    query.mockImplementation(async (name: string) => name === "spectraThreads:get"
+      ? { thread: { _id: threadId, title: "Essay" }, messages, messagePage: { hasOlder } } : null);
+
+  it("does not replay the current request as an earlier turn", async () => {
+    const prompt = `Summarise this chapter: ${"text ".repeat(2_500)}`;
+    withMessages([
+      { _id: "m1", role: "user", content: "Earlier question", runId: "run-0" },
+      { _id: "m2", role: "assistant", content: "Earlier answer", runId: "run-0" },
+      { _id: "m3", role: "user", content: prompt, runId: "run-1" },
+    ]);
+    const context = await buildContext("actor", { threadId }, prompt, { mode: "orientation", currentRunId: "run-1" });
+    expect(context.conversation).toEqual([
+      { role: "user", content: "Earlier question" },
+      { role: "assistant", content: "Earlier answer" },
+    ]);
+  });
+
+  it("labels a cut message with how to read the rest", async () => {
+    const long = `${"a".repeat(8_000)}THE CONCLUSION`;
+    withMessages([{ _id: "m1", role: "assistant", content: long, runId: "run-0" }]);
+    const context = await buildContext("actor", { threadId }, "Continue", { mode: "orientation", currentRunId: "run-1" });
+    const content = String(context.conversation[0]?.content);
+    expect(content).toContain("Only the first 8,000 of 8,014 characters");
+    expect(content).toContain(`messageId "m1", offset 8000`);
+    expect(content).toMatch(/revision "[0-9a-f]{64}"/);
+  });
+
+  it("says when earlier turns are not shown", async () => {
+    withMessages(Array.from({ length: 20 }, (_, index) =>
+      ({ _id: `m${index}`, role: index % 2 ? "assistant" : "user", content: `turn ${index}`, runId: `run-${index}` })), true);
+    const context = await buildContext("actor", { threadId }, "Continue", { mode: "orientation", currentRunId: "run-now" });
+    expect(context.conversation).toHaveLength(16);
+    expect(context.conversation[0]).toEqual({ role: "user", content: "turn 4" });
+    expect(context.packet).toMatchObject({ conversationHistory: { shownMessages: 16, earlierMessagesOmitted: true } });
+  });
+});

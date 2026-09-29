@@ -169,6 +169,58 @@ export async function gatherResolvedArtifactContext(
   );
 }
 
+export const CONVERSATION_MESSAGES = 16;
+export const CONVERSATION_MESSAGE_CHARACTERS = 8_000;
+
+/**
+ * The prior turns of this thread as the model sees them. The current request
+ * is persisted before the run starts and is sent separately as the current
+ * user message, so this run's own messages are left out (a long prompt used
+ * to reappear, cut, as an earlier turn). A long message is cut with a pointer
+ * the model can pass to read_thread for the rest; the omission of older turns
+ * is stated rather than silent.
+ */
+export function modelConversation(
+  messages: Record<string, unknown>[],
+  input: { threadId?: string; currentRunId?: string; hasOlder?: boolean },
+) {
+  const prior = messages.filter(
+    (message) =>
+      (message.role === "user" || message.role === "assistant") &&
+      typeof message.content === "string" &&
+      message.content.trim() &&
+      !(input.currentRunId && message.runId === input.currentRunId),
+  );
+  const shown = prior.slice(-CONVERSATION_MESSAGES);
+  const conversation = shown.map((message) => {
+    const content = message.content as string;
+    if (content.length <= CONVERSATION_MESSAGE_CHARACTERS)
+      return { role: message.role, content };
+    const kept = content.slice(0, CONVERSATION_MESSAGE_CHARACTERS);
+    const pointer =
+      input.threadId && typeof message._id === "string"
+        ? ` To read the rest, call read_thread with threadId "${input.threadId}", messageId "${message._id}", offset ${kept.length} and revision "${createHash("sha256").update(content).digest("hex")}".`
+        : "";
+    return {
+      role: message.role,
+      content: `${kept}\n\n[Only the first ${kept.length.toLocaleString("en-US")} of ${content.length.toLocaleString("en-US")} characters of this message are shown.${pointer}]`,
+    };
+  });
+  const earlierOmitted = prior.length - shown.length > 0 || input.hasOlder === true;
+  return {
+    conversation,
+    history: earlierOmitted
+      ? {
+          shownMessages: conversation.length,
+          earlierMessagesOmitted: true,
+          ...(input.threadId
+            ? { howToRead: `Call read_thread with threadId "${input.threadId}" (and its before cursor) or a query to see earlier turns.` }
+            : {}),
+        }
+      : null,
+  };
+}
+
 /**
  * The user's saved, permission-bound memory for this request. Every run gets
  * it up front: the model is told it has "supplied" memory and to call
@@ -225,6 +277,8 @@ export async function buildContext(
     restoredGoal?: { originalRequest: string; clarificationResponses: string[] };
     /** A memory read already started for this run (shared by parallel builds). */
     memory?: Promise<unknown>;
+    /** The run being planned; its own persisted request is not prior history. */
+    currentRunId?: string;
   } = {},
 ) {
   const expanded = options.mode !== "orientation";
@@ -823,18 +877,18 @@ export async function buildContext(
       ? "artifact"
       : "selection"
     : focusMode;
-  const conversation =
+  const threadDetailRecord =
     threadDetail && typeof threadDetail === "object"
-      ? rows((threadDetail as Record<string, unknown>).messages)
-          .slice(-24)
-          .map((message) => ({
-            role: message.role,
-            content:
-              typeof message.content === "string"
-                ? message.content.slice(0, 8_000)
-                : "",
-          }))
-      : [];
+      ? (threadDetail as Record<string, unknown>)
+      : null;
+  const { conversation, history: conversationHistory } = threadDetailRecord
+    ? modelConversation(rows(threadDetailRecord.messages), {
+        threadId: body.threadId,
+        currentRunId: options.currentRunId,
+        hasOlder:
+          (threadDetailRecord.messagePage as { hasOlder?: unknown } | undefined)?.hasOlder === true,
+      })
+    : { conversation: [], history: null };
   const continuedThread =
     threadDetail && typeof threadDetail === "object"
       ? ((threadDetail as Record<string, unknown>).thread as
@@ -1037,6 +1091,7 @@ export async function buildContext(
         },
       } : {}),
       contextMode: expanded ? "expanded" : "orientation",
+      ...(conversationHistory ? { conversationHistory } : {}),
       omitted: {
         ...contextPacket.omitted,
         ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true }),

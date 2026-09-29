@@ -18,7 +18,7 @@ vi.mock("@/features/spectra/ai/yjs-artifact-operation", async (importOriginal) =
   readLiveArtifactValue: seams.readLive,
 }));
 
-import { executeAgentReadTool } from "@/app/api/spectra/run/loop/plan";
+import { buildAgentOrientation, executeAgentReadTool } from "@/app/api/spectra/run/loop/plan";
 
 const readArtifact = (args: Record<string, unknown>) =>
   executeAgentReadTool("actor", {
@@ -146,5 +146,15 @@ describe("several attached files all reach the model, labelled", () => {
     for (const name of ["photo.png", "scan.pdf", "essay.docx", "book.txt"]) expect(manifest).toContain(name);
     expect(manifest).toContain("Only the first 40,000 of 90,000 characters were read.");
     expect(manifest).toContain("No extractable PDF text was found.");
+  });
+});
+
+describe("the orientation says when earlier conversation was left out", () => {
+  it("passes the omitted-history note to the model", () => {
+    const orientation = buildAgentOrientation({
+      conversation: [{ role: "user", content: "turn" }],
+      conversationHistory: { shownMessages: 1, earlierMessagesOmitted: true },
+    }, "Continue");
+    expect(orientation.conversationHistory).toEqual({ shownMessages: 1, earlierMessagesOmitted: true });
   });
 });

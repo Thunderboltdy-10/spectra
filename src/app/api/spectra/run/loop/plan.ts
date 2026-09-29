@@ -3702,6 +3702,12 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
     conversation: Array.isArray(record.conversation)
       ? record.conversation.slice(-16)
       : [],
+    conversationHistory:
+      record.conversationHistory &&
+      typeof record.conversationHistory === "object" &&
+      !Array.isArray(record.conversationHistory)
+        ? record.conversationHistory
+        : undefined,
     longTermMemory:
       record.longTermMemory &&
       typeof record.longTermMemory === "object" &&
@@ -3966,7 +3972,11 @@ export async function callModel(
         !content.trim()
       )
         return [];
-      return [{ role, content: content.slice(0, 8_000) }];
+      // Context gathering already cut long turns and labelled the cut with a
+      // read_thread pointer; this bound only catches an unlabelled caller.
+      return [{ role, content: content.length > 9_000
+        ? `${content.slice(0, 8_000)}\n\n[Only the first 8,000 of ${content.length.toLocaleString("en-US")} characters of this message are shown.]`
+        : content }];
     },
   );
   // Keep the historical transcript as real ordered messages. Re-serializing

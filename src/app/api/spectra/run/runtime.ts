@@ -650,10 +650,10 @@ async function runAttemptInLedger(
     // One memory retrieval (an embedding call) serves both parallel builds.
     const memory = readRunMemory(params.actorClerkId, contextBody, params.prompt);
     const contextReads = Promise.all([
-      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal, memory }),
+      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal, memory, currentRunId: params.runId }),
       (params.artifactId && signalsMutationIntent) || usesFocusedContent
         ? buildContext(params.actorClerkId, contextBody, params.prompt, {
-            mode: "orientation", hydrateTargets: true, restoredGoal, memory,
+            mode: "orientation", hydrateTargets: true, restoredGoal, memory, currentRunId: params.runId,
           })
         : null,
     ]);

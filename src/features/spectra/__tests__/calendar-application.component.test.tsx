@@ -136,6 +136,27 @@ describe("Calendar application", () => {
     );
   });
 
+  it("explains an end before the start instead of sending it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 10, 0) });
+    installFetch(() => undefined);
+    render(<CalendarApplication />);
+    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add personal event" });
+    fireEvent.change(within(dialog).getByLabelText("Title"), {
+      target: { value: "Football" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Ends"), {
+      target: { value: "2026-09-29T10:30" },
+    });
+    expect(within(dialog).getByRole("alert").textContent).toBe(
+      "End must be after start.",
+    );
+    const submit = within(dialog).getByRole("button", { name: "Add event" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(submit.closest("form")!);
+    expect(posts.some((post) => post.action === "createPersonalItem")).toBe(false);
+  });
+
   it("places events on the user's own clock even when Calendar reports UTC", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     // A student without school data: every stored row says UTC, so the

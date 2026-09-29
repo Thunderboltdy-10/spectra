@@ -19,13 +19,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1365,16 +1365,15 @@ export function CalendarApplication() {
           onRemove={removeItem}
         />
       ) : null}
-      {composerOpen ? (
-        <CalendarComposer
-          timezone={timezone}
-          onClose={() => setComposerOpen(false)}
-          onCreated={() => {
-            setComposerOpen(false);
-            void load("merge", visibleRange.from, visibleRange.to, true);
-          }}
-        />
-      ) : null}
+      <CalendarComposer
+        open={composerOpen}
+        timezone={timezone}
+        onClose={() => setComposerOpen(false)}
+        onCreated={() => {
+          setComposerOpen(false);
+          void load("merge", visibleRange.from, visibleRange.to, true);
+        }}
+      />
       </div>
       {studio.mode === "split" && studio.activeArtifact ? (
         <ArtifactStudio
@@ -1872,10 +1871,12 @@ function CalendarItemPanel({
 }
 
 function CalendarComposer({
+  open,
   timezone,
   onClose,
   onCreated,
 }: {
+  open: boolean;
   timezone: string;
   onClose: () => void;
   onCreated: () => void;
@@ -1884,98 +1885,100 @@ function CalendarComposer({
   const [start, setStart] = useState(() => toLocalDateTimeInput(Date.now() + HOUR));
   const [end, setEnd] = useState(() => toLocalDateTimeInput(Date.now() + 2 * HOUR));
   const [busy, setBusy] = useState(false);
-  const surface = useRef<HTMLDivElement>(null);
-  useModalFocus(surface, { onClose: busy ? undefined : onClose });
+  useEffect(() => {
+    if (!open) return;
+    setTitle("");
+    setStart(toLocalDateTimeInput(Date.now() + HOUR));
+    setEnd(toLocalDateTimeInput(Date.now() + 2 * HOUR));
+  }, [open]);
+  const startAt = Date.parse(start);
+  const endAt = Date.parse(end);
+  const endBeforeStart =
+    Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt;
   return (
-    <div
-      ref={surface}
-      tabIndex={-1}
-      className="fixed inset-0 z-modal grid place-items-center bg-black/25 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add personal event"
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          setBusy(true);
-          void calendarPost({
-            action: "createPersonalItem",
-            kind: "personal_event",
-            title,
-            startAt: Date.parse(start),
-            endAt: Date.parse(end),
-            timezone,
-          })
-            .then(onCreated)
-            .catch((error) =>
-              toast.error(error instanceof Error ? error.message : "Could not add event."),
-            )
-            .finally(() => setBusy(false));
-        }}
-        className="w-full max-w-[460px] rounded-2xl border border-white/50 bg-[var(--bg-elevated)] p-5 shadow-2xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-heading font-semibold">Add personal event</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-        <label className="mt-5 block text-micro font-semibold">
-          Title
-          <input
-            autoFocus
-            required
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
-          />
-        </label>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <label className="text-micro font-semibold">
-            Starts
+      <DialogContent className="max-w-[460px] gap-0 p-5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (endBeforeStart) return;
+            setBusy(true);
+            void calendarPost({
+              action: "createPersonalItem",
+              kind: "personal_event",
+              title,
+              startAt,
+              endAt,
+              timezone,
+            })
+              .then(onCreated)
+              .catch((error) =>
+                toast.error(error instanceof Error ? error.message : "Could not add event."),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          <DialogTitle>Add personal event</DialogTitle>
+          <label className="mt-5 block text-micro font-semibold">
+            Title
             <input
-              type="datetime-local"
+              autoFocus
               required
-              value={start}
-              onChange={(event) => setStart(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
             />
           </label>
-          <label className="text-micro font-semibold">
-            Ends
-            <input
-              type="datetime-local"
-              required
-              value={end}
-              onChange={(event) => setEnd(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
-            />
-          </label>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-9 rounded-lg px-3 text-caption font-semibold hover:bg-[var(--bg-hover)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !title.trim()}
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-caption font-semibold text-[var(--bg-primary)] disabled:opacity-40"
-          >
-            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            Add event
-          </button>
-        </div>
-      </form>
-    </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="text-micro font-semibold">
+              Starts
+              <input
+                type="datetime-local"
+                required
+                value={start}
+                onChange={(event) => setStart(event.target.value)}
+                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              />
+            </label>
+            <label className="text-micro font-semibold">
+              Ends
+              <input
+                type="datetime-local"
+                required
+                min={start}
+                value={end}
+                aria-invalid={endBeforeStart || undefined}
+                onChange={(event) => setEnd(event.target.value)}
+                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              />
+            </label>
+          </div>
+          {endBeforeStart ? (
+            <p role="alert" className="mt-2 text-micro text-[var(--danger)]">
+              End must be after start.
+            </p>
+          ) : null}
+          <DialogFooter className="mt-5">
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={busy || !title.trim() || endBeforeStart}
+            >
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              Add event
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

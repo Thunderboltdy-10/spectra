@@ -1578,6 +1578,11 @@ export function PresentationStudio({
   const gestureDeckRef = useRef<PresentationContent | null>(null);
   gestureDeckRef.current = gestureDeck;
   const deck = gestureDeck ?? committedDeck;
+  // The deck an edit applies to. Async work (a media upload, an import) edits
+  // it after an await, when the render that started it holds a stale deck;
+  // applying there would silently revert everything since, peers included.
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
   const contract = useStudioContract();
   // Two locks, and either one is enough: the prop is the studio's own (history
   // view, a deck that has not synchronized), the contract is the role's. Every
@@ -1890,7 +1895,7 @@ export function PresentationStudio({
       if (record) {
         setUndoStack((stack) => [
           ...stack.slice(-79),
-          { before: cloneDeck(deck), after: next },
+          { before: cloneDeck(deckRef.current), after: next },
         ]);
         setRedoStack([]);
       }
@@ -1898,17 +1903,20 @@ export function PresentationStudio({
       // Re-normalize so settings/speakerNotes/layout fields match the Yjs
       // projection before onChange dirties the studio (same class of drift as
       // whiteboard zOrder — otherwise first ack looks like a remote conflict).
-      onChange(normalizePresentationContent(next));
+      const normalized = normalizePresentationContent(next);
+      deckRef.current = normalized;
+      onChange(normalized);
     },
-    [deck, onChange, readOnly],
+    [onChange, readOnly],
   );
   const mutate = useCallback(
     (recipe: (draft: PresentationContent) => void, record = true) => {
-      const next = producePresentationContent(deck, recipe);
-      if (next === deck) return;
+      const current = deckRef.current;
+      const next = producePresentationContent(current, recipe);
+      if (next === current) return;
       emit(next, record);
     },
-    [deck, emit],
+    [emit],
   );
   const mutateLocal = useCallback(
     (recipe: (draft: PresentationContent) => void) => {
@@ -2800,7 +2808,7 @@ export function PresentationStudio({
       const importedDeck = normalizePresentationContent(next);
       setUndoStack((stack) => [
         ...stack.slice(-79),
-        { before: cloneDeck(deck), after: importedDeck },
+        { before: cloneDeck(deckRef.current), after: importedDeck },
       ]);
       setRedoStack([]);
       onChange(importedDeck);

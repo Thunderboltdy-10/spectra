@@ -685,6 +685,11 @@ export function WhiteboardStudio({
   const restoreReference = useMutation(api.artifactEmbeds.restore);
   const tight = contract.density === "tight";
   const board = useMemo(() => normalizeWhiteboardContent(content), [content]);
+  // The board an edit applies to. Async work (an upload, an import) edits it
+  // after an await, when the render that started it holds a stale board;
+  // applying there would silently revert everything since, peers included.
+  const boardRef = useRef(board);
+  boardRef.current = board;
   // Viewport is personal presence, never shared artifact content. Panning or
   // zooming in one differently-sized pane must not move every collaborator.
   const [viewport, setViewport] = useState(board.viewport);
@@ -853,25 +858,25 @@ export function WhiteboardStudio({
     (next: WhiteboardContent, record = true) => {
       if (readOnly) return;
       if (record) {
-        setUndo((stack) => [
-          ...stack.slice(-79),
-          { before: clone(board), after: next },
-        ]);
+        const before = clone(boardRef.current);
+        setUndo((stack) => [...stack.slice(-79), { before, after: next }]);
         setRedo([]);
       }
       // Re-normalize so zOrder/settings match the collaborative projection
       // before onChange dirties the studio (sticky create/edit path).
-      onChange(normalizeWhiteboardContent(next));
+      const normalized = normalizeWhiteboardContent(next);
+      boardRef.current = normalized;
+      onChange(normalized);
     },
-    [board, onChange, readOnly],
+    [onChange, readOnly],
   );
   const mutate = useCallback(
     (recipe: (draft: WhiteboardContent) => void, record = true) => {
-      const next = clone(board);
+      const next = clone(boardRef.current);
       recipe(next);
       emit(next, record);
     },
-    [board, emit],
+    [emit],
   );
 
   useEffect(
@@ -1689,7 +1694,13 @@ export function WhiteboardStudio({
     }
     setUndo((stack) => stack.slice(0, -1));
     setRedo((stack) => [...stack.slice(-79), entry]);
-    onChange(normalizeWhiteboardContent(previous));
+    // Replay again on the board as it is now: it can have moved on while the
+    // embed rows were reconciled.
+    const settled = normalizeWhiteboardContent(
+      applyStudioHistory(entry, "undo", boardRef.current),
+    );
+    boardRef.current = settled;
+    onChange(settled);
   }
   async function redoAction() {
     const entry = redo.at(-1);
@@ -1705,7 +1716,13 @@ export function WhiteboardStudio({
     }
     setRedo((stack) => stack.slice(0, -1));
     setUndo((stack) => [...stack.slice(-79), entry]);
-    onChange(normalizeWhiteboardContent(next));
+    // Replay again on the board as it is now: it can have moved on while the
+    // embed rows were reconciled.
+    const settled = normalizeWhiteboardContent(
+      applyStudioHistory(entry, "redo", boardRef.current),
+    );
+    boardRef.current = settled;
+    onChange(settled);
   }
   function updateSelected(recipe: (node: WhiteboardNode) => void) {
     if (!selectedNodeId) return;

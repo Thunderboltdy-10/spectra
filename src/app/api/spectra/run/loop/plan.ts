@@ -3659,6 +3659,11 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
           ? item.excerpt.slice(0, 1_600)
           : undefined,
     })),
+    // The exact regions the user picked as context (a paragraph, slide or
+    // range): label, its captured text and its anchor. The packet carried
+    // them, but the orientation dropped them, so the model knew only the
+    // work, not the part of it the user meant.
+    semanticTargets: rows(record.semanticTargets).slice(0, 24),
     workspaceMap: compactMap(record.workspaceMap, 18),
     currentLibraryLocation:
       record.currentLibraryLocation &&

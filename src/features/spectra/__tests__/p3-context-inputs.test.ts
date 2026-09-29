@@ -267,3 +267,12 @@ describe("a document too large for one read can be navigated", () => {
     expect(read.content.blocks.map((block) => block.id)).toEqual(["blk-420", "long"]);
   });
 });
+
+describe("a region the user picked as context reaches the model", () => {
+  it("keeps the picked region's label, captured text and anchor in the orientation", () => {
+    const target = { id: "region-7", label: "Paragraph 3", summary: "The treaty was signed in 1648.",
+      anchor: { workId: "doc", kind: "block", path: ["blocks", "b3"] } };
+    const orientation = buildAgentOrientation({ semanticTargets: [target] }, "Explain this part");
+    expect(orientation.semanticTargets).toEqual([target]);
+  });
+});

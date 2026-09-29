@@ -7,6 +7,31 @@ import {
 import * as logging from "@/lib/logging";
 
 describe("withRouteErrorHandling", () => {
+  it.each([
+    ["CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is no longer on Calendar.", 404],
+    ["CALENDAR_TASK_UNAVAILABLE: This task is no longer active.", 409],
+    ["CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task.", 409],
+    ["CALENDAR_SOURCE_LOCKED: Official school records cannot be removed here.", 409],
+  ])("answers a coded, worded domain refusal %s as a client error", async (message, status) => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error(message);
+    });
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string };
+    };
+    expect(response.status).toBe(status);
+    expect(payload.error?.message).toBe(message.split(": ")[1]);
+  });
+
+  it("keeps a bare code without a sentence on the generic server failure", async () => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error("PAYLOAD_HASH_MISMATCH");
+    });
+    const payload = (await response.json()) as { error?: { message?: string } };
+    expect(response.status).toBe(500);
+    expect(payload.error?.message).toBe(PUBLIC_SERVER_FAILURE);
+  });
+
   it("maps AUTH_ORG_INACTIVE errors to 403 responses", async () => {
     const response = await withRouteErrorHandling(async () => {
       throw new Error("AUTH_ORG_INACTIVE: School access is inactive.");

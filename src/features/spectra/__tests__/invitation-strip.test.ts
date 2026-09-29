@@ -15,17 +15,29 @@ describe("share invitation inbox", () => {
       ),
       "utf8",
     );
-    const chrome = readFileSync(
-      path.join(process.cwd(), "src/components/layout/app-shell.tsx"),
+    const notifications = readFileSync(
+      path.join(process.cwd(), "src/components/layout/shell-notifications.ts"),
       "utf8",
     );
-    expect(chrome).toContain('router.push("/library?collection=invitations")');
+    const invitations = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/features/spectra/pages/use-share-invitations.ts",
+      ),
+      "utf8",
+    );
+    expect(notifications).toContain(
+      'SHARE_INVITATIONS_HREF = "/library?collection=invitations"',
+    );
+    expect(notifications).toContain("router?.push(SHARE_INVITATIONS_HREF)");
     expect(shell).toContain(
       'searchParams.get("collection") === "invitations"',
     );
-    expect(shell).toContain("getSpectraShareInvitations({ force })");
-    expect(shell).toContain('spectraBus.on("notifications.changed"');
-    expect(shell).toContain("refreshInvitations(true)");
+    expect(shell).toContain("useShareInvitations(invitationCollection)");
+    expect(invitations).toContain("getSpectraShareInvitations({ force })");
+    expect(invitations).toContain('spectraBus.on("notifications.changed"');
+    expect(invitations).toContain('spectraBus.on("invitations.review"');
+    expect(invitations).toContain("refreshInvitations(true)");
     expect(strip).toContain("Nothing appears in your Library until you accept.");
     expect(strip).toContain("Accept");
     expect(strip).toContain("Decline");
@@ -41,7 +53,11 @@ describe("share invitation inbox", () => {
     );
     expect(chrome).toContain('!item.readAt && item.kind !== "share"');
     // Accept path stays: share rows keep the invitations collection deep-link.
-    expect(chrome).toContain('href: "/library?collection=invitations"');
+    const notifications = readFileSync(
+      path.join(process.cwd(), "src/components/layout/shell-notifications.ts"),
+      "utf8",
+    );
+    expect(notifications).toContain("href: SHARE_INVITATIONS_HREF");
     // Mark-read still no-ops shares (no schema readAt on shareInvitations).
     expect(chrome).toContain('if (item.kind === "share") return;');
     expect(chrome).not.toContain("markSpectraShareInvitationsRead");

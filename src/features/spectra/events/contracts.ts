@@ -105,6 +105,9 @@ export type SpectraEvents = {
   "workspace.refreshRequested": Record<string, never>;
   "threads.changed": Record<string, never>;
   "notifications.changed": Record<string, never>;
+  /* Open the pending share invitations in the Library (a notification's
+     Review), including when the Library already shows them. */
+  "invitations.review": Record<string, never>;
   "workspaces.changed": Record<string, never>;
   "shell.sidebarLayout": { collapsed: boolean };
   /* The workbench row asking chrome to rail the sidebar because open panels

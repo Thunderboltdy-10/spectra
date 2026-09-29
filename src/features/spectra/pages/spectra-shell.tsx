@@ -150,7 +150,6 @@ import {
   exportSpectraWorkspaceManifest,
   getSpectraOverview,
   getSpectraRunDetail,
-  getSpectraShareInvitations,
   getSpectraThread,
   peekSpectraWorkspace,
   getSpectraWorkspace,
@@ -159,7 +158,6 @@ import {
   type SpectraArtifact,
   type SpectraOverview,
   type SpectraRun,
-  type SpectraShareInvitation,
   type SpectraThread,
   type SpectraWorkspace,
   type SpectraWorkspaceItem,
@@ -197,6 +195,7 @@ import {
   spectraShellHref,
   workspaceIdFromSpectraPath,
 } from "./shell-location";
+import { useShareInvitations } from "./use-share-invitations";
 
 type ViewMode = "list" | "board";
 type OverviewLoadState =
@@ -1241,10 +1240,12 @@ export function SpectraShell({
   const [artifactShareTarget, setArtifactShareTarget] =
     useState<SpectraArtifact | null>(null);
   const invitationCollection = searchParams.get("collection") === "invitations";
-  const [shareInvitations, setShareInvitations] = useState<
-    SpectraShareInvitation[]
-  >([]);
-  const [invitationsOpen, setInvitationsOpen] = useState(invitationCollection);
+  const {
+    shareInvitations,
+    invitationsOpen,
+    setInvitationsOpen,
+    refreshInvitations,
+  } = useShareInvitations(invitationCollection);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -1282,30 +1283,6 @@ export function SpectraShell({
       });
   }, [pinSources]);
 
-  /**
-   * Invitations are their own subscription, not a field of the overview.
-   *
-   * Nothing shared with this reader exists anywhere in their tree until they
-   * accept, so the invitation cannot be derived from the work they already
-   * have — and the overview reloads on every workspace switch, which is no
-   * reason to re-ask the server about invitations.
-   */
-  const refreshInvitations = useCallback(async (force = false) => {
-    const result = await getSpectraShareInvitations({ force }).catch(() => null);
-    if (result) setShareInvitations(result.invitations);
-  }, []);
-  useEffect(() => {
-    void refreshInvitations();
-    const stop = spectraBus.on("notifications.changed", () => {
-      void refreshInvitations(true);
-    });
-    return stop;
-  }, [refreshInvitations]);
-  useEffect(() => {
-    if (!invitationCollection) return;
-    setInvitationsOpen(true);
-    void refreshInvitations(true);
-  }, [invitationCollection, refreshInvitations]);
   const [workspaceDeleteConfirmation, setWorkspaceDeleteConfirmation] =
     useState("");
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(

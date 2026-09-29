@@ -84,6 +84,10 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
+import {
+  buildShellNotifications,
+  reviewShareInvitations,
+} from "./shell-notifications";
 
 type AppShellProps = {
   children: ReactNode;
@@ -315,7 +319,7 @@ function ShellNavigation() {
                   : "You have read-only access.",
               action: {
                 label: "Review",
-                onClick: () => router.push("/library?collection=invitations"),
+                onClick: () => reviewShareInvitations(router),
               },
             },
           );
@@ -353,50 +357,12 @@ function ShellNavigation() {
 
   const notifications = useMemo(
     () =>
-      [
-        ...commentNotifications.map((item) => ({
-          id: item._id,
-          kind: "comment" as const,
-          artifactId: item.artifactId,
-          title:
-            item.kind === "mention"
-              ? `${item.author?.name ?? "Someone"} mentioned you`
-              : item.kind === "reply"
-                ? `${item.author?.name ?? "Someone"} replied`
-                : `New comment from ${item.author?.name ?? "a collaborator"}`,
-          detail: `${item.artifact.title} · ${item.comment.body}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...plannerNotifications.map((item) => ({
-          id: item._id,
-          kind: "planner" as const,
-          artifactId: item.artifactId,
-          title: item.taskTitle,
-          detail: `Due ${new Date(item.dueAt).toLocaleString("en-US")}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...timetableNotifications.map((item) => ({
-          id: item._id,
-          kind: "timetable" as const,
-          artifactId: item.artifactId,
-          title: item.eventTitle,
-          detail: `${item.artifactTitle} · ${new Date(item.occurrenceStart).toLocaleString("en-US")}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...shareInvitations.map((item) => ({
-          id: item.invitationId,
-          kind: "share" as const,
-          artifactId: item.resourceId,
-          href: "/library?collection=invitations",
-          title: `${item.inviter?.name ?? "A collaborator"} shared ${item.resource.title}`,
-          detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access · Review invitation`,
-          createdAt: item.createdAt,
-          readAt: undefined,
-        })),
-      ].sort((a, b) => b.createdAt - a.createdAt),
+      buildShellNotifications({
+        comments: commentNotifications,
+        planner: plannerNotifications,
+        timetable: timetableNotifications,
+        invitations: shareInvitations,
+      }),
     [
       commentNotifications,
       plannerNotifications,
@@ -842,12 +808,12 @@ function ShellNavigation() {
                   <Link
                     key={`wide:${item.kind}:${item.id}`}
                     href={
-                      "href" in item
-                        ? item.href
-                        : `/library/${encodeURIComponent(item.artifactId)}`
+                      item.href ??
+                      `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
+                      if (item.kind === "share") reviewShareInvitations();
                       void markNotificationRead(item);
                     }}
                     className="flex gap-2.5 rounded-control px-2.5 py-2 hover:bg-[var(--bg-hover)]"
@@ -996,12 +962,12 @@ function ShellNavigation() {
                   <Link
                     key={`mobile:${item.kind}:${item.id}`}
                     href={
-                      "href" in item
-                        ? item.href
-                        : `/library/${encodeURIComponent(item.artifactId)}`
+                      item.href ??
+                      `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
+                      if (item.kind === "share") reviewShareInvitations();
                       void markNotificationRead(item);
                     }}
                     className="flex gap-3 rounded-surface px-3 py-3 hover:bg-[var(--bg-hover)]"

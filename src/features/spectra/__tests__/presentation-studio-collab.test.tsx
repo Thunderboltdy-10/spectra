@@ -159,4 +159,50 @@ describe("presentation text editing", () => {
     expect(slideText(harness.content, 0)).toBe("Hello");
     expect(slideText(harness.content, 1)).toBe("Peer edit");
   });
+
+  it("undoes the typing without reverting a collaborator's edit made while it went on", () => {
+    const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
+    render(<Host harness={harness} />);
+    const box = editableBox("Hello");
+    fireEvent.focus(box);
+    fireEvent.change(box, { target: { value: "Hello class" } });
+    act(() => {
+      const deck = normalizePresentationContent(harness.content);
+      harness.setContent({
+        ...deck,
+        slides: deck.slides.map((slide, index) =>
+          index === 1
+            ? { ...slide, objects: [{ ...slide.objects[0]!, content: { text: "Peer edit" } }] }
+            : slide,
+        ),
+      });
+    });
+    fireEvent.change(box, { target: { value: "Hello class!" } });
+    fireEvent.blur(box);
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(slideText(harness.content, 0)).toBe("Hello");
+    expect(slideText(harness.content, 1)).toBe("Peer edit");
+  });
+});
+
+describe("speaker notes", () => {
+  function notes(content: unknown) {
+    return normalizePresentationContent(content).slides[0]!.speakerNotes ?? "";
+  }
+
+  it("undoes a typing session in the notes as one step", () => {
+    const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
+    render(<Host harness={harness} />);
+    fireEvent.click(screen.getByRole("button", { name: /Speaker notes/ }));
+    const field = screen.getByLabelText("Speaker notes for slide 1");
+    fireEvent.focus(field);
+    for (const value of ["S", "Sa", "Say", "Say hi"])
+      fireEvent.change(field, { target: { value } });
+    expect(notes(harness.content)).toBe("Say hi");
+    fireEvent.blur(field);
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(notes(harness.content)).toBe("");
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(notes(harness.content)).toBe("Say hi");
+  });
 });

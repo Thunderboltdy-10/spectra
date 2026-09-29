@@ -1692,9 +1692,17 @@ export function PresentationStudio({
   const mediaTargetRef = useRef<{ slideId: string; objectId?: string } | undefined>(undefined);
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
-  const textOriginRef = useRef<PresentationContent | undefined>(undefined);
+  /**
+   * A typing session (a slide text box or the speaker notes, from focus to
+   * blur) commits every keystroke but is one undo step. `after` gathers only
+   * this person's edits, so undoing the session never reverts what a
+   * collaborator changed while it went on.
+   */
+  const typingSessionRef = useRef<
+    StudioHistoryEntry<PresentationContent> | undefined
+  >(undefined);
   useEffect(() => {
-    if (dragRef.current || textOriginRef.current) return;
+    if (dragRef.current) return;
     setGestureDeck(null);
   }, [content]);
   const runCommandRef = useRef<(id: string, params?: CommandParam) => boolean>(
@@ -1892,7 +1900,10 @@ export function PresentationStudio({
   const emit = useCallback(
     (next: PresentationContent, record = true) => {
       if (readOnly) return;
-      if (record) {
+      const session = typingSessionRef.current;
+      if (record && session) {
+        session.after = commitStudioGesture(deckRef.current, next, session.after);
+      } else if (record) {
         setUndoStack((stack) => [
           ...stack.slice(-79),
           { before: cloneDeck(deckRef.current), after: next },
@@ -2608,23 +2619,25 @@ export function PresentationStudio({
         const next = value.trim();
         if (next) slide.title = next.slice(0, 300);
       }
-    }, !textOriginRef.current);
+    });
+  }
+  function beginTyping() {
+    if (typingSessionRef.current) return;
+    const origin = cloneDeck(deckRef.current);
+    typingSessionRef.current = { before: origin, after: origin };
+  }
+  function finishTyping() {
+    const session = typingSessionRef.current;
+    if (!session) return;
+    typingSessionRef.current = undefined;
+    if (studioValuesEqual(session.before, session.after)) return;
+    setUndoStack((stack) => [...stack.slice(-79), session]);
+    setRedoStack([]);
   }
   function beginText(objectId: string) {
-    textOriginRef.current ??= cloneDeck(deck);
+    beginTyping();
     setSelectedObjectId(objectId);
     onActiveRegionChange?.(objectId);
-  }
-  function finishText() {
-    const origin = textOriginRef.current;
-    if (!origin) return;
-    textOriginRef.current = undefined;
-    if (studioValuesEqual(origin, deck)) return;
-    setUndoStack((stack) => [
-      ...stack.slice(-79),
-      { before: origin, after: cloneDeck(deck) },
-    ]);
-    setRedoStack([]);
   }
   function chooseMedia(kind: "image" | "video", replace = false) {
     mediaTargetRef.current = { slideId: activeSlide.id, ...(replace && selectedObject ? { objectId: selectedObject.id } : {}) };
@@ -3955,7 +3968,7 @@ export function PresentationStudio({
                 onPointerUp={finishDrag}
                 onTextChange={updateText}
                 onTextFocus={beginText}
-                onTextBlur={finishText}
+                onTextBlur={finishTyping}
               />
               <section
                 className="presentation-notes"
@@ -3993,9 +4006,11 @@ export function PresentationStudio({
                       )}
                       placeholder="No speaker notes"
                       className="presentation-notes-field"
-                      onFocus={() =>
-                        onActiveRegionChange?.(`${activeSlide.id}:notes`)
-                      }
+                      onFocus={() => {
+                        beginTyping();
+                        onActiveRegionChange?.(`${activeSlide.id}:notes`);
+                      }}
+                      onBlur={finishTyping}
                       // Through the command, not around it (C1). The panel and
                       // the bar then agree by construction: when a linked deck
                       // has no notes page the field is read-only and says why,

@@ -49,6 +49,7 @@ const SheetContent = React.forwardRef<
             LAYER_CLASS[layer],
             className,
           )}
+          aria-modal="true"
           {...props}
           {...focusReturn}
         >

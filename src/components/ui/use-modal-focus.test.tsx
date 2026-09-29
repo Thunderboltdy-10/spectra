@@ -70,6 +70,8 @@ describe("hand-built modal dialogs", () => {
     const missing = sourceFiles(join(root, "src"))
       .map((path) => ({ path: relative(root, path).replace(/\\/g, "/"), source: readFileSync(path, "utf8") }))
       .filter(({ source }) => /aria-modal=(?:"true"|\{true\}|\{[^}]*\?\s*true)/.test(source))
+      // Dialog and Sheet take the contract from Radix (plus useFocusReturn).
+      .filter(({ source }) => !source.includes('from "@radix-ui/react-dialog"'))
       .filter(({ path, source }) => !source.includes("useModalFocus(") && !OWN_KEYBOARD_CONTRACT.has(path))
       .map(({ path }) => path);
     expect(missing).toEqual([]);

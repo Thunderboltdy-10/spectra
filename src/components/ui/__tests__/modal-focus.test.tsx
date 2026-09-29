@@ -37,13 +37,16 @@ function Harness() {
 // frame after unmount, so the restore is awaited.
 describe("admin dialogs", () => {
   it("move focus in, keep Tab inside, close on Escape and restore focus", async () => {
-    render(<Harness />);
+    const { container } = render(<Harness />);
     const opener = screen.getByRole("button", { name: "Remove member" });
     opener.focus();
     fireEvent.click(opener);
 
     const dialog = screen.getByRole("dialog", { name: "Remove this member?" });
     expect(dialog.contains(document.activeElement)).toBe(true);
+    // Portaled to <body> and aria-modal, so the live dock mutes beneath it.
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.contains(dialog)).toBe(false);
 
     const remove = screen.getByRole("button", { name: "Remove" });
     remove.focus();

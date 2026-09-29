@@ -87,8 +87,17 @@ describe("layering contract", () => {
       join(process.cwd(), "src/features/spectra/administration/shared.tsx"),
       "utf8",
     );
-    expect(adminDialog).toContain("createPortal");
-    expect(adminDialog).toContain("document.body");
+    // The admin dialog must portal to <body> as an aria-modal dialog so the
+    // mute above applies. The shared DialogContent does both (see
+    // modal-focus.test), so it must stay on it rather than a hand-rolled portal.
+    expect(adminDialog).toContain("@/components/ui/dialog");
+    expect(adminDialog).toMatch(/<DialogContent\s+layer="composer-dock"/);
+    const dialogSource = readFileSync(
+      join(process.cwd(), "src/components/ui/dialog.tsx"),
+      "utf8",
+    );
+    expect(dialogSource).toContain('aria-modal="true"');
+    expect(adminDialog).not.toContain("createPortal");
   });
 });
 

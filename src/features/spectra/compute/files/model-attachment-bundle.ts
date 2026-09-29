@@ -53,14 +53,11 @@ export function createModelAttachmentBundle(
     size: attachment.size,
     ...(attachment.data ? { data: attachment.data } : {}),
   };
-  const visualRepresentation = attachment.visualPdfData
-    ? {
-        kind: "pdf" as const,
-        data: attachment.visualPdfData,
-        mimeType: "application/pdf",
-      }
-    : attachment.data &&
-        (attachment.handling === "pdf" || attachment.handling === "image")
+  // Office files reach the model as their extracted text evidence only; a
+  // re-rendered text-only PDF of that same text was a paid duplicate.
+  const visualRepresentation =
+    attachment.data &&
+    (attachment.handling === "pdf" || attachment.handling === "image")
       ? {
           kind: attachment.handling,
           data: attachment.data,
@@ -152,17 +149,6 @@ export function nativeOpenRouterAttachmentContent(
           {
             type: "file" as const,
             file: { filename: attachment.name, file_data: bundle.originalFile.data },
-          },
-        ];
-      }
-      if (bundle.visualRepresentation?.kind === "pdf") {
-        return [
-          {
-            type: "file" as const,
-            file: {
-              filename: `${attachment.name}.pdf`,
-              file_data: bundle.visualRepresentation.data,
-            },
           },
         ];
       }

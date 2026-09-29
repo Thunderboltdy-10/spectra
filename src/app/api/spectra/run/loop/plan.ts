@@ -16,7 +16,7 @@ import {
   prepareContentEvidence,
   prepareContentPatchEvidence,
 } from "@/features/spectra/ai/source-evidence-content";
-import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
+import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, attachmentManifestPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
 import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
@@ -3787,7 +3787,7 @@ export async function callModel(
   if (!apiKey)
     throw new Error("OpenRouter is not configured for Spectra runs.");
   const attachmentEvidence = buildAttachmentEvidence(attachments);
-  const textAttachments = attachmentEvidencePrompt(attachmentEvidence);
+  const textAttachments = `${attachmentManifestPrompt(attachments)}${attachmentEvidencePrompt(attachmentEvidence)}`;
   const contextRecord =
     context && typeof context === "object" && !Array.isArray(context)
       ? (context as Record<string, unknown>)

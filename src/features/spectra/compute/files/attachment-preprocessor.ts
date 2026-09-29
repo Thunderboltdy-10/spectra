@@ -27,7 +27,6 @@ export type PreparedAttachment = {
   data?: string;
   extractedText?: string;
   pageCount?: number;
-  visualPdfData?: string;
   structuredRepresentation?: { kind: string; value: unknown };
   sourceMap?: Array<{
     kind: "page" | "slide" | "sheet" | "range" | "section";
@@ -46,31 +45,6 @@ export type PreparedAttachment = {
     extractor: string;
   };
 };
-
-async function officeTextPdf(name: string, text: string) {
-  const { jsPDF } = await import("jspdf");
-  const document = new jsPDF({ unit: "pt", format: "a4" });
-  document.setFont("helvetica", "normal");
-  document.setFontSize(10);
-  const margin = 46;
-  const width = document.internal.pageSize.getWidth() - margin * 2;
-  const height = document.internal.pageSize.getHeight() - margin;
-  let y = margin;
-  document.setFontSize(13);
-  document.text(name.slice(0, 120), margin, y);
-  y += 24;
-  document.setFontSize(10);
-  for (const line of document.splitTextToSize(text.slice(0, 80_000), width) as string[]) {
-    if (y > height) {
-      document.addPage();
-      y = margin;
-    }
-    document.text(line, margin, y);
-    y += 13;
-  }
-  const bytes = Buffer.from(document.output("arraybuffer"));
-  return `data:application/pdf;base64,${bytes.toString("base64")}`;
-}
 
 export function attachmentBuffer(data: string, name: string, maxBytes = 25_000_000) {
   return decodeBase64DataUrl(data, name, maxBytes);
@@ -194,12 +168,53 @@ async function extractPptxText(buffer: Uint8Array, characterLimit: number) {
   return sections.join("\n\n").slice(0, characterLimit);
 }
 
+/** All attachments of one request share this much extracted text. */
+const EXTRACTED_TEXT_BUDGET = 80_000;
+const count = (value: number) => value.toLocaleString("en-US");
+
+type Extraction = {
+  attachment: PreparedAttachment;
+  /** Full extracted length, or undefined when the extractor stopped early. */
+  totalCharacters?: number;
+  stoppedEarly: boolean;
+};
+
+/**
+ * Share the budget so every file is read: files shorter than an equal share
+ * keep all their text and the rest is split among the longer ones. A long
+ * first file can no longer leave a later file with nothing.
+ */
+function allocateExtractedText(extractions: Extraction[]) {
+  const texts = extractions.filter((entry) => entry.attachment.extractedText);
+  const allowance = new Map<Extraction, number>();
+  let remaining = EXTRACTED_TEXT_BUDGET;
+  const bySize = [...texts].sort(
+    (left, right) =>
+      left.attachment.extractedText!.length - right.attachment.extractedText!.length,
+  );
+  bySize.forEach((entry, index) => {
+    const share = Math.floor(remaining / (bySize.length - index));
+    const granted = Math.min(entry.attachment.extractedText!.length, share);
+    allowance.set(entry, granted);
+    remaining -= granted;
+  });
+  return allowance;
+}
+
+function truncationWarning(entry: Extraction, retained: number) {
+  const { attachment, totalCharacters, stoppedEarly } = entry;
+  if (attachment.handling === "pdf")
+    return `Text was read from ${attachment.sourceMap?.length ?? 0} of ${attachment.pageCount ?? "?"} pages (${count(retained)} characters). The whole original PDF is still attached; extracted citations cover only the pages read.`;
+  return stoppedEarly || totalCharacters === undefined
+    ? `Only the first ${count(retained)} characters were read; the rest of the file was not.`
+    : `Only the first ${count(retained)} of ${count(totalCharacters)} characters were read; the rest of the file was not.`;
+}
+
 export async function prepareAttachments(
   input: AttachmentInput[] | undefined,
 ): Promise<PreparedAttachment[]> {
   const rows = Array.isArray(input) ? input.slice(0, 4) : [];
-  let extractedCharacters = 0;
-  const prepared: PreparedAttachment[] = [];
+  const extractions: Extraction[] = [];
   for (const row of rows) {
     const name =
       typeof row.name === "string"
@@ -210,7 +225,6 @@ export async function prepareAttachments(
         ? row.mimeType.slice(0, 120)
         : "application/octet-stream";
     const size = Number.isFinite(row.size) ? (row.size as number) : 0;
-    const remaining = Math.max(0, 80_000 - extractedCharacters);
     if (row.handling === "image") {
       if (
         !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mimeType) ||
@@ -219,24 +233,31 @@ export async function prepareAttachments(
         !row.data.startsWith(`data:${mimeType};base64,`)
       )
         throw new Error(`Invalid image attachment: ${name}`);
-      prepared.push({ name, mimeType, size, handling: "image", data: row.data });
+      extractions.push({
+        attachment: { name, mimeType, size, handling: "image", data: row.data },
+        stoppedEarly: false,
+      });
       continue;
     }
     if (row.handling === "pdf") {
       if (size > 10 * 1024 * 1024 || typeof row.data !== "string" || !row.data.startsWith("data:application/pdf;base64,"))
         throw new Error(`Invalid PDF attachment: ${name}`);
-      const local = await extractPdfText(attachmentBuffer(row.data, name, 10 * 1024 * 1024), Math.min(60_000, remaining));
-      extractedCharacters += local.text.length;
-      prepared.push({ name, mimeType: "application/pdf", size, handling: "pdf", data: row.data, extractedText: local.text, pageCount: local.pageCount, sourceMap: local.sourceMap,
-        ...(local.truncated ? { warnings: [{ code: "extraction_truncated", message: "The PDF exceeds the text extraction budget. The original is retained; extracted citations cover only the supplied passages." }] } : {}),
+      const local = await extractPdfText(attachmentBuffer(row.data, name, 10 * 1024 * 1024), 60_000);
+      extractions.push({
+        attachment: { name, mimeType: "application/pdf", size, handling: "pdf", data: row.data, extractedText: local.text, pageCount: local.pageCount, sourceMap: local.sourceMap },
+        totalCharacters: local.truncated ? undefined : local.text.length,
+        stoppedEarly: local.truncated,
       });
       continue;
     }
     if (row.handling === "text") {
       if (size > 2 * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid text attachment: ${name}`);
-      const extractedText = row.data.replace(/\u0000/g, "").slice(0, Math.min(40_000, remaining));
-      extractedCharacters += extractedText.length;
-      prepared.push({ name, mimeType, size, handling: "text", extractedText });
+      const full = row.data.replace(/\u0000/g, "");
+      extractions.push({
+        attachment: { name, mimeType, size, handling: "text", extractedText: full.slice(0, 40_000) },
+        totalCharacters: full.length,
+        stoppedEarly: false,
+      });
       continue;
     }
     if (row.handling === "docx") {
@@ -246,22 +267,55 @@ export async function prepareAttachments(
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
       const html = await mammoth.convertToHtml({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
-      const extractedText = result.value.replace(/\u0000/g, "").slice(0, Math.min(40_000, remaining));
-      extractedCharacters += extractedText.length;
-      prepared.push({ name, mimeType, size, handling: "docx", data: row.data, extractedText, visualPdfData: await officeTextPdf(name, extractedText), structuredRepresentation: { kind: "docx", value: { html: html.value, messages: [...result.messages, ...html.messages].map((message) => message.message) } } });
+      const full = result.value.replace(/\u0000/g, "");
+      extractions.push({
+        attachment: { name, mimeType, size, handling: "docx", data: row.data, extractedText: full.slice(0, 40_000), structuredRepresentation: { kind: "docx", value: { html: html.value, messages: [...result.messages, ...html.messages].map((message) => message.message) } } },
+        totalCharacters: full.length,
+        stoppedEarly: false,
+      });
       continue;
     }
     if (row.handling === "xlsx" || row.handling === "pptx") {
       const maximum = row.handling === "xlsx" ? 12 : 20;
       if (size > maximum * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid ${row.handling.toUpperCase()} attachment: ${name}`);
-      const buffer = attachmentBuffer(row.data, name, row.handling === "xlsx" ? 12 * 1024 * 1024 : 20 * 1024 * 1024);
-      const extractedText = await (row.handling === "xlsx" ? extractXlsxText(buffer, Math.min(60_000, remaining)) : extractPptxText(buffer, Math.min(60_000, remaining)));
-      extractedCharacters += extractedText.length;
-      prepared.push({ name, mimeType, size, handling: row.handling, data: row.data, extractedText, visualPdfData: await officeTextPdf(name, extractedText) });
+      const buffer = attachmentBuffer(row.data, name, maximum * 1024 * 1024);
+      // One character past the cap tells a complete file from a cut one.
+      const probe = await (row.handling === "xlsx" ? extractXlsxText(buffer, 60_001) : extractPptxText(buffer, 60_001));
+      extractions.push({
+        attachment: { name, mimeType, size, handling: row.handling, data: row.data, extractedText: probe.slice(0, 60_000) },
+        totalCharacters: probe.length > 60_000 ? undefined : probe.length,
+        stoppedEarly: probe.length > 60_000,
+      });
       continue;
     }
     throw new Error(`Unsupported attachment type: ${name}`);
   }
+  const allowance = allocateExtractedText(extractions);
+  const prepared = extractions.map((entry): PreparedAttachment => {
+    const { attachment } = entry;
+    if (!attachment.extractedText) return attachment;
+    const extractedText = attachment.extractedText.slice(0, allowance.get(entry) ?? 0);
+    const sourceMap = attachment.sourceMap
+      ?.filter((location) => (location.startOffset ?? 0) < extractedText.length)
+      .map((location) =>
+        location.endOffset !== undefined && location.endOffset > extractedText.length
+          ? { ...location, endOffset: extractedText.length }
+          : location,
+      );
+    const next = { ...attachment, extractedText, ...(sourceMap ? { sourceMap } : {}) };
+    const cut =
+      entry.stoppedEarly ||
+      (entry.totalCharacters !== undefined && extractedText.length < entry.totalCharacters);
+    return cut
+      ? {
+          ...next,
+          warnings: [{
+            code: "extraction_truncated",
+            message: truncationWarning({ ...entry, attachment: next }, extractedText.length),
+          }],
+        }
+      : next;
+  });
   const preparedAt = new Date().toISOString();
   return prepared.map((attachment, index) => {
     const sourceMap = attachment.sourceMap ?? (() => {

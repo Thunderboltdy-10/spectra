@@ -811,8 +811,16 @@ export function StudioTabRail({
     setShellSlot(document.getElementById("spectra-shell-tab-slot"));
   }, []);
 
+  // A tab is two sibling controls, activate and close. The close used to be a
+  // `role="button"` span nested inside the activate <button>: interactive
+  // content inside a button is invalid, and assistive tech announced one
+  // control whose name swallowed both.
+  const tabBodyClass =
+    "flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-chip text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]";
+  const tabCloseClass =
+    "ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]";
   const tabClass = (active: boolean) =>
-    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-chip border px-2.5 text-caption font-medium transition ${
+    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-chip border px-2.5 text-caption font-medium transition-colors duration-[var(--motion-fast)] ${
       active
         ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
         : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -862,36 +870,27 @@ export function StudioTabRail({
         {hubTabs.map((hubTab) => {
           const active = activeHubTabId === hubTab.id;
           return (
-            <button
-              key={hubTab.id}
-              type="button"
-              className={tabClass(active)}
-              onClick={() => onActivateHub(hubTab.id)}
-            >
-              <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
-              <span className="min-w-0 flex-1 truncate text-left">
-                {hubTab.label}
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
+            <div key={hubTab.id} className={tabClass(active)}>
+              <button
+                type="button"
+                className={tabBodyClass}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onActivateHub(hubTab.id)}
+              >
+                <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {hubTab.label}
+                </span>
+              </button>
+              <button
+                type="button"
                 aria-label={`Close ${hubTab.label}`}
-                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseHub(hubTab.id);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onCloseHub(hubTab.id);
-                  }
-                }}
+                className={tabCloseClass}
+                onClick={() => onCloseHub(hubTab.id)}
               >
                 <X className="h-3 w-3" />
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
         {tabs.map((tab) => {
@@ -903,32 +902,32 @@ export function StudioTabRail({
           const Icon = meta.icon;
           const active = activeArtifactId === artifact._id;
           return (
-            <button
-              key={tab.artifactId}
-              type="button"
-              className={tabClass(active)}
-              onClick={() => onActivateTab(artifact._id)}
-            >
-              <Icon
-                className="h-3.5 w-3.5 shrink-0"
-                style={{ color: meta.color }}
-              />
-              <span className="min-w-0 flex-1 truncate text-left">
-                {artifact.title}
-              </span>
-              {dirtyIds.has(artifact._id) ? (
-                <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent-gold)]"
-                  title="Unsaved changes"
+            <div key={tab.artifactId} className={tabClass(active)}>
+              <button
+                type="button"
+                className={tabBodyClass}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onActivateTab(artifact._id)}
+              >
+                <Icon
+                  className="h-3.5 w-3.5 shrink-0"
+                  style={{ color: meta.color }}
                 />
-              ) : null}
-              <span
-                role="button"
-                tabIndex={0}
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {artifact.title}
+                </span>
+                {dirtyIds.has(artifact._id) ? (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent-gold)]"
+                    title="Unsaved changes"
+                  />
+                ) : null}
+              </button>
+              <button
+                type="button"
                 aria-label={`Close ${artifact.title}`}
-                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={(event) => {
-                  event.stopPropagation();
+                className={tabCloseClass}
+                onClick={() => {
                   if (dirtyIds.has(artifact._id)) {
                     onActivateTab(artifact._id);
                     requestAnimationFrame(() =>
@@ -938,24 +937,10 @@ export function StudioTabRail({
                     );
                   } else onCloseTab(artifact._id);
                 }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (dirtyIds.has(artifact._id)) {
-                      onActivateTab(artifact._id);
-                      requestAnimationFrame(() =>
-                        void spectraBus.command("work.requestClose", {
-                          workId: artifact._id,
-                        }),
-                      );
-                    } else onCloseTab(artifact._id);
-                  }
-                }}
               >
                 <X className="h-3 w-3" />
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
         <button

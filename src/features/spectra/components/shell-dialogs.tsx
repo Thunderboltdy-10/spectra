@@ -22,6 +22,7 @@ import {
   DialogFooter,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -286,30 +287,16 @@ export function TrashPurgeDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100vw-32px))] gap-0 p-5">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription className="mt-2">{detail}</DialogDescription>
-        <DialogFooter className="mt-5">
-          <Button variant="secondary" size="md" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            size="md"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            {busy ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Trash2 className="size-4" />
-            )}
-            Delete forever
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      title={title}
+      detail={detail}
+      confirmLabel="Delete forever"
+      destructive
+      pending={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -327,32 +314,15 @@ export function ArtifactDeleteDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent className="max-w-[min(440px,calc(100vw-32px))] gap-0 p-5">
-        <DialogTitle>Delete {artifactTitle}?</DialogTitle>
-        <DialogDescription className="mt-2">
-          This work item, its placements, version history, and directly linked
-          run history will be permanently removed.
-        </DialogDescription>
-        <DialogFooter className="mt-5">
-          <Button variant="secondary" size="md" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            size="md"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            {busy ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Trash2 className="size-4" />
-            )}
-            Delete permanently
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={open}
+      title={`Delete ${artifactTitle}?`}
+      detail="This work item, its placements, version history, and directly linked run history will be permanently removed."
+      confirmLabel="Delete permanently"
+      destructive
+      pending={busy}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }

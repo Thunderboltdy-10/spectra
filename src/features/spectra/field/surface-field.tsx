@@ -33,17 +33,13 @@ import {
   type GrainMood,
   type GrainRenderer,
 } from "./grain-renderer";
+import { getSpectraMotionSnapshot } from "../motion";
 
 /** How long one lattice drift cycle takes; must match the CSS keyframes. */
 const DRIFT_PERIOD_MS = 58_000;
 
 export type FieldState =
-  | "active"
-  | "typing"
-  | "waiting"
-  | "drag"
-  | "success"
-  | "failure";
+  "active" | "typing" | "waiting" | "drag" | "success" | "failure";
 
 export type FieldInfluence = {
   /** Stable key — usually the acting client id, or a region id. */
@@ -178,9 +174,9 @@ export function EnvironmentField({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const reduced =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // The Spectra motion preference layered over the OS setting: a user who
+    // turned motion down in Spectra gets the one still frame too.
+    const reduced = getSpectraMotionSnapshot().reduced;
 
     let renderer: GrainRenderer | null = null;
     try {

@@ -98,6 +98,19 @@ export function writeDevicePreferences(
   storage.setItem(SPECTRA_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
 }
 
+/** The motion level mirrored onto `html[data-spectra-motion]`. A "reduce
+    motion" switch lowers "full" to "reduced"; it never raises "none". */
+export function documentMotionLevel(
+  preferences: SpectraPreferences,
+): SpectraPreferences["appearance"]["motionLevel"] {
+  const level = preferences.appearance.motionLevel;
+  if (level === "none") return "none";
+  return preferences.appearance.reducedMotion ||
+    preferences.accessibility.reducedMotion
+    ? "reduced"
+    : level;
+}
+
 function applyDocumentPreferences(preferences: SpectraPreferences) {
   const root = document.documentElement;
   root.dataset.spectraDensity = preferences.appearance.density;
@@ -106,11 +119,7 @@ function applyDocumentPreferences(preferences: SpectraPreferences) {
     preferences.accessibility.highContrast
       ? "high"
       : "standard";
-  root.dataset.spectraMotion =
-    preferences.appearance.reducedMotion ||
-    preferences.accessibility.reducedMotion
-      ? "reduced"
-      : preferences.appearance.motionLevel;
+  root.dataset.spectraMotion = documentMotionLevel(preferences);
   root.dataset.spectraStreamingReveal = preferences.appearance.streamingReveal
     ? "true"
     : "false";

@@ -72,9 +72,9 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
     </span> : null}
     {hasSources ? <button type="button" className="inline-flex items-center gap-1 rounded-chip px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
       Based on {parts.join(" and ") || provenance.workspaceTitle}
-      <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      <ChevronDown className={`h-3 w-3 transition-transform duration-[var(--motion-base)] ease-standard ${open ? "rotate-180" : ""}`} />
     </button> : null}
-    {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-[spectra-fade-up_180ms_ease-out]">
+    {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-fade-in">
       {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}
       {provenance.workspaceTitle ? <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{provenance.workspaceTitle}</span> : null}
       {provenance.attachmentNames?.map((name) => <span key={name} className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{name}</span>)}
@@ -157,7 +157,7 @@ export function ResultCardStack({
             role="group"
             data-spectra-card="result"
             data-card-state={cardState}
-            className="group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-caption animate-[spectra-fade-up_180ms_ease-out]"
+            className="group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-caption animate-fade-in"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}

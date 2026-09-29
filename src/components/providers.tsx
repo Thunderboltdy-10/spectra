@@ -9,6 +9,7 @@ import { useAuth } from "@clerk/nextjs";
 import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
+import { SpectraMotionConfig } from "@/features/spectra/motion/motion-primitives";
 import { clearAccountScopedStorage } from "@/lib/account-storage";
 import { useEffect, useRef, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
@@ -45,7 +46,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <PathScopedErrorBoundary>
       <ThemeProvider>
-        {content}
+        <SpectraMotionConfig>{content}</SpectraMotionConfig>
         <DynamicFavicon />
         <LocalComputeCacheController />
         <CookieConsentManager />

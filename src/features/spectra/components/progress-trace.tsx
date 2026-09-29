@@ -178,7 +178,7 @@ export function ProgressTrace({
           </span>
           <ChevronDown
             className={cn(
-              "h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              "h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70 transition-transform duration-[var(--motion-base)] ease-standard",
               groupOpen ? "rotate-180" : "rotate-0",
             )}
           />
@@ -257,7 +257,7 @@ export function ProgressTrace({
                             >
                               <ChevronDown
                                 className={cn(
-                                  "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                                  "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-[var(--motion-base)] ease-standard",
                                   open ? "rotate-180" : "rotate-0",
                                 )}
                               />

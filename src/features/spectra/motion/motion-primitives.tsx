@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { grammarFor, transitionFor, type MotionPrimitive } from "./grammar";
 import { useSpectraMotion } from "./motion-level";
@@ -10,6 +10,28 @@ import { useSpectraMotion } from "./motion-level";
  * motion level (preference + OS reduced-motion) so decoration disappears
  * while state transitions stay legible.
  */
+
+/* ------------------------------------------------------------------ *
+ * SpectraMotionConfig — the Spectra motion level for every framer tree.
+ *
+ * Framer-motion ignores prefers-reduced-motion unless told otherwise, and
+ * knows nothing of the Spectra preference, so the live dock, progress
+ * trace, command bar, context picker and embeds panel moved at full travel
+ * for someone who had asked for less. Mounted once at the root: "reduced"
+ * turns transform and layout travel off (opacity still fades); "none" skips
+ * framer animations entirely, matching the CSS contract.
+ * ------------------------------------------------------------------ */
+export function SpectraMotionConfig({ children }: { children: ReactNode }) {
+  const motionLevel = useSpectraMotion();
+  return (
+    <MotionConfig
+      reducedMotion={motionLevel.reduced ? "always" : "never"}
+      skipAnimations={motionLevel.disabled}
+    >
+      {children}
+    </MotionConfig>
+  );
+}
 
 /* ------------------------------------------------------------------ *
  * Reveal — content enters with a soft rise + fade.

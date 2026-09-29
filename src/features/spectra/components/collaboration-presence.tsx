@@ -11,20 +11,18 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SpectraMark } from "@/components/spectra-mark";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   clientRectsForSelectionRange,
   positionForPresenceAnchor,
   selectionIsActive,
 } from "../collaboration/presence-anchor";
 import type { CollaborationPresence } from "../collaboration/types";
-import {
-  follow,
-  resumeFollow,
-  useFollow,
-} from "../collaboration/follow";
-import {
-  followAiActor,
-  useFollowAi,
-} from "../collaboration/follow-ai";
+import { follow, resumeFollow, useFollow } from "../collaboration/follow";
+import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 import { stableAiActorId } from "../collaboration/ai-actor-id";
 import {
   actorLabel,
@@ -107,7 +105,7 @@ function validCursor(
   );
 }
 
-function presenceColor(person: CollaborationPresence) {
+export function presenceColor(person: CollaborationPresence) {
   // An AI wears its owner's colour everywhere: "Nadia" and "Nadia's AI" are
   // visibly the same participant, never a generic cyan guest.
   if (person.interactionState) {
@@ -121,7 +119,16 @@ function presenceColor(person: CollaborationPresence) {
       ...(person.accountId ? { ownerAccountId: person.accountId } : {}),
     });
   }
-  return person.color || "#6f7b72";
+  // A person resolves through the same palette as their interaction frames,
+  // so their avatar, cursor and region ring are one colour. (No client
+  // publishes `color`; the old fallback painted every idle human grey while
+  // the interaction layer painted them in their palette colour.)
+  return actorPresenceColor({
+    clientId: person.clientId,
+    kind: "human",
+    name: person.name ?? "",
+    ...(person.accountId ? { accountId: person.accountId } : {}),
+  });
 }
 
 function positionsEqual(
@@ -550,10 +557,9 @@ export function CollaborationCursorLayer({
         return (
           <div
             key={`${person.clientId}:menu`}
-            className="absolute z-chrome min-w-[148px] overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-card transition-[left,top] duration-300 ease-out"
+            className="absolute left-0 top-0 z-chrome min-w-[148px] overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-card transition-transform duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
             style={{
-              left: Math.max(8, position.left),
-              top: position.top + 22,
+              transform: `translate3d(${Math.max(8, position.left)}px, ${position.top + 22}px, 0)`,
               outline: `1px solid color-mix(in oklab, ${color} 35%, transparent)`,
             }}
           >
@@ -614,12 +620,17 @@ export function CollaborationCursorLayer({
         return (
           <div
             key={person.clientId}
-            className={`absolute transition-[left,top] ease-out motion-reduce:transition-none ${
+            // Moved by transform, not left/top: a glide is compositor-only and
+            // never re-lays out the layer. A human cursor tracks nearly live;
+            // an AI pointer glides so its jumps between targets read as travel.
+            className={`absolute left-0 top-0 transition-transform ease-standard motion-reduce:transition-none ${
               person.actorKind === "ai" && mode === "pointer"
-                ? "duration-300"
-                : "duration-75"
+                ? "duration-[var(--motion-slow)]"
+                : "duration-[var(--motion-instant)]"
             }`}
-            style={{ left: position.left, top: position.top }}
+            style={{
+              transform: `translate3d(${position.left}px, ${position.top}px, 0)`,
+            }}
           >
             {showCaret ? (
               <span
@@ -780,51 +791,57 @@ export function CollaborationPresenceIndicator({
           <X className="h-3 w-3 text-[var(--text-tertiary)]" />
         </button>
       ) : null}
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-label={`${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"} present`}
-        className={`group flex h-9 items-center gap-2 rounded-control border px-2 shadow-[var(--shadow-sm)] transition ${activeAi ? "" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
-        style={
-          activeAiColor
-            ? {
-                borderColor: `color-mix(in oklab, ${activeAiColor} 38%, var(--border-default))`,
-                backgroundColor: `color-mix(in oklab, ${activeAiColor} 6%, var(--bg-primary))`,
-              }
-            : undefined
-        }
-      >
-        <span className="flex -space-x-1.5">
-          {collaborators.slice(0, 3).map((person) => (
-            <span
-              key={person.clientId}
-              className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--bg-primary)] text-micro font-bold text-white shadow-sm"
-              style={{ backgroundColor: presenceColor(person) }}
-              title={presenceName(
-                person,
-                presence,
-                currentAccountId,
-                currentDisplayName,
-              )}
-            >
-              {person.actorKind === "ai" ? (
-                <SpectraMark mono size={13} />
-              ) : (
-                initials(person.name)
-              )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"} present`}
+            className={`group flex h-9 items-center gap-2 rounded-control border px-2 shadow-[var(--shadow-sm)] transition ${activeAi ? "" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+            style={
+              activeAiColor
+                ? {
+                    borderColor: `color-mix(in oklab, ${activeAiColor} 38%, var(--border-default))`,
+                    backgroundColor: `color-mix(in oklab, ${activeAiColor} 6%, var(--bg-primary))`,
+                  }
+                : undefined
+            }
+          >
+            <span className="flex -space-x-1.5">
+              {collaborators.slice(0, 3).map((person) => (
+                <span
+                  key={person.clientId}
+                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--bg-primary)] text-micro font-bold text-white shadow-sm"
+                  style={{ backgroundColor: presenceColor(person) }}
+                  title={presenceName(
+                    person,
+                    presence,
+                    currentAccountId,
+                    currentDisplayName,
+                  )}
+                >
+                  {person.actorKind === "ai" ? (
+                    <SpectraMark mono size={13} />
+                  ) : (
+                    initials(person.name)
+                  )}
+                </span>
+              ))}
             </span>
-          ))}
-        </span>
-        <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
-        <span className="pr-1 text-micro font-medium text-[var(--text-secondary)]">
-          {activeAiName
-            ? `${activeAiName}${activeAiPlace ? ` · ${activeAiPlace}` : ""}`
-            : `${activeCount || collaborators.length} here`}
-        </span>
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-panel w-64 overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover">
+            <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
+            <span className="pr-1 text-micro font-medium text-[var(--text-secondary)]">
+              {activeAiName
+                ? `${activeAiName}${activeAiPlace ? ` · ${activeAiPlace}` : ""}`
+                : `${activeCount || collaborators.length} here`}
+            </span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          sideOffset={8}
+          layer="panel"
+          aria-label="People here"
+          className="w-64 overflow-hidden p-0"
+        >
           <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
             <span className="text-micro font-semibold text-[var(--text-primary)]">
               People here
@@ -867,8 +884,8 @@ export function CollaborationPresenceIndicator({
                 person.actorKind === "ai"
                   ? Boolean(
                       followAi.following &&
-                        aiActorId &&
-                        followAi.followedActorId === aiActorId,
+                      aiActorId &&
+                      followAi.followedActorId === aiActorId,
                     )
                   : followedTarget != null &&
                     (followedTarget as { clientId: string }).clientId ===
@@ -961,8 +978,8 @@ export function CollaborationPresenceIndicator({
               );
             })}
           </ul>
-        </div>
-      ) : null}
+        </PopoverContent>
+      </Popover>
       {disengagedFrom && disengagedFrom.kind !== "ai" ? (
         <button
           type="button"

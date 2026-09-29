@@ -27,20 +27,13 @@ const conversationSurface = readFileSync(
   "utf8",
 );
 
-const NEW_KEYFRAMES = [
-  "spectra-tail-shimmer",
-  "spectra-presence-flag-decay",
-  "spectra-completion-ring",
-  "spectra-target-pulse",
-  "spectra-fade-up",
-  "spectra-panel-enter",
-  "spectra-panel-exit",
-  "spectra-panel-handoff",
-  "spectra-follow-pill-in",
-  "spectra-follow-dot-live",
-] as const;
+/** Every keyframe in the product (the landing page included). A new one is
+    checked the moment it is written; there is no list to remember. */
+const ALL_KEYFRAMES = [
+  ...new Set([...globals.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]!)),
+];
 
-/** Properties allowed inside new keyframes: composite-friendly only. */
+/** Properties keyframes may animate: composite or paint only, never layout. */
 const ALLOWED_PROPS = new Set([
   "transform",
   "opacity",
@@ -52,6 +45,11 @@ const ALLOWED_PROPS = new Set([
   "stroke-dashoffset",
   "stroke-dasharray",
   "background-position",
+  "background-position-x",
+  "background",
+  "color",
+  "stroke-opacity",
+  "fill-opacity",
 ]);
 
 function keyframeBlock(name: string): string {
@@ -78,8 +76,9 @@ describe("motion integrity", () => {
     expect(conversationSurface).toContain("LiveContentReveal");
   });
 
-  it("new keyframes animate only composite-safe properties", () => {
-    for (const name of NEW_KEYFRAMES) {
+  it("every keyframe animates only composite-safe properties", () => {
+    expect(ALL_KEYFRAMES.length).toBeGreaterThan(20);
+    for (const name of ALL_KEYFRAMES) {
       const block = keyframeBlock(name);
       const animated = new Set<string>();
       for (const match of block.matchAll(/([a-z-]+)\s*:/g)) {
@@ -98,42 +97,23 @@ describe("motion integrity", () => {
     }
   });
 
-  it("new effect classes are gated for reduced and none motion levels", () => {
-    const gatedClasses = [
-      "spectra-return-pill",
-      "spectra-follow-chip-dot",
-      "spectra-stream-active",
-    ];
-    for (const klass of gatedClasses) {
-      const reducedSelector = `html[data-spectra-motion="reduced"]`;
-      const noneSelector = `html[data-spectra-motion="none"]`;
-      const pattern = new RegExp(
-        `${reducedSelector.replaceAll('"', '\\\\"')}[^{}]*\\.${klass.replaceAll("-", "\\-")}`,
+  it("one reduced-motion contract covers every animation, from the preference and the OS", () => {
+    // Every element (and pseudo-element) collapses keyframe animations to a
+    // single near-instant iteration under the "reduced" and "none" levels
+    // and under the OS setting, so no animation needs a per-class gate and a
+    // new one cannot ship without a reduced-motion path.
+    for (const level of ["reduced", "none"]) {
+      expect(globals).toContain(
+        `html[data-spectra-motion="${level}"] *::before`,
       );
-      expect(
-        pattern.test(globals) || globals.includes(`reduced"] .${klass}`),
-        `${klass} lacks a reduced-motion gate`,
-      ).toBe(true);
-      expect(
-        globals.includes(`none"] .${klass}`),
-        `${klass} lacks a no-motion gate`,
-      ).toBe(true);
-      expect(reducedSelector.length + noneSelector.length).toBeGreaterThan(0);
     }
-  });
-
-  it('global "none" level collapses every animation and transition', () => {
-    expect(globals).toContain('html[data-spectra-motion="none"] *');
-    expect(globals).toContain("animation-duration: 0.01ms !important");
-    expect(globals).toContain("transition-duration: 0.01ms !important");
-  });
-
-  it("stops Tailwind loaders under OS or Spectra reduced motion", () => {
     expect(globals).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.animate-spin,\s*\.animate-pulse \{\s*animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{\s*:root \{[^}]*--motion-fast: 0ms;[^}]*\}\s*\*,\s*\*::before,\s*\*::after \{\s*animation-duration: 0\.01ms !important;\s*animation-iteration-count: 1 !important;/,
     );
-    expect(globals).toMatch(
-      /:root\[data-spectra-motion="reduced"\] \.animate-spin,\s*:root\[data-spectra-motion="reduced"\] \.animate-pulse \{\s*animation: none;/,
+    expect(globals).toContain("transition-duration: 0.01ms !important");
+    // Loaders and shimmers are stopped by the contract, not bespoke rules.
+    expect(globals).not.toMatch(
+      /\.animate-spin,\s*\.animate-pulse \{\s*animation: none;/,
     );
   });
 });

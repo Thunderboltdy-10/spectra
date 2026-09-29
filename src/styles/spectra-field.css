@@ -423,16 +423,6 @@
   }
 }
 
-/* Surfaces that host a field need a stacking context and content above it. */
-.spectra-field-host {
-  position: relative;
-  isolation: isolate;
-}
-.spectra-field-host > *:not(.spectra-field) {
-  position: relative;
-  z-index: 1;
-}
-
 /* The work surface hosts the activity field behind its content
    (`StudioActivityField` mounts with `behind`). Isolation keeps the field's
    negative z-index inside the section — without it the lattice would slip
@@ -490,24 +480,29 @@ button:hover .spectra-mark .spectra-prism-refractions,
 
 /* Working turns the same solid object, slowly enough to remain legible. */
 .spectra-prism-optic[data-optics="working"] .spectra-prism-body {
-  animation: spectra-prism-turn calc(var(--motion-slow) * 14) var(--ease-in-out) infinite;
+  animation: spectra-prism-turn calc(var(--motion-slow) * 14) var(--ease-in-out)
+    infinite;
 }
 .spectra-prism-optic[data-optics="working"] .spectra-prism-ray {
-  animation: spectra-prism-refract calc(var(--motion-slow) * 5) var(--ease-in-out) infinite;
+  animation: spectra-prism-refract calc(var(--motion-slow) * 5)
+    var(--ease-in-out) infinite;
   animation-delay: calc(var(--ray-i) * var(--motion-fast));
 }
 .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
-  animation: spectra-prism-pool calc(var(--motion-slow) * 7) var(--ease-in-out) infinite;
+  animation: spectra-prism-pool calc(var(--motion-slow) * 7) var(--ease-in-out)
+    infinite;
 }
 
 /* Waiting holds its pose and breathes much more slowly. */
 .spectra-prism-optic[data-optics="waiting"] .spectra-prism-pool {
-  animation: spectra-prism-pool calc(var(--motion-slow) * 18) var(--ease-in-out) infinite;
+  animation: spectra-prism-pool calc(var(--motion-slow) * 18) var(--ease-in-out)
+    infinite;
 }
 
 /* Completion resolves once to the familiar three-quarter pose. */
 .spectra-prism-optic[data-optics="completed"] .spectra-prism-body {
-  animation: spectra-prism-resolve calc(var(--motion-slow) * 3) var(--ease-out-expo) 1 both;
+  animation: spectra-prism-resolve calc(var(--motion-slow) * 3)
+    var(--ease-out-expo) 1 both;
 }
 .spectra-prism-optic[data-optics="completed"] .spectra-prism-pool {
   opacity: 0.9;
@@ -522,7 +517,8 @@ button:hover .spectra-mark .spectra-prism-refractions,
 }
 
 @keyframes spectra-prism-turn {
-  0%, 100% {
+  0%,
+  100% {
     transform: perspective(90px) rotateY(-5deg) rotateZ(-0.5deg);
   }
   50% {
@@ -553,8 +549,12 @@ button:hover .spectra-mark .spectra-prism-refractions,
 }
 
 @keyframes spectra-prism-resolve {
-  from { transform: perspective(90px) rotateY(14deg) scale(0.94); }
-  to { transform: perspective(90px) rotateY(0deg) scale(1); }
+  from {
+    transform: perspective(90px) rotateY(14deg) scale(0.94);
+  }
+  to {
+    transform: perspective(90px) rotateY(0deg) scale(1);
+  }
 }
 
 .spectra-prism-slot {
@@ -569,49 +569,20 @@ button:hover .spectra-mark .spectra-prism-refractions,
    stand-in steps aside rather than doubling the object. */
 .spectra-prism-slot[data-occupied="true"] > svg {
   opacity: 0;
-  transition: opacity 320ms var(--ease-standard);
+  transition: opacity var(--motion-slow) var(--ease-standard);
 }
-
-/* Static but communicative: refraction and state colour remain. */
-html[data-spectra-motion="reduced"] .spectra-prism-body,
-html[data-spectra-motion="reduced"] .spectra-prism-pool,
-html[data-spectra-motion="reduced"] .spectra-prism-ray,
-html[data-spectra-motion="none"] .spectra-prism-body,
-html[data-spectra-motion="none"] .spectra-prism-pool,
-html[data-spectra-motion="none"] .spectra-prism-ray {
-  animation: none;
-}
-html[data-spectra-motion="reduced"] .spectra-prism-optic[data-optics="working"] .spectra-prism-pool,
-html[data-spectra-motion="none"] .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
+html[data-spectra-motion="reduced"]
+  .spectra-prism-optic[data-optics="working"]
+  .spectra-prism-pool,
+html[data-spectra-motion="none"]
+  .spectra-prism-optic[data-optics="working"]
+  .spectra-prism-pool {
   opacity: 0.8;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectra-prism-body,
-  .spectra-prism-pool,
-  .spectra-prism-ray {
-    animation: none;
-  }
   .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
     opacity: 0.8;
-  }
-}
-
-html[data-spectra-motion="reduced"] .spectra-field-rest,
-html[data-spectra-motion="none"] .spectra-field-rest,
-html[data-spectra-motion="reduced"] .spectra-field-wake::before,
-html[data-spectra-motion="none"] .spectra-field-wake::before {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spectra-field-rest,
-  .spectra-field-wake::before,
-  .spectra-field[data-depth="true"] .spectra-field-rest::after {
-    animation: none;
-  }
-  .spectra-field-wake {
-    transition: opacity 200ms linear;
   }
 }
 
@@ -693,7 +664,8 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   backdrop-filter: none !important;
 }
 
-.spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-editor-workbar {
+.spectra-artifact-studio[data-canvas-extent="infinite"]
+  .spectra-editor-workbar {
   margin: 8px var(--spectra-studio-inline-inset) 0 !important;
   border-radius: var(--card-radius) !important;
 }
@@ -703,7 +675,7 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
 }
 
 .spectra-editor-workbar::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in oklab, var(--border-default) 40%, transparent);
 }
 
@@ -721,8 +693,8 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   button:hover:not(:disabled):not(.spectra-workbar-primary):not([role="tab"]),
 .spectra-editor-workbar button[data-active="true"]:not([role="tab"]) {
   border-color: #d9d4fa;
-  background: #f0edff;
-  color: #5a48cf;
+  background: var(--brand-wash);
+  color: var(--brand-ink);
 }
 
 .spectra-editor-workbar button:active:not(:disabled) {
@@ -739,14 +711,6 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   display: none;
 }
 
-.code-workbar-source {
-  overflow: hidden;
-}
-
-.code-mobile-switch:not([data-surface="split"]) {
-  display: none !important;
-}
-
 /* Preserve the persisted navigation geometry before React hydrates so route
    skeletons and loaded content share the same horizontal origin. */
 html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar {
@@ -759,10 +723,7 @@ html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
 
 html[data-spectra-sidebar-collapsed="true"]
   .spectra-shell-sidebar
-  [data-sidebar-recents],
-html[data-spectra-sidebar-collapsed="true"]
-  .spectra-shell-sidebar
-  [data-sidebar-workspaces] {
+  [data-sidebar-recents] {
   display: none !important;
 }
 
@@ -772,29 +733,9 @@ html[data-spectra-sidebar-collapsed="true"]
   display: none !important;
 }
 
-.presentation-toolbar {
-  margin: 0 12px 8px !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.spectra-editor-workbar.sheets-top-bars {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  overflow: visible !important;
-  min-height: 0;
-}
-
 .sheets-grid-frame {
   min-height: 0;
   flex: 1 1 auto;
-}
-
-.sheets-top-bars > :is(.sheets-menu-bar, .sheets-format-bar) {
-  border-color: var(--border-subtle) !important;
-  background: transparent !important;
 }
 
 /* The floating Live Dock no longer overlaps a split editor, so reserving
@@ -867,7 +808,6 @@ html[data-spectra-sidebar-collapsed="true"]
 
 .sheets-grid-frame,
 .code-editor-grid,
-.code-preview-pane,
 .presentation-workspace,
 .whiteboard-shell {
   min-height: 0 !important;
@@ -877,21 +817,4 @@ html[data-spectra-sidebar-collapsed="true"]
 
 .code-editor-grid > section {
   min-height: 0 !important;
-}
-
-/* Mission Control cards size from the remaining canvas, not the viewport.
-   Opening a side panel therefore produces fewer, wider cards instead of four
-   desktop columns squeezed into unreadable slivers. */
-.spectra-mission-control-workspaces .spectra-workspace-card-grid {
-  grid-template-columns: repeat(
-    auto-fit,
-    minmax(min(270px, 100%), 1fr)
-  ) !important;
-  align-items: start;
-}
-
-.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
-  min-width: 0;
-  height: auto;
-  align-self: start;
 }

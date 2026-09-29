@@ -227,7 +227,7 @@ function RailBranch({
               >
                 <ChevronRight
                   className={cn(
-                    "size-3 transition-transform duration-150",
+                    "size-3 transition-transform duration-[var(--motion-fast)] ease-standard",
                     open && "rotate-90",
                   )}
                 />

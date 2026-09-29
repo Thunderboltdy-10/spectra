@@ -246,7 +246,7 @@ export function ArtifactCard({
             event.stopPropagation();
             onToggleContext?.();
           }}
-          className={`absolute right-2.5 top-2.5 z-chrome flex h-6 w-6 items-center justify-center rounded-chip border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`}
+          className={`absolute right-2.5 top-2.5 z-chrome flex h-6 w-6 items-center justify-center rounded-chip border transition-[background-color,border-color,color,transform] duration-[var(--motion-fast)] ease-standard ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`}
           aria-label={
             contextSelected ? "Remove from selection" : "Add to selection"
           }
@@ -382,7 +382,7 @@ export function ArtifactCard({
               aria-valuenow={Math.round(artifact.aiProgress * 100)}
             >
               <span
-                className="block h-full rounded-full bg-[var(--accent-cyan)] transition-[width] duration-300 motion-reduce:transition-none"
+                className="block h-full rounded-full bg-[var(--accent-cyan)] transition-[width] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
                 style={{ width: `${Math.max(4, artifact.aiProgress * 100)}%` }}
               />
             </div>

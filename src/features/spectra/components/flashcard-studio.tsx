@@ -179,12 +179,10 @@ export function FlashcardStudio({
     | "struggling"
     | "changed"
   >("all");
-  const [_railView, _setRailView] = useState<"list" | "grid">("list");
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [draggedCardId, setDraggedCardId] = useState<string>();
-  const [_renamingSection, setRenamingSection] = useState<string>();
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
@@ -1002,7 +1000,6 @@ export function FlashcardStudio({
       ),
     );
     setActiveSection(proposed);
-    setRenamingSection(undefined);
     setSectionNameDraft("");
   }
 

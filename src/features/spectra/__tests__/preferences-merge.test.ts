@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { knownCapabilityIds } from "../capabilities/catalog";
 import { swapWorkbarCommandOrders } from "../commands/registry";
+import { documentMotionLevel } from "../settings/preference-store";
 import {
   DEFAULT_SPECTRA_PREFERENCES,
   applyPreferencePatch,
@@ -258,5 +259,27 @@ describe("preference merge (P3.I4)", () => {
     expect(store).toContain("subscribeIdleSurfaceRefresh");
     expect(store).toContain("unsub?.()");
     expect(store).toContain("refreshLayersRef.current()");
+  });
+});
+
+describe("document motion level", () => {
+  const withMotion = (
+    motionLevel: "full" | "reduced" | "none",
+    reducedMotion: boolean,
+  ) => ({
+    ...DEFAULT_SPECTRA_PREFERENCES,
+    appearance: {
+      ...DEFAULT_SPECTRA_PREFERENCES.appearance,
+      motionLevel,
+      reducedMotion,
+    },
+  });
+
+  it("lets a reduce-motion switch lower full motion but never raise none", () => {
+    expect(documentMotionLevel(withMotion("full", false))).toBe("full");
+    expect(documentMotionLevel(withMotion("full", true))).toBe("reduced");
+    // Was "reduced": the switch re-enabled 60ms transitions for a person who
+    // had asked for no motion at all.
+    expect(documentMotionLevel(withMotion("none", true))).toBe("none");
   });
 });

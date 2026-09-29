@@ -5,6 +5,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
+import { useFloatingLayer } from "./layer-context";
 
 /**
  * Spectra's one Select. Replaces every native `<select>`: an OS dropdown cannot
@@ -67,7 +68,7 @@ SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content> & {
-    /** Stacking layer. Inside a dialog, pass the dialog's layer ("modal"). */
+    /** Stacking layer. Defaults to the host dialog/sheet's layer, else dropdown. */
     layer?: SpectraLayer;
   }
 >(
@@ -77,36 +78,39 @@ const SelectContent = React.forwardRef<
       children,
       position = "popper",
       style,
-      layer = "dropdown",
+      layer: explicitLayer,
       ...props
     },
     ref,
-  ) => (
-    <SelectPrimitive.Portal>
-      <SelectPrimitive.Content
-        ref={ref}
-        position={position}
-        sideOffset={4}
-        className={cn(
-          "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          LAYER_CLASS[layer],
-          className,
-        )}
-        style={{
-          backgroundColor: "var(--bg-elevated)",
-          borderColor: "var(--border-default)",
-          ...style,
-        }}
-        {...props}
-      >
-        {/* The viewport must size to its content and scroll. Pinning it to
+  ) => {
+    const layer = useFloatingLayer(explicitLayer);
+    return (
+      <SelectPrimitive.Portal>
+        <SelectPrimitive.Content
+          ref={ref}
+          position={position}
+          sideOffset={4}
+          className={cn(
+            "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] spectra-float origin-[var(--radix-select-content-transform-origin)]",
+            LAYER_CLASS[layer],
+            className,
+          )}
+          style={{
+            backgroundColor: "var(--bg-elevated)",
+            borderColor: "var(--border-default)",
+            ...style,
+          }}
+          {...props}
+        >
+          {/* The viewport must size to its content and scroll. Pinning it to
           `--radix-select-trigger-height` clamps the list to one row. */}
-        <SelectPrimitive.Viewport className="max-h-72 overflow-y-auto p-1.5">
-          {children}
-        </SelectPrimitive.Viewport>
-      </SelectPrimitive.Content>
-    </SelectPrimitive.Portal>
-  ),
+          <SelectPrimitive.Viewport className="max-h-72 overflow-y-auto p-1.5">
+            {children}
+          </SelectPrimitive.Viewport>
+        </SelectPrimitive.Content>
+      </SelectPrimitive.Portal>
+    );
+  },
 );
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 

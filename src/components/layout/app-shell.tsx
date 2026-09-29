@@ -545,7 +545,7 @@ function ShellNavigation() {
         aria-label="Spectra navigation"
         data-collapsed={sidebarCollapsed}
         className={cn(
-          "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
+          "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-[var(--motion-base)] ease-standard md:flex",
           sidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >
@@ -1147,7 +1147,7 @@ export function AppShell({
         ...(noScroll ? { height: "100dvh", overflow: "hidden" } : {}),
       }}
       className={cn(
-        "spectra-app-shell min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-200",
+        "spectra-app-shell min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-[var(--motion-base)] ease-standard",
         shellEffectiveCollapsed ? "md:pl-[76px]" : "md:pl-[240px]",
       )}
     >

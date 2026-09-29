@@ -7,8 +7,6 @@ import {
 import type { ArtifactTypeKey, SemanticRegion } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { normalizeArtifactContent } from "../ai/content-normalization";
-import type { ArtifactRegionController } from "./region-controller";
-import type { ArtifactCollaborationTransport } from "./types";
 import { planSheetsCellProjection } from "../work/models/yjs/structured-adapters";
 
 export const ARTIFACT_YJS_META_MAP = "spectra:artifact-meta";
@@ -95,13 +93,6 @@ export type ArtifactRegionSnapshot = {
   }>;
 };
 
-const UNINITIALIZED_SNAPSHOT: ArtifactLiveModelSnapshot = {
-  initialized: false,
-  validity: "uninitialized",
-  value: null,
-  regionIds: [],
-};
-
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -163,16 +154,6 @@ function isCodeLinesMarker(
   );
 }
 
-function pathStartsWith(
-  path: readonly (string | number)[],
-  prefix: readonly (string | number)[],
-) {
-  return (
-    prefix.length < path.length &&
-    prefix.every((segment, index) => path[index] === segment)
-  );
-}
-
 function valueAtPath(value: unknown, path: readonly (string | number)[]) {
   let current = value;
   for (const segment of path) {
@@ -182,49 +163,89 @@ function valueAtPath(value: unknown, path: readonly (string | number)[]) {
   return current;
 }
 
-function replaceAtPath(
-  value: unknown,
-  path: readonly (string | number)[],
-  replacement: unknown,
+/**
+ * `source` with a region marker written at each relative path, copying only
+ * the containers on those paths. Deep-cloning every region's subtree (and
+ * then the whole artifact for the root) before writing markers made a
+ * decomposition cost the artifact's size times its depth. `source` is never
+ * mutated. Sheets/presentation regions can address containers that are
+ * optional on the schema (e.g. rowIdentities); missing parents are
+ * materialized so decompose never throws "Cannot set properties of undefined".
+ */
+function withRegionMarkers(
+  source: unknown,
+  markers: ReadonlyArray<readonly [readonly (string | number)[], string]>,
 ) {
-  if (path.length === 0) return replacement;
-  if (value === null || typeof value !== "object") {
-    throw new Error(
-      `ARTIFACT_REGION_PATH_INVALID: cannot write ${path.join("/")} onto a non-object root`,
-    );
-  }
-  let current = value as Record<string | number, unknown>;
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const segment = path[index]!;
-    const nextSegment = path[index + 1]!;
-    const existing = current[segment];
-    if (existing === null || typeof existing !== "object") {
-      // Sheets/presentation regions can address containers that are optional
-      // on the schema (e.g. rowIdentities). Materialize missing parents so
-      // decompose never throws "Cannot set properties of undefined".
-      current[segment] =
-        typeof nextSegment === "number" ||
-        (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
-          ? []
-          : {};
+  if (!markers.length) return source;
+  const owned = new Set<object>();
+  const own = (value: object) => {
+    const copy = Array.isArray(value) ? [...value] : { ...value };
+    owned.add(copy);
+    return copy as Record<string | number, unknown>;
+  };
+  let root = source;
+  for (const [path, regionId] of markers) {
+    if (path.length === 0) {
+      root = marker(regionId);
+      continue;
     }
-    current = current[segment] as Record<string | number, unknown>;
+    if (root === null || typeof root !== "object")
+      throw new Error(
+        `ARTIFACT_REGION_PATH_INVALID: cannot write ${path.join("/")} onto a non-object root`,
+      );
+    if (!owned.has(root)) root = own(root);
+    let current = root as Record<string | number, unknown>;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const segment = path[index]!;
+      const nextSegment = path[index + 1]!;
+      const existing = current[segment];
+      let next: Record<string | number, unknown>;
+      if (existing === null || typeof existing !== "object") {
+        next = (
+          typeof nextSegment === "number" ||
+          (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
+            ? []
+            : {}
+        ) as Record<string | number, unknown>;
+        owned.add(next);
+      } else
+        next = owned.has(existing)
+          ? (existing as Record<string | number, unknown>)
+          : own(existing);
+      current[segment] = next;
+      current = next;
+    }
+    current[path[path.length - 1]!] = marker(regionId);
   }
-  current[path[path.length - 1]!] = replacement;
-  return value;
+  return root;
 }
 
-function nearestAncestor(
-  candidate: SemanticRegion,
-  regions: readonly SemanticRegion[],
-) {
-  return regions
-    .filter(
-      (other) =>
-        other.regionId !== candidate.regionId &&
-        pathStartsWith(candidate.path, other.path),
-    )
-    .sort((left, right) => right.path.length - left.path.length)[0];
+/**
+ * Each region's nearest ancestor (the region whose path is the longest strict
+ * prefix of its own; the first such region wins a tie) and each region's
+ * direct children, in region order. Built from a path index in one pass: the
+ * pairwise scan it replaces cost ~400 ms for a 200-question quiz (3,600
+ * regions), and the studio runs it twice on every keystroke.
+ */
+function regionHierarchy(regions: readonly SemanticRegion[]) {
+  const byPath = new Map<string, SemanticRegion>();
+  for (const region of regions) {
+    const key = JSON.stringify(region.path);
+    if (!byPath.has(key)) byPath.set(key, region);
+  }
+  const ancestors = new Map<string, SemanticRegion | undefined>();
+  const children = new Map<string, SemanticRegion[]>();
+  for (const candidate of regions) {
+    let ancestor: SemanticRegion | undefined;
+    for (let length = candidate.path.length - 1; length >= 0 && !ancestor; length -= 1)
+      ancestor = byPath.get(JSON.stringify(candidate.path.slice(0, length)));
+    ancestors.set(candidate.regionId, ancestor);
+    if (!ancestor) continue;
+    const siblings = children.get(ancestor.regionId);
+    if (siblings) siblings.push(candidate);
+    else children.set(ancestor.regionId, [candidate]);
+  }
+  return { ancestors, children };
 }
 
 export function decomposeArtifactContent(
@@ -239,26 +260,16 @@ export function decomposeArtifactContent(
   const regions = enumerateArtifactRegions(typeKey, parsed);
   const descriptors = new Map<string, StoredArtifactRegionDescriptor>();
   const regionValues = new Map<string, string>();
-  const ancestors = new Map(
-    regions.map((candidate) => [
-      candidate.regionId,
-      nearestAncestor(candidate, regions),
-    ]),
-  );
+  const { ancestors, children } = regionHierarchy(regions);
 
   for (const candidate of regions) {
-    const source = clone(valueAtPath(parsed, candidate.path));
-    const children = regions.filter(
-      (other) => ancestors.get(other.regionId)?.regionId === candidate.regionId,
-    );
-    let template = source;
-    for (const child of children) {
-      template = replaceAtPath(
-        template,
+    const template = withRegionMarkers(
+      valueAtPath(parsed, candidate.path),
+      (children.get(candidate.regionId) ?? []).map((child) => [
         child.path.slice(candidate.path.length),
-        marker(child.regionId),
-      );
-    }
+        child.regionId,
+      ]),
+    );
     const descriptor: StoredArtifactRegionDescriptor = {
       regionId: candidate.regionId,
       kind: candidate.kind,
@@ -273,12 +284,12 @@ export function decomposeArtifactContent(
     regionValues.set(candidate.regionId, encodeRegionValue(template));
   }
 
-  let root = clone(parsed) as unknown;
-  for (const candidate of regions.filter(
-    (entry) => !ancestors.get(entry.regionId),
-  )) {
-    root = replaceAtPath(root, candidate.path, marker(candidate.regionId));
-  }
+  const root = withRegionMarkers(
+    parsed,
+    regions
+      .filter((entry) => !ancestors.get(entry.regionId))
+      .map((entry) => [entry.path, entry.regionId]),
+  );
   return { rootTemplate: JSON.stringify(root), descriptors, regionValues };
 }
 
@@ -469,13 +480,11 @@ function documentDescriptorSignature(value: DecomposedArtifact) {
   } catch {
     // Projection validation reports malformed templates separately.
   }
-  return JSON.stringify(
-    canonicalJsonValue({
-      rootTemplate,
-      descriptors: [...value.descriptors.values()]
-        .sort((left, right) => left.regionId.localeCompare(right.regionId))
-        .map(({ label: _label, ...descriptor }) => descriptor),
-    }),
+  return structureSignature(
+    rootTemplate,
+    [...value.descriptors.values()].map(
+      ({ label: _label, ...descriptor }) => descriptor,
+    ),
   );
 }
 
@@ -529,14 +538,33 @@ function descriptorSignature(value: DecomposedArtifact) {
     // A malformed template is handled by the normal projection validation.
     // Keeping the original string here preserves a deterministic signature.
   }
-  return JSON.stringify(
-    canonicalJsonValue({
-      rootTemplate,
-      descriptors: [...value.descriptors.values()].sort((left, right) =>
-        left.regionId.localeCompare(right.regionId),
-      ),
-    }),
-  );
+  return structureSignature(rootTemplate, [...value.descriptors.values()]);
+}
+
+/**
+ * Descriptors are built by `decomposeArtifactContent` with a fixed key order,
+ * so only their order needs canonicalizing; canonicalizing each of thousands
+ * of descriptors object by object dominated a keystroke's region diff.
+ */
+function structureSignature(
+  rootTemplate: unknown,
+  descriptors: Array<Omit<StoredArtifactRegionDescriptor, "label">>,
+) {
+  return JSON.stringify([
+    canonicalJsonValue(rootTemplate),
+    descriptors.sort((left, right) =>
+      compareCodeUnits(left.regionId, right.regionId),
+    ),
+  ]);
+}
+
+/**
+ * Canonical forms are only ever compared with each other, so any total order
+ * works. Locale collation was the dominant cost of a region signature, and it
+ * can rank two distinct keys as equal, leaving their order to the input.
+ */
+function compareCodeUnits(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function canonicalJsonValue(value: unknown): unknown {
@@ -544,7 +572,7 @@ export function canonicalJsonValue(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
   );
 }
@@ -767,289 +795,6 @@ export function planArtifactYjsMutation(
       for (const mutation of mutations) mutation();
     },
   };
-}
-
-export class ArtifactYjsModel {
-  private readonly metadata: Y.Map<unknown>;
-  private readonly regions: Y.Map<string>;
-  private readonly descriptors: Y.Map<string>;
-  private readonly listeners = new Set<() => void>();
-  private snapshot: ArtifactLiveModelSnapshot = UNINITIALIZED_SNAPSHOT;
-  private readonly refresh: () => void;
-  private destroyed = false;
-
-  constructor(
-    private readonly typeKey: ArtifactTypeKey,
-    private readonly transport: ArtifactCollaborationTransport,
-  ) {
-    this.metadata = transport.document.getMap(ARTIFACT_YJS_META_MAP);
-    this.regions = transport.document.getMap(ARTIFACT_YJS_REGION_MAP);
-    this.descriptors = transport.document.getMap(ARTIFACT_YJS_DESCRIPTOR_MAP);
-    this.refresh = () => this.rebuildSnapshot();
-    this.metadata.observe(this.refresh);
-    this.regions.observe(this.refresh);
-    this.descriptors.observe(this.refresh);
-    this.rebuildSnapshot();
-  }
-
-  getSnapshot = () => this.snapshot;
-
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-
-  destroy() {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    // React tears down the transport and the live model through independent
-    // effects. If the Y.Doc closed first, Yjs already removed every observer;
-    // calling unobserve again produces a noisy error for each artifact map.
-    if (!this.transport.document.isDestroyed) {
-      this.metadata.unobserve(this.refresh);
-      this.regions.unobserve(this.refresh);
-      this.descriptors.unobserve(this.refresh);
-    }
-    this.listeners.clear();
-  }
-
-  private emit() {
-    for (const listener of this.listeners) listener();
-  }
-
-  private rebuildSnapshot() {
-    if (this.metadata.get("initialized") !== true) {
-      this.snapshot = UNINITIALIZED_SNAPSHOT;
-      this.emit();
-      return;
-    }
-    try {
-      if (this.metadata.get("typeKey") !== this.typeKey)
-        throw new Error("ARTIFACT_TYPE_MISMATCH");
-      const rootTemplate = this.metadata.get("rootTemplate");
-      if (typeof rootTemplate !== "string")
-        throw new Error("ARTIFACT_ROOT_TEMPLATE_MISSING");
-      const content = coerceArtifactContent(
-        this.typeKey,
-        recomposeArtifactContent(rootTemplate, new Map(this.regions.entries())),
-      );
-      const validation = validateArtifactContent(this.typeKey, content);
-      if (!validation.success)
-        throw new Error(
-          validation.error.issues[0]?.message || "Artifact content is invalid.",
-        );
-      const title = this.metadata.get("title");
-      const summary = this.metadata.get("summary");
-      const tags = this.metadata.get("tags");
-      if (
-        typeof title !== "string" ||
-        !Array.isArray(tags) ||
-        !tags.every((tag) => typeof tag === "string")
-      ) {
-        throw new Error("ARTIFACT_METADATA_INVALID");
-      }
-      this.snapshot = {
-        initialized: true,
-        validity: "valid",
-        value: {
-          title,
-          ...(typeof summary === "string" && summary ? { summary } : {}),
-          tags,
-          content: validation.data,
-        },
-        regionIds: [...this.regions.keys()].sort(),
-      };
-    } catch (error) {
-      this.snapshot = {
-        initialized: true,
-        validity: "invalid",
-        value: null,
-        regionIds: [...this.regions.keys()].sort(),
-        error:
-          error instanceof Error
-            ? error.message
-            : "Artifact live state is invalid.",
-      };
-    }
-    this.emit();
-  }
-
-  private writeComplete(
-    value: ArtifactLiveValue,
-    decomposed: DecomposedArtifact,
-  ) {
-    this.metadata.set("modelVersion", MODEL_VERSION);
-    this.metadata.set("typeKey", this.typeKey);
-    this.metadata.set(
-      "schemaVersion",
-      requireArtifactTypeManifest(this.typeKey).schemas.currentVersion,
-    );
-    this.metadata.set("title", value.title);
-    this.metadata.set("summary", value.summary ?? "");
-    this.metadata.set("tags", [...value.tags]);
-    this.metadata.set("rootTemplate", decomposed.rootTemplate);
-    for (const key of [...this.descriptors.keys()])
-      if (!decomposed.descriptors.has(key)) this.descriptors.delete(key);
-    for (const key of [...this.regions.keys()])
-      if (!decomposed.regionValues.has(key)) this.regions.delete(key);
-    for (const [regionId, descriptor] of decomposed.descriptors)
-      this.descriptors.set(regionId, JSON.stringify(descriptor));
-    for (const [regionId, encoded] of decomposed.regionValues)
-      this.regions.set(regionId, encoded);
-    this.metadata.set("initialized", true);
-  }
-
-  async initialize(
-    value: ArtifactLiveValue,
-    controller: ArtifactRegionController,
-  ) {
-    if (this.snapshot.initialized)
-      return {
-        applied: false as const,
-        reason: "already_initialized" as const,
-      };
-    const nextValue =
-      this.typeKey === "whiteboard"
-        ? {
-            ...value,
-            content: coerceArtifactContent(this.typeKey, value.content),
-          }
-        : value;
-    const decomposed = decomposeArtifactContent(
-      this.typeKey,
-      nextValue.content,
-    );
-    const result = await controller.edit(
-      "artifact:structure",
-      ["artifact:structure"],
-      () => {
-        if (this.metadata.get("initialized") === true) return;
-        this.writeComplete(nextValue, decomposed);
-      },
-    );
-    return result.applied
-      ? { applied: true as const }
-      : {
-          applied: false as const,
-          reason: "conflict" as const,
-          claim: result.claim,
-        };
-  }
-
-  descriptor(regionId: string): StoredArtifactRegionDescriptor | null {
-    const encoded = this.descriptors.get(regionId);
-    if (!encoded) return null;
-    return JSON.parse(encoded) as StoredArtifactRegionDescriptor;
-  }
-
-  async replaceRegion(
-    regionId: string,
-    value: unknown,
-    controller: ArtifactRegionController,
-  ) {
-    const descriptor = this.descriptor(regionId);
-    if (!descriptor) throw new Error(`ARTIFACT_REGION_UNKNOWN: ${regionId}`);
-    return controller.edit(regionId, [descriptor.overlapDomain], () => {
-      this.regions.set(regionId, encodeRegionValue(value));
-    });
-  }
-
-  async replaceMetadata(
-    field: "title" | "summary" | "tags",
-    value: string | string[],
-    controller: ArtifactRegionController,
-  ) {
-    const regionId = `metadata:${field}`;
-    return controller.edit(regionId, [regionId], () =>
-      this.metadata.set(field, Array.isArray(value) ? [...value] : value),
-    );
-  }
-
-  async replaceSnapshot(
-    value: ArtifactLiveValue,
-    controller: ArtifactRegionController,
-  ) {
-    const next = decomposeArtifactContent(this.typeKey, value.content);
-    const currentRoot = this.metadata.get("rootTemplate");
-    const currentDescriptors = new Map<
-      string,
-      StoredArtifactRegionDescriptor
-    >();
-    for (const [regionId, encoded] of this.descriptors)
-      currentDescriptors.set(
-        regionId,
-        JSON.parse(encoded) as StoredArtifactRegionDescriptor,
-      );
-    const current: DecomposedArtifact = {
-      rootTemplate: typeof currentRoot === "string" ? currentRoot : "null",
-      descriptors: currentDescriptors,
-      regionValues: new Map(this.regions.entries()),
-    };
-    if (descriptorSignature(current) !== descriptorSignature(next)) {
-      return controller.edit("artifact:structure", ["artifact:structure"], () =>
-        this.writeComplete(value, next),
-      );
-    }
-
-    const claimedRegions: Array<{
-      regionId: string;
-      overlapDomains: string[];
-    }> = [];
-    const mutations: Array<() => void> = [];
-    for (const [regionId, encoded] of next.regionValues) {
-      if (this.regions.get(regionId) === encoded) continue;
-      const descriptor = next.descriptors.get(regionId)!;
-      claimedRegions.push({
-        regionId,
-        overlapDomains: [descriptor.overlapDomain],
-      });
-      mutations.push(() => this.regions.set(regionId, encoded));
-    }
-    if (this.metadata.get("title") !== value.title) {
-      claimedRegions.push({
-        regionId: "metadata:title",
-        overlapDomains: ["metadata:title"],
-      });
-      mutations.push(() => this.metadata.set("title", value.title));
-    }
-    if (this.metadata.get("summary") !== (value.summary ?? "")) {
-      claimedRegions.push({
-        regionId: "metadata:summary",
-        overlapDomains: ["metadata:summary"],
-      });
-      mutations.push(() => this.metadata.set("summary", value.summary ?? ""));
-    }
-    if (
-      JSON.stringify(this.metadata.get("tags")) !== JSON.stringify(value.tags)
-    ) {
-      claimedRegions.push({
-        regionId: "metadata:tags",
-        overlapDomains: ["metadata:tags"],
-      });
-      mutations.push(() => this.metadata.set("tags", [...value.tags]));
-    }
-    if (claimedRegions.length === 0)
-      return { applied: true as const, claims: [] };
-    return controller.editMany(claimedRegions, () => {
-      for (const mutation of mutations) mutation();
-    });
-  }
-
-  async replaceRegionsFromSnapshot(
-    value: ArtifactLiveValue,
-    regionIds: readonly string[],
-    controller: ArtifactRegionController,
-  ) {
-    const selected = [...new Set(regionIds)];
-    if (selected.length === 0) return { applied: true as const, claims: [] };
-    if (selected.includes("artifact:structure")) {
-      return controller.edit("artifact:structure", ["artifact:structure"], () =>
-        this.writeComplete(value, decomposeArtifactContent(this.typeKey, value.content)),
-      );
-    }
-    const plan = planArtifactYjsRestore(this.transport.document, this.typeKey, value, selected);
-    return controller.editMany(plan.regions, plan.apply);
-  }
 }
 
 /** Prepare a restore without changing the document. Server admission can use

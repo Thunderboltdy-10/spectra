@@ -227,6 +227,8 @@ import {
   rebaseCollaborativeSnapshot,
   draftContentForLiveWrite,
   createStudioHistory,
+  rememberLocalSyncKey,
+  setAtPointers,
   studioHistoryShortcut,
   studioIncomingSource,
   tagsFromDraft,
@@ -420,28 +422,6 @@ function valueAtPointer(value: unknown, path: string) {
   return current;
 }
 
-function setAtPointer(target: unknown, path: string, value: unknown) {
-  const segments = pointerSegments(path);
-  if (segments.length === 0) return structuredClone(value);
-  const root =
-    target && typeof target === "object" ? structuredClone(target) : {};
-  let current = root as Record<string, unknown>;
-  for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index]!;
-    const nextSegment = segments[index + 1]!;
-    const existing = current[segment];
-    current[segment] =
-      existing && typeof existing === "object"
-        ? existing
-        : /^\d+$/.test(nextSegment)
-          ? []
-          : {};
-    current = current[segment] as Record<string, unknown>;
-  }
-  current[segments.at(-1)!] = structuredClone(value);
-  return root;
-}
-
 const ARTIFACT_LIVE_METADATA_POINTERS = new Set([
   "/title",
   "/summary",
@@ -475,9 +455,9 @@ function mergeAiRegions(
 ) {
   if (preview === undefined) return local;
   if (!changedPaths.length || changedPaths.includes("/")) return preview;
-  return changedPaths.reduce(
-    (next, path) => setAtPointer(next, path, valueAtPointer(preview, path)),
+  return setAtPointers(
     local,
+    changedPaths.map((path) => [path, valueAtPointer(preview, path)] as const),
   );
 }
 
@@ -3187,9 +3167,6 @@ function ArtifactStudioEditor({
   const [syncBusy, setSyncBusy] = useState(false);
   const [liveConflict, setLiveConflict] = useState<{
     message: string;
-    claimId?: string;
-    regionId?: string;
-    queuePosition?: number;
   } | null>(null);
   const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<
     "download" | "materialize" | null
@@ -3564,7 +3541,7 @@ function ArtifactStudioEditor({
       };
       const key = snapshotKey(titled);
       syncingRef.current = true;
-      localSyncKeysRef.current.add(key);
+      rememberLocalSyncKey(localSyncKeysRef.current, key);
       setSyncBusy(true);
       setLiveConflict(null);
       try {
@@ -3613,25 +3590,14 @@ function ArtifactStudioEditor({
         // React snapshot over that live body: the snapshot can lag the editor
         // by a render while the user types and would turn a title change into a
         // false structural rewrite.
-        const result =
+        if (
           (artifact.blueprintKey === "document" ||
             artifact.blueprintKey === "code") &&
           live.modelSnapshot.initialized &&
           !nativeFallbackEditedRef.current
-            ? await live.synchronizeMetadata(nextLiveValue)
-            : await live.synchronize(nextLiveValue);
-        if (result && "applied" in result && result.applied === false) {
-          localSyncKeysRef.current.delete(key);
-          const claim = "claim" in result ? result.claim : undefined;
-          setLiveConflict({
-            message:
-              "This region is being edited by another collaborator. Your draft is preserved and queued without overwriting their work.",
-            claimId: claim?.claimId,
-            regionId: claim?.conflict?.regionId,
-            queuePosition: claim?.conflict?.queuePosition,
-          });
-          return false;
-        }
+        )
+          await live.synchronizeMetadata(nextLiveValue);
+        else await live.synchronize(nextLiveValue);
         const acknowledgedValue =
           live.flushSnapshot?.() ?? live.model?.getSnapshot().value;
         if (acknowledgedValue) {
@@ -3656,7 +3622,10 @@ function ArtifactStudioEditor({
             tagDraft: acknowledgedValue.tags.join(", "),
             content: acknowledgedContent,
           };
-          localSyncKeysRef.current.add(snapshotKey(acknowledged));
+          rememberLocalSyncKey(
+            localSyncKeysRef.current,
+            snapshotKey(acknowledged),
+          );
           // Region decomposition may normalize IDs/defaults while applying an
           // otherwise identical draft (notably code line IDs). Reconcile to
           // the locally acknowledged Yjs value so byte-level normalization
@@ -3832,21 +3801,14 @@ function ArtifactStudioEditor({
   ]);
   const presencePreview = useMemo(() => {
     if (!activeAiPresence || activeAiPreviewPatches.length === 0) return null;
-    let next: {
-      title: string;
-      summary: string;
-      tags: string[];
-      content: unknown;
-    } = {
-      title,
-      summary,
-      tags: tagsFromDraft(tagDraft),
-      content,
-    };
+    const next = setAtPointers(
+      { title, summary, tags: tagsFromDraft(tagDraft), content },
+      activeAiPreviewPatches.map(
+        (patch) => [livePreviewOuterPointer(patch.path), patch.value] as const,
+      ),
+    ) as { title: string; summary: string; tags: string[]; content: unknown };
     const paths: string[] = [];
     for (const patch of activeAiPreviewPatches) {
-      const outerPointer = livePreviewOuterPointer(patch.path);
-      next = setAtPointer(next, outerPointer, patch.value) as typeof next;
       const contentPointer = livePreviewContentPointer(patch.path);
       if (contentPointer) paths.push(contentPointer);
     }
@@ -4493,18 +4455,18 @@ function ArtifactStudioEditor({
    */
   const editorContent = useMemo(() => {
     if (remoteSpeculation.size === 0) return durableEditorContent;
-    let next: unknown = durableEditorContent;
     let documentBlocksAreSpeculative = false;
+    const patches: Array<readonly [string, unknown]> = [];
     for (const [pointer, value] of remoteSpeculation) {
       const contentPointer = livePreviewContentPointer(pointer);
       if (!contentPointer) continue;
       if (/^\/blocks(?:\/|$)/.test(contentPointer))
         documentBlocksAreSpeculative = true;
-      next =
-        contentPointer === "/"
-          ? (value ?? next)
-          : setAtPointer(next, contentPointer, value);
+      // A whole-content frame with no value keeps what is already layered.
+      if (contentPointer === "/" && value == null) continue;
+      patches.push([contentPointer, value]);
     }
+    const next = setAtPointers(durableEditorContent, patches);
     if (
       artifact.blueprintKey === "document" &&
       documentBlocksAreSpeculative &&
@@ -4827,10 +4789,6 @@ function ArtifactStudioEditor({
         ...live.liveValue,
         summary: expected,
       })
-      .then((result) => {
-        if (result && "applied" in result && result.applied === false)
-          generatedSummaryRepairRef.current = null;
-      })
       .catch(() => {
         generatedSummaryRepairRef.current = null;
       });
@@ -5130,7 +5088,6 @@ function ArtifactStudioEditor({
       // Speculative AI previews must never freeze human region sync. Peers
       // render AI frames via awareness; durable Yjs writes remain region-
       // scoped and only claim the blocks the human actually changed.
-      liveConflict?.claimId ||
       syncBusy ||
       ((artifact.blueprintKey === "document" ||
         artifact.blueprintKey === "code") &&
@@ -5437,9 +5394,6 @@ function ArtifactStudioEditor({
   // The scrollport's padding lives in CSS so one rule can reserve room for the
   // fixed composer for every type at once (`--spectra-composer-safe-area`).
   const mainClass = "min-h-0 flex-1";
-  const liveConflictLabel = liveConflict?.regionId
-    ? liveDescriptor(liveConflict.regionId)?.label
-    : undefined;
   const currentAccountId = live.accountId;
   const commentRegions = useMemo<ArtifactCommentRegion[]>(() => {
     const semantic = live.modelSnapshot.regionIds.map((regionId) => {
@@ -6074,16 +6028,12 @@ function ArtifactStudioEditor({
         <div className="relative z-dropdown h-0 shrink-0">
           <DismissibleArtifactNotice
             artifactId={artifact._id}
-            identity={`${liveConflict.regionId ?? ""}:${liveConflict.message}`}
+            identity={liveConflict.message}
             role="alert"
             className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
           >
             <span className="min-w-0 flex-1">
               {liveConflict.message}
-              {liveConflictLabel ? ` · ${liveConflictLabel}` : ""}
-              {liveConflict.queuePosition
-                ? ` · Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
-                : ""}
             </span>
             <button
               type="button"

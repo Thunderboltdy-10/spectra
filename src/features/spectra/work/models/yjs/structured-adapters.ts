@@ -380,6 +380,51 @@ function sheetIdentityMapsCompatible(
   return true;
 }
 
+const normalizedSheetsByValue = new WeakMap<object, SheetsContent>();
+
+/**
+ * Artifact values are immutable (React state, Yjs projections, parsed JSON),
+ * so one normalization per value object is enough. A cell commit used to
+ * normalize both sides of every comparison: the studio's region lookup and the
+ * live write each re-normalized the previous value they had just produced.
+ */
+function normalizedSheetsContent(value: unknown) {
+  if (!value || typeof value !== "object") return normalizeSheetsContent(value);
+  let normalized = normalizedSheetsByValue.get(value);
+  if (!normalized) {
+    normalized = normalizeSheetsContent(value);
+    normalizedSheetsByValue.set(value, normalized);
+  }
+  return normalized;
+}
+
+function rawSheetCells(value: unknown) {
+  const sheets = isRecord(value) && Array.isArray(value.sheets) ? value.sheets : null;
+  return sheets?.map((sheet) =>
+    isRecord(sheet) && isRecord(sheet.cells) ? sheet.cells : undefined,
+  );
+}
+
+/**
+ * The studio writes a cell as an overlay of the previous cells record.
+ * Normalization rebuilds every record, which erased that hint, so each plan
+ * compared all cells. Read it from the raw values instead: normalization is a
+ * per-cell function of the raw cell and the workbook's date system (compared
+ * separately), so cells the overlay leaves untouched normalize identically.
+ */
+function rawChangedSheetAddresses(
+  before: Array<Record<string, unknown> | undefined> | undefined,
+  after: Array<Record<string, unknown> | undefined> | undefined,
+  index: number,
+) {
+  if (!before || !after || before.length !== after.length) return null;
+  const previous = before[index];
+  const next = after[index];
+  if (!previous || !next) return null;
+  const hinted = changedSheetCellAddresses(previous, next);
+  return hinted ? [...new Set(hinted.map((address) => address.toUpperCase()))] : null;
+}
+
 /**
  * Returns a cell-only plan when workbook and sheet structure are unchanged.
  * Structural changes deliberately fall back to the adapter's complete
@@ -390,8 +435,10 @@ export function planSheetsCellProjection(
   before: unknown,
   after: unknown,
 ): SheetsCellProjectionPlan | null {
-  const previous = normalizeSheetsContent(before);
-  const content = normalizeSheetsContent(after);
+  const previous = normalizedSheetsContent(before);
+  const content = normalizedSheetsContent(after);
+  const rawBefore = rawSheetCells(before);
+  const rawAfter = rawSheetCells(after);
   if (
     previous.activeSheetId !== content.activeSheetId ||
     !plainEqual(previous.workbook, content.workbook) ||
@@ -432,7 +479,9 @@ export function planSheetsCellProjection(
       )
     )
       return null;
-    const hinted = changedSheetCellAddresses(previousCells, nextCells);
+    const hinted =
+      rawChangedSheetAddresses(rawBefore, rawAfter, index) ??
+      changedSheetCellAddresses(previousCells, nextCells);
     const addresses = hinted
       ? hinted
       : [

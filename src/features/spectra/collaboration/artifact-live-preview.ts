@@ -97,18 +97,42 @@ function collectStringChanges(
   return [];
 }
 
-function setAtPath(
-  value: unknown,
+/**
+ * `root` with the string at `path` replaced. Only the containers on that path
+ * are copied; everything else is shared, and `root` itself is never written.
+ * A missing parent leaves `root` unchanged.
+ */
+function withStringAt(
+  root: unknown,
   path: readonly (string | number)[],
   next: string,
-) {
-  let current = value;
-  for (const segment of path.slice(0, -1)) {
-    if (!current || typeof current !== "object") return;
+): unknown {
+  const containers: unknown[] = [];
+  let current = root;
+  for (const segment of path) {
+    if (!current || typeof current !== "object") return root;
+    containers.push(current);
     current = (current as Record<string | number, unknown>)[segment];
   }
-  if (!current || typeof current !== "object") return;
-  (current as Record<string | number, unknown>)[path.at(-1)!] = next;
+  let child: unknown = next;
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    const container = containers[index] as object;
+    const copy = (
+      Array.isArray(container) ? [...(container as unknown[])] : { ...container }
+    ) as Record<string | number, unknown>;
+    copy[path[index]!] = child;
+    child = copy;
+  }
+  return child;
+}
+
+function stringAt(root: unknown, path: readonly (string | number)[]) {
+  let current = root;
+  for (const segment of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string | number, unknown>)[segment];
+  }
+  return current;
 }
 
 /**
@@ -284,15 +308,21 @@ export function buildArtifactLivePreviewFrames(
       : [structuredClone(after)];
   }
 
+  // Frames share every untouched subtree with `before` and with each other
+  // (they are read-only snapshots). Cloning and serializing the whole value
+  // for every typed prefix cost ~190 ms for five edits on a 1,000-object
+  // board, and made each later frame diff walk the entire artifact.
   const frames: ArtifactLiveValue[] = [];
-  const current = structuredClone(before) as ArtifactLiveValue;
-  let previousKey = JSON.stringify(current);
+  let current: unknown = before;
+  let lastPushed: unknown = before;
 
-  const pushFrame = (value: ArtifactLiveValue) => {
-    const key = JSON.stringify(value);
-    if (key === previousKey) return;
-    frames.push(value);
-    previousKey = key;
+  // Every candidate is `current` with one string changed at `path`, and the
+  // last pushed frame differs from `current` at most at that same kind of
+  // leaf, so comparing the string at `path` is the whole-value comparison.
+  const pushFrame = (value: unknown, path: readonly (string | number)[]) => {
+    if (stringAt(value, path) === stringAt(lastPushed, path)) return;
+    frames.push(value as ArtifactLiveValue);
+    lastPushed = value;
   };
 
   for (const change of changes) {
@@ -302,22 +332,14 @@ export function buildArtifactLivePreviewFrames(
       change.before,
       change.after,
     );
-    if (rewriteFrames.length === 0) {
-      setAtPath(current, change.path, change.after);
-      pushFrame(structuredClone(current) as ArtifactLiveValue);
-      continue;
-    }
-    for (const nextText of rewriteFrames) {
-      const value = structuredClone(current) as ArtifactLiveValue;
-      setAtPath(value, change.path, nextText);
-      pushFrame(value);
-    }
-    setAtPath(current, change.path, change.after);
-    pushFrame(structuredClone(current) as ArtifactLiveValue);
+    for (const nextText of rewriteFrames)
+      pushFrame(withStringAt(current, change.path, nextText), change.path);
+    current = withStringAt(current, change.path, change.after);
+    pushFrame(current, change.path);
   }
 
-  const finalKey = JSON.stringify(after);
-  if (finalKey !== previousKey) frames.push(structuredClone(after));
+  if (JSON.stringify(after) !== JSON.stringify(lastPushed))
+    frames.push(structuredClone(after));
   return frames;
 }
 

@@ -108,4 +108,48 @@ describe("whiteboard undo with collaborators", () => {
     expect(nodeText(harness.content, "mine")).toBe("Mine");
     expect(nodeText(harness.content, "theirs")).toBe("Theirs, edited");
   });
+
+  it("undoes a drag without reverting a collaborator's edit made during it", async () => {
+    const harness: Harness = { content: null, setContent: () => {} };
+    render(<Host harness={harness} />);
+    Element.prototype.setPointerCapture ??= () => {};
+    const mine = screen.getAllByRole("textbox").find((element) => (element as HTMLTextAreaElement).value === "Mine")!;
+    const node = mine.closest(".whiteboard-node") as HTMLElement;
+    const canvas = document.querySelector(".whiteboard-canvas") as HTMLElement;
+    const nodeX = (id: string) =>
+      normalizeWhiteboardContent(harness.content).nodes.find((item) => item.id === id)!.x;
+    fireEvent.pointerDown(node, { pointerId: 7, button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 7, clientX: 160, clientY: 100 });
+    act(() => {
+      const board = normalizeWhiteboardContent(harness.content);
+      harness.setContent({
+        ...board,
+        nodes: board.nodes.map((item) => (item.id === "theirs" ? { ...item, content: { text: "Theirs, edited" } } : item)),
+      });
+    });
+    fireEvent.pointerMove(canvas, { pointerId: 7, clientX: 220, clientY: 100 });
+    fireEvent.pointerUp(canvas, { pointerId: 7, clientX: 220, clientY: 100 });
+    expect(nodeX("mine")).not.toBe(40);
+    await act(async () => {
+      fireEvent.keyDown(canvas, { key: "z", ctrlKey: true });
+    });
+    expect(nodeX("mine")).toBe(40);
+    expect(nodeText(harness.content, "theirs")).toBe("Theirs, edited");
+  });
+
+  it("undoes a sticky typing session as one step", async () => {
+    const harness: Harness = { content: null, setContent: () => {} };
+    render(<Host harness={harness} />);
+    const mine = screen.getAllByRole("textbox").find((element) => (element as HTMLTextAreaElement).value === "Mine")!;
+    fireEvent.doubleClick(mine);
+    fireEvent.focus(mine);
+    for (const value of ["Mine!", "Mine!!", "Mine!!!"]) fireEvent.change(mine, { target: { value } });
+    fireEvent.blur(mine);
+    expect(nodeText(harness.content, "mine")).toBe("Mine!!!");
+    const canvas = document.querySelector(".whiteboard-canvas") as HTMLElement;
+    await act(async () => {
+      fireEvent.keyDown(canvas, { key: "z", ctrlKey: true });
+    });
+    expect(nodeText(harness.content, "mine")).toBe("Mine");
+  });
 });

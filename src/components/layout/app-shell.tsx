@@ -84,6 +84,7 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
+import { sidebarThreadSections } from "./sidebar-threads";
 import {
   buildShellNotifications,
   reviewShareInvitations,
@@ -156,6 +157,16 @@ function ShellNavigation() {
   const workspaces = workspaceCatalog.items;
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [threadsLoaded, setThreadsLoaded] = useState(false);
+  const activeThreadId = searchParams.get("threadId");
+  const threadSections = useMemo(
+    () =>
+      sidebarThreadSections(threads, {
+        term: sidebarSearch,
+        chatPage: pathname === "/chat",
+      }),
+    [threads, sidebarSearch, pathname],
+  );
   const [isMacPlatform, setIsMacPlatform] = useState(false);
   const [preferredSidebarCollapsed, setPreferredSidebarCollapsed] =
     useState(false);
@@ -282,8 +293,9 @@ function ShellNavigation() {
     const refresh = () => {
       void getSpectraThreads()
         .then(({ threads: rows }) => {
-          if (active)
-            setThreads(rows.filter((thread) => thread.status === "active"));
+          if (!active) return;
+          setThreads(rows.filter((thread) => thread.status === "active"));
+          setThreadsLoaded(true);
         })
         .catch(() => undefined);
     };
@@ -651,16 +663,7 @@ function ShellNavigation() {
         >
           {sidebarCollapsed
             ? null
-            : ([true, false] as const).map((pinned) => {
-                const term = sidebarSearch.trim().toLowerCase();
-                const rows = threads
-                  .filter(
-                    (thread) =>
-                      Boolean(thread.pinned) === pinned &&
-                      (!term || thread.title.toLowerCase().includes(term)),
-                  )
-                  .slice(0, pinned ? 5 : 10);
-                if (!rows.length) return null;
+            : threadSections.map(({ pinned, rows }) => {
                 return (
                   <section key={String(pinned)} className="mt-3">
                     <h2 className="flex items-center justify-between px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
@@ -673,6 +676,7 @@ function ShellNavigation() {
                           key={thread._id}
                           href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
                           prefetch={false}
+                          aria-current={pathname === "/chat" && activeThreadId === thread._id ? "page" : undefined}
                           className={cn("group flex items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]", pathname === "/chat" ? "min-h-10 py-1" : "h-8")}
                         >
                           <span className="min-w-0 flex-1 truncate">
@@ -694,6 +698,13 @@ function ShellNavigation() {
                   </section>
                 );
               })}
+          {!sidebarCollapsed && threadsLoaded && threadSections.length === 0 ? (
+            <p className="mt-3 px-1 text-micro leading-4 text-[var(--text-tertiary)]">
+              {sidebarSearch.trim()
+                ? `No recent chats match “${sidebarSearch.trim()}”.`
+                : "Your chats will appear here. Start one with New chat."}
+            </p>
+          ) : null}
         </div>
         <div
           className={cn(

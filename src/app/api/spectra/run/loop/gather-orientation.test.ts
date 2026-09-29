@@ -37,7 +37,7 @@ describe("initial context orientation", () => {
     "does not discover workspace state based on the wording of %j", async (prompt) => {
       const context = await buildContext("actor", {}, prompt, { mode: "orientation" });
       expect(query).not.toHaveBeenCalled();
-      expect(act).not.toHaveBeenCalled();
+      expect(act.mock.calls.map(([name]) => name)).toEqual(["memory:contextForRun"]);
       expect(live).not.toHaveBeenCalled();
       expect(context.artifacts).toEqual([]);
       expect(context.packet.contextMode).toBe("orientation");
@@ -53,7 +53,7 @@ describe("initial context orientation", () => {
     expect(context.currentWorkspace).toMatchObject({ id: "workspace", title: "Chemistry" });
     expect(JSON.stringify(context)).not.toContain("EDITOR BODY");
     expect(query.mock.calls.map(([name]) => name).sort()).toEqual(["spectraContext:getArtifact", "spectraContext:getWorkspace"]);
-    expect(act).not.toHaveBeenCalled();
+    expect(act.mock.calls.map(([name]) => name)).toEqual(["memory:contextForRun"]);
     expect(live).not.toHaveBeenCalled();
   });
 
@@ -85,9 +85,9 @@ describe("initial context orientation", () => {
       "Rewrite this guide's introduction", { mode: "orientation", hydrateTargets: true });
     expect(context.focusedArtifact).toMatchObject({ id: artifactId, content: contents.content });
     expect(context.packet.contextMode).toBe("orientation");
-    expect(context.packet.omitted).toMatchObject({ artifactContents: false, workspaceDiscovery: true, memoryRetrieval: true });
+    expect(context.packet.omitted).toMatchObject({ artifactContents: false, workspaceDiscovery: true });
     expect(query.mock.calls.map(([name]) => name).sort()).toEqual(["spectraArtifacts:get", "spectraContext:getWorkspace"]);
-    expect(act).not.toHaveBeenCalled();
+    expect(act.mock.calls.map(([name]) => name)).toEqual(["memory:contextForRun"]);
     expect(live).toHaveBeenCalledTimes(1);
   });
 
@@ -100,7 +100,7 @@ describe("initial context orientation", () => {
     expect(context.packet.activeGoal).toMatchObject({ request: "Revise the guide and preserve the practice questions." });
     expect(context.focusedArtifact).toMatchObject({ id: artifactId });
     expect(context.currentThreadId).toBe("current-thread");
-    expect(act).not.toHaveBeenCalled();
+    expect(act.mock.calls.map(([name]) => name)).toEqual(["memory:contextForRun"]);
   });
 
   it("references the full restored user request instead of overriding it with an old goal excerpt", async () => {
@@ -141,5 +141,39 @@ describe("initial context orientation", () => {
     expect(act).toHaveBeenCalled();
     expect(live).toHaveBeenCalled();
     expect(context.packet.contextMode).toBe("expanded");
+  });
+});
+
+describe("saved memory reaches every run", () => {
+  const memory = {
+    enabled: true, text: "The student is in grade 11 and prefers British spelling.",
+    claims: [{ id: "claim-1", text: "Prefers British spelling" }], selectedClaimIds: ["claim-1"],
+  };
+
+  it("supplies permission-bound memory in orientation, where the model is told it was supplied", async () => {
+    act.mockImplementation(async (name: string) => name === "memory:contextForRun" ? memory : null);
+    const context = await buildContext("actor", { workspaceId: "workspace" }, "Write my essay intro", { mode: "orientation" });
+    expect(act).toHaveBeenCalledWith("memory:contextForRun", expect.objectContaining({
+      actorClerkId: "actor", queryText: "Write my essay intro", workspaceId: "workspace",
+    }));
+    expect(context.packet.longTermMemory).toMatchObject({ text: memory.text });
+    expect(context.memoryRetrieval).toMatchObject({ selectedClaimIds: ["claim-1"] });
+    expect(context.packet.omitted).not.toHaveProperty("memoryRetrieval");
+  });
+
+  it("shares one memory read between parallel builds of the same run", async () => {
+    const shared = Promise.resolve(memory);
+    const [plain, hydrated] = await Promise.all([
+      buildContext("actor", { artifactId }, "Rewrite this", { mode: "orientation", memory: shared }),
+      buildContext("actor", { artifactId }, "Rewrite this", { mode: "orientation", hydrateTargets: true, memory: shared }),
+    ]);
+    expect(act).not.toHaveBeenCalled();
+    expect(plain.packet.longTermMemory).toMatchObject({ text: memory.text });
+    expect(hydrated.packet.longTermMemory).toMatchObject({ text: memory.text });
+  });
+
+  it("still runs when memory is unavailable", async () => {
+    const context = await buildContext("actor", {}, "Hello", { mode: "orientation", memory: Promise.reject(new Error("down")) });
+    expect(context.packet.longTermMemory).toBeNull();
   });
 });

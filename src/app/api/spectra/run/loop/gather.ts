@@ -169,6 +169,29 @@ export async function gatherResolvedArtifactContext(
   );
 }
 
+/**
+ * The user's saved, permission-bound memory for this request. Every run gets
+ * it up front: the model is told it has "supplied" memory and to call
+ * retrieve_memory only when that is insufficient, so leaving it out meant a
+ * saved preference ("I am in grade 11", "use British spelling") was ignored
+ * unless the model happened to go looking.
+ */
+export function readRunMemory(
+  actorClerkId: string,
+  body: { workspaceId?: string; artifactId?: string },
+  prompt: string,
+): Promise<unknown> {
+  // Memory is supporting context: an unavailable read must never fail the run.
+  return Promise.resolve()
+    .then(() => act<unknown & object, unknown>("memory:contextForRun", {
+      actorClerkId,
+      queryText: prompt,
+      workspaceId: body.workspaceId,
+      artifactId: body.artifactId,
+    }))
+    .then((value) => value ?? null, () => null);
+}
+
 export async function buildContext(
   actorClerkId: string,
   body: Pick<
@@ -200,6 +223,8 @@ export async function buildContext(
     hydrateTargets?: boolean;
     /** Server-restored intent already composed in full into the prompt. */
     restoredGoal?: { originalRequest: string; clarificationResponses: string[] };
+    /** A memory read already started for this run (shared by parallel builds). */
+    memory?: Promise<unknown>;
   } = {},
 ) {
   const expanded = options.mode !== "orientation";
@@ -362,14 +387,7 @@ export async function buildContext(
           limit: 8,
         }).catch(() => [])
       : Promise.resolve([]),
-    !expanded
-      ? Promise.resolve(null)
-      : act<unknown & object, unknown>("memory:contextForRun", {
-          actorClerkId,
-          queryText: prompt,
-          workspaceId: body.workspaceId,
-          artifactId: body.artifactId,
-        }).catch(() => null),
+    options.memory?.catch(() => null) ?? readRunMemory(actorClerkId, body, prompt),
     expanded && body.scopeNodeId
       ? query<unknown & object, unknown>("orgTree:subtree", {
           actorClerkId,
@@ -1021,7 +1039,7 @@ export async function buildContext(
       contextMode: expanded ? "expanded" : "orientation",
       omitted: {
         ...contextPacket.omitted,
-        ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true, memoryRetrieval: true }),
+        ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true }),
       },
     },
     memoryRetrieval:

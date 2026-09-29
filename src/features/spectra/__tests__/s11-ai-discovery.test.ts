@@ -89,6 +89,7 @@ describe("authenticated discovery and compact context", () => {
     const context = await buildContext("actor", {}, "Hello", { mode: "orientation" });
     await gatherPlanReferenceContext("actor", context, parseSpectraPlan({ decision: "answer", operations: [], finalResponse: "Hello." }));
     expect(seams.query).not.toHaveBeenCalled();
-    expect(seams.act).not.toHaveBeenCalled();
+    // Only the run's saved-memory read; nothing discovers workspace state.
+    expect(seams.act.mock.calls.map(([name]) => name)).toEqual(["memory:contextForRun"]);
   });
 });

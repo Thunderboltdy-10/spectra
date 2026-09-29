@@ -129,6 +129,7 @@ export function StudioItemRail({
               role="button"
               tabIndex={0}
               className="spectra-item-rail-row"
+              aria-current={item.active ? "true" : undefined}
               data-active={item.active || undefined}
               data-has-preview={item.preview ? true : undefined}
               data-index={showIndex || undefined}

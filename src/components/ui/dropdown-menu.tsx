@@ -5,6 +5,7 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, Ellipsis, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
+import { useFloatingLayer } from "./layer-context";
 
 /**
  * Spectra's one menu. Every overflow, "more actions" and three-dot control uses
@@ -23,30 +24,45 @@ const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
-    /** Stacking layer. Inside a dialog, pass the dialog's layer ("modal"). */
+    /** Stacking layer. Defaults to the host dialog/sheet's layer, else dropdown. */
     layer?: SpectraLayer;
   }
->(({ className, style, sideOffset = 6, collisionPadding = 12, layer = "dropdown", ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      collisionPadding={collisionPadding}
-      className={cn(
-        "max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
-        LAYER_CLASS[layer],
-        "spectra-float origin-[var(--radix-dropdown-menu-content-transform-origin)]",
-        className,
-      )}
-      style={{
-        backgroundColor: "var(--bg-elevated)",
-        borderColor: "var(--border-default)",
-        ...style,
-      }}
-      {...props}
-    />
-  </DropdownMenuPrimitive.Portal>
-));
+>(
+  (
+    {
+      className,
+      style,
+      sideOffset = 6,
+      collisionPadding = 12,
+      layer: explicitLayer,
+      ...props
+    },
+    ref,
+  ) => {
+    const layer = useFloatingLayer(explicitLayer);
+    return (
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          ref={ref}
+          sideOffset={sideOffset}
+          collisionPadding={collisionPadding}
+          className={cn(
+            "max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+            LAYER_CLASS[layer],
+            "spectra-float origin-[var(--radix-dropdown-menu-content-transform-origin)]",
+            className,
+          )}
+          style={{
+            backgroundColor: "var(--bg-elevated)",
+            borderColor: "var(--border-default)",
+            ...style,
+          }}
+          {...props}
+        />
+      </DropdownMenuPrimitive.Portal>
+    );
+  },
+);
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
 
 const itemBase =
@@ -133,7 +149,7 @@ export function OverflowMenu<T extends string>({
   onSelect,
   align = "end",
   side = "bottom",
-  layer = "dropdown",
+  layer,
   avoidCollisions = true,
   active = false,
   size = 40,

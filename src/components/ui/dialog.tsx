@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LAYERS, LAYER_CLASS, type SpectraLayer } from "./layers";
+import { HostLayer, useFocusReturn } from "./layer-context";
 
 /**
  * Spectra's one dialog (CANON R16, ARCHITECTURE-PLATFORM §3).
@@ -67,33 +68,39 @@ const DialogContent = React.forwardRef<
       layer = "modal",
       hideCloseButton = false,
       overlayClassName,
+      onOpenAutoFocus,
+      onCloseAutoFocus,
       ...props
     },
     ref,
-  ) => (
-    <DialogPortal>
-      <DialogOverlay layer={layer} className={overlayClassName} />
-      <DialogPrimitive.Content
-        ref={ref}
-        className={cn(
-          "spectra-float fixed left-1/2 top-1/2 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
-          LAYER_CLASS[layer],
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {hideCloseButton ? null : (
-          <DialogPrimitive.Close
-            aria-label="Close dialog"
-            className="absolute right-4 top-4 grid size-8 place-items-center rounded-control text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
-          >
-            <X aria-hidden="true" className="size-4" />
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  ),
+  ) => {
+    const focusReturn = useFocusReturn(onOpenAutoFocus, onCloseAutoFocus);
+    return (
+      <DialogPortal>
+        <DialogOverlay layer={layer} className={overlayClassName} />
+        <DialogPrimitive.Content
+          ref={ref}
+          className={cn(
+            "spectra-float fixed left-1/2 top-1/2 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+            LAYER_CLASS[layer],
+            className,
+          )}
+          {...props}
+          {...focusReturn}
+        >
+          <HostLayer layer={layer}>{children}</HostLayer>
+          {hideCloseButton ? null : (
+            <DialogPrimitive.Close
+              aria-label="Close dialog"
+              className="absolute right-4 top-4 grid size-8 place-items-center rounded-control text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    );
+  },
 );
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import fs from "node:fs";
 import path from "node:path";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { AdminDialog } from "@/features/spectra/administration/shared";
@@ -33,8 +33,10 @@ function Harness() {
   );
 }
 
-describe("hand-rolled modal dialogs", () => {
-  it("move focus in, keep Tab inside, close on Escape and restore focus", () => {
+// AdminDialog is now the shared Radix Dialog; Radix returns focus on the
+// frame after unmount, so the restore is awaited.
+describe("admin dialogs", () => {
+  it("move focus in, keep Tab inside, close on Escape and restore focus", async () => {
     render(<Harness />);
     const opener = screen.getByRole("button", { name: "Remove member" });
     opener.focus();
@@ -52,7 +54,7 @@ describe("hand-rolled modal dialogs", () => {
 
     fireEvent.keyDown(remove, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(opener);
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 });
 

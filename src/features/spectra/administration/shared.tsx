@@ -1,7 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -15,7 +14,12 @@ import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import { ProductEmptyState, ProductErrorState } from "@/features/spectra/components/product-state";
 import { Button } from "@/components/ui/button";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select";
 import {
   MetricValue,
@@ -257,24 +261,22 @@ export function AdminDialog({
   footer?: ReactNode;
   danger?: boolean;
 }) {
-  const surface = useRef<HTMLElement>(null);
-  useModalFocus(surface, { open, onClose });
-  if (!open || typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-composer-dock grid place-items-center bg-[var(--bg-overlay)] p-4"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+  // The shared Dialog: one veil, the float entrance, Radix's focus trap and
+  // focus return, and — through the host-layer context — select lists and
+  // menus that open *above* the dialog. The hand-rolled version sat at the
+  // composer-dock layer while its SelectField list opened at `dropdown`,
+  // behind the veil, so the invite form's profile picker could not be used.
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
     >
-      <section
-        ref={surface}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="max-h-[min(86dvh,760px)] w-full max-w-[540px] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]"
+      <DialogContent
+        layer="composer-dock"
+        hideCloseButton
+        className="flex max-h-[min(86dvh,760px)] max-w-[540px] flex-col gap-0 overflow-hidden p-0"
       >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
           <div className="flex gap-3">
@@ -284,26 +286,26 @@ export function AdminDialog({
               </span>
             ) : null}
             <div>
-              <h2 className="font-[var(--font-serif)] text-heading font-medium text-[var(--text-primary)]">
+              <DialogTitle className="font-[var(--font-serif)] text-heading font-medium text-[var(--text-primary)]">
                 {title}
-              </h2>
+              </DialogTitle>
               {detail ? (
-                <p className="mt-1 max-w-md text-micro leading-5 text-[var(--text-tertiary)]">
+                <DialogDescription className="mt-1 max-w-md text-micro leading-5 text-[var(--text-tertiary)]">
                   {detail}
-                </p>
+                </DialogDescription>
               ) : null}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="grid size-8 place-items-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
+            className="grid size-8 place-items-center rounded-control text-[var(--text-tertiary)] outline-none hover:bg-[var(--bg-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
             aria-label="Close"
           >
             <X size={16} />
           </button>
         </header>
-        <div className="max-h-[calc(min(86dvh,760px)-150px)] overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {children}
         </div>
         {footer ? (
@@ -311,9 +313,8 @@ export function AdminDialog({
             {footer}
           </footer>
         ) : null}
-      </section>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }
 

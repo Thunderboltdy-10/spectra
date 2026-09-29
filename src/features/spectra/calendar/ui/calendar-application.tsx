@@ -19,12 +19,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,14 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import {
+  addLocalDays,
+  endOfLocalDay,
+  localDaysAround,
+  startOfLocalDay,
+  startOfLocalWeek,
+  toLocalDateTimeInput,
+} from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 
 const ArtifactStudio = dynamic(
@@ -56,7 +65,6 @@ const ArtifactStudio = dynamic(
 );
 
 const HOUR = 60 * 60_000;
-const DAY = 24 * HOUR;
 const HOUR_PX = 48;
 const HOURS = 24;
 const MIN_DAYS = 1;
@@ -79,26 +87,8 @@ const MONTHS = [
   "December",
 ];
 
-function startOfWeek(value: Date | number) {
-  const result = new Date(value);
-  result.setHours(0, 0, 0, 0);
-  const day = result.getDay() || 7;
-  result.setDate(result.getDate() - day + 1);
-  return result;
-}
-
-function startOfDayMs(value: Date | number) {
-  const result = new Date(value);
-  result.setHours(0, 0, 0, 0);
-  return result.getTime();
-}
-
-function weekStartMs(value: Date | number) {
-  return startOfWeek(value).getTime();
-}
-
-function daysAround(center: number, before = EXTEND_DAYS, after = EXTEND_DAYS * 2) {
-  return Array.from({ length: before + after + 1 }, (_, index) => center + (index - before) * DAY);
+function daysAround(center: number) {
+  return localDaysAround(center, EXTEND_DAYS, EXTEND_DAYS * 2);
 }
 
 function formatTime(value: number, timezone: string) {
@@ -111,7 +101,7 @@ function formatTime(value: number, timezone: string) {
 
 function formatRange(rangeStart: number, span: number) {
   const start = new Date(rangeStart);
-  const end = new Date(rangeStart + (span - 1) * DAY);
+  const end = new Date(addLocalDays(rangeStart, span - 1));
   if (span === 1) {
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "short",
@@ -173,8 +163,8 @@ function CalendarDatePicker({
   }, [open, value]);
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-  const selected = startOfDayMs(value);
-  const today = startOfDayMs(Date.now());
+  const selected = startOfLocalDay(value);
+  const today = startOfLocalDay(Date.now());
   const years = Array.from({ length: 21 }, (_, index) => year - 10 + index);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -281,7 +271,7 @@ function CalendarDatePicker({
             </div>
             <div className="spectra-calendar-date-grid">
               {monthCells(year, month).map((cell) => {
-                const stamp = startOfDayMs(cell.date);
+                const stamp = startOfLocalDay(cell.date);
                 return (
                   <button
                     key={stamp + (cell.muted ? "-m" : "")}
@@ -379,6 +369,24 @@ function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
   return [...next.values()];
 }
 
+/** A failed Calendar action. The route strips the code from `message`, so the
+ * code travels separately and is what callers branch on. */
+class CalendarActionError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+function isGestureConflict(error: unknown) {
+  return (
+    error instanceof CalendarActionError &&
+    error.code === "CALENDAR_GESTURE_CONFLICT"
+  );
+}
+
 async function calendarPost(body: Record<string, unknown>) {
   const response = await requestSpectra("/api/spectra/calendar", {
     method: "POST",
@@ -387,7 +395,10 @@ async function calendarPost(body: Record<string, unknown>) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(payload?.error?.message ?? "Calendar action failed.");
+    throw new CalendarActionError(
+      payload?.error?.message ?? "Calendar action failed.",
+      typeof payload?.error?.code === "string" ? payload.error.code : undefined,
+    );
   return payload.data;
 }
 
@@ -412,7 +423,7 @@ type ResizeGesture = {
 };
 
 export function CalendarApplication() {
-  const initialStart = weekStartMs(Date.now());
+  const initialStart = startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
@@ -461,7 +472,7 @@ export function CalendarApplication() {
   const visibleRange = useMemo(
     () => ({
       from: days[0]!,
-      to: days[days.length - 1]! + DAY - 1,
+      to: endOfLocalDay(days[days.length - 1]!),
     }),
     [days],
   );
@@ -475,8 +486,8 @@ export function CalendarApplication() {
           merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
           return merged;
         }
-        const retainFrom = visibleRange.from - EXTEND_DAYS * DAY;
-        const retainTo = visibleRange.to + EXTEND_DAYS * DAY;
+        const retainFrom = addLocalDays(visibleRange.from, -EXTEND_DAYS);
+        const retainTo = addLocalDays(visibleRange.to, EXTEND_DAYS);
         return {
           ...incoming,
           items: mergeById(current.items, incoming.items).filter(
@@ -592,7 +603,11 @@ export function CalendarApplication() {
     return () => observer.disconnect();
   }, [daySpan, days.length, error, plansOpen, studio.mode]);
 
-  const timezone = overview?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // The grid's columns, drops and resizes are all in the browser's zone, so
+  // every time on it is too. The overview's zone is only a guess from stored
+  // rows (UTC for a student without school data), and rendering in it put an
+  // 11:00 Madrid event at 09:00.
+  const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const timedItems = useMemo(
     () =>
       (overview?.items ?? []).filter(
@@ -663,7 +678,7 @@ export function CalendarApplication() {
       }
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
-      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+      if (isGestureConflict(nextError)) {
         await load("replace", visibleRange.from, visibleRange.to, true);
         setSelected(null);
         toast.error("Calendar changed, so the latest block position was restored. Open it again to continue.");
@@ -671,6 +686,27 @@ export function CalendarApplication() {
         toast.error(message);
       }
     }
+  }
+
+  async function removeItem(item: CalendarItem) {
+    try {
+      await calendarPost({ action: "removePersonalItem", itemId: item.id });
+    } catch (nextError) {
+      toast.error(
+        nextError instanceof Error ? nextError.message : "Could not remove this from Calendar.",
+      );
+      return false;
+    }
+    setOverview((current) =>
+      current
+        ? { ...current, items: current.items.filter((entry) => entry.id !== item.id) }
+        : current,
+    );
+    setSelected(null);
+    // A removed work block returns its plan to the unscheduled list.
+    if (item.kind === "scheduled_work_block")
+      void load("merge", visibleRange.from, visibleRange.to);
+    return true;
   }
 
   async function commitWorkGesture(item: CalendarItem, startAt: number, endAt: number) {
@@ -690,7 +726,7 @@ export function CalendarApplication() {
     } catch (nextError) {
       upsertItem(item);
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
-      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+      if (isGestureConflict(nextError)) {
         await load("replace", visibleRange.from, visibleRange.to, true);
         toast.error("The block changed elsewhere, so Calendar restored its latest position.");
       } else {
@@ -882,7 +918,10 @@ export function CalendarApplication() {
   }
 
   function openItem(item: CalendarItem) {
-    const workId = planWorkId(item);
+    // A scheduled block has its own actions (duration, complete, remove); its
+    // plan is one click away in the details. Only an unscheduled plan opens
+    // straight into the plan.
+    const workId = item.kind === "scheduled_work_block" ? undefined : planWorkId(item);
     if (workId) {
       openWork(workId);
       return;
@@ -891,11 +930,12 @@ export function CalendarApplication() {
   }
 
   function jumpTo(date: Date) {
-    const start = startOfDayMs(date);
-    setDays(daysAround(start));
+    const start = startOfLocalDay(date);
+    const nextDays = daysAround(start);
+    setDays(nextDays);
     setFocusedStart(start);
     scrollWeekRef.current = start;
-    void load("replace", start - EXTEND_DAYS * DAY, start + EXTEND_DAYS * 2 * DAY - 1);
+    void load("replace", nextDays[0]!, endOfLocalDay(nextDays[nextDays.length - 1]!));
   }
 
   const changeDaySpan = useCallback((next: number) => {
@@ -920,10 +960,10 @@ export function CalendarApplication() {
     const current = daysRef.current;
     const edge =
       direction === "before"
-        ? current[0]! - EXTEND_DAYS * DAY
-        : current[current.length - 1]! + DAY;
+        ? addLocalDays(current[0]!, -EXTEND_DAYS)
+        : addLocalDays(current[current.length - 1]!, 1);
     const incoming = Array.from({ length: EXTEND_DAYS }, (_, index) =>
-      direction === "before" ? edge + index * DAY : edge + index * DAY,
+      addLocalDays(edge, index),
     );
     loadLockRef.current = true;
     const dayWidth = dayWidthRef.current;
@@ -942,7 +982,7 @@ export function CalendarApplication() {
       await load(
         "merge",
         incoming[0]!,
-        incoming[incoming.length - 1]! + DAY - 1,
+        endOfLocalDay(incoming[incoming.length - 1]!),
       );
       ignoreScrollRef.current = true;
       requestAnimationFrame(() => {
@@ -1106,7 +1146,7 @@ export function CalendarApplication() {
             <button
               type="button"
               aria-label="Previous range"
-              onClick={() => jumpTo(new Date(focusedStart - daySpan * DAY))}
+              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, -daySpan)))}
               className="spectra-calendar-week-step"
             >
               <ChevronLeft className="size-4" />
@@ -1119,7 +1159,7 @@ export function CalendarApplication() {
             <button
               type="button"
               aria-label="Next range"
-              onClick={() => jumpTo(new Date(focusedStart + daySpan * DAY))}
+              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, daySpan)))}
               className="spectra-calendar-week-step"
             >
               <ChevronRight className="size-4" />
@@ -1325,18 +1365,18 @@ export function CalendarApplication() {
           timezone={timezone}
           onClose={() => setSelected(null)}
           onCommit={commit}
+          onRemove={removeItem}
         />
       ) : null}
-      {composerOpen ? (
-        <CalendarComposer
-          timezone={timezone}
-          onClose={() => setComposerOpen(false)}
-          onCreated={() => {
-            setComposerOpen(false);
-            void load("merge", visibleRange.from, visibleRange.to, true);
-          }}
-        />
-      ) : null}
+      <CalendarComposer
+        open={composerOpen}
+        timezone={timezone}
+        onClose={() => setComposerOpen(false)}
+        onCreated={() => {
+          setComposerOpen(false);
+          void load("merge", visibleRange.from, visibleRange.to, true);
+        }}
+      />
       </div>
       {studio.mode === "split" && studio.activeArtifact ? (
         <ArtifactStudio
@@ -1629,13 +1669,20 @@ function CalendarItemPanel({
   timezone,
   onClose,
   onCommit,
+  onRemove,
 }: {
   item: CalendarItem;
   timezone: string;
   onClose: () => void;
   onCommit: (action: Record<string, unknown>) => Promise<void>;
+  onRemove: (item: CalendarItem) => Promise<boolean>;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  // School records belong to their source; everything a person placed here
+  // (events, scheduled work) can be taken off again.
+  const removable = !item.sourceLocked;
   return (
     <aside
       className="fixed inset-y-0 right-0 z-panel w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-lg)]"
@@ -1749,6 +1796,36 @@ function CalendarItemPanel({
           {item.status === "completed" ? "Completed" : "Mark complete"}
         </button>
       ) : null}
+      {removable ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-3 w-full"
+          onClick={() => setConfirmRemove(true)}
+        >
+          Remove from Calendar
+        </Button>
+      ) : null}
+      <ConfirmDialog
+        open={confirmRemove}
+        title={`Remove “${item.title}”?`}
+        detail={
+          item.kind === "scheduled_work_block"
+            ? "The scheduled time is removed from Calendar. The plan itself is kept and can be placed again."
+            : "This event is removed from your Calendar."
+        }
+        confirmLabel="Remove"
+        destructive
+        pending={removing}
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setRemoving(true);
+          void onRemove(item).then((removed) => {
+            setRemoving(false);
+            if (!removed) setConfirmRemove(false);
+          });
+        }}
+      />
       {item.linkedWorkIds.length ? (
         <section className="mt-5">
           <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
@@ -1763,7 +1840,7 @@ function CalendarItemPanel({
                 className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-micro font-semibold hover:bg-[var(--bg-hover)]"
               >
                 <Link2 className="size-3.5" />
-                Open linked work
+                {workId === item.planArtifactId ? "Open plan" : "Open linked work"}
                 <ExternalLink className="ml-auto size-3" />
               </button>
             ))}
@@ -1797,110 +1874,114 @@ function CalendarItemPanel({
 }
 
 function CalendarComposer({
+  open,
   timezone,
   onClose,
   onCreated,
 }: {
+  open: boolean;
   timezone: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
   const [title, setTitle] = useState("");
-  const [start, setStart] = useState(() => new Date(Date.now() + HOUR).toISOString().slice(0, 16));
-  const [end, setEnd] = useState(() => new Date(Date.now() + 2 * HOUR).toISOString().slice(0, 16));
+  const [start, setStart] = useState(() => toLocalDateTimeInput(Date.now() + HOUR));
+  const [end, setEnd] = useState(() => toLocalDateTimeInput(Date.now() + 2 * HOUR));
   const [busy, setBusy] = useState(false);
-  const surface = useRef<HTMLDivElement>(null);
-  useModalFocus(surface, { onClose: busy ? undefined : onClose });
+  useEffect(() => {
+    if (!open) return;
+    setTitle("");
+    setStart(toLocalDateTimeInput(Date.now() + HOUR));
+    setEnd(toLocalDateTimeInput(Date.now() + 2 * HOUR));
+  }, [open]);
+  const startAt = Date.parse(start);
+  const endAt = Date.parse(end);
+  const endBeforeStart =
+    Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt;
   return (
-    <div
-      ref={surface}
-      tabIndex={-1}
-      className="fixed inset-0 z-modal grid place-items-center bg-black/25 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add personal event"
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          setBusy(true);
-          void calendarPost({
-            action: "createPersonalItem",
-            kind: "personal_event",
-            title,
-            startAt: Date.parse(start),
-            endAt: Date.parse(end),
-            timezone,
-          })
-            .then(onCreated)
-            .catch((error) =>
-              toast.error(error instanceof Error ? error.message : "Could not add event."),
-            )
-            .finally(() => setBusy(false));
-        }}
-        className="w-full max-w-[460px] rounded-2xl border border-white/50 bg-[var(--bg-elevated)] p-5 shadow-2xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-heading font-semibold">Add personal event</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-        <label className="mt-5 block text-micro font-semibold">
-          Title
-          <input
-            autoFocus
-            required
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
-          />
-        </label>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <label className="text-micro font-semibold">
-            Starts
+      <DialogContent className="max-w-[460px] gap-0 p-5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (endBeforeStart) return;
+            setBusy(true);
+            void calendarPost({
+              action: "createPersonalItem",
+              kind: "personal_event",
+              title,
+              startAt,
+              endAt,
+              timezone,
+            })
+              .then(onCreated)
+              .catch((error) =>
+                toast.error(error instanceof Error ? error.message : "Could not add event."),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          <DialogTitle>Add personal event</DialogTitle>
+          <label className="mt-5 block text-micro font-semibold">
+            Title
             <input
-              type="datetime-local"
+              autoFocus
               required
-              value={start}
-              onChange={(event) => setStart(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
             />
           </label>
-          <label className="text-micro font-semibold">
-            Ends
-            <input
-              type="datetime-local"
-              required
-              value={end}
-              onChange={(event) => setEnd(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
-            />
-          </label>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-9 rounded-lg px-3 text-caption font-semibold hover:bg-[var(--bg-hover)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !title.trim()}
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-caption font-semibold text-[var(--bg-primary)] disabled:opacity-40"
-          >
-            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            Add event
-          </button>
-        </div>
-      </form>
-    </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="text-micro font-semibold">
+              Starts
+              <input
+                type="datetime-local"
+                required
+                value={start}
+                onChange={(event) => setStart(event.target.value)}
+                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              />
+            </label>
+            <label className="text-micro font-semibold">
+              Ends
+              <input
+                type="datetime-local"
+                required
+                min={start}
+                value={end}
+                aria-invalid={endBeforeStart || undefined}
+                onChange={(event) => setEnd(event.target.value)}
+                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
+              />
+            </label>
+          </div>
+          {endBeforeStart ? (
+            <p role="alert" className="mt-2 text-micro text-[var(--danger)]">
+              End must be after start.
+            </p>
+          ) : null}
+          <DialogFooter className="mt-5">
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={busy || !title.trim() || endBeforeStart}
+            >
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              Add event
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

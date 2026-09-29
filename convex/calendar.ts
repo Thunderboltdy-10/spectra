@@ -341,47 +341,47 @@ async function recoverScheduledBlock(
   const task = block.taskItemId ? await ctx.db.get(block.taskItemId) : null;
   if (block.taskItemId) {
     if (!task || task.ownerAccountId !== actor.accountId || task.schoolId !== actor.schoolId || task.kind !== "task")
-      throw new Error("CALENDAR_TASK_NOT_FOUND");
-    if (task.status === "removed") throw new Error("CALENDAR_TASK_UNAVAILABLE");
+      throw new Error("CALENDAR_TASK_NOT_FOUND: This task is not on your Calendar any more. Refresh Calendar, then try again.");
+    if (task.status === "removed") throw new Error("CALENDAR_TASK_UNAVAILABLE: This task is no longer active. Refresh Calendar to see its current state.");
   }
   if (scope && scope.sourceRecordId !== task?.sourceRecordId)
-    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
   if (task?.officialDeadlineItemId !== block.officialDeadlineItemId)
-    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+    throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
   if (block.officialDeadlineItemId) {
     const official = await ctx.db.get(block.officialDeadlineItemId);
     if (!official || official.ownerAccountId !== actor.accountId || official.schoolId !== actor.schoolId ||
       official.kind !== "official_deadline" || !official.sourceLocked || official.sourceRecordId !== task?.sourceRecordId)
-      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
   }
   if (block.planArtifactId) {
     const plan = await ctx.db.get(block.planArtifactId);
     if (!plan || plan.ownerAccountId !== actor.accountId ||
       (plan.schoolId !== undefined && plan.schoolId !== actor.schoolId) || plan.blueprintKey !== "planner_task" ||
       !["active", "archived"].includes(plan.status))
-      throw new Error("CALENDAR_PLAN_NOT_FOUND");
+      throw new Error("CALENDAR_PLAN_NOT_FOUND: This plan is not available any more. Refresh Calendar, then try again.");
     const content = object(plan.content);
     if (!plannerTaskCandidates(plan).some(candidate => candidate.id === block.planTaskId))
-      throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
+      throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND: This step is no longer in the plan. Refresh Calendar, then try again.");
     if (!scope && args.planTaskId !== block.planTaskId) {
       // Old receipts did not retain the requested visual-subtask alias. Only
       // an extant legacy alias belonging to this same admitted root is safe.
       const sameLegacyRoot = block.planTaskId === "task-1" && !Array.isArray(content.tasks) &&
         Array.isArray(content.subtasks) && content.subtasks.some(candidate => object(candidate).id === args.planTaskId);
-      if (!sameLegacyRoot) throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT");
+      if (!sameLegacyRoot) throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling request was already used for another block. Try placing it again.");
     }
     const sourceRecordId = await sourceRecordForPlanner(ctx, plan._id, actor.accountId);
     const sourceRoot = block.planTaskId === "task-1" ? sourceRecordId : undefined;
     if (task) {
       const linkedDirectly = task.planArtifactId === plan._id && task.planTaskId === block.planTaskId;
       const linkedBySource = Boolean(sourceRoot && task.sourceRecordId === sourceRoot);
-      if (!linkedDirectly && !linkedBySource) throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
-      if (sourceRoot && task.sourceRecordId !== sourceRoot) throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+      if (!linkedDirectly && !linkedBySource) throw new Error("CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task. Refresh Calendar, then try again.");
+      if (sourceRoot && task.sourceRecordId !== sourceRoot) throw new Error("CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task. Refresh Calendar, then try again.");
     } else if (sourceRoot || (block.planTaskId === "task-1" && object(content.source).provider === "managebac")) {
-      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+      throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
     }
   } else if (args.planTaskId !== undefined || block.planTaskId !== undefined || !task) {
-    throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT");
+    throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling request was already used for another block. Try placing it again.");
   }
   return itemWire(block);
 }
@@ -576,7 +576,7 @@ export const overview = query({
       !Number.isFinite(args.to) ||
       args.to <= args.from
     )
-      throw new Error("CALENDAR_RANGE_INVALID");
+      throw new Error("CALENDAR_RANGE_INVALID: Calendar needs a valid date range.");
     const metrics = createCalendarReadMetrics();
     const limit = pageSize(args.limit);
     const visiblePage = args.cursor === CALENDAR_DONE_CURSOR ? { rows: [], nextCursor: null } : await readVisibleCalendarItems(
@@ -803,7 +803,7 @@ export const createPersonalItem = mutation({
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
     if (args.idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length < 8))
-      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID: This Calendar request is invalid. Try again.");
     const previous = idempotencyKey ? await ctx.db.query("calendarItems")
       .withIndex("by_schedule_idempotency", (q) => q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique() : null;
     if (previous) {
@@ -856,13 +856,13 @@ export const scheduleTask = mutation({
     if (args.endAt <= args.startAt)
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     if (!args.taskItemId && !(args.planArtifactId && args.planTaskId))
-      throw new Error("CALENDAR_TASK_REQUIRED");
+      throw new Error("CALENDAR_TASK_REQUIRED: Choose a task or plan to schedule.");
     const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
     if (
       args.idempotencyKey !== undefined &&
       (!idempotencyKey || idempotencyKey.length < 8)
     )
-      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID: This Calendar request is invalid. Try again.");
     const existingByKey = idempotencyKey
       ? await ctx.db.query("calendarItems")
           .withIndex("by_schedule_idempotency", q => q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
@@ -875,12 +875,12 @@ export const scheduleTask = mutation({
     const assertTaskAvailable = (task: Doc<"calendarItems"> | null) => {
       if (!task || task.ownerAccountId !== actor.accountId ||
         task.schoolId !== actor.schoolId || task.kind !== "task")
-        throw new Error("CALENDAR_TASK_NOT_FOUND");
-      if (task.status !== "active") throw new Error("CALENDAR_TASK_UNAVAILABLE");
+        throw new Error("CALENDAR_TASK_NOT_FOUND: This task is not on your Calendar any more. Refresh Calendar, then try again.");
+      if (task.status !== "active") throw new Error("CALENDAR_TASK_UNAVAILABLE: This task is no longer active. Refresh Calendar to see its current state.");
     };
     if (args.taskItemId) assertTaskAvailable(taskItem);
     if (args.planTaskId && !args.planArtifactId)
-      throw new Error("CALENDAR_PLAN_NOT_FOUND");
+      throw new Error("CALENDAR_PLAN_NOT_FOUND: This plan is not available any more. Refresh Calendar, then try again.");
     if (args.planArtifactId) {
       plannerArtifact = await ctx.db.get(args.planArtifactId);
       if (
@@ -890,7 +890,7 @@ export const scheduleTask = mutation({
         plannerArtifact.blueprintKey !== "planner_task" ||
         plannerArtifact.status !== "active"
       )
-        throw new Error("CALENDAR_PLAN_NOT_FOUND");
+        throw new Error("CALENDAR_PLAN_NOT_FOUND: This plan is not available any more. Refresh Calendar, then try again.");
       const availableTasks = planTasks(plannerArtifact);
       const content = object(plannerArtifact.content);
       const legacySubtask = !Array.isArray(content.tasks) && Array.isArray(content.subtasks) &&
@@ -900,7 +900,7 @@ export const scheduleTask = mutation({
         // Retain the historical visual-subtask alias only when that subtask
         // actually belongs to the single-root plan, never for arbitrary IDs.
         (legacySubtask && availableTasks.length === 1 ? availableTasks[0] : undefined);
-      if (!plannerTask) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND");
+      if (!plannerTask) throw new Error("CALENDAR_PLAN_TASK_NOT_FOUND: This step is no longer in the plan. Refresh Calendar, then try again.");
       const planRow = await ctx.db.query("calendarPlanTaskReadModels")
         .withIndex("by_plan_task", q => q.eq("planArtifactId", plannerArtifact!._id)
           .eq("taskId", plannerTask!.id)).unique();
@@ -909,10 +909,10 @@ export const scheduleTask = mutation({
       const sourceRecordId = await sourceRecordForPlanner(ctx, plannerArtifact._id, actor.accountId);
       if (planRow && (planRow.ownerAccountId !== actor.accountId ||
         planRow.schoolId !== plannerArtifact.schoolId || planRow.sourceRecordId !== sourceRecordId))
-        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
       const sourceRootRecordId = plannerTask.id === "task-1" ? sourceRecordId : undefined;
       if (sourceRootRecordId) {
-        if (!planRow) throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+        if (!planRow) throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
         const sourceModel = await ctx.db.query("calendarItemReadModels")
           .withIndex("by_account_source_kind", q => q.eq("ownerAccountId", actor.accountId)
             .eq("sourceRecordId", sourceRootRecordId).eq("kind", "task")).unique();
@@ -921,16 +921,16 @@ export const scheduleTask = mutation({
           assertTaskAvailable(sourceTask);
           if (sourceTask!.sourceRecordId !== sourceRootRecordId ||
             (taskItem && taskItem._id !== sourceTask!._id))
-            throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+            throw new Error("CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task. Refresh Calendar, then try again.");
           taskItem = sourceTask;
-        } else throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+        } else throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
       }
       if (taskItem) {
         const linkedDirectly = taskItem.planArtifactId === plannerArtifact._id &&
           taskItem.planTaskId === plannerTask.id;
         const linkedBySource = Boolean(sourceRootRecordId && taskItem.sourceRecordId === sourceRootRecordId);
         if (!linkedDirectly && !linkedBySource)
-          throw new Error("CALENDAR_TASK_PLAN_MISMATCH");
+          throw new Error("CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task. Refresh Calendar, then try again.");
       } else if (plannerTask.id === "task-1" && object(content.source).provider === "managebac") {
         throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: Refresh school data before scheduling this imported task.");
       }
@@ -943,7 +943,7 @@ export const scheduleTask = mutation({
       if (!official || official.ownerAccountId !== actor.accountId ||
         official.schoolId !== actor.schoolId || official.kind !== "official_deadline" ||
         !official.sourceLocked || official.sourceRecordId !== taskItem?.sourceRecordId)
-        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE");
+        throw new Error("CALENDAR_SOURCE_LINK_UNAVAILABLE: This task's school record changed. Refresh school data, then try again.");
       officialDeadlineItemId = official._id;
     }
     const title = taskItem?.title ?? plannerTask?.title ?? "Scheduled work";
@@ -995,12 +995,12 @@ export const moveWorkBlock = mutation({
       item.ownerAccountId !== actor.accountId ||
       item.kind !== "scheduled_work_block"
     )
-      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND");
+      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
       throw new Error(
         "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before moving it.",
       );
-    if (args.endAt <= args.startAt) throw new Error("CALENDAR_TIME_INVALID");
+    if (args.endAt <= args.startAt) throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     await ctx.db.patch(item._id, {
       startAt: args.startAt,
       endAt: args.endAt,
@@ -1025,13 +1025,13 @@ export const resizeWorkBlock = mutation({
       item.ownerAccountId !== actor.accountId ||
       item.kind !== "scheduled_work_block"
     )
-      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND");
+      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
       throw new Error(
         "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before resizing it.",
       );
     if (item.startAt === undefined || args.endAt <= item.startAt)
-      throw new Error("CALENDAR_TIME_INVALID");
+      throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     await ctx.db.patch(item._id, {
       endAt: args.endAt,
       revision: item.revision + 1,
@@ -1054,13 +1054,13 @@ export const completeWorkBlock = mutation({
       item.ownerAccountId !== actor.accountId ||
       item.kind !== "scheduled_work_block"
     )
-      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND");
+      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
       throw new Error(
         "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before completing it.",
       );
     if (item.status === "removed" || item.status === "cancelled")
-      throw new Error("CALENDAR_WORK_BLOCK_UNAVAILABLE");
+      throw new Error("CALENDAR_WORK_BLOCK_UNAVAILABLE: This work block was removed or cancelled, so it cannot be completed.");
     await ctx.db.patch(item._id, {
       status: "completed",
       revision: item.revision + 1,
@@ -1076,7 +1076,7 @@ export const removePersonalItem = mutation({
     const actor = await actorOrThrow(ctx);
     const item = await ctx.db.get(args.itemId);
     if (!item || item.ownerAccountId !== actor.accountId)
-      throw new Error("CALENDAR_ITEM_NOT_FOUND");
+      throw new Error("CALENDAR_ITEM_NOT_FOUND: This item is not on your Calendar any more. Refresh Calendar.");
     if (item.sourceLocked)
       throw new Error(
         "CALENDAR_SOURCE_LOCKED: Official source records cannot be removed here.",

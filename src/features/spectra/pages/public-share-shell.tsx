@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowRight,
   BookOpen,
   CalendarDays,
@@ -126,34 +127,41 @@ function forgetPublicShareToken() {
   }
 }
 
-function ArtifactContent({
+/** One card in a shared workspace. Opening it shows the work in full. */
+function ArtifactCard({
   artifact,
-  compact = false,
+  onOpen,
 }: {
   artifact: PublicArtifact;
-  compact?: boolean;
+  onOpen: () => void;
 }) {
+  const Icon = ICONS[artifact.blueprintKey] ?? FileText;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group block w-full rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+    >
+      <span className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-ui font-semibold text-[var(--text-primary)]">
+            {artifact.title}
+          </span>
+          <span className="mt-1 line-clamp-2 block text-micro leading-5 text-[var(--text-secondary)]">
+            {artifact.summary || "Shared Spectra work"}
+          </span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
   const content = record(artifact.content);
   const Icon = ICONS[artifact.blueprintKey] ?? FileText;
-  if (compact) {
-    return (
-      <article className="group rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 transition-colors hover:border-[var(--border-strong)]">
-        <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
-            <Icon className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <h3 className="truncate text-ui font-semibold text-[var(--text-primary)]">
-              {artifact.title}
-            </h3>
-            <p className="mt-1 line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">
-              {artifact.summary || "Shared Spectra work"}
-            </p>
-          </div>
-        </div>
-      </article>
-    );
-  }
 
   const blocks = rows(content.blocks);
   const cards = rows(content.cards);
@@ -475,6 +483,71 @@ function ArtifactContent({
   );
 }
 
+/**
+ * A shared workspace: its cards, or one piece of work opened in full. The
+ * projection already carries every card's content, so a reader can open the
+ * work instead of seeing only its title.
+ */
+function SharedWorkspace({
+  projection,
+  openArtifactId,
+  onOpen,
+}: {
+  projection: Extract<PublicProjection, { resourceType: "workspace" }>;
+  openArtifactId: string | null;
+  onOpen: (artifactId: string | null) => void;
+}) {
+  const opened = projection.artifacts.find(
+    (artifact) => artifact.artifactId === openArtifactId,
+  );
+  if (opened)
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => onOpen(null)}
+          className="mb-5 inline-flex items-center gap-1.5 rounded-control px-2 py-1.5 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to {projection.workspace.title}
+        </button>
+        <ArtifactContent artifact={opened} />
+      </>
+    );
+  return (
+    <>
+      <header className="mb-7">
+        <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
+          <LayoutDashboard className="h-3.5 w-3.5" />
+          Shared workspace
+        </div>
+        <h1 className="mt-3 font-display text-display font-semibold leading-tight">
+          {projection.workspace.title}
+        </h1>
+        {projection.workspace.description ? (
+          <p className="mt-3 max-w-2xl text-ui leading-6 text-[var(--text-secondary)]">
+            {projection.workspace.description}
+          </p>
+        ) : null}
+      </header>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {projection.artifacts.map((artifact) => (
+          <ArtifactCard
+            key={artifact.artifactId}
+            artifact={artifact}
+            onOpen={() => onOpen(artifact.artifactId)}
+          />
+        ))}
+        {projection.artifacts.length === 0 ? (
+          <div className="col-span-full rounded-surface border border-dashed border-[var(--border-default)] py-16 text-center text-caption text-[var(--text-secondary)]">
+            No work has been included in this public workspace view.
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 export function PublicShareShell() {
   const router = useRouter();
   const [projection, setProjection] = useState<PublicProjection | null>(null);
@@ -482,7 +555,10 @@ export function PublicShareShell() {
     "loading" | "ready" | "error" | "auth-required"
   >("loading");
   const [message, setMessage] = useState("");
+  const [retryable, setRetryable] = useState(false);
+  const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
+  const shownRef = useRef(false);
 
   const load = useCallback(async (background = false) => {
     const generation = ++loadGenerationRef.current;
@@ -518,7 +594,10 @@ export function PublicShareShell() {
       }
       if (!response.ok || !payload?.projection) {
         if (response.status === 404) forgetPublicShareToken();
-        throw new Error(payload?.error || "This public view is unavailable.");
+        throw Object.assign(
+          new Error(payload?.error || "This public view is unavailable."),
+          { terminal: response.status >= 400 && response.status < 500 },
+        );
       }
       // The auth return uses /public without a token in the redirect URL.
       // Restore its fragment before clearing temporary storage so refresh,
@@ -529,10 +608,18 @@ export function PublicShareShell() {
         window.history.replaceState(window.history.state, "", restoredUrl);
       }
       forgetPublicShareToken();
+      shownRef.current = true;
       setProjection(payload.projection);
       setState("ready");
     } catch (error) {
       if (generation !== loadGenerationRef.current) return;
+      const terminal =
+        (error as { terminal?: unknown } | null)?.terminal === true;
+      /* A background refresh that could not reach the server keeps the work
+         on screen; only a link that is gone replaces it. */
+      if (background && !terminal && shownRef.current) return;
+      shownRef.current = false;
+      setRetryable(!terminal);
       setMessage(
         error instanceof Error
           ? error.message
@@ -618,6 +705,15 @@ export function PublicShareShell() {
             <p className="mt-2 text-caption leading-6 text-[var(--text-secondary)]">
               {message}
             </p>
+            {retryable ? (
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="mt-5 inline-flex items-center rounded-control border border-[var(--border-default)] px-4 py-2 text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+              >
+                Try again
+              </button>
+            ) : null}
           </section>
         ) : null}
         {state === "auth-required" ? (
@@ -648,36 +744,11 @@ export function PublicShareShell() {
           </section>
         ) : null}
         {state === "ready" && projection?.resourceType === "workspace" ? (
-          <>
-            <header className="mb-7">
-              <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
-                <LayoutDashboard className="h-3.5 w-3.5" />
-                Shared workspace
-              </div>
-              <h1 className="mt-3 font-display text-display font-semibold leading-tight">
-                {projection.workspace.title}
-              </h1>
-              {projection.workspace.description ? (
-                <p className="mt-3 max-w-2xl text-ui leading-6 text-[var(--text-secondary)]">
-                  {projection.workspace.description}
-                </p>
-              ) : null}
-            </header>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {projection.artifacts.map((artifact) => (
-                <ArtifactContent
-                  key={artifact.artifactId}
-                  artifact={artifact}
-                  compact
-                />
-              ))}
-              {projection.artifacts.length === 0 ? (
-                <div className="col-span-full rounded-surface border border-dashed border-[var(--border-default)] py-16 text-center text-caption text-[var(--text-secondary)]">
-                  No work has been included in this public workspace view.
-                </div>
-              ) : null}
-            </div>
-          </>
+          <SharedWorkspace
+            projection={projection}
+            openArtifactId={openArtifactId}
+            onOpen={setOpenArtifactId}
+          />
         ) : null}
         {state === "ready" &&
         projection &&

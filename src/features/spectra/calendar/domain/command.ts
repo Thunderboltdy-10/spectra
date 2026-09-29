@@ -103,7 +103,7 @@ export function calendarSemanticAction(
     if (typeof args.timezone !== "string" || !args.timezone.trim())
       throw new Error("CALENDAR_TIMEZONE_REQUIRED: Use the intended IANA timezone.");
     try { new Intl.DateTimeFormat("en", { timeZone: args.timezone }); }
-    catch { throw new Error("CALENDAR_TIMEZONE_INVALID"); }
+    catch { throw new Error("CALENDAR_TIMEZONE_INVALID: Use a valid IANA timezone."); }
   }
   if (toolId === "schedule_calendar_task") {
     const taskItemId =
@@ -119,7 +119,7 @@ export function calendarSemanticAction(
         ? args.planTaskId.trim()
         : undefined;
     if (!taskItemId && !(planArtifactId && planTaskId))
-      throw new Error("CALENDAR_TASK_REQUIRED");
+      throw new Error("CALENDAR_TASK_REQUIRED: Choose a task or plan to schedule.");
     return {
       type: "calendar.schedule_task",
       ...(taskItemId ? { taskItemId } : {}),
@@ -136,7 +136,7 @@ export function calendarSemanticAction(
   if (toolId === "create_calendar_personal_event") {
     const title =
       typeof args.title === "string" ? args.title.trim().slice(0, 500) : "";
-    if (!title) throw new Error("CALENDAR_TITLE_REQUIRED");
+    if (!title) throw new Error("CALENDAR_TITLE_REQUIRED: Give the event a title.");
     const linkedArtifactIds = Array.isArray(args.linkedArtifactIds)
       ? args.linkedArtifactIds
           .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -157,7 +157,7 @@ export function calendarSemanticAction(
     };
   }
   const itemId = typeof args.itemId === "string" ? args.itemId.trim() : "";
-  if (!itemId) throw new Error("CALENDAR_ITEM_REQUIRED");
+  if (!itemId) throw new Error("CALENDAR_ITEM_REQUIRED: Choose the Calendar item to change.");
   if (toolId === "move_calendar_block")
     return {
       type: "calendar.move_work_block",

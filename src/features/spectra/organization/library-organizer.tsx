@@ -667,7 +667,12 @@ function LibraryOrganizerContent({
           {
             action: {
               label: "Undo",
-              onClick: () => void actions.restore(nodeIds).catch(() => {}),
+              /* An Undo that fails must say so; a silent failure leaves the
+                 reader believing the items came back. */
+              onClick: () =>
+                void run("Those items are still in the Trash.", () =>
+                  actions.restore(nodeIds),
+                ),
             },
           },
         );
@@ -811,7 +816,14 @@ function LibraryOrganizerContent({
         setSelection(EMPTY_SELECTION);
         publishWorkSelection(EMPTY_SELECTION);
       } else if (action.type === "rename") setRenamingId(action.nodeId);
-      else if (action.type === "trash") trashNodes(action.nodeIds);
+      else if (action.type === "trash") {
+        /* In the Trash, Delete means delete forever — behind the same
+           confirmation as the menu. Trashing again changed nothing and still
+           announced "Moved to Trash." with an Undo that restored the items. */
+        if (location.kind === "trash")
+          requestPurge(rows.filter((row) => action.nodeIds.includes(row.nodeId)));
+        else trashNodes(action.nodeIds);
+      }
       else if (action.type === "leave") {
         if (!inFolder || currentParentId === null) return;
         navigate({
@@ -826,10 +838,12 @@ function LibraryOrganizerContent({
     [
       inFolder,
       currentParentId,
+      location.kind,
       navigate,
       openNode,
       path,
       renamingId,
+      requestPurge,
       rows,
       selection,
       selectionMode,

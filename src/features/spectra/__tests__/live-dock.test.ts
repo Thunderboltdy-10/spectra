@@ -330,9 +330,12 @@ describe("Live Dock V2", () => {
   it("keeps the command bar on its established surface and gives it a quiet trigger", () => {
     const kbar = read("src/features/spectra/components/universal-kbar.tsx");
     expect(kbar).toContain('spectraBus.on("shell.openCommandBar", openKBar)');
-    expect(kbar).toContain("fixed inset-0 z-[var(--z-modal)] bg-black/25 px-4 pt-[12vh]");
-    expect(kbar).toContain('aria-modal="true"');
-    expect(kbar).toContain("mx-auto w-full max-w-2xl");
+    // The bar is the shared Dialog (modal layer, focus trap and return),
+    // placed high on the page rather than centred.
+    expect(kbar).toContain('from "@/components/ui/dialog"');
+    expect(kbar).toContain("<DialogTitle className=\"sr-only\">Spectra command bar</DialogTitle>");
+    expect(kbar).toContain("top-[12vh] max-w-2xl translate-y-0");
+    expect(kbar).not.toContain("useModalFocus");
     expect(kbar).toContain("border-0 bg-transparent");
     expect(kbar).toContain("focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none");
     expect(kbar).not.toContain("spectra-command-palette");

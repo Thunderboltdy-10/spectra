@@ -62,6 +62,28 @@ const vNodeKind = v.union(
 
 const MAX_ORG_TREE_PAGE_SIZE = 50;
 
+/**
+ * The on-disk path a Library name maps to for a Bridge-mirrored file: same
+ * folder, same extension, the node's (already validated) name as the stem.
+ * Using the bare name dropped the extension ("Essay.docx" → "Essay draft"),
+ * which left the file unopenable by its app. Null when nothing would change.
+ */
+function mirroredReplicaPath(currentPath: string, name: string) {
+  const slash = currentPath.lastIndexOf("/");
+  const folder = slash >= 0 ? currentPath.slice(0, slash + 1) : "";
+  const base = currentPath.slice(slash + 1);
+  const dot = base.lastIndexOf(".");
+  const extension = dot > 0 ? base.slice(dot) : "";
+  let stem = name.trim();
+  if (extension && stem.toLowerCase().endsWith(extension.toLowerCase()))
+    stem = stem.slice(0, -extension.length);
+  /* Windows drops trailing dots and spaces from a file name. */
+  stem = stem.replace(/[. ]+$/, "");
+  if (!stem) return null;
+  const target = `${folder}${stem}${extension}`;
+  return target === currentPath ? null : target;
+}
+
 async function resolveParentId(
   ctx: Parameters<typeof requireSpectraActor>[0],
   raw: string | undefined | null,
@@ -672,10 +694,9 @@ export const rename = mutation({
     const renamed = await renameNode(ctx, node, args.name);
     if (renamed.kind === "work" && renamed.sourceId) {
       const replica = (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", ctx.db.normalizeId("spectraArtifacts", renamed.sourceId!)!).eq("kind", "local")).take(1))[0];
-      if (replica?.relativePath) {
-        const slash = replica.relativePath.lastIndexOf("/");
-        await enqueueStructureRequest(ctx, actor.accountId, ctx.db.normalizeId("spectraArtifacts", renamed.sourceId!)!, "rename", replica.relativePath, `${slash >= 0 ? replica.relativePath.slice(0, slash + 1) : ""}${args.name}`, renamed._id);
-      }
+      const target = replica?.relativePath ? mirroredReplicaPath(replica.relativePath, renamed.name) : null;
+      if (replica?.relativePath && target)
+        await enqueueStructureRequest(ctx, actor.accountId, ctx.db.normalizeId("spectraArtifacts", renamed.sourceId!)!, "rename", replica.relativePath, target, renamed._id);
     }
     return { nodeId: renamed._id, name: renamed.name };
   },
@@ -709,10 +730,11 @@ export const move = mutation({
       if (result.kind === "work" && result.sourceId) {
         const workId = ctx.db.normalizeId("spectraArtifacts", result.sourceId);
         const replica = workId ? (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local")).take(1))[0] : null;
-        if (workId && replica?.relativePath) {
-          const slash = replica.relativePath.lastIndexOf("/");
-          await enqueueStructureRequest(ctx, actor.accountId, workId, "move", replica.relativePath, `${slash >= 0 ? replica.relativePath.slice(0, slash + 1) : ""}${result.name}`, result._id);
-        }
+        /* A Library move keeps the file in its folder on disk; it only
+           mirrors a name that differs from the file's. */
+        const target = replica?.relativePath ? mirroredReplicaPath(replica.relativePath, result.name) : null;
+        if (workId && replica?.relativePath && target)
+          await enqueueStructureRequest(ctx, actor.accountId, workId, "move", replica.relativePath, target, result._id);
       }
       afterSiblingId = result._id;
     }

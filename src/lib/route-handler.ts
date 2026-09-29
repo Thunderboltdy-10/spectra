@@ -54,6 +54,14 @@ function normalizeErrorStatus(message: string) {
   )
     return 409;
   if (lower.includes("required") || lower.includes("invalid")) return 400;
+  // A coded refusal that also carries a sentence ("CODE: what happened") is
+  // written for the user. Its code names the kind of refusal; without this it
+  // fell through to 500 and the user read "check your connection" instead.
+  const worded = message.match(/^([A-Z][A-Z0-9_]+):\s*\S/);
+  if (worded) {
+    if (/_NOT_FOUND$/.test(worded[1])) return 404;
+    if (/_(UNAVAILABLE|MISMATCH|LOCKED|CONFLICT)$/.test(worded[1])) return 409;
+  }
   return 500;
 }
 

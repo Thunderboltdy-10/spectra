@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import JoinSchoolPage from "../page";
 
@@ -11,6 +11,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/features/spectra/field/surface-field", () => ({
   SurfaceField: () => null,
 }));
+const clerk = vi.hoisted(() => ({ signOut: vi.fn(async () => {}) }));
+vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerk }));
 
 function routeFailure(code: string, message: string, status: number) {
   return {
@@ -27,6 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  clerk.signOut.mockClear();
 });
 
 describe("join page", () => {
@@ -75,8 +78,39 @@ describe("join page", () => {
     expect(
       await screen.findByRole("button", { name: "Retry invitation check" }),
     ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use a different account" }),
+    );
+    expect(clerk.signOut).toHaveBeenCalledWith({
+      redirectUrl: "/sign-in?redirect_url=%2Fjoin%3Ftoken%3Dlive-token",
+    });
+  });
+
+  it("lets someone signed in with another email switch to the invited one", async () => {
+    navigation.search = "token=mismatch-token";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          schoolName: "Riverside School",
+          role: "student",
+          emailMatches: false,
+          alreadyMember: false,
+        }),
+      }),
+    );
+    render(<JoinSchoolPage />);
+    await screen.findByRole("heading", { name: "Join Riverside School" });
     expect(
-      screen.getByRole("link", { name: "Sign in" }).getAttribute("href"),
-    ).toBe("/sign-in?redirect_url=%2Fjoin%3Ftoken%3Dlive-token");
+      (screen.getByRole("button", { name: "Join school" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use a different account" }),
+    );
+    expect(clerk.signOut).toHaveBeenCalledWith({
+      redirectUrl: "/sign-in?redirect_url=%2Fjoin%3Ftoken%3Dmismatch-token",
+    });
   });
 });

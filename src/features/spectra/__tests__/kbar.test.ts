@@ -18,6 +18,28 @@ describe("contextual K-bar registry", () => {
     expect(entries.some((entry) => entry.command.id === "app.security.credentials")).toBe(false);
   });
 
+  it("never asks a person to type an internal ID", () => {
+    // "Delete Library items" asked for "Comma-separated node IDs", and "Change
+    // sync policy" for IDs plus JSON. Nobody can answer those; the commands
+    // stay available to the AI and to surfaces that already know the target.
+    for (const query of ["", "delete", "sync", "sharing", "classes", "resource", "organize"]) {
+      const entries = buildKBarEntries(APP_COMMANDS, context(), query);
+      const unanswerable = entries
+        .filter((entry) =>
+          (entry.command.parameters ?? []).some(
+            (parameter) => parameter.kind === "item" && entry.params?.[parameter.name] === undefined,
+          ),
+        )
+        .map((entry) => entry.command.id);
+      expect(unanswerable).toEqual([]);
+    }
+    // A search result carries its own ID, so opening it still works.
+    const results = buildKBarEntries(APP_COMMANDS, context(), "notes", [
+      { id: "work-1", kind: "artifact", title: "Notes", params: { workId: "work-1", surface: "panel" } },
+    ]);
+    expect(results.find((entry) => entry.id === "artifact:work-1")?.command.id).toBe("app.work.open");
+  });
+
   it("ranks actions from the mounted surface and active run first", () => {
     const entries = buildKBarEntries(APP_COMMANDS, context({
       pathname: "/settings",

@@ -204,6 +204,16 @@ function commandEntry(command: Command<unknown>, context: KBarContext, query: st
         : command.id === "app.settings.toggle-continuation"
           ? { value: !context.continueCurrentConversation }
           : undefined;
+  // A person cannot answer "Comma-separated node IDs". Commands that target
+  // an item the palette cannot seed stay with the AI and the surfaces that
+  // already hold the target; search results carry their own IDs.
+  const seeded: Record<string, unknown> = params ?? {};
+  if (
+    (command.parameters ?? []).some(
+      (parameter) => parameter.kind === "item" && seeded[parameter.name] === undefined,
+    )
+  )
+    return null;
   return {
     id: `command:${command.id}`,
     command,

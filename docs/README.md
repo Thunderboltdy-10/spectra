@@ -61,7 +61,7 @@ The main subsystems in `src/features/spectra/`:
 
 ## Run and test
 
-Node and dependencies come from `package.json`. Copy `.env.example` or `.env.local.example` to `.env.local`. The Convex deployment's own environment is listed in `docs/spectra-launch-audit/reports/P2-OPS-PERFORMANCE.md` ("Deploy checklist").
+Node and dependencies come from `package.json`. Copy `.env.example` or `.env.local.example` to `.env.local`. Spectra has no built-in model: `SPECTRA_MODEL_ID`, `SPECTRA_REASONING_PROFILE` and `SPECTRA_MODEL_PROVIDER` (plus the optional fallback and judge settings documented in `.env.example`) choose the model, reasoning level and provider. `src/features/spectra/ai/model-config.ts` throws when they are missing, and `check:deploy-env` fails a production build without them. The Convex deployment's own environment is listed in `docs/spectra-launch-audit/reports/P2-OPS-PERFORMANCE.md` ("Deploy checklist").
 
 | Task | Command |
 | --- | --- |
@@ -112,7 +112,7 @@ The launch audit replaced the old process rituals, not these decisions.
   - waves `W1`–`W9`, `V7`–`V9`, and sessions `S6`–`S11`;
   - Phase 2 hardening, `P2-*.md`: security-privacy, ops-performance, experience, write-paths, account lifecycle, outcomes, scale, code health, AI quality, residuals and sync-resume;
   - Phase 3 launch work, `P3-*.md`: Bridge/Lens, UI system, AI engine, editors, editors-2, sync durability, AI context, workspace flows, surfaces-2, client performance and Convex errors.
-- Each P2 and P3 report ends with a findings ledger ("Reported, not fixed" included) and a "Needs live verification" script: actions and expected results. Those scripts are the browser verification plan. Run the P3 scripts first, because they cover the newest code.
+- Each P2 and P3 report ends with a findings ledger ("Reported, not fixed" included) and a "Needs live verification" script: actions and expected results. Those scripts are the browser verification plan. Run the P3 scripts first, because they cover the newest code. `docs/spectra-launch-audit/LIVE-VERIFICATION-PROMPTS.md` has the two prompts for running them: a verifier that only documents issues, and a fixer that works the resulting `LIVE-ISSUES.md` ledger.
 
 ## Open launch risks
 

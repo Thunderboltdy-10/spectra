@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { identityFailureMessage } from "@/components/ui/truthful-state";
 
@@ -439,15 +440,9 @@ function libraryFailureMessage(raw: string): string | null {
 
 /** A stable failure message: the server's reason, or a plain fallback. */
 export function treeFailureMessage(error: unknown, fallback: string) {
-  const raw = error instanceof Error ? error.message : "";
-  /* Convex prefixes thrown messages; the sentence we wrote is what a reader
-     needs, not the frame around it. */
-  const match = raw.match(/Uncaught Error:\s*([^\n]+)/);
-  /* Production Convex redacts the sentence and leaves only the frame
-     ("[CONVEX M(library:move)] [Request ID: …] Server Error Called by client").
-     A frame with no sentence has nothing for a reader; use the fallback. */
-  const frameOnly = !match && /\[CONVEX [A-Z]\(|\[Request ID:|Server Error/.test(raw);
-  const message = frameOnly ? "" : (match?.[1] ?? raw ?? "").trim();
+  /* The sentence we wrote, from the ConvexError data production keeps. A
+     redacted frame with no words reads as empty; use the fallback. */
+  const message = error instanceof Error ? readConvexError(error).message : "";
   /* AUTH_* identity codes must win over LIBRARY_* if a frame ever carries both
      (LIBRARY catch-all must not mask sign-in / school membership failures). */
   return (

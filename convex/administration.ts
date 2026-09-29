@@ -1,10 +1,5 @@
-import {
-  internalAction,
-  internalQuery,
-  query,
-  type MutationCtx,
-  type QueryCtx,
-} from "./_generated/server";
+import { type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalAction, internalQuery, query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { PaginationOptions, PaginationResult } from "convex/server";

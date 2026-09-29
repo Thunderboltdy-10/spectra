@@ -2,6 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/badge";
+import { readConvexError } from "../../../shared/convex-error.mjs";
 
 /**
  * S8 — truthfulness of reported state.
@@ -189,7 +190,9 @@ export function readingFromCapability(
 
 function rawText(error: unknown): string {
   if (typeof error === "string") return error;
-  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  // A redacted Convex failure keeps its words only in ConvexError data.
+  if (error instanceof Error)
+    return `${error.name}: ${readConvexError(error).message || error.message}`;
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message: unknown }).message);
   }

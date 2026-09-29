@@ -1,5 +1,5 @@
 import { v, type Infer, type ObjectType } from "convex/values";
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import { internalMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";

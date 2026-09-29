@@ -1,6 +1,6 @@
 "use node";
 
-import { internalAction } from "./_generated/server";
+import { internalAction } from "./functions";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import * as Y from "yjs";

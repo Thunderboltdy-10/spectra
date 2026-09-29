@@ -1,6 +1,6 @@
 import { assertExclusiveDurableStorage, deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation, internalQuery } from "./functions";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getActorForAccountId } from "./identityShared";

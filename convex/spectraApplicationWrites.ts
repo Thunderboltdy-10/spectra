@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
-import { mutation } from "./_generated/server";
+import { mutation } from "./functions";
 import { getAuthenticatedActor } from "./identityShared";
 import { normalizeAiPreferencePatch } from "../src/features/spectra/settings/schema/preferences";
 import { applicationApprovalScope, applicationOperationScope, applicationWriteReceipt } from "./spectraApplicationWriteScope";

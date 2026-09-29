@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation } from "./orgNodeMutation";
 import { v } from "convex/values";

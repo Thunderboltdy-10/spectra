@@ -61,6 +61,7 @@ import type * as durableStorageBindings from "../durableStorageBindings.js";
 import type * as env from "../env.js";
 import type * as executionScheduler from "../executionScheduler.js";
 import type * as flashcardStudy from "../flashcardStudy.js";
+import type * as functions from "../functions.js";
 import type * as identity from "../identity.js";
 import type * as identityShared from "../identityShared.js";
 import type * as intakeAttestation from "../intakeAttestation.js";
@@ -189,6 +190,7 @@ declare const fullApi: ApiFromModules<{
   env: typeof env;
   executionScheduler: typeof executionScheduler;
   flashcardStudy: typeof flashcardStudy;
+  functions: typeof functions;
   identity: typeof identity;
   identityShared: typeof identityShared;
   intakeAttestation: typeof intakeAttestation;

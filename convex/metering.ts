@@ -1,4 +1,4 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./functions";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { resolveActorContext } from "./identityShared";

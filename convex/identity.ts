@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./functions";
 import { v } from "convex/values";
 import { getAccountByClerkId, getAuthenticatedAccount, getAuthenticatedActor, getAuthenticatedIdentity, isPlatformOperatorEmail } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";

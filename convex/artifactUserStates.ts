@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import { mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import { requireArtifactCapability } from "./spectraShared";

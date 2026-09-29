@@ -1,7 +1,7 @@
 "use node";
 
 import { createHash, createHmac } from "node:crypto";
-import { internalAction } from "./_generated/server";
+import { internalAction } from "./functions";
 import { v } from "convex/values";
 
 /**

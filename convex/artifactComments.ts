@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./functions";
 import { v } from "convex/values";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActiveMembership, getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";

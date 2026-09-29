@@ -1,8 +1,40 @@
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
+import { ConvexHttpClient, type HttpMutationOptions } from "convex/browser";
+import {
+  makeFunctionReference,
+  type ArgsAndOptions,
+  type FunctionReference,
+  type OptionalRestArgs,
+} from "convex/server";
 import { auth } from "@clerk/nextjs/server";
 import { getConvexUrl } from "@/lib/env";
 import { getWorkerConvexToken } from "@/lib/convex-worker-context";
+import { rethrowWorded } from "../../shared/convex-error.mjs";
+
+/* Route code branches on `error.message` ("CODE: sentence"). Production Convex
+   redacts that message to "Server Error" and keeps the words only in the
+   ConvexError data, so every server-side call puts them back. */
+class WordedConvexHttpClient extends ConvexHttpClient {
+  override query<Query extends FunctionReference<"query">>(
+    query: Query,
+    ...args: OptionalRestArgs<Query>
+  ) {
+    return super.query(query, ...args).catch(rethrowWorded);
+  }
+
+  override mutation<Mutation extends FunctionReference<"mutation">>(
+    mutation: Mutation,
+    ...args: ArgsAndOptions<Mutation, HttpMutationOptions>
+  ) {
+    return super.mutation(mutation, ...args).catch(rethrowWorded);
+  }
+
+  override action<Action extends FunctionReference<"action">>(
+    action: Action,
+    ...args: OptionalRestArgs<Action>
+  ) {
+    return super.action(action, ...args).catch(rethrowWorded);
+  }
+}
 
 type CachedConvexToken = {
   token: string;
@@ -90,7 +122,7 @@ async function getConvexClient() {
     throw new Error(
       "AUTH_CONVEX_TOKEN_MISSING: The authenticated Convex token is unavailable.",
     );
-  return new ConvexHttpClient(getConvexUrl(), { logger: false, auth: token });
+  return new WordedConvexHttpClient(getConvexUrl(), { logger: false, auth: token });
 }
 
 export async function storeArtifactContent(artifactId: string, content: unknown) {
@@ -106,7 +138,7 @@ export async function checkpointArtifactDurableContent(artifactId: string) {
 }
 
 function getPublicConvexClient() {
-  return new ConvexHttpClient(getConvexUrl(), { logger: false });
+  return new WordedConvexHttpClient(getConvexUrl(), { logger: false });
 }
 
 function ref<T extends "query" | "mutation" | "action">(name: string) {

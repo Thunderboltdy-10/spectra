@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";

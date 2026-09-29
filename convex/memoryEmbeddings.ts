@@ -2,7 +2,7 @@
 
 import { getEncoding } from "js-tiktoken";
 import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
+import { internalAction } from "./functions";
 import { internal } from "./_generated/api";
 import { getOpenRouterApiKey } from "./env";
 import {

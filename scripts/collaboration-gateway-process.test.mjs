@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assertGatewayPortAvailable, gatewayBinding, runGatewayProcess } from "./collaboration-gateway-process.mjs";
+import { GATEWAY_SHUTDOWN_DRAIN_MS, GATEWAY_SHUTDOWN_GRACE_MS } from "./collaboration-persist.mjs";
 
 function runtime() {
   return Object.assign(new EventEmitter(), {
@@ -164,6 +165,30 @@ describe("owned gateway child supervision", () => {
     }))).toBe(0);
     expect(owned.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
     expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the gateway finish its durable drain before the default SIGKILL", async () => {
+    vi.useFakeTimers();
+    try {
+      const processRuntime = runtime();
+      const owned = child();
+      owned.kill.mockImplementation((signal) => {
+        if (signal === "SIGKILL") queueMicrotask(() => owned.emit("exit", null, signal));
+      });
+      const spawnProcess = vi.fn(() => {
+        queueMicrotask(() => processRuntime.emit("SIGTERM"));
+        return owned;
+      });
+      const stopped = runGatewayProcess(options({ runtime: processRuntime, spawnProcess, supervise: true }));
+      await vi.advanceTimersByTimeAsync(GATEWAY_SHUTDOWN_DRAIN_MS);
+      // The old 3 s timer killed the gateway while it was still storing edits.
+      expect(owned.kill.mock.calls).toEqual([["SIGTERM"]]);
+      await vi.advanceTimersByTimeAsync(GATEWAY_SHUTDOWN_GRACE_MS - GATEWAY_SHUTDOWN_DRAIN_MS);
+      expect(await stopped).toBe(0);
+      expect(owned.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("increases recovery backoff for consecutive fast failures", async () => {

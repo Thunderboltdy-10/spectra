@@ -8,3 +8,5 @@
   healthcheckPath = "/_spectra/health"
   healthcheckTimeout = 3
   numReplicas = 1
+  # Seconds between SIGTERM and SIGKILL; the gateway drains edits for up to 25 s.
+  drainingSeconds = 30

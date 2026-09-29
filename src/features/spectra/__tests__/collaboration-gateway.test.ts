@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { COLLAB_RECONNECT } from "../collaboration/reconnect-backoff";
@@ -37,6 +38,10 @@ import {
   collaborationFailureMessage,
   collaborationRetryDelayMs,
   COLLABORATION_AUTHORIZE_CACHE_MS,
+  drainGatewayForShutdown,
+  GATEWAY_RESTARTING_CLOSE,
+  GATEWAY_SHUTDOWN_DRAIN_MS,
+  GATEWAY_SHUTDOWN_GRACE_MS,
 } from "../../../../scripts/collaboration-persist.mjs";
 
 describe("P5.I2 gateway production helpers", () => {
@@ -547,5 +552,112 @@ describe("collaboration bridge verify precision", () => {
     const bridge = readFileSync("convex/collaborationGatewayBridge.ts", "utf8");
     expect(bridge).toContain("optionalProjectionText");
     expect(bridge).toContain("projectionPayloadRef");
+  });
+});
+
+describe("gateway shutdown drain", () => {
+  type Room = { name: string; pending: number; hang?: boolean };
+
+  function harness(rooms: Room[], options: { budgetMs?: number; lateUpdate?: Room } = {}) {
+    const events: string[] = [];
+    const logs: string[] = [];
+    let lateDelivered = false;
+    const drained = drainGatewayForShutdown({
+      stopAccepting: () => events.push("stop-accepting"),
+      closeConnections: () => events.push("close-connections"),
+      dirtyDocuments: () => rooms.filter((room) => room.pending > 0),
+      flushDocument: async (room: Room) => {
+        events.push(`flush:${room.name}`);
+        if (room.hang) return new Promise(() => undefined);
+        await Promise.resolve();
+        room.pending = 0;
+        // A socket that closed mid-message still applies its one update.
+        if (options.lateUpdate && !lateDelivered) {
+          lateDelivered = true;
+          options.lateUpdate.pending += 1;
+        }
+      },
+      flushCheckpoints: async () => {
+        events.push("checkpoints");
+      },
+      describeDocument: (room: Room) => `${room.name} pendingUpdates=${room.pending}`,
+      log: (line: string) => logs.push(line),
+      budgetMs: options.budgetMs ?? 1_000,
+      settleMs: 1,
+    });
+    return { drained, events, logs };
+  }
+
+  it("stops writes, stores every dirty room, then writes checkpoints", async () => {
+    const rooms = [
+      { name: "essay", pending: 2 },
+      { name: "clean", pending: 0 },
+      { name: "deck", pending: 1 },
+    ];
+    const { drained, events, logs } = harness(rooms);
+    const result = await drained;
+    expect(events).toEqual([
+      "stop-accepting",
+      "close-connections",
+      "flush:essay",
+      "flush:deck",
+      "checkpoints",
+    ]);
+    expect(result).toEqual({ unflushed: [], checkpointsFlushed: true });
+    expect(rooms.every((room) => room.pending === 0)).toBe(true);
+    expect(logs.join("")).toContain("0 room(s) not durable");
+  });
+
+  it("drains an update applied after its socket closed", async () => {
+    const late = { name: "late", pending: 0 };
+    const rooms = [{ name: "essay", pending: 1 }, late];
+    const { drained, events } = harness(rooms, { lateUpdate: late });
+    const result = await drained;
+    expect(events).toEqual([
+      "stop-accepting",
+      "close-connections",
+      "flush:essay",
+      "flush:late",
+      "checkpoints",
+    ]);
+    expect(result.unflushed).toEqual([]);
+    expect(late.pending).toBe(0);
+  });
+
+  it("exits inside its budget and names each room it could not store", async () => {
+    const rooms = [
+      { name: "stuck", pending: 3, hang: true },
+      { name: "essay", pending: 1 },
+    ];
+    const started = Date.now();
+    const { drained, logs } = harness(rooms, { budgetMs: 50 });
+    const result = await drained;
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(result.unflushed).toEqual(["stuck pendingUpdates=3"]);
+    expect(rooms[1].pending).toBe(0);
+    expect(logs.join("")).toContain("not durable before exit: stuck pendingUpdates=3");
+  });
+
+  it("closes sockets with a restart code the client treats as a reconnect", () => {
+    // 4403 and 4409 mark the tab revoked or unsynchronized with an error.
+    expect(GATEWAY_RESTARTING_CLOSE.code).toBe(1012);
+  });
+
+  it("gives the drain room inside every kill timer that wraps it", () => {
+    const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+    // Hocuspocus' own SIGTERM handler would exit before the drain finished.
+    expect(gateway).toMatch(/stopOnSignals:\s*false/);
+    expect(gateway).toMatch(/process\.on\("SIGTERM", shutdown\)/);
+    expect(GATEWAY_SHUTDOWN_GRACE_MS).toBeGreaterThan(GATEWAY_SHUTDOWN_DRAIN_MS);
+    const fly = readFileSync("deploy/collaboration-gateway/fly.toml", "utf8");
+    expect(fly).toMatch(/^kill_signal\s*=\s*"SIGTERM"/m);
+    const flySeconds = Number(fly.match(/^kill_timeout\s*=\s*"?(\d+)s?"?/m)?.[1]);
+    expect(flySeconds * 1_000).toBeGreaterThan(GATEWAY_SHUTDOWN_GRACE_MS);
+    const compose = readFileSync("deploy/collaboration-gateway/compose.yml", "utf8");
+    const composeSeconds = Number(compose.match(/stop_grace_period:\s*(\d+)s/)?.[1]);
+    expect(composeSeconds * 1_000).toBeGreaterThan(GATEWAY_SHUTDOWN_GRACE_MS);
+    const railway = readFileSync("deploy/collaboration-gateway/railway.toml", "utf8");
+    const railwaySeconds = Number(railway.match(/drainingSeconds\s*=\s*(\d+)/)?.[1]);
+    expect(railwaySeconds * 1_000).toBeGreaterThan(GATEWAY_SHUTDOWN_GRACE_MS);
   });
 });

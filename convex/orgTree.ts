@@ -778,7 +778,10 @@ export const trash = mutation({
         : null;
       const sourcePath = replica?.relativePath;
       const trashed = await trashNode(ctx, node);
-      if (sourceWorkId && sourcePath) await enqueueStructureRequest(ctx, actor.accountId, sourceWorkId, "delete", sourcePath, undefined, node._id);
+      /* Only a work that just entered Trash asks for its file: trashing one
+         already there (a stale second tab, a retried request) changes
+         nothing, so it must not queue another deletion of the file. */
+      if (sourceWorkId && sourcePath && trashed.trashed > 0) await enqueueStructureRequest(ctx, actor.accountId, sourceWorkId, "delete", sourcePath, undefined, node._id);
       results.push(trashed);
     }
     return { trashed: results };
@@ -793,10 +796,39 @@ export const restore = mutation({
     for (const nodeId of args.nodeIds) {
       const node = await requireOwnNode(ctx, nodeId, actor.accountId);
       results.push(await restoreTrashedNode(ctx, node));
+      await withdrawFileDeletion(ctx, node);
     }
     return { restored: results };
   },
 });
+
+/**
+ * Restoring a Bridge-linked work keeps its file. A deletion still waiting for
+ * approval or for the device is withdrawn, so the Recycle Bin prompt (or the
+ * device) no longer removes the file of a work that is back in the Library.
+ * A deletion the device has already claimed or done is left as it is.
+ */
+async function withdrawFileDeletion(ctx: MutationCtx, node: Doc<"orgNodes">) {
+  const workId = node.kind === "work" && node.sourceId
+    ? ctx.db.normalizeId("spectraArtifacts", node.sourceId)
+    : null;
+  if (!workId) return;
+  const requests = await ctx.db
+    .query("bridgeFsRequests")
+    .withIndex("by_work_created", (q) => q.eq("workId", workId))
+    .order("desc")
+    .take(50);
+  const now = Date.now();
+  for (const request of requests) {
+    if (request.kind !== "delete") continue;
+    if (request.state !== "approval-required" && request.state !== "pending") continue;
+    await ctx.db.patch(request._id, {
+      state: "ignored",
+      explanation: "The work was restored from Trash, so its file stays on disk.",
+      updatedAt: now,
+    });
+  }
+}
 
 const COLLAB_DRAIN_PAGE = 100;
 

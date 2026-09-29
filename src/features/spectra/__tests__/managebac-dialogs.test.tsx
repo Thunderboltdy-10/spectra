@@ -1,0 +1,86 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DisconnectDialog,
+  ManifestDialog,
+  SettingsDialog,
+} from "../pages/managebac-integration-shell";
+
+afterEach(cleanup);
+
+function settings(busy = false, onClose = vi.fn()) {
+  render(
+    <SettingsDialog
+      config={{ baseUrl: "https://api.managebac.com", token: "" }}
+      setConfig={vi.fn()}
+      busy={busy}
+      connected
+      envTokenAvailable={false}
+      onClose={onClose}
+      onSave={vi.fn()}
+      onManifest={vi.fn()}
+    />,
+  );
+  return onClose;
+}
+
+describe("ManageBac dialogs on the shared Dialog", () => {
+  it("asks to disconnect above every panel, starting on the safe answer", () => {
+    const onConfirm = vi.fn();
+    render(
+      <DisconnectDialog busy={false} onClose={vi.fn()} onConfirm={onConfirm} />,
+    );
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Disconnect ManageBac?",
+    });
+    // The modal layer, not `dropdown`, which app panels and popovers paint over.
+    expect(dialog.className).toContain("z-modal");
+    expect(dialog.className).not.toContain("z-dropdown");
+    expect(document.activeElement?.textContent).toBe("Keep connected");
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("cannot be dismissed while the disconnect runs", () => {
+    const onClose = vi.fn();
+    render(<DisconnectDialog busy onClose={onClose} onConfirm={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      (screen.getByRole("button", { name: "Keep connected" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("names the settings and manifest dialogs by the titles they show", () => {
+    settings();
+    expect(
+      screen.getByRole("dialog", { name: "ManageBac connection" }),
+    ).toBeTruthy();
+    cleanup();
+    render(
+      <ManifestDialog
+        value=""
+        setValue={vi.fn()}
+        busy={false}
+        onClose={vi.fn()}
+        onImport={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Verified capability manifest" }),
+    ).toBeTruthy();
+  });
+
+  it("closes settings on Escape, but not while saving", () => {
+    const onClose = settings();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    cleanup();
+    const busyClose = settings(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(busyClose).not.toHaveBeenCalled();
+  });
+});

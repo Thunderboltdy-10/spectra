@@ -341,6 +341,15 @@ function minutesOnDay(value: number, timezone: string) {
   return Number(parts.hour) * 60 + Number(parts.minute);
 }
 
+/** The owner's own work blocks and personal events move and resize; official
+    and imported source events do not (the server enforces the same rule). */
+function isReschedulable(item: CalendarItem) {
+  return (
+    item.kind === "scheduled_work_block" ||
+    (item.kind === "personal_event" && !item.sourceLocked)
+  );
+}
+
 function isDayItem(item: CalendarItem) {
   return Boolean(
     item.startAt !== undefined &&
@@ -1538,7 +1547,7 @@ function WeekGrid({
                   timezone={timezone}
                   previewing={gesturePreview?.itemId === item.id}
                   pending={pendingItemIds.has(item.id)}
-                  canMove={item.kind === "scheduled_work_block" && !pendingItemIds.has(item.id) && !resizeGesture}
+                  canMove={isReschedulable(item) && !pendingItemIds.has(item.id) && !resizeGesture}
                   onOpen={() => onOpen(item)}
                   onDragStart={(offset) => onBlockDragStart(item, offset)}
                   onDragEnd={onBlockDragEnd}
@@ -1742,7 +1751,7 @@ function CalendarItemPanel({
           </div>
         ) : null}
       </dl>
-      {item.kind === "scheduled_work_block" && item.endAt !== undefined ? (
+      {isReschedulable(item) && item.endAt !== undefined ? (
         <section className="mt-5 rounded-xl border border-[var(--border-default)] p-3">
           <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
             Duration

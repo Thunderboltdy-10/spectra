@@ -4067,6 +4067,8 @@ export default defineSchema({
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
     title: v.string(),
+    /** The owner named this chat; generated titles never replace it. */
+    titleSetByOwner: v.optional(v.boolean()),
     summaryShort: v.optional(v.string()),
     summaryLong: v.optional(v.string()),
     origin: v.union(

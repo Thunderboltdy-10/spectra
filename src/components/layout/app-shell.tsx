@@ -84,6 +84,11 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
+import { sidebarThreadSections } from "./sidebar-threads";
+import {
+  buildShellNotifications,
+  reviewShareInvitations,
+} from "./shell-notifications";
 
 type AppShellProps = {
   children: ReactNode;
@@ -152,6 +157,16 @@ function ShellNavigation() {
   const workspaces = workspaceCatalog.items;
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [threadsLoaded, setThreadsLoaded] = useState(false);
+  const activeThreadId = searchParams.get("threadId");
+  const threadSections = useMemo(
+    () =>
+      sidebarThreadSections(threads, {
+        term: sidebarSearch,
+        chatPage: pathname === "/chat",
+      }),
+    [threads, sidebarSearch, pathname],
+  );
   const [isMacPlatform, setIsMacPlatform] = useState(false);
   const [preferredSidebarCollapsed, setPreferredSidebarCollapsed] =
     useState(false);
@@ -278,8 +293,9 @@ function ShellNavigation() {
     const refresh = () => {
       void getSpectraThreads()
         .then(({ threads: rows }) => {
-          if (active)
-            setThreads(rows.filter((thread) => thread.status === "active"));
+          if (!active) return;
+          setThreads(rows.filter((thread) => thread.status === "active"));
+          setThreadsLoaded(true);
         })
         .catch(() => undefined);
     };
@@ -315,7 +331,7 @@ function ShellNavigation() {
                   : "You have read-only access.",
               action: {
                 label: "Review",
-                onClick: () => router.push("/library?collection=invitations"),
+                onClick: () => reviewShareInvitations(router),
               },
             },
           );
@@ -353,50 +369,12 @@ function ShellNavigation() {
 
   const notifications = useMemo(
     () =>
-      [
-        ...commentNotifications.map((item) => ({
-          id: item._id,
-          kind: "comment" as const,
-          artifactId: item.artifactId,
-          title:
-            item.kind === "mention"
-              ? `${item.author?.name ?? "Someone"} mentioned you`
-              : item.kind === "reply"
-                ? `${item.author?.name ?? "Someone"} replied`
-                : `New comment from ${item.author?.name ?? "a collaborator"}`,
-          detail: `${item.artifact.title} · ${item.comment.body}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...plannerNotifications.map((item) => ({
-          id: item._id,
-          kind: "planner" as const,
-          artifactId: item.artifactId,
-          title: item.taskTitle,
-          detail: `Due ${new Date(item.dueAt).toLocaleString("en-US")}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...timetableNotifications.map((item) => ({
-          id: item._id,
-          kind: "timetable" as const,
-          artifactId: item.artifactId,
-          title: item.eventTitle,
-          detail: `${item.artifactTitle} · ${new Date(item.occurrenceStart).toLocaleString("en-US")}`,
-          createdAt: item.createdAt,
-          readAt: item.readAt,
-        })),
-        ...shareInvitations.map((item) => ({
-          id: item.invitationId,
-          kind: "share" as const,
-          artifactId: item.resourceId,
-          href: "/library?collection=invitations",
-          title: `${item.inviter?.name ?? "A collaborator"} shared ${item.resource.title}`,
-          detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access · Review invitation`,
-          createdAt: item.createdAt,
-          readAt: undefined,
-        })),
-      ].sort((a, b) => b.createdAt - a.createdAt),
+      buildShellNotifications({
+        comments: commentNotifications,
+        planner: plannerNotifications,
+        timetable: timetableNotifications,
+        invitations: shareInvitations,
+      }),
     [
       commentNotifications,
       plannerNotifications,
@@ -685,16 +663,7 @@ function ShellNavigation() {
         >
           {sidebarCollapsed
             ? null
-            : ([true, false] as const).map((pinned) => {
-                const term = sidebarSearch.trim().toLowerCase();
-                const rows = threads
-                  .filter(
-                    (thread) =>
-                      Boolean(thread.pinned) === pinned &&
-                      (!term || thread.title.toLowerCase().includes(term)),
-                  )
-                  .slice(0, pinned ? 5 : 10);
-                if (!rows.length) return null;
+            : threadSections.map(({ pinned, rows }) => {
                 return (
                   <section key={String(pinned)} className="mt-3">
                     <h2 className="flex items-center justify-between px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
@@ -707,6 +676,7 @@ function ShellNavigation() {
                           key={thread._id}
                           href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
                           prefetch={false}
+                          aria-current={pathname === "/chat" && activeThreadId === thread._id ? "page" : undefined}
                           className={cn("group flex items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]", pathname === "/chat" ? "min-h-10 py-1" : "h-8")}
                         >
                           <span className="min-w-0 flex-1 truncate">
@@ -728,6 +698,13 @@ function ShellNavigation() {
                   </section>
                 );
               })}
+          {!sidebarCollapsed && threadsLoaded && threadSections.length === 0 ? (
+            <p className="mt-3 px-1 text-micro leading-4 text-[var(--text-tertiary)]">
+              {sidebarSearch.trim()
+                ? `No recent chats match “${sidebarSearch.trim()}”.`
+                : "Your chats will appear here. Start one with New chat."}
+            </p>
+          ) : null}
         </div>
         <div
           className={cn(
@@ -842,12 +819,12 @@ function ShellNavigation() {
                   <Link
                     key={`wide:${item.kind}:${item.id}`}
                     href={
-                      "href" in item
-                        ? item.href
-                        : `/library/${encodeURIComponent(item.artifactId)}`
+                      item.href ??
+                      `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
+                      if (item.kind === "share") reviewShareInvitations();
                       void markNotificationRead(item);
                     }}
                     className="flex gap-2.5 rounded-control px-2.5 py-2 hover:bg-[var(--bg-hover)]"
@@ -996,12 +973,12 @@ function ShellNavigation() {
                   <Link
                     key={`mobile:${item.kind}:${item.id}`}
                     href={
-                      "href" in item
-                        ? item.href
-                        : `/library/${encodeURIComponent(item.artifactId)}`
+                      item.href ??
+                      `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
+                      if (item.kind === "share") reviewShareInvitations();
                       void markNotificationRead(item);
                     }}
                     className="flex gap-3 rounded-surface px-3 py-3 hover:bg-[var(--bg-hover)]"

@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, X } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFollowAi } from "../collaboration/follow-ai";
 import { appSurfaceFromPathname } from "../collaboration/app-choreography";
@@ -311,10 +312,17 @@ export function UniversalKBar() {
       const message = value && typeof value === "object"
         ? value.message
         : `${entry.label} completed.`;
+      const effect = value && typeof value === "object"
+        ? value.effect
+        : entry.command.effect?.kind;
       setResultMessage(message);
       setParametersFor(null);
       setConfirming(null);
       closeKBar();
+      // The bar closes on success, so its status line is never read. A
+      // change with nothing new on screen (a setting, a saved edit) says what
+      // happened in a toast; navigation and opening show their own result.
+      if (effect === "toggle" || effect === "mutate") toast.success(message);
     } catch (error) {
       setResultMessage(commandFailureMessage(error, entry.label));
     } finally {

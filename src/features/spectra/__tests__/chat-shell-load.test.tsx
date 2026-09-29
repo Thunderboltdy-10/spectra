@@ -38,6 +38,10 @@ const mocks = vi.hoisted(() => {
     postSpectra: vi.fn(),
     run: vi.fn(),
     toastError: vi.fn(),
+    toastSuccess: vi.fn(),
+    trash: vi.fn(),
+    restore: vi.fn(),
+    placement: { current: null as { node: { nodeId: string } } | null },
   };
 });
 
@@ -51,7 +55,11 @@ vi.mock("next/dynamic", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError, message: vi.fn() },
+  toast: {
+    error: mocks.toastError,
+    success: mocks.toastSuccess,
+    message: vi.fn(),
+  },
 }));
 
 vi.mock("@/stores/spectra-context-store", () => ({
@@ -74,6 +82,11 @@ vi.mock("../data/api", () => ({
   getSpectraArtifact: vi.fn(),
   getSpectraRunDetail: vi.fn(),
   postSpectra: mocks.postSpectra,
+}));
+
+vi.mock("../organization/tree-client", () => ({
+  useTreePlacement: () => mocks.placement.current,
+  useTreeActions: () => ({ trash: mocks.trash, restore: mocks.restore }),
 }));
 
 vi.mock("../settings/preference-store", () => ({
@@ -225,6 +238,7 @@ beforeEach(() => {
   mocks.run.mockReset();
   mocks.toastError.mockReset();
   mocks.runOptions.current = null;
+  mocks.placement.current = null;
 });
 
 afterEach(() => {
@@ -385,6 +399,91 @@ describe("ChatShell load states", () => {
     });
     await waitFor(() => expect(screen.getByText("New route wins.")).toBeTruthy());
     expect(screen.queryByText("Stale route loses.")).toBeNull();
+  });
+});
+
+describe("ChatShell chat actions", () => {
+  function openSavedChat() {
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getThread.mockResolvedValue({
+      thread: { _id: "saved-thread", title: "Saved conversation" },
+      messages: [{ _id: "message-1", content: "Hello" }],
+      traces: [],
+    });
+    return render(<ChatShell />);
+  }
+
+  it("keeps the rename open and says so when saving the name fails", async () => {
+    openSavedChat();
+    fireEvent.click(await screen.findByRole("button", { name: "Rename chat" }));
+    const field = screen.getByRole("textbox", { name: "Chat name" });
+    fireEvent.change(field, { target: { value: "Exam prep" } });
+    mocks.postSpectra.mockRejectedValueOnce(new Error("network down"));
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Could not rename this chat. Try again.",
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Chat name" })).toBeTruthy();
+  });
+
+  it("does not save an empty chat name", async () => {
+    openSavedChat();
+    fireEvent.click(await screen.findByRole("button", { name: "Rename chat" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat name" }), {
+      target: { value: "   " },
+    });
+    const save = screen.getByRole("button", { name: "Save title" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(save);
+    expect(mocks.postSpectra).not.toHaveBeenCalled();
+  });
+
+  it("reports a pin that did not save", async () => {
+    openSavedChat();
+    mocks.postSpectra.mockRejectedValueOnce(new Error("network down"));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Pin chat" }));
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Could not pin this chat. Try again.",
+      ),
+    );
+  });
+
+  it("moves the open chat to the Trash, starts a new chat, and can undo", async () => {
+    mocks.placement.current = { node: { nodeId: "node-1" } };
+    mocks.trash.mockResolvedValue({ trashed: [] });
+    mocks.restore.mockResolvedValue({ restored: [] });
+    openSavedChat();
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Delete chat" }));
+      await Promise.resolve();
+    });
+
+    expect(mocks.trash).toHaveBeenCalledWith(["node-1"]);
+    await waitFor(() =>
+      expect(mocks.router.replace).toHaveBeenCalledWith("/chat?new=1"),
+    );
+    const [message, options] = mocks.toastSuccess.mock.calls.at(-1)!;
+    expect(message).toBe("Chat moved to Trash.");
+    await act(async () => {
+      options.action.onClick();
+      await Promise.resolve();
+    });
+    expect(mocks.restore).toHaveBeenCalledWith(["node-1"]);
+    await waitFor(() =>
+      expect(mocks.router.replace).toHaveBeenCalledWith(
+        "/chat?threadId=saved-thread",
+      ),
+    );
   });
 });
 

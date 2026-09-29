@@ -980,6 +980,18 @@ export const scheduleTask = mutation({
   },
 });
 
+/**
+ * What the owner may move or resize on their Calendar: their own work blocks
+ * and the personal events they added. Official and imported source events
+ * stay where their source put them.
+ */
+function isReschedulable(item: Doc<"calendarItems">) {
+  return (
+    item.kind === "scheduled_work_block" ||
+    (item.kind === "personal_event" && !item.sourceLocked)
+  );
+}
+
 export const moveWorkBlock = mutation({
   args: {
     itemId: v.id("calendarItems"),
@@ -993,7 +1005,7 @@ export const moveWorkBlock = mutation({
     if (
       !item ||
       item.ownerAccountId !== actor.accountId ||
-      item.kind !== "scheduled_work_block"
+      !isReschedulable(item)
     )
       throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
@@ -1023,7 +1035,7 @@ export const resizeWorkBlock = mutation({
     if (
       !item ||
       item.ownerAccountId !== actor.accountId ||
-      item.kind !== "scheduled_work_block"
+      !isReschedulable(item)
     )
       throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)

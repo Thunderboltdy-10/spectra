@@ -104,3 +104,49 @@ describe("Library names mirrored to Bridge files", () => {
     expect(await structureRequests(t)).toEqual([]);
   });
 });
+
+/** The owner chose to mirror Library structure onto the folder on disk. */
+async function mirrorStructureToDisk(t: ReturnType<typeof setupTest>, accountId: string) {
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    await ctx.db.insert("syncPolicies", {
+      accountId: accountId as never, scopeKind: "account", scopeId: accountId, preset: "both",
+      contentDirection: "bidirectional", discovery: "auto", structure: "mirror-to-disk", cloudContent: "full",
+      includeGlobs: [], excludeGlobs: [], timing: "continuous", protectedOriginal: false, createdAt: now, updatedAt: now,
+    });
+  });
+}
+
+describe("Trash and restore of a Bridge-linked work", () => {
+  it("asks Bridge to delete the file once, even when the work is trashed again", async () => {
+    const t = setupTest();
+    const { nodeId, accountId } = await seedLinkedWork(t);
+    await mirrorStructureToDisk(t, accountId);
+    const user = t.withIdentity(identity);
+    await user.mutation(api.orgTree.trash, { nodeIds: [nodeId] });
+    // The replica moves on (a sync touched it) before the second, stale trash.
+    await t.run(async (ctx) => {
+      const replica = (await ctx.db.query("workReplicas").collect())[0]!;
+      await ctx.db.patch(replica._id, { updatedAt: replica.updatedAt + 1 });
+    });
+    await user.mutation(api.orgTree.trash, { nodeIds: [nodeId] });
+    const requests = await structureRequests(t);
+    expect(requests.filter((request) => request.kind === "delete")).toHaveLength(1);
+  });
+
+  it("withdraws the waiting file deletion when the work is restored", async () => {
+    const t = setupTest();
+    const { nodeId, accountId } = await seedLinkedWork(t);
+    await mirrorStructureToDisk(t, accountId);
+    const user = t.withIdentity(identity);
+    await user.mutation(api.orgTree.trash, { nodeIds: [nodeId] });
+    const [queued] = await structureRequests(t);
+    expect(queued?.kind).toBe("delete");
+    expect(["approval-required", "pending"]).toContain(queued?.state);
+
+    await user.mutation(api.orgTree.restore, { nodeIds: [nodeId] });
+    const [after] = await structureRequests(t);
+    expect(after?.state).toBe("ignored");
+    expect(after?.explanation).toMatch(/restored/i);
+  });
+});

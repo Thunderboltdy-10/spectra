@@ -21,9 +21,11 @@ import {
   Pencil,
   Pin,
   Plus,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { describeFailure } from "@/components/ui/truthful-state";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -69,6 +71,7 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { useTreeActions, useTreePlacement } from "../organization/tree-client";
 import {
   acknowledgeViewportReady,
   requestViewportAction,
@@ -348,6 +351,94 @@ export function ChatShell() {
     },
     [closePresentation, router, setComposerThread, threads],
   );
+
+  /* Rename, pin and delete answer every time: a failure says so and leaves
+     the chat as it was, instead of an unhandled rejection and silence. */
+  const [threadBusy, setThreadBusy] = useState<"title" | "pin" | "trash" | null>(
+    null,
+  );
+  const threadPlacement = useTreePlacement("thread", threadId);
+  const treeActions = useTreeActions();
+  async function saveTitle() {
+    const title = titleDraft.trim();
+    if (!threadId || !title || threadBusy) return;
+    setThreadBusy("title");
+    try {
+      await postSpectra({ action: "updateThread", threadId, title });
+      setRenaming(false);
+      if (composerThread?.id === threadId)
+        setComposerThread({ id: threadId, title });
+      await refresh(threadId).catch(() => undefined);
+    } catch (error) {
+      toast.error(
+        describeFailure(error, {
+          fallback: "Could not rename this chat. Try again.",
+        }).message,
+      );
+    } finally {
+      setThreadBusy(null);
+    }
+  }
+  async function togglePinned() {
+    if (!threadId || threadBusy) return;
+    setThreadBusy("pin");
+    try {
+      await postSpectra({
+        action: "updateThread",
+        threadId,
+        pinned: !detail?.thread.pinned,
+      });
+      await refresh(threadId).catch(() => undefined);
+    } catch (error) {
+      toast.error(
+        describeFailure(error, {
+          fallback: detail?.thread.pinned
+            ? "Could not unpin this chat. Try again."
+            : "Could not pin this chat. Try again.",
+        }).message,
+      );
+    } finally {
+      setThreadBusy(null);
+    }
+  }
+  async function trashThread() {
+    const nodeId = threadPlacement?.node.nodeId;
+    if (!threadId || !nodeId || threadBusy) return;
+    setThreadBusy("trash");
+    try {
+      await treeActions.trash([nodeId]);
+      spectraBus.emit("threads.changed", {});
+      selectThread(null);
+      toast.success("Chat moved to Trash.", {
+        action: {
+          label: "Undo",
+          onClick: () =>
+            void treeActions
+              .restore([nodeId])
+              .then(() => {
+                spectraBus.emit("threads.changed", {});
+                selectThread(threadId);
+              })
+              .catch((error: unknown) =>
+                toast.error(
+                  describeFailure(error, {
+                    fallback:
+                      "Could not restore this chat. Find it in the Library Trash.",
+                  }).message,
+                ),
+              ),
+        },
+      });
+    } catch (error) {
+      toast.error(
+        describeFailure(error, {
+          fallback: "Could not delete this chat. Try again.",
+        }).message,
+      );
+    } finally {
+      setThreadBusy(null);
+    }
+  }
 
   const selectWorkspaceContext = useCallback((workspaceId: string | null) => {
     setChatWorkspaceId(workspaceId);
@@ -747,14 +838,9 @@ export function ChatShell() {
             {threadId ? (
               <button
                 type="button"
-                onClick={() =>
-                  void postSpectra({
-                    action: "updateThread",
-                    threadId,
-                    pinned: !detail?.thread.pinned,
-                  }).then(() => refresh(threadId))
-                }
-                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                disabled={threadBusy === "pin"}
+                onClick={() => void togglePinned()}
+                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
                 aria-label={
                   detail?.thread.pinned ? "Unpin chat" : "Pin chat"
                 }
@@ -763,6 +849,18 @@ export function ChatShell() {
                 <Pin
                   className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`}
                 />
+              </button>
+            ) : null}
+            {threadId ? (
+              <button
+                type="button"
+                disabled={!threadPlacement || threadBusy === "trash"}
+                onClick={() => void trashThread()}
+                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                aria-label="Delete chat"
+                title="Delete chat"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             ) : null}
             <button
@@ -813,31 +911,18 @@ export function ChatShell() {
               value={titleDraft}
               maxLength={64}
               onChange={(event) => setTitleDraft(event.target.value)}
+              aria-label="Chat name"
               onKeyDown={(event) => {
                 if (event.key === "Escape") setRenaming(false);
-                if (event.key === "Enter" && titleDraft.trim())
-                  void postSpectra({
-                    action: "updateThread",
-                    threadId,
-                    title: titleDraft.trim(),
-                  })
-                    .then(() => refresh(threadId))
-                    .then(() => setRenaming(false));
+                if (event.key === "Enter") void saveTitle();
               }}
               className="h-9 min-w-0 flex-1 bg-transparent px-2 text-ui font-medium text-[var(--text-primary)] outline-none"
             />
             <button
               type="button"
-              onClick={() =>
-                void postSpectra({
-                  action: "updateThread",
-                  threadId,
-                  title: titleDraft.trim(),
-                })
-                  .then(() => refresh(threadId))
-                  .then(() => setRenaming(false))
-              }
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--success)] hover:bg-[var(--bg-hover)]"
+              disabled={!titleDraft.trim() || threadBusy === "title"}
+              onClick={() => void saveTitle()}
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--success)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
               aria-label="Save title"
             >
               <Check className="h-4 w-4" />

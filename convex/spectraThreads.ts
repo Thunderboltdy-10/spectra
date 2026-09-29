@@ -209,6 +209,18 @@ function cleanTitle(value: string) {
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
+/** A name the owner typed: their words, tidied, never rewritten. */
+function ownerTitle(value: string) {
+  const title = value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 88)
+    .trim();
+  if (!title) throw new Error("A chat name is required.");
+  return title;
+}
+
 function cleanContent(value: string) {
   return value
     .replace(/\u0000/g, "")
@@ -941,7 +953,15 @@ export const list = query({
       )
       .order("desc")
       .paginate({ cursor: convexCursor, numItems: limit });
-    const visible = page.page;
+    /* A chat whose Library node is in the Trash is deleted as far as its owner
+       can tell; it returns to the list when the node is restored. */
+    const kept = await Promise.all(
+      page.page.map(async (thread) => {
+        const node = await findPrimaryNode(ctx, actor._id, "thread", String(thread._id));
+        return !node || node.deletedAt === undefined;
+      }),
+    );
+    const visible = page.page.filter((_, index) => kept[index]);
     const nextCursor = page.isDone
       ? includeArchived && status === "active"
         ? encodeCursor({
@@ -1598,9 +1618,10 @@ export const update = mutation({
         : (args.workspaceId ?? undefined);
     const now = Date.now();
     const title =
-      args.title === undefined ? thread.title : cleanTitle(args.title);
+      args.title === undefined ? thread.title : ownerTitle(args.title);
     await ctx.db.patch(args.threadId, {
       title,
+      ...(args.title === undefined ? {} : { titleSetByOwner: true }),
       pinned: args.pinned ?? thread.pinned,
       workspaceId: nextWorkspaceId,
       status: args.status ?? thread.status,
@@ -1651,10 +1672,11 @@ export const applyGeneratedMetadata = mutation({
     // Sparse title windows avoid sidebar instability while allowing a weak
     // first-prompt title to improve once the purpose becomes clear.
     const mayRetitle =
-      messageCount <= 2 ||
+      !thread.titleSetByOwner &&
+      (messageCount <= 2 ||
       provisionalTitle ||
       (messageCount >= 6 && messageCount <= 8) ||
-      (messageCount >= 16 && messageCount <= 18);
+      (messageCount >= 16 && messageCount <= 18));
     const title =
       mayRetitle && args.title ? cleanTitle(args.title) : thread.title;
     const summary =

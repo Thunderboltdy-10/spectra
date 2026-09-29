@@ -110,10 +110,23 @@ export function explicitArtifactIdsFromPrompt(prompt: string) {
   return [...new Set(prompt.match(/\bwx[a-z0-9]{20,}\b/gi) ?? [])].slice(0, 8);
 }
 
+/** Convex projects some content per viewer (a reader's quiz without its key,
+ * a non-owner's timetable without private layers). The live room holds the
+ * unprojected document, so it may only replace content that was not projected. */
+function storedContentIsViewerProjection(artifact: Record<string, unknown>) {
+  if (artifact.blueprintKey === "quiz") return artifact.accessLevel !== "modify";
+  if (artifact.blueprintKey === "timetable") return artifact.ownership !== "owned";
+  return false;
+}
+
+/** The Convex copy is a checkpoint the gateway writes after 30 s of idle, so
+ * text typed moments ago lives only in the collaboration room. Every AI read of
+ * current content overlays that live state; the checkpoint is the fallback. */
 export async function hydrateArtifactWithLiveContent(
   artifact: Record<string, unknown> | null,
 ): Promise<Record<string, unknown> | null> {
   if (!artifact || typeof artifact._id !== "string") return artifact;
+  if (storedContentIsViewerProjection(artifact)) return artifact;
   try {
     const live = await readLiveArtifactValue({
       artifactId: artifact._id,
@@ -156,6 +169,81 @@ export async function gatherResolvedArtifactContext(
   );
 }
 
+export const CONVERSATION_MESSAGES = 16;
+export const CONVERSATION_MESSAGE_CHARACTERS = 8_000;
+
+/**
+ * The prior turns of this thread as the model sees them. The current request
+ * is persisted before the run starts and is sent separately as the current
+ * user message, so this run's own messages are left out (a long prompt used
+ * to reappear, cut, as an earlier turn). A long message is cut with a pointer
+ * the model can pass to read_thread for the rest; the omission of older turns
+ * is stated rather than silent.
+ */
+export function modelConversation(
+  messages: Record<string, unknown>[],
+  input: { threadId?: string; currentRunId?: string; hasOlder?: boolean },
+) {
+  const prior = messages.filter(
+    (message) =>
+      (message.role === "user" || message.role === "assistant") &&
+      typeof message.content === "string" &&
+      message.content.trim() &&
+      !(input.currentRunId && message.runId === input.currentRunId),
+  );
+  const shown = prior.slice(-CONVERSATION_MESSAGES);
+  const conversation = shown.map((message) => {
+    const content = message.content as string;
+    if (content.length <= CONVERSATION_MESSAGE_CHARACTERS)
+      return { role: message.role, content };
+    const kept = content.slice(0, CONVERSATION_MESSAGE_CHARACTERS);
+    const pointer =
+      input.threadId && typeof message._id === "string"
+        ? ` To read the rest, call read_thread with threadId "${input.threadId}", messageId "${message._id}", offset ${kept.length} and revision "${createHash("sha256").update(content).digest("hex")}".`
+        : "";
+    return {
+      role: message.role,
+      content: `${kept}\n\n[Only the first ${kept.length.toLocaleString("en-US")} of ${content.length.toLocaleString("en-US")} characters of this message are shown.${pointer}]`,
+    };
+  });
+  const earlierOmitted = prior.length - shown.length > 0 || input.hasOlder === true;
+  return {
+    conversation,
+    history: earlierOmitted
+      ? {
+          shownMessages: conversation.length,
+          earlierMessagesOmitted: true,
+          ...(input.threadId
+            ? { howToRead: `Call read_thread with threadId "${input.threadId}" (and its before cursor) or a query to see earlier turns.` }
+            : {}),
+        }
+      : null,
+  };
+}
+
+/**
+ * The user's saved, permission-bound memory for this request. Every run gets
+ * it up front: the model is told it has "supplied" memory and to call
+ * retrieve_memory only when that is insufficient, so leaving it out meant a
+ * saved preference ("I am in grade 11", "use British spelling") was ignored
+ * unless the model happened to go looking.
+ */
+export function readRunMemory(
+  actorClerkId: string,
+  body: { workspaceId?: string; artifactId?: string },
+  prompt: string,
+): Promise<unknown> {
+  // Memory is supporting context: an unavailable read must never fail the run.
+  return Promise.resolve()
+    .then(() => act<unknown & object, unknown>("memory:contextForRun", {
+      actorClerkId,
+      queryText: prompt,
+      workspaceId: body.workspaceId,
+      artifactId: body.artifactId,
+    }))
+    .then((value) => value ?? null, () => null);
+}
+
 export async function buildContext(
   actorClerkId: string,
   body: Pick<
@@ -187,6 +275,10 @@ export async function buildContext(
     hydrateTargets?: boolean;
     /** Server-restored intent already composed in full into the prompt. */
     restoredGoal?: { originalRequest: string; clarificationResponses: string[] };
+    /** A memory read already started for this run (shared by parallel builds). */
+    memory?: Promise<unknown>;
+    /** The run being planned; its own persisted request is not prior history. */
+    currentRunId?: string;
   } = {},
 ) {
   const expanded = options.mode !== "orientation";
@@ -349,14 +441,7 @@ export async function buildContext(
           limit: 8,
         }).catch(() => [])
       : Promise.resolve([]),
-    !expanded
-      ? Promise.resolve(null)
-      : act<unknown & object, unknown>("memory:contextForRun", {
-          actorClerkId,
-          queryText: prompt,
-          workspaceId: body.workspaceId,
-          artifactId: body.artifactId,
-        }).catch(() => null),
+    options.memory?.catch(() => null) ?? readRunMemory(actorClerkId, body, prompt),
     expanded && body.scopeNodeId
       ? query<unknown & object, unknown>("orgTree:subtree", {
           actorClerkId,
@@ -792,18 +877,18 @@ export async function buildContext(
       ? "artifact"
       : "selection"
     : focusMode;
-  const conversation =
+  const threadDetailRecord =
     threadDetail && typeof threadDetail === "object"
-      ? rows((threadDetail as Record<string, unknown>).messages)
-          .slice(-24)
-          .map((message) => ({
-            role: message.role,
-            content:
-              typeof message.content === "string"
-                ? message.content.slice(0, 8_000)
-                : "",
-          }))
-      : [];
+      ? (threadDetail as Record<string, unknown>)
+      : null;
+  const { conversation, history: conversationHistory } = threadDetailRecord
+    ? modelConversation(rows(threadDetailRecord.messages), {
+        threadId: body.threadId,
+        currentRunId: options.currentRunId,
+        hasOlder:
+          (threadDetailRecord.messagePage as { hasOlder?: unknown } | undefined)?.hasOlder === true,
+      })
+    : { conversation: [], history: null };
   const continuedThread =
     threadDetail && typeof threadDetail === "object"
       ? ((threadDetail as Record<string, unknown>).thread as
@@ -1006,9 +1091,10 @@ export async function buildContext(
         },
       } : {}),
       contextMode: expanded ? "expanded" : "orientation",
+      ...(conversationHistory ? { conversationHistory } : {}),
       omitted: {
         ...contextPacket.omitted,
-        ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true, memoryRetrieval: true }),
+        ...(expanded ? {} : { artifactContents: !readsTargetContent, workspaceDiscovery: true }),
       },
     },
     memoryRetrieval:

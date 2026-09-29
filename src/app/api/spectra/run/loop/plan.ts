@@ -6,7 +6,7 @@ import type {
   RestoredClarification,
   Surface,
 } from "./contract";
-import { rows, summarizeArtifact } from "./gather";
+import { hydrateArtifactWithLiveContent, rows, summarizeArtifact } from "./gather";
 import { authenticatedArtifactObservations } from "./discovery";
 import { executeThreadRead } from "./thread-read";
 import { claimsUnsavedWork, planFromAgentCompletion } from "./completion";
@@ -16,7 +16,8 @@ import {
   prepareContentEvidence,
   prepareContentPatchEvidence,
 } from "@/features/spectra/ai/source-evidence-content";
-import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
+import { attachmentEvidencePrompt, attachmentEvidenceRepairPrompt, attachmentManifestPrompt, buildAttachmentEvidence } from "@/features/spectra/ai/attachment-evidence";
+import { embedForModel } from "@/features/spectra/ai/embed-context";
 import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
@@ -3156,7 +3157,12 @@ export async function executeAgentReadTool(
         "that Spectra artifact",
       );
       if (!artifactRead.ok) return artifactRead;
-      const artifact = artifactRead.value;
+      const artifact =
+        artifactRead.value && typeof artifactRead.value === "object"
+          ? await hydrateArtifactWithLiveContent(
+              artifactRead.value as Record<string, unknown>,
+            )
+          : null;
       return artifact && typeof artifact === "object"
         ? {
             ok: true,
@@ -3311,7 +3317,9 @@ export async function executeAgentReadTool(
       return {
         ok: true,
         hostWorkId,
-        embeds: embedsRead.value,
+        // Each embed's contextPolicy decides how much of its source the AI
+        // sees; the raw projection carried every full snapshot regardless.
+        embeds: rows((embedsRead.value as { embeds?: unknown } | null)?.embeds).map(embedForModel),
         warning:
           "References are permission-bound projections. Preserve unavailable or stale source state and never treat an embed as a copy of the source work.",
       };
@@ -3651,6 +3659,11 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
           ? item.excerpt.slice(0, 1_600)
           : undefined,
     })),
+    // The exact regions the user picked as context (a paragraph, slide or
+    // range): label, its captured text and its anchor. The packet carried
+    // them, but the orientation dropped them, so the model knew only the
+    // work, not the part of it the user meant.
+    semanticTargets: rows(record.semanticTargets).slice(0, 24),
     workspaceMap: compactMap(record.workspaceMap, 18),
     currentLibraryLocation:
       record.currentLibraryLocation &&
@@ -3697,6 +3710,12 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
     conversation: Array.isArray(record.conversation)
       ? record.conversation.slice(-16)
       : [],
+    conversationHistory:
+      record.conversationHistory &&
+      typeof record.conversationHistory === "object" &&
+      !Array.isArray(record.conversationHistory)
+        ? record.conversationHistory
+        : undefined,
     longTermMemory:
       record.longTermMemory &&
       typeof record.longTermMemory === "object" &&
@@ -3782,7 +3801,7 @@ export async function callModel(
   if (!apiKey)
     throw new Error("OpenRouter is not configured for Spectra runs.");
   const attachmentEvidence = buildAttachmentEvidence(attachments);
-  const textAttachments = attachmentEvidencePrompt(attachmentEvidence);
+  const textAttachments = `${attachmentManifestPrompt(attachments)}${attachmentEvidencePrompt(attachmentEvidence)}`;
   const contextRecord =
     context && typeof context === "object" && !Array.isArray(context)
       ? (context as Record<string, unknown>)
@@ -3961,7 +3980,11 @@ export async function callModel(
         !content.trim()
       )
         return [];
-      return [{ role, content: content.slice(0, 8_000) }];
+      // Context gathering already cut long turns and labelled the cut with a
+      // read_thread pointer; this bound only catches an unlabelled caller.
+      return [{ role, content: content.length > 9_000
+        ? `${content.slice(0, 8_000)}\n\n[Only the first 8,000 of ${content.length.toLocaleString("en-US")} characters of this message are shown.]`
+        : content }];
     },
   );
   // Keep the historical transcript as real ordered messages. Re-serializing

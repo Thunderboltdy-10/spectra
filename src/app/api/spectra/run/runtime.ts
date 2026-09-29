@@ -26,6 +26,7 @@ import {
   buildContext,
   gatherResolvedArtifactContext,
   queueSilentMemoryMaintenance,
+  readRunMemory,
   summarizeArtifact,
 } from "./loop/gather";
 import {
@@ -646,11 +647,13 @@ async function runAttemptInLedger(
     // orientation packet, so when the prompt could demand content, the
     // hydrated context is read at the same time instead of after it.
     const usesFocusedContent = promptDirectlyUsesFocusedContent(params.prompt);
+    // One memory retrieval (an embedding call) serves both parallel builds.
+    const memory = readRunMemory(params.actorClerkId, contextBody, params.prompt);
     const contextReads = Promise.all([
-      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal }),
+      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal, memory, currentRunId: params.runId }),
       (params.artifactId && signalsMutationIntent) || usesFocusedContent
         ? buildContext(params.actorClerkId, contextBody, params.prompt, {
-            mode: "orientation", hydrateTargets: true, restoredGoal,
+            mode: "orientation", hydrateTargets: true, restoredGoal, memory, currentRunId: params.runId,
           })
         : null,
     ]);

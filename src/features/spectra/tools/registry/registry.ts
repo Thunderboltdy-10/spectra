@@ -62,6 +62,13 @@ export type RegisteredToolDefinition<I, O> = {
   expectedDuration?: DurationClass;
   softStallAfter?: number;
   hardSafetyLimit?: number;
+  /**
+   * Set by a tool that bounds its own model-facing output (and labels any
+   * partial coverage itself). The executor then keeps that structure whole
+   * within this many characters instead of applying its generic item, field,
+   * string and depth cuts.
+   */
+  selfBoundedOutputCharacters?: number;
   retryPolicy: ToolRetryPolicy;
   cancellable: boolean;
   resumable: boolean;

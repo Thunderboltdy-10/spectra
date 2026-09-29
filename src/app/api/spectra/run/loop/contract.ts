@@ -102,7 +102,6 @@ export type PreparedAttachment = {
   data?: string;
   extractedText?: string;
   pageCount?: number;
-  visualPdfData?: string;
   structuredRepresentation?: { kind: string; value: unknown };
   sourceMap?: Array<{
     kind: "page" | "slide" | "sheet" | "range" | "section";

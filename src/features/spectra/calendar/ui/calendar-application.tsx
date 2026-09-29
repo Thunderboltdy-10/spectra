@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -368,6 +369,24 @@ function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
   return [...next.values()];
 }
 
+/** A failed Calendar action. The route strips the code from `message`, so the
+ * code travels separately and is what callers branch on. */
+class CalendarActionError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+function isGestureConflict(error: unknown) {
+  return (
+    error instanceof CalendarActionError &&
+    error.code === "CALENDAR_GESTURE_CONFLICT"
+  );
+}
+
 async function calendarPost(body: Record<string, unknown>) {
   const response = await requestSpectra("/api/spectra/calendar", {
     method: "POST",
@@ -376,7 +395,10 @@ async function calendarPost(body: Record<string, unknown>) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(payload?.error?.message ?? "Calendar action failed.");
+    throw new CalendarActionError(
+      payload?.error?.message ?? "Calendar action failed.",
+      typeof payload?.error?.code === "string" ? payload.error.code : undefined,
+    );
   return payload.data;
 }
 
@@ -581,7 +603,11 @@ export function CalendarApplication() {
     return () => observer.disconnect();
   }, [daySpan, days.length, error, plansOpen, studio.mode]);
 
-  const timezone = overview?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  // The grid's columns, drops and resizes are all in the browser's zone, so
+  // every time on it is too. The overview's zone is only a guess from stored
+  // rows (UTC for a student without school data), and rendering in it put an
+  // 11:00 Madrid event at 09:00.
+  const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const timedItems = useMemo(
     () =>
       (overview?.items ?? []).filter(
@@ -652,7 +678,7 @@ export function CalendarApplication() {
       }
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
-      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+      if (isGestureConflict(nextError)) {
         await load("replace", visibleRange.from, visibleRange.to, true);
         setSelected(null);
         toast.error("Calendar changed, so the latest block position was restored. Open it again to continue.");
@@ -660,6 +686,27 @@ export function CalendarApplication() {
         toast.error(message);
       }
     }
+  }
+
+  async function removeItem(item: CalendarItem) {
+    try {
+      await calendarPost({ action: "removePersonalItem", itemId: item.id });
+    } catch (nextError) {
+      toast.error(
+        nextError instanceof Error ? nextError.message : "Could not remove this from Calendar.",
+      );
+      return false;
+    }
+    setOverview((current) =>
+      current
+        ? { ...current, items: current.items.filter((entry) => entry.id !== item.id) }
+        : current,
+    );
+    setSelected(null);
+    // A removed work block returns its plan to the unscheduled list.
+    if (item.kind === "scheduled_work_block")
+      void load("merge", visibleRange.from, visibleRange.to);
+    return true;
   }
 
   async function commitWorkGesture(item: CalendarItem, startAt: number, endAt: number) {
@@ -679,7 +726,7 @@ export function CalendarApplication() {
     } catch (nextError) {
       upsertItem(item);
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
-      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+      if (isGestureConflict(nextError)) {
         await load("replace", visibleRange.from, visibleRange.to, true);
         toast.error("The block changed elsewhere, so Calendar restored its latest position.");
       } else {
@@ -1315,6 +1362,7 @@ export function CalendarApplication() {
           timezone={timezone}
           onClose={() => setSelected(null)}
           onCommit={commit}
+          onRemove={removeItem}
         />
       ) : null}
       {composerOpen ? (
@@ -1619,13 +1667,20 @@ function CalendarItemPanel({
   timezone,
   onClose,
   onCommit,
+  onRemove,
 }: {
   item: CalendarItem;
   timezone: string;
   onClose: () => void;
   onCommit: (action: Record<string, unknown>) => Promise<void>;
+  onRemove: (item: CalendarItem) => Promise<boolean>;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  // School records belong to their source; everything a person placed here
+  // (events, scheduled work) can be taken off again.
+  const removable = !item.sourceLocked;
   return (
     <aside
       className="fixed inset-y-0 right-0 z-panel w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-lg)]"
@@ -1739,6 +1794,36 @@ function CalendarItemPanel({
           {item.status === "completed" ? "Completed" : "Mark complete"}
         </button>
       ) : null}
+      {removable ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-3 w-full"
+          onClick={() => setConfirmRemove(true)}
+        >
+          Remove from Calendar
+        </Button>
+      ) : null}
+      <ConfirmDialog
+        open={confirmRemove}
+        title={`Remove “${item.title}”?`}
+        detail={
+          item.kind === "scheduled_work_block"
+            ? "The scheduled time is removed from Calendar. The plan itself is kept and can be placed again."
+            : "This event is removed from your Calendar."
+        }
+        confirmLabel="Remove"
+        destructive
+        pending={removing}
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={() => {
+          setRemoving(true);
+          void onRemove(item).then((removed) => {
+            setRemoving(false);
+            if (!removed) setConfirmRemove(false);
+          });
+        }}
+      />
       {item.linkedWorkIds.length ? (
         <section className="mt-5">
           <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">

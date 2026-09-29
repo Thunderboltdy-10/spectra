@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -31,11 +32,11 @@ function json(status: number, body: unknown) {
   });
 }
 
-function overview(items: unknown[] = []) {
+function overview(items: unknown[] = [], timezone = "Europe/Madrid") {
   return json(200, {
     ok: true,
     data: {
-      timezone: "Europe/Madrid",
+      timezone,
       items,
       unscheduledTasks: [],
       partialTimeItems: [],
@@ -54,7 +55,11 @@ function overview(items: unknown[] = []) {
 let posts: Array<Record<string, unknown>> = [];
 let gets = 0;
 
-function installFetch(onPost: Handler, items: unknown[] = []) {
+function installFetch(
+  onPost: Handler,
+  items: unknown[] = [],
+  timezone = "Europe/Madrid",
+) {
   posts = [];
   gets = 0;
   vi.stubGlobal(
@@ -68,7 +73,7 @@ function installFetch(onPost: Handler, items: unknown[] = []) {
         return onPost(url, init) ?? json(200, { ok: true, data: {} });
       }
       gets += 1;
-      return overview(items);
+      return overview(items, timezone);
     }),
   );
 }
@@ -130,4 +135,121 @@ describe("Calendar application", () => {
       "2026-09-29T12:00",
     );
   });
+
+  it("places events on the user's own clock even when Calendar reports UTC", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    // A student without school data: every stored row says UTC, so the
+    // overview reports UTC. 11:00 in Madrid is 09:00 UTC.
+    installFetch(() => undefined, [
+      {
+        id: "event-1",
+        kind: "personal_event",
+        title: "Chemistry revision",
+        startAt: Date.parse("2026-09-29T09:00:00Z"),
+        endAt: Date.parse("2026-09-29T10:00:00Z"),
+        allDay: false,
+        timezone: "UTC",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: false,
+        linkedWorkIds: [],
+        revision: 1,
+      },
+    ], "UTC");
+    render(<CalendarApplication />);
+    const block = await screen.findByTitle("Chemistry revision");
+    expect(block.textContent).toMatch(/^11:00/);
+    expect(block.style.top).toBe(`${11 * 48}px`);
+  });
+
+  it("restores the latest block after another tab changed it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(
+      () =>
+        json(409, {
+          ok: false,
+          error: {
+            code: "CALENDAR_GESTURE_CONFLICT",
+            message: "Re-resolve the block before resizing it.",
+            status: 409,
+          },
+        }),
+      [workBlock()],
+    );
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Essay draft"));
+    const loadsBefore = gets;
+    fireEvent.click(screen.getByRole("button", { name: "+ 30 min" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError.mock.calls[0]![0]).toMatch(/Calendar changed/);
+    await waitFor(() => expect(gets).toBeGreaterThan(loadsBefore));
+  });
+
+  it("removes a personal event after confirmation", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(
+      (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.action === "removePersonalItem")
+          return json(200, { ok: true, data: { itemId: body.itemId } });
+        return undefined;
+      },
+      [
+        {
+          ...workBlock(),
+          id: "event-2",
+          kind: "personal_event",
+          title: "Dentist",
+          taskItemId: undefined,
+        },
+      ],
+    );
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Dentist"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Calendar" }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+    await waitFor(() =>
+      expect(posts.some((post) => post.action === "removePersonalItem" && post.itemId === "event-2")).toBe(true),
+    );
+    await waitFor(() => expect(screen.queryByTitle("Dentist")).toBeNull());
+  });
+
+  it("does not offer removal for an official school record", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [
+      {
+        ...workBlock(),
+        id: "class-1",
+        kind: "official_event",
+        title: "Maths HL",
+        taskItemId: undefined,
+        sourceLocked: true,
+      },
+    ]);
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Maths HL"));
+    expect(screen.queryByRole("button", { name: "Remove from Calendar" })).toBeNull();
+  });
 });
+
+function workBlock() {
+  return {
+    id: "block-1",
+    kind: "scheduled_work_block",
+    title: "Essay draft",
+    startAt: Date.parse("2026-09-29T14:00:00Z"),
+    endAt: Date.parse("2026-09-29T15:00:00Z"),
+    allDay: false,
+    timezone: "Europe/Madrid",
+    timePrecision: "exact",
+    status: "active",
+    sourceLocked: false,
+    taskItemId: "task-1",
+    linkedWorkIds: [],
+    revision: 3,
+  };
+}

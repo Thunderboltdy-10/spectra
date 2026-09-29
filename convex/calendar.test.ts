@@ -272,3 +272,37 @@ describe("Calendar overview range-bounded reads", () => {
   });
 });
 
+
+describe("Calendar personal events", () => {
+  it("can be moved and resized like the owner's own work blocks", async () => {
+    const t = setupTest();
+    await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const created = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "personal_event", title: "Dentist", startAt: 1_790_330_400_000, endAt: 1_790_334_000_000,
+      timezone: "Europe/Madrid", actorKind: "human", idempotencyKey: "human:dentist-01",
+    });
+    const itemId = created.id as Id<"calendarItems">;
+    const moved = await user.mutation(api.calendar.moveWorkBlock, {
+      itemId, startAt: 1_790_337_600_000, endAt: 1_790_341_200_000, expectedRevision: created.revision,
+    });
+    expect(moved).toMatchObject({ startAt: 1_790_337_600_000, endAt: 1_790_341_200_000 });
+    const resized = await user.mutation(api.calendar.resizeWorkBlock, {
+      itemId, endAt: 1_790_343_000_000, expectedRevision: moved.revision,
+    });
+    expect(resized.endAt).toBe(1_790_343_000_000);
+  });
+
+  it("keeps official source events where the school put them", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendarTask(t);
+    const itemId = await t.run((ctx) => ctx.db.insert("calendarItems", {
+      ownerAccountId: seeded.accountId, schoolId: seeded.schoolId, kind: "official_event", title: "Assembly", startAt: 1_790_330_400_000,
+      endAt: 1_790_334_000_000, allDay: false, timezone: "Europe/Madrid", timePrecision: "exact", status: "active",
+      sourceLocked: true, linkedArtifactIds: [], revision: 1, createdBy: "human", createdAt: 1, updatedAt: 1,
+    } as never));
+    await expect(t.withIdentity(identity).mutation(api.calendar.moveWorkBlock, {
+      itemId, startAt: 1_790_337_600_000, endAt: 1_790_341_200_000, expectedRevision: 1,
+    })).rejects.toThrow();
+  });
+});

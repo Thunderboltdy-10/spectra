@@ -239,6 +239,51 @@ describe("Calendar application", () => {
     await waitFor(() => expect(screen.queryByTitle("Dentist")).toBeNull());
   });
 
+  it("moves and lengthens a personal event, but never an official one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(
+      (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.action === "resizeWorkBlock")
+          return json(200, {
+            ok: true,
+            data: { ...workBlock(), id: "event-3", kind: "personal_event", title: "Dentist", taskItemId: undefined, endAt: body.endAt, revision: 4 },
+          });
+        return undefined;
+      },
+      [
+        { ...workBlock(), id: "event-3", kind: "personal_event", title: "Dentist", taskItemId: undefined },
+        {
+          ...workBlock(),
+          id: "official-1",
+          kind: "official_event",
+          title: "Assembly",
+          taskItemId: undefined,
+          sourceLocked: true,
+          startAt: Date.parse("2026-09-29T09:00:00Z"),
+          endAt: Date.parse("2026-09-29T10:00:00Z"),
+        },
+      ],
+    );
+    render(<CalendarApplication />);
+    const dentist = await screen.findByTitle("Dentist");
+    expect(dentist.getAttribute("draggable")).toBe("true");
+    expect(screen.getByTitle("Assembly").getAttribute("draggable")).not.toBe("true");
+
+    fireEvent.click(dentist);
+    fireEvent.click(screen.getByRole("button", { name: "+ 30 min" }));
+    await waitFor(() =>
+      expect(
+        posts.some(
+          (post) =>
+            post.action === "resizeWorkBlock" &&
+            post.itemId === "event-3" &&
+            post.endAt === Date.parse("2026-09-29T15:30:00Z"),
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("opens a plan's scheduled block in its details, with the plan one click away", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(() => undefined, [

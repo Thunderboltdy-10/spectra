@@ -4,6 +4,8 @@ services:
       context: ../..
       dockerfile: deploy/collaboration-gateway/Dockerfile
     restart: unless-stopped
+    # Docker's default 10 s would SIGKILL the gateway mid-drain (see fly.toml).
+    stop_grace_period: 30s
     ports:
       - "1234:1234"
     environment:

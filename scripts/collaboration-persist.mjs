@@ -187,6 +187,70 @@ export function persistenceFlushDelay({ firstAt, entries, bytes, now = Date.now(
   return Math.max(0, Math.min(PERSISTENCE_IDLE_MS, PERSISTENCE_MAX_WAIT_MS - (now - firstAt)));
 }
 
+// A deploy sends the platform's kill signal, then SIGKILL after its timeout
+// (fly.toml `kill_timeout`). The launcher forwards the signal to the gateway
+// and waits GATEWAY_SHUTDOWN_GRACE_MS before its own SIGKILL. The drain must
+// finish inside both, and each must stay larger than the one inside it.
+export const GATEWAY_SHUTDOWN_DRAIN_MS = 20_000;
+export const GATEWAY_SHUTDOWN_GRACE_MS = GATEWAY_SHUTDOWN_DRAIN_MS + 5_000;
+// The WebSocket "service restart" close. Clients reconnect and re-send the
+// Yjs delta the next gateway has not stored, so nothing is marked failed.
+export const GATEWAY_RESTARTING_CLOSE = Object.freeze({ code: 1012, reason: "Gateway restarting" });
+
+/**
+ * Stops writes, then makes every accepted update durable before the process
+ * exits: stop listening → close sockets (clients keep their local Y.Doc and
+ * re-sync with the next gateway) → flush every dirty room until none is left
+ * → flush projection checkpoints. Bounded by `budgetMs`; whatever is still
+ * dirty at the deadline is logged, never silently dropped.
+ */
+export async function drainGatewayForShutdown({
+  stopAccepting,
+  closeConnections,
+  dirtyDocuments,
+  flushDocument,
+  flushCheckpoints,
+  describeDocument = () => "room",
+  log = () => undefined,
+  budgetMs = GATEWAY_SHUTDOWN_DRAIN_MS,
+  settleMs = 25,
+  now = Date.now,
+}) {
+  const deadline = now() + budgetMs;
+  const remaining = () => Math.max(0, deadline - now());
+  const withinBudget = (work) => {
+    let timer;
+    const expired = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), remaining());
+    });
+    return Promise.race([
+      Promise.resolve(work).then(() => true, () => true),
+      expired,
+    ]).finally(() => clearTimeout(timer));
+  };
+  stopAccepting();
+  closeConnections();
+  let flushed = 0;
+  // A socket closing mid-message can still apply one update after the close,
+  // and a failed batch can leave a newer one behind, so drain to empty.
+  for (;;) {
+    const dirty = dirtyDocuments();
+    if (!dirty.length || remaining() === 0) break;
+    flushed += dirty.length;
+    if (!(await withinBudget(Promise.allSettled(dirty.map((document) => flushDocument(document))))))
+      break;
+    if (dirtyDocuments().length)
+      await withinBudget(new Promise((resolve) => setTimeout(resolve, settleMs)));
+  }
+  const checkpointsFlushed = remaining() > 0 && (await withinBudget(flushCheckpoints()));
+  const unflushed = dirtyDocuments().map((document) => describeDocument(document));
+  for (const description of unflushed)
+    log(`[shutdown] not durable before exit: ${description}\n`);
+  if (!checkpointsFlushed) log("[shutdown] projection checkpoints did not finish before exit\n");
+  log(`[shutdown] drained ${flushed} room flush(es); ${unflushed.length} room(s) not durable\n`);
+  return { unflushed, checkpointsFlushed };
+}
+
 export function durableHeadKey(context) {
   if (!context?.artifactId || !context?.partitionKey) return null;
   return `${context.artifactId}:${context.partitionKey}`;

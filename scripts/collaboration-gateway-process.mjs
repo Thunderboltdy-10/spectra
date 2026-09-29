@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
+import { GATEWAY_SHUTDOWN_GRACE_MS } from "./collaboration-persist.mjs";
 import { reconnectDelayMs } from "./collaboration-reconnect.mjs";
 
 export function gatewayBinding(environment = process.env) {
@@ -42,7 +43,9 @@ export async function runGatewayProcess({
   retryDelay = reconnectDelayMs,
   wait = delay,
   now = Date.now,
-  shutdownTimeoutMs = 3000,
+  // The gateway drains accepted updates to Convex before it exits. Killing it
+  // sooner discards the ones still in flight.
+  shutdownTimeoutMs = GATEWAY_SHUTDOWN_GRACE_MS,
 }) {
   const binding = gatewayBinding(environment);
   const controller = new AbortController();

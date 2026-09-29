@@ -49,6 +49,8 @@ import {
   collaborationFailureMessage,
   collaborationRetryDelayMs,
   createCollaborationAuthorizationGuard,
+  drainGatewayForShutdown,
+  GATEWAY_RESTARTING_CLOSE,
   persistenceFlushDelay,
 } from "./collaboration-persist.mjs";
 
@@ -125,6 +127,10 @@ const canonicalRooms = new WeakMap();
 const documentDurableAnchors = new WeakMap();
 const openDocuments = new Map();
 const checkpointSchedulers = new Set();
+// Rooms that may hold accepted updates Convex has not stored yet. Shutdown
+// drains exactly these; a room leaves the set once its queue is empty.
+const persistenceDocuments = new Set();
+let shuttingDown = false;
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
 let lastCompactionDeferred = null;
@@ -265,6 +271,21 @@ function persistenceQueue(document) {
   };
   documentPersistenceQueues.set(document, created);
   return created;
+}
+
+function gatewayRestarting() {
+  // Hocuspocus closes the socket with this code and reason. The client keeps
+  // the edit locally and re-sends it to the next gateway.
+  return Object.assign(new Error("COLLABORATION_GATEWAY_RESTARTING"), GATEWAY_RESTARTING_CLOSE);
+}
+
+function persistenceDirty(document) {
+  const queue = documentPersistenceQueues.get(document);
+  return Boolean(queue?.pending.length || queue?.flushing || unappliedDocumentMessages.has(document));
+}
+
+function settlePersistenceDocument(document) {
+  if (!persistenceDirty(document)) persistenceDocuments.delete(document);
 }
 
 function canonicalRoom(document, context) {
@@ -611,6 +632,7 @@ async function persistAcceptedMessages(document, entries) {
 }
 function schedulePersistence(document, entry) {
   const queue = persistenceQueue(document);
+  persistenceDocuments.add(document);
   if (queue.pending.length === 0) {
     queue.firstPendingAt = Date.now();
   }
@@ -653,13 +675,17 @@ async function flushPersistence(document) {
   const entries = queue.pending.splice(0);
   queue.firstPendingAt = null;
   queue.pendingBytes = 0;
-  if (!entries.length) return queue.chain.persistTail;
+  if (!entries.length) {
+    settlePersistenceDocument(document);
+    return queue.chain.persistTail;
+  }
   const flushing = queue.chain.enqueue({ entries }).catch(error => {
       lastPersistenceFailure = { code: "COLLABORATION_APPEND_FAILED", at: Date.now(), attempt: 1 };
       forceCanonicalReconnect(entries[0].context, collaborationFailureMessage(error));
       throw error;
     }).finally(() => {
       if (queue.flushing === flushing) queue.flushing = null;
+      settlePersistenceDocument(document);
     });
   queue.flushing = flushing;
   return flushing;
@@ -898,6 +924,9 @@ const server = new Server({
   maxUnauthenticatedQueueSize: MAX_REALTIME_MESSAGE_BYTES,
   maxUnauthenticatedQueueMessages: 64,
   maxPendingDocuments: 4,
+  // Hocuspocus' own signal handler exits as soon as its rooms unload, while
+  // accepted updates may still be on their way to Convex. `shutdown` owns it.
+  stopOnSignals: false,
 
   async onRequest({ request, response }) {
     if (!request.url?.startsWith("/_spectra/health")) return;
@@ -987,6 +1016,7 @@ const server = new Server({
     socketId,
     connection,
   }) {
+    if (shuttingDown) throw gatewayRestarting();
     await reauthorize(context);
     const incomingUpdate = extractYjsUpdate(frame);
     if (!incomingUpdate || incomingUpdate.byteLength === 0) return;
@@ -997,6 +1027,9 @@ const server = new Server({
     // even when the collaborators changed independent regions.
     await acquireDocumentMessage(document, socketId);
     try {
+      // Shutdown began while this message waited for the room: once the drain
+      // has started, only updates already in the room may still be applied.
+      if (shuttingDown) throw gatewayRestarting();
       await reauthorize(context);
       const nativeBefore = isNativeArtifactDocument(document);
       // Sync step 2 often contains the complete client state on room join.
@@ -1055,6 +1088,7 @@ const server = new Server({
       // Hocuspocus awaits between this hook and apply. Canonical native state
       // must not replace the authored base during that captured interval.
       unappliedDocumentMessages.add(document);
+      persistenceDocuments.add(document);
       messageQueue(socketId).push({
         context: { ...context },
         connection,
@@ -1074,6 +1108,8 @@ const server = new Server({
         error instanceof Error
           ? error.message
           : "COLLABORATION_UPDATE_REJECTED";
+      // A restart is not a rejection: the next gateway judges this update.
+      if (shuttingDown) throw gatewayRestarting();
       process.stderr.write(`[beforeHandleMessage] ${reason}\n`);
       // A rejected update leaves this peer's local Y.Doc ahead of the canonical
       // room. Emit durable_failed before the close so the client marks
@@ -1123,6 +1159,7 @@ const server = new Server({
       // Ordinary updates release after apply. A full pending batch also waits
       // for storage, bounding memory when durable I/O falls behind incoming edits.
       releaseDocumentMessage(socketId);
+      settlePersistenceDocument(document);
     }
   },
 
@@ -1495,6 +1532,7 @@ const server = new Server({
         // await close hooks, so rejecting here would crash unrelated rooms.
         process.stderr.write(`[disconnect] ${collaborationFailureMessage(error)}\n`);
       }
+      settlePersistenceDocument(document);
       for (const [key, open] of openDocuments) if (open.document === document) openDocuments.delete(key);
       await canonicalRooms.get(document)?.session.dispose();
       canonicalRooms.delete(document);
@@ -1578,15 +1616,34 @@ process.stdout.write(
 );
 
 async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   clearInterval(policySweep);
   authorizationGuard.dispose();
-  await Promise.all(
-    [...checkpointSchedulers].map((scheduler) => scheduler.flush()),
-  );
+  const { unflushed } = await drainGatewayForShutdown({
+    stopAccepting: () => server.httpServer.close(),
+    closeConnections: () => {
+      const sockets = new Set([...activeConnections].map(connection => connection.webSocket));
+      for (const document of server.hocuspocus.documents.values())
+        for (const connection of document.getConnections()) sockets.add(connection.webSocket);
+      for (const socket of sockets) {
+        try { socket.close(GATEWAY_RESTARTING_CLOSE.code, GATEWAY_RESTARTING_CLOSE.reason); }
+        catch { /* Already closed. */ }
+      }
+    },
+    dirtyDocuments: () => [...persistenceDocuments].filter(persistenceDirty),
+    flushDocument: flushPersistence,
+    flushCheckpoints: () => Promise.allSettled([...checkpointSchedulers].map(scheduler => scheduler.flush())),
+    describeDocument: document => {
+      const pending = documentPersistenceQueues.get(document)?.pending ?? [];
+      const context = pending[0]?.context;
+      return `artifact=${context?.artifactId ?? document.name} partition=${context?.partitionKey ?? "?"} pendingUpdates=${pending.length}`;
+    },
+    log: line => process.stderr.write(line),
+  });
   for (const scheduler of checkpointSchedulers) scheduler.dispose();
   checkpointSchedulers.clear();
-  await server.destroy();
-  process.exit(0);
+  process.exit(unflushed.length ? 1 : 0);
 }
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

@@ -13,6 +13,11 @@
 
 app = "spectra-collaboration-gateway"
 primary_region = "mad"
+# On deploy or restart the gateway stops taking edits, then stores every
+# accepted update in Convex before it exits (up to 20 s; the launcher allows
+# 25 s). Fly's default 5 s SIGKILL would cut that drain short.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
 
 [build]
   dockerfile = "deploy/collaboration-gateway/Dockerfile"

@@ -16,6 +16,69 @@ export function reconciliationSnapshotKey(snapshot: ReconciliationSnapshot) {
   return JSON.stringify(snapshot);
 }
 
+function jsonPointerSegments(path: string) {
+  return path === "/"
+    ? []
+    : path
+        .split("/")
+        .slice(1)
+        .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+/**
+ * `target` with each JSON pointer set to (a clone of) its value, applied in
+ * order. Only the containers on a patched path are copied, once each; every
+ * other subtree is shared with `target`, which is never modified.
+ *
+ * This runs on every AI streaming frame and every peer speculation frame.
+ * Deep-cloning the whole artifact once per patch cost ~80 ms a frame on a
+ * 1,000-object whiteboard. It also threw DataCloneError on a sheet holding a
+ * cell overlay (a Proxy), and it gave every unchanged item a new identity.
+ */
+export function setAtPointers(
+  target: unknown,
+  patches: Iterable<readonly [path: string, value: unknown]>,
+): unknown {
+  const owned = new WeakSet<object>();
+  const own = (value: object) => {
+    const copy: object = Array.isArray(value)
+      ? [...(value as unknown[])]
+      : { ...value };
+    owned.add(copy);
+    return copy;
+  };
+  let root = target;
+  for (const [path, value] of patches) {
+    const segments = jsonPointerSegments(path);
+    const replacement = structuredClone(value);
+    if (segments.length === 0) {
+      root = replacement;
+      if (replacement && typeof replacement === "object") owned.add(replacement);
+      continue;
+    }
+    if (!root || typeof root !== "object") {
+      root = {};
+      owned.add(root as object);
+    } else if (!owned.has(root)) root = own(root);
+    let current = root as Record<string, unknown>;
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index]!;
+      const existing = current[segment];
+      let child: object;
+      if (existing && typeof existing === "object")
+        child = owned.has(existing) ? existing : own(existing);
+      else {
+        child = /^\d+$/.test(segments[index + 1]!) ? [] : {};
+        owned.add(child);
+      }
+      current[segment] = child;
+      current = child as Record<string, unknown>;
+    }
+    current[segments.at(-1)!] = replacement;
+  }
+  return root;
+}
+
 /**
  * A studio remembers the serialized values of its own recent writes so their
  * live echo is accepted as local. A save whose echo never arrives verbatim

@@ -228,6 +228,7 @@ import {
   draftContentForLiveWrite,
   createStudioHistory,
   rememberLocalSyncKey,
+  setAtPointers,
   studioHistoryShortcut,
   studioIncomingSource,
   tagsFromDraft,
@@ -421,28 +422,6 @@ function valueAtPointer(value: unknown, path: string) {
   return current;
 }
 
-function setAtPointer(target: unknown, path: string, value: unknown) {
-  const segments = pointerSegments(path);
-  if (segments.length === 0) return structuredClone(value);
-  const root =
-    target && typeof target === "object" ? structuredClone(target) : {};
-  let current = root as Record<string, unknown>;
-  for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index]!;
-    const nextSegment = segments[index + 1]!;
-    const existing = current[segment];
-    current[segment] =
-      existing && typeof existing === "object"
-        ? existing
-        : /^\d+$/.test(nextSegment)
-          ? []
-          : {};
-    current = current[segment] as Record<string, unknown>;
-  }
-  current[segments.at(-1)!] = structuredClone(value);
-  return root;
-}
-
 const ARTIFACT_LIVE_METADATA_POINTERS = new Set([
   "/title",
   "/summary",
@@ -476,9 +455,9 @@ function mergeAiRegions(
 ) {
   if (preview === undefined) return local;
   if (!changedPaths.length || changedPaths.includes("/")) return preview;
-  return changedPaths.reduce(
-    (next, path) => setAtPointer(next, path, valueAtPointer(preview, path)),
+  return setAtPointers(
     local,
+    changedPaths.map((path) => [path, valueAtPointer(preview, path)] as const),
   );
 }
 
@@ -3822,21 +3801,14 @@ function ArtifactStudioEditor({
   ]);
   const presencePreview = useMemo(() => {
     if (!activeAiPresence || activeAiPreviewPatches.length === 0) return null;
-    let next: {
-      title: string;
-      summary: string;
-      tags: string[];
-      content: unknown;
-    } = {
-      title,
-      summary,
-      tags: tagsFromDraft(tagDraft),
-      content,
-    };
+    const next = setAtPointers(
+      { title, summary, tags: tagsFromDraft(tagDraft), content },
+      activeAiPreviewPatches.map(
+        (patch) => [livePreviewOuterPointer(patch.path), patch.value] as const,
+      ),
+    ) as { title: string; summary: string; tags: string[]; content: unknown };
     const paths: string[] = [];
     for (const patch of activeAiPreviewPatches) {
-      const outerPointer = livePreviewOuterPointer(patch.path);
-      next = setAtPointer(next, outerPointer, patch.value) as typeof next;
       const contentPointer = livePreviewContentPointer(patch.path);
       if (contentPointer) paths.push(contentPointer);
     }
@@ -4483,18 +4455,18 @@ function ArtifactStudioEditor({
    */
   const editorContent = useMemo(() => {
     if (remoteSpeculation.size === 0) return durableEditorContent;
-    let next: unknown = durableEditorContent;
     let documentBlocksAreSpeculative = false;
+    const patches: Array<readonly [string, unknown]> = [];
     for (const [pointer, value] of remoteSpeculation) {
       const contentPointer = livePreviewContentPointer(pointer);
       if (!contentPointer) continue;
       if (/^\/blocks(?:\/|$)/.test(contentPointer))
         documentBlocksAreSpeculative = true;
-      next =
-        contentPointer === "/"
-          ? (value ?? next)
-          : setAtPointer(next, contentPointer, value);
+      // A whole-content frame with no value keeps what is already layered.
+      if (contentPointer === "/" && value == null) continue;
+      patches.push([contentPointer, value]);
     }
+    const next = setAtPointers(durableEditorContent, patches);
     if (
       artifact.blueprintKey === "document" &&
       documentBlocksAreSpeculative &&

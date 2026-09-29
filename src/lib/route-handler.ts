@@ -6,6 +6,7 @@ import {
   logAPIResponse,
 } from "./logging";
 import type { NextRequest } from "next/server";
+import { readConvexError } from "../../shared/convex-error";
 
 function normalizeErrorStatus(message: string) {
   const lower = message.toLowerCase();
@@ -69,32 +70,14 @@ function normalizeErrorStatus(message: string) {
 export const PUBLIC_SERVER_FAILURE =
   "Spectra could not finish this request. Check your connection, then try again.";
 
-function unwrapConvexError(rawMessage: string) {
-  const withoutConvexId = rawMessage.replace(
-    /\[Request ID:\s*[^\]]+\]\s*/gi,
-    "",
-  );
-  const named = withoutConvexId.match(
-    /\b([A-Z][A-Z0-9_]{3,}):\s*([^\n]+)/,
-  );
-  if (named) return `${named[1]}: ${named[2].trim()}`;
-  return withoutConvexId
-    .split("\n")[0]
-    .replace(/^Uncaught Error:\s*/i, "")
-    .replace(/^Server Error:\s*/i, "")
-    .trim();
-}
-
-/** The HTTP status for a thrown error, after Convex's envelope is removed.
- * Routes that answer in plain text use the same mapping as JSON routes. */
+/** The HTTP status for a thrown error, read through Convex's frame and
+ * production redaction. Routes that answer in plain text use the same mapping
+ * as JSON routes. */
 export function errorStatus(error: unknown) {
-  return normalizeErrorStatus(
-    unwrapConvexError(error instanceof Error ? error.message : String(error)),
-  );
+  return normalizeErrorStatus(readConvexError(error).message);
 }
 
-function parseCodeAndMessage(rawMessage: string) {
-  const normalized = unwrapConvexError(rawMessage);
+function parseCodeAndMessage(normalized: string) {
   const [prefix, ...rest] = normalized.split(":");
   if (/^[A-Z0-9_]+$/.test(prefix) && rest.length > 0) {
     return {
@@ -138,7 +121,8 @@ export async function withRouteErrorHandling<T>(
   } catch (error) {
     const rawMessage =
       error instanceof Error ? error.message : PUBLIC_SERVER_FAILURE;
-    const unwrapped = unwrapConvexError(rawMessage);
+    const unwrapped =
+      error instanceof Error ? readConvexError(error).message : rawMessage;
     const status = normalizeErrorStatus(unwrapped);
     const { code, message } = parseCodeAndMessage(unwrapped);
     const safeMessage = status >= 500 ? PUBLIC_SERVER_FAILURE : message;

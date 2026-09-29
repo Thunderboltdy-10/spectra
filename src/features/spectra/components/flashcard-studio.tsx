@@ -590,12 +590,20 @@ export function FlashcardStudio({
     };
   }, [artifactId]);
 
+  // The deck as it is now. An upload or import finishes after an await, when
+  // the render that started it holds stale cards; building on those would
+  // silently drop every card edit made meanwhile, collaborators' included.
+  const latestDeckRef = useRef({ content, cards });
+  latestDeckRef.current = { content, cards };
+
   function commit(nextCards: DeckCard[]) {
+    const latestContent = latestDeckRef.current.content;
+    latestDeckRef.current = { content: latestContent, cards: nextCards };
     setCards(nextCards);
     onChange({
-      ...record(content),
+      ...record(latestContent),
       cards: nextCards,
-      settings: record(content).settings ?? {
+      settings: record(latestContent).settings ?? {
         shuffle: true,
         revealMode: "click",
       },
@@ -604,7 +612,9 @@ export function FlashcardStudio({
 
   function updateCard(cardId: string, patch: Partial<DeckCard>) {
     commit(
-      cards.map((card) => (card.id === cardId ? { ...card, ...patch } : card)),
+      latestDeckRef.current.cards.map((card) =>
+        card.id === cardId ? { ...card, ...patch } : card,
+      ),
     );
   }
 
@@ -667,7 +677,7 @@ export function FlashcardStudio({
       if (
         previousAssetId &&
         previousAssetId !== uploaded.assetId &&
-        !cards.some(
+        !latestDeckRef.current.cards.some(
           (card) =>
             card.id !== activeCard.id &&
             card.media?.assetId === previousAssetId,
@@ -1071,7 +1081,7 @@ export function FlashcardStudio({
             ],
             importedContent: { cards: unique },
           });
-          commit([...cards, ...unique]);
+          commit([...latestDeckRef.current.cards, ...unique]);
           setActiveCardId(unique[0]!.id);
           setActiveSection(unique[0]!.section ?? "Imported");
           setDeckImportReport(
@@ -1225,7 +1235,7 @@ export function FlashcardStudio({
             settings: manifestContent.settings,
           },
         });
-        commit([...cards, ...importedCards]);
+        commit([...latestDeckRef.current.cards, ...importedCards]);
         setActiveCardId(importedCards[0]!.id);
         setActiveSection(importedCards[0]!.section ?? "Imported");
         void getArtifactAssets(artifactId)
@@ -1411,7 +1421,7 @@ export function FlashcardStudio({
             ? "Every valid row duplicates an existing card. Nothing was changed."
             : "No rows contained both a front and back value.",
         );
-      commit([...cards, ...unique]);
+      commit([...latestDeckRef.current.cards, ...unique]);
       setActiveCardId(unique[0]!.id);
       setActiveSection(unique[0]!.section ?? "Imported");
       await completeArtifactImport({

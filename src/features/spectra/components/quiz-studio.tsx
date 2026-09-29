@@ -700,15 +700,23 @@ export function QuizStudio({
     quizAssets.map((asset) => [asset.assetId, asset]),
   );
 
+  // The quiz as it is now. A media upload finishes after an await, when the
+  // render that started it holds stale questions; building on those would
+  // silently drop every edit made meanwhile, collaborators' included.
+  const latestQuizRef = useRef({ content, questions, quizSettings, published });
+  latestQuizRef.current = { content, questions, quizSettings, published };
+
   function commit(next: QuizQuestion[], preservePublished = false) {
-    const nextPublished = preservePublished ? published : false;
+    const latest = latestQuizRef.current;
+    const nextPublished = preservePublished ? latest.published : false;
+    latestQuizRef.current = { ...latest, questions: next, published: nextPublished };
     setQuestions(next);
     if (!preservePublished) setPublished(false);
     setPublishIssues([]);
     onChange({
-      ...record(content),
+      ...record(latest.content),
       questions: next,
-      settings: quizSettings,
+      settings: latest.quizSettings,
       published: nextPublished,
     });
   }
@@ -830,7 +838,7 @@ export function QuizStudio({
         blob: file,
       });
       const previousAssetId = activeQuestion.media?.assetId;
-      const nextQuestions = questions.map((question) =>
+      const nextQuestions = latestQuizRef.current.questions.map((question) =>
         question.id === activeQuestion.id
           ? {
               ...question,

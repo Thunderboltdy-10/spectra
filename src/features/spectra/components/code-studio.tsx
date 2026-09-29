@@ -783,8 +783,15 @@ export function CodeStudio({
     };
   }, [artifactId]);
 
+  // The workbook as it is now. An asset upload or import finishes after an
+  // await, when the render that started it holds a stale workbook; building
+  // on that would silently revert every edit made meanwhile.
+  const workbookRef = useRef(workbook);
+  workbookRef.current = workbook;
+
   const emit = useCallback(
     (next: CodeContent) => {
+      workbookRef.current = next;
       setWorkbook(next);
       lastEmittedKeyRef.current = codeContentKey(next);
       onChange(next);
@@ -795,11 +802,11 @@ export function CodeStudio({
   const mutate = useCallback(
     (recipe: (draft: CodeContent) => void) => {
       if (readOnly) return;
-      const draft = structuredClone(workbook);
+      const draft = structuredClone(workbookRef.current);
       recipe(draft);
       emit(draft);
     },
-    [emit, readOnly, workbook],
+    [emit, readOnly],
   );
 
   const appendConsole = useCallback(

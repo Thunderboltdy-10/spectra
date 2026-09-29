@@ -6,7 +6,7 @@ import type {
   RestoredClarification,
   Surface,
 } from "./contract";
-import { rows, summarizeArtifact } from "./gather";
+import { hydrateArtifactWithLiveContent, rows, summarizeArtifact } from "./gather";
 import { authenticatedArtifactObservations } from "./discovery";
 import { executeThreadRead } from "./thread-read";
 import { claimsUnsavedWork, planFromAgentCompletion } from "./completion";
@@ -3156,7 +3156,12 @@ export async function executeAgentReadTool(
         "that Spectra artifact",
       );
       if (!artifactRead.ok) return artifactRead;
-      const artifact = artifactRead.value;
+      const artifact =
+        artifactRead.value && typeof artifactRead.value === "object"
+          ? await hydrateArtifactWithLiveContent(
+              artifactRead.value as Record<string, unknown>,
+            )
+          : null;
       return artifact && typeof artifact === "object"
         ? {
             ok: true,

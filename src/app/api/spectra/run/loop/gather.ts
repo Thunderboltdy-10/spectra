@@ -110,10 +110,23 @@ export function explicitArtifactIdsFromPrompt(prompt: string) {
   return [...new Set(prompt.match(/\bwx[a-z0-9]{20,}\b/gi) ?? [])].slice(0, 8);
 }
 
+/** Convex projects some content per viewer (a reader's quiz without its key,
+ * a non-owner's timetable without private layers). The live room holds the
+ * unprojected document, so it may only replace content that was not projected. */
+function storedContentIsViewerProjection(artifact: Record<string, unknown>) {
+  if (artifact.blueprintKey === "quiz") return artifact.accessLevel !== "modify";
+  if (artifact.blueprintKey === "timetable") return artifact.ownership !== "owned";
+  return false;
+}
+
+/** The Convex copy is a checkpoint the gateway writes after 30 s of idle, so
+ * text typed moments ago lives only in the collaboration room. Every AI read of
+ * current content overlays that live state; the checkpoint is the fallback. */
 export async function hydrateArtifactWithLiveContent(
   artifact: Record<string, unknown> | null,
 ): Promise<Record<string, unknown> | null> {
   if (!artifact || typeof artifact._id !== "string") return artifact;
+  if (storedContentIsViewerProjection(artifact)) return artifact;
   try {
     const live = await readLiveArtifactValue({
       artifactId: artifact._id,

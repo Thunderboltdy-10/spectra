@@ -2650,7 +2650,10 @@ export function WhiteboardStudio({
         unsupportedFeatures,
         importedContent: imported.content,
       });
-      emit(imported.content);
+      // The import was converted from the board as it was when it began; the
+      // original's upload and the conversion take time. Replay it onto the
+      // board as it is now, so an edit made meanwhile is not reverted.
+      emit(commitStudioGesture(board, imported.content, boardRef.current));
       setSelectedNodeIds([]);
       setIoNotice(
         `Imported ${imported.importedNodes.toLocaleString()} native object${imported.importedNodes === 1 ? "" : "s"} from ${file.name}.${imported.warnings.length ? ` Fidelity report: ${imported.warnings.join(" ")}` : " Full native board structure was retained."}`,

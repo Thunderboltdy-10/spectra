@@ -654,3 +654,76 @@ export function applyStudioHistory<T>(
 export function commitStudioGesture<T>(origin: T, gesture: T, current: T): T {
   return rebaseCollaborativeValue(origin, gesture, current).value as T;
 }
+
+/**
+ * An undo history for studios that have none of their own. Consecutive edits
+ * that continue each other within `coalesceMs` form one step, so a typed word
+ * undoes as a word rather than a keystroke. Steps replay through
+ * `applyStudioHistory`, so collaborators' edits made in between survive.
+ */
+export function createStudioHistory<T>({
+  limit = 80,
+  coalesceMs = 800,
+  now = () => Date.now(),
+}: { limit?: number; coalesceMs?: number; now?: () => number } = {}) {
+  let undoStack: StudioHistoryEntry<T>[] = [];
+  let redoStack: StudioHistoryEntry<T>[] = [];
+  let lastRecordedAt = Number.NEGATIVE_INFINITY;
+  return {
+    record(before: T, after: T) {
+      if (studioValuesEqual(before, after)) return;
+      const at = now();
+      const last = undoStack[undoStack.length - 1];
+      if (
+        last &&
+        at - lastRecordedAt < coalesceMs &&
+        studioValuesEqual(last.after, before)
+      ) {
+        undoStack[undoStack.length - 1] = { before: last.before, after };
+      } else {
+        undoStack = [...undoStack.slice(-(limit - 1)), { before, after }];
+      }
+      lastRecordedAt = at;
+      redoStack = [];
+    },
+    step(direction: "undo" | "redo", current: T): T | null {
+      const from = direction === "undo" ? undoStack : redoStack;
+      const entry = from.pop();
+      if (!entry) return null;
+      (direction === "undo" ? redoStack : undoStack).push(entry);
+      lastRecordedAt = Number.NEGATIVE_INFINITY;
+      return applyStudioHistory(entry, direction, current);
+    },
+    reset() {
+      undoStack = [];
+      redoStack = [];
+      lastRecordedAt = Number.NEGATIVE_INFINITY;
+    },
+  };
+}
+
+/** Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y, outside any text field. */
+export function studioHistoryShortcut(event: {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  target: EventTarget | null;
+}): "undo" | "redo" | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  const target = event.target as HTMLElement | null;
+  // Text fields keep the browser's own text undo.
+  if (
+    target &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" ||
+      target.isContentEditable)
+  )
+    return null;
+  const key = event.key.toLowerCase();
+  if (key === "z") return event.shiftKey ? "redo" : "undo";
+  if (key === "y" && !event.shiftKey) return "redo";
+  return null;
+}

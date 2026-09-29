@@ -11,6 +11,7 @@ use sha2::Digest;
 use walkdir::WalkDir;
 
 use crate::identity::local_resource_id;
+use crate::journal::VerifiedStat;
 use crate::platform::{HostPlatform, OsFileIdentity, Platform};
 
 #[derive(Debug, Clone)]
@@ -93,6 +94,10 @@ pub struct ScanEntry {
     pub relative_path: String,
     pub is_directory: bool,
     pub size: u64,
+    /// Modification time from the file's own handle (not the cached directory
+    /// entry), in nanoseconds since the Unix epoch.
+    #[serde(default)]
+    pub modified_ns: Option<i64>,
     pub content_hash: Option<String>,
     pub double_sync_risk: bool,
 }
@@ -267,6 +272,8 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
             online_only += 1;
             continue;
         }
+        let mut size = if is_directory { 0 } else { metadata.len() };
+        let mut modified_ns = None;
         let resource_id = if is_directory {
             format!(
                 "dir_{}",
@@ -283,6 +290,12 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
                     continue;
                 }
             };
+            // The handle's stat is current. Windows fills directory entries
+            // lazily, so theirs can lag a write that has already finished.
+            if let Ok(current) = file.metadata() {
+                size = current.len();
+                modified_ns = current.modified().ok().and_then(unix_nanos);
+            }
             match platform.file_identity(&file) {
                 Ok(identity) => local_resource_id(&identity),
                 Err(error) => {
@@ -298,7 +311,8 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
             local_resource_id: resource_id,
             relative_path: relative,
             is_directory,
-            size: if is_directory { 0 } else { metadata.len() },
+            size,
+            modified_ns,
             content_hash: None,
             double_sync_risk: is_double_sync_path(path),
         });
@@ -309,6 +323,35 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
         next_cursor: None,
         online_only,
     })
+}
+
+pub fn unix_nanos(time: SystemTime) -> Option<i64> {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_nanos()).ok())
+}
+
+/// A write that lands within this window of the hash can keep the same
+/// modification time on coarse filesystems (FAT, exFAT, some network
+/// shares), so such a stat never vouches for the bytes.
+const RACY_STAT_WINDOW_NS: i64 = 2_000_000_000;
+
+/// Returns the recorded hash when the file still has the exact size and
+/// modification time it had when those bytes were hashed, and the hash is
+/// still the one the journal holds for it. Anything else (no stat yet, no
+/// mtime, a write racing the hash, a hash replaced since) means re-reading.
+pub fn reusable_hash(
+    recorded: &VerifiedStat,
+    current_hash: Option<&str>,
+    size: u64,
+    modified_ns: Option<i64>,
+) -> Option<String> {
+    let modified_ns = modified_ns?;
+    (current_hash == Some(recorded.content_hash.as_str())
+        && recorded.size == size
+        && recorded.modified_ns == modified_ns
+        && recorded.verified_at_ns.saturating_sub(recorded.modified_ns) >= RACY_STAT_WINDOW_NS)
+        .then(|| recorded.content_hash.clone())
 }
 
 fn is_double_sync_path(path: &Path) -> bool {
@@ -421,6 +464,16 @@ pub struct StableFileSnapshot {
 }
 
 impl StableFileSnapshot {
+    /// The stat these bytes were hashed under, for `reusable_hash`.
+    pub fn verified_stat(&self) -> Option<VerifiedStat> {
+        Some(VerifiedStat {
+            size: self.size,
+            modified_ns: self.modified.and_then(unix_nanos)?,
+            content_hash: self.fingerprint.clone(),
+            verified_at_ns: unix_nanos(SystemTime::now())?,
+        })
+    }
+
     /// Reads the bytes through the same writer-exclusive lease used for the
     /// fingerprint. The lease remains held until the snapshot is dropped.
     pub fn read_bytes(&mut self) -> std::io::Result<Vec<u8>> {
@@ -741,6 +794,62 @@ mod tests {
         assert_eq!(scan.online_only, 1);
         assert!(!is_online_only(&dir.path().join("local-essay.docx")));
         assert!(!is_online_only(&dir.path().join("missing.docx")));
+    }
+
+    #[test]
+    fn a_recorded_stat_vouches_for_its_hash_only_while_nothing_moved() {
+        let settled = VerifiedStat {
+            size: 10,
+            modified_ns: 1_000_000_000,
+            content_hash: "h1".into(),
+            verified_at_ns: 5_000_000_000,
+        };
+        let hash = |recorded: &VerifiedStat, current: Option<&str>, size, modified| {
+            reusable_hash(recorded, current, size, modified)
+        };
+        assert_eq!(
+            hash(&settled, Some("h1"), 10, Some(1_000_000_000)).as_deref(),
+            Some("h1")
+        );
+        // Any change to the stat, or a hash the journal replaced since.
+        assert!(hash(&settled, Some("h1"), 11, Some(1_000_000_000)).is_none());
+        assert!(hash(&settled, Some("h1"), 10, Some(1_000_000_001)).is_none());
+        assert!(hash(&settled, Some("h2"), 10, Some(1_000_000_000)).is_none());
+        // No hash in the store yet, or no modification time to compare.
+        assert!(hash(&settled, None, 10, Some(1_000_000_000)).is_none());
+        assert!(hash(&settled, Some("h1"), 10, None).is_none());
+        // Hashed within the filesystem's timestamp granularity of the last
+        // write: a second write could keep this exact size and mtime.
+        let racy = VerifiedStat {
+            verified_at_ns: settled.modified_ns + 1_999_999_999,
+            ..settled.clone()
+        };
+        assert!(hash(&racy, Some("h1"), 10, Some(1_000_000_000)).is_none());
+        // A clock set back after the write never makes the stat trusted.
+        let skewed = VerifiedStat {
+            verified_at_ns: settled.modified_ns - 1,
+            ..settled
+        };
+        assert!(hash(&skewed, Some("h1"), 10, Some(1_000_000_000)).is_none());
+    }
+
+    #[test]
+    fn scan_reads_size_and_mtime_from_the_file_handle() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("essay.docx");
+        std::fs::write(&path, b"bytes").unwrap();
+        let scan = scan_mount(&TestPlatform, dir.path()).unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(scan.entries[0].size, 5);
+        assert_eq!(
+            scan.entries[0].modified_ns,
+            unix_nanos(metadata.modified().unwrap())
+        );
+        let snapshot = stable_file_snapshot(&path).unwrap().unwrap();
+        let stat = snapshot.verified_stat().unwrap();
+        assert_eq!(Some(stat.modified_ns), scan.entries[0].modified_ns);
+        assert_eq!(stat.size, 5);
+        assert_eq!(stat.content_hash, snapshot.fingerprint);
     }
 
     #[test]

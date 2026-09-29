@@ -27,9 +27,9 @@ use spectra_bridge_core::sync::{
     resume_pairing, set_mount_availability, upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
-    MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
-    is_online_only, office_lock_exists, office_lock_paths, relative_key, scan_mount,
-    stable_file_snapshot,
+    MountWatcher, ScanEntry, StabilityTracker, WatcherConfig, file_held_by_office,
+    is_office_lock_file, is_online_only, office_lock_exists, office_lock_paths, relative_key,
+    reusable_hash, scan_mount, stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -448,6 +448,31 @@ fn set_mount_status(
     journal.set_config(&format!("mount_status:{grant_id}"), &serde_json::json!({ "state": state, "detail": detail, "synced": synced, "total": total }).to_string()).map_err(|error| error.to_string())
 }
 
+/// Names a file that is behind without taking the folder out of service: the
+/// folder stays active and keeps its last known counts.
+fn set_mount_file_note(journal: &Journal, grant_id: &str, detail: &str) -> Result<(), String> {
+    let previous = journal
+        .config(&format!("mount_status:{grant_id}"))
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok());
+    let count = |key: &str| {
+        previous
+            .as_ref()
+            .and_then(|value| value.get(key))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as usize
+    };
+    set_mount_status(
+        journal,
+        grant_id,
+        "active",
+        detail,
+        count("synced"),
+        count("total"),
+    )
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MountRepairRetry {
@@ -507,6 +532,19 @@ fn schedule_mount_repair_retry(
     synced: usize,
     total: usize,
 ) -> Result<u64, String> {
+    let delay_ms = record_mount_repair_retry(journal, grant_id)?;
+    let base_detail = detail.chars().take(500).collect::<String>();
+    let status_detail = format!(
+        "{base_detail} Automatic repair is scheduled in {}.",
+        display_retry_delay(delay_ms),
+    );
+    set_mount_status(journal, grant_id, "waiting", &status_detail, synced, total)?;
+    Ok(delay_ms)
+}
+
+/// Schedules the next full repair pass without touching the folder's status,
+/// for a pass that synced the folder but left individual files behind.
+fn record_mount_repair_retry(journal: &Journal, grant_id: &str) -> Result<u64, String> {
     let key = mount_repair_retry_key(grant_id);
     let previous = journal
         .config(&key)
@@ -525,12 +563,6 @@ fn schedule_mount_repair_retry(
     journal
         .set_config(&key, &value)
         .map_err(|error| error.to_string())?;
-    let base_detail = detail.chars().take(500).collect::<String>();
-    let status_detail = format!(
-        "{base_detail} Automatic repair is scheduled in {}.",
-        display_retry_delay(delay_ms),
-    );
-    set_mount_status(journal, grant_id, "waiting", &status_detail, synced, total)?;
     Ok(delay_ms)
 }
 
@@ -717,9 +749,53 @@ fn derived_change_key(
     hex::encode(digest.finalize())
 }
 
+fn adoption_candidate(resource: &ResourceRecord) -> AdoptionCandidate {
+    AdoptionCandidate {
+        local_resource_id: resource.local_resource_id.clone(),
+        path_key: resource.path_key.clone(),
+        content_hash: resource.content_hash.clone().unwrap_or_default(),
+        os_identity: record_identity(resource),
+        available: resource.available,
+        last_seen_generation: resource.last_seen_generation,
+    }
+}
+
+fn record_identity(resource: &ResourceRecord) -> Option<OsFileIdentity> {
+    match (resource.volume, resource.file_index) {
+        (Some(volume), Some(file_index)) => Some(OsFileIdentity { volume, file_index }),
+        _ => None,
+    }
+}
+
+fn adoption_candidates(
+    journal: &Journal,
+    grant_id: &str,
+) -> anyhow::Result<Vec<AdoptionCandidate>> {
+    Ok(journal
+        .resources_for_grant(grant_id)?
+        .iter()
+        .map(adoption_candidate)
+        .collect())
+}
+
+/// Keeps a scan's in-memory candidates in step with the journal, so each
+/// file adopts against every earlier file of the same scan without the scan
+/// reloading the whole mount per file.
+fn remember_candidate(candidates: &mut Vec<AdoptionCandidate>, resource: &ResourceRecord) {
+    let candidate = adoption_candidate(resource);
+    match candidates
+        .iter_mut()
+        .find(|existing| existing.local_resource_id == candidate.local_resource_id)
+    {
+        Some(existing) => *existing = candidate,
+        None => candidates.push(candidate),
+    }
+}
+
 fn adopt_resource_record(
     grant: &Grant,
     journal: &Journal,
+    candidates: &[AdoptionCandidate],
     path: &std::path::Path,
     hash: &str,
     os_identity: &OsFileIdentity,
@@ -727,23 +803,8 @@ fn adopt_resource_record(
 ) -> anyhow::Result<(ResourceRecord, Option<ResourceRecord>)> {
     let relative_path = relative_key(grant.device_root(), path);
     anyhow::ensure!(!relative_path.is_empty(), "changed path is the mount root");
-    let candidates = journal
-        .resources_for_grant(&grant.id)?
-        .into_iter()
-        .map(|resource| AdoptionCandidate {
-            local_resource_id: resource.local_resource_id,
-            path_key: resource.path_key,
-            content_hash: resource.content_hash.unwrap_or_default(),
-            os_identity: match (resource.volume, resource.file_index) {
-                (Some(volume), Some(file_index)) => Some(OsFileIdentity { volume, file_index }),
-                _ => None,
-            },
-            available: resource.available,
-            last_seen_generation: resource.last_seen_generation,
-        })
-        .collect::<Vec<_>>();
     let adopted_id = adopt(
-        &candidates,
+        candidates,
         Some(os_identity),
         &relative_path,
         hash,
@@ -784,9 +845,11 @@ fn enqueue_stable_change(
         snapshot.fingerprint == hash,
         "file changed after its quiescence proof"
     );
+    let candidates = adoption_candidates(journal, &grant.id)?;
     let (resource, previous) = adopt_resource_record(
         grant,
         journal,
+        &candidates,
         path,
         hash,
         &snapshot.os_identity,
@@ -799,6 +862,9 @@ fn enqueue_stable_change(
             && candidate.revision.as_deref() == Some(hash)
     });
     journal.upsert_resource(&resource)?;
+    if let Some(stat) = snapshot.verified_stat() {
+        let _ = journal.record_verified_stat(&resource.local_resource_id, &stat);
+    }
     if unchanged {
         let _ = enqueue_unlocked_path(grant, journal, path);
         return Ok(false);
@@ -1218,6 +1284,309 @@ async fn finish_delivered_change(
     }
 }
 
+/// What one full pass found on disk before asking the cloud about it.
+#[derive(Debug, Default)]
+struct LocalScan {
+    files: Vec<DiscoveredResource>,
+    /// Files Office holds open or a writer is still changing.
+    held: Vec<String>,
+    /// Files (or folders) that could not be read or recorded.
+    failed: Vec<String>,
+    /// False when a file went unseen: reconciling missing files would then
+    /// mistake it for deleted.
+    complete: bool,
+    double_sync_risk: bool,
+    online_only: usize,
+    /// Files whose bytes this pass read and hashed.
+    hashed: usize,
+}
+
+/// The recorded hash of a file that has not moved since it was hashed: same
+/// path, same OS identity, same size and modification time.
+fn unchanged_hash(journal: &Journal, record: &ResourceRecord, entry: &ScanEntry) -> Option<String> {
+    let identity = record_identity(record)?;
+    if local_resource_id(&identity) != entry.local_resource_id {
+        return None;
+    }
+    let stat = journal
+        .verified_stat(&record.local_resource_id)
+        .ok()
+        .flatten()?;
+    reusable_hash(
+        &stat,
+        record.content_hash.as_deref(),
+        entry.size,
+        entry.modified_ns,
+    )
+}
+
+/// Reads the folder for a full repair pass. A file whose size, modification
+/// time and identity still match the stat its hash was taken under keeps that
+/// hash without being read again; every other file is read and hashed.
+/// Online-only files are never opened (`scan_mount` skips them).
+fn scan_local_files(
+    grant: &Grant,
+    journal: &Journal,
+    generation: u64,
+) -> Result<LocalScan, String> {
+    let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
+    let mut local = LocalScan {
+        complete: scan.failures.is_empty(),
+        online_only: scan.online_only,
+        failed: scan
+            .failures
+            .into_iter()
+            .map(|failure| failure.relative_path)
+            .collect(),
+        ..LocalScan::default()
+    };
+    let records = journal
+        .resources_for_grant(&grant.id)
+        .map_err(|error| error.to_string())?;
+    let mut candidates = records.iter().map(adoption_candidate).collect::<Vec<_>>();
+    let by_path = records
+        .into_iter()
+        .filter(|record| record.available)
+        .map(|record| (record.path_key.clone(), record))
+        .collect::<HashMap<_, _>>();
+    for entry in scan.entries {
+        if entry.is_directory {
+            continue;
+        }
+        local.double_sync_risk |= entry.double_sync_risk;
+        let native_format = native_format(std::path::Path::new(&entry.relative_path));
+        let entry_path = grant.device_root().join(&entry.relative_path);
+        if file_held_by_office(&entry_path) {
+            local.held.push(entry.relative_path);
+            local.complete = false;
+            let _ = enqueue_locked_path(grant, journal, &entry_path);
+            continue;
+        }
+        let path_key = relative_key(grant.device_root(), &entry_path);
+        let reused = by_path.get(&path_key).and_then(|record| {
+            unchanged_hash(journal, record, &entry).map(|hash| (record.clone(), hash))
+        });
+        let (record, size, content_hash, stat) = match reused {
+            Some((mut record, hash)) => {
+                record.last_seen_generation = generation;
+                (record, entry.size, hash, None)
+            }
+            None => {
+                let snapshot = match stable_file_snapshot(&entry_path) {
+                    Ok(Some(snapshot)) => snapshot,
+                    Ok(None) => {
+                        local.held.push(entry.relative_path);
+                        local.complete = false;
+                        continue;
+                    }
+                    Err(_) => {
+                        local.failed.push(entry.relative_path);
+                        local.complete = false;
+                        continue;
+                    }
+                };
+                local.hashed += 1;
+                let record = match adopt_resource_record(
+                    grant,
+                    journal,
+                    &candidates,
+                    &entry_path,
+                    &snapshot.fingerprint,
+                    &snapshot.os_identity,
+                    generation,
+                ) {
+                    Ok((record, _)) => record,
+                    Err(_) => {
+                        local.failed.push(entry.relative_path);
+                        local.complete = false;
+                        continue;
+                    }
+                };
+                let stat = snapshot.verified_stat();
+                (record, snapshot.size, snapshot.fingerprint.clone(), stat)
+            }
+        };
+        if journal.upsert_resource(&record).is_err() {
+            local.failed.push(entry.relative_path);
+            local.complete = false;
+            continue;
+        }
+        if let Some(stat) = stat {
+            let _ = journal.record_verified_stat(&record.local_resource_id, &stat);
+        }
+        remember_candidate(&mut candidates, &record);
+        local.files.push(DiscoveredResource {
+            local_resource_id: record.local_resource_id,
+            relative_path: entry.relative_path,
+            size,
+            content_hash: Some(content_hash),
+            native_format,
+        });
+    }
+    Ok(local)
+}
+
+/// How a pass treats a file the cloud declined to register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiscoverySkip {
+    /// The folder's rules or the user's choice; nothing to retry.
+    Policy,
+    /// Office holds the file on some device; retry once it is closed.
+    Held,
+    /// The file cannot be registered as it is; a rename or move may fix it.
+    Unsyncable,
+    /// Anything else is retried with the next repair pass.
+    Retry,
+}
+
+fn classify_discovery_skip(reason: Option<&str>) -> DiscoverySkip {
+    match reason {
+        Some(
+            "approval-required"
+            | "filtered"
+            | "explicit-only"
+            | "ignored-by-user"
+            | "artifact-access-revoked",
+        ) => DiscoverySkip::Policy,
+        Some("office-lock") => DiscoverySkip::Held,
+        Some("resource-metadata-invalid") => DiscoverySkip::Unsyncable,
+        _ => DiscoverySkip::Retry,
+    }
+}
+
+/// A failed payload upload goes to the outbound queue, which retries that one
+/// file with its own backoff while the rest of the folder carries on. Returns
+/// false when the file could not be queued and needs a repair pass instead.
+fn hand_off_failed_upload(
+    grant: &Grant,
+    journal: &Journal,
+    resource: &DiscoveredResource,
+    generation: u64,
+) -> bool {
+    let Some(hash) = resource.content_hash.as_deref() else {
+        return false;
+    };
+    let path = grant.device_root().join(&resource.relative_path);
+    matches!(
+        enqueue_stable_change(grant, journal, &path, hash, generation),
+        Ok(true)
+    )
+}
+
+/// Per-file results of one full pass. Files are named so the folder status
+/// can say which one is behind instead of calling the whole folder stuck.
+#[derive(Debug, Default)]
+struct MountPass {
+    scanned: usize,
+    /// Files the scan never handed to the cloud (held or unreadable).
+    unscanned: usize,
+    /// Scanned files the cloud did not take in this pass.
+    unsynced: usize,
+    held: Vec<String>,
+    failed: Vec<String>,
+    retrying: Vec<String>,
+    unsyncable: Vec<String>,
+    oversized: usize,
+    online_only: usize,
+    complete: bool,
+}
+
+impl MountPass {
+    fn needs_repair(&self) -> bool {
+        !self.held.is_empty() || !self.failed.is_empty() || !self.complete
+    }
+}
+
+fn file_word(count: usize) -> &'static str {
+    if count == 1 { "file" } else { "files" }
+}
+
+fn name_files(paths: &[String]) -> String {
+    let first = paths.first().map(String::as_str).unwrap_or_default();
+    match paths.len() {
+        0 | 1 => format!("\u{201c}{first}\u{201d}"),
+        count => format!(
+            "\u{201c}{first}\u{201d} and {} more {}",
+            count - 1,
+            file_word(count - 1)
+        ),
+    }
+}
+
+/// The folder's status after a pass that reached the cloud. The folder stays
+/// active: files that did sync are usable, and each one that did not is named.
+fn mount_pass_status(pass: &MountPass, repair_delay_ms: Option<u64>) -> (String, usize, usize) {
+    let mut detail = "Available in Spectra".to_owned();
+    if pass.oversized > 0 {
+        detail = format!(
+            "{detail}, except {} {} over 100 MB. {OVERSIZED_FILE_DETAIL}",
+            pass.oversized,
+            file_word(pass.oversized),
+        );
+    }
+    let mut notes = Vec::new();
+    let one = |paths: &[String]| paths.len() == 1;
+    if !pass.held.is_empty() {
+        notes.push(format!(
+            "{} {} open or still being saved and will sync once {} closed.",
+            name_files(&pass.held),
+            if one(&pass.held) { "is" } else { "are" },
+            if one(&pass.held) { "it is" } else { "they are" },
+        ));
+    }
+    if !pass.failed.is_empty() {
+        notes.push(format!(
+            "{} could not be synced yet.",
+            name_files(&pass.failed)
+        ));
+    }
+    if !pass.retrying.is_empty() {
+        notes.push(format!(
+            "Spectra is retrying the upload of {}.",
+            name_files(&pass.retrying)
+        ));
+    }
+    if !pass.unsyncable.is_empty() {
+        notes.push(format!(
+            "{} could not be added to Spectra; renaming or moving {} may help.",
+            name_files(&pass.unsyncable),
+            if one(&pass.unsyncable) { "it" } else { "them" },
+        ));
+    }
+    if let Some(delay_ms) = repair_delay_ms {
+        notes.push(format!(
+            "Spectra will check again in {}.",
+            display_retry_delay(delay_ms)
+        ));
+    }
+    if pass.online_only > 0 {
+        notes.push(format!(
+            "{} online-only {} will sync once {} on this device.",
+            pass.online_only,
+            file_word(pass.online_only),
+            if pass.online_only == 1 {
+                "it is"
+            } else {
+                "they are"
+            },
+        ));
+    }
+    if !notes.is_empty() {
+        if !detail.ends_with('.') {
+            detail.push('.');
+        }
+        for note in notes {
+            detail.push(' ');
+            detail.push_str(&note);
+        }
+    }
+    let synced = pass
+        .scanned
+        .saturating_sub(pass.oversized)
+        .saturating_sub(pass.unsynced);
+    (detail, synced, pass.scanned + pass.unscanned)
+}
+
 async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     set_mount_status(
         journal,
@@ -1239,80 +1608,26 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let generation = journal
         .next_generation(&grant.id)
         .map_err(|error| error.to_string())?;
-    let mut files = Vec::new();
     let owner_lock_paths = office_lock_paths(grant.device_root(), 500);
     let scan_id = uuid::Uuid::new_v4().to_string();
-    let mut double_sync_risk = false;
-    let mut locked_files = 0usize;
-    let mut isolated_failures = 0usize;
-    let mut oversized_files = 0usize;
-    let mut scan_complete = true;
-    let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
-    let online_only_files = scan.online_only;
-    for _failure in scan.failures {
-        isolated_failures += 1;
-        scan_complete = false;
-    }
-    for entry in scan.entries {
-        if entry.is_directory {
-            continue;
-        }
-        double_sync_risk |= entry.double_sync_risk;
-        let native_format = std::path::Path::new(&entry.relative_path)
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("file")
-            .to_ascii_lowercase();
-        let entry_path = grant.device_root().join(&entry.relative_path);
-        let locked = file_held_by_office(&entry_path);
-        if locked {
-            locked_files += 1;
-            scan_complete = false;
-            let _ = enqueue_locked_path(grant, journal, &entry_path);
-            continue;
-        }
-        let snapshot = match stable_file_snapshot(&entry_path) {
-            Ok(Some(snapshot)) => snapshot,
-            Ok(None) => {
-                locked_files += 1;
-                scan_complete = false;
-                continue;
-            }
-            Err(_) => {
-                isolated_failures += 1;
-                scan_complete = false;
-                continue;
-            }
-        };
-        let content_hash = snapshot.fingerprint;
-        let (record, _) = match adopt_resource_record(
-            grant,
-            journal,
-            &entry_path,
-            &content_hash,
-            &snapshot.os_identity,
-            generation,
-        ) {
-            Ok(record) => record,
-            Err(_) => {
-                isolated_failures += 1;
-                scan_complete = false;
-                continue;
-            }
-        };
-        if journal.upsert_resource(&record).is_err() {
-            isolated_failures += 1;
-            scan_complete = false;
-            continue;
-        }
-        files.push(DiscoveredResource {
-            local_resource_id: record.local_resource_id,
-            relative_path: entry.relative_path,
-            size: snapshot.size,
-            content_hash: Some(content_hash),
-            native_format,
-        });
-    }
+    let LocalScan {
+        files,
+        held,
+        failed,
+        complete,
+        double_sync_risk,
+        online_only,
+        ..
+    } = scan_local_files(grant, journal, generation)?;
+    let mut pass = MountPass {
+        scanned: files.len(),
+        unscanned: held.len() + failed.len(),
+        held,
+        failed,
+        online_only,
+        complete,
+        ..MountPass::default()
+    };
     set_mount_status(
         journal,
         &grant.id,
@@ -1351,9 +1666,22 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
         for (resource, registration) in page.iter().zip(registrations.iter()) {
             processed += 1;
+            let name = || resource.relative_path.clone();
             if registration.skipped {
-                if registration.reason.as_deref() != Some("approval-required") {
-                    isolated_failures += 1;
+                match classify_discovery_skip(registration.reason.as_deref()) {
+                    DiscoverySkip::Policy => {}
+                    DiscoverySkip::Held => {
+                        pass.unsynced += 1;
+                        pass.held.push(name());
+                    }
+                    DiscoverySkip::Unsyncable => {
+                        pass.unsynced += 1;
+                        pass.unsyncable.push(name());
+                    }
+                    DiscoverySkip::Retry => {
+                        pass.unsynced += 1;
+                        pass.failed.push(name());
+                    }
                 }
             } else if registration.needs_payload
                 && carries_native_payload(&resource.native_format)
@@ -1361,7 +1689,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             {
                 // A repair retry cannot shrink the file; say so once instead
                 // of re-reading it on every repair scan.
-                oversized_files += 1;
+                pass.oversized += 1;
             } else if upload_discovered_resource(
                 &deployment,
                 &credential,
@@ -1372,7 +1700,15 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             .await
             .is_err()
             {
-                isolated_failures += 1;
+                // One file's upload must not hold the folder back: it retries
+                // on its own schedule, and only a file that cannot be queued
+                // waits for the next repair pass.
+                pass.unsynced += 1;
+                if hand_off_failed_upload(grant, journal, resource, generation) {
+                    pass.retrying.push(name());
+                } else {
+                    pass.failed.push(name());
+                }
             } else {
                 let _ = journal.mark_resource_reported(
                     &resource.local_resource_id,
@@ -1389,57 +1725,19 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             )?;
         }
     }
-    if scan_complete {
+    if pass.complete {
         reconcile_missing_resources(&deployment, &credential, &mount_id, &scan_id)
             .await
             .map_err(|error| error.to_string())?;
     }
-    if locked_files > 0 || isolated_failures > 0 {
-        schedule_mount_repair_retry(
-            journal,
-            &grant.id,
-            &format!(
-                "{} file{} did not sync.",
-                locked_files + isolated_failures,
-                if locked_files + isolated_failures == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-            ),
-            files.len().saturating_sub(isolated_failures),
-            files.len() + locked_files,
-        )
-        .map(|_| ())
+    let repair_delay_ms = if pass.needs_repair() {
+        Some(record_mount_repair_retry(journal, &grant.id)?)
     } else {
         clear_mount_repair_retry(journal, &grant.id)?;
-        let mut detail = "Available in Spectra".to_owned();
-        if oversized_files > 0 {
-            detail = format!(
-                "{detail}, except {oversized_files} file{} over 100 MB. {OVERSIZED_FILE_DETAIL}",
-                if oversized_files == 1 { "" } else { "s" },
-            );
-        }
-        if online_only_files > 0 {
-            detail = format!(
-                "{detail} {online_only_files} online-only file{} will sync once {} on this device.",
-                if online_only_files == 1 { "" } else { "s" },
-                if online_only_files == 1 {
-                    "it is"
-                } else {
-                    "they are"
-                },
-            );
-        }
-        set_mount_status(
-            journal,
-            &grant.id,
-            "active",
-            &detail,
-            files.len() - oversized_files,
-            files.len(),
-        )
-    }
+        None
+    };
+    let (detail, synced, total) = mount_pass_status(&pass, repair_delay_ms);
+    set_mount_status(journal, &grant.id, "active", &detail, synced, total)
 }
 
 const OVERSIZED_FILE_DETAIL: &str = "Files over 100 MB stay on this computer only; compress their pictures and videos to sync them.";
@@ -2346,19 +2644,19 @@ fn spawn_grant_watcher(
                 pending_files.remove(&path);
                 pending_missing.entry(path).or_insert(observed_at);
             }
-            if !batch.failures.is_empty() {
-                let _ = set_mount_status(
+            if let Some(failure) = batch.failures.first() {
+                let _ = set_mount_file_note(
                     &journal,
                     &grant.id,
-                    "waiting",
-                    "A file could not be read yet; other files continue syncing.",
-                    0,
-                    0,
+                    &format!(
+                        "{} could not be read yet; other files continue syncing.",
+                        name_files(std::slice::from_ref(&failure.relative_path)),
+                    ),
                 );
             }
 
             let mut generation = None;
-            let mut isolated_failures = 0usize;
+            let mut failed_paths: Vec<std::path::PathBuf> = Vec::new();
             for path in pending_files.clone() {
                 if !path.exists() {
                     pending_files.remove(&path);
@@ -2378,13 +2676,13 @@ fn spawn_grant_watcher(
                         .unwrap_or(false)
                     {
                         local_work_queued = true;
-                        let _ = set_mount_status(
+                        let _ = set_mount_file_note(
                             &journal,
                             &grant.id,
-                            "waiting",
-                            "A file is open in Office. Spectra will sync it after Office finishes saving.",
-                            0,
-                            0,
+                            &format!(
+                                "{} is open in Office. Spectra will sync it after Office finishes saving.",
+                                name_files(&[relative_key(grant.device_root(), &path)]),
+                            ),
                         );
                     }
                     continue;
@@ -2405,7 +2703,7 @@ fn spawn_grant_watcher(
                                     value
                                 }
                                 Err(_) => {
-                                    isolated_failures += 1;
+                                    failed_paths.push(path.clone());
                                     continue;
                                 }
                             },
@@ -2421,11 +2719,11 @@ fn spawn_grant_watcher(
                                 local_work_queued |= changed;
                                 pending_files.remove(&path);
                             }
-                            Err(_) => isolated_failures += 1,
+                            Err(_) => failed_paths.push(path.clone()),
                         }
                     }
                     Ok(None) => {}
-                    Err(_) => isolated_failures += 1,
+                    Err(_) => failed_paths.push(path.clone()),
                 }
             }
             let settled_missing = pending_missing
@@ -2444,7 +2742,7 @@ fn spawn_grant_watcher(
                             value
                         }
                         Err(_) => {
-                            isolated_failures += 1;
+                            failed_paths.push(path.clone());
                             continue;
                         }
                     },
@@ -2454,21 +2752,26 @@ fn spawn_grant_watcher(
                         local_work_queued |= queued > 0;
                         pending_missing.remove(&path);
                     }
-                    Err(_) => isolated_failures += 1,
+                    Err(_) => failed_paths.push(path.clone()),
                 }
             }
-            if isolated_failures > 0 {
-                let _ = set_mount_status(
+            if !failed_paths.is_empty() {
+                // The file stays pending and is retried on the next tick; the
+                // folder itself is not stuck, so it stays active.
+                let names = failed_paths
+                    .iter()
+                    .map(|path| relative_key(grant.device_root(), path))
+                    .collect::<Vec<_>>();
+                let _ = set_mount_file_note(
                     &journal,
                     &grant.id,
-                    "waiting",
-                    "A changed file could not be synced yet; unrelated files continue.",
-                    0,
-                    0,
+                    &format!(
+                        "{} could not be synced yet; Spectra keeps retrying and other files continue.",
+                        name_files(&names),
+                    ),
                 );
             } else if generation.is_some() {
-                let _ =
-                    set_mount_status(&journal, &grant.id, "active", "Changes queued safely", 0, 0);
+                let _ = set_mount_file_note(&journal, &grant.id, "Changes queued safely");
             }
             if last_hold_scan.elapsed() >= std::time::Duration::from_secs(2) {
                 last_hold_scan = std::time::Instant::now();
@@ -3550,5 +3853,263 @@ mod tests {
         clear_mount_repair_retry(&journal, "grant-safe").unwrap();
         assert!(!mount_repair_retry_due(&journal, "grant-safe"));
         assert_eq!(journal.config(&retry_key).unwrap(), None);
+    }
+
+    mod per_file_repair {
+        use super::super::{
+            DiscoveredResource, DiscoverySkip, MountPass, classify_discovery_skip,
+            hand_off_failed_upload, mount_pass_status, record_mount_repair_retry, scan_local_files,
+            set_mount_file_note, set_mount_status,
+        };
+        use spectra_bridge_core::fs::{Grant, GrantRegistry};
+        use spectra_bridge_core::journal::Journal;
+        use std::time::{Duration, SystemTime};
+
+        struct Folder(std::path::PathBuf);
+
+        impl Folder {
+            fn new() -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "spectra-bridge-repair-{}",
+                    uuid::Uuid::new_v4().simple()
+                ));
+                std::fs::create_dir_all(&path).unwrap();
+                Self(path)
+            }
+
+            fn grant(&self) -> Grant {
+                GrantRegistry::default()
+                    .add_native_selection("Coursework".into(), &self.0)
+                    .unwrap()
+            }
+
+            /// Writes a file whose last write is well in the past, as a file
+            /// that has been sitting in the folder since the last pass.
+            fn settled(&self, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+                let path = self.0.join(name);
+                std::fs::write(&path, bytes).unwrap();
+                set_mtime(&path, SystemTime::now() - Duration::from_secs(3_600));
+                path
+            }
+        }
+
+        impl Drop for Folder {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn set_mtime(path: &std::path::Path, time: SystemTime) {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(time)
+                .unwrap();
+        }
+
+        fn hash_of(files: &[DiscoveredResource], name: &str) -> Option<String> {
+            files
+                .iter()
+                .find(|file| file.relative_path == name)
+                .and_then(|file| file.content_hash.clone())
+        }
+
+        #[test]
+        fn a_repair_pass_reuses_the_hash_of_every_file_that_has_not_moved() {
+            let folder = Folder::new();
+            folder.settled("essay.docx", b"first draft");
+            folder.settled("notes.txt", b"notes");
+            let grant = folder.grant();
+            let journal = Journal::in_memory().unwrap();
+            let first = scan_local_files(&grant, &journal, 1).unwrap();
+            assert_eq!(first.hashed, 2);
+            assert!(first.complete);
+
+            // Before: every repair pass read and hashed every file again.
+            let second = scan_local_files(&grant, &journal, 2).unwrap();
+            assert_eq!(second.hashed, 0);
+            assert_eq!(second.files.len(), 2);
+            for name in ["essay.docx", "notes.txt"] {
+                assert_eq!(hash_of(&second.files, name), hash_of(&first.files, name));
+            }
+            let ids = |files: &[DiscoveredResource]| {
+                let mut ids = files
+                    .iter()
+                    .map(|file| file.local_resource_id.clone())
+                    .collect::<Vec<_>>();
+                ids.sort();
+                ids
+            };
+            assert_eq!(ids(&second.files), ids(&first.files));
+            for resource in journal.resources_for_grant(&grant.id).unwrap() {
+                assert_eq!(resource.last_seen_generation, 2);
+            }
+        }
+
+        #[test]
+        fn a_moved_stat_or_a_missing_hash_is_read_again() {
+            let folder = Folder::new();
+            let essay = folder.settled("essay.docx", b"first draft");
+            folder.settled("notes.txt", b"notes");
+            let grant = folder.grant();
+            let journal = Journal::in_memory().unwrap();
+            let first = scan_local_files(&grant, &journal, 1).unwrap();
+
+            // Same size, new bytes, new modification time.
+            std::fs::write(&essay, b"final draft").unwrap();
+            set_mtime(&essay, SystemTime::now() - Duration::from_secs(60));
+            let edited = scan_local_files(&grant, &journal, 2).unwrap();
+            assert_eq!(edited.hashed, 1);
+            assert_ne!(
+                hash_of(&edited.files, "essay.docx"),
+                hash_of(&first.files, "essay.docx")
+            );
+
+            // Size and mtime still match, but the store holds no hash.
+            let mut notes = journal
+                .resources_for_grant(&grant.id)
+                .unwrap()
+                .into_iter()
+                .find(|resource| resource.path_key.ends_with("notes.txt"))
+                .unwrap();
+            notes.content_hash = None;
+            journal.upsert_resource(&notes).unwrap();
+            let unhashed = scan_local_files(&grant, &journal, 3).unwrap();
+            assert_eq!(unhashed.hashed, 1);
+            assert_eq!(
+                hash_of(&unhashed.files, "notes.txt"),
+                hash_of(&first.files, "notes.txt")
+            );
+        }
+
+        #[test]
+        fn a_file_hashed_right_after_its_write_is_hashed_again_next_pass() {
+            let folder = Folder::new();
+            std::fs::write(folder.0.join("live.docx"), b"just saved").unwrap();
+            let grant = folder.grant();
+            let journal = Journal::in_memory().unwrap();
+            assert_eq!(scan_local_files(&grant, &journal, 1).unwrap().hashed, 1);
+            // A second write inside the timestamp granularity could keep this
+            // size and mtime, so the stat does not vouch for these bytes yet.
+            assert_eq!(scan_local_files(&grant, &journal, 2).unwrap().hashed, 1);
+        }
+
+        #[test]
+        fn folder_rules_are_not_sync_failures() {
+            for reason in [
+                "approval-required",
+                "filtered",
+                "explicit-only",
+                "ignored-by-user",
+                "artifact-access-revoked",
+            ] {
+                assert_eq!(classify_discovery_skip(Some(reason)), DiscoverySkip::Policy);
+            }
+            assert_eq!(
+                classify_discovery_skip(Some("office-lock")),
+                DiscoverySkip::Held
+            );
+            assert_eq!(
+                classify_discovery_skip(Some("resource-metadata-invalid")),
+                DiscoverySkip::Unsyncable
+            );
+            assert_eq!(classify_discovery_skip(None), DiscoverySkip::Retry);
+            assert_eq!(
+                classify_discovery_skip(Some("new-server-reason")),
+                DiscoverySkip::Retry
+            );
+        }
+
+        #[test]
+        fn a_failed_upload_retries_that_file_on_its_own_queue() {
+            let folder = Folder::new();
+            folder.settled("essay.docx", b"draft");
+            let grant = folder.grant();
+            let journal = Journal::in_memory().unwrap();
+            journal
+                .set_config(&format!("cloud_mount:{}", grant.id), "mount-1")
+                .unwrap();
+            let scan = scan_local_files(&grant, &journal, 1).unwrap();
+            assert!(journal.due_queue(10).unwrap().is_empty());
+            // Before: the file only came back with a full-folder repair pass.
+            assert!(hand_off_failed_upload(&grant, &journal, &scan.files[0], 1));
+            let queued = journal.due_queue(10).unwrap();
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].direction, "outbound-change");
+            assert!(queued[0].payload.contains("essay.docx"));
+            // A file that is gone cannot be queued; it needs a repair pass.
+            let gone = DiscoveredResource {
+                relative_path: "missing.docx".into(),
+                ..scan.files[0].clone()
+            };
+            assert!(!hand_off_failed_upload(&grant, &journal, &gone, 1));
+        }
+
+        #[test]
+        fn one_behind_file_is_named_and_the_folder_stays_active() {
+            let clean = MountPass {
+                scanned: 3,
+                complete: true,
+                ..MountPass::default()
+            };
+            assert!(!clean.needs_repair());
+            assert_eq!(
+                mount_pass_status(&clean, None),
+                ("Available in Spectra".to_owned(), 3, 3)
+            );
+
+            let retrying = MountPass {
+                scanned: 3,
+                unsynced: 1,
+                retrying: vec!["Physics/lab.docx".into()],
+                complete: true,
+                ..MountPass::default()
+            };
+            // The queue retries it; the folder needs no repair pass for it.
+            assert!(!retrying.needs_repair());
+            let (detail, synced, total) = mount_pass_status(&retrying, None);
+            assert_eq!(
+                detail,
+                "Available in Spectra. Spectra is retrying the upload of \u{201c}Physics/lab.docx\u{201d}."
+            );
+            assert_eq!((synced, total), (2, 3));
+
+            let held = MountPass {
+                scanned: 2,
+                unscanned: 2,
+                held: vec!["essay.docx".into(), "deck.pptx".into()],
+                unsyncable: vec!["bad:name.docx".into()],
+                unsynced: 1,
+                ..MountPass::default()
+            };
+            assert!(held.needs_repair());
+            let (detail, synced, total) = mount_pass_status(&held, Some(30_000));
+            assert!(detail.contains(
+                "\u{201c}essay.docx\u{201d} and 1 more file are open or still being saved"
+            ));
+            assert!(detail.contains("\u{201c}bad:name.docx\u{201d} could not be added"));
+            assert!(detail.ends_with("Spectra will check again in 30 seconds."));
+            assert_eq!((synced, total), (1, 4));
+        }
+
+        #[test]
+        fn a_file_note_keeps_the_folder_active_and_its_counts() {
+            let journal = Journal::in_memory().unwrap();
+            set_mount_status(&journal, "grant-a", "active", "Available in Spectra", 7, 8).unwrap();
+            record_mount_repair_retry(&journal, "grant-a").unwrap();
+            set_mount_file_note(
+                &journal,
+                "grant-a",
+                "\u{201c}a.docx\u{201d} could not be read yet.",
+            )
+            .unwrap();
+            let status: serde_json::Value =
+                serde_json::from_str(&journal.config("mount_status:grant-a").unwrap().unwrap())
+                    .unwrap();
+            assert_eq!(status["state"], "active");
+            assert_eq!(status["synced"], 7);
+            assert_eq!(status["total"], 8);
+        }
     }
 }

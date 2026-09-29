@@ -90,6 +90,17 @@ pub struct ResourceRecord {
     pub last_seen_generation: u64,
 }
 
+/// The size and modification time a file had when `content_hash` was read
+/// from its bytes. A repair scan may reuse the hash while the file still has
+/// this stat (see `watcher::reusable_hash`) instead of re-reading the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedStat {
+    pub size: u64,
+    pub modified_ns: i64,
+    pub content_hash: String,
+    pub verified_at_ns: i64,
+}
+
 pub struct Journal {
     connection: Mutex<Connection>,
 }
@@ -155,6 +166,11 @@ impl Journal {
              CREATE TABLE IF NOT EXISTS checkpoints (
                resource_id TEXT PRIMARY KEY, last_op_id TEXT NOT NULL,
                post_hash TEXT, compacted_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS resource_stats (
+               local_resource_id TEXT PRIMARY KEY, size INTEGER NOT NULL,
+               modified_ns INTEGER NOT NULL, content_hash TEXT NOT NULL,
+               verified_at_ns INTEGER NOT NULL
              );
              CREATE TABLE IF NOT EXISTS structure_targets (
                idempotency_key TEXT PRIMARY KEY, relative_path TEXT NOT NULL
@@ -373,6 +389,49 @@ impl Journal {
             Self::resource_from_row,
         )?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn record_verified_stat(
+        &self,
+        local_resource_id: &str,
+        stat: &VerifiedStat,
+    ) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "INSERT INTO resource_stats(local_resource_id,size,modified_ns,content_hash,verified_at_ns)
+             VALUES(?,?,?,?,?)
+             ON CONFLICT(local_resource_id) DO UPDATE SET
+               size=excluded.size, modified_ns=excluded.modified_ns,
+               content_hash=excluded.content_hash, verified_at_ns=excluded.verified_at_ns",
+            params![
+                local_resource_id,
+                i64::try_from(stat.size).unwrap_or(i64::MAX),
+                stat.modified_ns,
+                stat.content_hash,
+                stat.verified_at_ns,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn verified_stat(&self, local_resource_id: &str) -> anyhow::Result<Option<VerifiedStat>> {
+        Ok(self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT size,modified_ns,content_hash,verified_at_ns
+                 FROM resource_stats WHERE local_resource_id=?",
+                [local_resource_id],
+                |row| {
+                    Ok(VerifiedStat {
+                        size: row.get::<_, i64>(0)?.max(0) as u64,
+                        modified_ns: row.get(1)?,
+                        content_hash: row.get(2)?,
+                        verified_at_ns: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     pub fn mark_resource_unavailable(

@@ -25,10 +25,7 @@ import {
   Download,
   Eraser,
   Eye,
-  File,
   FileArchive,
-  FileCode2,
-  FileJson,
   FileImage,
   FilePlus2,
   FileText,
@@ -63,7 +60,6 @@ import {
 import { createPortal } from "react-dom";
 import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 import { Button } from "@/components/ui/button";
-import { type OverflowItem } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
@@ -240,17 +236,6 @@ function languageExtension(file: CodeFile) {
   if (language === "json" || /\.json5?$/i.test(file.path)) return json();
   if (language === "markdown" || /\.mdx?$/i.test(file.path)) return markdown();
   return [];
-}
-
-function _fileIcon(file: CodeFile) {
-  if (file.language === "json") return FileJson;
-  if (
-    ["html", "css", "javascript", "typescript", "python"].includes(
-      file.language,
-    )
-  )
-    return FileCode2;
-  return File;
 }
 
 function formatBytes(value: number) {
@@ -459,9 +444,6 @@ export function CodeStudio({
   );
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
-  const [fileSearchMode, _setFileSearchMode] = useState<"paths" | "content">(
-    "paths",
-  );
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{
     fileId: string;
     line: number;
@@ -476,10 +458,10 @@ export function CodeStudio({
       ? contract.density !== "tight"
       : fileRailPreference === "open");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [_newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
-  const [renameDraft, _setRenameDraft] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
   const [deleteFileId, setDeleteFileId] = useState<string | null>(null);
   const [panel, setPanel] = useState<"console" | "problems" | "tests" | null>(
     null,
@@ -563,44 +545,6 @@ export function CodeStudio({
   const filteredFiles = workbook.files.filter((file) =>
     file.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
   );
-  const _projectSearchResults = useMemo(() => {
-    const query = fileQuery.trim().toLocaleLowerCase();
-    if (fileSearchMode !== "content" || !query) return [];
-    const matches: Array<{
-      id: string;
-      fileId: string;
-      path: string;
-      line: number;
-      column: number;
-      snippet: string;
-    }> = [];
-    for (const file of workbook.files) {
-      const lines = file.source.split(/\r?\n/);
-      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-        const line = lines[lineIndex]!;
-        const normalized = line.toLocaleLowerCase();
-        let from = 0;
-        while (matches.length < 250) {
-          const column = normalized.indexOf(query, from);
-          if (column < 0) break;
-          const contextStart = Math.max(0, column - 42);
-          const contextEnd = Math.min(line.length, column + query.length + 64);
-          matches.push({
-            id: `${file.id}:${lineIndex + 1}:${column}`,
-            fileId: file.id,
-            path: file.path,
-            line: lineIndex + 1,
-            column,
-            snippet: `${contextStart ? "…" : ""}${line.slice(contextStart, contextEnd).trim()}${contextEnd < line.length ? "…" : ""}`,
-          });
-          from = column + Math.max(1, query.length);
-        }
-        if (matches.length >= 250) break;
-      }
-      if (matches.length >= 250) break;
-    }
-    return matches;
-  }, [fileQuery, fileSearchMode, workbook.files]);
   const activeIndex = workbook.files.findIndex(
     (file) => file.id === activeFile.id,
   );
@@ -619,15 +563,6 @@ export function CodeStudio({
       ),
     ].sort((left, right) => left - right);
   }, [activeIndex, aiChangedPaths]);
-  const _sourceBytes = useMemo(
-    () =>
-      workbook.files.reduce(
-        (total, file) =>
-          total + new TextEncoder().encode(file.source).byteLength,
-        0,
-      ),
-    [workbook.files],
-  );
   const runtimeResources = useMemo(
     () => codeResourceSnapshot(workbook, artifacts),
     [artifacts, workbook],
@@ -928,7 +863,7 @@ export function CodeStudio({
     });
   }
 
-  function _createFile() {
+  function createFile() {
     if (!newFilePath.trim()) return;
     try {
       const path = normalizeCodePath(newFilePath);
@@ -960,7 +895,7 @@ export function CodeStudio({
     }
   }
 
-  function _renameFile() {
+  function renameFile() {
     const id = renamingFileId;
     if (!id) return;
     try {
@@ -1003,7 +938,7 @@ export function CodeStudio({
     setDeleteFileId(null);
   }
 
-  function _duplicateFile(id: string) {
+  function duplicateFile(id: string) {
     const source = workbook.files.find((file) => file.id === id);
     if (!source || readOnly) return;
     const dot = source.path.lastIndexOf(".");
@@ -1033,38 +968,37 @@ export function CodeStudio({
     setActiveFileId(nextId);
   }
 
-  function _setEntryFile(id: string) {
+  function setEntryFile(id: string) {
     if (readOnly || workbook.entryFileId === id) return;
     mutate((draft) => {
       draft.entryFileId = id;
     });
   }
 
-  /**
-   * Every file action acts on the row it was opened from. Reaching them through
-   * a menu rather than a hover-only glyph is what makes them available to the
-   * keyboard and to touch.
-   */
-  function _fileRowActions(file: CodeFile) {
-    const isEntry = workbook.entryFileId === file.id;
-    return [
-      { key: "rename" as const, label: "Rename", icon: Pencil },
-      {
-        key: "entry" as const,
-        label: "Set as entry",
-        icon: Flag,
-        disabled: isEntry,
-        ...(isEntry ? { hint: "Current" } : {}),
-      },
-      { key: "duplicate" as const, label: "Duplicate", icon: Copy },
-      {
-        key: "delete" as const,
-        label: "Delete",
-        icon: Trash2,
-        disabled: workbook.files.length === 1,
-        ...(workbook.files.length === 1 ? { hint: "Only file" } : {}),
-      },
-    ] satisfies OverflowItem<"rename" | "entry" | "duplicate" | "delete">[];
+  function openNewFile() {
+    if (readOnly) return;
+    setFileRailPreference("open");
+    setRenamingFileId(null);
+    setNewFilePath("");
+    setNewFileOpen(true);
+  }
+
+  function startRenameFile(file: CodeFile) {
+    if (readOnly) return;
+    setFileRailPreference("open");
+    setNewFileOpen(false);
+    setRenameDraft(file.path);
+    setRenamingFileId(file.id);
+  }
+
+  function submitFilePathForm() {
+    if (renamingFileId) renameFile();
+    else createFile();
+  }
+
+  function closeFilePathForm() {
+    setNewFileOpen(false);
+    setRenamingFileId(null);
   }
 
   async function formatActiveFile() {
@@ -2560,6 +2494,64 @@ export function CodeStudio({
               view.focus();
             },
           },
+          ...(!readOnly && contract.surface === "full"
+            ? [
+                {
+                  id: "file-new",
+                  label: "New file",
+                  icon: FilePlus2,
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  onSelect: openNewFile,
+                },
+                {
+                  id: "file-rename",
+                  label: "Rename file",
+                  icon: Pencil,
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  onSelect: () => startRenameFile(activeFile),
+                },
+              ]
+            : []),
+          ...(!readOnly
+            ? [
+                {
+                  id: "file-duplicate",
+                  label: "Duplicate file",
+                  icon: Copy,
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  onSelect: () => duplicateFile(activeFile.id),
+                },
+                {
+                  id: "file-entry",
+                  label: "Set as entry file",
+                  icon: Flag,
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  disabled: workbook.entryFileId === activeFile.id,
+                  hint:
+                    workbook.entryFileId === activeFile.id
+                      ? "This file is already the entry"
+                      : "Run this file first",
+                  onSelect: () => setEntryFile(activeFile.id),
+                },
+                {
+                  id: "file-delete",
+                  label: "Delete file",
+                  icon: Trash2,
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  disabled: workbook.files.length === 1,
+                  hint:
+                    workbook.files.length === 1
+                      ? "Code needs at least one file"
+                      : "Remove this file",
+                  onSelect: () => setDeleteFileId(activeFile.id),
+                },
+              ]
+            : []),
           ...(parserFor(activeFile)
             ? [
                 {
@@ -2925,12 +2917,11 @@ export function CodeStudio({
                           active: file.id === activeFile.id,
                         }))}
                         onSelect={setActiveFileId}
-                        onAdd={
-                          readOnly ? undefined : () => setNewFileOpen(true)
-                        }
+                        onAdd={readOnly ? undefined : openNewFile}
                         addLabel="Add file"
                         canEdit={!readOnly}
                         tools={
+                          <>
                           <label className="mt-2 flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
                             <Search className="size-3.5 shrink-0" />
                             <input
@@ -2943,6 +2934,46 @@ export function CodeStudio({
                               className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
                             />
                           </label>
+                          {newFileOpen || renamingFileId ? (
+                            <div className="mt-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
+                              <label className="block text-micro font-semibold text-[var(--text-secondary)]">
+                                {renamingFileId ? "Rename path" : "New path"}
+                                <input
+                                  autoFocus
+                                  value={renamingFileId ? renameDraft : newFilePath}
+                                  onChange={(event) =>
+                                    renamingFileId
+                                      ? setRenameDraft(event.target.value)
+                                      : setNewFilePath(event.target.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") submitFilePathForm();
+                                    if (event.key === "Escape")
+                                      closeFilePathForm();
+                                  }}
+                                  placeholder="src/chart.tsx"
+                                  className="mt-1 h-7 w-full rounded-control border border-[var(--border-default)] bg-transparent px-2 text-micro font-normal text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)]"
+                                />
+                              </label>
+                              <div className="mt-1.5 flex justify-end gap-1">
+                                <button
+                                  type="button"
+                                  className="code-small-action"
+                                  onClick={closeFilePathForm}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="code-small-action bg-[var(--text-primary)] text-[var(--bg-primary)]"
+                                  onClick={submitFilePathForm}
+                                >
+                                  {renamingFileId ? "Rename" : "Create"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
                         }
                       />
                     ) : null}

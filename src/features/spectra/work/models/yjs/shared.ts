@@ -105,6 +105,47 @@ function longestCommonSubsequence<T>(left: readonly T[], right: readonly T[]) {
 }
 
 /**
+ * The LCS when every entry of `right` is distinct (keyed orders always are):
+ * map each `left` entry to its position in `right` and take the longest
+ * strictly increasing run of positions, O(n log n). The quadratic table cost
+ * 38 ms and 16 MB for a 2,000-item reorder and was skipped entirely above
+ * that, so a large list was rewritten whole and duplicated under concurrency.
+ */
+function longestCommonSubsequenceOfDistinct<T>(
+  left: readonly T[],
+  right: readonly T[],
+): Array<[number, number]> | null {
+  const positions = new Map<T, number>();
+  for (let j = 0; j < right.length; j += 1) {
+    if (positions.has(right[j]!)) return null;
+    positions.set(right[j]!, j);
+  }
+  // tails[k]: index into `left` of the smallest tail of an increasing run of
+  // length k + 1; previous[i]: the run element before left[i].
+  const tails: number[] = [];
+  const previous = new Int32Array(left.length).fill(-1);
+  const target = new Int32Array(left.length).fill(-1);
+  for (let i = 0; i < left.length; i += 1) {
+    const j = positions.get(left[i]!);
+    if (j === undefined) continue;
+    target[i] = j;
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (target[tails[middle]!]! < j) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) previous[i] = tails[low - 1]!;
+    tails[low] = i;
+  }
+  const pairs: Array<[number, number]> = [];
+  for (let i = tails.length ? tails[tails.length - 1]! : -1; i >= 0; i = previous[i]!)
+    pairs.push([i, target[i]!]);
+  return pairs.reverse();
+}
+
+/**
  * Make `array` equal `values` with the smallest edit: entries both sides keep
  * are left in place, so a concurrent insert or delete by another collaborator
  * merges instead of both clients rewriting (and so duplicating) the whole list.
@@ -132,9 +173,10 @@ export function replaceYArray<T>(array: Y.Array<T>, values: readonly T[]) {
   const removed = current.slice(start, currentEnd);
   const added = values.slice(start, valuesEnd);
   const kept =
-    removed.length * added.length <= ARRAY_DIFF_CELL_LIMIT
+    longestCommonSubsequenceOfDistinct(removed, added) ??
+    (removed.length * added.length <= ARRAY_DIFF_CELL_LIMIT
       ? longestCommonSubsequence(removed, added)
-      : [];
+      : []);
   // Walk the kept anchors from the end so earlier indexes stay valid.
   const anchors: Array<[number, number]> = [
     [-1, -1],

@@ -6,7 +6,8 @@ import {
 } from "../work/models/yjs/native-artifact-model";
 import { presentationYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { workYjsOrigins } from "../work/models/yjs/origins";
-import { shareUnchanged } from "../work/models/yjs/shared";
+import { replaceYArray, shareUnchanged } from "../work/models/yjs/shared";
+import { flashcardDeckYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { createPresentationObject } from "../presentation/model";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { requireArtifactTypeManifest } from "../artifacts/registry";
@@ -157,5 +158,61 @@ describe("live projection identity", () => {
     expect(reordered).not.toBe(previous);
     expect(Object.keys(reordered)).toEqual(["b", "a"]);
     expect(shareUnchanged({ a: 1 }, { a: 1, b: undefined })).toEqual({ a: 1, b: undefined });
+  });
+});
+
+describe("keyed list diffs on long lists", () => {
+  function editCount(from: string[], to: string[]) {
+    const doc = new Y.Doc();
+    const array = doc.getArray<string>("order");
+    array.push(from);
+    let operations = 0;
+    array.observe((event) => {
+      operations += event.changes.delta.length;
+    });
+    doc.transact(() => replaceYArray(array, to));
+    return { result: array.toArray(), operations };
+  }
+
+  it("reaches the target with a minimal edit for random reorders", () => {
+    let seed = 7;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    for (let round = 0; round < 60; round += 1) {
+      const from = Array.from({ length: 1 + Math.floor(random() * 40) }, (_, index) => `i${index}`);
+      const to = from.filter(() => random() > 0.2).sort(() => random() - 0.5);
+      if (random() > 0.5) to.splice(Math.floor(random() * to.length), 0, "new");
+      expect(editCount(from, to).result).toEqual(to);
+    }
+    // Moving one item is one delete and one insert, not a rewrite.
+    const ids = Array.from({ length: 5000 }, (_, index) => `id-${index}`);
+    const moved = [...ids.slice(1), ids[0]!];
+    const start = performance.now();
+    const { result } = editCount(ids, moved);
+    expect(result).toEqual(moved);
+    expect(performance.now() - start).toBeLessThan(1_000);
+  });
+
+  it("merges concurrent reorders of a 3,000-card deck without duplicating it", () => {
+    const card = (id: string) => ({ id, front: id, back: id });
+    const base = { title: "Deck", cards: Array.from({ length: 3000 }, (_, index) => card(`c${index}`)) };
+    const left = flashcardDeckYjsAdapter.createDocument(base as never);
+    const right = new Y.Doc();
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const origin = (clientId: string) => workYjsOrigins({ clientId, kind: "human" }).localHuman;
+    // One peer moves the last card to the front, the other the first card to
+    // the end, and each adds one. Both changed middles span the whole list
+    // (3,000 x 3,001 cells, above the old 4M-cell cap), so both peers used to
+    // rewrite the order and the merged order held every id twice.
+    const lastFirst = [base.cards.at(-1)!, ...base.cards.slice(0, -1)];
+    const firstLast = [...base.cards.slice(1), base.cards[0]!];
+    flashcardDeckYjsAdapter.applyProjection(left, { ...base, cards: [...lastFirst, card("x")] } as never, origin("l"));
+    flashcardDeckYjsAdapter.applyProjection(right, { ...base, cards: [...firstLast, card("y")] } as never, origin("r"));
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left, Y.encodeStateVector(right)));
+    Y.applyUpdate(left, Y.encodeStateAsUpdate(right, Y.encodeStateVector(left)));
+    const ids = (flashcardDeckYjsAdapter.project(left) as { cards: Array<{ id: string }> }).cards.map((entry) => entry.id);
+    expect(ids).toHaveLength(3002);
+    const order = left.getMap("spectra:work-v2").get("cards") as Y.Map<unknown>;
+    // The underlying order holds each id once: nothing was rewritten whole.
+    expect((order.get("order") as Y.Array<string>).length).toBe(3002);
   });
 });

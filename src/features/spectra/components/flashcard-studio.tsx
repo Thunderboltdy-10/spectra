@@ -90,6 +90,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
+  contentHistoryBindings,
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
@@ -1803,6 +1804,7 @@ export function FlashcardStudio({
   // them survive the pane's width, so the deck can no longer grow a second row
   // under pressure the way the audited build did.
   const deckActions: CommandBinding[] = projectBindingsFromIr("flashcard_deck", [
+    ...contentHistoryBindings(contract.history),
     {
       id: "add-card",
       label: "Add card",

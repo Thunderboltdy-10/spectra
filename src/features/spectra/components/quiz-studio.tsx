@@ -87,6 +87,7 @@ import { formatShortDate } from "./spectra-view-model";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
+  contentHistoryBindings,
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
@@ -1495,6 +1496,7 @@ export function QuizStudio({
     "quiz",
     canEditQuiz
     ? [
+        ...contentHistoryBindings(studio.history),
         activeQuizMode === "build"
           ? {
               id: "preview",

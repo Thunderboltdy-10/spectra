@@ -54,6 +54,17 @@ describe("createStudioHistory", () => {
     history.record(quiz(), quiz(["q9", "Other"]));
     expect(history.step("redo", quiz(["q9", "Other"]))).toBeNull();
   });
+
+  it("reports what can be undone and redone, for the workbar buttons", () => {
+    const history = createStudioHistory<Quiz>({ coalesceMs: 0 });
+    expect([history.canUndo(), history.canRedo()]).toEqual([false, false]);
+    history.record(quiz(), quiz(["q1", "One"]));
+    expect([history.canUndo(), history.canRedo()]).toEqual([true, false]);
+    history.step("undo", quiz(["q1", "One"]));
+    expect([history.canUndo(), history.canRedo()]).toEqual([false, true]);
+    history.reset();
+    expect([history.canUndo(), history.canRedo()]).toEqual([false, false]);
+  });
 });
 
 describe("studioHistoryShortcut", () => {

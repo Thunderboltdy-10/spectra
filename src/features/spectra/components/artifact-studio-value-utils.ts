@@ -699,6 +699,8 @@ export function createStudioHistory<T>({
       redoStack = [];
       lastRecordedAt = Number.NEGATIVE_INFINITY;
     },
+    canUndo: () => undoStack.length > 0,
+    canRedo: () => redoStack.length > 0,
   };
 }
 

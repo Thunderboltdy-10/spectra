@@ -103,6 +103,17 @@ export type StudioContract = {
     show: (panel: StudioInspectorPanel) => void;
     hide: () => void;
   };
+  /**
+   * The shell's content undo, for studios with no editor history of their own
+   * (quiz, flashcards, plan, timetable). Absent when the viewer cannot edit.
+   */
+  history?: StudioContentHistory;
+};
+
+export type StudioContentHistory = {
+  canUndo: boolean;
+  canRedo: boolean;
+  step: (direction: "undo" | "redo") => void;
 };
 
 const StudioContractContext = createContext<StudioContract | null>(null);
@@ -151,6 +162,7 @@ export function useStudioContractValue({
   compatibilityProfile = "spectra-native",
   fidelity = { artifact: "NATIVE" },
   executeApplicationCommand,
+  history,
 }: {
   artifactId: string;
   type: WorkType;
@@ -162,6 +174,7 @@ export function useStudioContractValue({
   compatibilityProfile?: CompatibilityProfile;
   fidelity?: Readonly<Record<string, FidelityClass>>;
   executeApplicationCommand?: StudioContract["executeApplicationCommand"];
+  history?: StudioContentHistory;
 }): StudioContract {
   return useMemo(() => {
     const definition = getWorkDefinition(type);
@@ -180,8 +193,9 @@ export function useStudioContractValue({
       fidelity,
       ...(executeApplicationCommand ? { executeApplicationCommand } : {}),
       inspector,
+      ...(history ? { history } : {}),
     };
-  }, [artifactId, compatibilityProfile, density, executeApplicationCommand, fidelity, inspector, role, surface, sync, type]);
+  }, [artifactId, compatibilityProfile, density, executeApplicationCommand, fidelity, history, inspector, role, surface, sync, type]);
 }
 
 /**

@@ -22,7 +22,7 @@ import {
 import { SelectField } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArtifactWorkbar } from "./artifact-workbar";
+import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
@@ -447,6 +447,7 @@ export function PlanStudio({
             : undefined
         }
         actions={projectBindingsFromIr("planner_task", [
+          ...contentHistoryBindings(studio.history),
           {
             id: "find",
             label: "Find tasks",

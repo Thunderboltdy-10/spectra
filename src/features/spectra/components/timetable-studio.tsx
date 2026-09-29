@@ -64,7 +64,12 @@ import {
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { projectBindingsFromIr } from "../capabilities/derivations";
-import { ArtifactWorkbar, type CommandBinding } from "./artifact-workbar";
+import {
+  ArtifactWorkbar,
+  contentHistoryBindings,
+  type CommandBinding,
+} from "./artifact-workbar";
+import { useOptionalStudioContract } from "./artifact-studio-shell";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 
 const HOUR_HEIGHT = 68;
@@ -317,6 +322,7 @@ export function TimetableStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  const studioHistory = useOptionalStudioContract()?.history;
   const sharedTimetable = useMemo(
     () => sharedTimetableContent(content),
     [content],
@@ -1195,6 +1201,7 @@ path={eventPath(event.id)}
   }
 
   const workbarActions: CommandBinding[] = projectBindingsFromIr("timetable", [
+    ...contentHistoryBindings(studioHistory),
     {
       id: "today",
       label: "Today",

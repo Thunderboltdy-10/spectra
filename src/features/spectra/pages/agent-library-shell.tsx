@@ -31,7 +31,14 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
 import {
@@ -423,16 +430,6 @@ export function AgentLibraryShell({
   const [publicPreview, setPublicPreview] = useState<SpectraPublicAgent | null>(
     null,
   );
-  const placementDialogRef = useRef<HTMLElement>(null);
-  const publicPreviewDialogRef = useRef<HTMLElement>(null);
-  useModalFocus(placementDialogRef, {
-    open: Boolean(placementTarget),
-    onClose: () => setPlacementTarget(null),
-  });
-  useModalFocus(publicPreviewDialogRef, {
-    open: Boolean(publicPreview),
-    onClose: () => setPublicPreview(null),
-  });
   const [panelWidth, setPanelWidth] = useState(780);
   const openedQueryRef = useRef<string | null>(null);
   const studio = useArtifactStudioState(
@@ -1031,42 +1028,21 @@ export function AgentLibraryShell({
         </WorkbenchLiveStack>
       ) : null}
 
-      {placementTarget ? (
-        <div
-          className="agent-library-overlay"
-          onPointerDown={() => setPlacementTarget(null)}
-        >
-          <section
-            className="agent-library-dialog"
-            ref={placementDialogRef}
-            tabIndex={-1}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-modal="true"
-            role="dialog"
-            aria-labelledby="agent-place-title"
-          >
-            <header className="flex items-start justify-between gap-4">
-              <div>
-                <h2
-                  id="agent-place-title"
-                  className="font-display text-metric font-semibold"
-                >
-                  Add to a workspace
-                </h2>
-                <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
-                  Choose where {placementTarget.title} should appear. This
-                  personal placement does not re-share it with the workspace.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPlacementTarget(null)}
-                className="grid size-8 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
-                aria-label="Close"
-              >
-                <X className="size-4" />
-              </button>
-            </header>
+      <Dialog
+        open={Boolean(placementTarget)}
+        onOpenChange={(next) => {
+          if (!next) setPlacementTarget(null);
+        }}
+      >
+        {placementTarget ? (
+          <DialogContent layer="composer-dock" className="max-w-[460px] gap-0 p-5">
+            <DialogHeader className="pr-8">
+              <DialogTitle className="font-display text-metric">Add to a workspace</DialogTitle>
+              <DialogDescription className="text-caption leading-5">
+                Choose where {placementTarget.title} should appear. This
+                personal placement does not re-share it with the workspace.
+              </DialogDescription>
+            </DialogHeader>
             <div className="mt-4 max-h-[340px] space-y-1 overflow-y-auto">
               {workspaces.map((workspace) => {
                 const alreadyPlaced = placementTarget.placements?.some(
@@ -1111,48 +1087,31 @@ export function AgentLibraryShell({
                 </div>
               ) : null}
             </div>
-          </section>
-        </div>
-      ) : null}
+          </DialogContent>
+        ) : null}
+      </Dialog>
 
-      {publicPreview ? (
-        <div
-          className="agent-library-overlay"
-          onPointerDown={() => setPublicPreview(null)}
-        >
-          <section
-            className="agent-library-dialog max-w-[560px]"
-            ref={publicPreviewDialogRef}
-            tabIndex={-1}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-modal="true"
-            role="dialog"
-            aria-labelledby="public-agent-title"
-          >
-            <header className="flex items-start gap-3">
+      <Dialog
+        open={Boolean(publicPreview)}
+        onOpenChange={(next) => {
+          if (!next) setPublicPreview(null);
+        }}
+      >
+        {publicPreview ? (
+          <DialogContent layer="composer-dock" className="max-w-[560px] gap-0 p-5">
+            <header className="flex items-start gap-3 pr-8">
               <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
                 <Bot className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <h2
-                  id="public-agent-title"
-                  className="truncate font-display text-metric font-semibold"
-                >
+                <DialogTitle className="truncate font-display text-metric">
                   {publicPreview.title}
-                </h2>
-                <p className="mt-1 text-micro text-[var(--text-secondary)]">
+                </DialogTitle>
+                <DialogDescription className="mt-1 text-micro">
                   Published release {publicPreview.releaseNumber} by{" "}
                   {publicPreview.owner.name}
-                </p>
+                </DialogDescription>
               </div>
-              <button
-                type="button"
-                onClick={() => setPublicPreview(null)}
-                className="grid size-8 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
-                aria-label="Close"
-              >
-                <X className="size-4" />
-              </button>
             </header>
             <p className="mt-5 text-ui leading-6 text-[var(--text-secondary)]">
               {publicPreview.summary || publicPreview.purpose}
@@ -1180,19 +1139,15 @@ export function AgentLibraryShell({
                   </span>
                 ))}
             </div>
-            <footer className="mt-6 flex items-center justify-end gap-2 border-t border-[var(--border-subtle)] pt-4">
-              <button
-                type="button"
-                onClick={() => setPublicPreview(null)}
-                className="h-9 rounded-control px-3 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
+            <DialogFooter className="mt-6 border-t border-[var(--border-subtle)] pt-4">
+              <Button variant="ghost" size="sm" onClick={() => setPublicPreview(null)}>
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
                 disabled={busyKey === `public:${publicPreview.agentId}`}
                 onClick={() => void installAgent(publicPreview)}
-                className="inline-flex h-9 items-center gap-2 rounded-control bg-[var(--text-primary)] px-4 text-caption font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 {busyKey === `public:${publicPreview.agentId}` ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -1200,11 +1155,11 @@ export function AgentLibraryShell({
                   <Plus className="size-4" />
                 )}
                 Install agent
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
 
       {shareTarget ? (
         <ShareDialog

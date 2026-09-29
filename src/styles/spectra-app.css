@@ -74,28 +74,6 @@
   padding: 13px 13px 10px;
 }
 
-.agent-library-overlay {
-  position: fixed;
-  z-index: var(--z-composer-dock);
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: color-mix(in oklab, var(--bg-primary) 68%, transparent);
-  padding: 20px;
-  backdrop-filter: blur(3px);
-}
-
-.agent-library-dialog {
-  width: min(460px, 100%);
-  max-height: min(720px, calc(100dvh - 40px));
-  overflow: auto;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: var(--bg-elevated);
-  padding: 20px;
-  box-shadow: 0 30px 90px rgba(27, 20, 12, 0.22);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .agent-library-card,
   .agent-library-card__body > span:first-child > span:first-child {

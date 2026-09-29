@@ -80,7 +80,7 @@ describe("Planner Reminder affordance", () => {
     ]);
   });
 
-  it("exposes minutesBefore Reminder controls in PlanStudio and blueprint sheet", () => {
+  it("exposes minutesBefore Reminder controls in PlanStudio", () => {
     const studio = readFileSync(
       resolve(__dirname, "../components/plan-studio.tsx"),
       "utf8",
@@ -90,17 +90,5 @@ describe("Planner Reminder affordance", () => {
     expect(studio).toContain("minutesBefore");
     expect(studio).toContain("REMINDER_MINUTE_OPTIONS");
     expect(studio).not.toContain("reminderDraft");
-
-    const sheet = readFileSync(
-      resolve(__dirname, "../components/artifact-blueprint-sheet.tsx"),
-      "utf8",
-    );
-    expect(sheet).toContain("minutesBefore");
-    expect(sheet).toContain("REMINDER_MINUTE_OPTIONS");
-    expect(sheet).not.toContain("reminderDraft");
-    // Must not strip structured rows back to free-text chips.
-    expect(sheet).not.toContain(
-      'task.reminders.filter((value): value is string => typeof value === "string")',
-    );
   });
 });

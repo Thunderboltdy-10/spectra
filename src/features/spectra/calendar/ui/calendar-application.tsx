@@ -47,6 +47,14 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import {
+  addLocalDays,
+  endOfLocalDay,
+  localDaysAround,
+  startOfLocalDay,
+  startOfLocalWeek,
+  toLocalDateTimeInput,
+} from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 
 const ArtifactStudio = dynamic(
@@ -56,7 +64,6 @@ const ArtifactStudio = dynamic(
 );
 
 const HOUR = 60 * 60_000;
-const DAY = 24 * HOUR;
 const HOUR_PX = 48;
 const HOURS = 24;
 const MIN_DAYS = 1;
@@ -79,26 +86,8 @@ const MONTHS = [
   "December",
 ];
 
-function startOfWeek(value: Date | number) {
-  const result = new Date(value);
-  result.setHours(0, 0, 0, 0);
-  const day = result.getDay() || 7;
-  result.setDate(result.getDate() - day + 1);
-  return result;
-}
-
-function startOfDayMs(value: Date | number) {
-  const result = new Date(value);
-  result.setHours(0, 0, 0, 0);
-  return result.getTime();
-}
-
-function weekStartMs(value: Date | number) {
-  return startOfWeek(value).getTime();
-}
-
-function daysAround(center: number, before = EXTEND_DAYS, after = EXTEND_DAYS * 2) {
-  return Array.from({ length: before + after + 1 }, (_, index) => center + (index - before) * DAY);
+function daysAround(center: number) {
+  return localDaysAround(center, EXTEND_DAYS, EXTEND_DAYS * 2);
 }
 
 function formatTime(value: number, timezone: string) {
@@ -111,7 +100,7 @@ function formatTime(value: number, timezone: string) {
 
 function formatRange(rangeStart: number, span: number) {
   const start = new Date(rangeStart);
-  const end = new Date(rangeStart + (span - 1) * DAY);
+  const end = new Date(addLocalDays(rangeStart, span - 1));
   if (span === 1) {
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "short",
@@ -173,8 +162,8 @@ function CalendarDatePicker({
   }, [open, value]);
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
-  const selected = startOfDayMs(value);
-  const today = startOfDayMs(Date.now());
+  const selected = startOfLocalDay(value);
+  const today = startOfLocalDay(Date.now());
   const years = Array.from({ length: 21 }, (_, index) => year - 10 + index);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -281,7 +270,7 @@ function CalendarDatePicker({
             </div>
             <div className="spectra-calendar-date-grid">
               {monthCells(year, month).map((cell) => {
-                const stamp = startOfDayMs(cell.date);
+                const stamp = startOfLocalDay(cell.date);
                 return (
                   <button
                     key={stamp + (cell.muted ? "-m" : "")}
@@ -412,7 +401,7 @@ type ResizeGesture = {
 };
 
 export function CalendarApplication() {
-  const initialStart = weekStartMs(Date.now());
+  const initialStart = startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
@@ -461,7 +450,7 @@ export function CalendarApplication() {
   const visibleRange = useMemo(
     () => ({
       from: days[0]!,
-      to: days[days.length - 1]! + DAY - 1,
+      to: endOfLocalDay(days[days.length - 1]!),
     }),
     [days],
   );
@@ -475,8 +464,8 @@ export function CalendarApplication() {
           merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
           return merged;
         }
-        const retainFrom = visibleRange.from - EXTEND_DAYS * DAY;
-        const retainTo = visibleRange.to + EXTEND_DAYS * DAY;
+        const retainFrom = addLocalDays(visibleRange.from, -EXTEND_DAYS);
+        const retainTo = addLocalDays(visibleRange.to, EXTEND_DAYS);
         return {
           ...incoming,
           items: mergeById(current.items, incoming.items).filter(
@@ -891,11 +880,12 @@ export function CalendarApplication() {
   }
 
   function jumpTo(date: Date) {
-    const start = startOfDayMs(date);
-    setDays(daysAround(start));
+    const start = startOfLocalDay(date);
+    const nextDays = daysAround(start);
+    setDays(nextDays);
     setFocusedStart(start);
     scrollWeekRef.current = start;
-    void load("replace", start - EXTEND_DAYS * DAY, start + EXTEND_DAYS * 2 * DAY - 1);
+    void load("replace", nextDays[0]!, endOfLocalDay(nextDays[nextDays.length - 1]!));
   }
 
   const changeDaySpan = useCallback((next: number) => {
@@ -920,10 +910,10 @@ export function CalendarApplication() {
     const current = daysRef.current;
     const edge =
       direction === "before"
-        ? current[0]! - EXTEND_DAYS * DAY
-        : current[current.length - 1]! + DAY;
+        ? addLocalDays(current[0]!, -EXTEND_DAYS)
+        : addLocalDays(current[current.length - 1]!, 1);
     const incoming = Array.from({ length: EXTEND_DAYS }, (_, index) =>
-      direction === "before" ? edge + index * DAY : edge + index * DAY,
+      addLocalDays(edge, index),
     );
     loadLockRef.current = true;
     const dayWidth = dayWidthRef.current;
@@ -942,7 +932,7 @@ export function CalendarApplication() {
       await load(
         "merge",
         incoming[0]!,
-        incoming[incoming.length - 1]! + DAY - 1,
+        endOfLocalDay(incoming[incoming.length - 1]!),
       );
       ignoreScrollRef.current = true;
       requestAnimationFrame(() => {
@@ -1106,7 +1096,7 @@ export function CalendarApplication() {
             <button
               type="button"
               aria-label="Previous range"
-              onClick={() => jumpTo(new Date(focusedStart - daySpan * DAY))}
+              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, -daySpan)))}
               className="spectra-calendar-week-step"
             >
               <ChevronLeft className="size-4" />
@@ -1119,7 +1109,7 @@ export function CalendarApplication() {
             <button
               type="button"
               aria-label="Next range"
-              onClick={() => jumpTo(new Date(focusedStart + daySpan * DAY))}
+              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, daySpan)))}
               className="spectra-calendar-week-step"
             >
               <ChevronRight className="size-4" />
@@ -1806,8 +1796,8 @@ function CalendarComposer({
   onCreated: () => void;
 }) {
   const [title, setTitle] = useState("");
-  const [start, setStart] = useState(() => new Date(Date.now() + HOUR).toISOString().slice(0, 16));
-  const [end, setEnd] = useState(() => new Date(Date.now() + 2 * HOUR).toISOString().slice(0, 16));
+  const [start, setStart] = useState(() => toLocalDateTimeInput(Date.now() + HOUR));
+  const [end, setEnd] = useState(() => toLocalDateTimeInput(Date.now() + 2 * HOUR));
   const [busy, setBusy] = useState(false);
   const surface = useRef<HTMLDivElement>(null);
   useModalFocus(surface, { onClose: busy ? undefined : onClose });

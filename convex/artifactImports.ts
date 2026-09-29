@@ -1,7 +1,7 @@
 import { loadVersionAfter } from "./artifactSnapshots";
 import { v } from "convex/values";
 import { validateContentAdoption } from "./collaborationDurablePayload";
-import { action, query } from "./_generated/server";
+import { action, query } from "./functions";
 import { mutation, internalMutation } from "./orgNodeMutation";
 import { api, internal } from "./_generated/api";
 import { writeAuditEvent } from "./auditShared";

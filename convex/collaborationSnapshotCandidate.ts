@@ -1,4 +1,4 @@
-import { internalQuery } from "./_generated/server";
+import { internalQuery } from "./functions";
 import { v } from "convex/values";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 

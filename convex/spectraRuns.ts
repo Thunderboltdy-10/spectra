@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";

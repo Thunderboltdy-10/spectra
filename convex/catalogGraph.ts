@@ -5,7 +5,7 @@ import { ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { CATALOG_MIGRATION_KEY } from "./catalogPages";
 import { openCatalogCursor, sealCatalogCursor } from "./catalogCursor";
 import { normalizeWorkspaceView } from "../shared/workspace-view";
-import { query } from "./_generated/server";
+import { query } from "./functions";
 import { v } from "convex/values";
 import { requireWorkspaceCapability } from "./spectraShared";
 

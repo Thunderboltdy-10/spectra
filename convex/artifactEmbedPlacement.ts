@@ -1,6 +1,6 @@
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { internalQuery, internalMutation } from "./_generated/server";
+import { internalQuery, internalMutation } from "./functions";
 import { v } from "convex/values";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";

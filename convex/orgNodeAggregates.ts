@@ -2,7 +2,7 @@ import { TableAggregate } from "@convex-dev/aggregate";
 import { v } from "convex/values";
 import { components } from "./_generated/api";
 import type { DataModel, Doc, Id } from "./_generated/dataModel";
-import { internalMutation } from "./_generated/server";
+import { internalMutation } from "./functions";
 
 type CountKey = [state: string, dimension: string, typeKey: string, activityAt: number];
 

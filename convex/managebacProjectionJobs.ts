@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
-import { internalQuery, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalQuery } from "./functions";
 import { internalMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getActorForAccountId } from "./identityShared";

@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "./_generated/server";
+import { action } from "./functions";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";

@@ -1,7 +1,7 @@
 import { assertExclusiveDurableStorage, deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { validateContentAdoption, validateDurablePayload } from "./collaborationDurablePayload";
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./functions";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { canReadPinnedContent } from "./retainedContentAccess";

@@ -146,6 +146,25 @@ describe("Convex module graph", () => {
     expect(loadTimeCycles()).toEqual([]);
   });
 
+  it("defines every function with the worded-error builders in ./functions", () => {
+    // Production redacts a plain Error's message; ./functions keeps the words.
+    const builders = new Set(["query", "mutation", "action", "internalQuery", "internalMutation", "internalAction"]);
+    const bypasses: string[] = [];
+    for (const name of entryPointModules().filter((module) => module !== "functions")) {
+      for (const statement of sourceFile(path.join(convexDir, `${name}.ts`)).statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+            statement.moduleSpecifier.text.replace(/\.js$/, "") !== "./_generated/server") continue;
+        const clause = statement.importClause;
+        const bindings = clause?.namedBindings;
+        if (clause?.isTypeOnly || !bindings || !ts.isNamedImports(bindings)) continue;
+        for (const element of bindings.elements)
+          if (!element.isTypeOnly && builders.has((element.propertyName ?? element.name).text))
+            bypasses.push(`${name}: ${element.name.text}`);
+      }
+    }
+    expect(bypasses).toEqual([]);
+  });
+
   it("detects a load-time cycle but ignores type-only and dynamic imports", () => {
     const text = [
       'import type { Doc } from "./_generated/dataModel";',

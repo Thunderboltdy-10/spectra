@@ -1,4 +1,4 @@
-import { action, query } from "./_generated/server";
+import { action, query } from "./functions";
 import { makeFunctionReference } from "convex/server";
 import { artifactScopeDigest } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";

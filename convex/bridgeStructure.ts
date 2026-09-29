@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation } from "./functions";
 import { getAuthenticatedActor } from "./identityShared";
 import { getActorForAccountId } from "./identityShared";
 import { computeEffectivePolicy } from "./syncPolicy";

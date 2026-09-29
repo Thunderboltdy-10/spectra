@@ -1,7 +1,8 @@
 "use node";
 
 import { v } from "convex/values";
-import { action, type ActionCtx } from "./_generated/server";
+import { type ActionCtx } from "./_generated/server";
+import { action } from "./functions";
 import { api, internal } from "./_generated/api";
 import { normalizeMediaType, normalizeSha256, verifyContentSignature } from "../shared/intake-integrity";
 import { canonicalIntakeAttestation, INTAKE_ATTESTATION_PURPOSE, type IntakeAttestation } from "../shared/intake-attestation";

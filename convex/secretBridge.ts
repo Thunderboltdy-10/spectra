@@ -1,6 +1,7 @@
 "use node";
 
-import { action, type ActionCtx } from "./_generated/server";
+import { type ActionCtx } from "./_generated/server";
+import { action } from "./functions";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";

@@ -8,7 +8,7 @@ import { internal } from "./_generated/api";
 import {
   internalMutation as rawInternalMutation,
   mutation as rawMutation,
-} from "./_generated/server";
+} from "./functions";
 import {
   orgNodeAggregates,
   skipUnchangedCountTrigger,

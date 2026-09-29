@@ -1,6 +1,6 @@
 import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./functions";
 import { writeAuditEvent } from "./auditShared";
 import { recordMeterEvent } from "./metering";
 import { requireArtifactCapability } from "./spectraShared";

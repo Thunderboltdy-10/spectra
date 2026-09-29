@@ -24,6 +24,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
@@ -142,6 +143,11 @@ import {
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { requestSpectra } from "../data/request";
+
+/** Clipboards rewrite line endings and may add a trailing newline. */
+function normalizeClipboardText(value: string) {
+  return value.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+}
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -853,7 +859,7 @@ export const SheetsStudio = memo(function SheetsStudio({
    * their formulas, their formats — so the block is kept here as well.
    */
   const [clipboardBlock, setClipboardBlock] = useState<
-    (ClipboardBlock & { cut?: boolean }) | null
+    (ClipboardBlock & { cut?: boolean; text: string }) | null
   >(null);
   const [copiedFormat, setCopiedFormat] = useState<SheetCellFormat | null>(
     null,
@@ -1798,7 +1804,7 @@ export const SheetsStudio = memo(function SheetsStudio({
     }));
   }
 
-  async function copySelection() {
+  function selectionText() {
     const values: string[] = [];
     for (
       let row = normalizedSelection.start.row;
@@ -1816,12 +1822,15 @@ export const SheetsStudio = memo(function SheetsStudio({
       }
       values.push(columns.join("\t"));
     }
-    await navigator.clipboard.writeText(values.join("\n"));
+    return values.join("\n");
   }
 
-  async function pasteSelection() {
+  async function pasteSelection(text?: string) {
     if (locked) return;
-    const rows = parseDelimited(await navigator.clipboard.readText(), "\t");
+    const rows = parseDelimited(
+      text ?? (await navigator.clipboard.readText()),
+      "\t",
+    );
     const origin = normalizedSelection.start;
     const blocked: string[] = [];
     const parsedByAddress: Record<string, SheetCell> = {};
@@ -1888,13 +1897,36 @@ export const SheetsStudio = memo(function SheetsStudio({
    * a button and an assistant call cannot drift apart (C1). Only movement and
    * cell entry — which are selection, not operations — stay local.
    */
+  function onGridClipboard(
+    event: ReactClipboardEvent<HTMLDivElement>,
+    action: "copy" | "cut" | "paste",
+  ) {
+    // A cell editor inside the grid handles its own text clipboard.
+    if (editingAddress) return;
+    const target = event.target as HTMLElement;
+    if (
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable
+    )
+      return;
+    event.preventDefault();
+    if (action === "paste") {
+      if (locked) return;
+      void pasteHere("all", event.clipboardData.getData("text/plain"));
+      return;
+    }
+    if (action === "cut" && locked) return;
+    event.clipboardData.setData("text/plain", captureBlock(action === "cut"));
+  }
+
   function onGridKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (editingAddress) return;
     const command = event.metaKey || event.ctrlKey;
+    // Copy, cut and paste stay with the browser so the native clipboard
+    // events (onGridClipboard) fire: they carry the clipboard synchronously,
+    // need no permission prompt, and paste reads what was actually copied.
     const shortcuts: Record<string, string> = {
-      c: "clipboard.copy",
-      x: "clipboard.cut",
-      v: "clipboard.paste",
       b: "format.bold",
       i: "format.italic",
       u: "format.underline",
@@ -3083,15 +3115,42 @@ export const SheetsStudio = memo(function SheetsStudio({
       const cell = activeSheet.cells[address];
       if (cell) cells[address] = cell;
     }
+    const text = selectionText();
     // A copy, not the live selection: the clipboard has to keep the shape that
     // was copied even after the selection moves.
-    setClipboardBlock({ range: selectionCopy(), cells, cut });
-    void copySelection();
+    setClipboardBlock({ range: selectionCopy(), cells, cut, text });
+    // The caller puts `text` on the system clipboard: a native copy/cut event
+    // synchronously, a toolbar click through the async clipboard API.
+    return text;
   }
 
-  function pasteHere(mode: string) {
-    if (!clipboardBlock) {
-      void pasteSelection();
+  function copyToSystemClipboard(cut: boolean) {
+    const text = captureBlock(cut);
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  }
+
+  /**
+   * Spectra's block only answers a paste while the system clipboard still
+   * holds what was copied from it. Once the person copies something else —
+   * from another sheet app, a web page, a document — that is what they mean
+   * to paste, and replaying the old block would paste the wrong data.
+   */
+  async function pasteHere(mode: string, systemText?: string) {
+    let text = systemText;
+    if (text === undefined && clipboardBlock) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        // Clipboard read was refused; the block is the best evidence left.
+      }
+    }
+    if (
+      !clipboardBlock ||
+      (text !== undefined &&
+        normalizeClipboardText(text) !==
+          normalizeClipboardText(clipboardBlock.text))
+    ) {
+      await pasteSelection(text);
       return;
     }
     const result = pasteBlock(
@@ -3479,10 +3538,10 @@ export const SheetsStudio = memo(function SheetsStudio({
     openFormatPanel: () => toggleInspector("format"),
     formatPanelOpen: inspector === "format",
     clipboard: {
-      copy: () => captureBlock(false),
-      cut: () => captureBlock(true),
-      paste: () => pasteHere("all"),
-      pasteSpecial: (mode) => pasteHere(mode),
+      copy: () => copyToSystemClipboard(false),
+      cut: () => copyToSystemClipboard(true),
+      paste: () => void pasteHere("all"),
+      pasteSpecial: (mode) => void pasteHere(mode),
       canPaste: Boolean(clipboardBlock) || undefined,
       clear: clearSelectionScope,
       fill: (direction) =>
@@ -4400,6 +4459,9 @@ export const SheetsStudio = memo(function SheetsStudio({
           className="sheets-grid-viewport"
           onScroll={updateViewport}
           onKeyDown={onGridKeyDown}
+          onCopy={(event) => onGridClipboard(event, "copy")}
+          onCut={(event) => onGridClipboard(event, "cut")}
+          onPaste={(event) => onGridClipboard(event, "paste")}
         >
           <div
             className="relative"

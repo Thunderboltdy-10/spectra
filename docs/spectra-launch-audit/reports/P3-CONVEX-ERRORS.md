@@ -2,6 +2,8 @@
 
 Branch `p3/convex-errors`, from `main` a7861f4f. The goal is that worded Convex errors (`CODE: sentence`) survive a production deployment. This closes R1 of `P3-WORKSPACE-FLOWS.md`.
 
+Gates at the end of the branch: `tsc --noEmit` is clean, `eslint --max-warnings=0` is clean on every changed file, the five `check:*` gates pass, and the full `vitest run` passes (4200 passed, 1 skipped, 472 files).
+
 ## What the installed package does (convex 1.45.0, convex-test 0.0.54)
 
 These facts come from `node_modules/convex/dist/esm`, not from memory.

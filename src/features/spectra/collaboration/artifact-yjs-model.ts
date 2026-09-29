@@ -172,36 +172,61 @@ function valueAtPath(value: unknown, path: readonly (string | number)[]) {
   return current;
 }
 
-function replaceAtPath(
-  value: unknown,
-  path: readonly (string | number)[],
-  replacement: unknown,
+/**
+ * `source` with a region marker written at each relative path, copying only
+ * the containers on those paths. Deep-cloning every region's subtree (and
+ * then the whole artifact for the root) before writing markers made a
+ * decomposition cost the artifact's size times its depth. `source` is never
+ * mutated. Sheets/presentation regions can address containers that are
+ * optional on the schema (e.g. rowIdentities); missing parents are
+ * materialized so decompose never throws "Cannot set properties of undefined".
+ */
+function withRegionMarkers(
+  source: unknown,
+  markers: ReadonlyArray<readonly [readonly (string | number)[], string]>,
 ) {
-  if (path.length === 0) return replacement;
-  if (value === null || typeof value !== "object") {
-    throw new Error(
-      `ARTIFACT_REGION_PATH_INVALID: cannot write ${path.join("/")} onto a non-object root`,
-    );
-  }
-  let current = value as Record<string | number, unknown>;
-  for (let index = 0; index < path.length - 1; index += 1) {
-    const segment = path[index]!;
-    const nextSegment = path[index + 1]!;
-    const existing = current[segment];
-    if (existing === null || typeof existing !== "object") {
-      // Sheets/presentation regions can address containers that are optional
-      // on the schema (e.g. rowIdentities). Materialize missing parents so
-      // decompose never throws "Cannot set properties of undefined".
-      current[segment] =
-        typeof nextSegment === "number" ||
-        (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
-          ? []
-          : {};
+  if (!markers.length) return source;
+  const owned = new Set<object>();
+  const own = (value: object) => {
+    const copy = Array.isArray(value) ? [...value] : { ...value };
+    owned.add(copy);
+    return copy as Record<string | number, unknown>;
+  };
+  let root = source;
+  for (const [path, regionId] of markers) {
+    if (path.length === 0) {
+      root = marker(regionId);
+      continue;
     }
-    current = current[segment] as Record<string | number, unknown>;
+    if (root === null || typeof root !== "object")
+      throw new Error(
+        `ARTIFACT_REGION_PATH_INVALID: cannot write ${path.join("/")} onto a non-object root`,
+      );
+    if (!owned.has(root)) root = own(root);
+    let current = root as Record<string | number, unknown>;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const segment = path[index]!;
+      const nextSegment = path[index + 1]!;
+      const existing = current[segment];
+      let next: Record<string | number, unknown>;
+      if (existing === null || typeof existing !== "object") {
+        next = (
+          typeof nextSegment === "number" ||
+          (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
+            ? []
+            : {}
+        ) as Record<string | number, unknown>;
+        owned.add(next);
+      } else
+        next = owned.has(existing)
+          ? (existing as Record<string | number, unknown>)
+          : own(existing);
+      current[segment] = next;
+      current = next;
+    }
+    current[path[path.length - 1]!] = marker(regionId);
   }
-  current[path[path.length - 1]!] = replacement;
-  return value;
+  return root;
 }
 
 /**
@@ -247,15 +272,13 @@ export function decomposeArtifactContent(
   const { ancestors, children } = regionHierarchy(regions);
 
   for (const candidate of regions) {
-    const source = clone(valueAtPath(parsed, candidate.path));
-    let template = source;
-    for (const child of children.get(candidate.regionId) ?? []) {
-      template = replaceAtPath(
-        template,
+    const template = withRegionMarkers(
+      valueAtPath(parsed, candidate.path),
+      (children.get(candidate.regionId) ?? []).map((child) => [
         child.path.slice(candidate.path.length),
-        marker(child.regionId),
-      );
-    }
+        child.regionId,
+      ]),
+    );
     const descriptor: StoredArtifactRegionDescriptor = {
       regionId: candidate.regionId,
       kind: candidate.kind,
@@ -270,12 +293,12 @@ export function decomposeArtifactContent(
     regionValues.set(candidate.regionId, encodeRegionValue(template));
   }
 
-  let root = clone(parsed) as unknown;
-  for (const candidate of regions.filter(
-    (entry) => !ancestors.get(entry.regionId),
-  )) {
-    root = replaceAtPath(root, candidate.path, marker(candidate.regionId));
-  }
+  const root = withRegionMarkers(
+    parsed,
+    regions
+      .filter((entry) => !ancestors.get(entry.regionId))
+      .map((entry) => [entry.path, entry.regionId]),
+  );
   return { rootTemplate: JSON.stringify(root), descriptors, regionValues };
 }
 
@@ -466,13 +489,11 @@ function documentDescriptorSignature(value: DecomposedArtifact) {
   } catch {
     // Projection validation reports malformed templates separately.
   }
-  return JSON.stringify(
-    canonicalJsonValue({
-      rootTemplate,
-      descriptors: [...value.descriptors.values()]
-        .sort((left, right) => left.regionId.localeCompare(right.regionId))
-        .map(({ label: _label, ...descriptor }) => descriptor),
-    }),
+  return structureSignature(
+    rootTemplate,
+    [...value.descriptors.values()].map(
+      ({ label: _label, ...descriptor }) => descriptor,
+    ),
   );
 }
 
@@ -526,14 +547,33 @@ function descriptorSignature(value: DecomposedArtifact) {
     // A malformed template is handled by the normal projection validation.
     // Keeping the original string here preserves a deterministic signature.
   }
-  return JSON.stringify(
-    canonicalJsonValue({
-      rootTemplate,
-      descriptors: [...value.descriptors.values()].sort((left, right) =>
-        left.regionId.localeCompare(right.regionId),
-      ),
-    }),
-  );
+  return structureSignature(rootTemplate, [...value.descriptors.values()]);
+}
+
+/**
+ * Descriptors are built by `decomposeArtifactContent` with a fixed key order,
+ * so only their order needs canonicalizing; canonicalizing each of thousands
+ * of descriptors object by object dominated a keystroke's region diff.
+ */
+function structureSignature(
+  rootTemplate: unknown,
+  descriptors: Array<Omit<StoredArtifactRegionDescriptor, "label">>,
+) {
+  return JSON.stringify([
+    canonicalJsonValue(rootTemplate),
+    descriptors.sort((left, right) =>
+      compareCodeUnits(left.regionId, right.regionId),
+    ),
+  ]);
+}
+
+/**
+ * Canonical forms are only ever compared with each other, so any total order
+ * works. Locale collation was the dominant cost of a region signature, and it
+ * can rank two distinct keys as equal, leaving their order to the input.
+ */
+function compareCodeUnits(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function canonicalJsonValue(value: unknown): unknown {
@@ -541,7 +581,7 @@ export function canonicalJsonValue(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
   );
 }

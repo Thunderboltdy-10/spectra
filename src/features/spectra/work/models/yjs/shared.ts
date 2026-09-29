@@ -166,3 +166,49 @@ export function isEmptyYjsUpdate(update: Uint8Array) {
   // An empty v1 update is encoded as two zero-length sections.
   return update.length <= 2;
 }
+
+/**
+ * `next` with every subtree that is deep-equal to the same place in
+ * `previous` replaced by the previous object, so an unchanged value keeps its
+ * identity across projections. Each projection builds a fresh object graph;
+ * without this, one collaborator's keystroke on slide 3 gave all 100 slides
+ * (and every card, question and whiteboard node) a new identity, so no
+ * memoised subtree or effect keyed on a sub-value could ever skip.
+ */
+export function shareUnchanged<T>(previous: unknown, next: T): T {
+  if (Object.is(previous, next)) return next;
+  if (!previous || !next || typeof previous !== "object" || typeof next !== "object")
+    return next;
+  if (Array.isArray(next)) {
+    if (!Array.isArray(previous)) return next;
+    let same = previous.length === next.length;
+    const shared = next.map((entry, index) => {
+      const value = shareUnchanged(previous[index], entry);
+      if (value !== previous[index]) same = false;
+      return value;
+    });
+    return (same ? previous : shared) as T;
+  }
+  if (Array.isArray(previous)) return next;
+  if (Object.getPrototypeOf(next) !== Object.prototype || Object.getPrototypeOf(previous) !== Object.prototype)
+    return next;
+  const before = previous as Record<string, unknown>;
+  const keys = Object.keys(next);
+  let same = keys.length === Object.keys(before).length;
+  const shared: Record<string, unknown> = {};
+  for (const key of keys) {
+    const entry = (next as Record<string, unknown>)[key];
+    const value = Object.prototype.hasOwnProperty.call(before, key)
+      ? shareUnchanged(before[key], entry)
+      : entry;
+    if (value !== before[key] || !Object.prototype.hasOwnProperty.call(before, key)) same = false;
+    shared[key] = value;
+  }
+  if (same) {
+    // Equal keys and values but a different key order is still a change to
+    // anything that serializes it.
+    const previousKeys = Object.keys(before);
+    if (keys.every((key, index) => previousKeys[index] === key)) return previous as T;
+  }
+  return shared as T;
+}

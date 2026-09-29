@@ -13,7 +13,7 @@ import {
 } from "../../../collaboration/artifact-yjs-model";
 import { documentContentToProseMirrorJson } from "../../../lenses/document-projection";
 import { workYjsAdapter } from "./registry";
-import { plainToY, workMeta, workRoot, yToPlain } from "./shared";
+import { plainToY, shareUnchanged, workMeta, workRoot, yToPlain } from "./shared";
 import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
 import { describeSheetsCellRegion } from "../../../artifacts/registry";
@@ -180,7 +180,10 @@ export class NativeArtifactYjsModel {
       return;
     }
     try {
-      const content = this.adapter.project(this.transport.document);
+      const content = shareUnchanged(
+        this.snapshot.value?.content,
+        this.adapter.project(this.transport.document),
+      );
       const validation = this.adapter.validate(
         this.transport.document,
         content,
@@ -198,7 +201,7 @@ export class NativeArtifactYjsModel {
       this.regionsById = new Map(
         regions.map((region) => [region.regionId, region]),
       );
-      this.snapshot = {
+      this.snapshot = shareUnchanged(this.snapshot, {
         initialized: true,
         validity: "valid",
         value: {
@@ -208,7 +211,7 @@ export class NativeArtifactYjsModel {
           content,
         },
         regionIds: regions.map((region) => region.regionId).sort(),
-      };
+      } satisfies ArtifactLiveModelSnapshot);
     } catch (error) {
       this.regionsById.clear();
       this.snapshot = {
@@ -244,7 +247,7 @@ export class NativeArtifactYjsModel {
         title: value.title,
         ...(value.summary ? { summary: value.summary } : {}),
         tags: [...value.tags],
-        content: plan.content,
+        content: shareUnchanged(this.snapshot.value?.content, plan.content),
       },
       // A cell-only edit keeps the existing semantic index usable until the
       // scheduled bounded projection refresh accounts for an added/deleted

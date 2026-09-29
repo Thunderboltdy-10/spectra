@@ -203,6 +203,21 @@ export const GATEWAY_RESTARTING_CLOSE = Object.freeze({ code: 1012, reason: "Gat
  * re-sync with the next gateway) → flush every dirty room until none is left
  * → flush projection checkpoints. Bounded by `budgetMs`; whatever is still
  * dirty at the deadline is logged, never silently dropped.
+ *
+ * @template Room
+ * @param {{
+ *   stopAccepting: () => void,
+ *   closeConnections: () => void,
+ *   dirtyDocuments: () => Room[],
+ *   flushDocument: (room: Room) => Promise<unknown>,
+ *   flushCheckpoints: () => Promise<unknown>,
+ *   describeDocument?: (room: Room) => string,
+ *   log?: (line: string) => unknown,
+ *   budgetMs?: number,
+ *   settleMs?: number,
+ *   now?: () => number,
+ * }} options
+ * @returns {Promise<{ unflushed: string[], checkpointsFlushed: boolean }>}
  */
 export async function drainGatewayForShutdown({
   stopAccepting,

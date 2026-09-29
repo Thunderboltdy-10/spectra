@@ -5111,18 +5111,6 @@ function ArtifactStudioEditor({
     synchronizeDraft,
   ]);
 
-  useEffect(() => {
-    if (!liveConflict?.claimId || !live.transport) return;
-    const renew = () =>
-      void postSpectra({
-        action: "renewRegionClaim",
-        claimId: liveConflict.claimId,
-        clientId: live.transport!.clientId,
-      }).catch(() => undefined);
-    const timer = window.setInterval(renew, 9_000);
-    return () => window.clearInterval(timer);
-  }, [live.transport, liveConflict?.claimId]);
-
   function changeBase(
     next: Partial<{ title: string; summary: string; tagDraft: string }>,
   ) {
@@ -5260,14 +5248,6 @@ function ArtifactStudioEditor({
       });
       if (origin !== recoveryViewRef.current || request.signal.aborted) return false;
       recoveryNeedsReview.current = null;
-      if (liveConflict?.claimId && live.transport) {
-        await postSpectra({
-          action: "releaseRegionClaim",
-          claimId: liveConflict.claimId,
-          clientId: live.transport.clientId,
-          resolution: "keep_current",
-        }).catch(() => undefined);
-      }
       return origin === recoveryViewRef.current && !request.signal.aborted;
     } catch (error) {
       if (origin === recoveryViewRef.current && !request.signal.aborted) {

@@ -975,9 +975,6 @@ const workspaceCache = new Map<
 const CACHE_TTL = 5 * 60_000;
 const FIRST_PAINT_FETCH_TTL_MS = 1_100;
 const CACHE_LOCAL_ACTIONS = new Set([
-  "acquireRegionClaim",
-  "renewRegionClaim",
-  "releaseRegionClaim",
   "hideResultCard",
   "keepResultCard",
 ]);

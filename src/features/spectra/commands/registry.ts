@@ -50,7 +50,16 @@ export function allTabsFor(type: WorkType): readonly string[] {
   return [...base, ...contextualTabsFor(type).filter((tab) => !base.includes(tab))];
 }
 
+// A command lands on a tab the type's bar shows. The name patterns below
+// were written for the office types; for a type without the tab they suggest
+// (code has no Insert tab, so "New file" was inferred onto one) the command
+// sat on a tab that never renders and could not be reached from the bar.
 function inferTab(type: WorkType, binding: CommandBinding) {
+  const tab = inferNamedTab(type, binding);
+  return tab === binding.contextualTab || COMMAND_TABS[type].includes(tab) ? tab : "General";
+}
+
+function inferNamedTab(type: WorkType, binding: CommandBinding) {
   if (binding.contextualTab) return binding.contextualTab;
   if (binding.tab) return COMMAND_TABS[type].includes(binding.tab) ? binding.tab : "General";
   const value = `${binding.id} ${binding.label}`.toLowerCase();

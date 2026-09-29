@@ -423,7 +423,7 @@ function actForStreamBeat(input: {
 
 type RegionClaim = {
   claimId: string;
-  status: "active" | "queued" | "paused";
+  status: "active" | "queued";
   leaseExpiresAt: number;
   conflict: null | {
     claimId: string;

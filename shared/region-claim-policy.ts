@@ -1,4 +1,5 @@
-export type RegionClaimAcquireStatus = "active" | "queued" | "paused";
+/** acquire returns only these; nothing writes the legacy "paused" status. */
+export type RegionClaimAcquireStatus = "active" | "queued";
 
 /** Large atomic edits claim the existing whole-artifact domain, never a truncated
  * set of cells or thousands of sequential leases that expire during acquisition. */
@@ -7,8 +8,8 @@ export function boundedRegionClaims(regions: Array<{ regionId: string; overlapDo
 }
 
 /**
- * Only an active lease may mutate. A queued lease waits in place.
- * Paused is an honest refuse — never treat it as acquired.
+ * Only an active lease may mutate. A queued lease waits in place. Any other
+ * status (a released, rejected or legacy row) is never treated as acquired.
  */
 export function claimAcquireAction(
   status: RegionClaimAcquireStatus | string,

@@ -23,7 +23,7 @@ async function queuedClaims(ctx: QueryCtx | MutationCtx, artifactId: Id<"spectra
 }
 
 async function expireStaleClaims(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">, now: number) {
-  const pending = (await Promise.all((['active', 'queued', 'paused'] as const).map((status) =>
+  const pending = (await Promise.all((['active', 'queued'] as const).map((status) =>
     ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", artifactId).eq("status", status)).collect(),
   ))).flat();
   const expired = pending.filter((claim) => claim.leaseExpiresAt <= now);
@@ -46,7 +46,7 @@ async function promoteQueues(ctx: MutationCtx, artifactId: Id<"spectraArtifacts"
     const conflicts = [...active, ...promoted].some((claim) => regionDomainsIntersect(claim.overlapDomains, candidate.overlapDomains));
     if (conflicts) continue;
     // Queued AI serializes onto the region when nothing still overlaps.
-    // Pause is an explicit conflict resolution, not an automatic promotion.
+    // Queued human and AI claims promote the same way; nothing pauses.
     const leaseMs = candidate.actorKind === "ai" ? AI_LEASE_MS : HUMAN_LEASE_MS;
     await ctx.db.patch(candidate._id, { status: "active", queuePosition: undefined, leaseExpiresAt: now + leaseMs, updatedAt: now });
     promoted.push(candidate);
@@ -62,7 +62,7 @@ export async function releaseClaimsForAccount(
   accountId: Id<"accounts">,
   now: number,
 ) {
-  const statuses = ["active", "queued", "paused"] as const;
+  const statuses = ["active", "queued"] as const;
   const claims = (await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", artifactId).eq("status", status)).collect()))).flat();
   await Promise.all(claims.filter((claim) => claim.actorAccountId === accountId).map((claim) => ctx.db.patch(claim._id, { status: "released", resolution: "permission_revoked", queuePosition: undefined, releasedAt: now, updatedAt: now })));
   return promoteQueues(ctx, artifactId, now);
@@ -73,7 +73,7 @@ export async function releaseClaimsForRun(
   runId: Id<"spectraAiRuns">,
   now: number,
 ) {
-  const statuses = ["active", "queued", "paused"] as const;
+  const statuses = ["active", "queued"] as const;
   const affected = (await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_run_status", (q) => q.eq("runId", runId).eq("status", status)).collect()))).flat();
   await Promise.all(affected.map((claim) => ctx.db.patch(claim._id, { status: "rejected", resolution: "run_stopped", queuePosition: undefined, releasedAt: now, updatedAt: now })));
   for (const artifactId of [...new Set(affected.map((claim) => claim.artifactId))]) await promoteQueues(ctx, artifactId, now);
@@ -111,13 +111,12 @@ export const acquire = mutation({
       return { claimId: sameClient._id, status: "active" as const, leaseExpiresAt, conflict: null };
     }
 
-    const pendingForClient = (await Promise.all((["queued", "paused"] as const).map((status) => ctx.db.query("regionClaims").withIndex("by_client_status", (q) => q.eq("clientId", clientId).eq("status", status)).collect()))).flat();
+    const pendingForClient = await ctx.db.query("regionClaims").withIndex("by_client_status", (q) => q.eq("clientId", clientId).eq("status", "queued")).collect();
     const samePending = pendingForClient.find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.actorKind === args.actorKind && claim.runId === args.runId && claim.operationId === args.operationId && claim.regionId === regionId && claim.leaseExpiresAt > now);
     if (samePending) {
       const blocking = (await activeClaims(ctx, artifact._id, now)).find((claim) => regionDomainsIntersect(claim.overlapDomains, overlapDomains));
-      const remainsPaused = samePending.status === "paused" && samePending.actorKind === "ai";
-      const nextStatus = blocking ? (samePending.status === "paused" ? "paused" as const : "queued" as const) : remainsPaused ? "paused" as const : "active" as const;
-      await ctx.db.patch(samePending._id, { status: nextStatus === "active" ? "active" : samePending.status, queuePosition: blocking ? samePending.queuePosition : undefined, overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
+      const nextStatus = blocking ? "queued" as const : "active" as const;
+      await ctx.db.patch(samePending._id, { status: nextStatus, queuePosition: blocking ? samePending.queuePosition : undefined, overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
       if (nextStatus === "active") return { claimId: samePending._id, status: "active" as const, leaseExpiresAt, conflict: null };
       return { claimId: samePending._id, status: nextStatus, leaseExpiresAt, conflict: blocking ? { claimId: blocking._id, actorKind: blocking.actorKind, regionId: blocking.regionId, leaseExpiresAt: blocking.leaseExpiresAt, queuePosition: samePending.queuePosition ?? 1 } : null };
     }
@@ -143,7 +142,7 @@ export const renew = mutation({
   args: { claimId: v.id("regionClaims"), clientId: v.string(), baseStateVectorHash: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const claim = await ctx.db.get(args.claimId);
-    if (!claim || (claim.status !== "active" && claim.status !== "queued" && claim.status !== "paused")) throw new Error("REGION_CLAIM_UNAVAILABLE: Reacquire the region.");
+    if (!claim || (claim.status !== "active" && claim.status !== "queued")) throw new Error("REGION_CLAIM_UNAVAILABLE: Reacquire the region.");
     const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
     const now = Date.now();
@@ -177,10 +176,10 @@ export const listForArtifact = query({
   handler: async (ctx, args) => {
     await requireArtifactCapability(ctx, args.artifactId, "read");
     const now = Date.now();
-    const statuses = args.includeResolved ? ["active", "queued", "paused", "released", "rejected"] as const : ["active", "queued", "paused"] as const;
+    const statuses = args.includeResolved ? ["active", "queued", "released", "rejected"] as const : ["active", "queued"] as const;
     const groups = await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).collect()));
     return groups.flat().filter((claim) => args.includeResolved || claim.leaseExpiresAt > now).map((claim) => {
-      const expired = claim.leaseExpiresAt <= now && (claim.status === "active" || claim.status === "queued" || claim.status === "paused");
+      const expired = claim.leaseExpiresAt <= now && (claim.status === "active" || claim.status === "queued");
       return { claimId: claim._id, actorKind: claim.actorKind, actorAccountId: claim.actorAccountId, runId: claim.runId, regionId: claim.regionId, overlapDomains: claim.overlapDomains, status: expired ? "released" as const : claim.status, queuePosition: expired ? undefined : claim.queuePosition, leaseExpiresAt: claim.leaseExpiresAt, resolution: expired ? "expired" as const : claim.resolution, createdAt: claim.createdAt };
     });
   },

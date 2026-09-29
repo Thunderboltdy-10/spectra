@@ -543,7 +543,7 @@ export const resumeAfterRegionConflict = mutation({
       claim.operationId !== operation._id ||
       claim.runId !== run._id ||
       claim.actorAccountId !== run.ownerAccountId ||
-      (claim.status !== "queued" && claim.status !== "paused")
+      claim.status !== "queued"
     ) {
       throw new Error(
         "REGION_CONFLICT_NOT_RESOLVED: This proposal is no longer available.",

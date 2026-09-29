@@ -35,7 +35,13 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ProductSectionNav } from "../components/product-section-nav";
 import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
 import { ProductPageHeader } from "../components/product-page-header";
@@ -1759,7 +1765,7 @@ function QuickAction({
   );
 }
 
-function SettingsDialog({
+export function SettingsDialog({
   config,
   setConfig,
   busy,
@@ -1785,28 +1791,27 @@ function SettingsDialog({
     "h-9 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-micro outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
   const canConnectWithoutTypedToken =
     !connected && envTokenAvailable && config.token.length === 0;
-  const surface = useRef<HTMLDivElement>(null);
-  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
-    <div
-      ref={surface}
-      tabIndex={-1}
-      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="ManageBac settings"
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
     >
-      <div className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-surface border border-white/70 bg-[var(--bg-primary)] shadow-[var(--shadow-lg)]">
+      <DialogContent
+        hideCloseButton
+        className="block max-h-[92vh] max-w-[520px] gap-0 overflow-y-auto bg-[var(--bg-primary)] p-0"
+      >
         <header className="sticky top-0 z-chrome flex items-start justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 px-5 py-4 backdrop-blur">
           <div>
-            <h2 className="font-display text-xl font-semibold">
+            <DialogTitle className="font-display text-xl font-semibold">
               ManageBac connection
-            </h2>
-            <p className="mt-1 text-micro text-[var(--text-tertiary)]">
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-micro text-[var(--text-tertiary)]">
               School administrators connect with the tenant API base URL and a
               school-wide read-only API key. Spectra syncs about every three
               hours and can refresh on demand when AI needs fresher data.
-            </p>
+            </DialogDescription>
           </div>
           <button
             type="button"
@@ -1922,12 +1927,12 @@ function SettingsDialog({
             </button>
           </div>
         </footer>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function ManifestDialog({
+export function ManifestDialog({
   value,
   setValue,
   busy,
@@ -1940,30 +1945,29 @@ function ManifestDialog({
   onClose: () => void;
   onImport: () => void;
 }) {
-  const surface = useRef<HTMLDivElement>(null);
-  useModalFocus(surface, { onClose: busy ? undefined : onClose });
   return (
-    <div
-      ref={surface}
-      tabIndex={-1}
-      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Import capability manifest"
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
     >
-      <div className="w-full max-w-[760px] overflow-hidden rounded-surface border border-white/70 bg-[var(--bg-primary)] shadow-[var(--shadow-lg)]">
+      <DialogContent
+        hideCloseButton
+        className="block max-h-[92vh] max-w-[760px] gap-0 overflow-y-auto bg-[var(--bg-primary)] p-0"
+      >
         <header className="flex items-start justify-between border-b border-[var(--border-subtle)] px-5 py-4">
           <div>
-            <h2 className="font-display text-xl font-semibold">
+            <DialogTitle className="font-display text-xl font-semibold">
               Verified capability manifest
-            </h2>
-            <p className="mt-1 max-w-xl text-micro leading-4 text-[var(--text-tertiary)]">
+            </DialogTitle>
+            <DialogDescription className="mt-1 max-w-xl text-micro leading-4 text-[var(--text-tertiary)]">
               Paste the tenant OpenAPI reference to inventory every GET route as
               unverified, or paste a reviewed Spectra capability manifest. A
               discovered route cannot run until its read-only permission,
               audience, normalization, and sampled response contract are
               verified.
-            </p>
+            </DialogDescription>
           </div>
           <button
             type="button"
@@ -2012,12 +2016,12 @@ function ManifestDialog({
             Validate and replace
           </button>
         </footer>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function DisconnectDialog({
+export function DisconnectDialog({
   busy,
   onClose,
   onConfirm,
@@ -2026,54 +2030,20 @@ function DisconnectDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const surface = useRef<HTMLDivElement>(null);
-  // Escape is "Keep connected"; it does nothing while the disconnect runs.
-  useModalFocus(surface, { onClose: busy ? undefined : onClose });
+  /* The shared confirmation: the modal layer (it sat at `dropdown`, under
+     every panel), focus on "Keep connected", and no dismissal while the
+     disconnect runs. */
   return (
-    <div
-      ref={surface}
-      tabIndex={-1}
-      className="fixed inset-0 z-dropdown grid place-items-center bg-[var(--text-primary)]/25 p-4"
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Disconnect ManageBac"
-    >
-      <div className="w-full max-w-[430px] rounded-surface border border-white/70 bg-[var(--bg-primary)] p-5 shadow-[var(--shadow-lg)]">
-        <span className="grid size-10 place-items-center rounded-xl bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] text-[var(--accent-coral)]">
-          <AlertTriangle size={18} />
-        </span>
-        <h2 className="mt-4 font-display text-xl font-semibold">
-          Disconnect ManageBac?
-        </h2>
-        <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
-          Spectra will give up its ManageBac access, stop scheduled syncs and
-          unlink accounts. Imported work and everyone&apos;s own notes on it stay
-          in Spectra, marked as no longer syncing.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="h-8 rounded-control px-3 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
-          >
-            Keep connected
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--danger)] px-3.5 text-micro font-medium text-white disabled:opacity-50"
-          >
-            {busy ? (
-              <LoaderCircle className="animate-spin" size={12} />
-            ) : (
-              <Link2 size={12} />
-            )}
-            Disconnect
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      open
+      title="Disconnect ManageBac?"
+      detail="Spectra will give up its ManageBac access, stop scheduled syncs and unlink accounts. Imported work and everyone's own notes on it stay in Spectra, marked as no longer syncing."
+      confirmLabel="Disconnect"
+      cancelLabel="Keep connected"
+      destructive
+      pending={busy}
+      onCancel={onClose}
+      onConfirm={onConfirm}
+    />
   );
 }

@@ -15,6 +15,7 @@ import { useBridgeHealth } from "./use-bridge";
 import { BRIDGE_SETTINGS_HREF } from "./client";
 import { ReconnectAction } from "./storage-toggle-group";
 import { FileStorageControls } from "./file-storage-controls";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 
 const DOCUMENT_LENS = new Set(["docx", "docm", "dotx", "dotm"]);
 const OFFICE_LENS = new Set([
@@ -102,9 +103,8 @@ export function ResourceSurface({
       else await discardProtectedPending({ workId: artifact._id as never });
     } catch (error) {
       setOpenError(
-        error instanceof Error
-          ? error.message
-          : "The pending changes could not be resolved.",
+        readConvexError(error).message ||
+          "The pending changes could not be resolved.",
       );
     } finally {
       setFileAction(null);

@@ -18,6 +18,7 @@ import { isArtifactTypeKey } from "../artifacts/registry";
 import { suggestedEmbedInteraction } from "../capabilities";
 import { workTypeMeta } from "./artifact-card";
 import { useArtifactEmbedContainer } from "./artifact-embed-host";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 
 function pendingKeepKey(threadId: string | undefined, sourceId: string) {
   return JSON.stringify([threadId ?? "", sourceId]);
@@ -150,9 +151,8 @@ export function ComposerArtifactDock({
         activeView.current.sourceIds.has(request.sourceId)
       ) {
         toast.error(
-          error instanceof Error
-            ? error.message
-            : "This work could not be kept in the conversation.",
+          readConvexError(error).message ||
+            "This work could not be kept in the conversation.",
         );
       }
     } finally {

@@ -1,3 +1,4 @@
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 /**
  * One public-language map for sync, Bridge, native, and dock failures (CANON R13).
  * Machine tokens, enum values, and stack fragments never reach a person.
@@ -194,7 +195,8 @@ const REPLICA_STATE_WORDS: Record<string, string> = {
 
 function rawText(error: unknown): string {
   if (typeof error === "string") return error;
-  if (error instanceof Error) return error.message;
+  // A redacted Convex failure keeps its words only in ConvexError data.
+  if (error instanceof Error) return readConvexError(error).message || error.message;
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message: unknown }).message);
   }

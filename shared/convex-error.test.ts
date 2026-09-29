@@ -105,3 +105,16 @@ describe("the collaboration gateway's Convex calls", () => {
     await expect(bridge("authorize", {})).rejects.toThrow(overlap.message);
   });
 });
+
+describe("Bridge failure copy", () => {
+  it("maps a redacted Bridge mutation failure by its code, not the frame", async () => {
+    const { humanizePublicFailure } = await import("../src/features/spectra/bridge/humanize");
+    const error = asDeployedError(
+      toWordedConvexError(new Error("AUTHORITY_PROHIBITED: Not allowed.")),
+      { surface: "react", udf: "M(syncPolicy:overrideAccount)" },
+    );
+    expect(humanizePublicFailure(error)).toBe(
+      "That action is not something Spectra can do on your behalf.",
+    );
+  });
+});

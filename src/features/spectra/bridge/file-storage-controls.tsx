@@ -15,6 +15,7 @@ import {
   storageChoiceFromPreset,
   type StorageChoice,
 } from "./sync-toggles";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 
 /**
  * Item-level storage and the Read-don't-change switch. Resource files and
@@ -134,9 +135,8 @@ export function FileStorageControls({
       });
     } catch (error) {
       setOpenError(
-        error instanceof Error
-          ? error.message
-          : "The storage strategy could not be changed. No file was removed.",
+        readConvexError(error).message ||
+          "The storage strategy could not be changed. No file was removed.",
       );
     } finally {
       setStrategyBusy(false);

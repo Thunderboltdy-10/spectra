@@ -290,15 +290,10 @@ export class NativeArtifactYjsModel {
     }
   }
 
-  async initialize(
+  private async initialize(
     value: ArtifactLiveValue,
     controller: ArtifactRegionController,
   ) {
-    if (this.snapshot.initialized)
-      return {
-        applied: false as const,
-        reason: "already_initialized" as const,
-      };
     let source = value;
     try {
       source =
@@ -307,7 +302,7 @@ export class NativeArtifactYjsModel {
       // A malformed legacy room is not allowed to replace the validated Convex
       // baseline. Its maps remain available for rollback/diagnostics.
     }
-    const result = await controller.edit(
+    await controller.edit(
       "artifact:structure",
       ["artifact:structure"],
       () => {
@@ -325,14 +320,8 @@ export class NativeArtifactYjsModel {
         this.writeMetadata(source);
       },
     );
-    if (result.applied) this.rebuildSnapshotImmediately();
-    return result.applied
-      ? { applied: true as const }
-      : {
-          applied: false as const,
-          reason: "conflict" as const,
-          claim: result.claim,
-        };
+    this.rebuildSnapshotImmediately();
+    return { applied: true as const };
   }
 
   descriptor(regionId: string): StoredArtifactRegionDescriptor | null {
@@ -353,19 +342,6 @@ export class NativeArtifactYjsModel {
             : {}),
         }
       : null;
-  }
-
-  async replaceMetadata(
-    field: "title" | "summary" | "tags",
-    value: string | string[],
-    controller: ArtifactRegionController,
-  ) {
-    const regionId = `metadata:${field}`;
-    const result = await controller.edit(regionId, [regionId], () => {
-      this.liveMeta.set(field, Array.isArray(value) ? [...value] : value);
-    });
-    if (result.applied) this.rebuildSnapshotImmediately();
-    return result;
   }
 
   async replaceMetadataSnapshot(
@@ -401,21 +377,13 @@ export class NativeArtifactYjsModel {
     ];
     if (!claims.length) {
       this.rebuildSnapshotImmediately();
-      return { applied: true as const, claims: [] };
+      return { applied: true as const };
     }
     const result = await controller.editMany(claims, () =>
       this.writeMetadata(value),
     );
-    if (result.applied) this.rebuildSnapshotImmediately();
+    this.rebuildSnapshotImmediately();
     return result;
-  }
-
-  async replaceRegion(
-    _regionId: string,
-    _value: unknown,
-    _controller: ArtifactRegionController,
-  ) {
-    throw new Error("NATIVE_WORK_REGION_REPLACEMENT_REQUIRES_SEMANTIC_ACTION");
   }
 
   async replaceSnapshot(
@@ -489,7 +457,7 @@ export class NativeArtifactYjsModel {
         : []),
     ];
     const claims = [...regions, ...metadataClaims];
-    if (!claims.length) return { applied: true as const, claims: [] };
+    if (!claims.length) return { applied: true as const };
     const result = await controller.editMany(boundedRegionClaims(claims), () => {
       if (contentChanged && sheetPlan)
         applySheetsCellProjection(
@@ -508,10 +476,8 @@ export class NativeArtifactYjsModel {
       }
       this.writeMetadata(value);
     });
-    if (result.applied) {
-      if (sheetPlan) this.exposeAppliedSheetSnapshot(value, sheetPlan);
-      else this.rebuildSnapshotImmediately();
-    }
+    if (sheetPlan) this.exposeAppliedSheetSnapshot(value, sheetPlan);
+    else this.rebuildSnapshotImmediately();
     return result;
   }
 
@@ -521,12 +487,12 @@ export class NativeArtifactYjsModel {
     controller: ArtifactRegionController,
   ) {
     const selected = [...new Set(regionIds)];
-    if (selected.length === 0) return { applied: true as const, claims: [] };
+    if (selected.length === 0) return { applied: true as const };
     if (selected.includes("artifact:structure"))
       return this.replaceSnapshot(value, controller);
     const plan = planNativeArtifactYjsRestore(this.transport.document, this.typeKey, value, this.actor, selected);
     const result = await controller.editMany(plan.regions, plan.apply);
-    if (result.applied) this.rebuildSnapshotImmediately();
+    this.rebuildSnapshotImmediately();
     return result;
   }
 }

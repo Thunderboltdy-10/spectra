@@ -364,9 +364,7 @@ export function useLocalRecoveryController(args: {
     }
     throwIfAborted(action.signal);
     if (!latest.current.sessionReady) throw new Error("LOCAL_RECOVERY_UNAVAILABLE");
-    const result = await latest.current.restoreRegions(value, action.regionIds);
-    if (result && typeof result === "object" && "applied" in result && result.applied === false)
-      throw new Error("LOCAL_RECOVERY_REGION_BUSY");
+    await latest.current.restoreRegions(value, action.regionIds);
   }), [adopt, exclusive, readBranch, readCurrent, typeKey]);
 
   const discardLocalRecovery = useCallback<LocalRecoveryController["discardLocalRecovery"]>(action => exclusive(async () => {

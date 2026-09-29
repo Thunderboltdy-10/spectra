@@ -3187,9 +3187,6 @@ function ArtifactStudioEditor({
   const [syncBusy, setSyncBusy] = useState(false);
   const [liveConflict, setLiveConflict] = useState<{
     message: string;
-    claimId?: string;
-    regionId?: string;
-    queuePosition?: number;
   } | null>(null);
   const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<
     "download" | "materialize" | null
@@ -3613,25 +3610,14 @@ function ArtifactStudioEditor({
         // React snapshot over that live body: the snapshot can lag the editor
         // by a render while the user types and would turn a title change into a
         // false structural rewrite.
-        const result =
+        if (
           (artifact.blueprintKey === "document" ||
             artifact.blueprintKey === "code") &&
           live.modelSnapshot.initialized &&
           !nativeFallbackEditedRef.current
-            ? await live.synchronizeMetadata(nextLiveValue)
-            : await live.synchronize(nextLiveValue);
-        if (result && "applied" in result && result.applied === false) {
-          localSyncKeysRef.current.delete(key);
-          const claim = "claim" in result ? result.claim : undefined;
-          setLiveConflict({
-            message:
-              "This region is being edited by another collaborator. Your draft is preserved and queued without overwriting their work.",
-            claimId: claim?.claimId,
-            regionId: claim?.conflict?.regionId,
-            queuePosition: claim?.conflict?.queuePosition,
-          });
-          return false;
-        }
+        )
+          await live.synchronizeMetadata(nextLiveValue);
+        else await live.synchronize(nextLiveValue);
         const acknowledgedValue =
           live.flushSnapshot?.() ?? live.model?.getSnapshot().value;
         if (acknowledgedValue) {
@@ -4827,10 +4813,6 @@ function ArtifactStudioEditor({
         ...live.liveValue,
         summary: expected,
       })
-      .then((result) => {
-        if (result && "applied" in result && result.applied === false)
-          generatedSummaryRepairRef.current = null;
-      })
       .catch(() => {
         generatedSummaryRepairRef.current = null;
       });
@@ -5130,7 +5112,6 @@ function ArtifactStudioEditor({
       // Speculative AI previews must never freeze human region sync. Peers
       // render AI frames via awareness; durable Yjs writes remain region-
       // scoped and only claim the blocks the human actually changed.
-      liveConflict?.claimId ||
       syncBusy ||
       ((artifact.blueprintKey === "document" ||
         artifact.blueprintKey === "code") &&
@@ -5437,9 +5418,6 @@ function ArtifactStudioEditor({
   // The scrollport's padding lives in CSS so one rule can reserve room for the
   // fixed composer for every type at once (`--spectra-composer-safe-area`).
   const mainClass = "min-h-0 flex-1";
-  const liveConflictLabel = liveConflict?.regionId
-    ? liveDescriptor(liveConflict.regionId)?.label
-    : undefined;
   const currentAccountId = live.accountId;
   const commentRegions = useMemo<ArtifactCommentRegion[]>(() => {
     const semantic = live.modelSnapshot.regionIds.map((regionId) => {
@@ -6074,16 +6052,12 @@ function ArtifactStudioEditor({
         <div className="relative z-dropdown h-0 shrink-0">
           <DismissibleArtifactNotice
             artifactId={artifact._id}
-            identity={`${liveConflict.regionId ?? ""}:${liveConflict.message}`}
+            identity={liveConflict.message}
             role="alert"
             className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
           >
             <span className="min-w-0 flex-1">
               {liveConflict.message}
-              {liveConflictLabel ? ` · ${liveConflictLabel}` : ""}
-              {liveConflict.queuePosition
-                ? ` · Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
-                : ""}
             </span>
             <button
               type="button"

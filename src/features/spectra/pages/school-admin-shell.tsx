@@ -636,9 +636,7 @@ export function SchoolAdminShell() {
         return { result };
       } catch (nextError) {
         toast.error(
-          humanizePublicFailure(
-            nextError instanceof Error ? nextError.message : "Action failed.",
-          ),
+          humanizePublicFailure(nextError ?? "Action failed."),
         );
         return null;
       } finally {

@@ -10,8 +10,6 @@ import {
 import {
   allowSpectraProviderFallbacks,
   getSpectraProviderRouting,
-  getSpectraVisionModelId,
-  getSpectraVisionProviderRouting,
 } from "../ai/model-config";
 
 describe("OpenRouter public response streaming", () => {
@@ -19,12 +17,6 @@ describe("OpenRouter public response streaming", () => {
     delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
     expect(allowSpectraProviderFallbacks()).toBe(true);
     expect(getSpectraProviderRouting("primary")).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: false });
-    expect(getSpectraVisionProviderRouting()).toEqual({
-      order: ["Xiaomi"],
-      only: ["Xiaomi"],
-      allow_fallbacks: false,
-    });
-    expect(getSpectraVisionModelId()).toBe("xiaomi/mimo-v2.5");
     expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: true, require_parameters: true });
   });
   it("decodes only the public finalResponse JSON string", () => {

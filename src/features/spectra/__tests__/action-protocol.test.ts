@@ -29,7 +29,6 @@ import {
   verifyCitation,
 } from "@/features/spectra/sources/records";
 import {
-  getSpectraAttachmentStrategy,
   getSpectraModelProfile,
   SPECTRA_DEFAULT_MODEL_ID,
 } from "@/features/spectra/ai/model-config";
@@ -556,17 +555,14 @@ describe("AI Action Protocol V2", () => {
     expect(source.canonicalUrl).toBe("https://example.edu/report");
   });
 
-  it("configures Luna native image/PDF input and keeps the visual prepass dormant", () => {
+  it("configures Luna native image/PDF input", () => {
     const previousModel = process.env.SPECTRA_MODEL_ID;
-    const previousStrategy = process.env.SPECTRA_ATTACHMENT_STRATEGY;
     delete process.env.SPECTRA_MODEL_ID;
-    delete process.env.SPECTRA_ATTACHMENT_STRATEGY;
     expect(getSpectraModelProfile()).toMatchObject({
       route: SPECTRA_DEFAULT_MODEL_ID,
       reasoningProfile: "xhigh",
       input: { image: true, pdf: true },
     });
-    expect(getSpectraAttachmentStrategy()).toBe("native");
     const content = nativeOpenRouterAttachmentContent("Inspect", [
       {
         name: "image.png",
@@ -588,13 +584,8 @@ describe("AI Action Protocol V2", () => {
       "image_url",
       "file",
     ]);
-    process.env.SPECTRA_ATTACHMENT_STRATEGY = "legacy_visual_prepass";
-    expect(getSpectraAttachmentStrategy()).toBe("legacy_visual_prepass");
     if (previousModel === undefined) delete process.env.SPECTRA_MODEL_ID;
     else process.env.SPECTRA_MODEL_ID = previousModel;
-    if (previousStrategy === undefined)
-      delete process.env.SPECTRA_ATTACHMENT_STRATEGY;
-    else process.env.SPECTRA_ATTACHMENT_STRATEGY = previousStrategy;
   });
 
   it("keeps internal durable jobs out of normal Live Dock tabs and preserves run history compatibility", () => {

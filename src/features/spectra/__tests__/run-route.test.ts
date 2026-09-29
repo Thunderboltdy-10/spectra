@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type { StructuredLogger } from "@/lib/logging";
 import { createHash, createHmac } from "node:crypto";
 import type { AiBeforeCommit, PreparedCanonicalAiUpdate } from "../ai/admitted-ai-update";
 import type { NativeMaterializeResult } from "../ai/native-ai-promotion";
@@ -672,6 +673,18 @@ describe("Spectra run route", () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({
       model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: "Hello!" } }],
     }), { status: 200 }));
+    const { convexQuery } = await import("@/lib/convex-server");
+    const write = convexMutation.getMockImplementation()!;
+    let contextReadDuringStatusWrite = false;
+    convexMutation.mockImplementation(async (...args: Parameters<typeof write>) => {
+      const [name, input] = args;
+      if (String(name).includes("spectraRuns:updateStatus") && (input as { phase?: string }).phase === "reading") {
+        const readsBefore = vi.mocked(convexQuery).mock.calls.length;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        contextReadDuringStatusWrite = vi.mocked(convexQuery).mock.calls.length > readsBefore;
+      }
+      return write(...args);
+    });
     const route = await import("@/app/api/spectra/run/route");
     await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "hi" }),
@@ -683,6 +696,35 @@ describe("Spectra run route", () => {
     // claimExecution already marks the run running; a separate "planning"
     // write replaced a moment later by "reading" only delayed the first token.
     expect(statusWritesBefore).toEqual(["reading", "retrieving"]);
+    // The context is read while the first status write is in flight.
+    expect(contextReadDuringStatusWrite).toBe(true);
+  });
+
+  it("reads a focused edit's live content alongside its orientation, not after it", async () => {
+    const { fetchMock, convexQuery } = setup({});
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI",
+      choices: [{ finish_reason: "stop", message: { content: "Here is a clearer summary to consider." } }],
+    }), { status: 200 }));
+    const answer = convexQuery.getMockImplementation()!;
+    let contentReadStartedDuringOrientation = false;
+    convexQuery.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name.includes("spectraContext:getArtifact")) {
+        // Hold the orientation read open briefly; a serial rebuild cannot
+        // start reading content until it finishes.
+        for (let wait = 0; wait < 5 && !contentReadStartedDuringOrientation; wait += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          contentReadStartedDuringOrientation = convexQuery.mock.calls.some(([called]) => called === "spectraArtifacts:get");
+        }
+      }
+      return answer(name, args);
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "artifact", workspaceId: "workspace-real",
+        artifactId: "artifact-real", prompt: "Rewrite this deck's summary to be clearer." }),
+    }))).text();
+    expect(contentReadStartedDuringOrientation).toBe(true);
   });
 
   it("streams an answer while it is written and stores it in few durable rows", async () => {
@@ -714,6 +756,54 @@ describe("Spectra run route", () => {
     expect(persisted[0]?.payload).toMatchObject({ content: "The Moon reflects sunlight.", runItem: { text: "The Moon reflects sunlight." } });
   });
 
+  it("never streams an internal id, even one split across chunks", async () => {
+    const { fetchMock, convexMutation } = setup({});
+    const id = "k17abcdefghijklmnopqrstuvwxyz012";
+    fetchMock.mockImplementation(async () => new Response(new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const piece of ["Your notes ", `(id: ${id.slice(0, 12)}`, `${id.slice(12)}) `, "are ready."])
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ delta: { content: piece } }] })}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Are my notes ready?" }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
+    const streamed = events.filter((event) => event.type === "text_delta" || event.type === "text_replace");
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(streamed.some((event) => event.content?.includes("k17"))).toBe(false);
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe("Your notes are ready.");
+  });
+
+  it.each([
+    ["rewrites the answer", "Here is a tighter summary you can paste in.", "Here is a tighter summary you can paste in."],
+    ["keeps claiming", "I've updated your notes.", "I've updated your notes.\n\n_Nothing was saved from this reply._"],
+  ])("never lets a reply that saved nothing claim a save (model %s)", async (_case, secondReply, saved) => {
+    const { fetchMock, convexMutation } = setup({});
+    const replies = ["I've updated your notes with a tighter summary.", secondReply];
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI",
+      choices: [{ finish_reason: "stop", message: { content: replies.shift() ?? secondReply } }],
+    }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Tighten my notes summary." }),
+    }))).text();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const correction = (JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body)) as {
+      messages: Array<{ role: string; content: unknown }> }).messages.at(-1);
+    expect(correction).toMatchObject({ role: "system", content: expect.stringContaining("no change was staged or saved") });
+    const assistant = convexMutation.mock.calls.find(([name, args]) =>
+      String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect((assistant?.[1] as { content?: string }).content).toBe(saved);
+  });
+
   it("takes back a streamed answer cut off by a provider error before the retry streams", async () => {
     const { fetchMock, convexMutation } = setup({});
     const sse = (records: unknown[]) => new Response(new ReadableStream({
@@ -739,8 +829,9 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; content?: string });
     const text = events.filter((event) => event.type === "text_delta" || event.type === "text_replace")
       .map((event) => `${event.type}:${event.content}`);
+    // The word still being written when the stream broke is never shown.
     expect(text.slice(0, 3)).toEqual([
-      "text_delta:The Moon glows because", "text_replace:", "text_delta:The Moon reflects sunlight.",
+      "text_delta:The Moon glows ", "text_replace:", "text_delta:The Moon reflects ",
     ]);
     const assistant = convexMutation.mock.calls.find(([name, args]) =>
       String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
@@ -1264,9 +1355,11 @@ describe("Spectra run route", () => {
   });
 
   it("creates one six-card deck and does not emit unrelated placement removal", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
+    // The route's own module instance, loaded after the per-test module reset.
+    const logging = await import("@/lib/logging");
+    const info = vi.spyOn(logging.StructuredLogger.prototype, "info").mockImplementation(() => undefined);
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
 
@@ -1310,7 +1403,7 @@ describe("Spectra run route", () => {
     const appendIdx = convexMutation.mock.calls.findIndex(([name, args]) => String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
     expect(completedIdx).toBeGreaterThan(-1);
     expect(appendIdx).toBeGreaterThan(completedIdx);
-    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+    expect(info.mock.calls.filter(([label]) => label === "spectra.agent-loop").map(([, entry]) => entry)).toEqual([
       { runId: "run-real", stage: "intake", status: "entered" },
       { runId: "run-real", stage: "plan", status: "entered" },
       { runId: "run-real", stage: "resolve", status: "entered" },
@@ -1319,6 +1412,13 @@ describe("Spectra run route", () => {
       { runId: "run-real", stage: "verify", status: "entered" },
       { runId: "run-real", stage: "report", status: "entered" },
     ]);
+    // Every run-loop line, including the provider turns logged deep in
+    // planning, carries the run and the request it belongs to.
+    const turnLogs = info.mock.calls.flatMap(([label], index) =>
+      label === "spectra.agent.turn" ? [info.mock.contexts[index] as StructuredLogger] : []);
+    expect(turnLogs.length).toBeGreaterThan(0);
+    for (const logger of turnLogs)
+      expect(logger.context).toMatchObject({ runId: "run-real", executionId: "execution-1", requestId: expect.any(String) });
   });
 
   it("reads focused content on demand before submitting a mutation plan", async () => {
@@ -2152,9 +2252,11 @@ describe("Spectra run route", () => {
   });
 
   it("applies an explicitly supplied focused deck hint without a model call or provisional shell", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
+    // The route's own module instance, loaded after the per-test module reset.
+    const logging = await import("@/lib/logging");
+    const info = vi.spyOn(logging.StructuredLogger.prototype, "info").mockImplementation(() => undefined);
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
       body: JSON.stringify({
@@ -2172,7 +2274,7 @@ describe("Spectra run route", () => {
     const cards = (getSavedArtifact().content as { cards?: Array<{ hint?: string }> }).cards ?? [];
     expect(cards[2]?.hint).toBe("Krebs makes high-energy carriers and a little ATP.");
     expect(events.some((event) => event.type === "final")).toBe(true);
-    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+    expect(info.mock.calls.filter(([label]) => label === "spectra.agent-loop").map(([, entry]) => entry)).toEqual([
       { runId: "run-real", stage: "intake", status: "entered" },
       { runId: "run-real", stage: "plan", status: "entered" },
       { runId: "run-real", stage: "resolve", status: "entered" },

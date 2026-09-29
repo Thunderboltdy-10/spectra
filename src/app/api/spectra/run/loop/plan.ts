@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import type {
   NativeProgressInput,
   ParkedCandidate,
@@ -8,7 +9,7 @@ import type {
 import { rows, summarizeArtifact } from "./gather";
 import { authenticatedArtifactObservations } from "./discovery";
 import { executeThreadRead } from "./thread-read";
-import { planFromAgentCompletion } from "./completion";
+import { claimsUnsavedWork, planFromAgentCompletion } from "./completion";
 import { explicitMutationScopeViolation } from "./target-scope";
 import { boundedArtifactRead } from "@/features/spectra/ai/bounded-artifact-read";
 import {
@@ -165,7 +166,7 @@ function recordOpenRouterEvent(
     event,
     ...metadata,
   };
-  console.info(`[spectra.openrouter.${event}]`, metadata);
+  runLog().info(`spectra.openrouter.${event}`, metadata);
   const instanceId = process.env.SPECTRA_LOCAL_INSTANCE?.trim();
   if (!instanceId) return;
   const configuredPath = process.env.SPECTRA_OPENROUTER_LOG_PATH?.trim();
@@ -1916,14 +1917,36 @@ export function reconcileExplicitPlannerRequirements(
   return content;
 }
 
-export function sanitizeArtifactUserFacingContent(
-  value: unknown,
-  context: unknown,
-) {
+// Convex document ids: 31-37 lowercase letters and digits, always mixing the
+// two. English words, long code identifiers and hex digests (32 = md5 aside)
+// do not match, so prose and code keep their words.
+const OPAQUE_ID = /(?<![A-Za-z0-9_-])(?=[a-z0-9]*[0-9])(?=[a-z0-9]*[a-z])[a-z0-9]{31,37}(?![A-Za-z0-9_-])/g;
+const REMOVED_ID = "\u0000";
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^$(){}|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Builds the scrubber that keeps internal ids out of student-facing text:
+ * answers, titles, and every string inside proposed artifact content. It
+ * removes only the id and the wrapper that introduced it, "(id: …)", "id …"
+ * or "(…)". A string with no id comes back byte for byte, so code
+ * indentation, nested lists, empty parentheses and long words are never
+ * rewritten. Build it once per run: collecting the context's ids walks the
+ * whole context.
+ */
+export function createUserFacingSanitizer(context: unknown) {
   const ownedIds = new Set<string>();
   const collect = (candidate: unknown, key = "") => {
     if (typeof candidate === "string") {
-      if (/(?:^_?id$|Id$|Ids$|Refs$)/.test(key) && candidate.length >= 6)
+      // An id that is a plain word ("summary", "introduction") would delete
+      // that word from prose, so an id needs a digit, hyphen or underscore.
+      if (
+        /(?:^_?id$|Id$|Ids$|Refs$)/.test(key) &&
+        candidate.length >= 6 &&
+        /[0-9_-]/.test(candidate)
+      )
         ownedIds.add(candidate);
       return;
     }
@@ -1963,28 +1986,25 @@ export function sanitizeArtifactUserFacingContent(
       if (typeof id === "string") allowedSourceRefs.add(id);
     }
   }
-  const serializedContext = JSON.stringify(context);
-  for (const match of serializedContext.matchAll(
-    /"(?:_?id|artifactId|workspaceId|threadId|sourceId|nodeId)"\s*:\s*"([^"]{12,})"/g,
-  ))
-    if (match[1]) ownedIds.add(match[1]);
+  const ownedIdPattern = ownedIds.size
+    ? new RegExp(
+        `(?<![A-Za-z0-9_-])(?:${[...ownedIds].sort((left, right) => right.length - left.length).map(escapeRegExp).join("|")})(?![A-Za-z0-9_-])`,
+        "g",
+      )
+    : null;
+  const scrubText = (text: string) => {
+    let marked = ownedIdPattern ? text.replace(ownedIdPattern, REMOVED_ID) : text;
+    marked = marked.replace(OPAQUE_ID, REMOVED_ID);
+    if (!marked.includes(REMOVED_ID)) return text;
+    return marked
+      .replace(/[ \t]*\((?:[ \t]*id[ \t]*:?)?[ \t]*\u0000[ \t]*\)/gi, "")
+      .replace(/[ \t]*\bid[ \t]*:?[ \t]*\u0000/gi, "")
+      .replace(/[ \t]*\u0000/g, "");
+  };
   const clean = (candidate: unknown, key = ""): unknown => {
     if (typeof candidate === "string") {
       if (/(?:^_?id$|Id$|Ids$|Refs$)/.test(key)) return candidate;
-      let result = candidate;
-      for (const id of ownedIds)
-        result = result.replaceAll(`(${id})`, "").replaceAll(id, "");
-      // Convex ids are long opaque lowercase identifiers. They are valid in
-      // provenance fields, never in student-facing prose. This catches a
-      // provider echo even when a compact context projection renamed the
-      // source key before it reached this worker.
-      result = result.replace(/\(?\b[a-z0-9]{28,}\b\)?/gi, "");
-      return result
-        .replace(/\(\s*(?:id\s*:?)?\s*\)/gi, "")
-        .replace(/\bid\s*:\s*(?=[,.;]|$)/gi, "")
-        .replace(/\s+([,.;:])/g, "$1")
-        .replace(/ {2,}/g, " ")
-        .trim();
+      return scrubText(candidate);
     }
     if (Array.isArray(candidate)) {
       const cleaned = candidate.map((item) => clean(item, key));
@@ -2005,15 +2025,13 @@ export function sanitizeArtifactUserFacingContent(
       ),
     );
   };
-  return clean(value);
+  return (value: unknown) => clean(value);
 }
 
 export function sanitizeModelOperationUserFacingContent(
   operation: ModelOperation,
-  context: unknown,
+  clean: ReturnType<typeof createUserFacingSanitizer>,
 ) {
-  const clean = (value: unknown) =>
-    sanitizeArtifactUserFacingContent(value, context);
   const next = structuredClone(operation) as ModelOperation;
   if (next.type === "artifact.create") {
     next.input.title = String(clean(next.input.title));
@@ -3769,6 +3787,7 @@ export async function callModel(
     context && typeof context === "object" && !Array.isArray(context)
       ? (context as Record<string, unknown>)
       : {};
+  const userFacing = createUserFacingSanitizer(contextRecord);
   // Server-restored staged work of a request that paused for clarification.
   // Positions keep their indexes (and @created:N identities) while revised.
   const restoredClarification = restoredClarificationFrom(contextRecord.stagedContinuation);
@@ -4239,7 +4258,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           prompt,
           contextRecord.focusedArtifact,
         ),
-        contextRecord,
+        userFacing,
       ),
       mergedResearchEvidence(),
     );
@@ -4320,17 +4339,17 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     const cleanText = (value: string | null | undefined) =>
       value == null
         ? value
-        : String(sanitizeArtifactUserFacingContent(value, contextRecord));
+        : String(userFacing(value));
     parsed = parseSpectraPlan({
       ...parsed,
       conversationTitle: cleanText(parsed.conversationTitle),
       conversationSummary: cleanText(parsed.conversationSummary),
       choices: parsed.choices
-        ? sanitizeArtifactUserFacingContent(parsed.choices, contextRecord)
+        ? userFacing(parsed.choices)
         : null,
       operations: parsed.operations.map((operation) =>
         prepareOperationForQuality(
-          sanitizeModelOperationUserFacingContent(operation, contextRecord),
+          sanitizeModelOperationUserFacingContent(operation, userFacing),
           mergedResearchEvidence(),
         ),
       ),
@@ -4398,10 +4417,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
       typeof parsed.title === "string" && parsed.title.trim()
         ? parsed.title.trim()
         : `New ${blueprintKey.replaceAll("_", " ")}`;
-    const safeContent = sanitizeArtifactUserFacingContent(
-      parsed.content,
-      contextRecord,
-    );
+    const safeContent = userFacing(parsed.content);
     const preparedContent =
       blueprintKey === "planner_task"
         ? reconcileExplicitPlannerRequirements(safeContent, prompt)
@@ -4492,19 +4508,63 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     onPublicText?.(content, "replace");
     clearStreamedAnswer();
   };
-  const streamAnswerFor = (request: number) => (delta: string) => {
-    if (acceptedAgentOperations.length || committedApplicationSummaries.length) {
-      clearStreamedAnswer();
+  // The model's raw prose for the current answer turn. What streams is its
+  // scrubbed form, and the word still being written is held back until it
+  // ends: an internal id is only recognizable once it is complete.
+  // Scrubbing never crosses a line break, so finished lines are scrubbed once.
+  let rawAnswerText = "";
+  let scrubbedLinesRawLength = 0;
+  let scrubbedLines = "";
+  const publishScrubbedAnswer = (settledEnd: number) => {
+    const settled = rawAnswerText.slice(0, settledEnd);
+    const linesEnd = settled.lastIndexOf("\n") + 1;
+    if (linesEnd > scrubbedLinesRawLength) {
+      scrubbedLines += String(userFacing(settled.slice(scrubbedLinesRawLength, linesEnd)));
+      scrubbedLinesRawLength = linesEnd;
+    }
+    const visible = scrubbedLines + String(userFacing(settled.slice(linesEnd)));
+    if (visible === streamedAnswerText) return;
+    if (visible.startsWith(streamedAnswerText)) {
+      const next = visible.slice(streamedAnswerText.length);
+      emitPublic(next);
+      streamedAnswerText = visible;
+      onAnswerText?.(next, "delta");
       return;
     }
-    // A later turn's prose replaces an earlier turn's preamble.
-    if (answerRequest !== request) {
-      if (emittedPublicText) replacePublic("");
-      answerRequest = request;
-    }
-    emitPublic(delta);
-    streamedAnswerText += delta;
-    onAnswerText?.(delta, "delta");
+    // Removing an id can also remove text already shown, such as the space
+    // before "(id: …)". Send the whole scrubbed answer again.
+    emittedPublicText = visible;
+    streamedAnswerText = visible;
+    onPublicText?.(visible, "replace");
+    onAnswerText?.(visible, "replace");
+  };
+  const answerIsStreamable = () =>
+    !acceptedAgentOperations.length && !committedApplicationSummaries.length;
+  const streamAnswerFor = (request: number) => {
+    const stream = (delta: string) => {
+      if (!answerIsStreamable()) {
+        clearStreamedAnswer();
+        return;
+      }
+      // A later turn's prose replaces an earlier turn's preamble.
+      if (answerRequest !== request) {
+        if (emittedPublicText) replacePublic("");
+        answerRequest = request;
+        rawAnswerText = "";
+        scrubbedLinesRawLength = 0;
+        scrubbedLines = "";
+      }
+      rawAnswerText += delta;
+      let settledEnd = rawAnswerText.length;
+      while (settledEnd > 0 && !/\s/.test(rawAnswerText[settledEnd - 1]!)) settledEnd -= 1;
+      publishScrubbedAnswer(settledEnd);
+    };
+    // The turn finished streaming, so its last word is complete too.
+    const flush = () => {
+      if (answerRequest === request && answerIsStreamable())
+        publishScrubbedAnswer(rawAnswerText.length);
+    };
+    return Object.assign(stream, { flush });
   };
   let result: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
   let plan: SpectraPlan | undefined;
@@ -4732,12 +4792,27 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     if (!agentResult.terminalTool && ordinaryAgent) {
       // Prose is never parsed as executable JSON. Only operations accepted
       // through typed tools can enter the durable graph on this path.
-      latestPlanText = agentResult.text;
-      const completion = planFromAgentCompletion(agentResult.text, stagedGraph());
+      // An answer that still ended at the output limit after continuing says
+      // so instead of reading as complete.
+      const notes = [
+        ...(agentResult.truncated
+          ? ["_This answer reached the length limit and stops here. Ask me to continue for the rest._"]
+          : []),
+        // Still claiming saved work after its one correction turn: the reply
+        // must not read as a receipt for changes that do not exist.
+        ...(answerIsStreamable() && claimsUnsavedWork(agentResult.text)
+          ? ["_Nothing was saved from this reply._"]
+          : []),
+      ];
+      const answerText = notes.length
+        ? [agentResult.text.trimEnd(), ...notes].join("\n\n")
+        : agentResult.text;
+      latestPlanText = answerText;
+      const completion = planFromAgentCompletion(answerText, stagedGraph());
       return {
         plan: parseAndCheckPlan(JSON.stringify(completion)),
         result: {
-          text: agentResult.text,
+          text: answerText,
           model: agentResult.model,
           provider: agentResult.provider,
           usage: agentResult.usage,
@@ -4953,6 +5028,14 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           }]
         : messages,
       budget: budgetForAgentPass(requestMode, agentRuntimeBudget),
+      // A reply that says it saved, created or updated something while no
+      // operation was staged or committed gets one turn to do the work with
+      // tools or to answer without the claim.
+      reviewAnswer: ordinaryAgent
+        ? (text) => answerIsStreamable() && claimsUnsavedWork(text)
+          ? "Your reply says something was saved, created or updated, but no change was staged or saved in this run: no write tool was called. If the request needs a change, make it now with the tools. Otherwise give the complete answer again without saying anything was saved, created or updated."
+          : undefined
+        : undefined,
       // Survives context compaction: identities of staged (unsaved) work and
       // actions this attempt already committed. Typed payloads stay in memory.
       taskState: () => acceptedAgentOperations.length || committedApplicationSummaries.length
@@ -5323,7 +5406,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         }
         return toolResult;
       },
-      requestTurn: async (messages, turn) => {
+      requestTurn: async (messages, turn, continuesAnswer) => {
         const startedAt = Date.now();
         response = await request(
           providerRouting,
@@ -5344,11 +5427,13 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             `Spectra model provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`,
           );
         }
-        return readOpenRouterAgentTurn(
+        const answerStream = onAnswerText && ordinaryAgent
+          ? // A continuation extends the visible answer instead of replacing it.
+            streamAnswerFor(continuesAnswer ? agentTurnRequests : ++agentTurnRequests)
+          : undefined;
+        const agentTurn = await readOpenRouterAgentTurn(
           response,
-          onAnswerText && ordinaryAgent
-            ? streamAnswerFor(++agentTurnRequests)
-            : undefined,
+          answerStream,
           onReasoningText,
           (call) => {
             if (
@@ -5362,9 +5447,11 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           providerIdleTimeoutMs,
           providerLabel,
         );
+        answerStream?.flush();
+        return agentTurn;
       },
       onTurn: (turn, index) => {
-        console.info("[spectra.agent.turn]", {
+        runLog().info("spectra.agent.turn", {
           index,
           finishReason: turn.finishReason,
           tools: turn.toolCalls.map((call) => call.name),
@@ -5402,7 +5489,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
       if (emittedPublicText) replacePublic("");
       emittedOperationCount = 0;
       emittedProgressCount = 0;
-      console.warn("[spectra.openrouter.repair_retry]", {
+      runLog().warn("spectra.openrouter.repair_retry", {
         model: baseBody.model,
         error: publicError(primaryFailure),
         issues:
@@ -5443,7 +5530,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             repairMessages,
             "repair",
           );
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "focused_repair_headers",
             elapsedMs: Date.now() - repairStartedAt,
             status: response.status,
@@ -5457,7 +5544,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             raw: result?.text ?? latestPlanText,
             error: primaryFailure,
           });
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "repair_headers",
             elapsedMs: Date.now() - repairStartedAt,
             status: repairResponse.status,
@@ -5507,7 +5594,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     if (emittedPublicText) replacePublic("");
     emittedOperationCount = 0;
     emittedProgressCount = 0;
-    console.warn("[spectra.openrouter.encouragement_retry]", {
+    runLog().warn("spectra.openrouter.encouragement_retry", {
       model: baseBody.model,
       error: publicError(primaryFailure),
       directFocusedAction,
@@ -5538,7 +5625,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           encouragementMessages,
           "encouragement",
         );
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "encouragement_headers",
           elapsedMs: Date.now() - encouragementStartedAt,
           status: response.status,
@@ -5557,7 +5644,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             error: primaryFailure,
           },
         );
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "encouragement_headers",
           elapsedMs: Date.now() - encouragementStartedAt,
           status: encouragementResponse.status,
@@ -5622,7 +5709,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     emittedOperationCount = 0;
     emittedProgressCount = 0;
     const fallbackRouting = getSpectraProviderRouting("fallback");
-    console.warn("[spectra.openrouter.fallback]", {
+    runLog().warn("spectra.openrouter.fallback", {
       model: baseBody.model,
       primaryStatus: response.status,
       primaryError: publicError(primaryFailure),
@@ -5656,7 +5743,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         result = fallbackPass.result;
         fallbackResult = fallbackPass.result;
         fallbackFailure = undefined;
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "fallback_agent_complete",
           provider: providerName,
           elapsedMs: Date.now() - fallbackStartedAt,
@@ -5704,7 +5791,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             undefined,
             getSpectraFallbackModelId(),
           );
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "fallback_repair_headers",
             provider: providerName,
             status: fallbackRepairResponse.status,
@@ -5759,7 +5846,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           plan = recoveryPass.plan;
           result = recoveryPass.result;
           fallbackFailure = undefined;
-          console.info("[spectra.openrouter.primary_recovery]", {
+          runLog().info("spectra.openrouter.primary_recovery", {
             delayMs,
             model: recoveryPass.result.model,
             provider: recoveryPass.result.provider,
@@ -5914,7 +6001,7 @@ export async function callParallelCreationWorkers(
     finalResponse: `Created ${titles.join(", ")}.`,
   });
   assertRequestedArtifactContent(plan.operations, prompt);
-  console.info("[spectra.parallel_workers.complete]", {
+  runLog().info("spectra.parallel_workers.complete", {
     workerCount: results.length,
     elapsedMs: Date.now() - startedAt,
     models: [...new Set(results.map((result) => result.model))],
@@ -6219,7 +6306,7 @@ ${prompt}`;
   });
   assertRequestedArtifactContent(plan.operations, prompt);
   callbacks.onPublicText?.(plan.finalResponse, "replace");
-  console.info("[spectra.task_graph.complete]", {
+  runLog().info("spectra.task_graph.complete", {
     creationWorkers: creations.length,
     coordinationOperations: coordinationResult.plan.operations.length,
     elapsedMs: Date.now() - startedAt,

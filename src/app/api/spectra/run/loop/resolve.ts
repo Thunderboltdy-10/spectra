@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import { buildContext } from "./gather";
 import type { AuthenticatedPlacement } from "./discovery";
 import { provisionalSingleCreation } from "./intake";
@@ -1776,8 +1777,7 @@ export function resolveAndValidatePlan(
   resolved = narrateResolvedTargets(resolved, targetResolutions);
   assertRequestedArtifactMutation(resolved.operations, prompt);
   assertPresentationLayoutContract(resolved.operations, prompt);
-  console.info(
-    `[spectra.plan.summary] ${JSON.stringify({
+  runLog().info("spectra.plan.summary", {
       intent: resolved.intent,
       operations: resolved.operations.map((operation) => ({
         type: operation.type,
@@ -1795,8 +1795,7 @@ export function resolveAndValidatePlan(
             ? operation.input.placement
             : undefined,
       })),
-    })}`,
-  );
+  });
   try {
     return {
       plan: validatePlanAgainstIntent(resolved, ownedReferences(context)),
@@ -1804,8 +1803,7 @@ export function resolveAndValidatePlan(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    console.error(
-      `[spectra.plan.resolve_validate] ${JSON.stringify({
+    runLog().warn("spectra.plan.resolve_validate", {
         promptPreview: prompt.slice(0, 160),
         decision: resolved.decision,
         intent: resolved.intent,
@@ -1823,8 +1821,7 @@ export function resolveAndValidatePlan(
         })),
         message: message.slice(0, 400),
         publicError: formatPlanApplicationPublicError(error),
-      })}`,
-    );
+    });
     // Quietly collapse duplicate same-type creates from a singular request
     // instead of exposing an intent mismatch after shells already appeared.
     if (/more visible artifacts/i.test(message)) {
@@ -1868,7 +1865,7 @@ export function resolveAndValidatePlan(
             ),
           ],
         });
-        console.warn("[spectra.plan.duplicate_create_trimmed]", {
+        runLog().warn("spectra.plan.duplicate_create_trimmed", {
           blueprintKey: requested.blueprintKey,
           dropped: creates.length - 1,
         });
@@ -1907,7 +1904,7 @@ export function resolveAndValidatePlan(
             (operation) => operation.type === "artifact.create",
           )
         ) {
-          console.warn("[spectra.plan.update_promoted_to_create]", {
+          runLog().warn("spectra.plan.update_promoted_to_create", {
             blueprintKey: requested.blueprintKey,
           });
           return {
@@ -1938,7 +1935,7 @@ export function resolveAndValidatePlan(
               workspaceId,
           },
         });
-        console.warn("[spectra.plan.intent_aligned_to_create]", {
+        runLog().warn("spectra.plan.intent_aligned_to_create", {
           blueprintKey: requested.blueprintKey,
         });
         return {
@@ -1968,7 +1965,7 @@ export function resolveAndValidatePlan(
               workspaceId,
           },
         });
-        console.warn("[spectra.plan.intent_aligned_to_authored_create]", {
+        runLog().warn("spectra.plan.intent_aligned_to_authored_create", {
           blueprintKey,
         });
         return {

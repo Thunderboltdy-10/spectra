@@ -70,23 +70,50 @@ function usageTokenCounts(usage: unknown) {
   };
 }
 
+/**
+ * Meters a run's cumulative usage for its current execution. Usage is reported
+ * several times per execution (the heartbeat snapshot, Stop, stale-lease
+ * recovery, the worker's own final status), so only the growth over
+ * `meteredUsage` is recorded. The first report keeps the execution-keyed
+ * idempotency prefix; later growth is keyed by the total it starts from, so a
+ * retried mutation never meters the same growth twice.
+ */
 async function recordRunModelMeters(
   ctx: MutationCtx,
   run: Doc<"spectraAiRuns">,
   usage: unknown,
   occurredAt: number,
 ) {
+  if (!run.executionId) return;
   const { inputTokens, outputTokens } = usageTokenCounts(usage);
+  const metered =
+    run.meteredUsage?.executionId === run.executionId
+      ? run.meteredUsage
+      : { executionId: run.executionId, inputTokens: 0, outputTokens: 0 };
+  const inputGrowth = Math.max(0, inputTokens - metered.inputTokens);
+  const outputGrowth = Math.max(0, outputTokens - metered.outputTokens);
+  if (inputGrowth === 0 && outputGrowth === 0) return;
+  const executionPrefix = `spectra-run:${run._id}:${run.executionId}`;
   await recordModelTokenUsage(ctx, {
     schoolId: run.schoolId,
     accountId: run.ownerAccountId,
-    inputTokens,
-    outputTokens,
+    inputTokens: inputGrowth,
+    outputTokens: outputGrowth,
     sourceType: "spectra_run",
     sourceId: String(run._id),
-    idempotencyPrefix: `spectra-run:${run._id}:${run.executionId}`,
+    idempotencyPrefix:
+      metered.inputTokens === 0 && metered.outputTokens === 0
+        ? executionPrefix
+        : `${executionPrefix}:from:${metered.inputTokens}:${metered.outputTokens}`,
     dimensions: { surface: run.sourceSurface, status: run.status },
     occurredAt,
+  });
+  await ctx.db.patch(run._id, {
+    meteredUsage: {
+      executionId: run.executionId,
+      inputTokens: Math.max(inputTokens, metered.inputTokens),
+      outputTokens: Math.max(outputTokens, metered.outputTokens),
+    },
   });
 }
 
@@ -1305,6 +1332,13 @@ export const updateStatus = mutation({
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
+    // Tokens were spent whether or not this transition still applies. A
+    // worker that finishes after Stop (which released its lease) is exactly
+    // the one holding the final usage figure.
+    const reportedUsage =
+      args.usage ?? (isTerminalRunStatus(args.status) ? run.usage : undefined);
+    if (reportedUsage)
+      await recordRunModelMeters(ctx, run, reportedUsage, Date.now());
     if (args.workerId && run.workerId !== args.workerId)
       return { ignored: true, status: run.status };
     // A confirmation event can reach the browser just before the durable
@@ -1366,8 +1400,6 @@ export const updateStatus = mutation({
         args.usage ?? run.usage,
         now,
       );
-    if (terminal)
-      await recordRunModelMeters(ctx, run, args.usage ?? run.usage, now);
     const provenanceRecord = args.provenance && typeof args.provenance === "object" && !Array.isArray(args.provenance)
       ? (args.provenance as { artifactIds?: unknown })
       : undefined;
@@ -1718,6 +1750,10 @@ export const heartbeat = mutation({
     executionId: v.string(),
     workerId: v.string(),
     awaitedOperationId: v.optional(v.id("spectraOperations")),
+    // The worker's cumulative usage so far. Stored with each lease renewal so
+    // Stop and stale-lease recovery can meter a run whose worker never
+    // reports a final status.
+    usage: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
@@ -1736,6 +1772,7 @@ export const heartbeat = mutation({
     await ctx.db.patch(args.runId, {
       heartbeatAt: now,
       leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
+      ...(args.usage ? { usage: args.usage } : {}),
     });
     return { alive: true, ...(observation ? { observation } : {}) };
   },
@@ -2126,6 +2163,7 @@ export const reconcileStaleRuns = internalMutation({
         run.selectedAgentVersionId
       )
         await settleAgentInvocation(ctx, run, "failed", run.usage, now);
+      await recordRunModelMeters(ctx, run, run.usage, now);
       await ctx.db.patch(run._id, {
         status: "failed",
         phase: recovery.recoveryState,
@@ -2603,6 +2641,7 @@ export const rejectConfirmation = mutation({
       run.selectedAgentVersionId
     )
       await settleAgentInvocation(ctx, run, "cancelled", run.usage, now);
+    await recordRunModelMeters(ctx, run, run.usage, now);
     await Promise.all(
       currentOperations
         .filter((operation) => operation.status === "proposed")
@@ -2693,6 +2732,7 @@ export const reviseConfirmation = mutation({
       run.selectedAgentVersionId
     )
       await settleAgentInvocation(ctx, run, "cancelled", run.usage, now);
+    await recordRunModelMeters(ctx, run, run.usage, now);
     await Promise.all(
       current
         .filter((operation) => operation.status === "proposed")
@@ -2800,6 +2840,7 @@ export const stopRun = mutation({
       run.selectedAgentVersionId
     )
       await settleAgentInvocation(ctx, run, "cancelled", run.usage, now);
+    await recordRunModelMeters(ctx, run, run.usage, now);
     await Promise.all(
       currentOperations
         .filter(

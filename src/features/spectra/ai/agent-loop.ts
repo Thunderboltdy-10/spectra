@@ -26,6 +26,20 @@ export type SpectraAgentLoopResult = {
   provider?: string;
   usage?: OpenRouterUsage;
   turns: number;
+  /** The answer still ended at the output limit after every continuation. */
+  truncated?: boolean;
+};
+
+/** Continuation turns allowed for one answer that hits the output limit. */
+const MAX_LENGTH_CONTINUATIONS = 3;
+
+const TRUNCATED_CALL_RESULT = {
+  status: 1,
+  ok: false,
+  code: "output_truncated",
+  retryable: true,
+  message:
+    "Your reply reached the output limit and this call was cut off before its arguments finished, so it was not executed. Send it again; split very large content across several smaller calls.",
 };
 
 /** A semantic stall has already used its local recovery turns, not a provider outage. */
@@ -98,6 +112,8 @@ export async function runSpectraAgentLoop(input: {
   requestTurn: (
     messages: SpectraAgentMessage[],
     turn: number,
+    /** True when this turn continues an answer cut off at the output limit. */
+    continuesAnswer: boolean,
   ) => Promise<OpenRouterAgentTurn>;
   executeTool: (call: OpenRouterAgentToolCall) => Promise<unknown>;
   isParallelSafeTool?: (call: OpenRouterAgentToolCall) => boolean;
@@ -111,13 +127,18 @@ export async function runSpectraAgentLoop(input: {
   onTurn?: (turn: OpenRouterAgentTurn, index: number) => void;
   /** Exact harness task state (staged graph, receipts) kept across compaction. */
   taskState?: () => string | undefined;
+  /**
+   * Checks a complete final answer once. A returned correction is sent back
+   * to the model, which can still act with tools or rewrite the answer.
+   */
+  reviewAnswer?: (text: string) => string | undefined;
   budget?: {
     maxTurns?: number;
     maxToolCalls?: number;
     maxElapsedMs?: number;
     maxTotalTokens?: number;
   };
-}) {
+}): Promise<SpectraAgentLoopResult> {
   const messages = [...input.messages];
   const repeatedCalls = new Map<string, number>();
   const savedResults = new Map<string, unknown>();
@@ -136,6 +157,10 @@ export async function runSpectraAgentLoop(input: {
   let finalizationNudgeAdded = false;
   let finalizationTurns = 0;
   let lastFinalizationText = "";
+  // Prose from turns that ended at the output limit, awaiting continuation.
+  let answerPrefix = "";
+  let lengthContinuations = 0;
+  let answerReviewed = false;
   const startedAt = Date.now();
   const maxTurns = Math.max(4, Math.min(40, input.budget?.maxTurns ?? 24));
   const maxToolCalls = Math.max(
@@ -213,9 +238,11 @@ export async function runSpectraAgentLoop(input: {
     turns += 1;
     if (finalizationOnly) finalizationTurns += 1;
     if (knownPromptTokens + Math.ceil(appendedCharacters / 3.5) >= compactAtTokens) compact();
-    const turn = await input.requestTurn(messages, turns);
+    const turn = await input.requestTurn(messages, turns, answerPrefix.length > 0);
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (finalizationOnly) lastFinalizationText = turn.text;
+    const answerText = answerPrefix + turn.text;
+    answerPrefix = "";
+    if (finalizationOnly) lastFinalizationText = answerText;
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
     const turnPromptTokens = turn.usage?.promptTokens;
@@ -237,7 +264,14 @@ export async function runSpectraAgentLoop(input: {
     model = turn.model ?? model;
     provider = turn.provider ?? provider;
 
-    const terminalCalls = turn.toolCalls.filter(input.isTerminalTool);
+    // finish_reason "length": the provider stopped at the output limit, so the
+    // last thing streamed is cut off. A cut-off tool call is never executed or
+    // treated as terminal; cut-off prose is continued rather than saved as a
+    // complete answer.
+    const truncatedCall = turn.finishReason === "length" ? turn.toolCalls.at(-1) : undefined;
+    const terminalCalls = turn.toolCalls.filter(
+      (call) => call !== truncatedCall && input.isTerminalTool(call),
+    );
     const terminal = terminalCalls[0];
     if (terminal && turn.toolCalls.length === 1)
       return {
@@ -250,13 +284,39 @@ export async function runSpectraAgentLoop(input: {
       } satisfies SpectraAgentLoopResult;
 
     if (turn.toolCalls.length === 0) {
-      if (stalled && !turn.text.trim()) throw new SpectraAgentNoProgressError();
+      const cutOff = turn.finishReason === "length";
+      if (cutOff && lengthContinuations < MAX_LENGTH_CONTINUATIONS) {
+        lengthContinuations += 1;
+        answerPrefix = answerText;
+        append(
+          { role: "assistant", content: turn.text },
+          {
+            role: "user",
+            content:
+              "Your reply was cut off by the output limit. Continue exactly where it stopped, without repeating or summarizing what you already wrote.",
+          },
+        );
+        continue;
+      }
+      if (stalled && !answerText.trim()) throw new SpectraAgentNoProgressError();
+      const correction = !cutOff && !finalizationOnly && !answerReviewed
+        ? input.reviewAnswer?.(answerText)
+        : undefined;
+      answerReviewed ||= !cutOff;
+      if (correction) {
+        append(
+          { role: "assistant", content: turn.text },
+          { role: "system", content: correction },
+        );
+        continue;
+      }
       return {
-        text: turn.text,
+        text: answerText,
         model,
         provider,
         usage,
         turns,
+        ...(cutOff ? { truncated: true } : {}),
       } satisfies SpectraAgentLoopResult;
     }
 
@@ -398,6 +458,7 @@ export async function runSpectraAgentLoop(input: {
         // a terminal call in the same turn. Feed the terminal call a
         // structured correction while still executing the non-terminal calls.
         // The next model turn can then use those results and finish cleanly.
+        if (call === truncatedCall) return Promise.resolve(TRUNCATED_CALL_RESULT);
         if (terminalCallIds.has(call.id)) return Promise.resolve(terminalCallError);
         if (terminalCalls.length && !input.isParallelSafeTool?.(call))
           return Promise.resolve(mixedMutationCallError);

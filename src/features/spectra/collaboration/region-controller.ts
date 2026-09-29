@@ -1,7 +1,5 @@
 "use client";
 
-import * as Y from "yjs";
-import { postSpectra } from "../data/api";
 import type { ArtifactCollaborationTransport } from "./types";
 
 export type RegionClaimResult = {
@@ -11,29 +9,8 @@ export type RegionClaimResult = {
   conflict: null | { claimId: string; actorKind: "human" | "ai"; regionId: string; leaseExpiresAt: number; queuePosition: number };
 };
 
-async function stateVectorHash(transport: ArtifactCollaborationTransport) {
-  const stateVector = Y.encodeStateVector(transport.document);
-  const bytes = new Uint8Array(stateVector.byteLength);
-  bytes.set(stateVector);
-  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer);
-  const binary = String.fromCharCode(...new Uint8Array(digest));
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
-
 export class ArtifactRegionController {
-  constructor(private readonly artifactId: string, private readonly transport: ArtifactCollaborationTransport, private readonly partitionKey = "root") {}
-
-  async acquire(regionId: string, overlapDomains: string[]) {
-    return postSpectra<RegionClaimResult>({
-      action: "acquireRegionClaim",
-      artifactId: this.artifactId,
-      partitionKey: this.partitionKey,
-      clientId: this.transport.clientId,
-      regionId,
-      overlapDomains,
-      baseStateVectorHash: await stateVectorHash(this.transport),
-    });
-  }
+  constructor(private readonly transport: ArtifactCollaborationTransport) {}
 
   async edit(
     regionId: string,

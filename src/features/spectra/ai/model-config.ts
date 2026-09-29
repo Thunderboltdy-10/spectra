@@ -1,14 +1,10 @@
 export const SPECTRA_DEFAULT_MODEL_ID = "openai/gpt-5.6";
 export const SPECTRA_DEFAULT_FALLBACK_MODEL_ID = "openai/gpt-5.6-luna";
 export const SPECTRA_DEFAULT_REASONING_PROFILE = "xhigh" as const;
-export const SPECTRA_DEFAULT_VISION_MODEL_ID = "xiaomi/mimo-v2.5";
 export const SPECTRA_PRIMARY_PROVIDER = "OpenAI" as const;
-export const SPECTRA_VISION_PROVIDER = "Xiaomi" as const;
 export const SPECTRA_FALLBACK_PROVIDERS = ["OpenAI"] as const;
 export const SPECTRA_BLOCKED_PROVIDERS = ["DigitalOcean"] as const;
 
-export type ModelAttachmentStrategy =
-  "native" | "legacy_visual_prepass" | "automatic";
 export type ModelProfile = {
   route: string;
   reasoningProfile: string;
@@ -70,20 +66,6 @@ export function getSpectraModelProfile(): ModelProfile {
   };
 }
 
-export function getSpectraAttachmentStrategy(): ModelAttachmentStrategy {
-  const value = process.env.SPECTRA_ATTACHMENT_STRATEGY?.trim();
-  return value === "legacy_visual_prepass" || value === "automatic"
-    ? value
-    : "native";
-}
-
-export function getSpectraVisionModelId() {
-  return modelIdFromEnvironment(
-    "SPECTRA_VISION_MODEL_ID",
-    SPECTRA_DEFAULT_VISION_MODEL_ID,
-  );
-}
-
 export function getSpectraProviderRouting(
   mode: "primary" | "fallback" = "primary",
 ) {
@@ -97,14 +79,6 @@ export function getSpectraProviderRouting(
   return {
     order: [SPECTRA_PRIMARY_PROVIDER],
     only: [SPECTRA_PRIMARY_PROVIDER],
-    allow_fallbacks: false,
-  } as const;
-}
-
-export function getSpectraVisionProviderRouting() {
-  return {
-    order: [SPECTRA_VISION_PROVIDER],
-    only: [SPECTRA_VISION_PROVIDER],
     allow_fallbacks: false,
   } as const;
 }

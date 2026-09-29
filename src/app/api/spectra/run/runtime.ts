@@ -29,11 +29,8 @@ import {
   summarizeArtifact,
 } from "./loop/gather";
 import {
-  addDerivedVisualAttachments,
   agentCanHandleLikelyMutation,
   assertSelectedAgentAllowsOperations,
-  attachmentNeedsVisualEvidence,
-  enrichImageAttachments,
   hasNonCreationMutationIntent,
   normalizeNativeProgress,
   parallelCreationContract,
@@ -86,10 +83,7 @@ import {
 import { verifyAcknowledgedUpdate, verifyCommittedOutcomes } from "./loop/verify";
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
-import {
-  getSpectraAttachmentStrategy,
-  getSpectraModelId,
-} from "@/features/spectra/ai/model-config";
+import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import {
   AiArtifactRegionConflictError,
   applyAiArtifactMutation,
@@ -120,6 +114,8 @@ import { RunStateMachine } from "@/features/spectra/runs/state";
 import type { RunProtocolState } from "@/features/spectra/runs/state";
 import { classifyRunAttemptAbort } from "@/features/spectra/ai/run-lifecycle";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
+import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-usage";
+import { runLog, withSpectraRequestLog, withSpectraRunLog } from "@/features/spectra/ai/run-log";
 import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./loop/ui-observation";
 import { handleUiObserverRequest, uiObserverSchema } from "./loop/ui-observer-request";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
@@ -212,7 +208,16 @@ function composeRestoredRequest(restored: RestoredClarification) {
   ].join("\n\n");
 }
 
-async function runAttempt(
+// Every provider call made while this attempt runs (repair and fallback
+// passes, parallel workers, research) lands in one usage ledger. Each status
+// write and heartbeat reports that cumulative total for metering.
+function runAttempt(...args: Parameters<typeof runAttemptInLedger>) {
+  const [{ runId, executionId }] = args;
+  return withRunUsageLedger(() =>
+    withSpectraRunLog({ runId, executionId }, () => runAttemptInLedger(...args)));
+}
+
+async function runAttemptInLedger(
   params: {
     actorClerkId: string;
     runId: string;
@@ -247,8 +252,7 @@ async function runAttempt(
   let phaseStartedAt = attemptStartedAt;
   const recordPhase = (phase: string) => {
     const now = Date.now();
-    console.info("[spectra.run.phase]", {
-      runId: params.runId,
+    runLog().info("spectra.run.phase", {
       phase,
       elapsedMs: now - phaseStartedAt,
       totalMs: now - attemptStartedAt,
@@ -257,7 +261,7 @@ async function runAttempt(
   };
   const loop = createAgentLoopExecution({
     runId: params.runId,
-    onTransition: (entry) => console.info("[spectra.agent-loop]", entry),
+    onTransition: (entry) => runLog().info("spectra.agent-loop", entry),
   });
   loop.enter("intake");
   await mutate("spectraRuns:claimExecution", {
@@ -301,11 +305,13 @@ async function runAttempt(
     : leaseController.signal;
   const heartbeat = setInterval(() => {
     const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    const usage = runUsageSnapshot();
     void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
       ...(awaitedOperationId ? { awaitedOperationId } : {}),
+      ...(usage ? { usage } : {}),
     })
       .then((result) => {
         if (!result.alive) { leaseController.abort(); cancelUiObservation(params.runId, params.executionId); }
@@ -489,7 +495,9 @@ async function runAttempt(
       advanceProtocolState("completed");
       return;
     }
-    await mutate("spectraRuns:updateStatus", {
+    // The status write and the context reads are independent; the write is
+    // awaited before the next status write so the phases land in order.
+    const readingStatusWrite = mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -499,6 +507,9 @@ async function runAttempt(
       resultSummary: "Reading the visible and selected work",
       resultActions: [],
     });
+    // Observed by the await below; a rejection must not surface earlier as
+    // an unhandled one while the context is read.
+    readingStatusWrite.catch(() => undefined);
     const earlyPendingByIndex = new Map<number, string>();
     const earlyPendingBlueprintByIndex = new Map<
       number,
@@ -612,6 +623,40 @@ async function runAttempt(
       : provisionalCreation
         ? [provisionalCreation]
         : [];
+    const contextBody = {
+        workspaceId: params.workspaceId,
+        scopeNodeId: params.scopeNodeId,
+        artifactId: params.artifactId,
+        threadId: params.threadId,
+        focusMode: params.focusMode,
+        selectedArtifactIds: params.selectedArtifactIds,
+        explicitContextObjects: params.explicitContextObjects,
+        currentView: params.currentView,
+        clarificationId: params.clarificationId,
+        choiceMessageId: params.choiceMessageId,
+        choiceKey: params.choiceKey,
+        clarificationExecutionId: params.clarificationExecutionId,
+        continuationRunId: params.continuationRunId,
+        batchSelections: params.batchSelections,
+        executionId: params.executionId,
+    };
+    // An explicit edit or direct use of the visible artifact is the demand for
+    // its current content; other requests keep identity-only orientation.
+    // Whether the prompt targets the visible artifact is known only from the
+    // orientation packet, so when the prompt could demand content, the
+    // hydrated context is read at the same time instead of after it.
+    const usesFocusedContent = promptDirectlyUsesFocusedContent(params.prompt);
+    const contextReads = Promise.all([
+      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal }),
+      (params.artifactId && signalsMutationIntent) || usesFocusedContent
+        ? buildContext(params.actorClerkId, contextBody, params.prompt, {
+            mode: "orientation", hydrateTargets: true, restoredGoal,
+          })
+        : null,
+    ]);
+    // Awaited once the creation shells are open; a failure must not surface
+    // as an unhandled rejection before then.
+    contextReads.catch(() => undefined);
     for (const [provisionalIndex, shell] of provisionalShells.entries()) {
       const provisionalTitle =
         shell.requestedTitle ?? `New ${shell.label.toLowerCase()}`;
@@ -660,36 +705,17 @@ async function runAttempt(
         },
       });
     }
-    const contextBody = {
-        workspaceId: params.workspaceId,
-        scopeNodeId: params.scopeNodeId,
-        artifactId: params.artifactId,
-        threadId: params.threadId,
-        focusMode: params.focusMode,
-        selectedArtifactIds: params.selectedArtifactIds,
-        explicitContextObjects: params.explicitContextObjects,
-        currentView: params.currentView,
-        clarificationId: params.clarificationId,
-        choiceMessageId: params.choiceMessageId,
-        choiceKey: params.choiceKey,
-        clarificationExecutionId: params.clarificationExecutionId,
-        continuationRunId: params.continuationRunId,
-        batchSelections: params.batchSelections,
-        executionId: params.executionId,
-    };
-    let context = await buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal });
+    const [orientationContext, hydratedContext] = await contextReads;
     const explicitlyTargetsFocusedArtifact =
-      promptExplicitlyTargetsFocusedArtifact(params.prompt, context.packet);
+      promptExplicitlyTargetsFocusedArtifact(params.prompt, orientationContext.packet);
     const signalsFocusedEdit =
       Boolean(params.artifactId) &&
       signalsMutationIntent &&
       explicitlyTargetsFocusedArtifact;
-    // An explicit edit or direct use of the visible artifact is the demand for
-    // its current content; other requests keep identity-only orientation.
-    if (explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || promptDirectlyUsesFocusedContent(params.prompt)))
-      context = await buildContext(params.actorClerkId, contextBody, params.prompt, {
-        mode: "orientation", hydrateTargets: true, restoredGoal,
-      });
+    let context =
+      hydratedContext && explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || usesFocusedContent)
+        ? hydratedContext
+        : orientationContext;
     const ordinarySpectraRequested = requestsOrdinarySpectra(
       params.prompt,
       params.disableAgentRouting,
@@ -763,7 +789,8 @@ async function runAttempt(
         }
       : context.packet;
     recordPhase("context_ready");
-    await mutate("spectraRuns:updateStatus", {
+    await readingStatusWrite;
+    const retrievingStatusWrite = mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -789,7 +816,7 @@ async function runAttempt(
         ? context.conversation.slice(0, -1)
         : context.conversation;
     const conversation = persistedConversation.slice(-30);
-    await mutate("spectraRuns:setContextSnapshot", {
+    const contextSnapshotWrite = mutate("spectraRuns:setContextSnapshot", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -815,6 +842,7 @@ async function runAttempt(
         capturedAt: Date.now(),
       },
     });
+    await Promise.all([retrievingStatusWrite, contextSnapshotWrite]);
     const workspaceTitle = context.currentWorkspace?.title;
     let provenance = {
       artifactIds: context.selectedArtifactIds,
@@ -924,43 +952,7 @@ async function runAttempt(
         });
       }
     }
-    let modelAttachments = params.attachments ?? [];
-    const visualSources = modelAttachments.filter((attachment) =>
-      attachmentNeedsVisualEvidence(attachment, params.prompt),
-    );
-    if (
-      !focusedToolPlan &&
-      visualSources.length > 0 &&
-      getSpectraAttachmentStrategy() === "legacy_visual_prepass"
-    ) {
-      publish({
-        type: "progress",
-        runId: params.runId,
-        title:
-          visualSources.length === 1
-            ? `Inspecting ${visualSources[0]!.name}`
-            : `Inspecting ${visualSources.length} attached files`,
-        detail:
-          "Reading only the visuals, layout, diagrams, and relationships needed for the request",
-        activity: "inspect",
-      });
-      modelAttachments = await addDerivedVisualAttachments(
-        modelAttachments,
-        params.prompt,
-      );
-      if (
-        modelAttachments.some(
-          (attachment) =>
-            attachment.handling === "image" &&
-            attachment.data &&
-            !attachment.extractedText,
-        )
-      )
-        modelAttachments = await enrichImageAttachments(
-          modelAttachments,
-          executionSignal,
-        );
-    }
+    const modelAttachments = params.attachments ?? [];
     const invokeModel: typeof callModel = parallelCreations.length
       ? (
           surface,
@@ -1277,8 +1269,7 @@ async function runAttempt(
           ) => {
             streamedCreationPreview = true;
             hadVisibleActivity = true;
-            console.info("[spectra.run.partial_creation]", {
-              runId: params.runId,
+            runLog().info("spectra.run.partial_creation", {
               blueprintKey,
               itemCount,
               itemLabel,
@@ -1768,7 +1759,7 @@ async function runAttempt(
         provenance,
         modelUsed: modelResult.model,
         providerUsed: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       stopHeartbeat();
       await saveAssistantMessage({
@@ -1780,7 +1771,7 @@ async function runAttempt(
         decision: plan.decision,
         model: modelResult.model,
         provider: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
         choices: plan.choices,
       });
       await queueSilentMemoryMaintenance({
@@ -1852,7 +1843,7 @@ async function runAttempt(
         provenance,
         modelUsed: modelResult.model,
         providerUsed: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       stopHeartbeat();
       await Promise.all([
@@ -1883,7 +1874,7 @@ async function runAttempt(
         awaitingConfirmation: true,
         model: modelResult.model,
         provider: modelResult.provider,
-        usage: modelResult.usage,
+        usage: runUsageSnapshot(modelResult.usage),
       });
       card = await latestCard(params.actorClerkId, params.runId);
       publish({
@@ -2166,7 +2157,7 @@ async function runAttempt(
             provenance,
             modelUsed: modelResult.model,
             providerUsed: modelResult.provider,
-            usage: modelResult.usage,
+            usage: runUsageSnapshot(modelResult.usage),
           });
           stopHeartbeat();
           await Promise.all([
@@ -2239,7 +2230,7 @@ async function runAttempt(
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
         throw firstVerifyError;
       } else {
-        console.warn("[spectra.verify.encouragement_retry]", {
+        runLog().warn("spectra.verify.encouragement_retry", {
           error: publicError(firstVerifyError),
         });
         publishNativeProgress({
@@ -2340,7 +2331,7 @@ async function runAttempt(
       outcome: "canonical_saved",
       modelUsed: modelResult.model,
       providerUsed: modelResult.provider,
-      usage: modelResult.usage,
+      usage: runUsageSnapshot(modelResult.usage),
     })) as { nativeOutcome?: string } | null | undefined;
     stopHeartbeat();
     const reply = replyWithNativeReceipt(plan.finalResponse, completion?.nativeOutcome);
@@ -2354,7 +2345,7 @@ async function runAttempt(
       affected: allAffected,
       model: modelResult.model,
       provider: modelResult.provider,
-      usage: modelResult.usage,
+      usage: runUsageSnapshot(modelResult.usage),
     });
     await queueSilentMemoryMaintenance({
       actorClerkId: params.actorClerkId,
@@ -2383,20 +2374,17 @@ async function runAttempt(
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "run failed before later stages completed");
-    console.error(
-      "[spectra.run.failure]",
-      JSON.stringify({
-        runId: params.runId,
-        executionId: params.executionId,
+    runLog().error(
+      "spectra.run.failure",
+      error instanceof Error ? error : new Error(String(error)),
+      {
         commitStarted,
         publicTextLength: publicText.length,
-        name: error instanceof Error ? error.name : "UnknownError",
-        message: error instanceof Error ? error.message : String(error),
         stack:
           error instanceof Error
             ? error.stack?.split("\n").slice(0, 8).join(" | ")
             : undefined,
-      }),
+      },
     );
     // A streamed operation preview may still be writing when final plan parsing
     // or validation fails. Let those writes finish before cleanup so a late
@@ -2476,6 +2464,7 @@ async function runAttempt(
         runId: params.runId,
         executionId: params.executionId,
         status: "cancelled",
+        usage: runUsageSnapshot(),
         resultTitle: "Stopped",
         resultSummary: interruptedEffectSummary(effects,
           recovery.retryable ? "You can retry the remaining request." : "Continue in this conversation for the remaining work.",
@@ -2584,6 +2573,7 @@ async function runAttempt(
       executionId: params.executionId,
       workerId: params.workerId,
       status: "failed",
+      usage: runUsageSnapshot(),
       phase: preservedOutcome ? "partial" : "failed",
       outcome: effects.outcome,
       error: message,
@@ -2825,6 +2815,11 @@ function confirmedApplicationSummary(
   return "The approved Spectra action was applied successfully.";
 }
 
+function runResumeAttempt(...args: Parameters<typeof resumeOperationsAttempt>) {
+  const [{ runId, executionId }] = args;
+  return withSpectraRunLog({ runId, executionId }, () => resumeOperationsAttempt(...args));
+}
+
 async function resumeOperationsAttempt(params: {
   actorClerkId: string;
   runId: string;
@@ -2837,7 +2832,7 @@ async function resumeOperationsAttempt(params: {
   const loop = createAgentLoopExecution({
     runId: params.runId,
     startAt: "act",
-    onTransition: (entry) => console.info("[spectra.agent-loop]", entry),
+    onTransition: (entry) => runLog().info("spectra.agent-loop", entry),
   });
   loop.enter("act");
   await mutate("spectraRuns:claimExecution", {
@@ -2926,11 +2921,13 @@ async function resumeOperationsAttempt(params: {
   );
   const heartbeat = setInterval(() => {
     const awaitedOperationId = awaitedUiOperation(params.runId, params.executionId);
+    const usage = runUsageSnapshot();
     void mutate<unknown & object, { alive: boolean; observation?: unknown }>("spectraRuns:heartbeat", {
       runId: params.runId,
       executionId: params.executionId,
       workerId: params.workerId,
       ...(awaitedOperationId ? { awaitedOperationId } : {}),
+      ...(usage ? { usage } : {}),
     }).then((result) => {
       if (!result.alive) cancelUiObservation(params.runId, params.executionId);
       if (awaitedOperationId && result.observation)
@@ -3187,7 +3184,7 @@ async function resumeOperationsAttempt(params: {
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
         throw firstVerifyError;
       } else {
-        console.warn("[spectra.resume.verify.encouragement_retry]", {
+        runLog().warn("spectra.resume.verify.encouragement_retry", {
           error: publicError(firstVerifyError),
         });
         await mutate("spectraRuns:appendEvent", {
@@ -3408,7 +3405,7 @@ async function executeScheduledResume(body: Body) {
     throw new Error("The owner has no active session for this scheduled edit.");
   const token = await clerk.sessions.getToken(session.id, "convex", 1_800);
   await withWorkerConvexToken(token.jwt, () =>
-    resumeOperationsAttempt({
+    runResumeAttempt({
       actorClerkId,
       runId: required(body.runId, "runId"),
       resultCardId: required(body.resultCardId, "resultCardId"),
@@ -3586,7 +3583,14 @@ async function executeScheduledRun(body: Body) {
   });
 }
 
-export async function handleSpectraRunRequest(request: NextRequest) {
+export function handleSpectraRunRequest(request: NextRequest) {
+  return withSpectraRequestLog(
+    { method: request.method, path: request.nextUrl.pathname },
+    () => handleSpectraRunRequestInLog(request),
+  );
+}
+
+async function handleSpectraRunRequestInLog(request: NextRequest) {
   const rawBody = await request.text();
   let body: Body;
   try {
@@ -4488,7 +4492,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     return ndjson(async (emit) => {
       emit({ type: "approval_accepted", runId });
       emit({ type: "result_card", runId, card: streamCard(card) });
-      await resumeOperationsAttempt({
+      await runResumeAttempt({
         actorClerkId: actor.clerkId,
         runId,
         resultCardId: confirmation.resultCardId!,

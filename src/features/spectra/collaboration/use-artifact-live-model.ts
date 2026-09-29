@@ -74,9 +74,9 @@ export function useArtifactLiveModel(
   const controller = useMemo(
     () =>
       collaboration.transport
-        ? new ArtifactRegionController(artifactId, collaboration.transport)
+        ? new ArtifactRegionController(collaboration.transport)
         : null,
-    [artifactId, collaboration.transport],
+    [collaboration.transport],
   );
   const modelSnapshot = useSyncExternalStore(
     model?.subscribe ?? subscribeEmpty,

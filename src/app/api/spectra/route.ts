@@ -1224,49 +1224,6 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
-    if (action === "acquireRegionClaim") {
-      const overlapDomains = Array.isArray(body.overlapDomains)
-        ? body.overlapDomains.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [];
-      const result = await spectraMutation("regionClaims:acquire", {
-        artifactId: requireString(body.artifactId, "artifactId"),
-        partitionKey: optionalString(body.partitionKey),
-        clientId: requireString(body.clientId, "clientId"),
-        regionId: requireString(body.regionId, "regionId"),
-        overlapDomains,
-        baseStateVectorHash: requireString(
-          body.baseStateVectorHash,
-          "baseStateVectorHash",
-        ),
-        actorKind: "human",
-      });
-      return ok(result);
-    }
-
-    if (action === "renewRegionClaim") {
-      const result = await spectraMutation("regionClaims:renew", {
-        claimId: requireString(body.claimId, "claimId"),
-        clientId: requireString(body.clientId, "clientId"),
-        baseStateVectorHash: optionalString(body.baseStateVectorHash),
-      });
-      return ok(result);
-    }
-
-    if (action === "releaseRegionClaim") {
-      const result = await spectraMutation("regionClaims:release", {
-        claimId: requireString(body.claimId, "claimId"),
-        clientId: requireString(body.clientId, "clientId"),
-        resolution: ["apply", "keep_current", "cancel"].includes(
-          String(body.resolution),
-        )
-          ? body.resolution
-          : undefined,
-      });
-      return ok(result);
-    }
-
     if (action === "resolveAiArtifactConflict") {
       const operationId = requireString(body.operationId, "operationId");
       const resolution = requireString(body.resolution, "resolution");

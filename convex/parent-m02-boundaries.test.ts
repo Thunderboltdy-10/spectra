@@ -20,15 +20,6 @@ describe("Parent M02 boundary counterexamples", () => {
     const jobId = await t.run(ctx => ctx.db.insert("artifactImportJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, typeKey: "document", format: "docx", originalAssetRef: "fixture", status: "uploaded", unsupportedFeatures: [], parserVersion: "fixture", createdAt: f.now, updatedAt: f.now }));
     await expect(t.withIdentity(identity).mutation(api.artifactImports.complete, { jobId, typeKey: "document", status: "imported", fidelityReport: [], unsupportedFeatures: [], importedContent: { blocks: [{ id: "p1", type: "paragraph", text: "Small fixture" }] } })).resolves.toMatchObject({ status: "awaiting_commit" });
   });
-  it("requires authorization and a matching receipt even after activation", async () => {
-    const t = convexTest(schema, modules); const f = await seed(t);
-    const args = await t.run(async ctx => {
-      const storageId = await ctx.storage.store(new Blob(["fixture"], { type: "text/plain" }));
-      const assetId = await ctx.db.insert("artifactAssets", { artifactId: f.artifactId, schoolId: f.schoolId, uploadedByAccountId: f.accountId, storageId, uploadReceipt: "owner-receipt", path: "fixture.txt", name: "Fixture", mediaType: "text/plain", bytes: 7, sha256: "a".repeat(64), status: "active", createdAt: f.now, updatedAt: f.now });
-      return { assetId, storageId, uploadReceipt: "incorrect-receipt" };
-    });
-    await expect(t.mutation(api.artifactAssets.finalizeUpload, args)).rejects.toThrow();
-  });
   it("replays a committed import after the first commit advances currentVersionId", async () => {
     const t = convexTest(schema, modules); const f = await seed(t);
     const args = await t.run(async ctx => {

@@ -1,5 +1,6 @@
 import { getSpectraModelProfile, getSpectraProviderRouting } from "../../ai/model-config";
 import { canonicalizeSourceUrl } from "../records";
+import { recordProviderUsage } from "../../ai/run-usage";
 
 export type ResearchMode = "quick" | "verified" | "deep";
 export type ParallelSearchResult = { title: string; url: string; content: string; publishedAt?: string; authority: "primary" | "secondary" | "unknown" };
@@ -67,6 +68,8 @@ async function parallelSearchRequest(
   });
   if (!response.ok) throw new Error(`PROVIDER_UNAVAILABLE: Parallel search returned ${response.status}.`);
   const payload = await response.json() as Record<string, unknown>;
+  // Research runs a full model call per search; its tokens count toward the run.
+  recordProviderUsage(payload.usage);
   const message = rows(payload.choices)[0]?.message as Record<string, unknown> | undefined;
   const candidates = [
     ...rows(message?.annotations).flatMap((entry) => {

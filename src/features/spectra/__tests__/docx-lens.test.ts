@@ -279,6 +279,54 @@ describe("DOCX preservation lens", () => {
     );
   }, 120_000);
 
+  it("rewrites every paragraph of a long essay without walking the body once per paragraph", async () => {
+    const sourceDocument = Document.create();
+    for (let index = 0; index < 2_000; index += 1) sourceDocument.addParagraph(`Existing paragraph ${index} with ordinary essay text.`);
+    const opened = await docxLens.open(await sourceDocument.save());
+    const blocks = opened.projection.blocks.map((block) => ({ ...block, text: `${block.text} Revised.` }));
+    const update = docxProjectionFromContent({ ...opened.projection, nativeProjectionComplete: true, blocks }, opened.projection);
+    expect(update.operations.filter((operation) => operation.kind === "replace-paragraph")).toHaveLength(2_000);
+    const started = performance.now();
+    const output = await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations: update.operations });
+    // Measured on the dev machine: 2.4 s before (one body walk per edit), 0.35 s after.
+    expect(performance.now() - started).toBeLessThan(1_500);
+    const readback = await docxLens.open(output);
+    expect(await docxProjectionReadbackDigest(readback.projection, update.projection)).toBe(
+      await docxProjectionSemanticDigest(update.projection),
+    );
+  }, 120_000);
+
+  it("finds regions from the current XML after deletes, inserts and reorders in one save", async () => {
+    const sourceDocument = Document.create();
+    for (const text of ["Zero.", "One.", "Two.", "Three."]) sourceDocument.addParagraph(text);
+    const opened = await docxLens.open(await sourceDocument.save());
+    const [zero, one, two, three] = opened.projection.blocks.map((block) => block.id);
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        { kind: "replace-paragraph", regionId: zero!, text: "Zero edited." },
+        { kind: "delete-region", regionId: one! },
+        { kind: "replace-paragraph", regionId: two!, text: "Two edited." },
+        { kind: "insert-paragraph", regionId: "born", afterRegionId: two!, text: "Born." },
+        { kind: "replace-paragraph", regionId: "born", text: "Born edited." },
+        { kind: "reorder-regions", order: [three!, "born", two!, zero!] },
+        { kind: "replace-paragraph", regionId: three!, text: "Three edited." },
+      ],
+    });
+    const readback = await docxLens.open(output);
+    expect(readback.projection.blocks.map((block) => block.text)).toEqual([
+      "Three edited.", "Born edited.", "Two edited.", "Zero edited.",
+    ]);
+    await expect(docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        { kind: "replace-paragraph", regionId: two!, text: "Two edited." },
+        { kind: "delete-region", regionId: one! },
+        { kind: "replace-paragraph", regionId: one!, text: "Gone." },
+      ],
+    })).rejects.toThrow(/no longer exists/);
+  });
+
   it("ignores Word padding spaces in paragraph readback while preserving other whitespace", async () => {
     const opened = await docxLens.open(await fixture("complex-structure.docx"));
     const targetIndex = opened.projection.blocks.findIndex(

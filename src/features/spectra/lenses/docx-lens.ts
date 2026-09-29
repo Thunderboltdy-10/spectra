@@ -1074,7 +1074,10 @@ function ensureStableRegionIds(document: Document) {
 }
 
 function uniqueRegionById(document: Document, regionId: string) {
-  const matches = nativeRegions(document).filter((region) => region.id === regionId);
+  return uniqueRegionAmong(nativeRegions(document).filter((region) => region.id === regionId), regionId);
+}
+
+function uniqueRegionAmong(matches: readonly NativeRegion[], regionId: string) {
   if (matches.length !== 1)
     throw new DocxLensError(
       "DOCX_UNSUPPORTED_EDIT",
@@ -1083,6 +1086,69 @@ function uniqueRegionById(document: Document, regionId: string) {
         : `The Word region ${regionId} no longer exists.`,
     );
   return matches[0]!;
+}
+
+/**
+ * Edits that change only the inside of the paragraph or table they target.
+ * A bibliography rewrite is excluded: it removes the paragraphs beside it.
+ */
+function inPlaceRegionEdit(operation: DocxSemanticDelta) {
+  switch (operation.kind) {
+    case "replace-paragraph":
+      return !operation.inlineContent?.some((item) => item.kind === "bibliography");
+    case "apply-style":
+    case "format-runs":
+    case "format-paragraph":
+      return true;
+    case "edit-table-cell":
+      return !operation.inlineContent?.some((item) => item.kind === "bibliography");
+    default:
+      return false;
+  }
+}
+
+/** True while a region read earlier is still in the body under the same ID. */
+function regionStillCurrent(document: Document, region: NativeRegion, regionId: string) {
+  const body = document.body();
+  let node: XmlElement | null | undefined = region.element;
+  while (node && node !== body) node = node.parent as XmlElement | null | undefined;
+  if (!node) return false;
+  const id = region.paragraph
+    ? paragraphRegionId(region.paragraph, region.path)
+    : region.table
+      ? tableRegionId(region.table, region.path)
+      : undefined;
+  return id === regionId;
+}
+
+/**
+ * One walk of the body answers every region lookup of a save until an
+ * operation might add, remove or move a region; the index is then rebuilt
+ * from the XML, never patched. Walking the body for every operation made
+ * rewriting a long essay quadratic in its length.
+ */
+function nativeRegionIndex(document: Document) {
+  let index: Map<string, NativeRegion[]> | undefined;
+  const build = () => {
+    index = new Map();
+    for (const region of nativeRegions(document)) {
+      const matches = index.get(region.id);
+      if (matches) matches.push(region);
+      else index.set(region.id, [region]);
+    }
+    return index;
+  };
+  return {
+    unique(regionId: string) {
+      const cached = index?.get(regionId);
+      if (cached?.length === 1 && regionStillCurrent(document, cached[0]!, regionId)) return cached[0]!;
+      // A miss, an ambiguity or a stale entry is answered by the XML itself.
+      return uniqueRegionAmong(build().get(regionId) ?? [], regionId);
+    },
+    invalidate() {
+      index = undefined;
+    },
+  };
 }
 
 function movableCarrier(document: Document, region: NativeRegion) {
@@ -3452,16 +3518,22 @@ async function applyDelta(
   // Only an operation on a region inserted since the last read needs a fresh
   // fidelity entry and block. Re-reading after every insertion instead made
   // adding a section to a long document cost one full projection per block.
-  let projectedRegions = new Set(opened.projection.blocks.map((block) => block.id));
+  let projectedBlocks = new Map(opened.projection.blocks.map((block) => [block.id, block] as const));
   const projectionFor = async (regionId: string) => {
-    if (!projectedRegions.has(regionId)) {
+    if (!projectedBlocks.has(regionId)) {
       opened = await projectDocument(document, carry.profile, identity.identityStable);
-      projectedRegions = new Set(opened.projection.blocks.map((block) => block.id));
+      projectedBlocks = new Map(opened.projection.blocks.map((block) => [block.id, block] as const));
     }
     return opened;
   };
+  const regions = nativeRegionIndex(document);
+  // Only an in-place edit of one paragraph or table leaves every region
+  // where it was; after any other operation the next lookup walks the body.
+  let regionsUnmoved = false;
 
   for (const operation of operations) {
+    if (!regionsUnmoved) regions.invalidate();
+    regionsUnmoved = false;
     if (operation.kind === "insert-word-citation" || operation.kind === "edit-word-citation" || operation.kind === "remove-word-citation" || operation.kind === "regenerate-word-bibliography" || operation.kind === "insert-note" || operation.kind === "edit-note" || operation.kind === "move-note" || operation.kind === "delete-note" || operation.kind === "add-word-comment" || operation.kind === "edit-word-comment" || operation.kind === "delete-word-comment" || operation.kind === "track-text" || operation.kind === "review-revision") {
       const current = await projectDocument(document, carry.profile, identity.identityStable);
       const resolved = { ...operation,
@@ -3545,11 +3617,12 @@ async function applyDelta(
     // when the containing paragraph is otherwise preserved because the writer
     // targets one existing picture by package part and never rewrites the
     // paragraph's mixed native content.
-    const { fidelityMap, projection } = await projectionFor(regionId);
+    const { fidelityMap } = await projectionFor(regionId);
     if (!(["update-image", "insert-image", "replace-image"] as string[]).includes(operation.kind))
       assertEditable(fidelityMap, regionId);
-    const region = uniqueRegionById(document, regionId);
-    const block = projection.blocks.find((candidate) => candidate.id === regionId);
+    const region = regions.unique(regionId);
+    const block = projectedBlocks.get(regionId);
+    regionsUnmoved = inPlaceRegionEdit(operation);
     if (!block) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} no longer exists.`);
     if (operation.kind === "replace-paragraph") {
       if (!region.paragraph)

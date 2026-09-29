@@ -1270,6 +1270,7 @@ export async function renameNode(
     if (threadId)
       await ctx.db.patch(threadId, {
         title: name,
+        titleSetByOwner: true,
         updatedAt: now,
         readSchemaVersion: 1,
       });

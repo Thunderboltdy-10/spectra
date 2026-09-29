@@ -54,4 +54,23 @@ describe("UniversalKBar", () => {
     expect(push).toHaveBeenCalledWith("/chat?new=1");
     expect(screen.queryByRole("dialog", { name: "Spectra command bar" })).toBeNull();
   });
+
+  it("puts the cursor in the field a command asks for", async () => {
+    render(<UniversalKBar />);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(
+      screen.getByPlaceholderText("Search commands, work, workspaces, conversations…"),
+      { target: { value: "memory" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update memory" }));
+    const field = await screen.findByLabelText("Memory");
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    expect(document.activeElement).toBe(field);
+    // Escape steps back to the list instead of closing the bar.
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Spectra command bar" })).toBeTruthy();
+    expect(screen.queryByLabelText("Memory")).toBeNull();
+  });
 });

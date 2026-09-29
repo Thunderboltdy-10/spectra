@@ -196,6 +196,7 @@ import {
   workspaceIdFromSpectraPath,
 } from "./shell-location";
 import { useShareInvitations } from "./use-share-invitations";
+import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 
 type ViewMode = "list" | "board";
 type OverviewLoadState =
@@ -4045,17 +4046,15 @@ export function SpectraShell({
       const blob = new Blob([JSON.stringify(result.manifest, null, 2)], {
         type: "application/json",
       });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${
-        workspaceHeader.title
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "") || "workspace"
-      }.spectra-workspace.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadDocumentBlob(
+        `${
+          workspaceHeader.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "") || "workspace"
+        }.spectra-workspace.json`,
+        blob,
+      );
       const warningCount =
         result.report.warnings.length + result.report.unsupported.length;
       toast.success(

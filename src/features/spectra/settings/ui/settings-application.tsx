@@ -16,6 +16,7 @@ import { useSpectraPreferences } from "../preference-store";
 import { preferenceSaveStatus } from "../preference-save-status";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
+import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
 import { SurfaceField } from "../../field/surface-field";
@@ -247,12 +248,8 @@ function PrivacySettings() {
     try {
       const result = await exportSpectraMemory();
       const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
-      const href = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = href;
-      anchor.download = "spectra-personal-context.json";
-      anchor.click();
-      URL.revokeObjectURL(href);
+      // Revoking right after click() can cancel the download in Safari.
+      downloadDocumentBlob("spectra-personal-context.json", blob);
       toast.success("Personal context exported.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Personal context could not be exported.");

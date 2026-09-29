@@ -306,6 +306,12 @@ export function SchoolDataShell() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  /* A failed action is not a failed page: the records stay readable and the
+     notice names the action, instead of "School could not load". */
+  const [actionFailure, setActionFailure] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [resourceOutcomes, setResourceOutcomes] = useState<
     Record<string, { status: string; artifactId?: string; priorArtifactId?: string }>
   >({});
@@ -368,16 +374,21 @@ export function SchoolDataShell() {
 
   async function run(key: string, action: () => Promise<unknown>) {
     setBusy(key);
-    setError("");
+    setActionFailure(null);
     try {
       await action();
-      await load();
     } catch (nextError) {
-      setError(
-        describeFailure(nextError, {
+      setActionFailure({
+        title: key === "sync" ? "Sync did not finish" : "Import did not finish",
+        message: describeFailure(nextError, {
           fallback: "School could not finish this action. Try again.",
         }).message,
-      );
+      });
+      setBusy("");
+      return;
+    }
+    try {
+      await load();
     } finally {
       setBusy("");
     }
@@ -485,13 +496,28 @@ export function SchoolDataShell() {
                 }
               />
             ) : null}
-            {loading ? (
+            {actionFailure ? (
+              <ProductErrorState
+                className="mb-4 min-h-0"
+                title={actionFailure.title}
+                detail={actionFailure.message}
+                action={
+                  <Button variant="secondary" size="sm" onClick={() => setActionFailure(null)}>
+                    Dismiss
+                  </Button>
+                }
+              />
+            ) : null}
+            {/* The spinner is for the first load only. A refresh after an
+                action keeps the records, scroll position and class shelf
+                editor on screen. */}
+            {loading && !payload ? (
               <div className="flex min-h-[360px] items-center justify-center gap-2 text-micro text-[var(--text-tertiary)]">
                 <LoaderCircle className="size-4 animate-spin" />
                 Loading verified school records…
               </div>
             ) : null}
-            {!loading && payload ? (
+            {payload ? (
               <>
                 {activeState.kind === "partial" ? (
                   <div className="flex items-center gap-2 rounded-control px-1 py-2 text-micro text-[var(--text-secondary)]">

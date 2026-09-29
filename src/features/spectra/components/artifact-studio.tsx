@@ -225,6 +225,9 @@ import {
   createReconciliationSnapshotKey,
   incomingReconciliationKey,
   rebaseCollaborativeSnapshot,
+  draftContentForLiveWrite,
+  createStudioHistory,
+  studioHistoryShortcut,
   studioIncomingSource,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
@@ -484,28 +487,6 @@ function semanticPathToPointer(path: readonly (string | number)[]) {
       String(segment).replaceAll("~", "~0").replaceAll("/", "~1"),
     )
     .join("/")}`;
-}
-
-function _aiPreviewSections(artifact: SpectraArtifact) {
-  const content = record(artifact.aiPreview?.content);
-  const rows = Array.isArray(content.blocks)
-    ? content.blocks
-    : Array.isArray(content.cards)
-      ? content.cards
-      : Array.isArray(content.questions)
-        ? content.questions
-        : [];
-  return rows.slice(0, 4).flatMap((row): string[] => {
-    const item = record(row);
-    const label = [
-      item.title,
-      item.heading,
-      item.front,
-      item.prompt,
-      item.text,
-    ].find((value) => typeof value === "string" && value.trim());
-    return typeof label === "string" ? [label.trim().slice(0, 90)] : [];
-  });
 }
 
 type ArtifactSnapshot = {
@@ -2051,6 +2032,20 @@ function normalizeDocumentInlineMarkup(node: JSONContent): JSONContent {
   return { ...node, content };
 }
 
+/**
+ * Studios whose only undo would otherwise be the browser's text-field undo.
+ * The shell keeps their history: deleting a question, card, task or lesson
+ * is one Ctrl+Z away, and undo never reverts a collaborator's later edit.
+ */
+const SHELL_HISTORY_TYPES = new Set([
+  "quiz",
+  "flashcard_deck",
+  "planner_task",
+  "timetable",
+]);
+/** A removed button leaves focus on <body>; undo belongs to the last studio used. */
+let lastInteractedStudioSurface: HTMLElement | null = null;
+
 export function documentJsonFromContent(
   content: unknown,
   title: string,
@@ -3040,9 +3035,14 @@ function ArtifactStudioEditor({
   }, [summary, summaryExpanded]);
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
+  const contentHistoryRef = useRef(createStudioHistory<unknown>());
+  const latestContentRef = useRef(content);
+  latestContentRef.current = content;
   const [baseline, setBaseline] = useState(() =>
     artifactEditorSnapshot(artifact),
   );
+  const baselineRef = useRef(baseline);
+  baselineRef.current = baseline;
   const [dirty, setDirty] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -3587,12 +3587,25 @@ function ArtifactStudioEditor({
             // creating the Bridge write request.
           }
         }
+        // Sheets plan cell writes against the room itself, and document/code
+        // bodies are bound natively; every other body is replayed onto the
+        // room's current value so a peer's unabsorbed edit is not reverted.
+        const liveContent =
+          nativeBodyBinding ||
+          artifact.blueprintKey === "sheets" ||
+          !live.modelSnapshot.initialized
+            ? undefined
+            : (live.flushSnapshot?.() ?? undefined)?.content;
         const nextLiveValue = {
           title: persistableTitle(snapshot.title),
           ...(snapshot.summary.trim()
             ? { summary: snapshot.summary.trim() }
             : {}),
-          content: snapshot.content,
+          content: draftContentForLiveWrite({
+            baseline: baselineRef.current.content,
+            draft: snapshot.content,
+            live: liveContent,
+          }),
           tags: tagsFromDraft(snapshot.tagDraft),
         };
         // Document and code bodies are already committed through their native
@@ -4641,6 +4654,7 @@ function ArtifactStudioEditor({
   const lastStudioInteractionAtRef = useRef(0);
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();
+    lastInteractedStudioSurface = studioSurfaceRef.current;
     // Any direct input returns control of the viewport to the user instantly.
     disengageFollowAi();
   }, []);
@@ -5079,6 +5093,35 @@ function ArtifactStudioEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
   }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, live.unsynchronizedChanges]);
 
+  const shellHistoryEnabled =
+    !readOnly && SHELL_HISTORY_TYPES.has(artifact.blueprintKey);
+  const changeContentRef = useRef(changeContent);
+  changeContentRef.current = changeContent;
+  useEffect(() => {
+    const history = contentHistoryRef.current;
+    history.reset();
+    if (!shellHistoryEnabled) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+      const direction = studioHistoryShortcut(event);
+      if (!direction) return;
+      const surface = studioSurfaceRef.current;
+      const target = event.target;
+      const inside = target instanceof Node && Boolean(surface?.contains(target));
+      const unfocused =
+        target === document.body || target === document.documentElement;
+      if (!surface || !(inside || (unfocused && lastInteractedStudioSurface === surface)))
+        return;
+      if (surface.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      const next = history.step(direction, latestContentRef.current);
+      if (next === null) return;
+      event.preventDefault();
+      changeContentRef.current(next, false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [artifact._id, shellHistoryEnabled]);
+
   useEffect(() => {
     if (
       !dirty ||
@@ -5144,8 +5187,11 @@ function ArtifactStudioEditor({
     }
   }
 
-  function changeContent(next: unknown) {
+  function changeContent(next: unknown, recordHistory = true) {
     if (readOnly) return;
+    if (recordHistory && SHELL_HISTORY_TYPES.has(artifact.blueprintKey))
+      contentHistoryRef.current.record(latestContentRef.current, next);
+    latestContentRef.current = next;
     userHasEditedRef.current = true;
     reconcilingRemoteRef.current = false;
     writeStudioDirty(dirtyRef, setDirty, true);

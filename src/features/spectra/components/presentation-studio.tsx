@@ -114,6 +114,12 @@ import { spectraBus } from "../events";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { ArtifactWorkbar, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
+import {
+  applyStudioHistory,
+  commitStudioGesture,
+  studioValuesEqual,
+  type StudioHistoryEntry,
+} from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
 import { SelectField } from "@/components/ui/select";
 import {
@@ -1572,6 +1578,11 @@ export function PresentationStudio({
   const gestureDeckRef = useRef<PresentationContent | null>(null);
   gestureDeckRef.current = gestureDeck;
   const deck = gestureDeck ?? committedDeck;
+  // The deck an edit applies to. Async work (a media upload, an import) edits
+  // it after an await, when the render that started it holds a stale deck;
+  // applying there would silently revert everything since, peers included.
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
   const contract = useStudioContract();
   // Two locks, and either one is enough: the prop is the studio's own (history
   // view, a deck that has not synchronized), the contract is the role's. Every
@@ -1601,9 +1612,12 @@ export function PresentationStudio({
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
   const [draggingSlideId, setDraggingSlideId] = useState<string>();
-  const [_dropTargetSlideId, setDropTargetSlideId] = useState<string>();
-  const [undoStack, setUndoStack] = useState<PresentationContent[]>([]);
-  const [redoStack, setRedoStack] = useState<PresentationContent[]>([]);
+  const [undoStack, setUndoStack] = useState<
+    StudioHistoryEntry<PresentationContent>[]
+  >([]);
+  const [redoStack, setRedoStack] = useState<
+    StudioHistoryEntry<PresentationContent>[]
+  >([]);
   const [presentedDeck, setPresentedDeck] = useState<PresentationContent>();
   const [presentIndex, setPresentIndex] = useState(0);
   const [presentStartedAt, setPresentStartedAt] = useState(0);
@@ -1879,24 +1893,30 @@ export function PresentationStudio({
     (next: PresentationContent, record = true) => {
       if (readOnly) return;
       if (record) {
-        setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
+        setUndoStack((stack) => [
+          ...stack.slice(-79),
+          { before: cloneDeck(deckRef.current), after: next },
+        ]);
         setRedoStack([]);
       }
       setGestureDeck(null);
       // Re-normalize so settings/speakerNotes/layout fields match the Yjs
       // projection before onChange dirties the studio (same class of drift as
       // whiteboard zOrder — otherwise first ack looks like a remote conflict).
-      onChange(normalizePresentationContent(next));
+      const normalized = normalizePresentationContent(next);
+      deckRef.current = normalized;
+      onChange(normalized);
     },
-    [deck, onChange, readOnly],
+    [onChange, readOnly],
   );
   const mutate = useCallback(
     (recipe: (draft: PresentationContent) => void, record = true) => {
-      const next = producePresentationContent(deck, recipe);
-      if (next === deck) return;
+      const current = deckRef.current;
+      const next = producePresentationContent(current, recipe);
+      if (next === current) return;
       emit(next, record);
     },
-    [deck, emit],
+    [emit],
   );
   const mutateLocal = useCallback(
     (recipe: (draft: PresentationContent) => void) => {
@@ -1982,18 +2002,26 @@ export function PresentationStudio({
   }, [artifactId, readOnly, surface]);
 
   function undo() {
-    const previous = undoStack.at(-1);
-    if (!previous || readOnly) return;
+    const entry = undoStack.at(-1);
+    if (!entry || readOnly) return;
     setUndoStack((stack) => stack.slice(0, -1));
-    setRedoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(normalizePresentationContent(previous));
+    setRedoStack((stack) => [...stack.slice(-79), entry]);
+    onChange(
+      normalizePresentationContent(
+        applyStudioHistory(entry, "undo", committedDeck),
+      ),
+    );
   }
   function redo() {
-    const next = redoStack.at(-1);
-    if (!next || readOnly) return;
+    const entry = redoStack.at(-1);
+    if (!entry || readOnly) return;
     setRedoStack((stack) => stack.slice(0, -1));
-    setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(normalizePresentationContent(next));
+    setUndoStack((stack) => [...stack.slice(-79), entry]);
+    onChange(
+      normalizePresentationContent(
+        applyStudioHistory(entry, "redo", committedDeck),
+      ),
+    );
   }
   function addSlide() {
     const slide = createPresentationSlide(deck.slides.length + 1);
@@ -2546,15 +2574,28 @@ export function PresentationStudio({
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = undefined;
     setGuides({});
-    setUndoStack((stack) => [...stack.slice(-79), drag.snapshot]);
-    setRedoStack([]);
-    if (gestureDeckRef.current) {
-      onChange(normalizePresentationContent(gestureDeckRef.current));
+    const gesture = gestureDeckRef.current;
+    if (gesture) {
+      // Only the moved/resized objects come from the gesture copy; everything
+      // a collaborator changed during the drag stays theirs.
+      const next = normalizePresentationContent(
+        commitStudioGesture(drag.snapshot, gesture, committedDeck),
+      );
+      setUndoStack((stack) => [
+        ...stack.slice(-79),
+        { before: drag.snapshot, after: gesture },
+      ]);
+      setRedoStack([]);
+      onChange(next);
       setGestureDeck(null);
     }
   }
   function updateText(objectId: string, value: string) {
-    mutateLocal((draft) => {
+    // Typing commits on every keystroke like any other edit: collaborators
+    // see it live, a reload or crash cannot lose an unblurred text box, and a
+    // peer's edit elsewhere is never replaced by a copy taken at focus. The
+    // whole typing session is still one undo step (recorded on blur).
+    mutate((draft) => {
       const slide = draft.slides[activeSlideIndex]!;
       const object = slide.objects.find(
         (candidate) => candidate.id === objectId,
@@ -2567,7 +2608,7 @@ export function PresentationStudio({
         const next = value.trim();
         if (next) slide.title = next.slice(0, 300);
       }
-    });
+    }, !textOriginRef.current);
   }
   function beginText(objectId: string) {
     textOriginRef.current ??= cloneDeck(deck);
@@ -2575,14 +2616,15 @@ export function PresentationStudio({
     onActiveRegionChange?.(objectId);
   }
   function finishText() {
-    if (!textOriginRef.current) return;
-    setUndoStack((stack) => [...stack.slice(-79), textOriginRef.current!]);
-    setRedoStack([]);
+    const origin = textOriginRef.current;
+    if (!origin) return;
     textOriginRef.current = undefined;
-    if (gestureDeckRef.current) {
-      onChange(normalizePresentationContent(gestureDeckRef.current));
-      setGestureDeck(null);
-    }
+    if (studioValuesEqual(origin, deck)) return;
+    setUndoStack((stack) => [
+      ...stack.slice(-79),
+      { before: origin, after: cloneDeck(deck) },
+    ]);
+    setRedoStack([]);
   }
   function chooseMedia(kind: "image" | "video", replace = false) {
     mediaTargetRef.current = { slideId: activeSlide.id, ...(replace && selectedObject ? { objectId: selectedObject.id } : {}) };
@@ -2763,9 +2805,13 @@ export function PresentationStudio({
           ? [`Media requiring replacement: ${skippedMedia.join(", ")}`]
           : []),
       ];
-      setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
+      const importedDeck = normalizePresentationContent(next);
+      setUndoStack((stack) => [
+        ...stack.slice(-79),
+        { before: cloneDeck(deckRef.current), after: importedDeck },
+      ]);
       setRedoStack([]);
-      onChange(normalizePresentationContent(next));
+      onChange(importedDeck);
       await completeArtifactImport({
         jobId,
         typeKey: "presentation",
@@ -3869,10 +3915,7 @@ export function PresentationStudio({
                 canEdit={!readOnly}
                 draggingId={draggingSlideId}
                 onDragStart={setDraggingSlideId}
-                onDragEnd={() => {
-                  setDraggingSlideId(undefined);
-                  setDropTargetSlideId(undefined);
-                }}
+                onDragEnd={() => setDraggingSlideId(undefined)}
                 onMove={(from, to) => {
                   // The rail can be filtered by a find, so a drop maps through
                   // the list a person is actually looking at.

@@ -180,6 +180,17 @@ function plainEqual(left: unknown, right: unknown): boolean {
   );
 }
 
+/**
+ * Keyed lists live in a collection. A list that is emptied stays a collection,
+ * so a collaborator adding an item at the same moment is merged rather than
+ * lost when one client swaps the whole field for a plain array.
+ */
+function isKeyedCollectionValue(existing: unknown, values: readonly unknown[]) {
+  if (!values.every((entry) => isRecord(entry) && typeof entry.id === "string"))
+    return false;
+  return values.length > 0 || (existing instanceof Y.Map && isCollection(existing));
+}
+
 function syncCollection(
   collection: Y.Map<unknown>,
   values: readonly unknown[],
@@ -207,7 +218,7 @@ function syncArray(
   values: readonly unknown[],
   path: readonly string[],
 ) {
-  const keyed = values.length > 0 && values.every((entry) => isRecord(entry) && typeof entry.id === "string");
+  const keyed = isKeyedCollectionValue(existing, values);
   if (keyed) {
     if (!(existing instanceof Y.Map && isCollection(existing)))
       throw new Error("STRUCTURED_COLLECTION_MUST_BE_ATTACHED_BEFORE_SYNC");
@@ -306,9 +317,7 @@ function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly strin
       if (!(existing instanceof Y.Text)) map.set(key, text);
       replaceYText(text, entry);
     } else if (Array.isArray(entry)) {
-      const keyed =
-        entry.length > 0 &&
-        entry.every((candidate) => isRecord(candidate) && typeof candidate.id === "string");
+      const keyed = isKeyedCollectionValue(existing, entry);
       let attached = existing;
       if (keyed && !(existing instanceof Y.Map && isCollection(existing))) {
         const collection = collectionMap();
@@ -475,7 +484,12 @@ function projectCollection(collection: Y.Map<unknown>) {
   const order = collection.get("order");
   const items = collection.get("items");
   if (!(order instanceof Y.Array) || !(items instanceof Y.Map)) return [];
+  // Two collaborators moving the same item each insert its id. Both views
+  // converge on the first occurrence instead of rendering the item twice.
+  const seen = new Set<string>();
   return order.toArray().flatMap((id) => {
+    if (seen.has(String(id))) return [];
+    seen.add(String(id));
     const item = items.get(String(id));
     if (!(item instanceof Y.Map)) return [];
     const projected = projectMap(item);

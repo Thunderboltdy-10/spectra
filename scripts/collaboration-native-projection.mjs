@@ -523,7 +523,11 @@ function projectCollection(collection) {
   const order = collection.get("order");
   const items = collection.get("items");
   if (!(order instanceof Y.Array) || !(items instanceof Y.Map)) return [];
+  // Mirrors the client projection: concurrent moves can leave an id twice.
+  const seen = new Set();
   return order.toArray().flatMap((id) => {
+    if (seen.has(String(id))) return [];
+    seen.add(String(id));
     const item = items.get(String(id));
     if (!(item instanceof Y.Map)) return [];
     const projected = projectMap(item);

@@ -128,10 +128,11 @@ describe("P4.I3 honest execution and authority", () => {
     const act = read("src/app/api/spectra/run/loop/act.ts");
     expect(act).toContain('actorKind: "ai"');
     // Keyed per execution; the shared helper appends `:model_input_tokens`.
-    // Later growth in the same execution is keyed from the metered total.
+    // Later growth in the same execution is keyed from the metered total; a
+    // replacement worker after a takeover is keyed by its own worker id.
     const meters = read("convex/spectraRuns.ts");
     expect(meters).toContain(
-      "const executionPrefix = `spectra-run:${run._id}:${run.executionId}`;",
+      "const executionPrefix = `spectra-run:${run._id}:${run.executionId}${firstWorker ? \"\" : `:worker:${workerId}`}`;",
     );
     expect(read("convex/metering.ts")).toContain(
       "idempotencyKey: `${args.idempotencyPrefix}:${category}`",

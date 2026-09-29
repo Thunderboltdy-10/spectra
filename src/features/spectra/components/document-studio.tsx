@@ -97,6 +97,7 @@ import type { DocumentAcademicOperation } from "../commands/office/document-acad
 import { documentBlocksFromJson } from "../lenses/document-projection";
 import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
+import { CitationSourcePickers } from "./document-citation-pickers";
 import { editNoteText } from "../editor/note-text-edit";
 import {
   PageBreak,
@@ -3524,8 +3525,14 @@ export function DocumentStudio({
           >
             <label>Author{academicDraft.kind === "citation" ? " (optional)" : ""}<input aria-label="Native author" value={academicDraft.author} onChange={(event) => setAcademicDraft({ ...academicDraft, author: event.target.value })} /></label>
             {academicDraft.kind === "citation" ? <>
-              {!academicDraft.citationId && availableWordSources.length ? <label>Existing Word source<select aria-label="Existing Word source" value={academicDraft.source?.tag ?? ""} onChange={(event) => { const source = availableWordSources.find((item) => item.tag === event.target.value); if (source) chooseWordSource(source); else setAcademicDraft({ ...academicDraft, source: undefined, text: "", author: "", year: "", url: "" }); }}><option value="">New supplied source</option>{availableWordSources.map((source) => <option key={source.tag} value={source.tag}>{source.title || source.tag}</option>)}</select></label> : null}
-              <label>Source type<select aria-label="Source type" value={academicDraft.source?.sourceType ?? "Misc"} onChange={(event) => setAcademicDraft({ ...academicDraft, source: { ...(academicDraft.source ?? { tag: `Source${crypto.randomUUID().replaceAll("-", "")}`, title: academicDraft.text }), sourceType: event.target.value as WordSource["sourceType"] } })}><option value="Misc">Unspecified</option><option value="Book">Book</option><option value="JournalArticle">Journal article</option><option value="DocumentFromInternetSite">Web page</option><option value="Report">Report</option></select></label>
+              <CitationSourcePickers
+                sources={availableWordSources}
+                source={academicDraft.source}
+                showSources={!academicDraft.citationId}
+                onChooseSource={chooseWordSource}
+                onNewSource={() => setAcademicDraft({ ...academicDraft, source: undefined, text: "", author: "", year: "", url: "" })}
+                onSourceType={(sourceType) => setAcademicDraft({ ...academicDraft, source: { ...(academicDraft.source ?? { tag: `Source${crypto.randomUUID().replaceAll("-", "")}`, title: academicDraft.text }), sourceType } })}
+              />
               <label>Year (optional)<input aria-label="Source year" value={academicDraft.year} onChange={(event) => setAcademicDraft({ ...academicDraft, year: event.target.value })} /></label>
               <label>Pages (optional)<input aria-label="Citation pages" value={academicDraft.pages} onChange={(event) => setAcademicDraft({ ...academicDraft, pages: event.target.value })} /></label>
               <label>URL (optional)<input aria-label="Source URL" value={academicDraft.url} onChange={(event) => setAcademicDraft({ ...academicDraft, url: event.target.value })} /></label>

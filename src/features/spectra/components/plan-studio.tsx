@@ -22,7 +22,7 @@ import {
 import { SelectField } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArtifactWorkbar } from "./artifact-workbar";
+import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
@@ -118,6 +118,12 @@ export function PlanStudio({
   onOpenArtifact?: (artifactId: string) => void;
 }) {
   const plan = useMemo(() => normalizePlanContent(content), [content]);
+  // The content as last rendered, for work that finishes after an await (a
+  // file read): it must land on the plan as it is then, not as it was.
+  const contentRef = useRef(content);
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   const [view, setView] = useState<PlanViewKind>("list");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<PlanStatus | "all">("all");
@@ -257,7 +263,8 @@ export function PlanStudio({
     }
     setProblem(undefined);
     if (message) setNotice(message);
-    onChange({ ...(content && typeof content === "object" ? content : {}), ...next });
+    const latest = contentRef.current;
+    onChange({ ...(latest && typeof latest === "object" ? latest : {}), ...next });
   }
 
   function patchTask(taskId: string, patch: Partial<PlanTask>) {
@@ -386,7 +393,7 @@ export function PlanStudio({
   async function importPlan(file: File) {
     const text = await file.text();
     const result = planFromDelimited(
-      plan,
+      normalizePlanContent(contentRef.current),
       text,
       file.name.endsWith(".tsv") ? "\t" : ",",
     );
@@ -447,6 +454,7 @@ export function PlanStudio({
             : undefined
         }
         actions={projectBindingsFromIr("planner_task", [
+          ...contentHistoryBindings(studio.history),
           {
             id: "find",
             label: "Find tasks",

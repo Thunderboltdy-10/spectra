@@ -217,7 +217,11 @@ export function SelectField({
   // opened onto an empty menu.
   const empty = options.length === 0;
   const matched = options.some((option) => option.value === value);
-  const resolvedValue = empty || !matched ? undefined : value;
+  // Always controlled: an unmatched value is "" (Radix shows the placeholder),
+  // never undefined, which would hand the choice to Radix's own state. An
+  // action picker ("Link work…", "Add reminder…") keeps value="" and so
+  // returns to its prompt after every pick instead of showing the last one.
+  const resolvedValue = empty || !matched ? "" : value;
 
   const trigger = (
     <SelectTrigger

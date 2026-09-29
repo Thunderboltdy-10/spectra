@@ -90,6 +90,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
+  contentHistoryBindings,
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
@@ -652,7 +653,6 @@ export function FlashcardStudio({
     setDeckMediaBusy(true);
     setDeckMediaError(undefined);
     try {
-      const previousAssetId = activeCard.media?.assetId;
       const uploaded = await uploadArtifactAsset({
         artifactId,
         path: `flashcards/${activeCard.id}/${Date.now().toString(36)}-${file.name}`,
@@ -674,16 +674,6 @@ export function FlashcardStudio({
         },
         ...(activeCard.variant === "image_occlusion" ? { occlusions: [] } : {}),
       });
-      if (
-        previousAssetId &&
-        previousAssetId !== uploaded.assetId &&
-        !latestDeckRef.current.cards.some(
-          (card) =>
-            card.id !== activeCard.id &&
-            card.media?.assetId === previousAssetId,
-        )
-      )
-        await revokeArtifactAsset(previousAssetId).catch(() => undefined);
       const refreshed = await getArtifactAssets(artifactId);
       setDeckAssets(refreshed.assets);
     } catch (error) {
@@ -698,46 +688,19 @@ export function FlashcardStudio({
     }
   }
 
-  async function removeDeckMedia() {
+  // Removing an image or a card never releases its asset: undo and History
+  // restore bring it back, and every retained version still references it.
+  // Assets are released with the artifact.
+  function removeDeckMedia() {
     if (!activeCard?.media || deckMediaBusy) return;
-    setDeckMediaBusy(true);
     setDeckMediaError(undefined);
-    try {
-      const removedAssetId = activeCard.media.assetId;
-      if (
-        !cards.some(
-          (card) =>
-            card.id !== activeCard.id && card.media?.assetId === removedAssetId,
-        )
-      )
-        await revokeArtifactAsset(removedAssetId);
-      updateCard(activeCard.id, {
-        media: undefined,
-        occlusions: [],
-        ...(activeCard.variant === "image_occlusion"
-          ? { variant: "basic" as const }
-          : {}),
-      });
-      setDeckAssets((current) =>
-        current.filter(
-          (asset) =>
-            asset.assetId !== removedAssetId ||
-            cards.some(
-              (card) =>
-                card.id !== activeCard.id &&
-                card.media?.assetId === removedAssetId,
-            ),
-        ),
-      );
-    } catch (error) {
-      setDeckMediaError(
-        error instanceof Error
-          ? error.message
-          : "The card image could not be removed.",
-      );
-    } finally {
-      setDeckMediaBusy(false);
-    }
+    updateCard(activeCard.id, {
+      media: undefined,
+      occlusions: [],
+      ...(activeCard.variant === "image_occlusion"
+        ? { variant: "basic" as const }
+        : {}),
+    });
   }
 
   function maskPoint(event: ReactPointerEvent<HTMLDivElement>) {
@@ -802,36 +765,6 @@ export function FlashcardStudio({
     setActiveCardId(card.id);
     setActiveSection(section);
     focusCardIdRef.current = card.id;
-  }
-
-  function releaseUnusedDeckMedia(
-    removedCards: DeckCard[],
-    remainingCards: DeckCard[],
-  ) {
-    const retainedAssetIds = new Set(
-      remainingCards.flatMap((card) =>
-        card.media?.assetId ? [card.media.assetId] : [],
-      ),
-    );
-    const removable = [
-      ...new Set(
-        removedCards.flatMap((card) =>
-          card.media?.assetId && !retainedAssetIds.has(card.media.assetId)
-            ? [card.media.assetId]
-            : [],
-        ),
-      ),
-    ];
-    if (!removable.length) return;
-    void Promise.all(
-      removable.map((assetId) =>
-        revokeArtifactAsset(assetId).catch(() => undefined),
-      ),
-    ).then(() =>
-      setDeckAssets((current) =>
-        current.filter((asset) => !removable.includes(asset.assetId)),
-      ),
-    );
   }
 
   function reorderCard(draggedId: string, targetId: string) {
@@ -1871,6 +1804,7 @@ export function FlashcardStudio({
   // them survive the pane's width, so the deck can no longer grow a second row
   // under pressure the way the audited build did.
   const deckActions: CommandBinding[] = projectBindingsFromIr("flashcard_deck", [
+    ...contentHistoryBindings(contract.history),
     {
       id: "add-card",
       label: "Add card",
@@ -2359,7 +2293,6 @@ export function FlashcardStudio({
                               },
                             ];
                       commit(replacement);
-                      releaseUnusedDeckMedia([activeCard], replacement);
                       setActiveCardId(replacement[0]!.id);
                     }}
                     aria-label="Remove card"
@@ -2430,7 +2363,7 @@ export function FlashcardStudio({
                       type="button"
                       className={iconButtonClass()}
                       disabled={deckMediaBusy || !canEdit}
-                      onClick={() => void removeDeckMedia()}
+                      onClick={removeDeckMedia}
                       aria-label="Remove image"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -2871,7 +2804,7 @@ export function FlashcardStudio({
                           type="button"
                           className={iconButtonClass()}
                           disabled={deckMediaBusy || !canEdit}
-                          onClick={() => void removeDeckMedia()}
+                          onClick={removeDeckMedia}
                           aria-label="Remove card image"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

@@ -64,7 +64,14 @@ import {
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { projectBindingsFromIr } from "../capabilities/derivations";
-import { ArtifactWorkbar, type CommandBinding } from "./artifact-workbar";
+import {
+  ArtifactWorkbar,
+  contentHistoryBindings,
+  type CommandBinding,
+} from "./artifact-workbar";
+import { useOptionalStudioContract } from "./artifact-studio-shell";
+import { SelectField } from "@/components/ui/select";
+import { formatMinutesBefore } from "../reminders/minutes-before";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 
 const HOUR_HEIGHT = 68;
@@ -297,6 +304,38 @@ function EventCard({
   );
 }
 
+// Radix Select rejects an empty-string item value, so "Does not repeat" has a
+// sentinel of its own. A rule these presets do not cover (an imported
+// "every Monday and Wednesday") shows as itself instead of as a wrong preset.
+const NO_RECURRENCE = "none";
+const RECURRENCE_PRESETS = [
+  { value: NO_RECURRENCE, label: "Does not repeat" },
+  { value: "FREQ=DAILY", label: "Daily" },
+  { value: "FREQ=WEEKLY", label: "Weekly" },
+  { value: "FREQ=MONTHLY", label: "Monthly" },
+];
+function recurrenceOptions(current: string | undefined) {
+  return current && !RECURRENCE_PRESETS.some((option) => option.value === current)
+    ? [...RECURRENCE_PRESETS, { value: current, label: `Custom (${current})` }]
+    : RECURRENCE_PRESETS;
+}
+
+const AVAILABILITY_OPTIONS = [
+  { value: "busy", label: "Busy" },
+  { value: "free", label: "Free" },
+];
+
+const REMINDER_PRESETS = [-1, 0, 5, 10, 15, 30, 60, 1440];
+function reminderOptions(current: number) {
+  const minutes = REMINDER_PRESETS.includes(current)
+    ? REMINDER_PRESETS
+    : [...REMINDER_PRESETS, current].sort((left, right) => left - right);
+  return minutes.map((value) => ({
+    value: String(value),
+    label: value < 0 ? "None" : formatMinutesBefore(value),
+  }));
+}
+
 export function TimetableStudio({
   artifactId,
   artifacts,
@@ -317,6 +356,7 @@ export function TimetableStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  const studioHistory = useOptionalStudioContract()?.history;
   const sharedTimetable = useMemo(
     () => sharedTimetableContent(content),
     [content],
@@ -468,6 +508,9 @@ export function TimetableStudio({
     selectedEvent && personalReady && !selectedIsPersonal,
   );
   const selectedCanPersonalize = Boolean(selectedEvent && personalReady);
+  const selectedReminderMinutes = selectedIsPersonal
+    ? (selectedEvent?.reminders?.[0]?.minutesBefore ?? -1)
+    : (selectedEvent?.overlay?.reminderMinutes ?? -1);
 
   const days = useMemo(() => {
     if (view.kind === "day") return [anchor];
@@ -1195,6 +1238,7 @@ path={eventPath(event.id)}
   }
 
   const workbarActions: CommandBinding[] = projectBindingsFromIr("timetable", [
+    ...contentHistoryBindings(studioHistory),
     {
       id: "today",
       label: "Today",
@@ -1703,21 +1747,23 @@ path={eventPath(event.id)}
           </label>
           <label>
             Calendar
-            <select
+            <SelectField
+              ariaLabel="Calendar"
+              size="sm"
+              triggerClassName="w-full normal-case tracking-normal font-normal text-micro"
               value={selectedEvent.layerId}
               disabled={!selectedCanEditBase}
-              onChange={(event) =>
+              onChange={(layerId) =>
                 updateSelected((candidate) => {
-                  candidate.layerId = event.target.value;
+                  candidate.layerId = layerId;
                 })
               }
-            >
-              {timetable.layers.map((layer) => (
-                <option key={layer.id} value={layer.id} disabled={layer.locked}>
-                  {layer.name}
-                </option>
-              ))}
-            </select>
+              options={timetable.layers.map((layer) => ({
+                value: layer.id,
+                label: layer.name,
+                disabled: layer.locked,
+              }))}
+            />
           </label>
           <label>
             <MapPin className="h-3.5 w-3.5" /> Location or video
@@ -1733,49 +1779,49 @@ path={eventPath(event.id)}
           </label>
           <label>
             Recurrence
-            <select
-              value={selectedEvent.recurrence ?? ""}
+            <SelectField
+              ariaLabel="Recurrence"
+              size="sm"
+              triggerClassName="w-full normal-case tracking-normal font-normal text-micro"
+              value={selectedEvent.recurrence ?? NO_RECURRENCE}
               disabled={!selectedCanEditBase}
-              onChange={(event) =>
+              onChange={(recurrence) =>
                 updateSelected((candidate) => {
-                  candidate.recurrence = event.target.value || undefined;
+                  candidate.recurrence =
+                    recurrence === NO_RECURRENCE ? undefined : recurrence;
                 })
               }
-            >
-              <option value="">Does not repeat</option>
-              <option value="FREQ=DAILY">Daily</option>
-              <option value="FREQ=WEEKLY">Weekly</option>
-              <option value="FREQ=MONTHLY">Monthly</option>
-            </select>
+              options={recurrenceOptions(selectedEvent.recurrence)}
+            />
           </label>
           <div className="timetable-event-date-fields">
             <label>
               Show as
-              <select
+              <SelectField
+                ariaLabel="Show as"
+                size="sm"
+                triggerClassName="w-full normal-case tracking-normal font-normal text-micro"
                 value={selectedEvent.availability ?? "busy"}
                 disabled={!selectedCanEditBase}
-                onChange={(event) =>
+                onChange={(availability) =>
                   updateSelected((candidate) => {
-                    candidate.availability = event.target.value as
-                      "busy" | "free";
+                    candidate.availability = availability as "busy" | "free";
                   })
                 }
-              >
-                <option value="busy">Busy</option>
-                <option value="free">Free</option>
-              </select>
+                options={AVAILABILITY_OPTIONS}
+              />
             </label>
             <label>
               Reminder
-              <select
-                value={
-                  selectedIsPersonal
-                    ? (selectedEvent.reminders?.[0]?.minutesBefore ?? -1)
-                    : (selectedEvent.overlay?.reminderMinutes ?? -1)
-                }
+              <SelectField
+                ariaLabel="Reminder"
+                size="sm"
+                triggerClassName="w-full normal-case tracking-normal font-normal text-micro"
+                value={String(selectedReminderMinutes)}
                 disabled={!selectedCanPersonalize}
-                onChange={(event) => {
-                  const minutes = Number(event.target.value);
+                options={reminderOptions(selectedReminderMinutes)}
+                onChange={(value) => {
+                  const minutes = Number(value);
                   updateSelected((candidate) => {
                     if (!selectedIsPersonal) {
                       candidate.overlay = {
@@ -1798,16 +1844,7 @@ path={eventPath(event.id)}
                     }
                   });
                 }}
-              >
-                <option value={-1}>None</option>
-                <option value={0}>At start time</option>
-                <option value={5}>5 minutes before</option>
-                <option value={10}>10 minutes before</option>
-                <option value={15}>15 minutes before</option>
-                <option value={30}>30 minutes before</option>
-                <option value={60}>1 hour before</option>
-                <option value={1440}>1 day before</option>
-              </select>
+              />
             </label>
           </div>
           <label className="timetable-color-field">
@@ -1987,31 +2024,28 @@ path={eventPath(event.id)}
           </label>
           <label>
             Linked work
-            <select
+            <SelectField
+              ariaLabel="Linked work"
+              size="sm"
+              triggerClassName="w-full normal-case tracking-normal font-normal text-micro"
               value=""
+              placeholder="Link work…"
               disabled={!selectedCanEditBase}
-              onChange={(event) => {
-                const artifactId = event.target.value;
-                if (!artifactId) return;
+              onChange={(linkedId) => {
+                if (!linkedId) return;
                 updateSelected((candidate) => {
                   candidate.artifactIds = Array.from(
-                    new Set([...(candidate.artifactIds ?? []), artifactId]),
+                    new Set([...(candidate.artifactIds ?? []), linkedId]),
                   );
                 });
               }}
-            >
-              <option value="">Link work…</option>
-              {artifacts
+              options={artifacts
                 .filter(
                   (artifact) =>
                     artifact._id !== artifactId && artifact.status === "active",
                 )
-                .map((artifact) => (
-                  <option key={artifact._id} value={artifact._id}>
-                    {artifact.title}
-                  </option>
-                ))}
-            </select>
+                .map((artifact) => ({ value: artifact._id, label: artifact.title }))}
+            />
           </label>
           {selectedEvent.artifactIds?.length ? (
             <div className="timetable-event-links">

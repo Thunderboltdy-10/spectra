@@ -62,6 +62,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type FocusEvent as ReactFocusEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -103,6 +104,8 @@ import { targetAttrs } from "../collaboration/target-attributes";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
   applyStudioHistory,
+  commitStudioGesture,
+  studioValuesEqual,
   type StudioHistoryEntry,
 } from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
@@ -713,6 +716,14 @@ export function WhiteboardStudio({
   const [redo, setRedo] = useState<StudioHistoryEntry<WhiteboardContent>[]>(
     [],
   );
+  /**
+   * Typing in an object's text (focus to blur) commits every keystroke but is
+   * one undo step. `after` gathers only this person's edits, so undoing it
+   * never reverts what a collaborator changed meanwhile.
+   */
+  const typingSessionRef = useRef<
+    StudioHistoryEntry<WhiteboardContent> | undefined
+  >(undefined);
   const [presenting, setPresenting] = useState(false);
   const presenterRef = useRef<HTMLDivElement>(null);
   useModalFocus(presenterRef, {
@@ -857,7 +868,10 @@ export function WhiteboardStudio({
   const emit = useCallback(
     (next: WhiteboardContent, record = true) => {
       if (readOnly) return;
-      if (record) {
+      const session = typingSessionRef.current;
+      if (record && session) {
+        session.after = commitStudioGesture(boardRef.current, next, session.after);
+      } else if (record) {
         const before = clone(boardRef.current);
         setUndo((stack) => [...stack.slice(-79), { before, after: next }]);
         setRedo([]);
@@ -1611,6 +1625,25 @@ export function WhiteboardStudio({
       }, false);
     }
   }
+  function isTypingTarget(target: EventTarget) {
+    return (
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLInputElement && target.type === "text")
+    );
+  }
+  function beginTyping(event: ReactFocusEvent<HTMLDivElement>) {
+    if (!isTypingTarget(event.target) || typingSessionRef.current) return;
+    const origin = clone(boardRef.current);
+    typingSessionRef.current = { before: origin, after: origin };
+  }
+  function finishTyping(event: ReactFocusEvent<HTMLDivElement>) {
+    const session = typingSessionRef.current;
+    if (!isTypingTarget(event.target) || !session) return;
+    typingSessionRef.current = undefined;
+    if (studioValuesEqual(session.before, session.after)) return;
+    setUndo((stack) => [...stack.slice(-79), session]);
+    setRedo([]);
+  }
   function finishPointer(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
@@ -1623,10 +1656,20 @@ export function WhiteboardStudio({
     // nothing: the bar's Undo used to walk back through identical states.
     if (drag.mode !== "node" && drag.mode !== "resize") return;
     if (!drag.moved) return;
-    setUndo((stack) => [
-      ...stack.slice(-79),
-      { before: drag.snapshot, after: clone(board) },
-    ]);
+    // The undo entry holds only this gesture's geometry. Taking the whole
+    // board at drop time would fold in a collaborator's edit that landed
+    // during the drag, and undoing the drag would revert it too.
+    const gestureIds = new Set(
+      drag.mode === "resize" ? [drag.nodeId] : Object.keys(drag.nodeStarts ?? {}),
+    );
+    const after = clone(drag.snapshot);
+    for (const node of after.nodes) {
+      const live = gestureIds.has(node.id)
+        ? boardRef.current.nodes.find((candidate) => candidate.id === node.id)
+        : undefined;
+      if (live) Object.assign(node, { x: live.x, y: live.y, width: live.width, height: live.height });
+    }
+    setUndo((stack) => [...stack.slice(-79), { before: drag.snapshot, after }]);
     setRedo([]);
   }
   function wheel(event: ReactWheelEvent<HTMLDivElement>) {
@@ -2607,7 +2650,10 @@ export function WhiteboardStudio({
         unsupportedFeatures,
         importedContent: imported.content,
       });
-      emit(imported.content);
+      // The import was converted from the board as it was when it began; the
+      // original's upload and the conversion take time. Replay it onto the
+      // board as it is now, so an edit made meanwhile is not reverted.
+      emit(commitStudioGesture(board, imported.content, boardRef.current));
       setSelectedNodeIds([]);
       setIoNotice(
         `Imported ${imported.importedNodes.toLocaleString()} native object${imported.importedNodes === 1 ? "" : "s"} from ${file.name}.${imported.warnings.length ? ` Fidelity report: ${imported.warnings.join(" ")}` : " Full native board structure was retained."}`,
@@ -2760,6 +2806,8 @@ export function WhiteboardStudio({
         onPointerMove={compact ? undefined : movePointer}
         onPointerUp={compact ? undefined : finishPointer}
         onPointerCancel={compact ? undefined : finishPointer}
+        onFocus={compact ? undefined : beginTyping}
+        onBlur={compact ? undefined : finishTyping}
         onWheel={compact ? undefined : wheel}
         onKeyDown={compact ? undefined : canvasKeyDown}
         onCopy={compact ? undefined : (event) => canvasClipboard(event, "copy")}

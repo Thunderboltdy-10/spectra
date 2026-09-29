@@ -2450,7 +2450,10 @@ function shiftIdentityMap(
     ...Object.fromEntries(
       Array.from({ length: materializedCount }, (_, index) => [
         String(index),
-        `${identityPrefix}-${index + 1}`,
+        // The same implicit id `normalizeSheetIdentityMap` gives an
+        // unmaterialized row or column, so an insert does not rename the
+        // rows it leaves in place.
+        `${identityPrefix}:${index + 1}`,
       ]),
     ),
     ...(source ?? {}),
@@ -2532,6 +2535,73 @@ function shiftStructuralRange(
     else range.end.column -= 1;
   }
   return `${prefix}${rangeLabel(range)}`;
+}
+
+const IDENTITY_KEY_SEPARATOR = "";
+
+function implicitAxisId(sheetId: string, kind: "row" | "column", index: number) {
+  return `${sheetId}:${kind}:${index + 1}`;
+}
+
+/**
+ * The workbook with each sheet's cells keyed by row and column identity
+ * instead of address. A row or column insert moves every cell after it to a
+ * new address, but not to a new identity, so replaying history in this form
+ * keeps a collaborator's later edit with its row. `sheetsByAddress` undoes it.
+ */
+export function sheetsByIdentity(content: SheetsContent): SheetsContent {
+  return {
+    ...content,
+    sheets: content.sheets.map((sheet) => {
+      const rows = { ...(sheet.rowIdentities ?? {}) };
+      const columns = { ...(sheet.columnIdentities ?? {}) };
+      const cells: Record<string, SheetCell> = {};
+      for (const [address, cell] of Object.entries(sheet.cells)) {
+        const coordinate = parseAddress(address);
+        if (!coordinate) continue;
+        const row = (rows[String(coordinate.row)] ??= implicitAxisId(sheet.id, "row", coordinate.row));
+        const column = (columns[String(coordinate.column)] ??= implicitAxisId(sheet.id, "column", coordinate.column));
+        cells[`${row}${IDENTITY_KEY_SEPARATOR}${column}`] = cell;
+      }
+      return { ...sheet, cells, rowIdentities: rows, columnIdentities: columns };
+    }),
+  };
+}
+
+export function sheetsByAddress(content: SheetsContent): SheetsContent {
+  return {
+    ...content,
+    sheets: content.sheets.map((sheet) => {
+      const indexOf = (kind: "row" | "column", map: Record<string, string>) => {
+        const byId = new Map(Object.entries(map).map(([index, id]) => [id, Number(index)]));
+        const implicitPrefix = `${sheet.id}:${kind}:`;
+        return (id: string) => {
+          const index = byId.get(id);
+          if (index !== undefined) return index;
+          // An implicit id names its position while nothing else claims it.
+          const suffix = id.startsWith(implicitPrefix) ? id.slice(implicitPrefix.length) : "";
+          const position = /^[1-9][0-9]*$/.test(suffix) ? Number(suffix) - 1 : -1;
+          return position >= 0 && map[String(position)] === undefined ? position : undefined;
+        };
+      };
+      const rowOf = indexOf("row", sheet.rowIdentities ?? {});
+      const columnOf = indexOf("column", sheet.columnIdentities ?? {});
+      const cells: Record<string, SheetCell> = {};
+      for (const [key, cell] of Object.entries(sheet.cells)) {
+        const [rowId, columnId] = key.split(IDENTITY_KEY_SEPARATOR);
+        if (columnId === undefined) {
+          cells[key] = cell;
+          continue;
+        }
+        const row = rowOf(rowId!);
+        const column = columnOf(columnId);
+        // A cell whose row or column was deleted meanwhile goes with it.
+        if (row === undefined || column === undefined) continue;
+        cells[coordinateToAddress({ row, column })] = cell;
+      }
+      return { ...sheet, cells };
+    }),
+  };
 }
 
 export function mutateSheetAxis(

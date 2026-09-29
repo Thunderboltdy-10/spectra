@@ -38,7 +38,6 @@ import {
   getArtifactAssets,
   getSpectraQuizPracticeAttempts,
   getSpectraQuizResponseSummary,
-  revokeArtifactAsset,
   saveSpectraQuizPracticeResponse,
   startSpectraQuizPractice,
   submitSpectraQuizPractice,
@@ -88,6 +87,7 @@ import { formatShortDate } from "./spectra-view-model";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
+  contentHistoryBindings,
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
@@ -837,7 +837,6 @@ export function QuizStudio({
         sha256: await artifactBlobSha256(file),
         blob: file,
       });
-      const previousAssetId = activeQuestion.media?.assetId;
       const nextQuestions = latestQuizRef.current.questions.map((question) =>
         question.id === activeQuestion.id
           ? {
@@ -852,20 +851,6 @@ export function QuizStudio({
           : question,
       );
       commit(nextQuestions);
-      if (
-        previousAssetId &&
-        !nextQuestions.some(
-          (question) => question.media?.assetId === previousAssetId,
-        )
-      ) {
-        try {
-          await revokeArtifactAsset(previousAssetId);
-        } catch {
-          setQuizMediaError(
-            "The new image is active, but the replaced asset could not yet be released from storage.",
-          );
-        }
-      }
       const refreshed = await getArtifactAssets(artifactId);
       setQuizAssets(refreshed.assets);
     } catch (error) {
@@ -879,54 +864,23 @@ export function QuizStudio({
     }
   }
 
-  async function removeQuestionMedia(questionId: string) {
-    const target = questions.find((question) => question.id === questionId);
-    if (!target?.media) return;
-    const assetId = target.media.assetId;
-    const next = questions.map((question) =>
-      question.id === questionId ? { ...question, media: undefined } : question,
+  // Removing an image or a question never releases its asset: undo and
+  // History restore bring the item back, and every retained version still
+  // references it. Assets are released with the artifact.
+  function removeQuestionMedia(questionId: string) {
+    if (!questions.some((question) => question.id === questionId && question.media)) return;
+    commit(
+      questions.map((question) =>
+        question.id === questionId ? { ...question, media: undefined } : question,
+      ),
     );
-    commit(next);
-    if (!next.some((question) => question.media?.assetId === assetId)) {
-      try {
-        await revokeArtifactAsset(assetId);
-        setQuizAssets((current) =>
-          current.filter((asset) => asset.assetId !== assetId),
-        );
-      } catch (error) {
-        setQuizMediaError(
-          error instanceof Error
-            ? error.message
-            : "The image was removed from the question but storage cleanup failed.",
-        );
-      }
-    }
   }
 
-  async function removeQuestion(questionId: string) {
-    const target = questions.find((question) => question.id === questionId);
+  function removeQuestion(questionId: string) {
     const next = questions.filter((question) => question.id !== questionId);
     const replacement = next.length > 0 ? next : quizQuestions({});
     commit(replacement);
     setActiveQuestionId(replacement[0]?.id ?? "");
-    const assetId = target?.media?.assetId;
-    if (
-      assetId &&
-      !replacement.some((question) => question.media?.assetId === assetId)
-    ) {
-      try {
-        await revokeArtifactAsset(assetId);
-        setQuizAssets((current) =>
-          current.filter((asset) => asset.assetId !== assetId),
-        );
-      } catch (error) {
-        setQuizMediaError(
-          error instanceof Error
-            ? error.message
-            : "The question was removed but media cleanup failed.",
-        );
-      }
-    }
   }
 
   function answerArray(questionId: string) {
@@ -1480,11 +1434,14 @@ export function QuizStudio({
           timeLimitSeconds: question.timeLimitSeconds ?? 90,
         }),
       );
+      // The quiz as it is now, after the upload and parse: a question added
+      // meanwhile (here or by a collaborator) is kept.
+      const current = latestQuizRef.current.questions;
       const onlyBlankStarter =
-        questions.length === 1 &&
-        !questions[0]?.prompt.trim() &&
-        questions[0]?.options.every((option) => !option.trim());
-      const next = onlyBlankStarter ? imported : [...questions, ...imported];
+        current.length === 1 &&
+        !current[0]?.prompt.trim() &&
+        current[0]?.options.every((option) => !option.trim());
+      const next = onlyBlankStarter ? imported : [...current, ...imported];
       commit(next);
       setActiveQuestionId(imported[0]?.id ?? next[0]?.id ?? "");
       await completeArtifactImport({
@@ -1542,6 +1499,7 @@ export function QuizStudio({
     "quiz",
     canEditQuiz
     ? [
+        ...contentHistoryBindings(studio.history),
         activeQuizMode === "build"
           ? {
               id: "preview",
@@ -2881,7 +2839,7 @@ export function QuizStudio({
                   )}
                   aiChangedPaths={aiChangedPaths}
                   onChange={(patch) => updateQuestion(activeQuestion.id, patch)}
-                  onRemove={() => void removeQuestion(activeQuestion.id)}
+                  onRemove={() => removeQuestion(activeQuestion.id)}
                   onDuplicate={() => {
                     const questionId = id("question");
                     const duplicate: QuizQuestion = {
@@ -3151,7 +3109,7 @@ export function QuizStudio({
                           <button
                             type="button"
                             onClick={() =>
-                              void removeQuestionMedia(activeQuestion.id)
+                              removeQuestionMedia(activeQuestion.id)
                             }
                           >
                             <Trash2 className="h-3.5 w-3.5" /> Remove image

@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   getSpectraArtifactCommentPreference,
@@ -179,20 +179,6 @@ export function ArtifactCommentsPanel({
     }, 220);
     return () => window.clearTimeout(timeout);
   }, [mentionSearch, open]);
-
-  // Escape stays on the window listener below; the hook adds the focus trap
-  // and returns focus to the control that opened the panel.
-  const panelRef = useRef<HTMLElement>(null);
-  useModalFocus(panelRef, { open });
-
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
 
   const repliesByParent = useMemo(() => {
     const map = new Map<string, SpectraArtifactComment[]>();
@@ -360,12 +346,19 @@ export function ArtifactCommentsPanel({
     return <div key={comment._id} className="space-y-2">{renderComment(comment, depth > 0)}{replies.map((reply) => renderThread(reply, depth + 1))}</div>;
   }
 
-  if (!open) return null;
+  // The shared Dialog owns the focus trap, focus return and Escape, so Escape
+  // in a menu or list opened inside the panel closes only that list, and
+  // those lists open over the panel rather than under it.
   return (
-    <div className="absolute inset-0 z-panel flex justify-end" onPointerDown={onClose}>
-      <aside ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="artifact-comments-title" className="flex h-full w-full max-w-[410px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]" onPointerDown={(event) => event.stopPropagation()}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        layer="panel"
+        hideCloseButton
+        aria-describedby={undefined}
+        className="spectra-sheet left-auto right-0 top-0 flex h-dvh max-w-[410px] translate-x-0 translate-y-0 flex-col gap-0 !rounded-none border-y-0 border-r-0 border-l bg-[var(--bg-elevated)] p-0"
+      >
         <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-4 py-4">
-          <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><h2 id="artifact-comments-title" className="font-display text-heading font-semibold text-[var(--text-primary)]">Comments</h2><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>
+          <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><DialogTitle className="font-display">Comments</DialogTitle><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>
           <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="h-4 w-4" /></button></div>
         </header>
 
@@ -417,8 +410,8 @@ export function ArtifactCommentsPanel({
             <p className="mt-2 text-right text-micro text-[var(--text-tertiary)]">Ctrl/⌘ + Enter to post</p>
           </div>
         </div>
-      </aside>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

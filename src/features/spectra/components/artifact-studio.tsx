@@ -3016,6 +3016,19 @@ function ArtifactStudioEditor({
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
   const contentHistoryRef = useRef(createStudioHistory<unknown>());
+  const [contentHistoryState, setContentHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+  });
+  const publishContentHistory = useCallback(() => {
+    const canUndo = contentHistoryRef.current.canUndo();
+    const canRedo = contentHistoryRef.current.canRedo();
+    setContentHistoryState((current) =>
+      current.canUndo === canUndo && current.canRedo === canRedo
+        ? current
+        : { canUndo, canRedo },
+    );
+  }, []);
   const latestContentRef = useRef(content);
   latestContentRef.current = content;
   const [baseline, setBaseline] = useState(() =>
@@ -5055,9 +5068,34 @@ function ArtifactStudioEditor({
     !readOnly && SHELL_HISTORY_TYPES.has(artifact.blueprintKey);
   const changeContentRef = useRef(changeContent);
   changeContentRef.current = changeContent;
+  // The keyboard shortcut and the workbar's Undo and Redo share this step.
+  const stepContentHistory = useCallback(
+    (direction: "undo" | "redo") => {
+      const next = contentHistoryRef.current.step(
+        direction,
+        latestContentRef.current,
+      );
+      publishContentHistory();
+      if (next === null) return false;
+      changeContentRef.current(next, false);
+      return true;
+    },
+    [publishContentHistory],
+  );
+  const contentHistory = useMemo(
+    () =>
+      shellHistoryEnabled
+        ? {
+            ...contentHistoryState,
+            step: (direction: "undo" | "redo") =>
+              void stepContentHistory(direction),
+          }
+        : undefined,
+    [contentHistoryState, shellHistoryEnabled, stepContentHistory],
+  );
   useEffect(() => {
-    const history = contentHistoryRef.current;
-    history.reset();
+    contentHistoryRef.current.reset();
+    publishContentHistory();
     if (!shellHistoryEnabled) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented) return;
@@ -5071,14 +5109,11 @@ function ArtifactStudioEditor({
       if (!surface || !(inside || (unfocused && lastInteractedStudioSurface === surface)))
         return;
       if (surface.querySelector('[role="dialog"], [role="alertdialog"]')) return;
-      const next = history.step(direction, latestContentRef.current);
-      if (next === null) return;
-      event.preventDefault();
-      changeContentRef.current(next, false);
+      if (stepContentHistory(direction)) event.preventDefault();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [artifact._id, shellHistoryEnabled]);
+  }, [artifact._id, publishContentHistory, shellHistoryEnabled, stepContentHistory]);
 
   useEffect(() => {
     if (
@@ -5146,8 +5181,10 @@ function ArtifactStudioEditor({
 
   function changeContent(next: unknown, recordHistory = true) {
     if (readOnly) return;
-    if (recordHistory && SHELL_HISTORY_TYPES.has(artifact.blueprintKey))
+    if (recordHistory && SHELL_HISTORY_TYPES.has(artifact.blueprintKey)) {
       contentHistoryRef.current.record(latestContentRef.current, next);
+      publishContentHistory();
+    }
     latestContentRef.current = next;
     userHasEditedRef.current = true;
     reconcilingRemoteRef.current = false;
@@ -5594,6 +5631,7 @@ function ArtifactStudioEditor({
     compatibilityProfile: artifact.compatibilityProfile ?? "spectra-native",
     fidelity: nativeFidelity,
     executeApplicationCommand,
+    history: contentHistory,
   });
   const identityBlock = (
     <div className="spectra-artifact-identity flex min-w-0 flex-1 items-start">

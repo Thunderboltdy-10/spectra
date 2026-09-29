@@ -502,7 +502,7 @@
   outline: none;
 }
 
-.spectra-document-inline-panel button {
+.spectra-document-inline-panel button:not([role="combobox"]) {
   flex: none;
   padding: 6px 11px;
   border: 1px solid #cfd6cd;
@@ -534,14 +534,6 @@
   gap: 4px;
   min-width: 0;
   font-size: var(--text-small, 0.8125rem);
-}
-
-.spectra-document-inline-panel select {
-  max-width: 100%;
-  padding: 6px 9px;
-  border: 1px solid #cfd6cd;
-  border-radius: var(--control-radius);
-  background: #fff;
 }
 
 .spectra-document-word-comments textarea,

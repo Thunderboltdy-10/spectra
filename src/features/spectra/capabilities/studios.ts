@@ -24,7 +24,16 @@ type StudioSpec = {
   exposed?: boolean;
 };
 
+/** Workbar Undo and Redo over the shell's content history. */
+const CONTENT_HISTORY_SPECS: readonly StudioSpec[] = (
+  ["quiz", "flashcard_deck", "planner_task", "timetable"] as const
+).flatMap((type) => [
+  { type, localId: "undo", description: "Undo the last change.", requires: "edit" as const },
+  { type, localId: "redo", description: "Redo the last undone change.", requires: "edit" as const },
+]);
+
 const STUDIO_SPECS: readonly StudioSpec[] = [
+  ...CONTENT_HISTORY_SPECS,
   { type: "quiz", localId: "preview", description: "Preview this quiz as a learner." },
   { type: "quiz", localId: "build", description: "Return to building this quiz." },
   { type: "quiz", localId: "settings", description: "Open quiz settings." },

@@ -9,6 +9,8 @@ import {
   Settings2,
   RotateCcw,
   MoreHorizontal,
+  Redo2,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -36,7 +38,11 @@ import {
   type CommandParam,
 } from "../commands";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { useStudioContract, type StudioDensity } from "./artifact-studio-shell";
+import {
+  useStudioContract,
+  type StudioContentHistory,
+  type StudioDensity,
+} from "./artifact-studio-shell";
 import {
   WorkbarCommandControl,
   WorkbarControlMenuRow,
@@ -45,6 +51,39 @@ import {
 import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, shouldWarnEssentialOverBudget, workbarPlanKey } from "./workbar-overflow";
 
 export type { CommandBinding } from "../commands";
+
+/**
+ * Undo and Redo over the shell's content history (quiz, flashcards, plan,
+ * timetable). They lead the bar, as the whiteboard's do, and are absent when
+ * the viewer cannot edit.
+ */
+export function contentHistoryBindings(
+  history: StudioContentHistory | undefined,
+): CommandBinding[] {
+  if (!history) return [];
+  return [
+    {
+      id: "undo",
+      label: "Undo",
+      icon: Undo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !history.canUndo,
+      hint: "Ctrl+Z",
+      onSelect: () => history.step("undo"),
+    },
+    {
+      id: "redo",
+      label: "Redo",
+      icon: Redo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !history.canRedo,
+      hint: "Ctrl+Shift+Z",
+      onSelect: () => history.step("redo"),
+    },
+  ];
+}
 
 /**
  * Spectra's one artifact workbar.

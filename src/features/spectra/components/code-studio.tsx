@@ -10,11 +10,11 @@ import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { openSearchPanel } from "@codemirror/search";
-import { Prec } from "@codemirror/state";
+import { Prec, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import { Awareness } from "y-protocols/awareness";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import {
   AlertTriangle,
   Box,
@@ -225,21 +225,36 @@ function uid(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+const fileCollaboration = new WeakMap<
+  Y.Text,
+  { awareness: Awareness; extension: Extension[] }
+>();
+
 /**
  * The collaboration binding for one file's editor, with undo scoped to this
  * person. CodeMirror's own history records every transaction, including the
  * ones y-codemirror dispatches for a collaborator's typing, so its Ctrl+Z
  * reverted peers. yCollab's Y.UndoManager tracks only local-origin edits; its
  * keymap takes Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while the file is shared.
+ *
+ * One binding, and so one undo history, per file. A fresh one per render gave
+ * the undo command an empty manager after the first re-render, and the editor
+ * is remounted on every file switch, which discarded that file's history.
  */
 export function codeEditorCollaboration(
   sharedText: Y.Text,
   awareness: Awareness,
 ) {
-  return [
-    yCollab(sharedText, awareness),
+  const cached = fileCollaboration.get(sharedText);
+  if (cached?.awareness === awareness) return cached.extension;
+  const extension = [
+    yCollab(sharedText, awareness, {
+      undoManager: new Y.UndoManager(sharedText),
+    }),
     Prec.high(keymap.of(yUndoManagerKeymap)),
   ];
+  fileCollaboration.set(sharedText, { awareness, extension });
+  return extension;
 }
 
 /** basicSetup for the source editor: CodeMirror history only when not shared. */
@@ -2453,6 +2468,48 @@ export function CodeStudio({
     </div>
   );
 
+  // The New file / Rename path form. The full surface shows it in the Files
+  // rail; a side panel has no rail, so it opens above the editor instead.
+  const filePathForm =
+    newFileOpen || renamingFileId ? (
+      <div className="mt-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
+        <label className="block text-micro font-semibold text-[var(--text-secondary)]">
+          {renamingFileId ? "Rename path" : "New path"}
+          <input
+            autoFocus
+            value={renamingFileId ? renameDraft : newFilePath}
+            onChange={(event) =>
+              renamingFileId
+                ? setRenameDraft(event.target.value)
+                : setNewFilePath(event.target.value)
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submitFilePathForm();
+              if (event.key === "Escape")
+                closeFilePathForm();
+            }}
+            placeholder="src/chart.tsx"
+            className="mt-1 h-7 w-full rounded-control border border-[var(--border-default)] bg-transparent px-2 text-micro font-normal text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)]"
+          />
+        </label>
+        <div className="mt-1.5 flex justify-end gap-1">
+          <button
+            type="button"
+            className="code-small-action"
+            onClick={closeFilePathForm}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="code-small-action bg-[var(--text-primary)] text-[var(--bg-primary)]"
+            onClick={submitFilePathForm}
+          >
+            {renamingFileId ? "Rename" : "Create"}
+          </button>
+        </div>
+      </div>
+    ) : null;
   const sourcePaneVisible = surface === "code" || surface === "split";
   const isFullscreen = contract.surface === "full";
   // Side-by-side Both is a fullscreen orientation. In the panel it must not
@@ -2535,7 +2592,7 @@ export function CodeStudio({
               view.focus();
             },
           },
-          ...(!readOnly && contract.surface === "full"
+          ...(!readOnly
             ? [
                 {
                   id: "file-new",
@@ -2975,48 +3032,13 @@ export function CodeStudio({
                               className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
                             />
                           </label>
-                          {newFileOpen || renamingFileId ? (
-                            <div className="mt-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
-                              <label className="block text-micro font-semibold text-[var(--text-secondary)]">
-                                {renamingFileId ? "Rename path" : "New path"}
-                                <input
-                                  autoFocus
-                                  value={renamingFileId ? renameDraft : newFilePath}
-                                  onChange={(event) =>
-                                    renamingFileId
-                                      ? setRenameDraft(event.target.value)
-                                      : setNewFilePath(event.target.value)
-                                  }
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter") submitFilePathForm();
-                                    if (event.key === "Escape")
-                                      closeFilePathForm();
-                                  }}
-                                  placeholder="src/chart.tsx"
-                                  className="mt-1 h-7 w-full rounded-control border border-[var(--border-default)] bg-transparent px-2 text-micro font-normal text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)]"
-                                />
-                              </label>
-                              <div className="mt-1.5 flex justify-end gap-1">
-                                <button
-                                  type="button"
-                                  className="code-small-action"
-                                  onClick={closeFilePathForm}
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  className="code-small-action bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                                  onClick={submitFilePathForm}
-                                >
-                                  {renamingFileId ? "Rename" : "Create"}
-                                </button>
-                              </div>
-                            </div>
-                          ) : null}
+                          {filePathForm}
                         </>
                         }
                       />
+                    ) : null}
+                    {contract.surface !== "full" && filePathForm ? (
+                      <div className="px-2 pb-2">{filePathForm}</div>
                     ) : null}
                     <div
                       className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"

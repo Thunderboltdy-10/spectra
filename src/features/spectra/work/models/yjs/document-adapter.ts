@@ -386,27 +386,6 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
       setWorkModelMetadata(doc, this.workType, this.modelVersion);
       if (JSON.stringify(currentDocument) !== JSON.stringify(nextDocument))
         adoptProjectionFragment(fragment, currentDocument, nextDocument, origin);
-      if (typeof globalThis !== "undefined") {
-        const target = globalThis as typeof globalThis & {
-          __spectraNativeProjection?: Array<Record<string, unknown>>;
-        };
-        const nextText = JSON.stringify(nextDocument);
-        if (nextText.includes("RCV1WORDNATIVE")) {
-          const log = (target.__spectraNativeProjection ??= []);
-          log.push({
-            event: "applyProjection",
-            currentNodes: currentDocument.content?.length ?? 0,
-            nextNodes: nextDocument.content?.length ?? 0,
-            fragmentLength: fragment.length,
-            native7InNext: nextText.includes("RCV1WORDNATIVE7"),
-            native7InCurrent: JSON.stringify(currentDocument).includes(
-              "RCV1WORDNATIVE7",
-            ),
-            at: Date.now(),
-          });
-          if (log.length > 40) log.splice(0, log.length - 40);
-        }
-      }
     }, origin);
   }
 

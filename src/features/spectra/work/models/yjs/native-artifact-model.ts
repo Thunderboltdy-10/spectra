@@ -489,29 +489,7 @@ export class NativeArtifactYjsModel {
         : []),
     ];
     const claims = [...regions, ...metadataClaims];
-    const traceNativeProjection = (detail: Record<string, unknown>) => {
-      if (typeof globalThis === "undefined") return;
-      const target = globalThis as typeof globalThis & {
-        __spectraNativeProjection?: Array<Record<string, unknown>>;
-      };
-      const log = (target.__spectraNativeProjection ??= []);
-      log.push({
-        event: "replaceSnapshot",
-        typeKey: this.typeKey,
-        contentChanged,
-        claimCount: claims.length,
-        claimIds: claims.map((claim) => claim.regionId),
-        hasWordMarker: JSON.stringify(value.content).includes("RCV1WORDNATIVE"),
-        ...detail,
-        at: Date.now(),
-      });
-      if (log.length > 40) log.splice(0, log.length - 40);
-    };
-    if (!claims.length) {
-      traceNativeProjection({ applyProjectionRan: false });
-      return { applied: true as const, claims: [] };
-    }
-    let applyProjectionRan = false;
+    if (!claims.length) return { applied: true as const, claims: [] };
     const result = await controller.editMany(boundedRegionClaims(claims), () => {
       if (contentChanged && sheetPlan)
         applySheetsCellProjection(
@@ -520,7 +498,6 @@ export class NativeArtifactYjsModel {
           workYjsOrigins(this.actor).localHuman,
         );
       else if (contentChanged) {
-        applyProjectionRan = true;
         this.adapter.applyProjection(
           this.transport.document,
           value.content,
@@ -535,10 +512,6 @@ export class NativeArtifactYjsModel {
       if (sheetPlan) this.exposeAppliedSheetSnapshot(value, sheetPlan);
       else this.rebuildSnapshotImmediately();
     }
-    traceNativeProjection({
-      applyProjectionRan,
-      applied: result.applied,
-    });
     return result;
   }
 

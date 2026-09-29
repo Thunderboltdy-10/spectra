@@ -1434,11 +1434,14 @@ export function QuizStudio({
           timeLimitSeconds: question.timeLimitSeconds ?? 90,
         }),
       );
+      // The quiz as it is now, after the upload and parse: a question added
+      // meanwhile (here or by a collaborator) is kept.
+      const current = latestQuizRef.current.questions;
       const onlyBlankStarter =
-        questions.length === 1 &&
-        !questions[0]?.prompt.trim() &&
-        questions[0]?.options.every((option) => !option.trim());
-      const next = onlyBlankStarter ? imported : [...questions, ...imported];
+        current.length === 1 &&
+        !current[0]?.prompt.trim() &&
+        current[0]?.options.every((option) => !option.trim());
+      const next = onlyBlankStarter ? imported : [...current, ...imported];
       commit(next);
       setActiveQuestionId(imported[0]?.id ?? next[0]?.id ?? "");
       await completeArtifactImport({

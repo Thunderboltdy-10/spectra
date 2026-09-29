@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import type {
   NativeProgressInput,
   ParkedCandidate,
@@ -165,7 +166,7 @@ function recordOpenRouterEvent(
     event,
     ...metadata,
   };
-  console.info(`[spectra.openrouter.${event}]`, metadata);
+  runLog().info(`spectra.openrouter.${event}`, metadata);
   const instanceId = process.env.SPECTRA_LOCAL_INSTANCE?.trim();
   if (!instanceId) return;
   const configuredPath = process.env.SPECTRA_OPENROUTER_LOG_PATH?.trim();
@@ -5450,7 +5451,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         return agentTurn;
       },
       onTurn: (turn, index) => {
-        console.info("[spectra.agent.turn]", {
+        runLog().info("spectra.agent.turn", {
           index,
           finishReason: turn.finishReason,
           tools: turn.toolCalls.map((call) => call.name),
@@ -5488,7 +5489,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
       if (emittedPublicText) replacePublic("");
       emittedOperationCount = 0;
       emittedProgressCount = 0;
-      console.warn("[spectra.openrouter.repair_retry]", {
+      runLog().warn("spectra.openrouter.repair_retry", {
         model: baseBody.model,
         error: publicError(primaryFailure),
         issues:
@@ -5529,7 +5530,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             repairMessages,
             "repair",
           );
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "focused_repair_headers",
             elapsedMs: Date.now() - repairStartedAt,
             status: response.status,
@@ -5543,7 +5544,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             raw: result?.text ?? latestPlanText,
             error: primaryFailure,
           });
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "repair_headers",
             elapsedMs: Date.now() - repairStartedAt,
             status: repairResponse.status,
@@ -5593,7 +5594,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     if (emittedPublicText) replacePublic("");
     emittedOperationCount = 0;
     emittedProgressCount = 0;
-    console.warn("[spectra.openrouter.encouragement_retry]", {
+    runLog().warn("spectra.openrouter.encouragement_retry", {
       model: baseBody.model,
       error: publicError(primaryFailure),
       directFocusedAction,
@@ -5624,7 +5625,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           encouragementMessages,
           "encouragement",
         );
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "encouragement_headers",
           elapsedMs: Date.now() - encouragementStartedAt,
           status: response.status,
@@ -5643,7 +5644,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             error: primaryFailure,
           },
         );
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "encouragement_headers",
           elapsedMs: Date.now() - encouragementStartedAt,
           status: encouragementResponse.status,
@@ -5708,7 +5709,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     emittedOperationCount = 0;
     emittedProgressCount = 0;
     const fallbackRouting = getSpectraProviderRouting("fallback");
-    console.warn("[spectra.openrouter.fallback]", {
+    runLog().warn("spectra.openrouter.fallback", {
       model: baseBody.model,
       primaryStatus: response.status,
       primaryError: publicError(primaryFailure),
@@ -5742,7 +5743,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         result = fallbackPass.result;
         fallbackResult = fallbackPass.result;
         fallbackFailure = undefined;
-        console.info("[spectra.openrouter.phase]", {
+        runLog().info("spectra.openrouter.phase", {
           phase: "fallback_agent_complete",
           provider: providerName,
           elapsedMs: Date.now() - fallbackStartedAt,
@@ -5790,7 +5791,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             undefined,
             getSpectraFallbackModelId(),
           );
-          console.info("[spectra.openrouter.phase]", {
+          runLog().info("spectra.openrouter.phase", {
             phase: "fallback_repair_headers",
             provider: providerName,
             status: fallbackRepairResponse.status,
@@ -5845,7 +5846,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
           plan = recoveryPass.plan;
           result = recoveryPass.result;
           fallbackFailure = undefined;
-          console.info("[spectra.openrouter.primary_recovery]", {
+          runLog().info("spectra.openrouter.primary_recovery", {
             delayMs,
             model: recoveryPass.result.model,
             provider: recoveryPass.result.provider,
@@ -6000,7 +6001,7 @@ export async function callParallelCreationWorkers(
     finalResponse: `Created ${titles.join(", ")}.`,
   });
   assertRequestedArtifactContent(plan.operations, prompt);
-  console.info("[spectra.parallel_workers.complete]", {
+  runLog().info("spectra.parallel_workers.complete", {
     workerCount: results.length,
     elapsedMs: Date.now() - startedAt,
     models: [...new Set(results.map((result) => result.model))],
@@ -6305,7 +6306,7 @@ ${prompt}`;
   });
   assertRequestedArtifactContent(plan.operations, prompt);
   callbacks.onPublicText?.(plan.finalResponse, "replace");
-  console.info("[spectra.task_graph.complete]", {
+  runLog().info("spectra.task_graph.complete", {
     creationWorkers: creations.length,
     coordinationOperations: coordinationResult.plan.operations.length,
     elapsedMs: Date.now() - startedAt,

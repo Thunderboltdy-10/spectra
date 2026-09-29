@@ -1,4 +1,5 @@
 import "server-only";
+import { runLog } from "./run-log";
 
 import { createHash, randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -969,7 +970,7 @@ async function synchronizeMutation(params: {
   } | undefined>;
 }) {
   const logPhase = (phase: string, detail: Record<string, unknown> = {}) =>
-    console.info("[spectra.ai.artifact.phase]", {
+    runLog().info("spectra.ai.artifact.phase", {
       phase,
       artifactId: params.session.artifact._id,
       runId: params.runId,
@@ -1791,7 +1792,7 @@ async function applyAiArtifactMutationAttempt(params: {
       () =>
         `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
     );
-    console.info("[spectra.ai.artifact.connect]", {
+    runLog().info("spectra.ai.artifact.connect", {
       artifactId: params.artifactId,
       runId: params.runId,
       operationId: params.operationId,

@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import type { Card, RunDetail } from "./contract";
 import { mutate, query } from "./io";
 import type {
@@ -99,30 +100,21 @@ export function publicError(error: unknown, options?: { explanationOnly?: boolea
     const issue = error.issues[0];
     const path = issue?.path.join(".") ?? "";
     const code = issue?.code ?? "invalid";
-    console.error(
-      `[spectra.plan.validation] ${JSON.stringify({
-        path,
-        code,
-        message: issue?.message,
-        issues: error.issues.slice(0, 8).map((entry) => ({
-          path: entry.path.join("."),
-          code: entry.code,
-          message: entry.message,
-        })),
-      })}`,
-    );
+    runLog().error("spectra.plan.validation", error, {
+      path,
+      code,
+      issues: error.issues.slice(0, 8).map((entry) => ({
+        path: entry.path.join("."),
+        code: entry.code,
+        message: entry.message,
+      })),
+    });
   } else if (error instanceof Error) {
-    console.error(
-      `[spectra.plan.application] ${JSON.stringify({
-        name: error.name,
-        message: error.message.slice(0, 800),
-        stack: error.stack?.split("\n").slice(0, 6),
-      })}`,
-    );
+    runLog().error("spectra.plan.application", error, {
+      stack: error.stack?.split("\n").slice(0, 6),
+    });
   } else {
-    console.error(
-      `[spectra.plan.application] ${JSON.stringify({ error: String(error).slice(0, 400) })}`,
-    );
+    runLog().error("spectra.plan.application", new Error(String(error).slice(0, 400)));
   }
   return formatPlanApplicationPublicError(error, options);
 }

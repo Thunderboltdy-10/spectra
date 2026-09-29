@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import { query } from "./io";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { latestNativeWritePerReplica } from "@/features/spectra/ai/native-write-status";
@@ -596,7 +597,7 @@ export async function verifyCommittedOutcomes(
         artifactId,
         timeoutMs: 4_000,
       }).catch((error) => {
-        console.warn("[spectra.verify.live_read_failed]", {
+        runLog().warn("spectra.verify.live_read_failed", {
           artifactId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -608,7 +609,7 @@ export async function verifyCommittedOutcomes(
         continue;
       }
       if (live) {
-        console.warn("[spectra.verify.live_mismatch]", {
+        runLog().warn("spectra.verify.live_mismatch", {
           artifactId,
           changes: (operation.input.contentPatch?.changes ?? []).map(
             (change) => ({

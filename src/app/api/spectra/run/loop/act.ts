@@ -1,3 +1,4 @@
+import { runLog } from "@/features/spectra/ai/run-log";
 import type { NativeProgressUpdate, Surface } from "./contract";
 import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
@@ -912,7 +913,7 @@ export async function executeOperation(
         tags: input.tags,
       }),
     });
-    console.info("[spectra.ai.artifact.create-phase]", {
+    runLog().info("spectra.ai.artifact.create-phase", {
       phase: "yjs-applied",
       artifactId: pendingArtifactId,
       runId,
@@ -954,7 +955,7 @@ export async function executeOperation(
       let finalizeError: unknown;
       while (true) {
         try {
-          console.info("[spectra.ai.artifact.create-phase]", {
+          runLog().info("spectra.ai.artifact.create-phase", {
             phase: "finalize-attempt",
             artifactId: pendingArtifactId,
             runId,
@@ -968,7 +969,7 @@ export async function executeOperation(
             summary: creationSummary,
           })) as Record<string, unknown>;
           finalizeError = undefined;
-          console.info("[spectra.ai.artifact.create-phase]", {
+          runLog().info("spectra.ai.artifact.create-phase", {
             phase: "finalized",
             artifactId: pendingArtifactId,
             runId,

@@ -115,6 +115,7 @@ import type { RunProtocolState } from "@/features/spectra/runs/state";
 import { classifyRunAttemptAbort } from "@/features/spectra/ai/run-lifecycle";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
 import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-usage";
+import { runLog, withSpectraRequestLog, withSpectraRunLog } from "@/features/spectra/ai/run-log";
 import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./loop/ui-observation";
 import { handleUiObserverRequest, uiObserverSchema } from "./loop/ui-observer-request";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
@@ -211,7 +212,9 @@ function composeRestoredRequest(restored: RestoredClarification) {
 // passes, parallel workers, research) lands in one usage ledger. Each status
 // write and heartbeat reports that cumulative total for metering.
 function runAttempt(...args: Parameters<typeof runAttemptInLedger>) {
-  return withRunUsageLedger(() => runAttemptInLedger(...args));
+  const [{ runId, executionId }] = args;
+  return withRunUsageLedger(() =>
+    withSpectraRunLog({ runId, executionId }, () => runAttemptInLedger(...args)));
 }
 
 async function runAttemptInLedger(
@@ -249,8 +252,7 @@ async function runAttemptInLedger(
   let phaseStartedAt = attemptStartedAt;
   const recordPhase = (phase: string) => {
     const now = Date.now();
-    console.info("[spectra.run.phase]", {
-      runId: params.runId,
+    runLog().info("spectra.run.phase", {
       phase,
       elapsedMs: now - phaseStartedAt,
       totalMs: now - attemptStartedAt,
@@ -259,7 +261,7 @@ async function runAttemptInLedger(
   };
   const loop = createAgentLoopExecution({
     runId: params.runId,
-    onTransition: (entry) => console.info("[spectra.agent-loop]", entry),
+    onTransition: (entry) => runLog().info("spectra.agent-loop", entry),
   });
   loop.enter("intake");
   await mutate("spectraRuns:claimExecution", {
@@ -1267,8 +1269,7 @@ async function runAttemptInLedger(
           ) => {
             streamedCreationPreview = true;
             hadVisibleActivity = true;
-            console.info("[spectra.run.partial_creation]", {
-              runId: params.runId,
+            runLog().info("spectra.run.partial_creation", {
               blueprintKey,
               itemCount,
               itemLabel,
@@ -2229,7 +2230,7 @@ async function runAttemptInLedger(
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
         throw firstVerifyError;
       } else {
-        console.warn("[spectra.verify.encouragement_retry]", {
+        runLog().warn("spectra.verify.encouragement_retry", {
           error: publicError(firstVerifyError),
         });
         publishNativeProgress({
@@ -2373,20 +2374,17 @@ async function runAttemptInLedger(
   } catch (error) {
     if (loop.currentStage() !== "report")
       loop.enter("report", "run failed before later stages completed");
-    console.error(
-      "[spectra.run.failure]",
-      JSON.stringify({
-        runId: params.runId,
-        executionId: params.executionId,
+    runLog().error(
+      "spectra.run.failure",
+      error instanceof Error ? error : new Error(String(error)),
+      {
         commitStarted,
         publicTextLength: publicText.length,
-        name: error instanceof Error ? error.name : "UnknownError",
-        message: error instanceof Error ? error.message : String(error),
         stack:
           error instanceof Error
             ? error.stack?.split("\n").slice(0, 8).join(" | ")
             : undefined,
-      }),
+      },
     );
     // A streamed operation preview may still be writing when final plan parsing
     // or validation fails. Let those writes finish before cleanup so a late
@@ -2817,6 +2815,11 @@ function confirmedApplicationSummary(
   return "The approved Spectra action was applied successfully.";
 }
 
+function runResumeAttempt(...args: Parameters<typeof resumeOperationsAttempt>) {
+  const [{ runId, executionId }] = args;
+  return withSpectraRunLog({ runId, executionId }, () => resumeOperationsAttempt(...args));
+}
+
 async function resumeOperationsAttempt(params: {
   actorClerkId: string;
   runId: string;
@@ -2829,7 +2832,7 @@ async function resumeOperationsAttempt(params: {
   const loop = createAgentLoopExecution({
     runId: params.runId,
     startAt: "act",
-    onTransition: (entry) => console.info("[spectra.agent-loop]", entry),
+    onTransition: (entry) => runLog().info("spectra.agent-loop", entry),
   });
   loop.enter("act");
   await mutate("spectraRuns:claimExecution", {
@@ -3181,7 +3184,7 @@ async function resumeOperationsAttempt(params: {
       if (!isQuietRetryableApplyFailure(firstVerifyError)) {
         throw firstVerifyError;
       } else {
-        console.warn("[spectra.resume.verify.encouragement_retry]", {
+        runLog().warn("spectra.resume.verify.encouragement_retry", {
           error: publicError(firstVerifyError),
         });
         await mutate("spectraRuns:appendEvent", {
@@ -3402,7 +3405,7 @@ async function executeScheduledResume(body: Body) {
     throw new Error("The owner has no active session for this scheduled edit.");
   const token = await clerk.sessions.getToken(session.id, "convex", 1_800);
   await withWorkerConvexToken(token.jwt, () =>
-    resumeOperationsAttempt({
+    runResumeAttempt({
       actorClerkId,
       runId: required(body.runId, "runId"),
       resultCardId: required(body.resultCardId, "resultCardId"),
@@ -3580,7 +3583,14 @@ async function executeScheduledRun(body: Body) {
   });
 }
 
-export async function handleSpectraRunRequest(request: NextRequest) {
+export function handleSpectraRunRequest(request: NextRequest) {
+  return withSpectraRequestLog(
+    { method: request.method, path: request.nextUrl.pathname },
+    () => handleSpectraRunRequestInLog(request),
+  );
+}
+
+async function handleSpectraRunRequestInLog(request: NextRequest) {
   const rawBody = await request.text();
   let body: Body;
   try {
@@ -4482,7 +4492,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     return ndjson(async (emit) => {
       emit({ type: "approval_accepted", runId });
       emit({ type: "result_card", runId, card: streamCard(card) });
-      await resumeOperationsAttempt({
+      await runResumeAttempt({
         actorClerkId: actor.clerkId,
         runId,
         resultCardId: confirmation.resultCardId!,

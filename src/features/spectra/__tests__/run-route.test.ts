@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type { StructuredLogger } from "@/lib/logging";
 import { createHash, createHmac } from "node:crypto";
 import type { AiBeforeCommit, PreparedCanonicalAiUpdate } from "../ai/admitted-ai-update";
 import type { NativeMaterializeResult } from "../ai/native-ai-promotion";
@@ -1354,9 +1355,11 @@ describe("Spectra run route", () => {
   });
 
   it("creates one six-card deck and does not emit unrelated placement removal", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
+    // The route's own module instance, loaded after the per-test module reset.
+    const logging = await import("@/lib/logging");
+    const info = vi.spyOn(logging.StructuredLogger.prototype, "info").mockImplementation(() => undefined);
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
 
@@ -1400,7 +1403,7 @@ describe("Spectra run route", () => {
     const appendIdx = convexMutation.mock.calls.findIndex(([name, args]) => String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
     expect(completedIdx).toBeGreaterThan(-1);
     expect(appendIdx).toBeGreaterThan(completedIdx);
-    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+    expect(info.mock.calls.filter(([label]) => label === "spectra.agent-loop").map(([, entry]) => entry)).toEqual([
       { runId: "run-real", stage: "intake", status: "entered" },
       { runId: "run-real", stage: "plan", status: "entered" },
       { runId: "run-real", stage: "resolve", status: "entered" },
@@ -1409,6 +1412,13 @@ describe("Spectra run route", () => {
       { runId: "run-real", stage: "verify", status: "entered" },
       { runId: "run-real", stage: "report", status: "entered" },
     ]);
+    // Every run-loop line, including the provider turns logged deep in
+    // planning, carries the run and the request it belongs to.
+    const turnLogs = info.mock.calls.flatMap(([label], index) =>
+      label === "spectra.agent.turn" ? [info.mock.contexts[index] as StructuredLogger] : []);
+    expect(turnLogs.length).toBeGreaterThan(0);
+    for (const logger of turnLogs)
+      expect(logger.context).toMatchObject({ runId: "run-real", executionId: "execution-1", requestId: expect.any(String) });
   });
 
   it("reads focused content on demand before submitting a mutation plan", async () => {
@@ -2242,9 +2252,11 @@ describe("Spectra run route", () => {
   });
 
   it("applies an explicitly supplied focused deck hint without a model call or provisional shell", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
+    // The route's own module instance, loaded after the per-test module reset.
+    const logging = await import("@/lib/logging");
+    const info = vi.spyOn(logging.StructuredLogger.prototype, "info").mockImplementation(() => undefined);
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
       body: JSON.stringify({
@@ -2262,7 +2274,7 @@ describe("Spectra run route", () => {
     const cards = (getSavedArtifact().content as { cards?: Array<{ hint?: string }> }).cards ?? [];
     expect(cards[2]?.hint).toBe("Krebs makes high-energy carriers and a little ATP.");
     expect(events.some((event) => event.type === "final")).toBe(true);
-    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+    expect(info.mock.calls.filter(([label]) => label === "spectra.agent-loop").map(([, entry]) => entry)).toEqual([
       { runId: "run-real", stage: "intake", status: "entered" },
       { runId: "run-real", stage: "plan", status: "entered" },
       { runId: "run-real", stage: "resolve", status: "entered" },

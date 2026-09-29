@@ -2798,9 +2798,13 @@ export function PresentationStudio({
           ? [`Media requiring replacement: ${skippedMedia.join(", ")}`]
           : []),
       ];
-      setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
+      const importedDeck = normalizePresentationContent(next);
+      setUndoStack((stack) => [
+        ...stack.slice(-79),
+        { before: cloneDeck(deck), after: importedDeck },
+      ]);
       setRedoStack([]);
-      onChange(normalizePresentationContent(next));
+      onChange(importedDeck);
       await completeArtifactImport({
         jobId,
         typeKey: "presentation",

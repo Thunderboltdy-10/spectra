@@ -493,7 +493,9 @@ async function runAttemptInLedger(
       advanceProtocolState("completed");
       return;
     }
-    await mutate("spectraRuns:updateStatus", {
+    // The status write and the context reads are independent; the write is
+    // awaited before the next status write so the phases land in order.
+    const readingStatusWrite = mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -503,6 +505,9 @@ async function runAttemptInLedger(
       resultSummary: "Reading the visible and selected work",
       resultActions: [],
     });
+    // Observed by the await below; a rejection must not surface earlier as
+    // an unhandled one while the context is read.
+    readingStatusWrite.catch(() => undefined);
     const earlyPendingByIndex = new Map<number, string>();
     const earlyPendingBlueprintByIndex = new Map<
       number,
@@ -616,6 +621,40 @@ async function runAttemptInLedger(
       : provisionalCreation
         ? [provisionalCreation]
         : [];
+    const contextBody = {
+        workspaceId: params.workspaceId,
+        scopeNodeId: params.scopeNodeId,
+        artifactId: params.artifactId,
+        threadId: params.threadId,
+        focusMode: params.focusMode,
+        selectedArtifactIds: params.selectedArtifactIds,
+        explicitContextObjects: params.explicitContextObjects,
+        currentView: params.currentView,
+        clarificationId: params.clarificationId,
+        choiceMessageId: params.choiceMessageId,
+        choiceKey: params.choiceKey,
+        clarificationExecutionId: params.clarificationExecutionId,
+        continuationRunId: params.continuationRunId,
+        batchSelections: params.batchSelections,
+        executionId: params.executionId,
+    };
+    // An explicit edit or direct use of the visible artifact is the demand for
+    // its current content; other requests keep identity-only orientation.
+    // Whether the prompt targets the visible artifact is known only from the
+    // orientation packet, so when the prompt could demand content, the
+    // hydrated context is read at the same time instead of after it.
+    const usesFocusedContent = promptDirectlyUsesFocusedContent(params.prompt);
+    const contextReads = Promise.all([
+      buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal }),
+      (params.artifactId && signalsMutationIntent) || usesFocusedContent
+        ? buildContext(params.actorClerkId, contextBody, params.prompt, {
+            mode: "orientation", hydrateTargets: true, restoredGoal,
+          })
+        : null,
+    ]);
+    // Awaited once the creation shells are open; a failure must not surface
+    // as an unhandled rejection before then.
+    contextReads.catch(() => undefined);
     for (const [provisionalIndex, shell] of provisionalShells.entries()) {
       const provisionalTitle =
         shell.requestedTitle ?? `New ${shell.label.toLowerCase()}`;
@@ -664,36 +703,17 @@ async function runAttemptInLedger(
         },
       });
     }
-    const contextBody = {
-        workspaceId: params.workspaceId,
-        scopeNodeId: params.scopeNodeId,
-        artifactId: params.artifactId,
-        threadId: params.threadId,
-        focusMode: params.focusMode,
-        selectedArtifactIds: params.selectedArtifactIds,
-        explicitContextObjects: params.explicitContextObjects,
-        currentView: params.currentView,
-        clarificationId: params.clarificationId,
-        choiceMessageId: params.choiceMessageId,
-        choiceKey: params.choiceKey,
-        clarificationExecutionId: params.clarificationExecutionId,
-        continuationRunId: params.continuationRunId,
-        batchSelections: params.batchSelections,
-        executionId: params.executionId,
-    };
-    let context = await buildContext(params.actorClerkId, contextBody, params.prompt, { mode: "orientation", restoredGoal });
+    const [orientationContext, hydratedContext] = await contextReads;
     const explicitlyTargetsFocusedArtifact =
-      promptExplicitlyTargetsFocusedArtifact(params.prompt, context.packet);
+      promptExplicitlyTargetsFocusedArtifact(params.prompt, orientationContext.packet);
     const signalsFocusedEdit =
       Boolean(params.artifactId) &&
       signalsMutationIntent &&
       explicitlyTargetsFocusedArtifact;
-    // An explicit edit or direct use of the visible artifact is the demand for
-    // its current content; other requests keep identity-only orientation.
-    if (explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || promptDirectlyUsesFocusedContent(params.prompt)))
-      context = await buildContext(params.actorClerkId, contextBody, params.prompt, {
-        mode: "orientation", hydrateTargets: true, restoredGoal,
-      });
+    let context =
+      hydratedContext && explicitlyTargetsFocusedArtifact && (signalsFocusedEdit || usesFocusedContent)
+        ? hydratedContext
+        : orientationContext;
     const ordinarySpectraRequested = requestsOrdinarySpectra(
       params.prompt,
       params.disableAgentRouting,
@@ -767,7 +787,8 @@ async function runAttemptInLedger(
         }
       : context.packet;
     recordPhase("context_ready");
-    await mutate("spectraRuns:updateStatus", {
+    await readingStatusWrite;
+    const retrievingStatusWrite = mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -793,7 +814,7 @@ async function runAttemptInLedger(
         ? context.conversation.slice(0, -1)
         : context.conversation;
     const conversation = persistedConversation.slice(-30);
-    await mutate("spectraRuns:setContextSnapshot", {
+    const contextSnapshotWrite = mutate("spectraRuns:setContextSnapshot", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
@@ -819,6 +840,7 @@ async function runAttemptInLedger(
         capturedAt: Date.now(),
       },
     });
+    await Promise.all([retrievingStatusWrite, contextSnapshotWrite]);
     const workspaceTitle = context.currentWorkspace?.title;
     let provenance = {
       artifactIds: context.selectedArtifactIds,

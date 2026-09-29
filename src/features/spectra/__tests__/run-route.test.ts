@@ -672,6 +672,18 @@ describe("Spectra run route", () => {
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({
       model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "stop", message: { content: "Hello!" } }],
     }), { status: 200 }));
+    const { convexQuery } = await import("@/lib/convex-server");
+    const write = convexMutation.getMockImplementation()!;
+    let contextReadDuringStatusWrite = false;
+    convexMutation.mockImplementation(async (...args: Parameters<typeof write>) => {
+      const [name, input] = args;
+      if (String(name).includes("spectraRuns:updateStatus") && (input as { phase?: string }).phase === "reading") {
+        const readsBefore = vi.mocked(convexQuery).mock.calls.length;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        contextReadDuringStatusWrite = vi.mocked(convexQuery).mock.calls.length > readsBefore;
+      }
+      return write(...args);
+    });
     const route = await import("@/app/api/spectra/run/route");
     await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "hi" }),
@@ -683,6 +695,35 @@ describe("Spectra run route", () => {
     // claimExecution already marks the run running; a separate "planning"
     // write replaced a moment later by "reading" only delayed the first token.
     expect(statusWritesBefore).toEqual(["reading", "retrieving"]);
+    // The context is read while the first status write is in flight.
+    expect(contextReadDuringStatusWrite).toBe(true);
+  });
+
+  it("reads a focused edit's live content alongside its orientation, not after it", async () => {
+    const { fetchMock, convexQuery } = setup({});
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI",
+      choices: [{ finish_reason: "stop", message: { content: "Here is a clearer summary to consider." } }],
+    }), { status: 200 }));
+    const answer = convexQuery.getMockImplementation()!;
+    let contentReadStartedDuringOrientation = false;
+    convexQuery.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name.includes("spectraContext:getArtifact")) {
+        // Hold the orientation read open briefly; a serial rebuild cannot
+        // start reading content until it finishes.
+        for (let wait = 0; wait < 5 && !contentReadStartedDuringOrientation; wait += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          contentReadStartedDuringOrientation = convexQuery.mock.calls.some(([called]) => called === "spectraArtifacts:get");
+        }
+      }
+      return answer(name, args);
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "artifact", workspaceId: "workspace-real",
+        artifactId: "artifact-real", prompt: "Rewrite this deck's summary to be clearer." }),
+    }))).text();
+    expect(contentReadStartedDuringOrientation).toBe(true);
   });
 
   it("streams an answer while it is written and stores it in few durable rows", async () => {

@@ -720,6 +720,11 @@ async function startInstance(instanceId, options, environment) {
     ports,
     appEnv,
   );
+  if (options.command === "configure") {
+    await stopChild(convex);
+    process.stdout.write(`Local Convex configuration saved for instance ${instanceId}.\n`);
+    return;
+  }
   const finalEnv = withLocalConvexCliEnv({
     ...process.env,
     ...parseEnv(await readFile(paths.appEnv, "utf8")),
@@ -980,6 +985,7 @@ async function main() {
       return buildInstance(instanceId, options, process.env);
     case "add-instance":
       return addInstance(instanceId, options, process.env);
+    case "configure":
     case "start":
       return startInstance(instanceId, options, process.env);
     case "stop":
@@ -990,7 +996,7 @@ async function main() {
       return statusInstance(instanceId, process.env);
     default:
       throw new Error(
-        `Unknown local stack command "${options.command}". Use start, stop, reset, add-instance, build, or status.`,
+        `Unknown local stack command "${options.command}". Use start, configure, stop, reset, add-instance, build, or status.`,
       );
   }
 }

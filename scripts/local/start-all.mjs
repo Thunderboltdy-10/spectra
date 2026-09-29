@@ -122,6 +122,7 @@ async function readInstance(instance) {
   return {
     instanceRoot,
     runtimeStatePath: resolve(instanceRoot, "runtime.json"),
+    convexConfig: resolve(instanceRoot, "project", ".convex", "local", "default", "config.json"),
     ports: manifest?.ports ?? defaultPorts(instance),
   };
 }
@@ -236,6 +237,33 @@ function startDetached(label, executable, args, cwd, environment, logDirectory) 
   return { pid: child.pid, stdoutPath, stderrPath };
 }
 
+// First-time project selection needs the caller's terminal, before detaching.
+async function configureFreshInstance(node, stackScript, instanceId, instance) {
+  if (existsSync(instance.convexConfig)) return;
+  await new Promise((resolveConfiguration, rejectConfiguration) => {
+    const child = spawn(node, [stackScript, "configure", "--instance", String(instanceId)], {
+      cwd: repositoryRoot,
+      env: process.env,
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    child.once("error", rejectConfiguration);
+    child.once("exit", (code, signal) => {
+      if (code !== 0) {
+        rejectConfiguration(new Error(
+          `Local Convex configuration stopped with ${signal ?? `code ${code}`}. ` +
+          "Run this launcher in an interactive terminal, or set both " +
+          "SPECTRA_LOCAL_CONVEX_TEAM and SPECTRA_LOCAL_CONVEX_PROJECT in the instance env.local.",
+        ));
+      } else if (!existsSync(instance.convexConfig)) {
+        rejectConfiguration(new Error("Local Convex configuration finished without saving a deployment; refusing to detach an unconfigured stack."));
+      } else {
+        resolveConfiguration();
+      }
+    });
+  });
+}
+
 function requireFileHandle(path, flags) {
   return openSync(path, flags);
 }
@@ -291,6 +319,7 @@ async function main() {
   const stackStdoutPath = resolve(logDirectory, "start-all-stack.stdout.log");
   const stackStderrPath = resolve(logDirectory, "start-all-stack.stderr.log");
   if (!existingStack && !processIsAlive(stackPid)) {
+    await configureFreshInstance(node, resolve(repositoryRoot, "scripts", "local", "stack.mjs"), options.instance, instance);
     const stack = startDetached(
       "start-all-stack",
       node,
@@ -379,4 +408,4 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   });
 }
 
-export { bridgeStatus, defaultPorts, parseArguments, stackIsReady, stackReadiness };
+export { bridgeStatus, configureFreshInstance, defaultPorts, parseArguments, stackIsReady, stackReadiness };

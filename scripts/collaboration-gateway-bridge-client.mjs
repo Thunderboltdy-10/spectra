@@ -3,6 +3,7 @@ import { makeFunctionReference } from "convex/server";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isTransientCollaborationFailure } from "./collaboration-persist.mjs";
 import { contentDependencies } from "../shared/durable-dependencies.mjs";
+import { rethrowWorded } from "../shared/convex-error.mjs";
 
 const gatewayExchange = makeFunctionReference(
   "collaborationGatewayBridge:exchange",
@@ -70,7 +71,9 @@ export function createCollaborationGatewayBridgeClient({
           !isTransientCollaborationFailure(error) ||
           attempt === attempts - 1
         )
-          throw error;
+          // Gateway code branches on the message (COLLABORATION_NATIVE_OVERLAP);
+          // production keeps it only in the ConvexError data.
+          rethrowWorded(error);
         await sleep(retryDelayMs(attempt));
       }
     }

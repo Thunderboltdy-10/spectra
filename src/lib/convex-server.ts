@@ -8,17 +8,11 @@ import {
 import { auth } from "@clerk/nextjs/server";
 import { getConvexUrl } from "@/lib/env";
 import { getWorkerConvexToken } from "@/lib/convex-worker-context";
-import { readConvexError } from "../../shared/convex-error";
+import { rethrowWorded } from "../../shared/convex-error.mjs";
 
 /* Route code branches on `error.message` ("CODE: sentence"). Production Convex
    redacts that message to "Server Error" and keeps the words only in the
    ConvexError data, so every server-side call puts them back. */
-function rethrowWorded(error: unknown): never {
-  const { message } = readConvexError(error);
-  if (message && error instanceof Error && "data" in error) error.message = message;
-  throw error;
-}
-
 class WordedConvexHttpClient extends ConvexHttpClient {
   override query<Query extends FunctionReference<"query">>(
     query: Query,

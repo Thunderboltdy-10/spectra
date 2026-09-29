@@ -1,7 +1,7 @@
 import { ConvexError } from "convex/values";
 import { describe, expect, it } from "vitest";
 import { asDeployedError } from "../src/test/convex-redaction";
-import { readConvexError, toWordedConvexError } from "./convex-error";
+import { readConvexError, toWordedConvexError } from "./convex-error.mjs";
 
 describe("toWordedConvexError (the Convex function boundary)", () => {
   it("carries a worded Error as ConvexError data and keeps its message and stack", () => {
@@ -17,14 +17,14 @@ describe("toWordedConvexError (the Convex function boundary)", () => {
   });
 
   it("gives a sentence without a code a null code", () => {
-    const converted = toWordedConvexError(new Error("A name is required.")) as ConvexError<unknown>;
+    const converted = toWordedConvexError(new Error("A name is required.")) as ConvexError<{ code: string | null; message: string }>;
     expect(converted.data).toEqual({ code: null, message: "A name is required." });
   });
 
   it("reads the words out of a nested call's Uncaught frame", () => {
     const converted = toWordedConvexError(
       new Error("Uncaught Error: INVITATION_INVALID: This invitation is unavailable.\n    at handler (x.ts:1:1)"),
-    ) as ConvexError<unknown>;
+    ) as ConvexError<{ code: string | null; message: string }>;
     expect(converted.data).toEqual({
       code: "INVITATION_INVALID",
       message: "INVITATION_INVALID: This invitation is unavailable.",
@@ -80,5 +80,28 @@ describe("readConvexError (the one reader)", () => {
       message: "PAYLOAD_HASH_MISMATCH",
     });
     expect(readConvexError(undefined)).toEqual({ code: null, message: "" });
+  });
+});
+
+describe("the collaboration gateway's Convex calls", () => {
+  it("rethrow a redacted failure with its words, so the gateway can branch on the code", async () => {
+    const { createCollaborationGatewayBridgeClient } = await import(
+      "../scripts/collaboration-gateway-bridge-client.mjs"
+    );
+    const overlap = new Error("COLLABORATION_NATIVE_OVERLAP: The native file changed this region.");
+    const bridge = createCollaborationGatewayBridgeClient({
+      convexUrl: "https://fixture.invalid",
+      bridgeKey: "fixture-key".repeat(4),
+      retryAttempts: 1,
+      client: {
+        action: async () => {
+          throw asDeployedError(toWordedConvexError(overlap), {
+            surface: "http",
+            udf: "A(collaborationGatewayBridge:exchange)",
+          });
+        },
+      } as never,
+    });
+    await expect(bridge("authorize", {})).rejects.toThrow(overlap.message);
   });
 });

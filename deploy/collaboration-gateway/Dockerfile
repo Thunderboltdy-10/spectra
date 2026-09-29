@@ -34,6 +34,7 @@ COPY shared/collaboration-framing.mjs \
      shared/sheet-regions.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \
+     shared/convex-error.mjs \
      shared/sync-retry-policy.json \
      ./shared/
 EXPOSE 1234

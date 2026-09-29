@@ -6,7 +6,7 @@ import {
   logAPIResponse,
 } from "./logging";
 import type { NextRequest } from "next/server";
-import { readConvexError } from "../../shared/convex-error";
+import { readConvexError } from "../../shared/convex-error.mjs";
 
 function normalizeErrorStatus(message: string) {
   const lower = message.toLowerCase();

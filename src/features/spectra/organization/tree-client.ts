@@ -4,7 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { readConvexError } from "../../../../shared/convex-error";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { identityFailureMessage } from "@/components/ui/truthful-state";
 

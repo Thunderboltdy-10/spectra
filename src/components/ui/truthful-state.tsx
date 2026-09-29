@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/badge";
-import { readConvexError } from "../../../shared/convex-error";
+import { readConvexError } from "../../../shared/convex-error.mjs";
 
 /**
  * S8 — truthfulness of reported state.

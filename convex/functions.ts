@@ -6,7 +6,7 @@ import {
   mutation as generatedMutation,
   query as generatedQuery,
 } from "./_generated/server";
-import { toWordedConvexError } from "../shared/convex-error";
+import { toWordedConvexError } from "../shared/convex-error.mjs";
 
 /*
  * Spectra's function builders. Every Convex function is defined with these, not

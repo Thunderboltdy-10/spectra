@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UniversalKBar } from "../components/universal-kbar";
 
 const push = vi.fn();
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/workspace",
@@ -53,6 +55,23 @@ describe("UniversalKBar", () => {
     });
     expect(push).toHaveBeenCalledWith("/chat?new=1");
     expect(screen.queryByRole("dialog", { name: "Spectra command bar" })).toBeNull();
+  });
+
+  it("tells the reader a setting changed after the bar closes", async () => {
+    render(<UniversalKBar />);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(
+      screen.getByPlaceholderText("Search commands, work, workspaces, conversations…"),
+      { target: { value: "continuation" } },
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Turn on conversation continuation" }));
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("dialog", { name: "Spectra command bar" })).toBeNull();
+    expect(toastSuccess).toHaveBeenCalledWith(
+      "New messages will continue the current conversation.",
+    );
   });
 
   it("puts the cursor in the field a command asks for", async () => {

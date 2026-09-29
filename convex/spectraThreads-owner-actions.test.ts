@@ -108,3 +108,26 @@ describe("renaming a chat", () => {
     expect(thread?.title).toBe("Exam prep");
   });
 });
+
+describe("a chat moved to the Library Trash", () => {
+  it("leaves the chat list until it is restored", async () => {
+    const t = setupTest();
+    const { threadId } = await seedThread(t);
+    const nodeId = await t.run(async (ctx) => {
+      const thread = (await ctx.db.get(threadId))!;
+      return ctx.db.insert("orgNodes", {
+        accountId: thread.ownerAccountId, schoolId: thread.schoolId, parentId: null, kind: "thread",
+        name: thread.title, sourceId: String(threadId), orderKey: "a", createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    const owner = t.withIdentity(identity);
+    const listed = async () =>
+      (await owner.query(api.spectraThreads.list, {})).threads.map((thread) => thread._id);
+
+    expect(await listed()).toEqual([threadId]);
+    await owner.mutation(api.orgTree.trash, { nodeIds: [nodeId] });
+    expect(await listed()).toEqual([]);
+    await owner.mutation(api.orgTree.restore, { nodeIds: [nodeId] });
+    expect(await listed()).toEqual([threadId]);
+  });
+});

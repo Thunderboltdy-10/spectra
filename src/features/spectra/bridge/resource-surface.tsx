@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { Download, FileText, Loader2 } from "lucide-react";
+import { Download, FileText, Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { SpectraArtifact } from "../data/api";
 import { spectraBus } from "../events";
 import { humanizePublicFailure } from "./humanize";
@@ -212,14 +213,14 @@ export function ResourceSurface({
             {presentation.label}
           </button>
         </div>
-        <button
-          type="button"
-          className="spectra-icon-action"
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Close file"
           onClick={onClose}
         >
-          ×
-        </button>
+          <X aria-hidden="true" className="size-4" />
+        </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-5">
         <div className="mx-auto grid max-w-[860px] gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -254,9 +255,9 @@ export function ResourceSurface({
                         : "This file lives on a computer. Connect Spectra Bridge to use it here."}
               </p>
               {DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? (
-                <button
-                  type="button"
-                  className="mt-5 inline-flex h-9 items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] px-4 text-caption font-medium text-[var(--bg-primary)] disabled:opacity-45"
+                <Button
+                  variant="primary"
+                  className="mt-5 px-4"
                   disabled={
                     opening ||
                     !truth?.replicas.some((replica) =>
@@ -271,7 +272,7 @@ export function ResourceSurface({
                     <FileText className="size-3.5" />
                   )}
                   {opening ? "Opening safely…" : "Open in Spectra"}
-                </button>
+                </Button>
               ) : null}
               {openError ? (
                 <p
@@ -295,30 +296,30 @@ export function ResourceSurface({
                   written.
                 </p>
                 <div className="mt-3 grid gap-2">
-                  <button
-                    type="button"
-                    className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)]"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => void protectedAction("apply")}
                     disabled={fileAction !== null}
                   >
                     Apply to original
-                  </button>
-                  <button
-                    type="button"
-                    className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro font-medium"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void protectedAction("fork")}
                     disabled={fileAction !== null}
                   >
                     Keep as Spectra copy
-                  </button>
-                  <button
-                    type="button"
-                    className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro font-medium"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => void protectedAction("discard")}
                     disabled={fileAction !== null}
                   >
                     Discard pending changes
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : null}
@@ -368,9 +369,8 @@ export function ResourceSurface({
               artifactTitle={artifact.title}
             />
             <div className="grid gap-2">
-              <button
-                type="button"
-                className="flex h-9 items-center justify-center gap-2 rounded-control border border-[var(--border-default)] px-3 text-caption font-medium disabled:opacity-45"
+              <Button
+                variant="secondary"
                 disabled={
                   fileAction !== null ||
                   !truth?.replicas.some((replica) =>
@@ -383,7 +383,7 @@ export function ResourceSurface({
                 {fileAction === "download"
                   ? "Preparing copy…"
                   : "Download native copy"}
-              </button>
+              </Button>
             </div>
           </aside>
         </div>

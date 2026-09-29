@@ -69,8 +69,8 @@ import {
 } from "@/features/spectra/ai/authority-execution";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import {
-  SPECTRA_FALLBACK_PROVIDERS,
-  SPECTRA_PRIMARY_PROVIDER,
+  getSpectraFallbackProviders,
+  getSpectraPrimaryProvider,
   allowSpectraProviderFallbacks,
   assertPrimarySpectraRouting,
   getSpectraFallbackModelId,
@@ -5032,7 +5032,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     messages: SpectraAgentMessage[],
     requestMode: RequestMode = "initial",
     providerRouting: Record<string, unknown> = primaryRouting,
-    providerLabel: string = SPECTRA_PRIMARY_PROVIDER,
+    providerLabel: string = getSpectraPrimaryProvider(),
   ) => {
     emittedOperationCount = 0;
     emittedProgressCount = 0;
@@ -5579,7 +5579,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             onReasoningText,
             inspectPlan,
             providerIdleTimeoutMs,
-            SPECTRA_PRIMARY_PROVIDER,
+            getSpectraPrimaryProvider(),
           );
           if (!result.text.trim())
             throw new Error(
@@ -5679,7 +5679,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
             onReasoningText,
             inspectPlan,
             providerIdleTimeoutMs,
-            SPECTRA_PRIMARY_PROVIDER,
+            getSpectraPrimaryProvider(),
           );
           if (!result.text.trim())
             throw new Error(
@@ -5742,7 +5742,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     let fallbackResult:
       Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
     let selectedFallbackRouting: Record<string, unknown> = fallbackRouting;
-    for (const providerName of SPECTRA_FALLBACK_PROVIDERS) {
+    for (const providerName of getSpectraFallbackProviders()) {
       fallbackResult = undefined;
       // The exact candidate from this provider is the only draft eligible for
       // its one quiet continuation repair. Never accidentally carry a partial
@@ -5887,7 +5887,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
     throw new Error("The Spectra model did not return a valid plan.");
   const usedProvider = result.provider?.toLowerCase();
   const usedFallback =
-    usedProvider && usedProvider !== SPECTRA_PRIMARY_PROVIDER.toLowerCase();
+    usedProvider && usedProvider !== getSpectraPrimaryProvider().toLowerCase();
   if (usedFallback && !allowSpectraProviderFallbacks())
     throw new Error(`Unexpected OpenRouter provider: ${result.provider}`);
   recordOpenRouterEvent("response", {

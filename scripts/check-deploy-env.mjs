@@ -36,6 +36,26 @@ const DEVELOPMENT_ONLY = {
 
 const value = (env, name) => env[name]?.trim() ?? "";
 
+// Spectra has no built-in model: src/features/spectra/ai/model-config.ts reads
+// these and throws at request time when they are missing, so fail the build first.
+const MODEL_ID = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i;
+const REASONING_PROFILES = ["none", "minimal", "low", "medium", "high", "xhigh"];
+
+function modelProblems(env) {
+  const problems = [];
+  for (const name of ["SPECTRA_MODEL_ID", "SPECTRA_FALLBACK_MODEL_ID"]) {
+    const model = value(env, name);
+    if (!model && name === "SPECTRA_MODEL_ID") problems.push(`${name} is missing (the model every Spectra turn uses).`);
+    else if (model && !MODEL_ID.test(model)) problems.push(`${name} must be an OpenRouter model id like "vendor/model".`);
+  }
+  const profile = value(env, "SPECTRA_REASONING_PROFILE").toLowerCase();
+  if (!REASONING_PROFILES.includes(profile))
+    problems.push(`SPECTRA_REASONING_PROFILE must be one of ${REASONING_PROFILES.join(", ")}.`);
+  if (!value(env, "SPECTRA_MODEL_PROVIDER"))
+    problems.push("SPECTRA_MODEL_PROVIDER is missing (the OpenRouter provider that serves the model).");
+  return problems;
+}
+
 function remoteUrl(env, name, protocols, purpose) {
   const raw = value(env, name);
   if (!raw) return `${name} is missing (${purpose}).`;
@@ -71,6 +91,7 @@ export function deployEnvProblems(env) {
     add("CLERK_SECRET_KEY must be a production (sk_live_) key.");
   if (!value(env, "CLERK_WEBHOOK_SECRET")) add("CLERK_WEBHOOK_SECRET is missing (Clerk account sync).");
   if (!value(env, "OPENROUTER_API_KEY")) add("OPENROUTER_API_KEY is missing (all AI features).");
+  for (const problem of modelProblems(env)) add(problem);
 
   const key = Buffer.from(value(env, "SPECTRA_MASTER_ENCRYPTION_KEY"), "base64");
   if (key.length !== 32) add("SPECTRA_MASTER_ENCRYPTION_KEY must be 32 base64-encoded bytes.");

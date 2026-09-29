@@ -20,7 +20,8 @@ import {
   allowSpectraProviderFallbacks,
   getSpectraModelId,
   getSpectraProviderRouting,
-  SPECTRA_PRIMARY_PROVIDER,
+  getSpectraFallbackProviders,
+  getSpectraPrimaryProvider,
 } from "@/features/spectra/ai/model-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
@@ -82,11 +83,11 @@ async function completion(params: {
 }) {
   const attempts = [
     {
-      provider: SPECTRA_PRIMARY_PROVIDER,
+      provider: getSpectraPrimaryProvider(),
       routing: getSpectraProviderRouting("primary"),
     },
     ...(allowSpectraProviderFallbacks()
-      ? [{ provider: "AtlasCloud", routing: getSpectraProviderRouting("fallback") }]
+      ? [{ provider: getSpectraFallbackProviders().join(","), routing: getSpectraProviderRouting("fallback") }]
       : []),
   ];
 

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  resolveSpectraFallbackModelId,
-  SPECTRA_DEFAULT_FALLBACK_MODEL_ID,
-  SPECTRA_DEFAULT_MODEL_ID,
+  getSpectraFallbackModelId,
+  getSpectraFallbackProviders,
+  getSpectraProviderRouting,
 } from "../ai/model-config";
 import { PRESENTATION_LAYOUTS } from "../commands/office/presentation-commands";
 import { isRepairablePlanFailure } from "../operations/plan-diagnostics";
@@ -863,15 +863,20 @@ describe("P4.I4 quality machinery", () => {
     );
   });
 
-  it("keeps the fallback model distinct from the active primary route", () => {
-    expect(SPECTRA_DEFAULT_FALLBACK_MODEL_ID).not.toBe(
-      SPECTRA_DEFAULT_MODEL_ID,
-    );
-    expect(
-      resolveSpectraFallbackModelId(
-        SPECTRA_DEFAULT_FALLBACK_MODEL_ID,
-        SPECTRA_DEFAULT_FALLBACK_MODEL_ID,
-      ),
-    ).toBe(SPECTRA_DEFAULT_MODEL_ID);
+  it("takes the recovery model and providers from the environment", () => {
+    vi.stubEnv("SPECTRA_MODEL_ID", "vendor/primary");
+    vi.stubEnv("SPECTRA_MODEL_PROVIDER", "PrimaryHost");
+    vi.stubEnv("SPECTRA_FALLBACK_MODEL_ID", "vendor/recovery");
+    vi.stubEnv("SPECTRA_FALLBACK_PROVIDERS", "HostA, HostB");
+    expect(getSpectraFallbackModelId()).toBe("vendor/recovery");
+    expect(getSpectraProviderRouting("fallback").only).toEqual(["HostA", "HostB"]);
+    expect(getSpectraProviderRouting("primary").only).toEqual(["PrimaryHost"]);
+    vi.stubEnv("SPECTRA_FALLBACK_MODEL_ID", "");
+    vi.stubEnv("SPECTRA_FALLBACK_PROVIDERS", "");
+    expect(getSpectraFallbackModelId()).toBe("vendor/primary");
+    expect(getSpectraFallbackProviders()).toEqual(["PrimaryHost"]);
+    vi.stubEnv("SPECTRA_MODEL_PROVIDER", "");
+    expect(() => getSpectraProviderRouting("primary")).toThrow(/SPECTRA_MODEL_PROVIDER is not set/);
+    vi.unstubAllEnvs();
   });
 });

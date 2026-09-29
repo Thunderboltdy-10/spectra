@@ -15,7 +15,8 @@ import {
   getSpectraModelId,
   getSpectraProviderRouting,
   getSpectraReasoningProfile,
-  SPECTRA_PRIMARY_PROVIDER,
+  getSpectraFallbackProviders,
+  getSpectraPrimaryProvider,
 } from "@/features/spectra/ai/model-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
@@ -333,13 +334,13 @@ async function openRouterCompletion(params: {
 }) {
   const attempts = [
     {
-      provider: SPECTRA_PRIMARY_PROVIDER,
+      provider: getSpectraPrimaryProvider(),
       routing: getSpectraProviderRouting("primary"),
     },
     ...(allowSpectraProviderFallbacks()
       ? [
           {
-            provider: "AtlasCloud",
+            provider: getSpectraFallbackProviders().join(","),
             routing: getSpectraProviderRouting("fallback"),
           },
         ]
@@ -667,7 +668,7 @@ export async function POST(request: Request) {
     >("agents:beginEvalRun", {
       agentId: body.agentId,
       modelId: model,
-      provider: SPECTRA_PRIMARY_PROVIDER,
+      provider: getSpectraPrimaryProvider(),
       threshold:
         typeof body.threshold === "number"
           ? Math.max(0.5, Math.min(1, body.threshold))

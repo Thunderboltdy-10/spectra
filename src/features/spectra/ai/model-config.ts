@@ -1,58 +1,94 @@
-export const SPECTRA_DEFAULT_MODEL_ID = "openai/gpt-5.6";
-export const SPECTRA_DEFAULT_FALLBACK_MODEL_ID = "openai/gpt-5.6-luna";
-export const SPECTRA_DEFAULT_REASONING_PROFILE = "xhigh" as const;
-export const SPECTRA_PRIMARY_PROVIDER = "OpenAI" as const;
-export const SPECTRA_FALLBACK_PROVIDERS = ["OpenAI"] as const;
-export const SPECTRA_BLOCKED_PROVIDERS = ["DigitalOcean"] as const;
+/*
+ * Spectra's model configuration comes only from the environment (.env.local in
+ * development, the host's environment in production). Nothing here picks a
+ * model, provider or reasoning level on its own: a missing or malformed value
+ * fails loudly instead of silently running something else.
+ *
+ *   SPECTRA_MODEL_ID              OpenRouter model id for every Spectra turn
+ *   SPECTRA_REASONING_PROFILE     none | minimal | low | medium | high | xhigh
+ *   SPECTRA_MODEL_PROVIDER        OpenRouter provider that serves the model
+ *   SPECTRA_FALLBACK_MODEL_ID     optional; model used on the recovery route
+ *   SPECTRA_FALLBACK_PROVIDERS    optional; comma-separated recovery providers
+ *   SPECTRA_ALLOW_PROVIDER_FALLBACKS  "false" disables the recovery route
+ */
+
+export const SPECTRA_REASONING_PROFILES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+export type SpectraReasoningProfile =
+  (typeof SPECTRA_REASONING_PROFILES)[number];
+
+const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i;
 
 export type ModelProfile = {
   route: string;
-  reasoningProfile: string;
+  reasoningProfile: SpectraReasoningProfile;
   input: { text: boolean; image: boolean; pdf: boolean };
   tools: boolean;
   structuredOutput: boolean;
   serverTools: boolean;
 };
 
-function modelIdFromEnvironment(name: string, fallback: string) {
-  const value = process.env[name]?.trim();
-  return value && /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(value)
-    ? value
-    : fallback;
+function configured(name: string) {
+  return process.env[name]?.trim() || "";
+}
+
+function configError(name: string, problem: string): Error {
+  return new Error(
+    `SPECTRA_MODEL_CONFIG_INVALID: ${name} ${problem}. Set it in .env.local (see .env.example).`,
+  );
+}
+
+function modelIdFromEnvironment(name: string) {
+  const value = configured(name);
+  if (!value) return "";
+  if (!MODEL_ID_PATTERN.test(value))
+    throw configError(name, `must be an OpenRouter model id like "vendor/model"`);
+  return value;
 }
 
 export function getSpectraModelId() {
-  return modelIdFromEnvironment("SPECTRA_MODEL_ID", SPECTRA_DEFAULT_MODEL_ID);
+  const value = modelIdFromEnvironment("SPECTRA_MODEL_ID");
+  if (!value) throw configError("SPECTRA_MODEL_ID", "is not set");
+  return value;
 }
 
+/** The recovery route's model: the configured fallback, else the primary. */
 export function getSpectraFallbackModelId() {
-  const primaryModelId = getSpectraModelId();
-  const configuredFallbackModelId = modelIdFromEnvironment(
-    "SPECTRA_FALLBACK_MODEL_ID",
-    SPECTRA_DEFAULT_FALLBACK_MODEL_ID,
-  );
-  return resolveSpectraFallbackModelId(
-    primaryModelId,
-    configuredFallbackModelId,
+  return (
+    modelIdFromEnvironment("SPECTRA_FALLBACK_MODEL_ID") || getSpectraModelId()
   );
 }
 
-export function resolveSpectraFallbackModelId(
-  primaryModelId: string,
-  configuredFallbackModelId: string,
-) {
-  if (configuredFallbackModelId !== primaryModelId)
-    return configuredFallbackModelId;
-  return primaryModelId === SPECTRA_DEFAULT_MODEL_ID
-    ? SPECTRA_DEFAULT_FALLBACK_MODEL_ID
-    : SPECTRA_DEFAULT_MODEL_ID;
+export function getSpectraReasoningProfile(): SpectraReasoningProfile {
+  const value = configured("SPECTRA_REASONING_PROFILE").toLowerCase();
+  if (!value) throw configError("SPECTRA_REASONING_PROFILE", "is not set");
+  if (!(SPECTRA_REASONING_PROFILES as readonly string[]).includes(value))
+    throw configError(
+      "SPECTRA_REASONING_PROFILE",
+      `must be one of ${SPECTRA_REASONING_PROFILES.join(", ")}`,
+    );
+  return value as SpectraReasoningProfile;
 }
 
-export function getSpectraReasoningProfile() {
-  const value = process.env.SPECTRA_REASONING_PROFILE?.trim().toLowerCase();
-  return value && ["low", "medium", "high", "xhigh"].includes(value)
-    ? value
-    : SPECTRA_DEFAULT_REASONING_PROFILE;
+export function getSpectraPrimaryProvider() {
+  const value = configured("SPECTRA_MODEL_PROVIDER");
+  if (!value) throw configError("SPECTRA_MODEL_PROVIDER", "is not set");
+  return value;
+}
+
+/** Recovery providers, in order; defaults to the primary provider alone. */
+export function getSpectraFallbackProviders() {
+  const listed = configured("SPECTRA_FALLBACK_PROVIDERS")
+    .split(",")
+    .map((provider) => provider.trim())
+    .filter(Boolean);
+  return listed.length > 0 ? listed : [getSpectraPrimaryProvider()];
 }
 
 export function getSpectraModelProfile(): ModelProfile {
@@ -69,16 +105,19 @@ export function getSpectraModelProfile(): ModelProfile {
 export function getSpectraProviderRouting(
   mode: "primary" | "fallback" = "primary",
 ) {
-  if (mode === "fallback")
+  if (mode === "fallback") {
+    const providers = getSpectraFallbackProviders();
     return {
-      order: [...SPECTRA_FALLBACK_PROVIDERS],
-      only: [...SPECTRA_FALLBACK_PROVIDERS],
+      order: [...providers],
+      only: [...providers],
       allow_fallbacks: true,
       require_parameters: true,
     } as const;
+  }
+  const primary = getSpectraPrimaryProvider();
   return {
-    order: [SPECTRA_PRIMARY_PROVIDER],
-    only: [SPECTRA_PRIMARY_PROVIDER],
+    order: [primary],
+    only: [primary],
     allow_fallbacks: false,
   } as const;
 }
@@ -90,16 +129,15 @@ export function allowSpectraProviderFallbacks() {
 export function assertPrimarySpectraRouting(
   routing: ReturnType<typeof getSpectraProviderRouting>,
 ) {
+  const primary = getSpectraPrimaryProvider();
   if (
-    routing.order[0] !== SPECTRA_PRIMARY_PROVIDER ||
-    routing.only[0] !== SPECTRA_PRIMARY_PROVIDER ||
+    routing.order[0] !== primary ||
+    routing.only[0] !== primary ||
     routing.only.length !== 1 ||
     routing.allow_fallbacks !== false
   )
     throw new Error(
-      "Spectra primary requests must use the configured OpenRouter model through OpenAI without provider substitution.",
+      `Spectra primary requests must use the configured OpenRouter model through ${primary} without provider substitution.`,
     );
 }
 
-export const SPECTRA_MODEL_PROVIDER = SPECTRA_PRIMARY_PROVIDER;
-export const SPECTRA_MODEL_GATEWAY = "openrouter" as const;

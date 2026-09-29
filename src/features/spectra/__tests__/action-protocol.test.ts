@@ -28,10 +28,7 @@ import {
   createVerifiedSource,
   verifyCitation,
 } from "@/features/spectra/sources/records";
-import {
-  getSpectraModelProfile,
-  SPECTRA_DEFAULT_MODEL_ID,
-} from "@/features/spectra/ai/model-config";
+import { getSpectraModelProfile } from "@/features/spectra/ai/model-config";
 import { nativeOpenRouterAttachmentContent } from "@/features/spectra/compute/files/model-attachment-bundle";
 import { adaptLegacyRunEvent } from "@/features/spectra/migrations/compatibility";
 
@@ -555,12 +552,27 @@ describe("AI Action Protocol V2", () => {
     expect(source.canonicalUrl).toBe("https://example.edu/report");
   });
 
-  it("configures Luna native image/PDF input", () => {
-    const previousModel = process.env.SPECTRA_MODEL_ID;
-    delete process.env.SPECTRA_MODEL_ID;
+  it("takes the model and reasoning level from the environment and fails loudly without them", () => {
+    vi.stubEnv("SPECTRA_MODEL_ID", "vendor/some-model");
+    vi.stubEnv("SPECTRA_REASONING_PROFILE", "Medium");
     expect(getSpectraModelProfile()).toMatchObject({
-      route: SPECTRA_DEFAULT_MODEL_ID,
-      reasoningProfile: "xhigh",
+      route: "vendor/some-model",
+      reasoningProfile: "medium",
+    });
+    vi.stubEnv("SPECTRA_REASONING_PROFILE", "extreme");
+    expect(() => getSpectraModelProfile()).toThrow(/SPECTRA_REASONING_PROFILE/);
+    vi.stubEnv("SPECTRA_REASONING_PROFILE", "xhigh");
+    vi.stubEnv("SPECTRA_MODEL_ID", "");
+    expect(() => getSpectraModelProfile()).toThrow(/SPECTRA_MODEL_ID is not set/);
+    vi.stubEnv("SPECTRA_MODEL_ID", "not a model id");
+    expect(() => getSpectraModelProfile()).toThrow(/SPECTRA_MODEL_ID/);
+    vi.unstubAllEnvs();
+  });
+
+  it("configures native image/PDF input", () => {
+    expect(getSpectraModelProfile()).toMatchObject({
+      route: process.env.SPECTRA_MODEL_ID,
+      reasoningProfile: process.env.SPECTRA_REASONING_PROFILE,
       input: { image: true, pdf: true },
     });
     const content = nativeOpenRouterAttachmentContent("Inspect", [
@@ -584,8 +596,6 @@ describe("AI Action Protocol V2", () => {
       "image_url",
       "file",
     ]);
-    if (previousModel === undefined) delete process.env.SPECTRA_MODEL_ID;
-    else process.env.SPECTRA_MODEL_ID = previousModel;
   });
 
   it("keeps internal durable jobs out of normal Live Dock tabs and preserves run history compatibility", () => {

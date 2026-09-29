@@ -1,3 +1,14 @@
+/* Spectra reads its model, provider and reasoning level only from the environment
+ * (see src/features/spectra/ai/model-config.ts). Tests pin a known configuration so a
+ * developer's shell or .env.local cannot change what the suites assert. */
+Object.assign(process.env, {
+  SPECTRA_MODEL_ID: "openai/gpt-5.6",
+  SPECTRA_FALLBACK_MODEL_ID: "openai/gpt-5.6-luna",
+  SPECTRA_REASONING_PROFILE: "xhigh",
+  SPECTRA_MODEL_PROVIDER: "OpenAI",
+  SPECTRA_FALLBACK_PROVIDERS: "OpenAI",
+});
+
 type MediaListener = (event: MediaQueryListEvent) => unknown;
 
 const createMatchMediaList = (query: string): MediaQueryList => {

@@ -14,6 +14,9 @@ const production = {
   CLERK_SECRET_KEY: "sk_live_abc",
   CLERK_WEBHOOK_SECRET: "whsec_abc",
   OPENROUTER_API_KEY: "or-key",
+  SPECTRA_MODEL_ID: "openai/gpt-5.6",
+  SPECTRA_REASONING_PROFILE: "xhigh",
+  SPECTRA_MODEL_PROVIDER: "OpenAI",
   SPECTRA_MASTER_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
   SPECTRA_SECRET_BRIDGE_KEY: secret("secret"),
   SPECTRA_COLLAB_BRIDGE_KEY: secret("collab"),
@@ -32,6 +35,19 @@ function run(env) {
 describe("deploy env check", () => {
   it("accepts a complete production environment", () => {
     expect(deployEnvProblems(production)).toEqual([]);
+  });
+
+  it("requires the model, reasoning level and provider to be configured", () => {
+    const { SPECTRA_MODEL_ID, SPECTRA_MODEL_PROVIDER, ...unconfigured } = production;
+    void SPECTRA_MODEL_ID; void SPECTRA_MODEL_PROVIDER;
+    expect(deployEnvProblems({ ...unconfigured, SPECTRA_REASONING_PROFILE: "extreme" })).toEqual([
+      expect.stringContaining("SPECTRA_MODEL_ID is missing"),
+      expect.stringContaining("SPECTRA_REASONING_PROFILE must be one of"),
+      expect.stringContaining("SPECTRA_MODEL_PROVIDER is missing"),
+    ]);
+    expect(deployEnvProblems({ ...production, SPECTRA_FALLBACK_MODEL_ID: "luna" })).toEqual([
+      expect.stringContaining("SPECTRA_FALLBACK_MODEL_ID must be an OpenRouter model id"),
+    ]);
   });
 
   it("names every development fallback that would silently apply in production", () => {

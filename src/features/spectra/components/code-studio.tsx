@@ -10,8 +10,9 @@ import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import { openSearchPanel } from "@codemirror/search";
+import { Prec } from "@codemirror/state";
 import { Decoration, EditorView, keymap } from "@codemirror/view";
-import { yCollab } from "y-codemirror.next";
+import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import {
@@ -222,6 +223,39 @@ const CURATED_CODE_DEPENDENCIES = [
 
 function uid(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+/**
+ * The collaboration binding for one file's editor, with undo scoped to this
+ * person. CodeMirror's own history records every transaction, including the
+ * ones y-codemirror dispatches for a collaborator's typing, so its Ctrl+Z
+ * reverted peers. yCollab's Y.UndoManager tracks only local-origin edits; its
+ * keymap takes Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while the file is shared.
+ */
+export function codeEditorCollaboration(
+  sharedText: Y.Text,
+  awareness: Awareness,
+) {
+  return [
+    yCollab(sharedText, awareness),
+    Prec.high(keymap.of(yUndoManagerKeymap)),
+  ];
+}
+
+/** basicSetup for the source editor: CodeMirror history only when not shared. */
+export function codeEditorBasicSetup(collaborating: boolean) {
+  return {
+    lineNumbers: true,
+    highlightActiveLine: true,
+    highlightActiveLineGutter: true,
+    foldGutter: true,
+    autocompletion: true,
+    closeBrackets: true,
+    bracketMatching: true,
+    searchKeymap: true,
+    history: !collaborating,
+    historyKeymap: !collaborating,
+  };
 }
 
 function languageExtension(file: CodeFile) {
@@ -3004,25 +3038,16 @@ export function CodeStudio({
                           presenceExtension,
                           aiLineExtension,
                           ...(activeSharedText && collaborationAwareness
-                            ? [
-                                yCollab(
-                                  activeSharedText,
-                                  collaborationAwareness,
-                                ),
-                              ]
+                            ? codeEditorCollaboration(
+                                activeSharedText,
+                                collaborationAwareness,
+                              )
                             : []),
                           EditorView.lineWrapping,
                         ]}
-                        basicSetup={{
-                          lineNumbers: true,
-                          highlightActiveLine: true,
-                          highlightActiveLineGutter: true,
-                          foldGutter: true,
-                          autocompletion: true,
-                          closeBrackets: true,
-                          bracketMatching: true,
-                          searchKeymap: true,
-                        }}
+                        basicSetup={codeEditorBasicSetup(
+                          Boolean(activeSharedText && collaborationAwareness),
+                        )}
                         onCreateEditor={(view) => {
                           editorViewRef.current = view;
                         }}

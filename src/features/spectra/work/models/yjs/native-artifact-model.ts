@@ -247,7 +247,10 @@ export class NativeArtifactYjsModel {
         title: value.title,
         ...(value.summary ? { summary: value.summary } : {}),
         tags: [...value.tags],
-        content: shareUnchanged(this.snapshot.value?.content, plan.content),
+        // No deep share here: comparing every cell of a dense workbook cost
+        // more than the cell write itself, and the scheduled projection
+        // refresh shares unchanged values anyway.
+        content: plan.content,
       },
       // A cell-only edit keeps the existing semantic index usable until the
       // scheduled bounded projection refresh accounts for an added/deleted

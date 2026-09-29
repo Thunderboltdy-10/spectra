@@ -16,6 +16,29 @@ export function reconciliationSnapshotKey(snapshot: ReconciliationSnapshot) {
   return JSON.stringify(snapshot);
 }
 
+/**
+ * A studio remembers the serialized values of its own recent writes so their
+ * live echo is accepted as local. A save whose echo never arrives verbatim
+ * (the room normalized the draft: trimmed summary, re-spaced tags, reordered
+ * cells) left its key behind forever. Each key is the whole artifact as JSON,
+ * so a long session on a large sheet retained megabytes per save. Only one
+ * save is in flight at a time, so a few recent keys cover every echo.
+ */
+export const LOCAL_SYNC_KEY_LIMIT = 8;
+
+export function rememberLocalSyncKey(
+  keys: Set<string>,
+  key: string,
+  limit = LOCAL_SYNC_KEY_LIMIT,
+) {
+  keys.delete(key);
+  keys.add(key);
+  for (const oldest of keys) {
+    if (keys.size <= limit) break;
+    keys.delete(oldest);
+  }
+}
+
 /** Scoped to one editor; only immutable React snapshots may be used as keys. */
 export function createReconciliationSnapshotKey() {
   const keys = new WeakMap<ReconciliationSnapshot, string>();

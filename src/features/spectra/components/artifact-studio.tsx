@@ -227,6 +227,7 @@ import {
   rebaseCollaborativeSnapshot,
   draftContentForLiveWrite,
   createStudioHistory,
+  rememberLocalSyncKey,
   studioHistoryShortcut,
   studioIncomingSource,
   tagsFromDraft,
@@ -3561,7 +3562,7 @@ function ArtifactStudioEditor({
       };
       const key = snapshotKey(titled);
       syncingRef.current = true;
-      localSyncKeysRef.current.add(key);
+      rememberLocalSyncKey(localSyncKeysRef.current, key);
       setSyncBusy(true);
       setLiveConflict(null);
       try {
@@ -3642,7 +3643,10 @@ function ArtifactStudioEditor({
             tagDraft: acknowledgedValue.tags.join(", "),
             content: acknowledgedContent,
           };
-          localSyncKeysRef.current.add(snapshotKey(acknowledged));
+          rememberLocalSyncKey(
+            localSyncKeysRef.current,
+            snapshotKey(acknowledged),
+          );
           // Region decomposition may normalize IDs/defaults while applying an
           // otherwise identical draft (notably code line IDs). Reconcile to
           // the locally acknowledged Yjs value so byte-level normalization

@@ -109,61 +109,52 @@ The launch audit replaced the old process rituals, not these decisions.
 
 - `docs/spectra-launch-audit/START-HERE.md` is the audit charter and audience decisions. `STATE.md` is the running state. `S11-INTEGRATION.md` and `S11-CLOSEOUT.md` hold the integrated S11 decisions.
 - `docs/spectra-launch-audit/reports/` has one report per task:
-  - waves `W1`–`W9`;
-  - `V7`–`V9`;
-  - sessions `S6`–`S11`;
-  - Phase 2 hardening, `P2-*.md`: account lifecycle, experience, ops-performance, outcomes, security-privacy, write-paths and code-health.
-- Each P2 report ends with a findings ledger and a "Needs live verification" list. Those lists are the source for the next section.
+  - waves `W1`–`W9`, `V7`–`V9`, and sessions `S6`–`S11`;
+  - Phase 2 hardening, `P2-*.md`: security-privacy, ops-performance, experience, write-paths, account lifecycle, outcomes, scale, code health, AI quality, residuals and sync-resume;
+  - Phase 3 launch work, `P3-*.md`: Bridge/Lens, UI system, AI engine, editors, editors-2, sync durability, AI context, workspace flows, surfaces-2, client performance and Convex errors.
+- Each P2 and P3 report ends with a findings ledger ("Reported, not fixed" included) and a "Needs live verification" script: actions and expected results. Those scripts are the browser verification plan. Run the P3 scripts first, because they cover the newest code.
 
 ## Open launch risks
 
-These risks are compiled from the "Reported, not fixed" sections of the Phase 2 reports, as merged at `897c824e`. Items that a later P2 lane fixed are left out. The report named in brackets has the file and line detail.
+This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the report with file and line detail. Everything fixed by a later lane has been removed.
 
-**High**
+**Needs live proof before launch**
 
-- **Gateway capacity and single point of failure.** There is one Fly machine with `hard_limit = 200` sockets and one socket per open document. Rooms are in memory, so scaling out needs room-affinity routing. Load-test before launch. [OPS-PERFORMANCE]
-- **School export and purge are unbounded.** `buildLifecycleExport` reads a whole school in one query (`convex/administration.ts`), and some purge tables have no school index. A real school exceeds Convex's read limits. [OPS-PERFORMANCE]
+- **Convex errors in production.** Worded errors now cross the function boundary as `ConvexError` (`convex/functions.ts`, `shared/convex-error.mjs`). Only a production deployment redacts, so confirm on one that a stale calendar tab gets 409 and reloads, and that `/join` with a spent invitation shows the final copy. [P3-CONVEX-ERRORS]
+- **Gateway deploy drain.** A deploy during active editing must log "drained … 0 room(s) not durable" within the 30 s kill timeout. [P3-SYNC-DURABILITY]
+- **Gateway capacity.** One Fly machine (2 GB, `hard_limit = 200` sockets, rooms in memory). Load-test a classroom. Scaling out needs room-affinity routing. [OPS-PERFORMANCE, SCALE]
+- **Native Office round trip.** Word, Excel and PowerPoint edits through a paired Bridge on Windows, including cloud-drive folders and files open in Office. [P3-BRIDGE-LENS, P3-SYNC-DURABILITY]
+- **Two-browser collaboration.** Concurrent list edits, undo that keeps peers' edits, and imports during peer edits in every editor. [P3-EDITORS, P3-EDITORS-2]
+- **Calendar across the 25 October 2026 clock change** in Europe/Madrid. [P3-WORKSPACE-FLOWS]
+- **Earlier environment checks:** the Clerk deletion webhook, the Vercel production env check, and `npx convex codegen` showing no diff (P3-CONVEX-ERRORS hand-edited `api.d.ts`). [ACCOUNT-LIFECYCLE, OPS-PERFORMANCE]
 
-**Medium**
+**Operator steps at deploy**
 
-- **ManageBac:**
-  - The scheduled sync has no time budget or resumability. A killed request holds the 30-minute lease.
-  - `configure` can fall back to the environment's API key.
-  - School-level `resolveConflict` patches every projection inline.
-  - [OPS-PERFORMANCE]
-- **AI cost ceiling.** It is checked only in `beginRun`. Memory, embedding, agent and summary model work may not be gated, and there is no backfill of the rollups. [ACCOUNT-LIFECYCLE L7, L8]
-- **Erasure retention.** Erasure keeps billing, audit, shared-work and some operational rows by design. A DPO must confirm the retained set. There is no in-product or admin-initiated erasure. [ACCOUNT-LIFECYCLE L1, L6]
-- **Stop and Undo errors.** The toasts print the raw response text, and a signed-out Stop returns 500. [EXPERIENCE R4]
-- **Agent governance query.** `agentGovernance` is a reactive admin query that collects every active artifact in the school. [OPS-PERFORMANCE]
+- `npx convex run metering:backfillSchoolUsageTotals '{}'` once, so school usage ceilings start from real totals. [RESIDUALS]
+- Check that Fly `kill_timeout 30s`, Railway `drainingSeconds 30` and Compose `stop_grace_period 30s` are accepted. [P3-SYNC-DURABILITY]
 
-**Low or residual**
+**Product decisions (not blocking)**
 
-- **Cloudflare realtime.** AI writes over the opt-in provider still rely on transport acknowledgement, not an admission receipt. Keep it off until it has the same sink. [WRITE-PATHS]
-- **Choreography.** The readiness and observation fence described in S11-CHOREO is not built. Nothing consumes it yet. [WRITE-PATHS]
-- **Append verification:**
-  - A concurrent human append can make an honest AI run fail verification.
-  - Resumed runs have no recorded append positions.
-  - [WRITE-PATHS, OUTCOMES]
-- **Superseded AI writes.** A write superseded by a newer human write stays `native_pending`. Settling it needs a product rule. [OUTCOMES]
-- **Restore replica cap.** Restore fails closed above 50 linked replicas, and the error has no friendly copy. [WRITE-PATHS, OUTCOMES]
-- **ManageBac DNS rebinding.** The fetch has a DNS-rebinding check-then-use window. It is mitigated by HTTPS-only, no redirects, a timeout and a size cap. [SECURITY-PRIVACY R5]
-- **Unbounded run metadata.** `beginRun.messageMetadata` is `v.any()` with no size bound. [SECURITY-PRIVACY R8]
-- **Timeouts and bundle.** Some external calls have no per-call timeout, and a zip helper is statically reachable from every page. [OPS-PERFORMANCE]
-- **Wording.** Tool registry titles and collaboration labels still say "artifact". [EXPERIENCE R5, R6]
-- **Dialogs.** Some hand-built dialogs were not audited for focus. The calendar's "Ask Spectra about this time" button has no handler. [EXPERIENCE R9, OUTCOMES]
-- **Code health.** Dead feature chains and duplicated helpers remain; they are listed in P2-CODE-HEALTH. [CODE-HEALTH]
+- Erasure retains billing, audit, shared-work and some operational rows by design. A DPO must confirm the retained set. [ACCOUNT-LIFECYCLE]
+- There is no UI yet to choose an embed's context policy, and an editor text selection cannot yet be sent to the AI as context. [P3-CONTEXT]
+- The chat continuation toast makes no explicit choice on "Keep current" or on timeout. [P3-UI-SYSTEM]
 
-**Still needs live verification.** Each P2 report lists what could not be proven in source or tests. The launch-blocking ones are:
+**Known residuals (Low/Medium, listed in the reports)**
 
-- the Clerk deletion webhook and a staged account erasure;
-- the Vercel production environment check and the run route's duration;
-- a gateway classroom load test;
-- a native Word edit through a paired Bridge;
-- the sanitizer payloads in a real browser;
-- the owner's "Shared" icon (the EXPERIENCE R2 fix);
-- public links after offboarding;
-- ManageBac egress blocking;
-- `npx convex codegen` showing no diff.
+- **Keep off:** the Cloudflare realtime provider has no admission receipt. [WRITE-PATHS]
+- **Bridge:** a delete it has already carried out cannot be undone by a Library restore, and a permanently failing upload retries forever. [P3-SURFACES-2 X2, P3-SYNC-DURABILITY D1]
+- **Editors:**
+  - a peer's newly added quiz or flashcard image shows "Media unavailable" until reload;
+  - memoising per-item studio components would cut re-renders on big artifacts;
+  - a sheet save still forces one full rebuild.
+  - [P3-EDITORS-2, P3-CLIENT-PERF]
+- **Surfaces:**
+  - a deleted workspace leaves its tab open;
+  - some admin lists flash on refresh;
+  - some downloads revoke their URL immediately;
+  - the "Not reached" surfaces are `/agents/[id]`, `/analytics` and most of `/superadmin`.
+  - [P3-SURFACES-2]
+- **Small hardening:** DNS rebinding on ManageBac fetches, and an unbounded `beginRun.messageMetadata`. [SECURITY-PRIVACY R5, R8]
 
 ## History
 

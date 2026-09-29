@@ -918,7 +918,10 @@ export function CalendarApplication() {
   }
 
   function openItem(item: CalendarItem) {
-    const workId = planWorkId(item);
+    // A scheduled block has its own actions (duration, complete, remove); its
+    // plan is one click away in the details. Only an unscheduled plan opens
+    // straight into the plan.
+    const workId = item.kind === "scheduled_work_block" ? undefined : planWorkId(item);
     if (workId) {
       openWork(workId);
       return;
@@ -1837,7 +1840,7 @@ function CalendarItemPanel({
                 className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-micro font-semibold hover:bg-[var(--bg-hover)]"
               >
                 <Link2 className="size-3.5" />
-                Open linked work
+                {workId === item.planArtifactId ? "Open plan" : "Open linked work"}
                 <ExternalLink className="ml-auto size-3" />
               </button>
             ))}

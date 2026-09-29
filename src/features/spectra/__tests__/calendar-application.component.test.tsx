@@ -239,6 +239,24 @@ describe("Calendar application", () => {
     await waitFor(() => expect(screen.queryByTitle("Dentist")).toBeNull());
   });
 
+  it("opens a plan's scheduled block in its details, with the plan one click away", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [
+      {
+        ...workBlock(),
+        taskItemId: undefined,
+        planArtifactId: "plan-1",
+        planTaskId: "task-1",
+        linkedWorkIds: ["plan-1"],
+      },
+    ]);
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Essay draft"));
+    expect(screen.getByRole("button", { name: /Mark complete/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ 30 min" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Open plan/ })).toBeTruthy();
+  });
+
   it("does not offer removal for an official school record", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(() => undefined, [

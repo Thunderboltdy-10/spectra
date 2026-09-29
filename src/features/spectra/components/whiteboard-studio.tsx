@@ -121,6 +121,7 @@ import {
   artifactBlobSha256,
   downloadDocumentBlob,
 } from "./artifact-studio-file-utils";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -838,9 +839,7 @@ export function WhiteboardStudio({
       .catch((error: unknown) => {
         if (active)
           setAssetError(
-            error instanceof Error
-              ? error.message
-              : "Board media is unavailable.",
+            readConvexError(error).message || "Board media is unavailable.",
           );
       })
       .finally(() => {

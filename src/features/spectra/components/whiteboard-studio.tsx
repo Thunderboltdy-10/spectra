@@ -58,6 +58,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -207,6 +208,11 @@ const BOARD_EXPORTS = [
   LucideIcon,
   string,
 ])[];
+
+/** Clipboards rewrite line endings and may add a trailing newline. */
+function normalizeBoardClipboardText(value: string) {
+  return value.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+}
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -721,6 +727,12 @@ export function WhiteboardStudio({
   const [marquee, setMarquee] = useState<Marquee>();
   const dragRef = useRef<Drag | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const boardClipboardRef = useRef<{
+    text: string;
+    nodes: WhiteboardNode[];
+    edges: WhiteboardEdge[];
+    pastes: number;
+  } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const boardInputRef = useRef<HTMLInputElement>(null);
   const selectionHandledRef = useRef(false);
@@ -1876,8 +1888,15 @@ export function WhiteboardStudio({
     const originals = board.nodes.filter((node) =>
       selectedNodeIds.includes(node.id),
     );
+    insertCopies(originals, board.edges, gridSize * 2);
+  }
+
+  function insertCopies(
+    originals: WhiteboardNode[],
+    edges: readonly WhiteboardEdge[],
+    offset: number,
+  ) {
     if (!originals.length || readOnly) return;
-    const offset = gridSize * 2;
     const idMap = new Map(
       originals.map((node) => [node.id, `${node.type}-${uniqueToken()}`]),
     );
@@ -1887,6 +1906,7 @@ export function WhiteboardStudio({
         draft.nodes.push({
           ...clone(node),
           id: idMap.get(node.id)!,
+          pageId: page.id,
           x: node.x + offset,
           y: node.y + offset,
           zIndex: top + index,
@@ -1896,12 +1916,13 @@ export function WhiteboardStudio({
             : undefined,
         });
       });
-      for (const edge of draft.edges.filter(
+      for (const edge of edges.filter(
         (candidate) => idMap.has(candidate.from) && idMap.has(candidate.to),
       ))
         draft.edges.push({
           ...clone(edge),
           id: `edge-${uniqueToken()}`,
+          pageId: page.id,
           from: idMap.get(edge.from)!,
           to: idMap.get(edge.to)!,
         });
@@ -2073,6 +2094,101 @@ export function WhiteboardStudio({
       event.preventDefault();
       void redoAction();
     }
+  }
+
+  /**
+   * Copy, cut and paste on the canvas. Copied objects travel as their text
+   * (so a note pastes into a document or chat) and are also kept here with
+   * their connectors, which answer a paste while the system clipboard still
+   * holds that text. A pasted image is uploaded like an inserted one; pasted
+   * text from anywhere else becomes a text object or, when long, a sticky.
+   */
+  function canvasClipboard(
+    event: ReactClipboardEvent<HTMLDivElement>,
+    action: "copy" | "cut" | "paste",
+  ) {
+    if (
+      (event.target as HTMLElement).matches(
+        "input, textarea, [contenteditable='true']",
+      )
+    )
+      return;
+    if (action === "paste") {
+      if (readOnly) return;
+      const image = Array.from(event.clipboardData.files).find((file) =>
+        file.type.startsWith("image/"),
+      );
+      if (image) {
+        event.preventDefault();
+        void insertImage(image);
+        return;
+      }
+      const text = event.clipboardData.getData("text/plain");
+      const copied = boardClipboardRef.current;
+      if (
+        copied &&
+        normalizeBoardClipboardText(text) === normalizeBoardClipboardText(copied.text)
+      ) {
+        event.preventDefault();
+        copied.pastes += 1;
+        insertCopies(copied.nodes, copied.edges, gridSize * 2 * copied.pastes);
+        return;
+      }
+      if (!text.trim()) return;
+      event.preventDefault();
+      pasteTextNode(text.trim());
+      return;
+    }
+    const originals = board.nodes.filter((node) =>
+      selectedNodeIds.includes(node.id),
+    );
+    if (!originals.length) return;
+    event.preventDefault();
+    const ids = new Set(originals.map((node) => node.id));
+    const text = originals
+      .map((node) => {
+        const content = (node.content ?? {}) as Record<string, unknown>;
+        const label = [content.text, content.title, node.semanticLabel].find(
+          (value): value is string => typeof value === "string" && Boolean(value.trim()),
+        );
+        return label ?? node.type;
+      })
+      .join("\n");
+    boardClipboardRef.current = {
+      text,
+      nodes: clone(originals),
+      edges: clone(
+        board.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)),
+      ),
+      pastes: 0,
+    };
+    event.clipboardData.setData("text/plain", text);
+    if (action === "cut" && !readOnly) void deleteSelected();
+  }
+
+  function pasteTextNode(text: string) {
+    const layer = layers.find(
+      (candidate) => !candidate.locked && candidate.visible,
+    );
+    if (!layer || readOnly) return;
+    const long = text.length > 60 || text.includes("\n");
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    const center = worldPoint(
+      (bounds?.left ?? 0) + (bounds?.width ?? 800) / 2,
+      (bounds?.top ?? 0) + (bounds?.height ?? 600) / 2,
+    );
+    const node = createWhiteboardNode(
+      long ? "note" : "text",
+      page.id,
+      layer.id,
+      snap(center.x - 120),
+      snap(center.y - 75),
+      board.nodes.length + 1,
+    );
+    node.content = { ...((node.content ?? {}) as Record<string, unknown>), text };
+    mutate((draft) => draft.nodes.push(node));
+    setSelectedNodeId(node.id);
+    onActiveRegionChange?.(node.id);
   }
 
   async function insertImage(file: File) {
@@ -2629,6 +2745,9 @@ export function WhiteboardStudio({
         onPointerCancel={compact ? undefined : finishPointer}
         onWheel={compact ? undefined : wheel}
         onKeyDown={compact ? undefined : canvasKeyDown}
+        onCopy={compact ? undefined : (event) => canvasClipboard(event, "copy")}
+        onCut={compact ? undefined : (event) => canvasClipboard(event, "cut")}
+        onPaste={compact ? undefined : (event) => canvasClipboard(event, "paste")}
       >
         <div
           className="whiteboard-world"

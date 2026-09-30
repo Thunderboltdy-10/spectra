@@ -40,7 +40,7 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — after local:stop, local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; Profile A reloaded the existing local school and artifacts | — | 68587ec8 |
+| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — on d61b1e25, local:stop then local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; the existing local deployment and school data remained available | — | d61b1e25 |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
 | Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
@@ -76,9 +76,16 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | PASS — after the fix, the exact rewrite prompt updated the document's four sections and conclusion; the changed text remained after reload and a later stack restart | LV-020 (VERIFIED) | 7a1a8508 |
+| P3-AI-ENGINE — document section-only edit | P3-AI-ENGINE · Document · Edit | PASS — exact prompt “Rewrite the second section to be more concise.” updated section 2 while preserving all four section headings and the conclusion; the change remained after reload. The Work Surface first changed 16.5s after send. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-document-section-rewrite-after-reload-d61b1e25-redacted.png` | — | d61b1e25 |
+| P3-AI-ENGINE — document F5 first-token comparison | P3-AI-ENGINE · Document · Edit (F5) | BLOCKED — no pre-fix `main` baseline was available for comparison; the 16.5s Work Surface change is not a first-token measurement | — | d61b1e25 |
+| P3-AI-ENGINE — document conclusion append (report prompt) | P3-AI-ENGINE · Document · Append | PASS — the exact “Add a conclusion paragraph.” prompt produced the concluding paragraph, which remained in the document after reload and later stack restart; its save-state wording mismatch is tracked under LV-022 | LV-022 (NEEDS-DECISION) | 427cb3c9 |
+| P3-AI-ENGINE — document rich formatting | P3-AI-ENGINE · Document · formatting neighbor check | FAIL — the first bold request said it could not apply formatting; a repeated run stayed working for 120s, then reached `failed_terminal` while “leaders feared” became bold and remained bold after reload. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-after-reload-d61b1e25-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-failed-run-d61b1e25-redacted.png` | LV-022 (NEEDS-DECISION) | d61b1e25 |
+| P3-AI-ENGINE — append to an existing document conclusion | P3-AI-ENGINE · Document · Append neighbor check | FAIL — two final-sentence additions ended `failed_terminal`; the requested addition remained absent after reload | LV-023 (FIXING) | d61b1e25 |
 | P3-AI-ENGINE — flashcard create and hint edit | P3-AI-ENGINE · Flashcard deck · create and edit | PASS — created exactly 8 cards; card 3's hint remained changed after reload | — | 7a1a8508 |
 | P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | PASS — the fixed append added four distinct cards; all 12 remained after reload and card 3's hint stayed intact | LV-021 (VERIFIED) | 68587ec8 |
 | P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
+| P3-AI-ENGINE — flashcard rewrite | P3-AI-ENGINE · Flashcard deck · rewrite | PASS — all 12 cards' fronts, backs and hints were in Spanish after rewrite and reload; card count remained 12 | — | 68587ec8 |
+| P3-AI-ENGINE — quiz create/edit/append | P3-AI-ENGINE · Quiz | PASS — created six questions with 4 multiple choice/2 short answer; the harder Q2 edit persisted; appended two enzyme questions and after reload retained all eight questions with 5 multiple choice/3 short answer; 0 console errors. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-quiz-append-verified-d61b1e25-redacted.png` | — | d61b1e25 |
 
 ## Issues
 
@@ -778,6 +785,38 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 **Verification** (verifier):
 
 
+### LV-023 · AI document append to an existing conclusion fails
+
+- **Status:** FIXED
+- **Severity:** High
+- **Surface / role:** `/library` document Work studio and Live Dock / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Document · Append; adjacent re-check for LV-020
+- **Commit tested:** `d61b1e25` (local instance 8, web port 3000)
+- **Frequency:** 2 of 2 final-sentence append attempts to the existing conclusion ended in `failed_terminal` and left the document unchanged after reload.
+
+**Steps**
+1. On local instance 8 at commit `d61b1e25`, use saved Profile A and open the existing four-section `Causes of World War I` document in the Library Work studio. It already has a concluding paragraph.
+2. Start a new chat and confirm the open document is the only selected context object.
+3. Send `Add one final sentence to the conclusion distinguishing the assassination as the trigger from the longer-term causes; do not repeat the existing wording.` Wait for the run to leave its working state.
+4. Start another new chat with the same document as its only context and send `Append the exact sentence below after the current conclusion: The assassination was the spark; long-term tensions were the fuel.` Wait for the run to leave its working state.
+5. Reload the browser and inspect the end of the document.
+
+**Expected:** The P3-AI-ENGINE document script says, “Add a conclusion paragraph.” The requested conclusion addition should appear in the Work surface and remain after reload.
+
+**Actual:** Both runs reached `failed_terminal`. The first showed “Could not finish · Changing only the part you asked about”; the second showed “Could not finish · 2 related parts will change together.” After reload, the existing conclusion was unchanged and the requested sentence was absent. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-document-append-failed-status-d61b1e25-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-append-unchanged-after-reload-d61b1e25-redacted.png`; Playwright console excerpt `.playwright-cli/console-2026-09-30T12-56-51-574Z.log` (0 errors, 1 warning).
+
+**Fix** (fixer)
+- Commit: `9d6a4bf34cbfd1aa9ac8793df89dd45e92b980ae`.
+- Root cause: Both recorded append attempts used content-prefixed TipTap pointers. The writer removed the optional /content envelope prefix, but document mirror synchronization checked the raw pointer and readback still retained the prefix. The resulting saves had unchanged accepted document content; stale block projection and inconsistent read paths then failed verification despite an executed receipt.
+- Change: Normalize content-relative paths before mirror synchronization and in the shared pointer resolver used by apply/readback. This retains existing document/Sheets/whiteboard selector semantics and also fixes prefixed reads for decks and other content collections. Save/authority/readback checks, model/provider/reasoning/context and environment configuration are unchanged.
+- Test: Six regressions fail on previous code and pass after: append a final sentence to an existing paragraph, append a new final paragraph, read a prefixed stable block edit, and prefixed/direct pointer parity for a deck, sheet and whiteboard. Document cases exercise the actual write resolver and Yjs projection. All 199 focused patch/readback/native-model/reference/run-route/Convex-scope tests, both TypeScript checks, full lint and all five gates pass. Final full suite: 4,399 passed, 1 failed, 1 skipped (502 passed files, 1 failed, 1 skipped). The sole failure is pending LV-017 hosted packaging; all document/pointer/admission/run-route tests passed. This result is not green.
+- Re-check nearby: Sync/restart the verifier-owned local instance 8 to load the shared resolver into Convex, reload the frontend and repeat both reported additions after the existing conclusion. Confirm exact requested text persists after reload without duplicate text and preserves the original conclusion; re-check a new final paragraph, section edits and stable block paths. No shared deployment or code generation is required.
+
+**Verification** (verifier):
+
+
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -809,6 +848,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 -->
 
 ## Fixer closeout · 30 September 2026
+
+- Latest fix: LV-023 is FIXED at `9d6a4bf34cbfd1aa9ac8793df89dd45e92b980ae`. Six failing-before regressions prove content-prefixed document append/block pointers and deck/sheet/whiteboard reads now agree with direct pointers. All 199 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier has the hash and local backend sync/reload instructions; no shared deploy/codegen or environment edits occurred.
+- Latest full suite after LV-023: **4,399 passed, 1 failed, 1 skipped**; **502 passed files, 1 failed, 1 skipped** (504 files), duration 326.60 seconds. The sole failure is pending LV-017 hosted Docker packaging omitting shared runtime modules. All document, pointer, admission and run-route tests passed. Log: `.spectra-local/launch-fixer-LV023-full.log`. This full result is not green; the requested Docker COPY exception remains unanswered and its prepared patch remains unapplied.
+- Latest implementation commit: `9d6a4bf3` — normalize content-prefixed patch paths consistently (LV-023). Preceding assessment commit: `d61b1e25` (LV-022). **NEEDS-DECISION:** LV-022 — choose a final reply generated after verified receipts (latency/usage) or an authoritative saved-result message with separately labeled pre-save explanation (presentation change); no option assumed. Earlier decisions LV-003/LV-012 and CANNOT-REPRODUCE entries LV-004/LV-007 with their reasons remain below.
+
 
 - Latest assessment: LV-022 is **NEEDS-DECISION**. The real receipt helper retains a pre-save claim for all three tested canonical/native receipt outcomes, and both initial and resumed reporting paths reuse that draft. Choose post-save model prose (extra latency/usage) or an authoritative saved-result message with a separately labeled pre-save explanation (different presentation); both must preserve the full requested explanation and authoritative canonical/native facts. The user decision is pending, so no implementation was selected. All 25 receipt-report tests pass. No code changed; latest full suite remains **4,392 passed, 2 failed, 1 skipped**, with the packaging and Stop-auth limits recorded below.
 - LV-021 is now VERIFIED by the live verifier: twelve distinct cards persist after reload and the earlier card-3 hint remains intact. Its four-line code correction is `68587ec8`; the preceding ledger commit is `defe6e8a`.

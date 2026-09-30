@@ -76,6 +76,8 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | FAIL — two identical rewrite requests ended with “Could not finish”; the saved document retained its prior four sections and conclusion after reload | LV-020 | 427cb3c9 |
+| P3-AI-ENGINE — flashcard create and hint edit | P3-AI-ENGINE · Flashcard deck · create and edit | PASS — created exactly 8 cards; card 3's hint remained changed after reload | — | 7a1a8508 |
+| P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | FAIL — identical append requests were rejected 2/2; the deck remained at 8 cards after reload | LV-021 | 7a1a8508 |
 
 ## Issues
 
@@ -706,6 +708,38 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 **Verification** (verifier):
 
 
+### LV-021 · Flashcard deck append is rejected
+
+- **Status:** FIXED
+- **Severity:** High
+- **Surface / role:** Chat AI flashcard deck update / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Needs live verification · Flashcard deck, append
+- **Commit tested:** `7a1a8508` (local instance 8, web port 3000)
+- **Frequency:** 2 of 2 identical append requests were rejected; the deck remained unchanged after reload.
+
+**Steps**
+1. On local instance 8 at commit `7a1a8508`, sign in with saved Profile A and start a new chat in the local test school.
+2. Send `Create a flashcard deck about photosynthesis with 8 cards.` Wait for the deck to be created, then open the new Photosynthesis deck in Library.
+3. With the deck open, send `Change card 3's hint.` Select card 3, verify its hint changed, and reload to confirm the changed hint is saved.
+4. In the open deck's `Continue Photosynthesis...` composer, send `Add 4 cards about the Calvin cycle.` Wait for the assistant response and inspect the card list.
+5. Send the identical append prompt once more, wait for the response, then reload and inspect the saved card list.
+
+**Expected:** The P3-AI-ENGINE Flashcard deck script says to “Append: ‘Add 4 cards about the Calvin cycle.’” The four requested cards are added to the existing eight-card deck, for 12 cards total, and remain after reload.
+
+**Actual:** The first append request ended with “I couldn’t save the four new cards—the deck update was rejected, so the deck is unchanged.” The second ended with “I couldn’t add the cards: the deck update was rejected because the generated deck must contain exactly 4 cards. No changes were saved, so ‘Photosynthesis’ still has 8 cards.” After reload, the deck still showed its original eight cards and no new Calvin-cycle cards. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-flashcard-append-failure-2-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-flashcard-append-unchanged-after-reload-redacted.png`; Playwright console excerpt `.playwright-cli/console-2026-09-30T11-12-08-966Z.log` (0 errors, 1 warning).
+
+**Fix** (fixer)
+- Commit: `68587ec816eb80c33f04d8a17b9791dac75c5ef2`.
+- Root cause: The requested total-count check for newly generated decks also ran on artifact.update. It interpreted the four additions as a final deck total of four, rejecting patches with no full content payload as well as complete twelve-card update payloads. The same creation-versus-update mismatch affected quiz question additions and other counted collection edits.
+- Change: Restrict the existing final-total checks to artifact.create for decks and quizzes. Updates retain typed patch/content validation, authority/admission checks and post-save verification; no keyword routing, model/reasoning change, context truncation or alternate append mechanism was added.
+- Test: Four regressions fail before and pass after: deck and quiz patch appends through the public callModel/tool boundary, and complete deck/quiz updates with twelve items. Actual write resolver/Yjs projection keeps all eight original identities, adds the four new identities and leaves the source unchanged. Negative creation checks still reject twelve items when four were requested, and positive checks accept the requested twelve. All 97 focused completion/run-route/hollow-content/intent/document-patch tests, both TypeScript checks, full lint and all five gates pass. Final full suite: 4,392 passed, 2 failed, 1 skipped; the failures are pending LV-017 hosted packaging and the unchanged Stop-auth test (409 instead of 403). The run-route file passes 59/59 separately. This full-suite result is not green.
+- Re-check nearby: Reload the frontend and repeat Add 4 cards against the original eight-card deck; confirm twelve cards and preservation of the earlier card-3 hint after reload. Check Add 2 questions on an existing quiz, whole-deck rewrite and exact-count creation nearby. No backend restart, sync, deploy or codegen is required.
+
+**Verification** (verifier):
+
+
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -737,6 +771,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 -->
 
 ## Fixer closeout · 30 September 2026
+
+- Latest fix: LV-021 is FIXED at `68587ec816eb80c33f04d8a17b9791dac75c5ef2`. Four regressions fail before and pass after: public-planner deck/quiz patch appends and full update payloads with a final count larger than the requested addition count. Real write resolution/Yjs projection keeps eight original identities and four added identities, while wrong creation totals remain rejected. All 97 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier received the hash and reload-only re-check instructions; no backend restart, deploy or codegen is needed.
+- Latest full suite after LV-021: **4,392 passed, 2 failed, 1 skipped**; **501 passed files, 2 failed, 1 skipped** (504 files), duration 309.74 seconds. Failures: pending LV-017 hosted package lacks shared runtime modules; unchanged run-route Stop-auth case returned 409 instead of 403. The entire run-route file then passed **59/59** separately (and passed in the focused run). Logs: `.spectra-local/launch-fixer-LV021-full.log` and `.spectra-local/LV021-run-route-recheck.log`. This full result is not green; the Docker COPY exception remains unanswered and unapplied.
+- Latest implementation commit: `68587ec8` — scope collection final-total checks to creation (LV-021). Latest preceding ledger commit: `66d57dff` (LV-020). Earlier implementation commits, NEEDS-DECISION entries (LV-003 and LV-012), CANNOT-REPRODUCE entries (LV-004 and LV-007), and their reasons remain below.
+
 
 - Latest fix: LV-020 is FIXED at `7a1a8508932caca7f6e48f9960bab4350d668935`. Four failing-before regressions prove rewritten TipTap text, rich subtrees, structure replacement and mixed block/tree order survive the existing write resolver and Yjs projection. All 187 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier has the code hash and instructions to sync the owned local backend (the helper is shared with Convex admission), reload and re-check. No shared deployment/codegen was performed.
 - Latest full suite after LV-020: **4,389 passed, 1 failed, 1 skipped**; **502 passed files, 1 failed, 1 skipped** (504 files), duration 305.46 seconds. The sole failure is LV-017 hosted Docker packaging omitting the required shared runtime modules. All document tests passed; the Stop-auth and sheets performance tests that failed in the previous full run passed here. Log: `.spectra-local/launch-fixer-LV020-full.log`. This result is not green; the Docker COPY exception is still unanswered and its prepared patch remains unapplied.

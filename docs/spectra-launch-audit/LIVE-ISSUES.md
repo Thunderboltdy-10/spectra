@@ -30,6 +30,7 @@ Severity:
 ## Local test authorization and setup
 
 - **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A, which has school-administrator and platform-superadmin access, may be used as the administrator for a locally created test school. The configured ManageBac API key from `.env.local` may be entered through the school-admin ManageBac settings UI with the standard base URL for local test-school connection and read checks; no key or password value is recorded. The authorization does not permit sending real invitation emails or changing data at a real school. Convex is configured to a fresh local deployment; SMTP uses loopback with no listener, so invitation email is not sent and the app's manual-link path is used.
+- **Scope exclusion (2026-09-30):** The user explicitly instructed the verifier not to conduct mobile-dimension testing. No further phone-width or mobile-drawer checks will be run in this verification.
 
 ## Summary
 
@@ -98,7 +99,9 @@ _Written by the verifier at the end._
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | PASS — LV-031 permanent deletion passed; LV-032 displayed Retry offline and a Retry after reconnection restored the item once and persisted after reload; LV-034 Trash pointer activation passed at 1280×720. Evidence: .spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png; .spectra-local/live-verification/LV-032-postfix-offline-undo-toast-35921472-redacted.png; .spectra-local/live-verification/LV-034-postfix-pointer-35921472-redacted.png | LV-031 (VERIFIED), LV-032 (VERIFIED), LV-034 (VERIFIED) | a1bd0258 / 35921472 |
-| P3-WORKSPACE-FLOWS — Retry while already offline | LV-032 post-fix adjacent check | FAIL — in 2 of 2 attempts, clicking Retry while offline displayed two overlapping notices with two visible Retry buttons. Evidence: .spectra-local/live-verification/LV-032-postfix-offline-retry-state-35921472-redacted.png; .spectra-local/live-verification/LV-032-postfix-observations-35921472-redacted.txt | LV-035 (OPEN) | 35921472 |
+| P3-WORKSPACE-FLOWS — Retry while already offline | LV-032 post-fix adjacent check | PASS — after the fix, offline Undo showed one Retry notice; two consecutive retries while offline retained exactly one notice; online Retry restored the uniquely named disposable verifier document, cleared the notice, and the item remained in Recent after reload. Evidence: .spectra-local/live-verification/LV-035-postfix-retry-one-e9d438e9-redacted.png; .spectra-local/live-verification/LV-035-postfix-retry-two-e9d438e9-redacted.png; .spectra-local/live-verification/LV-035-postfix-console-summary-e9d438e9-redacted.txt | LV-035 (VERIFIED) | 51d6529a (app code at 3e22ac4c) |
+| P3-WORKSPACE-FLOWS — Library work open while offline | exploration · LV-035 adjacent reliability check | FAIL — two offline Library item clicks left the content blank with no Work Studio panel or Retry action; reconnection did not restore it until reload. See LV-036. Evidence: `.spectra-local/live-verification/LV-036-route-work-offline-no-retry-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-online-still-blank-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-online-after-reload-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-offline-observations-redacted.txt` | LV-036 (OPEN) | 51d6529a (app code at 3e22ac4c) |
+| Mobile-dimension checks | explicit user scope instruction · 2026-09-30 | BLOCKED — the user explicitly instructed the verifier not to conduct mobile-dimension testing; no further phone-width or mobile-drawer verification will be run | — | — |
 
 | P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
 | P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — the Calendar data view remained unavailable after HTTP 500, so no personal event, plan block, or official event control could be inspected; see LV-029 | LV-029 (OPEN) | 45281d26 |
@@ -1285,12 +1288,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - No OPEN, REOPENED or FIXING issue remains. LV-034 is FIXED and sent for live pointer/navigation recheck; LV-031 is now VERIFIED by the verifier. Stop between tasks as requested; no deployment, codegen, production-data or environment changes occurred.
 ### LV-035 · Retrying an offline Library undo shows overlapping duplicate notices
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** Library Trash Undo / signed-in school administrator (saved Profile A)
 - **Report script:** P3-WORKSPACE-FLOWS · step 8; LV-032 post-fix adjacent check
-- **Commit tested:** 35921472 (local instance 8; web port 3000)
-- **Frequency:** 2 of 2 completed retry-while-offline attempts
+- **Initial commit tested:** 35921472 (local instance 8; web port 3000)
+- **Verification commit tested:** 51d6529a (app code from fix commit 3e22ac4c; local instance 8; web port 3000)
+- **Frequency:** The pre-fix behavior occurred in 2 of 2 attempts. The post-fix retest passed once, including two consecutive Retry clicks while offline.
 
 **Steps**
 1. On local instance 8 at application commit 35921472, sign in with saved Profile A and open the verifier-created disposable document in Library > Recent.
@@ -1301,9 +1305,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 **Expected:** P3-WORKSPACE-FLOWS step 8 says, “Trash a work, then Undo while offline. Expected: an error toast with Retry.” After another offline Retry, the error state remains legible without overlapping duplicate notices; after reconnect, Retry restores the item without a reload.
 
-**Actual:** In 2 of 2 attempts, choosing Retry while still offline displayed two overlapping offline notices at the top of the page and two visible Retry buttons. Their button bounds were x=1194, y=10 and x=1194, y=6 in the 1280×720 viewport. After reconnect, choosing Retry restored the item; the Trash view was empty.
+**Actual before fix:** In 2 of 2 attempts, choosing Retry while still offline displayed two overlapping offline notices at the top of the page and two visible Retry buttons. Their button bounds were x=1194, y=10 and x=1194, y=6 in the 1280×720 viewport. After reconnect, choosing Retry restored the item; the Trash view was empty.
 
 **Evidence:** .spectra-local/live-verification/LV-032-postfix-offline-retry-state-35921472-redacted.png; .spectra-local/live-verification/LV-032-postfix-observations-35921472-redacted.txt; during the fast retry sequence, 0 console errors, 0 page errors and 0 failed requests were observed.
+
+**Verification after fix (2026-09-30):** On local instance 8, signed in with saved Profile A at 1280×720, a uniquely named disposable document was moved to Trash. Undo while offline showed one Retry notice. After each of two consecutive offline retries, exactly one Retry button remained visible. Reconnecting and choosing Retry restored the document, removed the Retry notice, and the document remained in Recent after reload. The browser console capture showed 0 new error entries after this sequence.
+
+**Verification evidence:** .spectra-local/live-verification/LV-035-postfix-retry-one-e9d438e9-redacted.png; .spectra-local/live-verification/LV-035-postfix-retry-two-e9d438e9-redacted.png; .spectra-local/live-verification/LV-035-postfix-console-summary-e9d438e9-redacted.txt; .spectra-local/live-verification/LV-035-postfix-verification-51d6529a-redacted.txt.
 
 **Fix** (fixer)
 - Commit: `3e22ac4c2a2e854f3082ff1760c1575f07c39806`.
@@ -1312,6 +1320,33 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Test: The real Sonner toaster mounted with the real organizer/action hooks reproduces two Retry buttons before the fix. Afterward two offline retries keep one notice and enqueue no mutation; reconnect/Retry restores the same item exactly once and clears the notice. A separate real-toaster test preserves distinct operations, and a pending-retry regression fails before its guard and proves one submission after. All **44 focused tests**, both TypeScript projects, full lint and all five gates pass; staged secret scan covers 3,321 files. Logs: `.spectra-local/LV035-{before,pending-before,focused-final,tsc-final,convex-tsc-final,lint-final,gates-final}.log`. The UX closure source guard is updated at `c99224070b7a88a713c2538fe919b06b9f20b4a7` to follow both the caller and shared Retry label. Final full suite: **4,453 passed, 6 failed, 1 skipped**; five unchanged lifecycle/timing failures then pass **66/66** in isolation, while LV-017 hosted packaging remains unresolved. Logs: `.spectra-local/launch-fixer-LV035-full-final.log` and `.spectra-local/LV035-full-failures-recheck.log`. This full result is not green.
 - Re-check nearby: Frontend reload only. Repeat offline Undo and Retry twice without reconnecting: expect one legible Retry notice, then reconnect/Retry and confirm one restore with the notice gone. Check repeated retry on another Library action, a pending online retry, and route-side work/conversation load retries when feasible. No backend sync, deploy or codegen required.
 
+### LV-036 · Library work open while offline leaves a blank view
+
+- **Status:** NEEDS-INFO
+- **Severity:** Medium
+- **Surface / role:** Library work open / signed-in Profile A school administrator
+- **Report script:** exploration · LV-035 adjacent reliability check
+- **Commit tested:** 51d6529a (application code at 3e22ac4c)
+- **Frequency:** Reproduced in 2 of 2 attempts with two unique disposable verifier works
+
+**Steps**
+1. On local instance 8, sign in through saved Profile A and open `http://localhost:3000/library` at desktop width.
+2. With the network online and Work Studio closed, locate `LV-035 Route-side Retry Verifier 2026-09-30`.
+3. Set the browser network offline, click that exact title, wait 4 seconds, and inspect the route, Library content, Work Studio panel, and visible Retry actions.
+4. Restore the network and wait 2.5 seconds without reloading; then reload online and click the title.
+5. Repeat steps 2–4 with `LV-035 Library Action Retry Verifier 2026-09-30`.
+
+**Expected:** An offline failure to open a work is visible without removing the Library context, and the user can retry after reconnecting.
+
+**Actual:** In both attempts, the offline click left the URL at `/library` with no `artifactId`, opened no Work Studio panel, showed no `Try again` button, and left the Library with no headings or target item. Restoring the network did not restore the Library content after 2.5 seconds. Reloading online restored the Library, and an online click opened the work. The redacted Playwright console excerpt contains “Failed to load resource: net::ERR_INTERNET_DISCONNECTED” on 4 browser resource-error entries after the first offline attempt and 6 after the second; online reload showed 0 errors. Those entries include no application filename or line number.
+
+**Evidence:** `.spectra-local/live-verification/LV-036-route-work-offline-no-retry-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-online-still-blank-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-online-after-reload-51d6529a-redacted.png`; `.spectra-local/live-verification/LV-036-route-work-offline-observations-redacted.txt` (resource URLs redacted; no application stack frame was present).
+
+**Assessment / question** (fixer)
+- Observed code: Library mounts `SpectraShell` and its `useShellArtifactOpen` path, not `RouteSidePanelHost` (the latter only serves school/analytics/settings/managebac/admin/superadmin routes). Library's failed-open callback currently emits a plain error toast with no Retry; this confirms the recovery-control gap but does not explain the persistent blank view.
+- Reproduction against real code: An isolated jsdom probe uses the real same-origin request wrapper, authoritative access coordinator, open hook and content-retention hook. A rejected fetch produces the readable connection failure, clears loading/pending state, retains the listed Library title, and accepts a fresh authorized detail on the second request: **1/1 passed**. Log/script: `.spectra-local/LV036-probe.log`, `.spectra-local/LV036-probe.test.tsx`. The blank-view failure is not reproduced at that boundary; it may occur elsewhere in rendering, navigation or transport, so no root cause is assumed.
+- Question for verifier: Please record sanitized message/stack categories for the four/six errors already observed, with source filenames/line numbers if available (chunk-load/dynamic import, React render/depth, Convex subscription, or fetch failure). Omit IDs, auth data and raw URLs. In the blank state, report whether Something went wrong, an offline/status message or any error recovery control is present, and whether the offline title click caused a reload/navigation. Counts and cropped blank screenshots cannot identify which boundary failed.
+- Status: NEEDS-INFO until these live details arrive. The verifier has this exact question; it may continue independent verification. No production code was changed, no speculative fallback/cache or symptom fix was added, and existing full-suite results remain unchanged.
 ## Fixer closeout · LV-035
 
 - Commits: `3e22ac4c2a2e854f3082ff1760c1575f07c39806` — one notice per retry operation across Library and route-side loaders; `c99224070b7a88a713c2538fe919b06b9f20b4a7` — follow the shared helper in the existing UX closure source guard; `e9d438e9` — audit and preserved LV-032/LV-034 verification. Existing human Git identity, no AI co-author trailers.

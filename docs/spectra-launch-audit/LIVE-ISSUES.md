@@ -47,19 +47,20 @@ _Written by the verifier at the end._
 | Superadmin local school record creation | exploration · create school | PASS | — | 683803d1 |
 | Initial school administrator invitation acceptance | W2-14 · step 1 | PASS | LV-004 (CANNOT-REPRODUCE) | 683803d1 |
 | W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | PASS | LV-009 (VERIFIED) | c9034739 |
-| ManageBac administrator key save | README · Open launch risks | PASS — Profile A saved the configured key in local school-admin settings; POST returned HTTP 200 | — | 0a8a2360 |
-| ManageBac capability review | README · Open launch risks | PASS — all eight listed read-only capabilities displayed verified | — | 0a8a2360 |
-| ManageBac integration readiness after admin setup | README · Open launch risks | FAIL — Integration remained Blocked after the configured key was saved | LV-010 | 0a8a2360 |
-| ManageBac identity resolution after admin capability review | W1-16 · step 6 | FAIL | LV-010 | 0a8a2360 |
-| ManageBac Sync now after admin capability review | W1-16 · step 6 | FAIL | LV-010 | 0a8a2360 |
+| ManageBac administrator key save | README · Open launch risks | PASS — Profile A saved the configured key in local school-admin settings; POST returned HTTP 200 | — | c119147d |
+| ManageBac capability review | README · Open launch risks | PASS — all eight listed read-only capabilities displayed verified | — | c119147d |
+| ManageBac integration readiness after admin setup | README · Open launch risks | PASS — Integration showed Connected after identity resolution and a completed sync | LV-010 (VERIFIED) | c119147d |
+| ManageBac identity resolution after admin capability review | W1-16 · step 6 | PASS — action completed with HTTP 200 | LV-010 (VERIFIED) | c119147d |
+| ManageBac Sync now after admin capability review | W1-16 · step 6 | PASS — latest manual run completed | LV-010 (VERIFIED) | c119147d |
+| ManageBac post-sync class selection and Overview/History consistency | W1-16 · step 6; exploration · post-sync class selection | FAIL | LV-014 | c119147d |
 | ManageBac overview before first successful sync | exploration · first-use state | PASS | LV-013 (VERIFIED) | 0a8a2360 |
-| W3-07 student no-match identity and dependent sync | W3-07 · step 5 | BLOCKED — Profile A is signed in with school-administrator access; the ManageBac action returned 409 before a student no-match result, and no separate student account was supplied | LV-010 | 0a8a2360 |
+| W3-07 student no-match identity and dependent sync | W3-07 · step 5 | BLOCKED — a separate student account was not supplied for the no-match check | — | c119147d |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
 | P3-SURFACES-2 · step 8 — ManageBac disconnect | P3-SURFACES-2 · step 8 | PASS | LV-007 (CANNOT-REPRODUCE) | d712d92b |
 | P3-EDITORS — new document save/reload smoke | P3-EDITORS · persistence check | PASS | LV-011 (VERIFIED) | d873b89c |
-| P3-BRIDGE-LENS — new document browser health requests | P3-BRIDGE-LENS · step 9 | FAIL | LV-012 | ed76ef1f / d873b89c |
+| P3-BRIDGE-LENS — new document and Library browser health requests | P3-BRIDGE-LENS · step 9 | FAIL — the later `/library` navigation also produced failed Bridge health requests | LV-012 | c119147d (app code 0a8a2360) |
 | P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | BLOCKED — the Bridge was already running before this task; the user instructed the verifier not to stop or restart a process it did not start | LV-012 | ed76ef1f |
 
 ## Issues
@@ -317,14 +318,14 @@ _Written by the verifier at the end._
 
 **Verification** (verifier): VERIFIED on commit `c9034739`, 2026-09-30. Reloaded `/workspace` as the signed-in initial school administrator and opened `/library`; neither route emitted a failed artifact request or console error. Then created a document through Library and opened the same valid local artifact in a second tab; the artifact GET returned HTTP 200 and the document editor rendered. The separate pending-save observation is recorded as LV-011.
 
-### LV-010 · ManageBac identity resolution remains blocked after admin capability review
+### LV-010 · ManageBac identity resolution remained blocked after admin capability review
 
-- **Status:** NEEDS-INFO
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** /managebac school setup and sync / school administrator
 - **Report script:** W1-16 · step 6, ManageBac school journey
-- **Commit tested:** 0a8a2360 (re-check after e8cd4740 and 0a8a2360)
-- **Frequency:** 8 action attempts total: the initial request returned HTTP 500; seven later identity or Sync now attempts returned HTTP 409, including both actions after the latest settings save
+- **Commit tested:** c119147d (app code 0a8a2360; current local Convex body loaded after the instance 8 launcher restart)
+- **Frequency:** The earlier blocked state was reproduced across 8 action attempts; after the current local Convex body was loaded, identity resolution and Sync now each completed on 1 of 1 attempts.
 
 **Steps**
 1. Start local instance 8 and sign in with saved Profile A as the administrator of the local test school Spectra Launch QA School.
@@ -356,9 +357,11 @@ _Written by the verifier at the end._
 - Test: Four real-model regressions failed before the fix: replacement/resubmitted credentials stayed blocked, settings-only saves lost their explanation, and a replaced credential without verified routes failed to return to validating. Focused isolation, scheduling and provider-fixture suites: 20 passed. Both TypeScript checks, full lint and all five gates passed; final full-suite result is recorded in the closeout below.
 - Re-check nearby: Let the authorized local Convex watcher load the committed function body, then explicitly resave the school key via Settings and resolve identity again. A valid provider response should proceed; a genuine credential rejection may block again with its provider reason. Check settings-only saves do not bypass a block and changed endpoint/header contracts still require route validation. No schema/codegen or shared deployment action was performed; hosted Convex must receive the function body through its normal authorized release. The initial 500 remains unproven; preserve logs if it returns.
 
-**Verification** (verifier): REOPENED on commit 0a8a2360, 2026-09-30. In the saved Profile A session, the configured key was re-entered through the school-admin settings UI and the settings POST returned HTTP 200; all eight read-only capabilities displayed verified. Resolve my school identity and Sync now each returned HTTP 409. After reload, Overview remained Blocked with no sync recorded and zero classes, calendar items, and tasks. Screenshot: .spectra-local/live-verification/LV-010-managebac-409-after-resave-0a8.png.
-
 **Latest diagnostic question (fixer):** The saved local backend uses syncSavedLocalBackend with Convex dev --once, not a live function watcher. Its most recent function-ready log predates e8cd4740, so the frontend revision does not prove the new configure body is deployed. Please sync/restart instance 8 through the authorized launcher workflow using only owned local stack processes, leaving the pre-existing Bridge untouched, then explicitly resave the key and repeat Resolve with request time/code and retained local logs. No shared deployment or codegen is requested; the earlier watcher instruction was incorrect.
+
+**Verifier response to the latest diagnostic question (2026-09-30):** Restarted only local instance 8 through the authorized launcher workflow so its saved local Convex backend loaded the current function body. In saved Profile A, the administrator re-entered the authorized key through ManageBac settings; all eight read-only capabilities displayed verified, Resolve my school identity returned HTTP 200, and Sync now returned HTTP 200 with a Complete history entry. Reloaded Overview showed Connected and a recent synchronization. The pre-restart 409 behavior did not recur. Screenshots: .spectra-local/live-verification/LV-010-managebac-current-body-sync-complete-0a8.png; .spectra-local/live-verification/LV-014-managebac-sync-history-counts-redacted.png.
+
+**Verification** (verifier): VERIFIED on commit c119147d, 2026-09-30. After loading the current local Convex body and repeating the exact key-save, capability-review, identity-resolution, and Sync now sequence, the integration completed successfully. Playwright showed HTTP 200 for the relevant ManageBac POST requests, 0 console errors, and the latest sync history as Complete; the earlier blocked state did not return.
 
 ### LV-011 · New document edits remain pending and are absent from a second tab
 
@@ -398,7 +401,7 @@ _Written by the verifier at the end._
 - **Surface / role:** `/library` document startup / signed-in school administrator
 - **Report script:** P3-BRIDGE-LENS · step 9, new artifact
 - **Commit tested:** `c9034739` (initial); `ed76ef1f` launcher preflight with the instance 8 runtime from `d873b89c`
-- **Frequency:** Reproduced on both initial document opens; post-fix reload produced 2 failed health GETs and 4 console errors; the new launcher preflight exited 1 once
+- **Frequency:** Reproduced on both initial document opens; post-fix reload produced 2 failed health GETs and 4 console errors; a `/library` navigation on 2026-09-30 added 4 failed health GETs and 8 console errors; the launcher preflight exited 1 once
 
 **Steps**
 1. On local instance 8 at commit `c9034739`, sign in using saved Profile A as the test school's administrator and open `/library`.
@@ -412,7 +415,7 @@ _Written by the verifier at the end._
 
 After the LV-012 commit, `npm run local:start:all -- --instance 8 --timeout-seconds 30` reported the local stack ready, then exited with code 1 and reported that the occupied Bridge port was not ready for this app and a duplicate would not be started. A clean Playwright reload afterward produced two failed `/v1/health` GETs and four matching console errors. The Bridge was already running before this task and was reused by `local:start:all`; it was not restarted under the user's process instruction.
 
-**Evidence:** .spectra-local/live-verification/LV-012-bridge-health-cors.png; .spectra-local/live-verification/LV-012-reopen-ed76.png; .spectra-local/live-verification/LV-012-reopen-ed76-2failed.png; .playwright-cli/console-2026-09-30T03-01-51-315Z.log (redacted excerpts: `/v1/health` blocked by CORS and `net::ERR_FAILED`, including post-fix lines 334–354); .playwright-cli/console-2026-09-30T03-10-09-266Z.log (same pair on second-tab load). The final clean reload had 2 failed health GETs and 4 matching console errors. No account, invitation, token or environment values are included.
+**Evidence:** .spectra-local/live-verification/LV-012-bridge-health-cors.png; .spectra-local/live-verification/LV-012-reopen-ed76.png; .spectra-local/live-verification/LV-012-reopen-ed76-2failed.png; .playwright-cli/console-2026-09-30T03-01-51-315Z.log (redacted excerpts: `/v1/health` blocked by CORS and `net::ERR_FAILED`, including post-fix lines 334–354); .playwright-cli/console-2026-09-30T03-10-09-266Z.log (same pair on second-tab load); .playwright-cli/console-2026-09-30T06-30-58-515Z.log lines 8–11 (four additional failures on `/library`). The final clean reload had 2 failed health GETs and 4 matching console errors. A direct `/library` navigation on 2026-09-30 produced 4 additional failed `GET /v1/health` requests and 8 matching CORS/`net::ERR_FAILED` console errors. No account, invitation, token or environment values are included.
 
 **Fix** (fixer)
 - Commit: `ed76ef1f2c45a55264e1b1f07eb10acad613bb5e`.
@@ -460,6 +463,36 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 **Verification** (verifier): VERIFIED on commit 0a8a2360, 2026-09-30. Reloaded /managebac before any successful sync; the connection message said “No synchronization has completed yet,” the last-synchronized label stayed at never, and Classes, Calendar, and Tasks each remained 0. No partial-coverage claim appeared. Screenshot: .spectra-local/live-verification/LV-013-verified-0a8.png.
 
+### LV-014 · ManageBac class list and Overview disagree after successful sync
+
+- **Status:** FIXED
+- **Severity:** Medium
+- **Surface / role:** `/managebac` Classes and Overview / school administrator
+- **Report script:** W1-16 · step 6, ManageBac school journey; exploration · post-sync class selection
+- **Commit tested:** c119147d (app code 0a8a2360; local instance 8)
+- **Frequency:** Reproduced in 1 of 1 post-sync checks; the class list and empty-state message remained after reload, and the Overview count remained zero after saving one selected class.
+
+**Steps**
+1. Start local instance 8 and sign in with saved Profile A as the school administrator for the local QA school with its ManageBac connection configured.
+2. Open `/managebac` → Sync history and confirm the school has a completed bootstrap sync.
+3. Open Classes. Note the available class count and the empty-state message.
+4. Select one class and choose **Save classes**.
+5. Open Overview, note the Classes count, and reload the page.
+6. Return to Classes and then Sync history; check whether the list state and completed sync entries are still present.
+
+**Expected:** W1-16 step 6 says to “Configure a read-only fixture, complete capability validation and authenticated school identity, select classes, materialize workspaces, sync tasks/calendar/resources, exercise review conflicts, then repeat the relevant surfaces as teacher and student. Verify that admin data does not expose private ordinary content.” The Classes page also says “When ManageBac is connected, current class records appear here after a successful sync.” After a completed sync, the visible class records should not be reported at the same time as absent and counted as zero in the Overview.
+
+**Actual:** Classes displayed 22 options while also showing “No classes in the latest sync.” Sync history showed an earlier Complete bootstrap run with 22 imported records and later Complete manual syncs. After selecting and saving one class, Classes showed 1 selected, but Overview continued to show Classes 0 after navigation and reload. The Classes list and empty-state message remained after reload. The latest Complete manual run showed 0 imported, 2 updated, and 0 conflicts. The local QA school's selection was returned to zero after the check.
+
+**Evidence:** .spectra-local/live-verification/LV-014-managebac-22-options-0-selected-redacted.png; .spectra-local/live-verification/LV-014-managebac-22-options-1-selected-redacted.png; .spectra-local/live-verification/LV-014-managebac-empty-latest-sync-redacted.png; .spectra-local/live-verification/LV-014-managebac-overview-zero-after-complete-sync-redacted.png; .spectra-local/live-verification/LV-014-managebac-sync-history-counts-redacted.png; Playwright snapshot/evaluation reported 22 options, 1 selected after save/reload, and the empty-state text; relevant `/api/spectra/managebac` POSTs returned HTTP 200; console had 0 errors and 1 Clerk development-key warning. Screenshot option labels, query strings, integration ID, and key values are omitted or masked.
+
+**Fix** (fixer)
+- Commit: `6451c6309d5f9a89c5b68cc4967424c004f5a4b3`.
+- Root cause: ClassShelfEditor read authorized personal class candidates, but Overview counted raw records/admin school-only previews and rendered those previews as a second class list. Admin previews intentionally exclude personal mapped records, so valid personal classes produced a zero count and contradictory empty message; ordinary-member raw rows could also disagree with filtered/deduplicated candidates.
+- Change: Refresh the existing candidate reader with the overview and pass its single collection into the shared controlled ClassShelfEditor. Count those same candidates for both admin and ordinary members, remove the duplicate preview-based list, and show unknown count plus an actionable class-load error when candidate loading fails without losing connection controls. Existing backend privacy/current-membership filtering remains authoritative and unchanged.
+- Test: Three UI regressions failed on the previous committed shell (admin personal candidates versus empty previews, ordinary eligible count versus raw rows, and failed-read unknown count). Four UI cases pass after the fix, including refresh updating the count and controlled selection together. Focused class picker, ManageBac UI/honesty and real-model isolation suites: 42 passed. Both TypeScript checks, full lint and all five gates passed; final full-suite result is recorded in the closeout below.
+- Re-check nearby: Reload the current frontend, then confirm available class count equals the picker options, with zero and one selected class; no second contradictory empty list should appear. Save/reload a selection, refresh after sync, and check ordinary-member eligibility/archived classes and class-load failures. No backend deploy/codegen step is required; admin previews were not broadened to other accounts personal data.
+
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -492,13 +525,13 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ## Fixer closeout · 30 September 2026
 
-- Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction); `e8cd4740` — explicit credential recovery from a blocked connection (reopened LV-010); `0a8a2360` — truthful connection versus sync-history copy (LV-013).
-- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce`, `d94ee311` and `c6f0108b`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
-- Latest full suite on the committed tree (`npx vitest run`): **4,356 passed, 3 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 301.95 seconds. Result: `.spectra-local/launch-fixer-LV013-full.log`. All three failures were in the unchanged account-erasure lifecycle file, whose scheduled-function drains exhausted the 10,000 timer-pump limit; the file then passed **7/7** in isolation (`.spectra-local/launch-fixer-LV013-isolated.log`). The previous committed-tree full run recorded 4,348 passed, 1 failed, 1 skipped in the same file, followed by a 7/7 isolated pass. Neither full run is claimed green.
+- Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction); `e8cd4740` — explicit credential recovery from a blocked connection (reopened LV-010); `0a8a2360` — truthful connection versus sync-history copy (LV-013); `6451c630` — one authorized class collection for picker and count (LV-014).
+- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce`, `d94ee311`, `c6f0108b` and `c119147d`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
+- Latest full suite on the committed tree (`npx vitest run`): **4,363 passed, 0 failed, 1 skipped**; **501 passed files, 0 failed, 1 skipped** (502 files). Duration: 313.98 seconds. Result: `.spectra-local/launch-fixer-LV014-full.log`. This final run is green. The earlier LV-013 full run had 4,356 passed, 3 failed, 1 skipped, all failures in unchanged account-erasure timer-pump drains, followed by a 7/7 isolated pass; that earlier result is retained in history and is superseded by this green full run.
 - The preceding batch full run returned **4,346 passed, 3 failed, 1 skipped**. It loaded the pre-fix ManageBac module while the three new regressions were being added; it is not final validation. Those regressions pass against the committed fix. Earlier full-suite results remain in the issue entries/history; the LV-006 full run was green.
-- Latest focused validation: reopened LV-010 **20 real-model/provider/scheduling tests passed**; LV-013 **17 UI/copy/honesty tests passed**. Both TypeScript checks, lint and all five gates passed for each. Earlier focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.
-- The verifier marked LV-001, LV-002, LV-008, LV-009, LV-011 and LV-013 VERIFIED. LV-005 and LV-006 are FIXED pending their live re-check. LV-011's preserved document draft reached the second tab and survived both reloads after the local gateway restart.
+- Latest focused validation: LV-014 **42 UI/class-picker/honesty/real-model isolation tests passed**, both TypeScript checks, full lint and all five gates passed. Three original collection/count/error regressions failed before the fix; a fourth proves refresh updates count and controlled selection together. Earlier focused validation: reopened LV-010 **20 real-model/provider/scheduling tests passed**; LV-013 **17 UI/copy/honesty tests passed**. Both TypeScript checks, lint and all five gates passed for each. Earlier focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.
+- The verifier marked LV-001, LV-002, LV-008, LV-009, LV-010, LV-011 and LV-013 VERIFIED. LV-005, LV-006 and LV-014 are FIXED pending their live re-check. LV-011's preserved document draft reached the second tab and survived both reloads after the local gateway restart.
 - **NEEDS-DECISION:** LV-003 — keep invalid/expired invitation preview 404/410 responses or change to a normal unavailable-preview result. LV-012 — keep automatic discovery and defer the incompatible pre-existing Bridge until its owner authorizes a properly configured restart, or agree an explicit connection/activation workflow; the launcher correction does not repair that running process. The human process-ownership constraint was respected; no Bridge origins were broadened and native-file verification remains deferred.
 - **CANNOT-REPRODUCE:** LV-004 — MIME encoding artifacts in the original invitation URL; decoded generated-token preview worked. LV-007 — the original Escape check exercised an idle confirmation, while the later pending-request observation retained the dialog and disabled controls.
-- **NEEDS-INFO:** LV-010 — the initial 500 remains unproven, but the later blocked-credential configuration trap has a committed real-model fix. The live re-check used an older backend body: saved local Convex syncs functions once during launcher startup, rather than watching source. The verifier has been asked to sync through its authorized owned-process launcher workflow, leave the pre-existing Bridge untouched, then resave the key and repeat identity resolution with retained logs. No shared deployment/codegen was performed.
+- LV-010 is VERIFIED after the authorized instance-8 launcher sync loaded the committed Convex body: identity resolution and manual sync returned 200 with Complete history. Saved local backends sync functions once at startup; they do not watch source. The earlier watcher assumption was corrected, no shared deployment/codegen was performed, and the pre-existing Bridge was left untouched.
 - No OPEN, REOPENED or FIXING entries remain at closeout. Live verification continues under the recorded authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages about a new or reopened ledger issue.

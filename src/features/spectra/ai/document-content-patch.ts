@@ -18,6 +18,11 @@ export type ContentPatchChange = { path: string; value: unknown };
 
 type DocumentBlock = Record<string, unknown>;
 
+/** Patches are relative to artifact content, with an optional envelope prefix. */
+function contentRelativePath(path: string) {
+  return path.replace(/^\/content\//, "/");
+}
+
 /**
  * Read a JSON pointer after resolving document block selectors such as
  * `/blocks/id:<blockId>/text`. Apply and verification must use the same
@@ -144,6 +149,7 @@ export function resolveDocumentPatchPath(
   content: unknown,
   path: string,
 ): string {
+  path = contentRelativePath(path);
   const match = path.match(
     /^(\/(?:content\/)?)blocks\/(?:id:|byId\/)?([^/]+)(.*)$/i,
   );
@@ -346,7 +352,7 @@ export function applyResolvedContentPatch(
   };
   for (const rawChange of patch.changes) {
     synchronizeMirrors();
-    previousPath = rawChange.path;
+    previousPath = contentRelativePath(rawChange.path);
     if (
       /^\/tiptap(?:\/|$)/.test(previousPath) &&
       next && typeof next === "object" && !Array.isArray(next)
@@ -357,7 +363,9 @@ export function applyResolvedContentPatch(
     // Sheets: uppercase A1 addresses and coerce scalar/formula cell writes so
     // column appends survive normalize + verify. Whiteboard: resolve id/title
     // node selectors and lift bare fill/stroke onto style.* before write.
-    const sheetsCanonical = canonicalizeSheetsPatchChange(rawChange);
+    const sheetsCanonical = canonicalizeSheetsPatchChange({
+      ...rawChange, path: previousPath,
+    });
     const change = canonicalizeWhiteboardPatchChange(next, sheetsCanonical);
     const resolvedPath = resolveDocumentPatchPath(next, change.path);
     const segments = resolvedPath

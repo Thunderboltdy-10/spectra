@@ -268,6 +268,33 @@ describe("canonical document tree patches", () => {
     expect(readResolvedContentPointer(content, "/tiptap/content/1/content/0/text")).toBe(changes[1]!.value);
   });
 
+
+  it("appends to an existing conclusion through a content-prefixed tree pointer", () => {
+    const before = initial();
+    const path = "/content/tiptap/content/1/content/0/text";
+    const value = "Original paragraph The trigger was a spark; the tensions were fuel.";
+    const { content } = resolveArtifactWriteInput("document", before, { contentPatch: { changes: [{ path, value }] } }, "Add a final sentence.");
+    expect(readResolvedContentPointer(content, path)).toBe(value);
+    expect(readResolvedContentPointer(content, "/blocks/id:body/text")).toBe(value);
+    expect(before.blocks?.[1]?.text).toBe("Original paragraph");
+  });
+
+  it("saves a new final paragraph through a content-prefixed append pointer", () => {
+    const before = initial();
+    const path = "/content/tiptap/content/-";
+    const value = { type: "paragraph", attrs: { blockId: "after-conclusion" }, content: [{ type: "text", text: "A final addition." }] };
+    const { content } = resolveArtifactWriteInput("document", before, { contentPatch: { changes: [{ path, value }] } }, "Append a final paragraph.");
+    expect(readResolvedContentPointer(content, path)).toMatchObject(value);
+    expect(readResolvedContentPointer(content, "/blocks/id:after-conclusion/text")).toBe("A final addition.");
+    expect(readResolvedContentPointer(content, "/blocks")).toHaveLength(3);
+  });
+
+  it("reads prefixed stable block paths with the same semantics used to apply them", () => {
+    const path = "/content/blocks/id:body/text";
+    const { content } = resolveArtifactWriteInput("document", initial(), { contentPatch: { changes: [{ path, value: "Updated conclusion." }] } }, "Edit the conclusion.");
+    expect(readResolvedContentPointer(content, path)).toBe("Updated conclusion.");
+  });
+
   it("keeps a replaced rich subtree and its marks through a Yjs reload", () => {
     const before = initial();
     const node = { type: "paragraph", attrs: { blockId: "body" }, content: [
@@ -295,5 +322,23 @@ describe("canonical document tree patches", () => {
     expect(readResolvedContentPointer(content, "/blocks/0/id")).toBe("new-heading");
     expect(readResolvedContentPointer(content, "/outline/0/id")).toBe("new-heading");
     expect(readResolvedContentPointer(content, "/blocks")).toHaveLength(1);
+  });
+});
+
+
+describe("content-envelope pointer parity", () => {
+  it.each([
+    { name: "deck", content: { cards: [{ id: "card", hint: "Old" }] }, path: "/cards/0/hint", value: "New hint" },
+    { name: "sheet", content: { sheets: [{ cells: { A1: { value: 1 } } }] }, path: "/sheets/0/cells/A1/value", value: 2 },
+    { name: "whiteboard", content: { nodes: [{ id: "node", style: { fill: "old" } }] }, path: "/nodes/id:node/style/fill", value: "new" },
+  ])("applies and reads the same $name value with either pointer form", ({ content, path, value }) => {
+    const prefixed = "/content" + path;
+    const direct = applyResolvedContentPatch(content, { changes: [{ path, value }] });
+    const enveloped = applyResolvedContentPatch(content, { changes: [{ path: prefixed, value }] });
+    expect(enveloped).toEqual(direct);
+    // Node-selector canonicalization is specific to its editor; read the
+    // equivalent resolved numeric pointer through the shared content reader.
+    const readable = prefixed.replace("id:node", "0");
+    expect(readResolvedContentPointer(enveloped, readable)).toBe(value);
   });
 });

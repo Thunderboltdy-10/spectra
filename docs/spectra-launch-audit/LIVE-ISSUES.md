@@ -29,7 +29,7 @@ Severity:
 
 ## Local test authorization and setup
 
-- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school. Convex is configured to a fresh local deployment; SMTP uses loopback with no listener, so invitation email is not sent and the app's manual-link path is used.
+- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A, which has school-administrator and platform-superadmin access, may be used as the administrator for a locally created test school. The configured ManageBac API key from `.env.local` may be entered through the school-admin ManageBac settings UI with the standard base URL for local test-school connection and read checks; no key or password value is recorded. The authorization does not permit sending real invitation emails or changing data at a real school. Convex is configured to a fresh local deployment; SMTP uses loopback with no listener, so invitation email is not sent and the app's manual-link path is used.
 
 ## Summary
 
@@ -47,8 +47,13 @@ _Written by the verifier at the end._
 | Superadmin local school record creation | exploration · create school | PASS | — | 683803d1 |
 | Initial school administrator invitation acceptance | W2-14 · step 1 | PASS | LV-004 (CANNOT-REPRODUCE) | 683803d1 |
 | W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | PASS | LV-009 (VERIFIED) | c9034739 |
-| ManageBac token setup and capability validation | README · Open launch risks | BLOCKED — the admin UI requires a tenant OpenAPI reference or reviewed capability manifest; none is configured in this run | LV-010 | d94ee311 |
-| ManageBac identity resolution while capability validation is pending | W1-16 · ManageBac school journey | FAIL | LV-010 | d94ee311 |
+| ManageBac administrator key save | README · Open launch risks | PASS — Profile A saved the configured key in local school-admin settings; POST returned HTTP 200 | — | 0a8a2360 |
+| ManageBac capability review | README · Open launch risks | PASS — all eight listed read-only capabilities displayed verified | — | 0a8a2360 |
+| ManageBac integration readiness after admin setup | README · Open launch risks | FAIL — Integration remained Blocked after the configured key was saved | LV-010 | 0a8a2360 |
+| ManageBac identity resolution after admin capability review | W1-16 · step 6 | FAIL | LV-010 | 0a8a2360 |
+| ManageBac Sync now after admin capability review | W1-16 · step 6 | FAIL | LV-010 | 0a8a2360 |
+| ManageBac overview before first successful sync | exploration · first-use state | PASS | LV-013 (VERIFIED) | 0a8a2360 |
+| W3-07 student no-match identity and dependent sync | W3-07 · step 5 | BLOCKED — Profile A is signed in with school-administrator access; the ManageBac action returned 409 before a student no-match result, and no separate student account was supplied | LV-010 | 0a8a2360 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
@@ -312,28 +317,28 @@ _Written by the verifier at the end._
 
 **Verification** (verifier): VERIFIED on commit `c9034739`, 2026-09-30. Reloaded `/workspace` as the signed-in initial school administrator and opened `/library`; neither route emitted a failed artifact request or console error. Then created a document through Library and opened the same valid local artifact in a second tab; the artifact GET returned HTTP 200 and the document editor rendered. The separate pending-save observation is recorded as LV-011.
 
-### LV-010 · ManageBac identity resolution fails while capabilities are pending
+### LV-010 · ManageBac identity resolution remains blocked after admin capability review
 
-- **Status:** CANNOT-REPRODUCE
-- **Severity:** Medium
-- **Surface / role:** `/managebac` admin setup / school administrator
+- **Status:** NEEDS-INFO
+- **Severity:** High
+- **Surface / role:** /managebac school setup and sync / school administrator
 - **Report script:** W1-16 · step 6, ManageBac school journey
-- **Commit tested:** `683803d1` (initial attempt); `d94ee311` (repeat, application code `c9034739`)
-- **Frequency:** 3 attempts total: 1 returned HTTP 500; 2 repeat attempts returned HTTP 409
+- **Commit tested:** 0a8a2360 (re-check after e8cd4740 and 0a8a2360)
+- **Frequency:** 8 action attempts total: the initial request returned HTTP 500; seven later identity or Sync now attempts returned HTTP 409, including both actions after the latest settings save
 
 **Steps**
-1. Sign in with saved Profile A as the school administrator of the local test school on instance 8.
-2. On `/managebac`, open **Connect ManageBac**, enter the authorized key from `.env.local` in **School-wide API key**, leave the canonical endpoint at its prefilled standard value, and select **Connect**.
-3. Wait for capability validation. Open **Review capabilities** and observe that no tenant routes are imported; the page says an administrator must copy the read-only route contracts from the tenant-specific API reference. The **Resolve my school identity** button remains enabled while the connection says **Validating capabilities**.
-4. Select **Resolve my school identity** once.
+1. Start local instance 8 and sign in with saved Profile A as the administrator of the local test school Spectra Launch QA School.
+2. On /managebac, open ManageBac settings, enter the authorized key from .env.local in School-wide API key, leave the canonical endpoint at its prefilled standard value, and save the settings.
+3. Open Review capabilities. Confirm that the listed read-only capabilities display as verified.
+4. Return to Overview and note the Integration status.
+5. Select Resolve my school identity once.
+6. Select Sync now once.
 
-**Expected:** W1-16 step 6 says to “complete capability validation and authenticated school identity.” The identity action should complete or present a user-readable outcome.
+**Expected:** W1-16 step 6 says to “Configure a read-only fixture, complete capability validation and authenticated school identity, select classes, materialize workspaces, sync tasks/calendar/resources, exercise review conflicts, then repeat the relevant surfaces as teacher and student. Verify that admin data does not expose private ordinary content.”
 
-**Actual:** The initial attempt left the connection **Validating capabilities** and showed zero identities needing attention. Its POST to `/api/spectra/managebac` returned HTTP 500 and a browser console error; the page displayed “The sync did not finish. Retry when the connection is ready.” On two repeat attempts after restart, the page showed **The connection needs attention** and **Integration · Blocked**; each POST returned HTTP 409 with `error.code: INTEGRATION_NOT_READY` and the message “ManageBac must be connected with verified readable capabilities.” The same user-facing retry banner appeared.
+**Actual:** In the saved Profile A browser, the school administrator entered the configured key from `.env.local` in ManageBac settings with the standard endpoint; the settings POST returned HTTP 200. Review capabilities listed eight read-only capabilities as verified, but Integration remained Blocked. Reloaded Overview said “The connection needs attention” and displayed “last synchronized never,” 0 conflicts, Classes 0, Calendar 0, and Tasks 0. Resolve my school identity and Sync now each returned HTTP 409 and displayed “Ask a school administrator to review the ManageBac connection and its verified read-only routes before trying again.” Neither completed identity resolution or synchronization.
 
-**Evidence:** .spectra-local/live-verification/LV-010-managebac-identity-500.png; .spectra-local/live-verification/LV-010-managebac-identity-409-recheck.png; Playwright network excerpts: POST `/api/spectra/managebac` → HTTP 500, then HTTP 409; browser response excerpt: `error.code: INTEGRATION_NOT_READY`, message “ManageBac must be connected with verified readable capabilities”; console reports the corresponding 500 and 409 responses. The screenshots contain only the local test school and a redacted account control.
-
-**Diagnostic question (fixer):** The local stack restart cleared the failing request logs. Please repeat the reported identity action once and record its time, HTTP status and error code; I will inspect local backend logs for the cause.
+**Evidence:** .spectra-local/live-verification/LV-010-managebac-identity-500.png; .spectra-local/live-verification/LV-010-managebac-identity-409-recheck.png; .spectra-local/live-verification/LV-010-managebac-verified-capabilities-blocked.png; .spectra-local/live-verification/LV-010-managebac-overview-blocked-panel-top.png; .spectra-local/live-verification/LV-010-managebac-409-after-resave-0a8.png; Playwright request excerpts from the current Profile A run: settings POST /api/spectra/managebac → HTTP 200; identity and Sync now POSTs to /api/spectra/managebac → HTTP 409 each; .playwright-cli/console-2026-09-30T05-45-52-785Z.log lines 5–6 record the two action errors. No key, email, or provider record values are included.
 
 **Fix** (fixer)
 - Commit: `4bfe0a8662e11be100033e5117fab851e487d824` fixes the confirmed action error-copy defect; the original HTTP 500 is CANNOT-REPRODUCE after restart.
@@ -341,6 +346,19 @@ _Written by the verifier at the end._
 - Change: Preserve structured route error data on the existing Error across shared API readers and use readConvexError in the ManageBac UI. Not-ready actions now explain administrator connection/verified-route recovery; other worded action messages and existing sync recovery remain available.
 - Test: Three regressions failed before the fix (lost HTTP error code, hidden structured not-ready reason, overwritten worded action reason). Focused API/UI/provider/honesty suites: 25 passed; both TypeScript checks, full lint and all five gates passed. The final corrected test call also passes its 19-test API/UI recheck.
 - Re-check nearby: Repeat Resolve while blocked/pending and check the administrator/connection/routes guidance; review token, credential and rate-limit action messages. Re-check the original fresh-connection validation state for HTTP 500; if it returns, retain the request time/code and local backend logs and REOPEN rather than assuming this error-handling correction repairs an unknown server fault. No model, provider, capability or sync authority is relaxed.
+
+**Verification** (verifier): REOPENED, commit 4bfe0a86, 2026-09-30. The 409 message now names the administrator and verified routes. After saving the school key and reviewing the displayed verified capabilities, the Integration card remained Blocked and both identity resolution and Sync now still returned 409.
+
+**Reopened fix** (fixer)
+- Commit: `e8cd4740701758ca611878f82bc13e4c1ee19714`.
+- Root cause: A credential-rejected sync marks the integration blocked. configure preserved that status even when the administrator explicitly stored a replacement or resubmitted credential, so beginSync rejected the next identity attempt before reaching the provider; the same mutation also erased blockedReason on settings-only saves. Verified route rows alone could not escape this state.
+- Change: Re-evaluate readable verified capability readiness when a blocked integration receives an explicitly stored credential. Settings-only saves retain the block and its explanation; replacement credentials still require verified readable routes, and changed connection contracts keep the existing invalidation path. This covers both identity and manual sync admission without auto-retrying rejected credentials.
+- Test: Four real-model regressions failed before the fix: replacement/resubmitted credentials stayed blocked, settings-only saves lost their explanation, and a replaced credential without verified routes failed to return to validating. Focused isolation, scheduling and provider-fixture suites: 20 passed. Both TypeScript checks, full lint and all five gates passed; final full-suite result is recorded in the closeout below.
+- Re-check nearby: Let the authorized local Convex watcher load the committed function body, then explicitly resave the school key via Settings and resolve identity again. A valid provider response should proceed; a genuine credential rejection may block again with its provider reason. Check settings-only saves do not bypass a block and changed endpoint/header contracts still require route validation. No schema/codegen or shared deployment action was performed; hosted Convex must receive the function body through its normal authorized release. The initial 500 remains unproven; preserve logs if it returns.
+
+**Verification** (verifier): REOPENED on commit 0a8a2360, 2026-09-30. In the saved Profile A session, the configured key was re-entered through the school-admin settings UI and the settings POST returned HTTP 200; all eight read-only capabilities displayed verified. Resolve my school identity and Sync now each returned HTTP 409. After reload, Overview remained Blocked with no sync recorded and zero classes, calendar items, and tasks. Screenshot: .spectra-local/live-verification/LV-010-managebac-409-after-resave-0a8.png.
+
+**Latest diagnostic question (fixer):** The saved local backend uses syncSavedLocalBackend with Convex dev --once, not a live function watcher. Its most recent function-ready log predates e8cd4740, so the frontend revision does not prove the new configure body is deployed. Please sync/restart instance 8 through the authorized launcher workflow using only owned local stack processes, leaving the pre-existing Bridge untouched, then explicitly resave the key and repeat Resolve with request time/code and retained local logs. No shared deployment or codegen is requested; the earlier watcher instruction was incorrect.
 
 ### LV-011 · New document edits remain pending and are absent from a second tab
 
@@ -413,6 +431,35 @@ After the LV-012 commit, `npm run local:start:all -- --instance 8 --timeout-seco
 
 No Bridge allowlist was broadened, no existing process was stopped, and no frontend retry/error suppression was added to conceal the reported condition.
 
+### LV-013 · ManageBac overview claims a completed partial sync before the first sync
+
+- **Status:** VERIFIED
+- **Severity:** Medium
+- **Surface / role:** /managebac overview / school administrator
+- **Report script:** W1-16 · step 6, ManageBac school journey; exploration · first-use state
+- **Commit tested:** 0a8a2360
+- **Frequency:** Originally reproduced on 3 of 3 reads; correct no-sync state confirmed on 1 of 1 post-fix reloads
+
+**Steps**
+1. On local instance 8, sign in with saved Profile A as the administrator of the newly created local test school.
+2. Open /managebac before any successful ManageBac sync.
+3. Read the Connection message, last-synchronized label, and Classes, Calendar, and Tasks counts.
+
+**Expected:** W1-16 step 6 puts syncing after fixture setup and identity resolution. Before a first successful sync, the Connection message should consistently indicate that no sync has completed.
+
+**Actual:** After fixer commit 0a8a2360, the saved Profile A session showed “Ask a school administrator to review the connection and its verified read-only routes before syncing. No synchronization has completed yet.” The same view displayed “last synchronized never,” 0 conflicts, and Classes 0, Calendar 0, and Tasks 0. After reload, the overview copy and counts remained consistent; Integration remained Blocked. The later key-resave identity and Sync now checks both returned HTTP 409, and the no-sync state remained unchanged.
+
+**Evidence:** .spectra-local/live-verification/LV-013-managebac-partial-vs-never.png; .spectra-local/live-verification/LV-013-verified-0a8.png; Playwright request excerpts from the current Profile A run: settings POST /api/spectra/managebac → HTTP 200; identity and Sync now POSTs to /api/spectra/managebac → HTTP 409 each. No key, email, or provider record values are included.
+
+**Fix** (fixer)
+- Commit: `0a8a2360e5698bdd69dc62ac0efeb4cf45d008cf`.
+- Root cause: The connection overview used a fallback partial-completion sentence for every status other than connected, validating and draft, including blocked/revoked before first sync. Connection state does not prove sync completion or the availability of records; even degraded can follow a failed attempt without a completed sync.
+- Change: Use the actual connection status and blocked reason for recovery copy, with lastSyncAt establishing whether any synchronization has completed. Connected first-use no longer claims records exist, and blocked/revoked/degraded states do not invent partial coverage.
+- Test: All six history/copy regressions failed before the fix; the focused dialogs/action-copy/sync-honesty suites now pass 17 tests. Both TypeScript checks, full lint and all five gates pass. Final full-suite result is recorded in the closeout below.
+- Re-check: Reload Overview before the first completed sync and check the no-completion sentence, actual block reason, and zero counts remain consistent. Re-check connected-first-use, genuine degraded/partial history, and disconnected/revoked copy; actual sync-run statuses remain in History.
+
+**Verification** (verifier): VERIFIED on commit 0a8a2360, 2026-09-30. Reloaded /managebac before any successful sync; the connection message said “No synchronization has completed yet,” the last-synchronized label stayed at never, and Classes, Calendar, and Tasks each remained 0. No partial-coverage claim appeared. Screenshot: .spectra-local/live-verification/LV-013-verified-0a8.png.
+
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -445,12 +492,13 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ## Fixer closeout · 30 September 2026
 
-- Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction).
-- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce` and `d94ee311`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
-- Final full suite on the committed tree (`npx vitest run`): **4,348 passed, 1 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 307.00 seconds. Result: `.spectra-local/launch-fixer-LV010-final-full.log`. The unchanged account-erasure lifecycle scheduled-function drain exhausted its 10,000 timer-pump limit; its file then passed **7/7** in isolation (`.spectra-local/launch-fixer-LV010-final-isolated.log`). This is a passing isolated recheck, not a claim that the full run was green.
+- Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction); `e8cd4740` — explicit credential recovery from a blocked connection (reopened LV-010); `0a8a2360` — truthful connection versus sync-history copy (LV-013).
+- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce`, `d94ee311` and `c6f0108b`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
+- Latest full suite on the committed tree (`npx vitest run`): **4,356 passed, 3 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 301.95 seconds. Result: `.spectra-local/launch-fixer-LV013-full.log`. All three failures were in the unchanged account-erasure lifecycle file, whose scheduled-function drains exhausted the 10,000 timer-pump limit; the file then passed **7/7** in isolation (`.spectra-local/launch-fixer-LV013-isolated.log`). The previous committed-tree full run recorded 4,348 passed, 1 failed, 1 skipped in the same file, followed by a 7/7 isolated pass. Neither full run is claimed green.
 - The preceding batch full run returned **4,346 passed, 3 failed, 1 skipped**. It loaded the pre-fix ManageBac module while the three new regressions were being added; it is not final validation. Those regressions pass against the committed fix. Earlier full-suite results remain in the issue entries/history; the LV-006 full run was green.
-- Latest focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.
-- The verifier marked LV-001, LV-002, LV-008, LV-009 and LV-011 VERIFIED. LV-005 and LV-006 are FIXED pending their live re-check. LV-011's preserved document draft reached the second tab and survived both reloads after the local gateway restart.
+- Latest focused validation: reopened LV-010 **20 real-model/provider/scheduling tests passed**; LV-013 **17 UI/copy/honesty tests passed**. Both TypeScript checks, lint and all five gates passed for each. Earlier focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.
+- The verifier marked LV-001, LV-002, LV-008, LV-009, LV-011 and LV-013 VERIFIED. LV-005 and LV-006 are FIXED pending their live re-check. LV-011's preserved document draft reached the second tab and survived both reloads after the local gateway restart.
 - **NEEDS-DECISION:** LV-003 — keep invalid/expired invitation preview 404/410 responses or change to a normal unavailable-preview result. LV-012 — keep automatic discovery and defer the incompatible pre-existing Bridge until its owner authorizes a properly configured restart, or agree an explicit connection/activation workflow; the launcher correction does not repair that running process. The human process-ownership constraint was respected; no Bridge origins were broadened and native-file verification remains deferred.
-- **CANNOT-REPRODUCE:** LV-004 — MIME encoding artifacts in the original invitation URL; decoded generated-token preview worked. LV-007 — the original Escape check exercised an idle confirmation, while the later pending-request observation retained the dialog and disabled controls. LV-010 — the original identity HTTP 500 did not recur after restart, and its logs were cleared; repeat calls returned intended INTEGRATION_NOT_READY 409. The confirmed error-copy defect was repaired, but no unknown server fault is claimed fixed; reopen with retained logs if the 500 returns.
+- **CANNOT-REPRODUCE:** LV-004 — MIME encoding artifacts in the original invitation URL; decoded generated-token preview worked. LV-007 — the original Escape check exercised an idle confirmation, while the later pending-request observation retained the dialog and disabled controls.
+- **NEEDS-INFO:** LV-010 — the initial 500 remains unproven, but the later blocked-credential configuration trap has a committed real-model fix. The live re-check used an older backend body: saved local Convex syncs functions once during launcher startup, rather than watching source. The verifier has been asked to sync through its authorized owned-process launcher workflow, leave the pre-existing Bridge untouched, then resave the key and repeat identity resolution with retained logs. No shared deployment/codegen was performed.
 - No OPEN, REOPENED or FIXING entries remain at closeout. Live verification continues under the recorded authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages about a new or reopened ledger issue.

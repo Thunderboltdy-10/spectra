@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
+import { resolveArtifactWriteInput } from "../operations/artifact-write-content";
 import {
   applyResolvedContentPatch,
   findDocumentSectionRange,
@@ -232,5 +234,66 @@ describe("document contentPatch section rewrite", () => {
       type: "paragraph",
       text: "N8 note",
     });
+  });
+});
+
+describe("canonical document tree patches", () => {
+  const initial = () => {
+    const doc = documentYjsAdapter.createDocument({ blocks: [
+      { id: "heading", type: "heading", text: "Original heading", attrs: { level: 2 } },
+      { id: "body", type: "paragraph", text: "Original paragraph" },
+    ], customMetadata: { keep: true } });
+    try { return documentYjsAdapter.project(doc); } finally { doc.destroy(); }
+  };
+
+  it("saves a whole-document rewrite made through TipTap text pointers", () => {
+    const before = initial();
+    const changes = [
+      { path: "/tiptap/content/0/content/0/text", value: "Simpler heading" },
+      { path: "/tiptap/content/1/content/0/text", value: "Simpler explanation for the reader." },
+    ];
+    const { content } = resolveArtifactWriteInput("document", before, { contentPatch: { changes } }, "Rewrite the document.");
+    for (const change of changes) expect(readResolvedContentPointer(content, change.path)).toBe(change.value);
+    expect(readResolvedContentPointer(content, "/blocks/1/text")).toBe(changes[1]!.value);
+    expect(readResolvedContentPointer(content, "/outline/0/title")).toBe("Simpler heading");
+    expect(before.blocks?.[1]?.text).toBe("Original paragraph");
+  });
+
+  it.each([true, false])("applies mixed block/tree pointers in their submitted order (%s)", (treeFirst) => {
+    const tree = { path: "/tiptap/content/1/content/0/text", value: "Tree edit" };
+    const block = { path: "/blocks/id:body/text", value: "Block edit" };
+    const changes = treeFirst ? [tree, block] : [block, tree];
+    const { content } = resolveArtifactWriteInput("document", initial(), { contentPatch: { changes } }, "Edit the paragraph.");
+    expect(readResolvedContentPointer(content, "/blocks/1/text")).toBe(changes[1]!.value);
+    expect(readResolvedContentPointer(content, "/tiptap/content/1/content/0/text")).toBe(changes[1]!.value);
+  });
+
+  it("keeps a replaced rich subtree and its marks through a Yjs reload", () => {
+    const before = initial();
+    const node = { type: "paragraph", attrs: { blockId: "body" }, content: [
+      { type: "text", text: "Rewritten and bold", marks: [{ type: "bold" }] },
+    ] };
+    const { content } = resolveArtifactWriteInput("document", before, {
+      contentPatch: { changes: [{ path: "/tiptap/content/1", value: node }] },
+    }, "Rewrite and format the paragraph.");
+    const doc = documentYjsAdapter.createDocument(content as ReturnType<typeof initial>);
+    try {
+      const saved = documentYjsAdapter.project(doc);
+      expect(readResolvedContentPointer(saved, "/tiptap/content/1")).toMatchObject(node);
+      expect(readResolvedContentPointer(saved, "/blocks/1/text")).toBe("Rewritten and bold");
+      expect(saved.customMetadata).toEqual({ keep: true });
+    } finally { doc.destroy(); }
+  });
+
+  it("refreshes block identities and outline after a whole tree replacement", () => {
+    const before = initial();
+    const tree = { type: "doc", content: [{ type: "heading", attrs: { blockId: "new-heading", level: 1 },
+      content: [{ type: "text", text: "New structure" }] }] };
+    const { content } = resolveArtifactWriteInput("document", before, {
+      contentPatch: { changes: [{ path: "/tiptap", value: tree }] },
+    }, "Rewrite the whole document.");
+    expect(readResolvedContentPointer(content, "/blocks/0/id")).toBe("new-heading");
+    expect(readResolvedContentPointer(content, "/outline/0/id")).toBe("new-heading");
+    expect(readResolvedContentPointer(content, "/blocks")).toHaveLength(1);
   });
 });

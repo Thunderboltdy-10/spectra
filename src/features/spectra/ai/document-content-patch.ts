@@ -5,6 +5,8 @@
  * Also applies sheets cell-path canonicalization and cells-map merges.
  */
 
+import { documentBlocksFromJson, documentContentToProseMirrorJson, type DocumentJsonNode } from "../lenses/document-projection";
+
 import {
   canonicalizeSheetsPatchChange,
   isSheetsCellsMapPath,
@@ -310,7 +312,48 @@ export function applyResolvedContentPatch(
   patch: { changes: ContentPatchChange[] },
 ) {
   const next = structuredClone(content) as unknown;
+  let previousPath = "";
+  const synchronizeMirrors = () => {
+    if (
+      next &&
+      typeof next === "object" &&
+      !Array.isArray(next) &&
+      /^\/(?:content\/)?blocks(?:\/|$)/.test(previousPath)
+    ) {
+      delete (next as Record<string, unknown>).tiptap;
+    } else if (
+      next &&
+      typeof next === "object" &&
+      !Array.isArray(next) &&
+      /^\/tiptap(?:\/|$)/.test(previousPath)
+    ) {
+      // TipTap is the authored tree on this path. Refresh its derived mirrors
+      // before the Yjs adapter can mistake stale block text for an authored edit.
+      const document = next as Record<string, unknown>;
+      const tiptap = document.tiptap as DocumentJsonNode | undefined;
+      if (tiptap?.type === "doc") {
+        const blocks = documentBlocksFromJson(tiptap);
+        document.blocks = blocks;
+        document.outline = blocks
+          .filter((block) => block.type === "heading")
+          .map((block) => ({
+            id: block.id,
+            title: block.text,
+            level: Number(block.attrs?.level) || 2,
+          }));
+      }
+    }
+  };
   for (const rawChange of patch.changes) {
+    synchronizeMirrors();
+    previousPath = rawChange.path;
+    if (
+      /^\/tiptap(?:\/|$)/.test(previousPath) &&
+      next && typeof next === "object" && !Array.isArray(next)
+    ) {
+      const document = next as Record<string, unknown>;
+      if (!document.tiptap) document.tiptap = documentContentToProseMirrorJson(document);
+    }
     // Sheets: uppercase A1 addresses and coerce scalar/formula cell writes so
     // column appends survive normalize + verify. Whiteboard: resolve id/title
     // node selectors and lift bare fill/stroke onto style.* before write.
@@ -387,15 +430,6 @@ export function applyResolvedContentPatch(
       change.value,
     );
   }
-  if (
-    next &&
-    typeof next === "object" &&
-    !Array.isArray(next) &&
-    patch.changes.some((change) =>
-      /^\/(?:content\/)?blocks(?:\/|$)/.test(change.path),
-    )
-  ) {
-    delete (next as Record<string, unknown>).tiptap;
-  }
+  synchronizeMirrors();
   return next;
 }

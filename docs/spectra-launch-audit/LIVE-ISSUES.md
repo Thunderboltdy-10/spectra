@@ -27,10 +27,13 @@ Severity:
 | **Medium** | A job works, but is confusing, slow or inconsistent. |
 | **Low** | Polish. |
 
+## Local test authorization and setup
+
+- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school. Convex is configured to a fresh local deployment; SMTP uses loopback with no listener, so invitation email is not sent and the app's manual-link path is used.
+
 ## Summary
 
 _Written by the verifier at the end._
-- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school. Convex is configured to a fresh local deployment; SMTP uses loopback with no listener, so invitation email is not sent and the app's manual-link path is used.
 
 ## Coverage
 
@@ -38,18 +41,21 @@ _Written by the verifier at the end._
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
-| Artifact read during Workspace and Library navigation | exploration · workspace surfaces | FAIL | LV-009 | 683803d1 |
+| Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
 | P2-EXPERIENCE step 2 — expired invitation | P2-EXPERIENCE · step 2 | BLOCKED — no actual expired stored invitation was available; LV-003 is NEEDS-DECISION | LV-003 | d551198a |
 | Superadmin local school record creation | exploration · create school | PASS | — | 683803d1 |
 | Initial school administrator invitation acceptance | W2-14 · step 1 | PASS | LV-004 (CANNOT-REPRODUCE) | 683803d1 |
-| W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | FAIL | LV-009 | 683803d1 |
-| ManageBac token setup and capability validation | README · Open launch risks | BLOCKED — the admin UI requires a tenant OpenAPI reference or reviewed capability manifest; none is configured in this run | LV-010 | 683803d1 |
-| ManageBac identity resolution while capability validation is pending | W1-16 · ManageBac school journey | FAIL | LV-010 | 683803d1 |
+| W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | PASS | LV-009 (VERIFIED) | c9034739 |
+| ManageBac token setup and capability validation | README · Open launch risks | BLOCKED — the admin UI requires a tenant OpenAPI reference or reviewed capability manifest; none is configured in this run | LV-010 | d94ee311 |
+| ManageBac identity resolution while capability validation is pending | W1-16 · ManageBac school journey | FAIL | LV-010 | d94ee311 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
 | P3-SURFACES-2 · step 8 — ManageBac disconnect | P3-SURFACES-2 · step 8 | PASS | LV-007 (CANNOT-REPRODUCE) | d712d92b |
+| P3-EDITORS — new document save/reload smoke | P3-EDITORS · persistence check | PASS | LV-011 (VERIFIED) | d873b89c |
+| P3-BRIDGE-LENS — new document browser health requests | P3-BRIDGE-LENS · step 9 | FAIL | LV-012 | ed76ef1f / d873b89c |
+| P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | BLOCKED — the Bridge was already running before this task; the user instructed the verifier not to stop or restart a process it did not start | LV-012 | ed76ef1f |
 
 ## Issues
 
@@ -278,7 +284,7 @@ _Written by the verifier at the end._
 
 ### LV-009 · Workspace and Library make failed artifact requests
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** `/workspace` and `/library` / signed-in Profile A before and after accepting the local initial-admin invitation
 - **Report script:** exploration · first-week school admin, workspace and Library reloads
@@ -304,14 +310,16 @@ _Written by the verifier at the end._
 - Test: All five original ownership regressions failed before the fix. **68/68** focused ownership, boundary-ordering, route, artifact-access/content and membership-page tests pass afterward; the boundary cases prove cleanup precedes restored readers, same-account restoration survives reload, and a database reset on the same URL/Clerk session is distinguished by account ID. Both TypeScript checks, full lint and all five gates passed. A prior temporary real-model different-table diagnostic reproduced HTTP 500 / INTERNAL_ERROR; its source edits were restored. Full suite: **4,340 passed, 1 failed, 1 skipped** (499 passed files, 1 failed, 1 skipped). The unchanged signed-out Stop case returned 409 instead of 401 under load; its file passed **59/59** in isolation. Redacted local backend evidence: .spectra-local/launch-fixer-LV009-backend-redacted.json.
 - Re-check nearby: on this committed revision, reload Workspace and Library with the saved Profile A session: no old artifact requests, 403/500 console errors, or generic boundary. Create/open valid local work and confirm same-scope reload restores it; then check sign-out/account switch, a fresh database at the same URL, and no-school registration/acceptance. Unknown legacy workbench UI state is reset once; current scoped state persists. Durable product records are unchanged; no schema, codegen or shared deployment step is required.
 
+**Verification** (verifier): VERIFIED on commit `c9034739`, 2026-09-30. Reloaded `/workspace` as the signed-in initial school administrator and opened `/library`; neither route emitted a failed artifact request or console error. Then created a document through Library and opened the same valid local artifact in a second tab; the artifact GET returned HTTP 200 and the document editor rendered. The separate pending-save observation is recorded as LV-011.
+
 ### LV-010 · ManageBac identity resolution fails while capabilities are pending
 
-- **Status:** OPEN
+- **Status:** CANNOT-REPRODUCE
 - **Severity:** Medium
 - **Surface / role:** `/managebac` admin setup / school administrator
 - **Report script:** W1-16 · step 6, ManageBac school journey
-- **Commit tested:** 683803d1
-- **Frequency:** 1 of 1 attempts
+- **Commit tested:** `683803d1` (initial attempt); `d94ee311` (repeat, application code `c9034739`)
+- **Frequency:** 3 attempts total: 1 returned HTTP 500; 2 repeat attempts returned HTTP 409
 
 **Steps**
 1. Sign in with saved Profile A as the school administrator of the local test school on instance 8.
@@ -321,9 +329,89 @@ _Written by the verifier at the end._
 
 **Expected:** W1-16 step 6 says to “complete capability validation and authenticated school identity.” The identity action should complete or present a user-readable outcome.
 
-**Actual:** The connection remains **Validating capabilities** and shows zero identities needing attention. The action produces a POST to `/api/spectra/managebac` that returns HTTP 500 and a browser console error. The page displays “The sync did not finish. Retry when the connection is ready.”
+**Actual:** The initial attempt left the connection **Validating capabilities** and showed zero identities needing attention. Its POST to `/api/spectra/managebac` returned HTTP 500 and a browser console error; the page displayed “The sync did not finish. Retry when the connection is ready.” On two repeat attempts after restart, the page showed **The connection needs attention** and **Integration · Blocked**; each POST returned HTTP 409 with `error.code: INTEGRATION_NOT_READY` and the message “ManageBac must be connected with verified readable capabilities.” The same user-facing retry banner appeared.
 
-**Evidence:** .spectra-local/live-verification/LV-010-managebac-identity-500.png; Playwright network excerpt: POST `/api/spectra/managebac` → HTTP 500; console: “Failed to load resource: the server responded with a status of 500 (Internal Server Error)”; screenshot contains the pending validation state and redacted account control.
+**Evidence:** .spectra-local/live-verification/LV-010-managebac-identity-500.png; .spectra-local/live-verification/LV-010-managebac-identity-409-recheck.png; Playwright network excerpts: POST `/api/spectra/managebac` → HTTP 500, then HTTP 409; browser response excerpt: `error.code: INTEGRATION_NOT_READY`, message “ManageBac must be connected with verified readable capabilities”; console reports the corresponding 500 and 409 responses. The screenshots contain only the local test school and a redacted account control.
+
+**Diagnostic question (fixer):** The local stack restart cleared the failing request logs. Please repeat the reported identity action once and record its time, HTTP status and error code; I will inspect local backend logs for the cause.
+
+**Fix** (fixer)
+- Commit: `4bfe0a8662e11be100033e5117fab851e487d824` fixes the confirmed action error-copy defect; the original HTTP 500 is CANNOT-REPRODUCE after restart.
+- Root cause: The repeat request returned the intended INTEGRATION_NOT_READY 409, but the shared API reader discarded its structured code. The action formatter then replaced all unrecognized reasons with failed-sync copy, hiding the backend explanation even for identity/configuration actions. The earlier 500 did not recur after restart, and its backend logs were cleared; no backend 500 cause is claimed fixed.
+- Change: Preserve structured route error data on the existing Error across shared API readers and use readConvexError in the ManageBac UI. Not-ready actions now explain administrator connection/verified-route recovery; other worded action messages and existing sync recovery remain available.
+- Test: Three regressions failed before the fix (lost HTTP error code, hidden structured not-ready reason, overwritten worded action reason). Focused API/UI/provider/honesty suites: 25 passed; both TypeScript checks, full lint and all five gates passed. The final corrected test call also passes its 19-test API/UI recheck.
+- Re-check nearby: Repeat Resolve while blocked/pending and check the administrator/connection/routes guidance; review token, credential and rate-limit action messages. Re-check the original fresh-connection validation state for HTTP 500; if it returns, retain the request time/code and local backend logs and REOPEN rather than assuming this error-handling correction repairs an unknown server fault. No model, provider, capability or sync authority is relaxed.
+
+### LV-011 · New document edits remain pending and are absent from a second tab
+
+- **Status:** VERIFIED
+- **Severity:** High
+- **Surface / role:** `/library` document editor / signed-in school administrator
+- **Report script:** P3-EDITORS · persistence check; P3-BRIDGE-LENS · step 9, new artifact
+- **Commit tested:** c9034739
+- **Frequency:** 1 of 1 edit attempts; pending state remained after 45 seconds
+
+**Steps**
+1. On local instance 8 at commit `c9034739`, sign in using saved Profile A as the test school's administrator and open `/library` with no document selected.
+2. Choose **New** → **Document**.
+3. Click the work surface and type `LIVE-VERIFY-2026-09-30`.
+4. Wait 45 seconds. In a second tab in the same signed-in browser context, open the document's current URL.
+5. Return to the original tab and attempt a reload; dismiss the browser's before-unload dialog to keep the open draft.
+
+**Expected:** P3-EDITORS says to “reload both browsers and confirm the result persisted.” P3-BRIDGE-LENS step 9 expects a new document to be materialized and its saved edit to come back to Spectra.
+
+**Actual:** The original tab continued to show **Saving…** and “Connection interrupted. Reconnecting while keeping your draft.” after 45 seconds. The second tab displayed the document without the typed marker. Reloading the original tab opened a before-unload dialog; after dismissing it, the marker remained visible in that tab. The page then said the edit was safely held on this device. Selecting **Save** left the save dialog and **Saving…** state open with its controls disabled. After returning to the editor, selecting **Retry** did not clear the interrupted state or complete the save during a further five-second wait. The edit was not available in the second tab during this check.
+
+**Evidence:** .spectra-local/live-verification/LV-011-document-reconnecting-saving.png; .spectra-local/live-verification/LV-011-new-tab-no-marker.png; .spectra-local/live-verification/LV-011-save-dialog-pending.png; Playwright network excerpt: 341 POST requests to `/api/spectra/collaboration/token` in the retained document trace, with 9 additional POSTs in a 10-second sample; those responses returned HTTP 200. No identity or credential values are included.
+
+**Fix** (fixer)
+- Commit: `d873b89c7c611a19ad60f4014ec76b0cdf2b2722`.
+- Root cause: The Hocuspocus connected hook has no document field; its room is connection.document. The gateway passed undefined to canonical catch-up and recorded it for policy tracking, forcing each newly opened artifact to reconnect before durable saves could settle. Local gateway logs showed repeated COLLABORATION_AUTHORIZATION_UNAVAILABLE after these closures.
+- Change: Read the connection-owned document in the shared hook, restoring canonical catch-up and room tracking for every artifact type. Updated the security hook fixtures to supply the current dependencies; authorization deadlines and revocation behavior are retained.
+- Test: New real-Yjs catch-up regression failed before the fix with a forced reconnect/undefined document and now receives durable text and tracks its frontier. Focused Vitest: 37 passed; Node authorization checks: 7 passed. Both TypeScript checks, full lint and all five gates passed. Final full-suite result is recorded in the closeout below.
+- Re-check nearby: Restart the local gateway to load the committed script, preserving the original draft. Save/Retry the marker, confirm it in the second tab and reload both after Saved; repeat new workbook/deck saves and cross-tab reads. No codegen or deploy-side step is needed for the local test.
+
+**Verification** (verifier): VERIFIED on commit `d873b89c`, 2026-09-30. Restarted instance 8 with the local launcher after confirming the restart targeted only its recorded local stack PIDs; the pre-existing Bridge was reused. The preserved test marker appeared in the second tab after its first load showed the document without it. The marker then remained in both tabs after reloading each. Neither tab showed a pending **Saving…** or **Reconnecting** state after readback. Screenshot: .spectra-local/live-verification/LV-011-fixed-d873b89-second-tab.png. Bridge health errors are tracked separately as LV-012.
+
+### LV-012 · Document startup repeatedly logs failed Bridge health requests
+
+- **Status:** NEEDS-DECISION
+- **Severity:** Medium
+- **Surface / role:** `/library` document startup / signed-in school administrator
+- **Report script:** P3-BRIDGE-LENS · step 9, new artifact
+- **Commit tested:** `c9034739` (initial); `ed76ef1f` launcher preflight with the instance 8 runtime from `d873b89c`
+- **Frequency:** Reproduced on both initial document opens; post-fix reload produced 2 failed health GETs and 4 console errors; the new launcher preflight exited 1 once
+
+**Steps**
+1. On local instance 8 at commit `c9034739`, sign in using saved Profile A as the test school's administrator and open `/library`.
+2. Choose **New** → **Document** and wait for the editor to render.
+3. Inspect the browser console and requests whose URL is `http://127.0.0.1:47615/v1/health`.
+4. Open the same document URL in a second tab and inspect the new console entries.
+
+**Expected:** P3-BRIDGE-LENS step 9 says to “create a new document, workbook and deck in Spectra and materialize each to a native file through the Bridge.” The editor's Bridge health requests should not appear as failed browser requests during the document workflow.
+
+**Actual:** Each observed health request failed with `net::ERR_FAILED`. The console reports that access from origin `http://localhost:3000` was blocked by CORS policy because no `Access-Control-Allow-Origin` header was present. At least 32 failed health GETs accumulated during the first editor session; the request count increased by five in a later 10-second sample. Opening the same document in a second tab produced further matching console errors. No native-file write was attempted.
+
+After the LV-012 commit, `npm run local:start:all -- --instance 8 --timeout-seconds 30` reported the local stack ready, then exited with code 1 and reported that the occupied Bridge port was not ready for this app and a duplicate would not be started. A clean Playwright reload afterward produced two failed `/v1/health` GETs and four matching console errors. The Bridge was already running before this task and was reused by `local:start:all`; it was not restarted under the user's process instruction.
+
+**Evidence:** .spectra-local/live-verification/LV-012-bridge-health-cors.png; .spectra-local/live-verification/LV-012-reopen-ed76.png; .spectra-local/live-verification/LV-012-reopen-ed76-2failed.png; .playwright-cli/console-2026-09-30T03-01-51-315Z.log (redacted excerpts: `/v1/health` blocked by CORS and `net::ERR_FAILED`, including post-fix lines 334–354); .playwright-cli/console-2026-09-30T03-10-09-266Z.log (same pair on second-tab load). The final clean reload had 2 failed health GETs and 4 matching console errors. No account, invitation, token or environment values are included.
+
+**Fix** (fixer)
+- Commit: `ed76ef1f2c45a55264e1b1f07eb10acad613bb5e`.
+- Root cause: The running local Bridge returns HTTP 200 health but no CORS allowance for http://localhost:3000. The launcher and preflight omitted Origin when checking readiness, so they accepted an existing process whose origin configuration was incompatible with this app; a fresh launcher start already supplies the correct allowed origins.
+- Change: Shared Bridge readiness probes now test the app origin for launcher reuse, fresh startup and preflight. An incompatible existing process produces a specific restart instruction; origin restrictions for pairing and file access remain intact.
+- Test: HTTP fixture regressions fail before the fix because the browser Origin is absent and mismatched/missing allowances are accepted; now all 36 focused readiness/preflight/stack tests and 4 launcher Node checks pass. The real running Bridge is correctly classified not_ready with the app-origin explanation. Both TypeScript checks, full lint and all five gates pass; final full-suite result is recorded in the closeout below.
+- Re-check nearby: Restart the authorized local Bridge through instance 8 launcher, preserving its data, and verify health returns Access-Control-Allow-Origin for the actual app origin and no health CORS failures appear in either tab. Also check launcher reuse of a correctly configured Bridge and rejection of a Bridge configured for another local instance; no production origin/deployment change is required. The verifier cannot restart the current Bridge under the human process-ownership constraint, so the live CORS recheck awaits a later authorized restart; it is not claimed VERIFIED.
+
+**Verification** (verifier): REOPENED on commit `ed76ef1f`, 2026-09-30. The committed launch preflight exited 1 and refused a duplicate while the pre-existing Bridge remained running; the browser reload still produced two failed `/v1/health` GETs and four console errors. The Bridge restart and native-file checks are blocked because the Bridge process predated this task and the user instruction prohibits restarting it. No Bridge pairing or native file write was attempted.
+
+**Reopened assessment (fixer):** The launcher correction prevents false readiness but does not repair the already-running, incompatible Bridge; the verifier correctly reports that the browser symptom remains. Origin denial is intended for a Bridge not configured for this app, and automatic discovery currently probes installed Bridges. Under the human constraint forbidding a restart of this pre-existing process, eliminating those browser failures requires a product choice rather than a further launcher patch.
+
+**Decision needed:**
+- Keep automatic Bridge discovery and exact origin restrictions. The current local process must remain unavailable to this app until its owner authorizes a correctly configured restart; retain the launcher readiness correction and defer native verification.
+- Change discovery to an explicit user connection/activation workflow instead of probing an unconfigured installed Bridge automatically. This avoids unsolicited health failures on normal editor opens but gives up automatic attachment/detection and changes Files and devices UX; it requires an agreed product flow.
+
+No Bridge allowlist was broadened, no existing process was stopped, and no frontend retry/error suppression was added to conceal the reported condition.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
@@ -357,12 +445,12 @@ _Written by the verifier at the end._
 
 ## Fixer closeout · 30 September 2026
 
-- Implementation commits: `454a7bbe` — complete foreground Convex selection (LV-001); `94d3cbb3` — settle account reads before school membership (LV-002); `95243861` — gate School and ManageBac readers on current membership (LV-005); `66179153` — reuse the membership gate for Analytics (LV-006); `683803d1` — wait for reactive membership before school subscriptions (LV-008); `c9034739` — bind restored workbench references to deployment/account (LV-009).
-- Audit/assessment commits: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, and `d712d92b` record validation, decisions, and live evidence. Each implementation entry gives its full commit hash and re-check instructions.
-- Latest full suite (`npx vitest run`): **4,340 passed, 1 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 310.09 seconds. Raw local result: `.spectra-local/launch-fixer-LV009-full.log`. The unchanged signed-out Stop case returned 409 instead of 401 under load; its file passed **59/59** in isolation (`.spectra-local/launch-fixer-LV009-isolated.log`). Earlier load-sensitive failures remain documented in the individual entries; the earlier LV-006 full run was green.
-- LV-009 is FIXED at `c9034739`; local backend logs confirmed the foreign persisted ID. **68 focused tests**, both types, lint and all five gates passed; full-suite and isolated results are above.
-- Focused validation: LV-005 **29 passed**; LV-006 **34 passed**; LV-008 **47 passed**; both TypeScript checks, full lint and all five gates passed for each fix. LV-008’s five original regression cases failed before the fix; its six-case guard suite now passes, including saved open-object reads and reactive membership transitions. LV-004's temporary generated-token real-model diagnostic and related suites passed **16 tests**, and its diagnostic source edits were restored. Earlier LV-001, LV-002 and LV-003 results remain in their entries.
-- LV-007 assessment: **8 tests passed**, including temporary idle-versus-pending Escape diagnostics; no application/test source change remains. It is **CANNOT-REPRODUCE** for the report's pending-disconnect requirement because the live steps only opened the idle confirmation.
-- LV-003 remains **NEEDS-DECISION**: keep the intended invalid/expired 404/410 responses, or change the API/client contract to a normal unavailable-preview result. LV-004 is **CANNOT-REPRODUCE**: the original mail link contained MIME encoding artifacts; the verifier followed the decoded 43-character-token href and obtained a valid preview with Join school enabled. No invitation authentication patch was needed.
-- LV-010 is OPEN and queued for diagnosis after the committed LV-009 fix. The verifier has marked LV-001 and LV-002 VERIFIED; LV-008 is now VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
-- Live coverage continues under the recorded local-verification authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.
+- Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction).
+- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce` and `d94ee311`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
+- Final full suite on the committed tree (`npx vitest run`): **4,348 passed, 1 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 307.00 seconds. Result: `.spectra-local/launch-fixer-LV010-final-full.log`. The unchanged account-erasure lifecycle scheduled-function drain exhausted its 10,000 timer-pump limit; its file then passed **7/7** in isolation (`.spectra-local/launch-fixer-LV010-final-isolated.log`). This is a passing isolated recheck, not a claim that the full run was green.
+- The preceding batch full run returned **4,346 passed, 3 failed, 1 skipped**. It loaded the pre-fix ManageBac module while the three new regressions were being added; it is not final validation. Those regressions pass against the committed fix. Earlier full-suite results remain in the issue entries/history; the LV-006 full run was green.
+- Latest focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.
+- The verifier marked LV-001, LV-002, LV-008, LV-009 and LV-011 VERIFIED. LV-005 and LV-006 are FIXED pending their live re-check. LV-011's preserved document draft reached the second tab and survived both reloads after the local gateway restart.
+- **NEEDS-DECISION:** LV-003 — keep invalid/expired invitation preview 404/410 responses or change to a normal unavailable-preview result. LV-012 — keep automatic discovery and defer the incompatible pre-existing Bridge until its owner authorizes a properly configured restart, or agree an explicit connection/activation workflow; the launcher correction does not repair that running process. The human process-ownership constraint was respected; no Bridge origins were broadened and native-file verification remains deferred.
+- **CANNOT-REPRODUCE:** LV-004 — MIME encoding artifacts in the original invitation URL; decoded generated-token preview worked. LV-007 — the original Escape check exercised an idle confirmation, while the later pending-request observation retained the dialog and disabled controls. LV-010 — the original identity HTTP 500 did not recur after restart, and its logs were cleared; repeat calls returned intended INTEGRATION_NOT_READY 409. The confirmed error-copy defect was repaired, but no unknown server fault is claimed fixed; reopen with retained logs if the 500 returns.
+- No OPEN, REOPENED or FIXING entries remain at closeout. Live verification continues under the recorded authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages about a new or reopened ledger issue.

@@ -101,4 +101,64 @@ describe("account storage boundary before restoring readers", () => {
     render(app());
     expect(session.restored).toEqual(["foreign-table-id"]);
   });
+  it("keeps the same prepared readers mounted through temporary Convex authentication loss", () => {
+    session.account = { accountId: "account-A" };
+    const view = render(app());
+    const reader = screen.getByText("Readers mounted");
+    save();
+    session.authenticated = false;
+    session.account = undefined;
+    view.rerender(app());
+    expect(screen.getByText("Readers mounted")).toBe(reader);
+    session.authenticated = true;
+    view.rerender(app());
+    expect(screen.getByText("Readers mounted")).toBe(reader);
+    session.account = { accountId: "account-A" };
+    view.rerender(app());
+    expect(screen.getByText("Readers mounted")).toBe(reader);
+    expect(useSpectraContextStore.getState().openObjects.map((o) => o.id)).toEqual(["foreign-table-id"]);
+  });
+  it.each(["account", "deployment", "unknown identity"])("blocks prepared readers when %s changes while Convex identity is unavailable", (change) => {
+    session.account = { accountId: "account-A" };
+    const view = render(app());
+    save();
+    session.authenticated = false;
+    session.account = undefined;
+    if (change === "account") session.userId = "clerk-B";
+    if (change === "deployment") vi.stubEnv("NEXT_PUBLIC_CONVEX_URL", "http://localhost:4002");
+    if (change === "unknown identity") session.loaded = false;
+    view.rerender(app());
+    expect(screen.queryByText("Readers mounted")).toBeNull();
+    session.loaded = true;
+    session.authenticated = true;
+    session.account = { accountId: change === "account" ? "account-B" : "account-A" };
+    view.rerender(app());
+    expect(screen.getByText("Readers mounted")).toBeTruthy();
+    if (change !== "unknown identity") {
+      expect(useSpectraContextStore.getState().openObjects).toEqual([]);
+      expect(session.restored).toEqual([]);
+    }
+  });
+  it.each([null, { accountId: "fresh-account" }])("clears prepared references when the resolved backend account changes to %j", (account) => {
+    session.account = { accountId: "account-A" };
+    const view = render(app());
+    save();
+    session.account = account;
+    view.rerender(app());
+    expect(screen.getByText("Readers mounted")).toBeTruthy();
+    expect(useSpectraContextStore.getState().openObjects).toEqual([]);
+    expect(session.restored).toEqual([]);
+  });
+  it("clears the previous account on sign-out", () => {
+    session.account = { accountId: "account-A" };
+    const view = render(app());
+    save();
+    session.userId = null;
+    session.authenticated = false;
+    session.account = undefined;
+    view.rerender(app());
+    expect(useSpectraContextStore.getState().openObjects).toEqual([]);
+    expect(session.restored).toEqual([]);
+  });
+
 });

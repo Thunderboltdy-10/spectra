@@ -21,6 +21,9 @@ export function AccountStorageBoundary({ children }: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
   const { isAuthenticated } = useConvexAuth();
   const account = useQuery(api.identity.account, isAuthenticated ? {} : "skip");
+  const owner = isLoaded
+    ? JSON.stringify([process.env.NEXT_PUBLIC_CONVEX_URL, userId ?? null])
+    : null;
   const scope =
     isLoaded && (!userId || (isAuthenticated && account !== undefined))
       ? JSON.stringify([
@@ -29,15 +32,24 @@ export function AccountStorageBoundary({ children }: { children: ReactNode }) {
           account?.accountId ?? null,
         ])
       : null;
-  const [preparedScope, setPreparedScope] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<{
+    owner: string;
+    scope: string;
+  } | null>(null);
   useLayoutEffect(() => {
-    if (scope === null) return;
+    if (scope === null || owner === null) return;
     bindAccountStorageScope(scope);
-    setPreparedScope(scope);
-  }, [scope]);
+    setPrepared({ owner, scope });
+  }, [owner, scope]);
+  // Token refresh can temporarily suspend the backend identity query. Keep
+  // the prepared shell only while Clerk and the deployment identify its owner.
   return (
     <AccountStorageReady.Provider
-      value={scope !== null && scope === preparedScope}
+      value={
+        owner !== null &&
+        prepared?.owner === owner &&
+        (scope === null || scope === prepared.scope)
+      }
     >
       {children}
     </AccountStorageReady.Provider>

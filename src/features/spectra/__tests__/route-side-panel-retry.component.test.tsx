@@ -7,6 +7,11 @@ import { spectraBus } from "../events";
 import { DEFAULT_SPECTRA_PREFERENCES } from "../settings/schema";
 import { RouteSidePanelHost } from "../components/route-side-panel-host";
 
+const session = vi.hoisted(() => ({ authenticated: true, account: { accountId: "account-A" } as { accountId: string } | undefined }));
+vi.mock("@clerk/nextjs", () => ({ useAuth: () => ({ isLoaded: true, userId: "clerk-A" }) }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: session.authenticated }), useQuery: () => session.account }));
+import { AccountStorageBoundary, useAccountStorageReady } from "@/components/account-storage-boundary";
+
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/school", useRouter: () => navigation }));
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
@@ -35,6 +40,8 @@ const fetchRequest = vi.fn(async (input: RequestInfo | URL) => {
 });
 beforeEach(() => {
   window.localStorage.clear();
+  session.authenticated = true;
+  session.account = { accountId: "account-A" };
   offline = true;
   fetchRequest.mockClear();
   vi.stubGlobal("fetch", fetchRequest);
@@ -123,4 +130,28 @@ it("does not let a late run lookup replace a newer selected conversation", async
   expect(screen.getByText("Opened conversation-b")).toBeTruthy();
   expect(fetchRequest).toHaveBeenCalledTimes(2);
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+function PreparedRouteHost() {
+  return useAccountStorageReady() ? <><main>School context</main><RouteSidePanelHost /></> : <p>Preparing account</p>;
+}
+function accountGatedHost() {
+  return <><AccountStorageBoundary><PreparedRouteHost /></AccountStorageBoundary><Toaster duration={Infinity} /></>;
+}
+it("retains the route host and its retry action while the same account refreshes authentication", async () => {
+  const view = render(accountGatedHost());
+  const context = screen.getByText("School context");
+  await openConversation("conversation-a");
+  await screen.findByRole("button", { name: "Try again" });
+  session.authenticated = false;
+  session.account = undefined;
+  view.rerender(accountGatedHost());
+  expect(screen.getByText("School context")).toBe(context);
+  session.authenticated = true;
+  view.rerender(accountGatedHost());
+  expect(screen.getByText("School context")).toBe(context);
+  offline = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Opened conversation-a")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
 });

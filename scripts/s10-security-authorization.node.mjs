@@ -79,7 +79,7 @@ test("the real message hook rejects a queued edit that expires while waiting", a
     "reauthorize", "extractYjsUpdate", "acquireDocumentMessage",
     "isNativeArtifactDocument", "canonicalDurableUpdate", "messageQueue",
     "releaseDocumentMessage", "rejectPeerUpdate", "process",
-    `return ({${source.slice(start, end)}}).beforeHandleMessage;`,
+    `const shuttingDown = false; return ({${source.slice(start, end)}}).beforeHandleMessage;`,
   )(
     context => f.guard.require(context),
     () => new Uint8Array([1]),
@@ -104,7 +104,7 @@ test("the real connected hook expires a quiet socket while the real policy sweep
   const activeConnections = new Set();
   const closed = [];
   const context = { artifactId: "fixture", partitionKey: "root", authorizationCheckedAt: 1_000, canModify: true };
-  const connection = { context, onClose: () => {}, webSocket: { close: code => closed.push(code) } };
+  const connection = { context, document: {}, onClose: () => {}, webSocket: { close: code => closed.push(code) } };
   const guard = createCollaborationAuthorizationGuard({
     authorize: () => new Promise(() => {}),
     closeConnection: (peer, code) => { activeConnections.delete(peer); peer.webSocket.close(code); },
@@ -115,8 +115,10 @@ test("the real connected hook expires a quiet socket while the real policy sweep
   const sweepEnd = source.indexOf("const policySweep =", sweepStart);
   assert(connectedStart >= 0 && connectedEnd > connectedStart && sweepStart >= 0 && sweepEnd > sweepStart);
   const connected = new Function("reauthorize", "activeConnections", "authorizationGuard",
+    "openDocuments", "durableHeadKey", "catchUpCanonicalRoom", "forceCanonicalReconnect", "collaborationFailureMessage",
     `return ({${source.slice(connectedStart, connectedEnd)}}).connected;`)(
     value => guard.require(value), activeConnections, guard,
+    new Map(), () => "fixture-room", async () => {}, () => {}, String,
   );
   const sweep = new Function("activeConnections", "bridge", "refreshAuthorization",
     `let policySweepRunning = false; ${source.slice(sweepStart, sweepEnd)} return enforceActivePolicyVersions;`)(

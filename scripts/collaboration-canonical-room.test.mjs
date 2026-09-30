@@ -207,3 +207,36 @@ it("rebuilds only after an explicit stale CAS, retaining the same envelope on a 
   expect(prepare).toHaveBeenCalledTimes(2);
   expect(appended[1]).toBe(appended[2]); expect(appended[0]).not.toBe(appended[1]);
 });
+
+it("opens the canonical room from the document owned by the connected Hocuspocus connection", async () => {
+  const canonical = new Y.Doc(); canonical.getText("body").insert(0, "durable text");
+  const live = new Y.Doc(); live.broadcastStateless = vi.fn();
+  const context = { artifactId: "artifact", partitionKey: "root" };
+  const activeConnections = new Set();
+  const openDocuments = new Map();
+  const forceCanonicalReconnect = vi.fn();
+  const authorizationGuard = { watch: vi.fn(() => vi.fn()) };
+  const deps = { flushPersistence: async () => undefined,
+    canonicalRoom: () => ({ run: work => work({ refresh: async () => ({ document: canonical, stored: { nextSequence: 3 } }) }) }),
+    documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages: new WeakSet(), documentDurableAnchors: new WeakMap(), mergeCanonicalIntoLive,
+    documentFrontierHash: durableFrontierHash, openDocuments, durableHeadKey: () => "room" };
+  const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+  const code = source.slice(source.indexOf("async function catchUpCanonicalRoom("), source.indexOf("const compactionState ="));
+  const catchUpCanonicalRoom = new Function(...Object.keys(deps), `${code}; return catchUpCanonicalRoom;`)(...Object.values(deps));
+  const start = source.indexOf("  async connected(");
+  const end = source.indexOf("  async beforeHandleMessage(", start);
+  const hooks = { reauthorize: async () => undefined, activeConnections, openDocuments,
+    durableHeadKey: deps.durableHeadKey, catchUpCanonicalRoom, forceCanonicalReconnect,
+    collaborationFailureMessage: String, authorizationGuard };
+  const connected = new Function(...Object.keys(hooks), `return ({${source.slice(start, end)}}).connected;`)(...Object.values(hooks));
+  const connection = { context, document: live, onClose: vi.fn(), webSocket: { close: vi.fn() } };
+  try {
+    // The installed server's connected payload has connection and context, but no document field.
+    await connected({ connection, context, documentName: "artifact-room" });
+    expect(forceCanonicalReconnect).not.toHaveBeenCalled();
+    expect(live.getText("body").toString()).toBe("durable text");
+    expect(openDocuments.get("room")).toMatchObject({ document: live, nextSequence: 3 });
+    expect(authorizationGuard.watch).toHaveBeenCalledWith(connection);
+    expect(activeConnections.has(connection)).toBe(true);
+  } finally { canonical.destroy(); live.destroy(); }
+});

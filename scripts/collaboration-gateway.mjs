@@ -991,7 +991,8 @@ const server = new Server({
     }
   },
 
-  async connected({ connection, document }) {
+  async connected({ connection }) {
+    const document = connection.document;
     try { await reauthorize(connection.context); }
     catch {
       connection.webSocket.close(connection.context.authorizationRevoked ? 4403 : 1013,

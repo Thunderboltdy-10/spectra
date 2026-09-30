@@ -66,7 +66,8 @@ describe("P6.I1 UX debt closure", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(library).toContain("flex-wrap items-center");
-    expect(library).toContain('label: "Retry"');
+    expect(library).toContain("showRetryToast(");
+    expect(read("src/components/ui/retry-toast.ts")).toContain('label = "Retry"');
     expect(library).toContain("Delete forever");
     expect(library).toContain("Empty Trash");
     expect(library).toContain("TrashPurgeDialog");

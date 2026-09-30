@@ -47,6 +47,7 @@ import { ProductSectionNav } from "../components/product-section-nav";
 import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
 import { ProductPageHeader } from "../components/product-page-header";
 import { ClassShelfEditor } from "../components/class-shelf-editor";
+import { fetchMyClassCandidates } from "../components/class-shelf-picker";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
@@ -634,9 +635,27 @@ export function ManageBacIntegrationShell() {
     token: "",
   });
 
+  const [classCollection, setClassCollection] = useState<
+    Awaited<ReturnType<typeof fetchMyClassCandidates>> | null
+  >(null);
+  const [classLoadError, setClassLoadError] = useState("");
+
   const refresh = useCallback(async () => {
     try {
-      const value = await getSpectraManageBacOverview();
+      const [overviewResult, classesResult] = await Promise.allSettled([
+        getSpectraManageBacOverview(), fetchMyClassCandidates(),
+      ]);
+      if (overviewResult.status === "rejected") throw overviewResult.reason;
+      const value = overviewResult.value;
+      if (classesResult.status === "fulfilled") {
+        setClassCollection(classesResult.value);
+        setClassLoadError("");
+      } else {
+        setClassCollection(null);
+        setClassLoadError(
+          readConvexError(classesResult.reason).message || "Could not load classes.",
+        );
+      }
       setOverview(value);
       setError("");
       if (value.data.integration) {
@@ -656,9 +675,7 @@ export function ManageBacIntegrationShell() {
       }
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "ManageBac could not be loaded.",
+        readConvexError(nextError).message || "ManageBac could not be loaded.",
       );
     } finally {
       setLoading(false);
@@ -678,8 +695,8 @@ export function ManageBacIntegrationShell() {
     [data?.previews, data?.records],
   );
   const classes = useMemo(
-    () => records.filter((record) => record.recordType === "class"),
-    [records],
+    () => classCollection?.classes ?? [],
+    [classCollection],
   );
   const timetable = useMemo(
     () =>
@@ -972,7 +989,7 @@ export function ManageBacIntegrationShell() {
                     <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">Open a verified source collection.</p>
                     <div className="mt-3 space-y-1">
                       {([
-                        ["Classes", classes.length, "classes", BookOpen],
+                        ["Classes", classCollection ? classes.length : "—", "classes", BookOpen],
                         ["Calendar", timetable.length, "calendar", CalendarDays],
                         ["Tasks", tasks.length, "tasks", ListChecks],
                       ] as const).map(([label, count, target, Icon]) => (
@@ -989,17 +1006,16 @@ export function ManageBacIntegrationShell() {
               ) : tab === "classes" ? (
                 <div>
                   <ClassShelfEditor
+                    integration={classCollection?.integration}
+                    identityRequired={classCollection?.identityRequired}
+                    identityStatus={classCollection?.identityStatus}
+                    classes={classes}
+                    selectionRevision={classCollection?.selectionRevision}
+                    classLoadError={classLoadError}
                     onSaved={() =>
                       runAction("sync", () => syncSpectraManageBac("manual"))
                     }
                   />
-                  <div className="mt-8">
-                    <RecordsList
-                      records={classes}
-                      emptyTitle="No classes in the latest sync"
-                      emptyDetail="When ManageBac is connected, current class records appear here after a successful sync."
-                    />
-                  </div>
                 </div>
               ) : tab === "calendar" ? (
                 <RecordsList

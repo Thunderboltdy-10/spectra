@@ -44,7 +44,8 @@ _Written by the verifier at the end._
 | Superadmin local school record creation | exploration · create school | PASS | — | 683803d1 |
 | Initial school administrator invitation acceptance | W2-14 · step 1 | PASS | LV-004 (CANNOT-REPRODUCE) | 683803d1 |
 | W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | FAIL | LV-009 | 683803d1 |
-| ManageBac admin token connection | README · Open launch risks | BLOCKED — not yet run | — | 683803d1 |
+| ManageBac token setup and capability validation | README · Open launch risks | BLOCKED — the admin UI requires a tenant OpenAPI reference or reviewed capability manifest; none is configured in this run | LV-010 | 683803d1 |
+| ManageBac identity resolution while capability validation is pending | W1-16 · ManageBac school journey | FAIL | LV-010 | 683803d1 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
@@ -277,7 +278,7 @@ _Written by the verifier at the end._
 
 ### LV-009 · Workspace and Library make failed artifact requests
 
-- **Status:** NEEDS-INFO
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/workspace` and `/library` / signed-in Profile A before and after accepting the local initial-admin invitation
 - **Report script:** exploration · first-week school admin, workspace and Library reloads
@@ -297,13 +298,32 @@ _Written by the verifier at the end._
 **Evidence:** .spectra-local/live-verification/LV-009-workspace-artifact-500.png; Playwright network excerpt: GET `/api/spectra?action=artifact&artifactId=[redacted]` → HTTP 403 (one no-school reload), then HTTP 500 (2 workspace loads, 1 Library load); 500 response code/message as above; one corresponding console error per response; no page errors.
 
 **Fix** (fixer)
-- Commit: assessment only; no application change yet.
-- Root cause: Not established from the redacted request. The shell can restore and hydrate saved open-artifact IDs on Workspace and Library; the route forwards its artifactId to the typed spectraArtifacts:get query. That path enforces membership and resource capability, while argument validation runs outside the worded-error handler; the specific response/backend reason is needed to distinguish a stale or malformed ID from a genuine backend failure.
-- Change: none pending the diagnostic evidence below. Code inspection also finds the restored-artifact hydration effect uses Boolean(overview), so a no-school overview starts detail reads; that accounts for the separately observed pre-membership 403. Do not convert arbitrary backend failures to missing work or discard saved work based on a transient error.
-- Test: **43/43** current API-route, shell-artifact-access, shell-artifact-content and deployed worded-error tests passed. A temporary real-model diagnostic reproduced HTTP 500 / INTERNAL_ERROR for a generated different-table ID submitted as artifactId; argument validation precedes the worded function boundary. Its deployed-error suite passed **5/5**, and the diagnostic source edit was restored byte-for-byte. This demonstrates a possible cause without establishing that the live request has such an ID; its backend reason is still needed.
-- Re-check nearby: saved open work and deep links on both surfaces, before membership and after acceptance, with separate outcomes for invalid IDs, deleted/denied work and transient failures.
+- Commit: `c9034739a7280bde4417f6c44ce172c6a0e9b8ff` (`fix(workbench): restore references only for their account and deployment (LV-009)`).
+- Root cause: Workbench references persisted without an account/deployment owner and were restored before any ownership check; the old account observer checked only in-page Clerk changes and its cleanup omitted context/shared panes and in-memory context. The fixer read the local Convex log API without printing credentials or IDs: six spectraArtifacts:get failures were ArgumentValidationError on .artifactId, where the saved ID resolved to schoolGroupMembers in the fresh deployment, before the worded-error handler could classify it. Separately, Boolean(overview) permitted saved-artifact hydration when the overview explicitly reported needsSchool, accounting for the observed pre-membership 403.
+- Change: replace the existing account observer with a boundary binding stored references to configured Convex URL, Clerk user and reactive account ID before AppShell mounts restoring readers. Reuse existing account-scoped cleanup and include persisted context, shared panes and in-memory context; preserve normal same-scope restoration, while unknown legacy references and changed account/deployment references are reset. Account registration can still bootstrap from a null identity; no-school overviews do not hydrate saved artifacts. This covers work/thread/workspace references, continuation/context, hub tabs and panes without weakening backend validation or permissions.
+- Test: All five original ownership regressions failed before the fix. **68/68** focused ownership, boundary-ordering, route, artifact-access/content and membership-page tests pass afterward; the boundary cases prove cleanup precedes restored readers, same-account restoration survives reload, and a database reset on the same URL/Clerk session is distinguished by account ID. Both TypeScript checks, full lint and all five gates passed. A prior temporary real-model different-table diagnostic reproduced HTTP 500 / INTERNAL_ERROR; its source edits were restored. Full suite: **4,340 passed, 1 failed, 1 skipped** (499 passed files, 1 failed, 1 skipped). The unchanged signed-out Stop case returned 409 instead of 401 under load; its file passed **59/59** in isolation. Redacted local backend evidence: .spectra-local/launch-fixer-LV009-backend-redacted.json.
+- Re-check nearby: on this committed revision, reload Workspace and Library with the saved Profile A session: no old artifact requests, 403/500 console errors, or generic boundary. Create/open valid local work and confirm same-scope reload restores it; then check sign-out/account switch, a fresh database at the same URL, and no-school registration/acceptance. Unknown legacy workbench UI state is reset once; current scoped state persists. Durable product records are unchanged; no schema, codegen or shared deployment step is required.
 
-**Question for verifier:** Please report the failed response's structured error.code and matching local server/Convex error reason with IDs, tokens and identity redacted. Was the artifact created in instance 8, or restored from saved browser state? For a validation error, report only the field/table name and generic reason, never the ID value. The verifier has confirmed INTERNAL_ERROR and generic public copy but cannot identify provenance from the UI. The fixer found no persisted server logs in the instance 8 logs directory or live-verification folder; please provide the local Next/Convex stdout log path or launch terminal/exec session ID so the fixer can read the diagnostic. No diagnosis, database inspection, environment contents or provider/production change is requested from the verifier.
+### LV-010 · ManageBac identity resolution fails while capabilities are pending
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/managebac` admin setup / school administrator
+- **Report script:** W1-16 · step 6, ManageBac school journey
+- **Commit tested:** 683803d1
+- **Frequency:** 1 of 1 attempts
+
+**Steps**
+1. Sign in with saved Profile A as the school administrator of the local test school on instance 8.
+2. On `/managebac`, open **Connect ManageBac**, enter the authorized key from `.env.local` in **School-wide API key**, leave the canonical endpoint at its prefilled standard value, and select **Connect**.
+3. Wait for capability validation. Open **Review capabilities** and observe that no tenant routes are imported; the page says an administrator must copy the read-only route contracts from the tenant-specific API reference. The **Resolve my school identity** button remains enabled while the connection says **Validating capabilities**.
+4. Select **Resolve my school identity** once.
+
+**Expected:** W1-16 step 6 says to “complete capability validation and authenticated school identity.” The identity action should complete or present a user-readable outcome.
+
+**Actual:** The connection remains **Validating capabilities** and shows zero identities needing attention. The action produces a POST to `/api/spectra/managebac` that returns HTTP 500 and a browser console error. The page displays “The sync did not finish. Retry when the connection is ready.”
+
+**Evidence:** .spectra-local/live-verification/LV-010-managebac-identity-500.png; Playwright network excerpt: POST `/api/spectra/managebac` → HTTP 500; console: “Failed to load resource: the server responded with a status of 500 (Internal Server Error)”; screenshot contains the pending validation state and redacted account control.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
@@ -337,12 +357,12 @@ _Written by the verifier at the end._
 
 ## Fixer closeout · 30 September 2026
 
-- Implementation commits: `454a7bbe` — complete foreground Convex selection (LV-001); `94d3cbb3` — settle account reads before school membership (LV-002); `95243861` — gate School and ManageBac readers on current membership (LV-005); `66179153` — reuse the membership gate for Analytics (LV-006); `683803d1` — wait for reactive membership before school subscriptions (LV-008).
+- Implementation commits: `454a7bbe` — complete foreground Convex selection (LV-001); `94d3cbb3` — settle account reads before school membership (LV-002); `95243861` — gate School and ManageBac readers on current membership (LV-005); `66179153` — reuse the membership gate for Analytics (LV-006); `683803d1` — wait for reactive membership before school subscriptions (LV-008); `c9034739` — bind restored workbench references to deployment/account (LV-009).
 - Audit/assessment commits: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, and `d712d92b` record validation, decisions, and live evidence. Each implementation entry gives its full commit hash and re-check instructions.
-- Latest full suite (`npx vitest run`): **4,330 passed, 2 failed, 1 skipped**; **496 passed files, 2 failed, 1 skipped**. Duration: 301.20 seconds. Raw local result: `.spectra-local/launch-fixer-LV008-full.log`. The unchanged no-school Stop case returned 409 instead of 403, and the unchanged dense-sheet timing assertion took 43.89 ms against 40 ms. Both files passed **136/136** tests in an isolated rerun (`.spectra-local/launch-fixer-LV008-isolated.log`). The preceding full run was green: 4,326 passed, 0 failed, 1 skipped.
-- LV-009 is **NEEDS-INFO**: 43 triage tests pass; the exact failed request needs a structured response code, redacted backend reason, and saved-versus-new artifact provenance before a root fix can be selected.
+- Latest full suite (`npx vitest run`): **4,340 passed, 1 failed, 1 skipped**; **499 passed files, 1 failed, 1 skipped**. Duration: 310.09 seconds. Raw local result: `.spectra-local/launch-fixer-LV009-full.log`. The unchanged signed-out Stop case returned 409 instead of 401 under load; its file passed **59/59** in isolation (`.spectra-local/launch-fixer-LV009-isolated.log`). Earlier load-sensitive failures remain documented in the individual entries; the earlier LV-006 full run was green.
+- LV-009 is FIXED at `c9034739`; local backend logs confirmed the foreign persisted ID. **68 focused tests**, both types, lint and all five gates passed; full-suite and isolated results are above.
 - Focused validation: LV-005 **29 passed**; LV-006 **34 passed**; LV-008 **47 passed**; both TypeScript checks, full lint and all five gates passed for each fix. LV-008’s five original regression cases failed before the fix; its six-case guard suite now passes, including saved open-object reads and reactive membership transitions. LV-004's temporary generated-token real-model diagnostic and related suites passed **16 tests**, and its diagnostic source edits were restored. Earlier LV-001, LV-002 and LV-003 results remain in their entries.
 - LV-007 assessment: **8 tests passed**, including temporary idle-versus-pending Escape diagnostics; no application/test source change remains. It is **CANNOT-REPRODUCE** for the report's pending-disconnect requirement because the live steps only opened the idle confirmation.
 - LV-003 remains **NEEDS-DECISION**: keep the intended invalid/expired 404/410 responses, or change the API/client contract to a normal unavailable-preview result. LV-004 is **CANNOT-REPRODUCE**: the original mail link contained MIME encoding artifacts; the verifier followed the decoded 43-character-token href and obtained a valid preview with Join school enabled. No invitation authentication patch was needed.
-- No issue remains OPEN, REOPENED or FIXING in this pass. The verifier has marked LV-001 and LV-002 VERIFIED; LV-008 is now VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
+- LV-010 is OPEN and queued for diagnosis after the committed LV-009 fix. The verifier has marked LV-001 and LV-002 VERIFIED; LV-008 is now VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
 - Live coverage continues under the recorded local-verification authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.

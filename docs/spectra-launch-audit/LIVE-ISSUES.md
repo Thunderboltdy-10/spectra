@@ -30,18 +30,21 @@ Severity:
 ## Summary
 
 _Written by the verifier at the end._
-- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school.
+- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school. Local invitation delivery used an instance-specific loopback discard sink; no email left this machine.
 
 ## Coverage
 
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Signed-in workspace gate with no school | exploration · first use | FAIL | LV-002 | 690266bc |
+| Signed-in workspace gate with no school | exploration · first use | PASS | LV-002 | d551198a |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
-| P2-EXPERIENCE step 2 — expired invitation | P2-EXPERIENCE · step 2 | FAIL | LV-003 | 690266bc |
-| Superadmin school onboarding email | exploration · create school | BLOCKED — submission would use configured SMTP; no safe mail sink supplied | — | 690266bc |
-| ManageBac admin token connection | README · Open launch risks | BLOCKED — configured host is the standard service host; no sandbox URL supplied | — | 690266bc |
+| P2-EXPERIENCE step 2 — expired invitation | P2-EXPERIENCE · step 2 | BLOCKED — no actual expired stored invitation was available; LV-003 is NEEDS-DECISION | LV-003 | d551198a |
+| Superadmin local school record creation | exploration · create school | PASS | — | d551198a |
+| Initial school administrator invitation acceptance | W2-14 · step 1 | FAIL | LV-004 | d551198a |
+| ManageBac admin token connection | README · Open launch risks | BLOCKED — Profile A has no active school-admin membership because its invitation could not be accepted (LV-004) | — | d551198a |
+| `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
+| ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 
 ## Issues
 
@@ -76,12 +79,12 @@ _Written by the verifier at the end._
 
 ### LV-002 · Workspace gate emits repeated console errors without a school
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** `/workspace` / signed-in user without school membership
 - **Report script:** exploration · first use on a fresh local instance
 - **Commit tested:** 690266bc
-- **Frequency:** Reproduced on the initial load and reload (2 of 2); not reproduced on two post-restart loads.
+- **Frequency:** Reproduced on the initial load and reload (2 of 2); not reproduced on four post-restart loads.
 
 **Steps**
 1. Start a fresh local Convex instance on commit `690266bc` and sign in with the saved Profile A session; leave the new database without a school or membership.
@@ -92,7 +95,7 @@ _Written by the verifier at the end._
 
 **Actual:** The invitation gate displays, but the browser records 26 console errors per load, including repeated `ConvexError: AUTH_ACCOUNT_REQUIRED` from `accountPreferences:writeLayer` and two HTTP 403 responses from `/api/spectra?action=runTabs&limit=120` (including the `surface=workspace` request).
 
-**Evidence:** .spectra-local/live-verification/LV-002-no-school-console.png; Playwright console excerpt (request IDs redacted): “26 errors, 1 warning”; `accountPreferences:writeLayer` → `AUTH_ACCOUNT_REQUIRED`; `/api/spectra?action=runTabs&limit=120` → 403. Rechecked after restart twice: 0 console errors, and workspace `runTabs` requests returned 200; screenshot .spectra-local/live-verification/LV-002-no-school-clean-recheck.png.
+**Evidence:** .spectra-local/live-verification/LV-002-no-school-console.png; Playwright console excerpt (request IDs redacted): “26 errors, 1 warning”; `accountPreferences:writeLayer` → `AUTH_ACCOUNT_REQUIRED`; `/api/spectra?action=runTabs&limit=120` → 403. Rechecked after restart twice: 0 console errors, and workspace `runTabs` requests returned 200; screenshot .spectra-local/live-verification/LV-002-no-school-clean-recheck.png; .spectra-local/live-verification/LV-002-verified-d551198a.png.
 
 **Fix** (fixer)
 - Commit: `94d3cbb3868420de73147424ee5d52f58c8f865f` (`fix(auth): settle account reads before joining a school (LV-002)`).
@@ -101,6 +104,7 @@ _Written by the verifier at the end._
 - Test: Before the fix, the backend/route regressions produced five failures (including both reported 403 requests); the migration failure test also failed with an unhandled rejection. After the fix, focused backend, route, hook, merge, receipted-settings, AI scope-security, observation-writer and module-graph suites passed **90 tests**. Both TypeScript checks, full lint and all five gates passed. Full suite: **4,305 passed, 1 failed, 1 skipped**; the unchanged run-route Stop authorization case timed out at 15 seconds. Its file passed **59/59** tests when rerun alone.
 - Re-check nearby: reload `/workspace` with a verified signed-in account and no school on a fresh database; the invitation gate should remain and there should be no preference mutation errors or failed run-tab requests. Check first registration, reload after migration, settings on `/superadmin` before membership, then joining a school and restoring normal run visibility. Check that a different account cannot see these preferences and that a signed-out/unverified account still cannot read run tabs. No schema/codegen or shared deployment step is required; the local verifier should load the committed backend code before re-checking.
 
+**Verification** (verifier): VERIFIED on commit `d551198a`, 2026-09-30. Restarted local instance 4 on the committed code, opened `/workspace` in Profile A with no school membership, and reloaded it. The invitation gate remained visible; the page had 0 console errors. Both `runTabs` requests (default and `surface=workspace`) returned HTTP 200. Opening `/settings` before membership rendered the Conversations settings with 0 console errors. Screenshot: .spectra-local/live-verification/LV-002-verified-d551198a.png.
 ### LV-003 · Expired invitation request returns HTTP 404 errors
 
 - **Status:** NEEDS-DECISION
@@ -128,6 +132,59 @@ _Written by the verifier at the end._
 - Decision options: **Keep the current 404/410 contract** — unavailable invitations remain final request failures with truthful statuses, and expected browser network-error entries are accepted by verification/monitoring. **Return a normal preview result with an explicit unavailable outcome** — expected invalid/expired previews can answer 200 and avoid those browser network errors; the administration preview response, client outcome handling and contract tests must change together, while authentication/transport failures retain their error statuses. Neither option is selected by the fixer.
 - Re-check nearby: after a decision, verify unknown, revoked and genuinely expired tokens, valid previews, cookie clearing, no final-decision retry, and transient-failure retry. If duplicate requests occur in a production-mode build, record that separately; the exact two-request pattern has been reproduced in development Strict Mode.
 
+### LV-004 · Unexpired initial school administrator invite is unavailable
+
+- **Status:** NEEDS-INFO
+- **Severity:** High
+- **Surface / role:** `/join?token=<issued>` / signed-in initial school administrator
+- **Report script:** W2-14 · step 1; P2-EXPERIENCE · step 3
+- **Commit tested:** d551198a
+- **Frequency:** Reproduced on both initial load and reload of the same unexpired invitation (2 of 2)
+
+**Steps**
+1. Start local instance 4 and sign in through the saved Profile A session.
+2. In Super Admin, add a local school and set Profile A as its initial school administrator.
+3. Open the invitation link from the loopback-only local mail sink in the same Profile A browser session.
+4. Reload the invitation page once.
+
+**Expected:** W2-14 step 1 says to “preview school/role/email match, accept, reload `/workspace`, and read back one active membership plus a ready initial-admin saga where applicable.”
+
+**Actual:** Both page loads show “This invitation is unavailable.” and a disabled “Join school” button. No school membership is created. Each load also records two POST requests to `/api/spectra/administration` with HTTP 404 responses.
+
+**Evidence:** .spectra-local/live-verification/LV-004-admin-invite-unavailable.png; Playwright console excerpt: 2 errors per load, both `/api/spectra/administration` POST requests returning 404; invitation token and identity redacted.
+
+**Fix** (fixer)
+- Commit:
+- Root cause:
+- Change:
+- Test:
+- Re-check nearby:
+### LV-005 · School data surfaces fail when Profile A has no membership
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/school-data` and `/managebac` / signed-in superadmin without an active school membership
+- **Report script:** exploration · first-week superadmin, `/school-data` and ManageBac
+- **Commit tested:** d551198a
+- **Frequency:** Reproduced on 1 of 1 visits to each surface; 4 errors on `/school-data` and 2 on `/managebac`
+
+**Steps**
+1. Start local instance 4 on commit `d551198a` and sign in through the saved Profile A session with no accepted school membership.
+2. Open `http://localhost:3060/school-data` and wait for the overview state.
+3. Open `http://localhost:3060/managebac` in the same session and inspect the page and console.
+
+**Expected:** The no-school state explains that school data is unavailable until the account joins a school.
+
+**Actual:** `/school-data` says “School records could not be read just now” and “School could not load — Check your connection, then try loading School again.” Its `/api/spectra/managebac` and `?action=myClasses` requests each return HTTP 403 twice. `/managebac` shows the message “This account does not have an active school membership,” but its `?action=overview` request returns HTTP 403 twice. The two pages together record six failed requests.
+
+**Evidence:** .spectra-local/live-verification/LV-005-school-data-no-membership.png; .spectra-local/live-verification/LV-005-managebac-no-membership.png; Playwright console excerpts show the 403 responses; identity values redacted.
+
+**Fix** (fixer)
+- Commit:
+- Root cause:
+- Change:
+- Test:
+- Re-check nearby:
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>

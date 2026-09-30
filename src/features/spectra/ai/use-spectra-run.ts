@@ -403,7 +403,7 @@ export function useSpectraRun({
   const publishActiveRuns = useCallback(() => {
     spectraBus.setQuery("run.active", { runIds: [...activeRunIds.current] });
   }, []);
-  const eventCursors = useRef(new Map<string, number>());
+  const eventCursors = useRef(new Map<string, { sequence: number; settledExecutionId?: string }>());
   const displayedRunTabs = useRef(new Map<string, SpectraRunTab>());
   const displayedRunVersions = useRef(
     new Map<string, { executionId?: string; attemptId?: string }>(),
@@ -507,6 +507,10 @@ export function useSpectraRun({
     let pollAgain = false;
     let tabSnapshot: SpectraRunTab[] = [];
     let tabsFetchedAt = 0;
+    const hasSettledExecution = (tab: SpectraRunTab) => Boolean(
+      tab.run.executionId &&
+      eventCursors.current.get(tab.runId)?.settledExecutionId === tab.run.executionId,
+    );
     const poll = async () => {
       if (polling) {
         pollAgain = true;
@@ -541,7 +545,8 @@ export function useSpectraRun({
           });
           tabSnapshot = result.runTabs;
           for (const tab of tabSnapshot) {
-            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(tab.run.status))
+            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(tab.run.status) &&
+              !hasSettledExecution(tab))
               observeUiRun(tab.runId, tab.run.executionId);
             displayedRunTabs.current.set(tab.runId, tab);
             displayedRunVersions.current.set(tab.runId, {
@@ -562,11 +567,12 @@ export function useSpectraRun({
           );
         });
         const active = relevant.filter(
-          (tab) =>
+          (tab) => !hasSettledExecution(tab) && (
             tab.run.status === "queued" ||
             tab.run.status === "running" ||
             tab.run.status === "awaiting_confirmation" ||
-            tab.run.status === "awaiting_resolution",
+            tab.run.status === "awaiting_resolution"
+          ),
         );
         observedActive = active.length > 0;
         setObservedContinuationRunId(
@@ -575,7 +581,8 @@ export function useSpectraRun({
         const observed = relevant.filter(
           (tab) =>
             active.some((row) => row.runId === tab.runId) ||
-            eventCursors.current.has(tab.runId),
+            (eventCursors.current.has(tab.runId) &&
+              !hasSettledExecution(tab)),
         );
         for (const tab of observed) {
           // The initial POST is only an acknowledgement; the worker may finish
@@ -588,14 +595,33 @@ export function useSpectraRun({
             (tab.run.status === "queued" || tab.run.status === "running")
           )
             continue;
-          const after = eventCursors.current.get(tab.runId) ?? 0;
+          const after = eventCursors.current.get(tab.runId)?.sequence ?? 0;
           const { events } = await getSpectraRunEvents(tab.runId, after);
           if (disposed) return;
-          let reachedTerminalEvent = false;
+          // Clarification resumes and retries retain earlier attempt events.
+          // A cached tab may also lag a new attempt's first event. Resolve the
+          // current execution once for a mixed batch before advancing its cursor.
+          let observedRun = tab.run;
+          if (events.some((row) => row.executionId !== observedRun.executionId)) {
+            const detail = await getSpectraRunDetail(tab.runId);
+            if (disposed) return;
+            observedRun = detail.run;
+            const refreshedTab = { ...tab, run: observedRun };
+            tabSnapshot = tabSnapshot.map((candidate) => candidate.runId === tab.runId ? refreshedTab : candidate);
+            displayedRunTabs.current.set(tab.runId, refreshedTab);
+            displayedRunVersions.current.set(tab.runId, {
+              executionId: observedRun.executionId,
+              attemptId: observedRun.attemptId ?? observedRun.executionId,
+            });
+            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(observedRun.status))
+              observeUiRun(tab.runId, observedRun.executionId);
+          }
           for (const row of events.sort((a, b) => a.sequence - b.sequence)) {
-            if (row.sequence <= (eventCursors.current.get(tab.runId) ?? 0))
+            if (row.sequence <= (eventCursors.current.get(tab.runId)?.sequence ?? 0))
               continue;
-            eventCursors.current.set(tab.runId, row.sequence);
+            eventCursors.current.set(tab.runId, { ...eventCursors.current.get(tab.runId), sequence: row.sequence });
+            if (observedRun.executionId && row.executionId !== observedRun.executionId)
+              continue;
             let event: ReturnType<typeof parseSpectraStreamEvent>;
             try {
               event = parseSpectraStreamEvent(row.payload);
@@ -625,11 +651,11 @@ export function useSpectraRun({
                         id: `durable:${tab.runId}`,
                         runId: tab.runId,
                         threadId: tab.threadId,
-                        prompt: tab.run.userPrompt,
+                        prompt: observedRun.userPrompt,
                         content: "",
                         steps: [],
                         status: "streaming" as const,
-                        startedAt: tab.run.createdAt,
+                        startedAt: observedRun.createdAt,
                       };
                 if (event.type === "text_delta")
                   return {
@@ -696,7 +722,7 @@ export function useSpectraRun({
               event.type === "interrupted" ||
               event.type === "final"
             ) {
-              reachedTerminalEvent = true;
+              eventCursors.current.set(tab.runId, { sequence: row.sequence, settledExecutionId: observedRun.executionId });
               setObservedContinuationRunId((current) =>
                 current === tab.runId ? null : current,
               );
@@ -713,11 +739,12 @@ export function useSpectraRun({
                 runId: tab.runId,
                 summary: event.summary,
                 prompt:
-                  promptByRun.current.get(tab.runId) ?? tab.run.userPrompt,
+                  promptByRun.current.get(tab.runId) ?? observedRun.userPrompt,
               });
             }
           }
-          if (reachedTerminalEvent) eventCursors.current.delete(tab.runId);
+          // Retain the sequence and settled execution through refreshes. The
+          // next attempt resumes after this cursor; this one is no longer polled.
         }
       } catch {
         // A transient observer failure must not interrupt the authoritative run.

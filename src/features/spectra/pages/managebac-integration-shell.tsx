@@ -60,6 +60,7 @@ import {
   removeSpectraCalendarPeriodMap,
   type SpectraManageBacCapability,
   type SpectraManageBacConflict,
+  type SpectraManageBacIntegration,
   type SpectraManageBacOverview,
   type SpectraManageBacRecord,
   type SpectraManageBacSyncRun,
@@ -239,6 +240,34 @@ function _SummaryMetric({
       </span>
     </div>
   );
+}
+
+export function integrationConnectionMessage(
+  integration: Pick<SpectraManageBacIntegration, "status" | "lastSyncAt" | "blockedReason">,
+) {
+  let detail: string;
+  switch (integration.status) {
+    case "connected":
+      detail = "The read-only connection is ready for school updates.";
+      break;
+    case "validating":
+      detail = "Spectra is checking the tenant reference and readable capabilities. Sync stays paused until validation finishes.";
+      break;
+    case "draft":
+      detail = "Finish connecting with a verified tenant token and capability manifest before syncing.";
+      break;
+    case "blocked":
+      detail = integration.blockedReason || "Ask a school administrator to review the connection and its verified read-only routes before syncing.";
+      break;
+    case "revoked":
+      detail = "The school connection was disconnected. Ask a school administrator to reconnect before syncing.";
+      break;
+    default:
+      detail = "The connection needs attention. Review the latest sync details before retrying.";
+  }
+  return integration.lastSyncAt === undefined
+    ? `${detail} No synchronization has completed yet.`
+    : detail;
 }
 
 function integrationStatusLabel(status: string | undefined) {
@@ -928,7 +957,7 @@ export function ManageBacIntegrationShell() {
                       <span className={cn("mt-2 size-2.5 shrink-0 rounded-full ring-4 ring-current/10", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : integration.status === "validating" ? "text-sky-500 bg-sky-500" : "text-amber-500 bg-amber-500")} />
                       <div>
                         <h2 className="font-display text-title font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : integration.status === "validating" ? "Validating ManageBac capabilities" : integration.status === "draft" ? "ManageBac is not connected yet" : "The connection needs attention"}</h2>
-                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : integration.status === "validating" ? "Spectra is checking the tenant reference and readable capabilities. Sync stays paused until validation finishes." : integration.status === "draft" ? "Finish connecting with a verified tenant token and capability manifest before syncing." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
+                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integrationConnectionMessage(integration)}</p>
                       </div>
                     </div>
                     <p className="ml-5 mt-4 text-micro text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>

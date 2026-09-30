@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DisconnectDialog,
   humanizeIntegrationError,
+  integrationConnectionMessage,
   ManifestDialog,
   SettingsDialog,
 } from "../pages/managebac-integration-shell";
@@ -96,5 +97,22 @@ describe("ManageBac action failure recovery", () => {
   it("keeps a worded action failure and uses action copy for an unworded failure", () => {
     expect(humanizeIntegrationError({ data: { message: "The school token is missing." } })).toBe("The school token is missing.");
     expect(humanizeIntegrationError(new Error("Server Error"))).toBe("ManageBac could not complete that action. Try again.");
+  });
+});
+
+
+describe("ManageBac connection history honesty", () => {
+  it.each(["blocked", "degraded", "revoked", "connected"] as const)("does not invent a completed sync for first-use %s", status => {
+    const message = integrationConnectionMessage({ status });
+    expect(message).toContain("No synchronization has completed yet.");
+    expect(message).not.toMatch(/completed with partial coverage|records.*available/i);
+  });
+  it("shows the actual block reason and keeps historical completion separate", () => {
+    const message = integrationConnectionMessage({ status: "blocked", lastSyncAt: 1234, blockedReason: "The stored read-only credential was rejected by ManageBac." });
+    expect(message).toContain("credential was rejected");
+    expect(message).not.toMatch(/No synchronization has completed|completed with partial coverage/);
+  });
+  it("does not infer partial coverage from a degraded connection with earlier history", () => {
+    expect(integrationConnectionMessage({ status: "degraded", lastSyncAt: 1234 })).not.toMatch(/completed with partial coverage|records.*available/i);
   });
 });

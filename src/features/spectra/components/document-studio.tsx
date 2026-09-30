@@ -5,10 +5,8 @@ import { uniqueToken } from "@/lib/unique-token";
 import { cn } from "@/lib/utils";
 import type { JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
-import {
-  isLocalCollaborativeDocumentChange,
-  NATIVE_PROJECTION_TRANSACTION_META,
-} from "../editor/collaboration-change";
+import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
+import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -670,6 +668,7 @@ export function DocumentStudio({
   readOnly = false,
   nativeReadOnlyRegionIds = [],
   collaborationDocument,
+  contentIsProvisional = false,
   onLocalCollaborativeChange,
   header,
   mode = "tab",
@@ -683,6 +682,7 @@ export function DocumentStudio({
   readOnly?: boolean;
   nativeReadOnlyRegionIds?: string[];
   collaborationDocument?: Y.Doc;
+  contentIsProvisional?: boolean;
   onLocalCollaborativeChange?: (userInitiated?: boolean) => void;
   header: ReactNode;
   mode?: "split" | "tab";
@@ -1574,59 +1574,14 @@ export function DocumentStudio({
     // Keep Word trailing inserts are the exception: adopt only the missing
     // native nodes so protected OMML/tables are not rewritten through
     // filterTransaction.
-    const missingNativeNodes = collaborationDocument
-      ? (incomingEditorJson.content ?? []).filter((node) => {
-          // Use bracket access to satisfy TS configs that disallow dot-access on
-          // index-signature types (the attrs object is intentionally untyped).
-          const blockId = record(node?.attrs)["blockId"];
-          if (typeof blockId !== "string" || !blockId) return false;
-          let found = false;
-          editor.state.doc.descendants((candidate) => {
-            if (candidate.attrs?.blockId === blockId) found = true;
-            return !found;
-          });
-          return !found;
-        })
-      : [];
-    const missingNativeBlockIds = missingNativeNodes.length > 0;
-    if (typeof window !== "undefined" && contentChanged) {
-      const target = window as Window & {
-        __spectraNativeProjection?: Array<Record<string, unknown>>;
-      };
-      const log = (target.__spectraNativeProjection ??= []);
-      log.push({
-        event: "document-studio",
-        contentChanged,
-        missingNativeBlockIds,
-        missingCount: missingNativeNodes.length,
-        incomingNodes: incomingEditorJson.content?.length ?? 0,
-        editorChildCount: editor.state.doc.childCount,
-        editorLength: editor.state.doc.textContent.length,
-        native7InIncoming: JSON.stringify(incomingEditorJson).includes(
-          "RCV1WORDNATIVE7",
-        ),
-        native7InEditor: editor.state.doc.textContent.includes("RCV1WORDNATIVE7"),
-        at: Date.now(),
+    // Revisit canonical native content when a preview ends, even if its JSON
+    // is unchanged. The missing-ID check makes native adoption idempotent.
+    if (contentChanged || (collaborationDocument && nativeBinding.format === "docx" && !contentIsProvisional)) {
+      applyDocumentStudioProjection(editor, incomingEditorJson, {
+        collaborative: Boolean(collaborationDocument),
+        native: nativeBinding.format === "docx",
+        provisional: contentIsProvisional,
       });
-      if (log.length > 40) log.splice(0, log.length - 40);
-    }
-    if (contentChanged && !collaborationDocument)
-      editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
-    else if (contentChanged && missingNativeBlockIds) {
-      const nodes = missingNativeNodes.flatMap((json) => {
-        try {
-          return [editor.schema.nodeFromJSON(json)];
-        } catch {
-          return [];
-        }
-      });
-      if (nodes.length)
-        editor.view.dispatch(
-          editor.state.tr
-            .insert(editor.state.doc.content.size, nodes)
-            .setMeta(NATIVE_PROJECTION_TRANSACTION_META, true)
-            .setMeta("addToHistory", false),
-        );
     }
     const decorationKey = JSON.stringify(target);
     if (lastDecorationKeyRef.current === decorationKey) return;
@@ -1636,7 +1591,7 @@ export function DocumentStudio({
         .setMeta(aiRegionDecorationKey, target)
         .setMeta("addToHistory", false),
     );
-  }, [aiChangedPaths, collaborationDocument, editor, incomingEditorJson]);
+  }, [aiChangedPaths, collaborationDocument, contentIsProvisional, editor, incomingEditorJson, nativeBinding.format]);
 
   const editorText = editor?.getText({ blockSeparator: "\n" }) ?? "";
   const wordCount = editorText.trim()

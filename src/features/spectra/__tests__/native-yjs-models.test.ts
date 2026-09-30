@@ -1484,8 +1484,8 @@ describe("native fine-grained Yjs models", () => {
       new URL("../editor/stable-block-id.ts", import.meta.url),
       "utf8",
     );
-    expect(source).toContain("missingNativeBlockIds");
-    expect(source).toContain("NATIVE_PROJECTION_TRANSACTION_META");
+    // Native adoption and preview isolation are exercised with real editors
+    // in document-studio-projection.test.ts, rather than source spelling.
     expect(source).toContain("Collaboration.configure");
     expect(blockIdSource).toContain("isYjsOriginDocumentTransaction");
   });

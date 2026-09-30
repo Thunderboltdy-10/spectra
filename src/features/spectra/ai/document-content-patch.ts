@@ -313,6 +313,15 @@ export function remapDocumentSectionRewriteChanges(
   }));
 }
 
+function patchItemIdentity(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const item = value as Record<string, unknown>;
+  const attrs = item.attrs;
+  const id = item.id ?? (attrs && typeof attrs === "object" && !Array.isArray(attrs)
+    ? (attrs as Record<string, unknown>).blockId : undefined);
+  return typeof id === "string" && id ? id : undefined;
+}
+
 export function applyResolvedContentPatch(
   content: unknown,
   patch: { changes: ContentPatchChange[] },
@@ -419,6 +428,15 @@ export function applyResolvedContentPatch(
     if (Array.isArray(cursor) && Number(finalKey) === cursor.length) {
       cursor.push(structuredClone(change.value));
       continue;
+    }
+    if (Array.isArray(cursor)) {
+      const existingId = patchItemIdentity(cursor[Number(finalKey)]);
+      const incomingId = patchItemIdentity(change.value);
+      if (existingId && incomingId && existingId !== incomingId) {
+        throw new Error(
+          "CONTENT_PATCH_IDENTITY_MISMATCH: " + change.path + " is occupied by another item. Preserve the existing identity when rewriting it, or append a new item with /- or the array length.",
+        );
+      }
     }
     // Partial `/sheets/N/cells` maps merge into the existing grid so a column
     // append cannot wipe unrelated addresses (same class of bug as deck `/-`).

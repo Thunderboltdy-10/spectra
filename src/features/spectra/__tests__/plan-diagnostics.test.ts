@@ -14,6 +14,11 @@ import { validatePlanAgainstIntent } from "../operations/validate-plan";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 
 describe("plan diagnostics and schema slip recovery", () => {
+  it("repairs an occupied-slot identity collision through the existing plan repair path", () => {
+    const error = new Error("CONTENT_PATCH_IDENTITY_MISMATCH: append with /- instead.");
+    expect(isRepairablePlanFailure(error)).toBe(true);
+    expect(isQuietRetryableApplyFailure(error)).toBe(true);
+  });
   it("unwraps { workSummary, plan } terminal envelopes before Zod", () => {
     const plan = parseSpectraPlan({
       workSummary: "Rewriting the third quiz stem",

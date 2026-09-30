@@ -6288,6 +6288,7 @@ function ArtifactStudioEditor({
                   artifactId={artifact._id}
                   title={title}
                   content={editorContent}
+                  contentIsProvisional={streamingSource !== "local" || remoteSpeculation.size > 0}
                   onChange={editorChange}
                   onBeforeNativeExport={async () => !dirty || save()}
                   aiChangedPaths={highlightPaths}

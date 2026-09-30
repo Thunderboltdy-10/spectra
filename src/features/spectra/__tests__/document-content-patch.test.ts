@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { workTransactionOrigin } from "../work/models/yjs/origins";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
 import { resolveArtifactWriteInput } from "../operations/artifact-write-content";
 import {
@@ -341,4 +342,41 @@ describe("content-envelope pointer parity", () => {
     const readable = prefixed.replace("id:node", "0");
     expect(readResolvedContentPointer(enveloped, readable)).toBe(value);
   });
+});
+
+
+describe("Stable collection identities at occupied patch slots", () => {
+  it.each([
+    { path: "/tiptap/content/0", content: { tiptap: { type: "doc", content: [{ type: "paragraph", attrs: { blockId: "saved" }, content: [{ type: "text", text: "Saved sentence." }] }] } }, replacement: { type: "paragraph", attrs: { blockId: "new" }, content: [{ type: "text", text: "New paragraph." }] } },
+    { path: "/cards/0", content: { cards: [{ id: "saved", front: "Saved" }] }, replacement: { id: "new", front: "Added" } },
+    { path: "/questions/0", content: { questions: [{ id: "saved", prompt: "Saved" }] }, replacement: { id: "new", prompt: "Added" } },
+    { path: "/slides/0", content: { slides: [{ id: "saved", title: "Saved" }] }, replacement: { id: "new", title: "Added" } },
+  ])("rejects a different item identity at $path before losing saved content", ({path, content, replacement}) => {
+    const original = structuredClone(content);
+    expect(() => applyResolvedContentPatch(content, { changes: [{path, value: replacement}] })).toThrow(/CONTENT_PATCH_IDENTITY_MISMATCH/);
+    expect(content).toEqual(original);
+  });
+  it("allows rewriting the same item and appending a new item with either supported pointer", () => {
+    const content = { cards: [{ id: "saved", front: "Saved" }] };
+    for (const path of ["/cards/-", "/cards/1"]) {
+      const result = applyResolvedContentPatch(content, { changes: [{path: "/cards/0", value: { id: "saved", front: "Revised" }}, {path, value: {id: "new", front: "Added"}}] });
+      expect(result).toEqual({cards: [{id: "saved", front: "Revised"}, {id: "new", front: "Added"}]});
+    }
+  });
+});
+
+
+it("rejects an occupied document slot and preserves saved text through a corrected admitted append", () => {
+  const doc = documentYjsAdapter.createDocument({ tiptap: { type: "doc", content: [
+    { type: "paragraph", attrs: { blockId: "conclusion" }, content: [{ type: "text", text: "Original conclusion." }] },
+    { type: "paragraph", attrs: { blockId: "saved-sentence" }, content: [{ type: "text", text: "Previously saved sentence." }] },
+  ] } });
+  try {
+    const before = documentYjsAdapter.project(doc);
+    const value = { type: "paragraph", attrs: { blockId: "new-final" }, content: [{ type: "text", text: "One new paragraph." }] };
+    expect(() => resolveArtifactWriteInput("document", before, { contentPatch: { changes: [{path: "/tiptap/content/1", value}] } }, "Append a paragraph.")).toThrow(/CONTENT_PATCH_IDENTITY_MISMATCH/);
+    const { content } = resolveArtifactWriteInput("document", before, { contentPatch: { changes: [{path: "/tiptap/content/-", value}] } }, "Append a paragraph.");
+    documentYjsAdapter.applyProjection(doc, content as Parameters<typeof documentYjsAdapter.applyProjection>[1], workTransactionOrigin({ clientId: "writer", kind: "ai", accountId: "account", name: "Spectra" }, "ai_semantic_edit"));
+    expect(documentYjsAdapter.project(doc).blocks!.map((block) => block.text)).toEqual(["Original conclusion.", "Previously saved sentence.", "One new paragraph."]);
+  } finally { doc.destroy(); }
 });

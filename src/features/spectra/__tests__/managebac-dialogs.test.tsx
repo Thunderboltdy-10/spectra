@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DisconnectDialog,
+  humanizeIntegrationError,
   ManifestDialog,
   SettingsDialog,
 } from "../pages/managebac-integration-shell";
@@ -82,5 +83,18 @@ describe("ManageBac dialogs on the shared Dialog", () => {
     const busyClose = settings(true);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(busyClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("ManageBac action failure recovery", () => {
+  it("shows route/connection recovery for the structured not-ready response", () => {
+    const error = Object.assign(new Error("Server Error"), { data: {
+      code: "INTEGRATION_NOT_READY", message: "ManageBac must be connected with verified readable capabilities.",
+    } });
+    expect(humanizeIntegrationError(error)).toMatch(/administrator.*connection.*routes/i);
+  });
+  it("keeps a worded action failure and uses action copy for an unworded failure", () => {
+    expect(humanizeIntegrationError({ data: { message: "The school token is missing." } })).toBe("The school token is missing.");
+    expect(humanizeIntegrationError(new Error("Server Error"))).toBe("ManageBac could not complete that action. Try again.");
   });
 });

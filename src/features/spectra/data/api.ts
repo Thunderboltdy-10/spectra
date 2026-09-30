@@ -1001,7 +1001,7 @@ const SPECTRA_REQUEST_FAILED =
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json().catch(() => null)) as
-    T | { error?: { message?: string } } | { error?: string } | null;
+    T | { error?: { code?: string; message?: string } } | { error?: string } | null;
   if (!response.ok) {
     const message =
       payload && typeof payload === "object" && "error" in payload
@@ -1009,7 +1009,12 @@ async function readJson<T>(response: Response): Promise<T> {
           ? payload.error
           : payload.error?.message
         : undefined;
-    throw new Error(message || SPECTRA_REQUEST_FAILED);
+    const error = new Error(message || SPECTRA_REQUEST_FAILED);
+    if (payload && typeof payload === "object" && "error" in payload &&
+        payload.error && typeof payload.error === "object") {
+      throw Object.assign(error, { data: payload.error });
+    }
+    throw error;
   }
   return payload as T;
 }

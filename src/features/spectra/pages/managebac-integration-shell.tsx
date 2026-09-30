@@ -35,6 +35,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Dialog,
@@ -356,8 +357,10 @@ function syncStageLabel(
   }
 }
 
-function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
+function syncRecoveryMessage(run: SpectraManageBacSyncRun, includeSyncFallback = true) {
   switch (run.errorCode) {
+    case "INTEGRATION_NOT_READY":
+      return "Ask a school administrator to review the ManageBac connection and its verified read-only routes before trying again.";
     case "INTEGRATION_IDENTITY_REQUIRED":
     case "INTEGRATION_IDENTITY_FAILED":
     case "INTEGRATION_IDENTITY_INVALID":
@@ -388,6 +391,7 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
     case "INTEGRATION_SYNC_STATE_TOO_LARGE":
       return "This school follows more classes than one sync can track. Follow fewer classes, then sync again.";
     default:
+      if (!includeSyncFallback) return undefined;
       return run.status === "partial"
         ? "Some school data was saved. Retry to fill the gaps."
         : run.status === "failed"
@@ -396,14 +400,14 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
   }
 }
 
-function humanizeIntegrationError(value: unknown) {
-  const message = value instanceof Error ? value.message : "";
-  const code = message.match(/^([A-Z][A-Z0-9_]+)\b/)?.[1];
+export function humanizeIntegrationError(value: unknown) {
+  const { code, message } = readConvexError(value);
   return syncRecoveryMessage({
     status: "failed",
     stage: "failed",
     errorCode: code,
-  } as SpectraManageBacSyncRun) ?? "ManageBac could not complete that action. Try again.";
+  } as SpectraManageBacSyncRun, false) ??
+    (message || "ManageBac could not complete that action. Try again.");
 }
 
 function RecordIcon({ type }: { type: string }) {

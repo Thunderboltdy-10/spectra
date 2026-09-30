@@ -3,9 +3,11 @@ import {
   SPECTRA_REQUEST_UNREACHABLE,
   getSpectraAgentPage,
   postSpectra,
+  resolveSpectraManageBacIdentity,
 } from "../data/api";
 import { getAdministration, mutateAdministration } from "../administration/api";
 import { fetchCalendarOverview } from "../calendar/data/overview-client";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { spectraFailureMessage } from "../data/request";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -77,5 +79,15 @@ describe("run control failure wording", () => {
     ["an empty body", new Response(null, { status: 404 })],
   ])("uses the caller's copy for %s", async (_label, response) => {
     await expect(spectraFailureMessage(response, copy)).resolves.toBe(copy.fallback);
+  });
+});
+
+it("preserves a ManageBac action error code alongside its user-readable message", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: {
+    code: "INTEGRATION_NOT_READY", message: "ManageBac must be connected with verified readable capabilities.",
+  } }, { status: 409 })));
+  const failure = await resolveSpectraManageBacIdentity().catch(error => error);
+  expect(readConvexError(failure)).toEqual({
+    code: "INTEGRATION_NOT_READY", message: "ManageBac must be connected with verified readable capabilities.",
   });
 });

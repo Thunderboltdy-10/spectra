@@ -1965,10 +1965,11 @@ export async function GET(request: NextRequest) {
     if (action !== "overview")
       return badRequest("That ManageBac action is unavailable.");
     const admin = actor.schoolRole === "school_admin";
-    const data = await convexQuery(
-      admin ? "managebac:adminOverview" : "managebac:myOverview",
-      {},
-    );
+    const [data, personal] = await Promise.all([
+      convexQuery(admin ? "managebac:adminOverview" : "managebac:myOverview", {}),
+      admin ? convexQuery("managebac:myOverview", {}) : Promise.resolve(null),
+    ]);
+    const personalData = object(personal);
     const overviewData =
       data && typeof data === "object" && !Array.isArray(data)
         ? (data as Record<string, unknown>)
@@ -1979,6 +1980,13 @@ export async function GET(request: NextRequest) {
         ...overviewData,
         ...(admin
           ? {
+              // School previews exclude mapped records. Add only this actor's
+              // authorized records, leaving operational previews unchanged.
+              records: [
+                ...(Array.isArray(overviewData.previews) ? overviewData.previews : []),
+                ...(Array.isArray(personalData.records) ? personalData.records : []),
+              ],
+              mapping: personalData.mapping,
               envBaseUrlHint:
                 normalizeManageBacBaseUrl(
                   process.env.MANAGEBAC_BASE_URL?.trim() ||

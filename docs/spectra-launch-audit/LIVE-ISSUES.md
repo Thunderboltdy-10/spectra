@@ -40,7 +40,7 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — on 4f8103b6, local:stop then local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; the existing local deployment and school data remained available | — | 4f8103b6 |
+| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — on 4f8103b6 and rechecked on 45281d26, `local:stop` then `local:start:all -- --instance 8` reported web 3000, local Convex 3002, gateway 3001 and Bridge ready; the same local deployment and school data remained available | — | 45281d26 |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
 | Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
@@ -74,7 +74,12 @@ _Written by the verifier at the end._
 | P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | PASS — instance 8 and its Bridge restarted; Bridge reported ready for the app origin, and A/B had 0 console errors after document reload | LV-012 (NEEDS-DECISION) | 396aa190 |
 | P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | BLOCKED — answer streamed without visible IDs; the browser UI does not expose provider-call count, so the one-call expectation is not proven | — | 396aa190 |
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
-| P3-AI-ENGINE — no-context “Tighten my notes summary” request | P3-AI-ENGINE · Answer, step 3; clarification-skip neighbor check | FAIL — with 0 context objects selected, the answer said it could not edit a personal notes summary but the result card said “Saved progress and results” (LV-022); after one “Skip for now” click, 186 same-origin `/api/spectra/run` HTTP 409 console errors were recorded (LV-025). The final answer was visible and the choice closed. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-no-context-notes-summary-final-response-4f8103b6-redacted.png`; `.spectra-local/live-verification/LV-025-no-context-skip-console-network-redacted.txt` | LV-022 (NEEDS-DECISION), LV-025 (OPEN) | 9d6a4bf3 |
+| P3-AI-ENGINE — no-context “Tighten my notes summary” response status | P3-AI-ENGINE · Answer, step 3 | FAIL — with 0 context objects selected, the assistant said it could not edit the matched locked item but the result card said “Saved progress and results”; see LV-022 (NEEDS-DECISION). Evidence: `.spectra-local/live-verification/LV-025-postfix-skip-final-reply-after-reload-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-skip-observations-redacted.txt` | LV-022 (NEEDS-DECISION) | 45281d26 |
+| P3-AI-ENGINE — clarification Skip repeated-conflict recheck | P3-AI-ENGINE · Answer, step 3; fixer neighbor check | PASS — after one Skip in a fresh zero-context chat, no 409 console errors were recorded; after the final answer appeared, an 8-second sample saw 0 `/api/spectra/run` responses and the console still had 0 errors. LV-025 verified; its response-pending observation is tracked separately under LV-027. Evidence: `.spectra-local/live-verification/LV-025-postfix-skip-observations-redacted.txt` | LV-025 (VERIFIED), LV-027 (OPEN) | 45281d26 |
+| P3-AI-ENGINE — clarification continuation pending state | P3-AI-ENGINE · Answer, step 3; fixer neighbor check | FAIL — after Skip, the run still showed “Thinking / Getting ready” at 120 seconds; after selecting an offered item, it still showed that state after at least 70 seconds. No Stop or Retry control appeared at the last pre-reload checks; final answers were visible after reload. Evidence: `.spectra-local/live-verification/LV-027-clarification-pending-observations-redacted.txt`; `.spectra-local/live-verification/LV-025-postfix-skip-run-after-120s-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-choice-run-pending-45281d26-redacted.png` | LV-027 (OPEN) | 45281d26 |
+| P3-AI-ENGINE — typed clarification answer | P3-AI-ENGINE · Answer, step 3; fixer neighbor check | PASS — a typed answer using made-up Photosynthesis text returned a concise rewrite in the reply with 0 context objects and 0 console errors; its result-card wording remains under LV-022 | LV-022 (NEEDS-DECISION) | 45281d26 |
+| P3-AI-ENGINE — Stop mid-stream on a long document create | P3-AI-ENGINE · Stop and steer | PASS — stopped with 3 live document blocks formed; the progress and Stop control disappeared, and no exact-title or generic “New document” row appeared in Library. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-stop-long-create-before-stop-45281d26-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-stop-long-create-after-stop-nonzero-45281d26-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-stop-long-create-redacted.txt` | — | 45281d26 |
+| Free exploration — Library full-title search | exploration · Library and search | FAIL — exact-title queries returned 9 and 34 partial results with 0 full-phrase matches; submitting the first query opened a broad “Water Cycle Field Guide” result. A unique query returned the expected 0-item empty state. Evidence: `.spectra-local/live-verification/LV-026-library-search-query-45281d26-redacted.png`; `.spectra-local/live-verification/LV-026-library-search-result-count-45281d26-redacted.png`; `.spectra-local/live-verification/LV-026-library-search-results-redacted.txt` | LV-026 (OPEN) | 45281d26 |
 | P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | PASS — after the fix, the exact rewrite prompt updated the document's four sections and conclusion; the changed text remained after reload and a later stack restart | LV-020 (VERIFIED) | 7a1a8508 |
 | P3-AI-ENGINE — document section-only edit | P3-AI-ENGINE · Document · Edit; post-fix neighbor check | PASS — on application commit 9d6a4bf3, exact prompt “Rewrite the second section to be more concise.” changed only section 2 and persisted after reload; all four headings, original conclusion, and other current document content remained. The reply called the edit staged/not saved while it persisted after reload; see LV-022 (NEEDS-DECISION). Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-section-edit-after-reload-4f8103b6-redacted.png`; 0 console errors | LV-022 (NEEDS-DECISION) | 9d6a4bf3 |
@@ -82,7 +87,7 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — document conclusion append (report prompt) | P3-AI-ENGINE · Document · Append | PASS — the exact “Add a conclusion paragraph.” prompt produced the concluding paragraph, which remained in the document after reload and later stack restart; its save-state wording mismatch is tracked under LV-022 | LV-022 (NEEDS-DECISION) | 427cb3c9 |
 | P3-AI-ENGINE — document rich formatting | P3-AI-ENGINE · Document · formatting neighbor check | FAIL — the first bold request said it could not apply formatting; a repeated run stayed working for 120s, then reached `failed_terminal` while “leaders feared” became bold and remained bold after reload. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-after-reload-d61b1e25-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-failed-run-d61b1e25-redacted.png` | LV-022 (NEEDS-DECISION) | d61b1e25 |
 | P3-AI-ENGINE — append to an existing document conclusion | P3-AI-ENGINE · Document · Append neighbor check | PASS — after the fix, both recorded final-sentence prompts completed; each requested sentence appeared once after reload, while the original conclusion and four section headings remained; 0 console errors | LV-023 (VERIFIED) | 9d6a4bf3 |
-| P3-AI-ENGINE — append a new final document paragraph (post-fix neighbor check) | P3-AI-ENGINE · Document · Append neighbor check for LV-023 | FAIL — one request produced two identical final paragraphs and a previously saved sentence disappeared; both copies remained after reload and full local stack restart | LV-024 (OPEN) | 9d6a4bf3 |
+| P3-AI-ENGINE — append a new final document paragraph (post-fix neighbor check) | P3-AI-ENGINE · Document · Append neighbor check for LV-023 | PASS — on 45281d26, the requested paragraph appeared once; both prior append sentences, the original conclusion and all four section headings remained once after reload and full local stack restart. Evidence: `.spectra-local/live-verification/LV-024-postfix-document-before-reload-45281d26-redacted.png`; `.spectra-local/live-verification/LV-024-postfix-document-after-reload-45281d26-redacted.png`; 0 console errors, 1 Clerk development-key warning | LV-024 (VERIFIED) | 45281d26 |
 | P3-AI-ENGINE — flashcard create and hint edit | P3-AI-ENGINE · Flashcard deck · create and edit | PASS — created exactly 8 cards; card 3's hint remained changed after reload | — | 7a1a8508 |
 | P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | PASS — the fixed append added four distinct cards; all 12 remained after reload and card 3's hint stayed intact | LV-021 (VERIFIED) | 68587ec8 |
 | P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
@@ -823,11 +828,11 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 
 ### LV-024 · Document paragraph append duplicates content and removes a saved sentence
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Blocker
 - **Surface / role:** `/library` document Work studio and Live Dock / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Document · Append; adjacent re-check for LV-023
-- **Commit tested:** `9d6a4bf3` (application code; repository HEAD `4f8103b6` adds audit documentation only)
+- **Commit tested:** `45281d26` (application code; full local instance-8 stack at web port 3000)
 - **Frequency:** 1 of 1 new final-paragraph requests duplicated the paragraph and removed a previously saved sentence after reload.
 
 **Steps**
@@ -852,14 +857,16 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 
 **Verification** (verifier):
 
+VERIFIED on commit `45281d26`, 2026-09-30. After the exact new-paragraph prompt on the existing four-section document with two prior appended sentences, the resulting paragraph appeared once. Both prior sentences, the original conclusion and all four section headings each appeared once after browser reload and again after a full local instance-8 stop/start. Playwright reported 0 console errors and 1 Clerk development-key warning. Evidence: `.spectra-local/live-verification/LV-024-postfix-document-before-reload-45281d26-redacted.png`; `.spectra-local/live-verification/LV-024-postfix-document-after-reload-45281d26-redacted.png`.
+
 
 ### LV-025 · Skip response produces repeated chat run conflicts
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** `/chat` AI answer and clarification choice / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Answer, step 3; clarification-skip neighbor check
-- **Commit tested:** `9d6a4bf3` (application code; repository HEAD `4f8103b6` adds audit documentation only)
+- **Commit tested:** `45281d26` (application code; frontend reload on local instance 8 at web port 3000)
 - **Frequency:** 1 of 1 “Skip for now” responses was followed by at least 186 HTTP 409 console errors.
 
 **Steps**
@@ -884,6 +891,59 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 - Re-check nearby: Frontend reload only, then one Skip click in a fresh context-free chat, inspect run requests through the final reply and another 8-second sample. Check normal choice selection, typed clarification answers, retry/Stop and clarification handling in Work/Workspace. No backend sync, shared deploy or codegen is needed.
 
 **Verification** (verifier):
+
+VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one “Skip for now” click closed the choice; the browser recorded 0 console errors, and an 8-second sample after the answer became visible saw 0 `/api/spectra/run` responses. A separate offered-choice and typed-clarification check also produced no console errors. The answer was visible after reload; the pre-reload pending state is recorded separately as LV-027. Evidence: `.spectra-local/live-verification/LV-025-postfix-skip-run-after-120s-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-skip-final-reply-after-reload-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-skip-observations-redacted.txt`.
+
+
+### LV-026 · Library full-title search returns broad partial matches
+
+- **Status:** NEEDS-DECISION
+- **Severity:** Medium
+- **Surface / role:** `/library` search / signed-in school administrator
+- **Report script:** exploration · first-week Library and search
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 exact-title queries with no matching full title displayed partial results; the unique no-match control displayed the empty state.
+
+**Steps**
+1. On local instance 8 at commit `45281d26`, sign in with saved Profile A and open `/library`.
+2. Search for the full title `Stop Check Water Cycle Draft` and wait for the results.
+3. Inspect the result count and whether any row contains the full title. Press Enter from the search field once and inspect the opened item.
+4. Replace the query with the full title `Water Cycle Stop Partial Run C` and wait for the results.
+5. Replace the query with the unique text `ZZZVERIFICATIONNORESULT812` and inspect the empty state.
+
+**Expected:** A complete Library-title query should show a full-title match or a clear no-match state; partial results should be distinguishable from a full-title match.
+
+**Actual:** `Stop Check Water Cycle Draft` showed 9 rows, 0 containing the full phrase; two rows contained `Water Cycle` and seven contained `Draft`. Pressing Enter opened a `Water Cycle Field Guide` item. `Water Cycle Stop Partial Run C` showed 34 rows, 0 containing the full phrase. The unique no-match control showed `Nothing matches “ZZZVERIFICATIONNORESULT812”` and 0 rows. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/LV-026-library-search-query-45281d26-redacted.png`; `.spectra-local/live-verification/LV-026-library-search-result-count-45281d26-redacted.png`; `.spectra-local/live-verification/LV-026-library-search-results-redacted.txt`.
+
+
+**Assessment** (fixer)
+- Root cause: Both orgTree.search and searchPage deliberately delegate ranking to the name full-text provider; they do not impose full-phrase or all-term matching. Library renders that ranked result set without a match category, and Enter opens its highlighted row. This is intended retrieval behavior with an ambiguous presentation contract, rather than a missing full-title record.
+- Reproduction: An ignored convex-test fixture calls the real searchPage query with both reported full-title queries against three ordinary titles. Both return partial results and zero full-phrase matches; the unique control returns zero. Test: `.spectra-local/LV026-search-repro.test.ts`, 1/1 passed; log `.spectra-local/LV026-repro.log`. No production records or application code changed.
+- Decision: (A) Require all query terms, producing a clear no-match state for a missing title but reducing broad discovery; or (B) preserve ranked broad retrieval and distinguish partial matches while making Enter's highlighted target clear, retaining useful nearby results but adding a result-presentation contract. Full-phrase priority can supplement either option when the exact title exists. The human choice is pending; no option has been implemented.
+
+### LV-027 · AI clarification follow-up remains in progress during extended waits
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/chat` AI clarification continuation / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Answer, step 3; Stop and steer neighbor check
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 clarification continuations remained in “Thinking / Getting ready” at the last pre-reload observation: one after Skip at 120 seconds and one after selecting an offered item after at least 70 seconds.
+
+**Steps**
+1. On local instance 8 at commit `45281d26`, sign in with saved Profile A and open a fresh `/chat` with no artifact and `0 context objects selected`.
+2. Send `Tighten my notes summary` and wait for the clarification question and offered choices.
+3. Select the offered `Szymborska poetry notes` choice once.
+4. Leave the conversation open. At the last check after at least 70 seconds, inspect the assistant progress state and composer controls.
+5. Reload the same chat and inspect the conversation again.
+
+**Expected:** P3-AI-ENGINE Answer step 3 says, “The model must either do the work with tools or answer without claiming it saved anything.” After a clarification choice, the continuation should reach a visible terminal response in the open chat; a long-running response should expose the Stop control described in Stop and steer.
+
+**Actual:** After the choice was selected, the page continued to show `Thinking` and `Getting ready` at the last pre-reload check after at least 70 seconds. No Stop or Retry control was present. After reloading the same chat, the final answer was visible. A separate fresh run with one `Skip for now` click still showed the same progress state at 120 seconds; its final answer was visible after a later reload. Both checks reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/LV-027-clarification-pending-observations-redacted.txt`; `.spectra-local/live-verification/LV-025-postfix-skip-run-after-120s-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-choice-run-pending-45281d26-redacted.png`; `.spectra-local/live-verification/LV-027-clarification-choice-final-after-reload-45281d26-redacted.png`.
 
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->

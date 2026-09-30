@@ -123,17 +123,49 @@ describe("Calendar application", () => {
     expect(heads.at(-1)).toBe(2);
   });
 
-  it("proposes an event start one hour after the user's own clock", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 10, 0) });
+  it.each([
+    ["2026-09-30T18:05:19", "2026-09-30T19:00", "2026-09-30T20:00"],
+    ["2026-09-30T18:00:00", "2026-09-30T19:00", "2026-09-30T20:00"],
+    ["2026-09-30T23:59:59", "2026-10-01T00:00", "2026-10-01T01:00"],
+    ["2027-03-28T01:35:00", "2027-03-28T03:00", "2027-03-28T04:00"],
+    ["2026-10-25T01:35:00", "2026-10-25T02:00", "2026-10-25T03:00"],
+  ])("defaults to the next whole local hour at %s", async (now, start, end) => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(now) });
     installFetch(() => undefined);
     render(<CalendarApplication />);
     fireEvent.click(screen.getByRole("button", { name: "Add event" }));
-    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe(
-      "2026-09-29T11:00",
-    );
-    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe(
-      "2026-09-29T12:00",
-    );
+    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe(start);
+    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe(end);
+    expect(Date.parse(end)).toBeGreaterThan(Date.parse(start));
+  });
+
+  it("refreshes whole-hour defaults when the composer reopens", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 30, 18, 5) });
+    installFetch(() => undefined);
+    render(<CalendarApplication />);
+    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    vi.setSystemTime(new Date(2026, 8, 30, 19, 17));
+    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
+    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe("2026-09-30T20:00");
+    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe("2026-09-30T21:00");
+  });
+
+  it("saves whole-hour defaults in the browser zone when Calendar reports UTC", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 30, 18, 5, 19) });
+    installFetch(() => undefined, [], "UTC");
+    render(<CalendarApplication />);
+    await waitFor(() => expect(gets).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
+    const dialog = screen.getByRole("dialog", { name: "Add personal event" });
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Revision" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add event" }));
+    await waitFor(() => expect(posts.find((post) => post.action === "createPersonalItem")).toMatchObject({
+      title: "Revision",
+      startAt: Date.parse("2026-09-30T19:00"),
+      endAt: Date.parse("2026-09-30T20:00"),
+      timezone: "Europe/Madrid",
+    }));
   });
 
   it("explains an end before the start instead of sending it", async () => {

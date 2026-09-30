@@ -54,7 +54,7 @@ import {
   localDaysAround,
   startOfLocalDay,
   startOfLocalWeek,
-  toLocalDateTimeInput,
+  defaultLocalEventTimes,
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 
@@ -1894,14 +1894,12 @@ function CalendarComposer({
   onCreated: () => void;
 }) {
   const [title, setTitle] = useState("");
-  const [start, setStart] = useState(() => toLocalDateTimeInput(Date.now() + HOUR));
-  const [end, setEnd] = useState(() => toLocalDateTimeInput(Date.now() + 2 * HOUR));
+  const [{ start, end }, setTimes] = useState(() => defaultLocalEventTimes(Date.now()));
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
     setTitle("");
-    setStart(toLocalDateTimeInput(Date.now() + HOUR));
-    setEnd(toLocalDateTimeInput(Date.now() + 2 * HOUR));
+    setTimes(defaultLocalEventTimes(Date.now()));
   }, [open]);
   const startAt = Date.parse(start);
   const endAt = Date.parse(end);
@@ -1953,7 +1951,10 @@ function CalendarComposer({
                 type="datetime-local"
                 required
                 value={start}
-                onChange={(event) => setStart(event.target.value)}
+                onChange={(event) => {
+                  const start = event.target.value;
+                  setTimes((current) => ({ ...current, start }));
+                }}
                 className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
               />
             </label>
@@ -1965,7 +1966,10 @@ function CalendarComposer({
                 min={start}
                 value={end}
                 aria-invalid={endBeforeStart || undefined}
-                onChange={(event) => setEnd(event.target.value)}
+                onChange={(event) => {
+                  const end = event.target.value;
+                  setTimes((current) => ({ ...current, end }));
+                }}
                 className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
               />
             </label>

@@ -971,7 +971,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-028 · Command bar keyboard shortcut focuses chat search
 
-- **Status:** OPEN
+- **Status:** NEEDS-DECISION
 - **Severity:** Low
 - **Surface / role:** Spectra command bar shortcut / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 5
@@ -988,6 +988,11 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** After each shortcut attempt, the focused control was the `Search recent chats` input and no dialog was open. Clicking the visible `Open Spectra command bar` button did open the command list, where `Update memory` was present.
 
 **Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt`.
+
+**Assessment** (fixer)
+- Root cause: This observation matches an intentional current mapping rather than a missing key listener. `KeyboardShortcutsRegistrar` routes Mod+Shift+F to the AppShell sidebar-search event, and `SHORTCUTS` labels that chord “Focus sidebar search”; `UniversalKBar` owns Mod+K. The older report script contradicts these two implemented contracts.
+- Reproduction: Mounted the real registrar and command bar together in jsdom with both Ctrl and Meta. Both cases confirm Shift+F invokes sidebar search with no dialog, then K opens the command bar without invoking search again. All **2/2** diagnostic tests pass; log `.spectra-local/LV028-probe.log`. No production code was changed and no shortcut was selected on the user's behalf.
+- Decision requested: (1) Keep Mod+K for the command bar and Mod+Shift+F for sidebar search, correct the audit script and include Mod+K in help; existing users retain both mappings. (2) Add Mod+Shift+F as a command-bar alias; sidebar search loses that shortcut unless another is assigned, and help/registrar/command ownership must be updated together. A text question is pending with the user; move on until answered.
 
 ### LV-029 · Calendar page stays in an error state
 

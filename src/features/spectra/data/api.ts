@@ -189,6 +189,7 @@ export type SpectraManageBacSyncRun = {
   kind: "identity" | "bootstrap" | "manual" | "scheduled" | "reconciliation";
   status:
     | "queued"
+    | "leased"
     | "running"
     | "awaiting_review"
     | "completed"

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ManageBacIntegrationShell } from "../pages/managebac-integration-shell";
 
@@ -28,7 +28,7 @@ beforeEach(() => {
   } });
   harness.candidates.mockResolvedValue({ integration, identityRequired: false, classes, selectionRevision: 1 });
 });
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 it("uses the personal class collection for the admin overview and picker without an empty preview list", async () => {
   render(<ManageBacIntegrationShell />);
@@ -75,4 +75,70 @@ it("keeps connection controls available and shows unknown class count when the c
   expect(await screen.findByText("Could not load classes.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "ManageBac settings" })).toBeTruthy();
   expect(screen.queryByText("No classes in the latest sync")).toBeNull();
+});
+
+
+it.each(["queued", "leased", "running"])("refreshes a %s sync until scheduled work finishes, then stops", async status => {
+  const snapshot = (status: string, stage: string) => ({ admin: true, data: {
+    integration, previews: [], capabilities: [], conflicts: [], mapping: { status: "verified" },
+    syncRuns: [{ _id: "run", kind: "manual", status, stage, createdAt: 1, counts: {} }],
+  } });
+  harness.overview.mockResolvedValueOnce(snapshot(status, "reconciling"))
+    .mockResolvedValue(snapshot("completed", "complete"));
+  vi.useFakeTimers();
+  await act(async () => { render(<ManageBacIntegrationShell />); });
+  expect(screen.getByRole("button", { name: "Syncing…" }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Sync history" }));
+  expect(screen.getByText("Checking for removed items")).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+  expect(screen.getByText("Complete")).toBeTruthy();
+  expect(screen.queryByText("Checking for removed items")).toBeNull();
+  expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(false);
+  expect(harness.overview).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+  expect(harness.overview).toHaveBeenCalledTimes(2);
+});
+
+it("retries a failed progress read and cancels the next refresh on unmount", async () => {
+  harness.overview.mockResolvedValue({ admin: true, data: {
+    integration, previews: [], capabilities: [], conflicts: [], mapping: { status: "verified" },
+    syncRuns: [{ _id: "run", kind: "manual", status: "running", stage: "applying_projections", createdAt: 1, counts: {} }],
+  } });
+  vi.useFakeTimers();
+  let view: ReturnType<typeof render>;
+  await act(async () => { view = render(<ManageBacIntegrationShell />); });
+  screen.getByRole("button", { name: "Syncing…" });
+  harness.overview.mockRejectedValueOnce(new Error("Progress temporarily unavailable."));
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+  expect(screen.getByText("Progress temporarily unavailable.")).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+  expect(screen.queryByText("Progress temporarily unavailable.")).toBeNull();
+  expect(harness.overview).toHaveBeenCalledTimes(3);
+  view!.unmount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+  expect(harness.overview).toHaveBeenCalledTimes(3);
+});
+
+
+it("does not overlap progress reads or replace unsaved class choices", async () => {
+  const value = { admin: true, data: {
+    integration, previews: [], capabilities: [], conflicts: [], mapping: { status: "verified" },
+    syncRuns: [{ _id: "run", kind: "manual", status: "running", stage: "reconciling", createdAt: 1, counts: {} }],
+  } };
+  harness.overview.mockResolvedValueOnce(value);
+  let resolve!: (value: unknown) => void;
+  harness.overview.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  vi.useFakeTimers();
+  await act(async () => { render(<ManageBacIntegrationShell />); });
+  fireEvent.click(screen.getByRole("button", { name: /^Classes\s*22$/ }));
+  fireEvent.click(within(screen.getByRole("listbox")).getAllByRole("option")[1]);
+  expect(within(screen.getByRole("listbox")).getAllByRole("option", { selected: true })).toHaveLength(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+  expect(harness.overview).toHaveBeenCalledTimes(2);
+  await act(async () => { resolve({ ...value, data: { ...value.data, syncRuns: [{ ...value.data.syncRuns[0], status: "partial", stage: "complete" }] } }); });
+  expect(screen.getByRole("button", { name: "Sync now" }).hasAttribute("disabled")).toBe(false);
+  expect(within(screen.getByRole("listbox")).getAllByRole("option", { selected: true })).toHaveLength(2);
+  expect(harness.candidates).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+  expect(harness.overview).toHaveBeenCalledTimes(2);
 });

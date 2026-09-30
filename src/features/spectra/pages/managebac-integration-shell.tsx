@@ -318,6 +318,7 @@ function syncStatusLabel(status: SpectraManageBacSyncRun["status"]) {
   switch (status) {
     case "queued":
       return "Waiting to start";
+    case "leased":
     case "running":
       return "In progress";
     case "awaiting_review":
@@ -640,17 +641,17 @@ export function ManageBacIntegrationShell() {
   >(null);
   const [classLoadError, setClassLoadError] = useState("");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ progressOnly = false }: { progressOnly?: boolean } = {}) => {
     try {
       const [overviewResult, classesResult] = await Promise.allSettled([
-        getSpectraManageBacOverview(), fetchMyClassCandidates(),
+        getSpectraManageBacOverview(), progressOnly ? Promise.resolve(null) : fetchMyClassCandidates(),
       ]);
       if (overviewResult.status === "rejected") throw overviewResult.reason;
       const value = overviewResult.value;
-      if (classesResult.status === "fulfilled") {
+      if (classesResult.status === "fulfilled" && classesResult.value !== null) {
         setClassCollection(classesResult.value);
         setClassLoadError("");
-      } else {
+      } else if (classesResult.status === "rejected") {
         setClassCollection(null);
         setClassLoadError(
           readConvexError(classesResult.reason).message || "Could not load classes.",
@@ -723,10 +724,27 @@ export function ManageBacIntegrationShell() {
   const syncInProgress = useMemo(
     () =>
       (data?.syncRuns ?? []).some((run) =>
-        ["queued", "running"].includes(run.status),
+        ["queued", "leased", "running"].includes(run.status),
       ),
     [data?.syncRuns],
   );
+  // The request may finish before scheduled reconciliation or projection work.
+  // Keep reading its progress until the backend reports a terminal state.
+  useEffect(() => {
+    if (!syncInProgress) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refresh({ progressOnly: true });
+      if (!cancelled) timer = setTimeout(() => void poll(), 3_000);
+    };
+    timer = setTimeout(() => void poll(), 3_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [refresh, syncInProgress]);
+
   const runAction = useCallback(
     async (key: string, action: () => Promise<unknown>) => {
       if (busyRef.current) return;

@@ -5,7 +5,7 @@ import { CookieConsentManager } from "@/components/cookie-consent-manager";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DynamicFavicon } from "@/components/spectra-logo";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
-import { useAuth } from "@clerk/nextjs";
+import { useRecoverableClerkAuth } from "./use-recoverable-clerk-auth";
 import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
@@ -19,7 +19,7 @@ const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 function LiveDataProvider({ children }: { children: React.ReactNode }) {
   if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");
-  return <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}><AccountStorageBoundary>{children}</AccountStorageBoundary></ConvexProviderWithClerk>;
+  return <ConvexProviderWithClerk client={convexClient} useAuth={useRecoverableClerkAuth}><AccountStorageBoundary>{children}</AccountStorageBoundary></ConvexProviderWithClerk>;
 }
 
 function PathScopedErrorBoundary({ children }: { children: ReactNode }) {

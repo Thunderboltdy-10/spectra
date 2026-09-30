@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import type { FunctionReference } from "convex/server";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
@@ -338,22 +339,35 @@ export function useBoardColumnCards(
   };
 }
 
+/** Library transactions have no durable offline queue. Reject before enqueueing. */
+function useOnlineTreeMutation<Mutation extends FunctionReference<"mutation">>(
+  reference: Mutation,
+) {
+  const mutation = useMutation(reference);
+  return useCallback((...args: Parameters<typeof mutation>) => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return Promise.reject(new Error("This device is offline. Reconnect, then retry this Library change."));
+    }
+    return mutation(...args);
+  }, [mutation]);
+}
+
 /**
  * Every write the organizer can perform. Each one is a single server
  * transaction: the client never sequences a move out of two calls, because a
  * half-applied move is a lost item.
  */
 export function useTreeActions() {
-  const createFolder = useMutation(api.orgTree.createFolder);
-  const rename = useMutation(api.orgTree.rename);
-  const move = useMutation(api.orgTree.move);
-  const trash = useMutation(api.orgTree.trash);
-  const restore = useMutation(api.orgTree.restore);
-  const purge = useMutation(api.orgTree.purge);
-  const setPinned = useMutation(api.orgTree.setPinned);
-  const createReference = useMutation(api.orgTree.createReference);
-  const ensureRoots = useMutation(api.orgTree.ensureAccountRoots);
-  const createWork = useMutation(api.spectraArtifacts.create);
+  const createFolder = useOnlineTreeMutation(api.orgTree.createFolder);
+  const rename = useOnlineTreeMutation(api.orgTree.rename);
+  const move = useOnlineTreeMutation(api.orgTree.move);
+  const trash = useOnlineTreeMutation(api.orgTree.trash);
+  const restore = useOnlineTreeMutation(api.orgTree.restore);
+  const purge = useOnlineTreeMutation(api.orgTree.purge);
+  const setPinned = useOnlineTreeMutation(api.orgTree.setPinned);
+  const createReference = useOnlineTreeMutation(api.orgTree.createReference);
+  const ensureRoots = useOnlineTreeMutation(api.orgTree.ensureAccountRoots);
+  const createWork = useOnlineTreeMutation(api.spectraArtifacts.create);
 
   return useMemo(
     () => ({

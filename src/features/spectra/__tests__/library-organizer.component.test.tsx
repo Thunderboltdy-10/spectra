@@ -17,12 +17,15 @@ vi.mock("sonner", () => ({ toast }));
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useQuery: () => undefined,
+  useMutation: () => tree.mutation,
 }));
 vi.mock("../bridge/use-product-online", () => ({ useProductOnline: () => true }));
 vi.mock("@/hooks/use-now", () => ({ useNow: () => Date.now() }));
 vi.mock("../data/idle-surface", () => ({ subscribeIdleSurfaceRefresh: () => () => {} }));
 
 const tree = vi.hoisted(() => ({
+  useRealActions: false,
+  mutation: vi.fn(),
   folder: [] as TreeNode[],
   search: [] as TreeNode[],
   searchStatus: "Exhausted" as "Exhausted" | "CanLoadMore" | "LoadingFirstPage",
@@ -53,7 +56,7 @@ vi.mock("../organization/tree-client", async (importOriginal) => {
   });
   return {
     ...actual,
-    useTreeActions: () => tree.actions,
+    useTreeActions: () => tree.useRealActions ? actual.useTreeActions() : tree.actions,
     useTreeChildren: () => page(tree.folder),
     useTreeContainers: () => page([]),
     useTreeSearch: () => ({ ...page(tree.search), status: tree.searchStatus }),
@@ -115,6 +118,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  tree.useRealActions = false;
+  tree.mutation.mockReset().mockImplementation(() => Promise.resolve({}));
   tree.folder = [node("n1", "Essay draft")];
   tree.search = [];
   tree.searchStatus = "Exhausted";
@@ -124,6 +129,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe("LibraryOrganizer", () => {
@@ -222,19 +228,27 @@ describe("LibraryOrganizer", () => {
     await waitFor(() => expect(tree.actions.trash).toHaveBeenCalledWith(["n1"]));
   });
 
-  it("says so when Undo could not bring an item back", async () => {
-    tree.actions.restore.mockRejectedValueOnce(new Error("offline"));
+  it("rejects offline Undo before enqueueing and retries the same restore after reconnect", async () => {
+    tree.useRealActions = true;
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     renderOrganizer();
     await screen.findByText("Essay draft");
     selectFirstRowAndPress("Delete");
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
-    const options = toast.success.mock.calls[0]![1] as {
-      action: { onClick: () => void };
-    };
-    await act(async () => {
-      options.action.onClick();
-    });
-    await waitFor(() => expect(tree.actions.restore).toHaveBeenCalledWith(["n1"]));
+    const options = toast.success.mock.calls[0]![1] as { action: { onClick: () => void } };
+    tree.mutation.mockClear();
+    online.mockReturnValue(false);
+    // Convex retains an unsent mutation in memory rather than rejecting it.
+    tree.mutation.mockImplementation(() => new Promise(() => {}));
+    await act(async () => { options.action.onClick(); });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(tree.mutation).not.toHaveBeenCalled();
+    const [message, failure] = toast.error.mock.calls[0]! as [string, { action: { label: string; onClick: () => void } }];
+    expect(message).toMatch(/offline.*reconnect/i);
+    expect(failure.action.label).toBe("Retry");
+    online.mockReturnValue(true);
+    tree.mutation.mockResolvedValue({});
+    await act(async () => { failure.action.onClick(); });
+    expect(tree.mutation).toHaveBeenCalledExactlyOnceWith({ nodeIds: ["n1"] });
   });
 });

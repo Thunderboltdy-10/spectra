@@ -62,7 +62,7 @@ export function OrganizerRail({
     <nav
       aria-label="Library folders"
       className={cn(
-        "flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] px-2 py-3",
+        "spectra-composer-clearance flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] px-2 py-3",
         className,
       )}
     >

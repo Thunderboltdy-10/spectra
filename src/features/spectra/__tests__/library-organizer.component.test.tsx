@@ -133,6 +133,15 @@ afterEach(() => {
 });
 
 describe("LibraryOrganizer", () => {
+  it("keeps the folder rail's quick views above the measured composer band", () => {
+    renderOrganizer();
+    const rail = screen.getByRole("navigation", { name: "Library folders" });
+    expect(rail.classList.contains("spectra-composer-clearance")).toBe(true);
+    for (const name of ["Recent", "Favorites", "Shared", "Trash"]) {
+      expect(screen.getByRole("button", { name }).closest("nav")).toBe(rail);
+    }
+  });
+
   it("labels broad search results and names the work Enter will open", async () => {
     tree.search = [node("s1", "Water Cycle Field Guide"), node("s2", "Draft notes")];
     const onOpenWork = vi.fn();

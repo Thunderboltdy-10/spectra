@@ -3,9 +3,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GlobalErrorBoundary } from "@/components/global-error-boundary";
+import { ErrorScreen, GlobalErrorBoundary } from "@/components/global-error-boundary";
 import RouteError from "@/app/error";
 
 const refresh = vi.fn();
@@ -16,7 +16,12 @@ const providersSource = readFileSync(
   "utf8",
 );
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  refresh.mockClear();
+});
 
 function StatefulChild({ shouldThrow = false }: { shouldThrow?: boolean }) {
   const [value, setValue] = useState("");
@@ -93,5 +98,89 @@ describe("app router error screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(refresh).toHaveBeenCalledOnce();
     expect(reset).toHaveBeenCalledOnce();
+  });
+});
+
+function observePageReload() {
+  const reload = vi.fn();
+  const currentWindow = window;
+  vi.stubGlobal("window", new Proxy(currentWindow, {
+    get(target, property, receiver) {
+      if (property === "location") return { reload };
+      return Reflect.get(target, property, receiver);
+    },
+  }));
+  return reload;
+}
+
+describe("module loading recovery", () => {
+  it("reloads a rejected lazy module instead of retrying its cached rejection", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const load = vi.fn<() => Promise<{ default: () => ReactNode }>>()
+      .mockRejectedValueOnce(new Error("Failed to load chunk /_next/static/chunks/editor.js"))
+      .mockResolvedValue({ default: () => <p>Editor loaded</p> });
+    const FailedEditor = lazy(load);
+    const view = render(
+      <GlobalErrorBoundary>
+        <Suspense fallback={<p>Loading editor</p>}><FailedEditor /></Suspense>
+      </GlobalErrorBoundary>,
+    );
+    await screen.findByRole("heading", { name: "Something went wrong" });
+    const reload = observePageReload();
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    expect(reload).toHaveBeenCalledOnce();
+    expect(load).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    view.unmount();
+    // A fresh page's lazy module has a new payload, unlike a boundary reset.
+    const FreshEditor = lazy(load);
+    render(<GlobalErrorBoundary><Suspense fallback={<p>Loading editor</p>}><FreshEditor /></Suspense></GlobalErrorBoundary>);
+    expect(await screen.findByText("Editor loaded")).toBeTruthy();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    Object.assign(new Error("Loading chunk 123 failed.\n(error: /_next/static/chunks/123.js)"), { name: "ChunkLoadError" }),
+    new Error("Failed to load chunk /_next/static/chunks/editor.js from module editor"),
+    new TypeError("Failed to fetch dynamically imported module: /editor.js"),
+    new TypeError("Importing a module script failed."),
+    new TypeError("error loading dynamically imported module: /editor.js"),
+  ])("offers one working reload action with public copy for %s", (error) => {
+    const retry = vi.fn();
+    render(<ErrorScreen error={error} onRetry={retry} />);
+    expect(screen.getByText("Part of Spectra could not load. Reconnect, then reload the page.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    const reload = observePageReload();
+    fireEvent.click(screen.getByRole("button", { name: "Reload page" }));
+    expect(reload).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it("uses the same module recovery for app-router failures", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const reset = vi.fn();
+    render(<RouteError error={new Error("Failed to load chunk /route.js")} reset={reset} />);
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    const reload = observePageReload();
+    fireEvent.click(screen.getByRole("button", { name: "Reload page" }));
+    expect(reload).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("still retries ordinary render failures without reloading", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let shouldThrow = true;
+    function RecoverableChild() {
+      if (shouldThrow) throw new Error("ordinary render failure");
+      return <p>Recovered content</p>;
+    }
+    render(<GlobalErrorBoundary><RecoverableChild /></GlobalErrorBoundary>);
+    const reload = observePageReload();
+    shouldThrow = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(screen.getByText("Recovered content")).toBeTruthy();
+    expect(reload).not.toHaveBeenCalled();
   });
 });

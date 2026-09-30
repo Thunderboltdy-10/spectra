@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { readConvexError } from "../../shared/convex-error.mjs";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 type Props = { children: ReactNode; resetKey?: string | null };
@@ -49,6 +50,13 @@ export class IsolatedErrorBoundary extends Component<
 /** Full-screen recovery shared by the client boundary and the app router's
  * error.tsx, so a server-rendered failure looks the same as a client one. */
 export function ErrorScreen({ error, onRetry }: { error?: unknown; onRetry: () => void }) {
+  // React lazy and the module runtime retain failed imports. Resetting a
+  // boundary or refetching a route cannot replace that rejected module payload.
+  const needsReload =
+    (error instanceof Error && error.name === "ChunkLoadError") ||
+    /^(?:Failed to load chunk\b|Loading (?:CSS )?chunk\b.*\bfailed\b|Failed to fetch dynamically imported module\b|Importing a module script failed\b|error loading dynamically imported module\b)/i.test(
+      readConvexError(error).message || "",
+    );
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[var(--bg-primary)] p-8 text-[var(--text-primary)]">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--bg-secondary)]">
@@ -61,17 +69,21 @@ export function ErrorScreen({ error, onRetry }: { error?: unknown; onRetry: () =
       <div className="max-w-md text-center">
         <h1 className="text-lg font-medium">Something went wrong</h1>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">
-          {humanizePublicFailure(error)}
+          {needsReload
+            ? "Part of Spectra could not load. Reconnect, then reload the page."
+            : humanizePublicFailure(error)}
         </p>
       </div>
       <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onRetry}
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-2.5 text-sm transition hover:bg-[var(--bg-hover)]"
-        >
-          Try again
-        </button>
+        {!needsReload && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-2.5 text-sm transition hover:bg-[var(--bg-hover)]"
+          >
+            Try again
+          </button>
+        )}
         <button
           type="button"
           onClick={() => window.location.reload()}

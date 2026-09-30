@@ -14,7 +14,7 @@ type Cache<T extends { _id: string }> = ReturnType<typeof createCatalogPageCache
 
 export function useCatalogPages<T extends { _id: string }>(cache: Cache<T>, enabled = true, complete = false) {
   const { userId, sessionId } = useAuth();
-  const identity = useQuery(api.catalogGraph.identity, useAuthedArgs(enabled ? {} : "skip"));
+  const identity = useQuery(api.catalogGraph.identity, useAuthedArgs(enabled ? {} : "skip", "account"));
   const key = enabled && userId && sessionId && identity
     ? JSON.stringify([userId, sessionId, identity.accountId, identity.schoolId, identity.membershipId]) + "/"
     : null;

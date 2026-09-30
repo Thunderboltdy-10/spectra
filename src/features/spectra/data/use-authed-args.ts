@@ -1,9 +1,20 @@
 "use client";
 
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 
-/** Skip Convex reads until the session is actually signed in. */
-export function useAuthedArgs<T>(args: T | "skip"): T | "skip" {
+/** School reads wait for membership; account reads can bootstrap that identity. */
+export function useAuthedArgs<T>(
+  args: T | "skip",
+  scope: "school" | "account" = "school",
+): T | "skip" {
   const { isAuthenticated } = useConvexAuth();
-  return isAuthenticated === true ? args : "skip";
+  const identity = useQuery(
+    api.catalogGraph.identity,
+    isAuthenticated === true && scope === "school" && args !== "skip"
+      ? {}
+      : "skip",
+  );
+  if (scope === "account") return isAuthenticated === true ? args : "skip";
+  return isAuthenticated === true && identity ? args : "skip";
 }

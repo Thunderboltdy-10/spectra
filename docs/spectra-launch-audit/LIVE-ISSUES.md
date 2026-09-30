@@ -1102,7 +1102,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-033 · Personal event defaults retain the current minute
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/calendar` personal-event composer / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 2
@@ -1119,6 +1119,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** Across three openings, the start and end defaults were 19:05–20:05, then 19:06–20:06, then 19:07–20:07 local. The first form was read at 18:05:19 and the fresh-reload form at 18:07:58. Saving a disposable local personal event confirmed it appeared in Calendar as 19:07–20:07; it was then removed through `Remove from Calendar` and no longer appeared.
 
 **Evidence:** `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt`.
+
+**Fix** (fixer)
+- Commit: `1dfd6df04da7fa0dc59c909f8fe72502d1131b05`.
+- Root cause: The composer added elapsed hours to the current clock, preserving its minutes. The earlier local-time test froze an exact hour and therefore could not detect the error; separate default calculations also read the clock independently.
+- Change: Initialize and reset the paired defaults through one shared local-hour helper from one clock reading. Advance whole local civil hours so midnight, the spring gap and the repeated autumn hour keep an end after the start; existing scheduled durations and user-entered times retain their behavior.
+- Test: Six cases fail before and pass after in `calendar-application.component.test.tsx`: minute rounding, midnight, both DST changes, reopen after the clock advances and persisted default timestamps despite a UTC overview. The exact-hour control stays green. All 17 focused tests, both TypeScript projects, full lint and all five gates pass. Logs: `.spectra-local/LV033-{before,focused,tsc,convex-tsc,lint,gates}.log`.
+- Re-check nearby: Frontend reload only, then open/reopen away from an exact hour, save a disposable default event and confirm its whole local-hour display. Also check midnight and DST boundaries when feasible. No backend sync, deploy or codegen required.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--

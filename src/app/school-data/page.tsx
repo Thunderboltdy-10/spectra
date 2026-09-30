@@ -1,12 +1,15 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { SchoolDataShell } from "@/features/spectra/pages/school-data-shell";
+import { SchoolMembershipGate } from "@/features/spectra/components/school-membership-gate";
 
 export const dynamic = "force-dynamic";
 
 export default function SchoolDataPage() {
   return (
     <AppShell fullBleed contentClassName="!p-0">
-      <SchoolDataShell />
+      <SchoolMembershipGate>
+        <SchoolDataShell />
+      </SchoolMembershipGate>
     </AppShell>
   );
 }

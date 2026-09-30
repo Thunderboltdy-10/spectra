@@ -73,7 +73,9 @@ _Written by the verifier at the end._
 | P3-BRIDGE-LENS — new document and Library browser health requests | P3-BRIDGE-LENS · step 9 | PASS — after the authorized instance-8/Bridge restart, a new document opened in A and the same URL in B; repeated Bridge health GETs returned HTTP 200 and each browser had 0 console errors | LV-012 (NEEDS-DECISION) | 396aa190 |
 | P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | PASS — instance 8 and its Bridge restarted; Bridge reported ready for the app origin, and A/B had 0 console errors after document reload | LV-012 (NEEDS-DECISION) | 396aa190 |
 | P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | BLOCKED — answer streamed without visible IDs; the browser UI does not expose provider-call count, so the one-call expectation is not proven | — | 396aa190 |
-| P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | FAIL — the run ended Paused with “The response did not pass validation”; no completed essay or length note was shown | LV-019 | 396aa190 |
+| P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
+| P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
+| P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | FAIL — two identical rewrite requests ended with “Could not finish”; the saved document retained its prior four sections and conclusion after reload | LV-020 | 427cb3c9 |
 
 ## Issues
 
@@ -643,12 +645,12 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ### LV-019 · Long chat answer pauses after validation failure
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** Chat AI answer / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Needs live verification · Answer, step 2
-- **Commit tested:** `396aa190` (local instance 8, web port 3000)
-- **Frequency:** 1 of 1 submitted long-essay requests; clicking Retry once left the same paused state visible, so no independent second request was counted.
+- **Commit tested:** `427cb3c9` (local instance 8, web port 3000; frontend hot reload and browser reload)
+- **Frequency:** Before the fix, the original request and one Retry both ended with the validation failure (1 submitted request plus one Retry). After the fix, a new request and Retry on the earlier paused request both completed.
 
 **Steps**
 1. On local instance 8 at commit `396aa190`, sign in using the saved Profile A session and open a new chat with no context objects selected.
@@ -659,9 +661,9 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 **Expected:** P3-AI-ENGINE step 2 says to “Expect it to continue past the output limit with no duplicated text. If it still stops, expect the length note.”
 
-**Actual:** The chat streamed essay text, then ended with “The response did not pass validation” and “Spectra paused this run,” with a **Retry** button. No completed essay or length note appeared in the chat. Clicking **Retry** once left the same paused validation message visible. Playwright reported 0 console errors and 1 warning during this run.
+**Actual:** On `396aa190`, the chat streamed essay text, then ended with “The response did not pass validation” and “Spectra paused this run,” with a **Retry** button. No completed essay or length note appeared. The first Retry also ended with the same validation failure. Playwright reported 0 console errors and 1 warning during the initial run.
 
-**Evidence:** `.spectra-local/live-verification/LV-019-ai-4000word-paused-first-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-paused-retry-redacted.png`; Playwright console excerpt: `Total messages: 3 (Errors: 0, Warnings: 1)`; the sole warning was Clerk's development-key notice.
+**Evidence:** `.spectra-local/live-verification/LV-019-ai-4000word-paused-first-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-paused-retry-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-verified-427cb3c9-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-retry-verified-427cb3c9-redacted.png`; `.spectra-local/live-verification/LV-019-ai-doc-edit-verified-427cb3c9-redacted.png`; Playwright console excerpts: pre-fix `Total messages: 3 (Errors: 0, Warnings: 1)` and post-fix `Total messages: 3 (Errors: 0, Warnings: 1)`; the sole warning was Clerk's development-key notice.
 
 **Fix** (fixer)
 - Commit: `427cb3c9c3664e03a6ff62af41f39b19cafba913`.
@@ -669,6 +671,37 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Change: Remove the hidden prose length limit from the canonical validator and matching plan/creation provider schemas, keeping nonempty responses and all operation/ownership/intent checks. This also fixes long replies accompanying accepted edits and artifact creation; output continuation and truthful cutoff notes remain unchanged. Model, provider, reasoning and context settings are unchanged.
 - Test: Four regressions fail before and pass after through the public callModel boundary: long ordinary prose without repair, successfully continued prose without duplication, exhausted continuation retaining the full text and length note, and a long completion retaining accepted operations. A fifth checks both provider contracts match the validator. All 117 focused completion/agent-loop/diagnostics/run-route tests, both TypeScript checks, full lint and all five gates passed. Final full suite: 4,382 passed, 3 failed, 1 skipped; failures are the pending LV-017 hosted package and unchanged Stop-auth/sheets timing tests. Those two unchanged files then pass 136/136 in a separate re-check. This full suite is not green.
 - Re-check nearby: Reload the frontend and repeat the original new-chat essay, inspecting the completed answer and terminal state; check Retry on the earlier paused request and a detailed answer accompanying an edit. If output continuations truly exhaust their limit, the full partial answer must retain its explicit length note. No backend restart, deploy or codegen is needed.
+
+**Verification** (verifier): VERIFIED on app commit `427cb3c9c3664e03a6ff62af41f39b19cafba913`, 2026-09-30. Reloaded the frontend on the updated checkout and opened a new chat with 0 context objects. The exact prompt returned a complete 3,730-word answer with a conclusion, no repeated paragraphs, a saved result and no validation error; the browser showed 0 console errors. Clicked **Retry** on the earlier paused thread; that run completed with a 4,479-word answer, no repeated paragraphs, and a saved result. In the same local session, created “Causes of World War I” with four sections, rewrote section 2 while asking for a detailed explanation, and received a 744-word answer (including the proposed rewrite) totaling 4,889 characters. Reloaded the artifact; the revised section remained in the document. The chat described the change as staged and not yet verified as saved before reload. Evidence: `.spectra-local/live-verification/LV-019-ai-4000word-verified-427cb3c9-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-retry-verified-427cb3c9-redacted.png`; `.spectra-local/live-verification/LV-019-ai-doc-edit-verified-427cb3c9-redacted.png`.
+
+### LV-020 · Whole-document rewrite does not update the document
+
+- **Status:** FIXED
+- **Severity:** High
+- **Surface / role:** Chat AI document rewrite / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Needs live verification · Document, rewrite
+- **Commit tested:** `427cb3c9` (local instance 8, web port 3000)
+- **Frequency:** 2 of 2 identical rewrite requests returned an explicit apply failure; the saved document was unchanged after reload.
+
+**Steps**
+1. On local instance 8 at commit `427cb3c9`, sign in with saved Profile A and open the local document `Causes of World War I` with its four sections and existing conclusion in the Work studio.
+2. With the document selected as the single context object, send `Rewrite the whole document for a 12-year-old.`
+3. Wait for the assistant response and inspect both the reply and the open document.
+4. Reload the browser and inspect the document content.
+5. Send the identical prompt once more, wait for the response, and inspect the document again.
+
+**Expected:** P3-AI-ENGINE's Document rewrite step says to “Rewrite the whole document for a 12-year-old.” The rewritten text should replace the content of the open document and remain there after reload.
+
+**Actual:** Both requests ended with “I couldn’t apply the rewrite to the document—the update failed, so the saved document is unchanged.” Each reply then provided a rewritten version in chat, but the Work studio retained the original introduction, the same four numbered sections, and the existing conclusion after reload. After the second failure, the Live Dock showed “Could not finish · 14 related parts will change together.” Playwright reported 0 console errors and 1 development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-doc-rewrite-failure-1-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-doc-rewrite-failure-2-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-doc-rewrite-unchanged-after-reload-redacted.png`; Playwright console excerpt: `Total messages: 3 (Errors: 0, Warnings: 1)`; the sole warning was Clerk's development-key notice.
+
+**Fix** (fixer)
+- Commit: `7a1a8508932caca7f6e48f9960bab4350d668935`.
+- Root cause: The recorded rewrite supplied 14 TipTap text-pointer changes, but the patch helper left the derived document blocks unchanged. The Yjs adapter interpreted those stale blocks as authored values and restored the old text over the patched tree; the post-save verifier correctly rejected the missing content change. The same mismatch affects rich subtree and whole-tree patches, including the shared Convex write preparation/admission resolver.
+- Change: Regenerate blocks and outline from the authored TipTap tree using the existing document converter before Yjs projection. Synchronize mirrors between changes and materialize the tree from updated blocks when switching representations, preserving submitted order for mixed block/tree pointers. No model, provider, reasoning, context or admission/readback checks were weakened.
+- Test: Four regressions fail on prior source and pass after: whole-document text-pointer rewrite, formatted subtree retaining marks through Yjs reload, whole-tree replacement refreshing identities/outline, and block-then-tree order. The reverse mixed order also passes. All 187 focused patch/readback/live-admission/native-model/reference/academic/run-route/Convex-scope tests pass; both TypeScript checks, full lint and all five gates pass. Final full suite: 4,389 passed, 1 failed, 1 skipped (502 passed files, 1 failed, 1 skipped). The sole failure is the pending LV-017 hosted package missing shared runtime imports; every document/admission test passed. This full suite is not green.
+- Re-check nearby: Sync/restart the verifier-owned local instance 8 to load the shared helper into Convex, then reload the browser and repeat the original whole-document rewrite. Confirm rewritten text before and after reload; re-check section-only changes, formatting and appending a conclusion. No shared deployment or code generation is required.
 
 **Verification** (verifier):
 
@@ -704,6 +737,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 -->
 
 ## Fixer closeout · 30 September 2026
+
+- Latest fix: LV-020 is FIXED at `7a1a8508932caca7f6e48f9960bab4350d668935`. Four failing-before regressions prove rewritten TipTap text, rich subtrees, structure replacement and mixed block/tree order survive the existing write resolver and Yjs projection. All 187 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier has the code hash and instructions to sync the owned local backend (the helper is shared with Convex admission), reload and re-check. No shared deployment/codegen was performed.
+- Latest full suite after LV-020: **4,389 passed, 1 failed, 1 skipped**; **502 passed files, 1 failed, 1 skipped** (504 files), duration 305.46 seconds. The sole failure is LV-017 hosted Docker packaging omitting the required shared runtime modules. All document tests passed; the Stop-auth and sheets performance tests that failed in the previous full run passed here. Log: `.spectra-local/launch-fixer-LV020-full.log`. This result is not green; the Docker COPY exception is still unanswered and its prepared patch remains unapplied.
+- Latest implementation commit: `7a1a8508` — synchronize authored document tree and derived block mirrors (LV-020). Ledger closeouts for the preceding fix are `cf2869e8`; earlier commits and decision/reproduction limits remain below. LV-019 is now VERIFIED by the live verifier, including long new-chat answers, Retry and a detailed document-edit reply.
+
 
 - Latest fix: LV-019 is FIXED at `427cb3c9c3664e03a6ff62af41f39b19cafba913`. Local diagnostics confirm the same 4,000-character finalResponse bound rejected both the original essay and Retry. Remove that prose bound consistently from the validator and provider schemas; four public-planner regressions fail before and pass after, with a fifth provider-contract alignment check. All 117 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier received the commit and reload-only checks; live verification remains pending.
 - Latest full suite after LV-019: **4,382 passed, 3 failed, 1 skipped**; **500 passed files, 3 failed, 1 skipped** (504 files), duration 310.17 seconds. Failures: LV-017 hosted package omits shared runtime imports; unchanged run-route Stop auth case returned 409 instead of 403; unchanged sheets dense-cell patch took 49.1988 ms against its 40 ms bound. Both latter files then passed **136/136** in a separate run. Logs: `.spectra-local/launch-fixer-LV019-full.log` and `.spectra-local/LV019-full-failures-recheck.log`. The full-suite result is not green and the LV-017 package exception remains pending.

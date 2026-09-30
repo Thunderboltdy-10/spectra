@@ -1085,7 +1085,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-032 · Offline Undo in Library Trash has no retry action
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Low
 - **Surface / role:** Library Trash Undo / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 8
@@ -1104,6 +1104,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 **Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`.
 
+
+**Fix** (fixer)
+- Commit: `1a390f5c0f666672510d2f01c6248338a3be85c1`.
+- Root cause: The existing organizer Retry toast runs only on rejection, but Convex retains unsent mutations in browser memory with a pending promise while offline. Undo therefore never reached its catch path, and reloading could discard the request. The product-wide banner incorrectly promised that every change would later be sent.
+- Change: Guard the shared Library mutation boundary against the browser's known-offline signal and reject before enqueueing, reusing existing readable-error and Retry handling. This covers restore/Undo, trash, purge, move, rename, pinning, references, folder/work creation and root creation, including semantic commands using the same actions. Requests already submitted remain alive, and the offline banner now distinguishes editable open work from actions needing a connection; no parallel queue, timeout, optimistic restore or backend change was added.
+- Test: Twelve cases fail before and pass after. The real organizer with real action hooks proves offline Undo displays Retry without submitting a mutation and reconnect/Retry restores the same item exactly once; ten action-entrypoint regressions prove no unsent mutation, and a separate case preserves an already-submitted restore through a later disconnection. All **43 focused tests**, both TypeScript projects, full lint and all five gates pass, including a staged secret scan of 3,319 files. Logs: `.spectra-local/LV032-{before,focused-final,tsc,convex-tsc,lint,gates,staged-secrets}.log`. Full-suite validation follows this batch.
+- Re-check nearby: Frontend reload only. Trash a disposable item, disconnect and Undo: expect a readable offline toast with Retry and the item still in Trash; reconnect and Retry without reloading, then confirm restoration persists after reload. Check Retry while still offline, another Library mutation, and continued offline editing of an already-open document. No backend sync, deploy or codegen required.
 
 ### LV-033 · Personal event defaults retain the current minute
 

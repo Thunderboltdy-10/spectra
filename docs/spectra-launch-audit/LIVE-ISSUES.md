@@ -847,7 +847,7 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 - Commit: `98677c5f5b791f9771f070ae765400844f845d05`.
 - Root cause: The accepted patch wrote a new stable paragraph identity into an occupied numeric slot, replacing the prior saved sentence. Independently, DocumentStudio treated any missing projected block as a canonical Word insert; an awareness preview authored a second Yjs node before the immutable admitted delta arrived, so both copies became durable.
 - Change: Shared patch resolution rejects whole-item identity collisions at occupied array slots and feeds the existing model repair path, while same-identity rewrites and both append pointers remain valid. The existing native projection transaction moved into a tested helper restricted to canonical Word reconciliation, with an explicit provisional-content flag from ArtifactStudio; ordinary and provisional collaborative content cannot author a second tree. The identity guard also covers deck cards, quiz questions, slides and other stable-ID collections.
-- Test: Seven regressions failed before the fix: four collection identity collisions and three real TipTap/Yjs preview or early-projection cases. Afterward, real write resolution preserves the conclusion and saved sentence alongside one new paragraph; collaborative editor reloads retain one copy, and canonical native inserts remain idempotent without altering rich existing content. All 128 focused tests pass including the native-model re-check (32/32); both TypeScript checks, full lint and all five gates passed. Full-suite validation will follow this queued-fix batch; the preceding result is recorded in closeout.
+- Test: Seven regressions failed before the fix: four collection identity collisions and three real TipTap/Yjs preview or early-projection cases. Afterward, real write resolution preserves the conclusion and saved sentence alongside one new paragraph; collaborative editor reloads retain one copy, and canonical native inserts remain idempotent without altering rich existing content. All 128 focused tests pass including the native-model re-check (32/32); both TypeScript checks, full lint and all five gates passed. The final LV-024/LV-025 suite returned 4,415 passed, 1 failed and 1 skipped; the sole failure is the pending LV-017 hosted package.
 - Re-check nearby: Sync/restart only the verifier-owned local instance 8, since Convex admission imports the shared patch helper, then reload. Use a fresh occupied-final-paragraph document; check one and then a second append, both prior literal sentences, an existing-paragraph rewrite, deck/quiz additions, and canonical Word trailing inserts through reload/restart. No shared deploy or codegen occurred.
 
 **Verification** (verifier):
@@ -855,7 +855,7 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 
 ### LV-025 · Skip response produces repeated chat run conflicts
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** `/chat` AI answer and clarification choice / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Answer, step 3; clarification-skip neighbor check
@@ -874,12 +874,14 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 
 **Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-no-context-notes-summary-final-response-4f8103b6-redacted.png`; `.spectra-local/live-verification/LV-025-no-context-skip-console-network-redacted.txt`; sanitized Playwright console log `.playwright-cli/console-2026-09-30T13-57-34-589Z.log` (same-origin `/api/spectra/run` HTTP 409 entries).
 
+**Question for verifier:** Please record one representative failed request's action name and redacted 409 response sentence, omitting IDs, tokens and prompt content. Endpoint observation remains welcome; real-hook tests reproduced repeated observer registration and historical-attempt final replay, and the local backend records 513 UI_OBSERVATION_INACTIVE errors with the latest at 14:01:26. This independent evidence permits diagnosis to continue.
+
 **Fix** (fixer)
-- Commit:
-- Root cause:
-- Change:
-- Test:
-- Re-check nearby:
+- Commit: `45281d261cc583325a8f659b31168d16676ff891`.
+- Root cause: The durable run poll deleted its sequence cursor after a final. Chat refresh emits threads.changed, so the same final replayed, released the real UI observer and caused registration again against the inactive execution, producing repeated 409s. The feed also applied earlier clarification-attempt finals to resumed executions of the same run.
+- Change: Retain the monotonic sequence with its settled execution, and stop observing/polling that attempt while letting a new execution resume after the cursor. A batch spanning attempts checks one fresh authoritative run version and updates its cached snapshot before applying current-execution events, so delayed tab snapshots do not discard a new resume. The shared hook covers Chat, Work and Workspace; no provider, reasoning, model, context or semantic routing changes were made.
+- Test: Two real-hook regressions fail before the fix: 22 repeated conflict POSTs in a 20 ms simulated poll window, and a prior-attempt final delivered to the resumed run. Five hook tests now pass using the real observer client, including delayed tab snapshots without repeated version reads, effect recreation, and resuming from a settled clarification. Read-only backend log counts independently found 513 UI_OBSERVATION_INACTIVE errors (latest 14:01:26). All 104 focused tests, both TypeScript projects, full lint and all five gates pass; the final LV-024/LV-025 suite returned 4,415 passed, 1 failed and 1 skipped, with only the pending LV-017 hosted packaging failure.
+- Re-check nearby: Frontend reload only, then one Skip click in a fresh context-free chat, inspect run requests through the final reply and another 8-second sample. Check normal choice selection, typed clarification answers, retry/Stop and clarification handling in Work/Workspace. No backend sync, shared deploy or codegen is needed.
 
 **Verification** (verifier):
 
@@ -957,3 +959,12 @@ VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/st
 - **CANNOT-REPRODUCE:** LV-004 — MIME encoding artifacts in the original invitation URL; decoded generated-token preview worked. LV-007 — the original Escape check exercised an idle confirmation, while the later pending-request observation retained the dialog and disabled controls.
 - LV-010 is VERIFIED after the authorized instance-8 launcher sync loaded the committed Convex body: identity resolution and manual sync returned 200 with Complete history. Saved local backends sync functions once at startup; they do not watch source. The earlier watcher assumption was corrected, no shared deployment/codegen was performed, and the pre-existing Bridge was left untouched.
 - No OPEN, REOPENED or FIXING entries remain at closeout. Live verification continues under the recorded authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages about a new or reopened ledger issue.
+
+
+## Fixer closeout · LV-024 and LV-025
+
+- Implementation commits: `98677c5f` — preserve saved paragraph identities and keep collaborative previews from authoring duplicate nodes (LV-024); `45281d26` — consume durable finals once per attempt and fence resumed execution events (LV-025). Audit commit: `57219dd0`. Both issues are FIXED and have been sent to the verifier with browser re-check steps; only the verifier sets VERIFIED.
+- Full suite: **4,415 passed, 1 failed, 1 skipped**; **504 passed files, 1 failed, 1 skipped** (506 files). The sole failure remains `scripts/collaboration-gateway-package.test.mjs`: the hosted image omits LV-017's two shared runtime modules. Its two-line COPY patch remains unapplied because deployment-configuration edits are prohibited and the requested exception has no answer. Log: `.spectra-local/launch-fixer-LV025-full.log`. This result is not green. Both fixes passed their focused tests, both TypeScript projects, full lint and all five gates.
+- **NEEDS-DECISION:** LV-022 — post-save model prose adds latency/usage, while an authoritative saved-result message with separately labeled pre-save explanation changes presentation; no option was selected. LV-003 — invalid/expired invite 404/410 semantics versus an unavailable-preview result. LV-012 — automatic Bridge discovery versus an explicit connection/activation workflow; the earlier authorized restart does not settle the presentation decision.
+- **CANNOT-REPRODUCE:** LV-004 — the original invitation had MIME encoding artifacts and the decoded generated token worked. LV-007 — the original Escape observation concerned an idle dialog; the pending-request check retained the dialog and disabled its controls. LV-017 remains NEEDS-INFO for the hosted-package exception described above.
+- No OPEN, REOPENED or FIXING issue remains. The fixer stops between tasks under the user's instruction, and will resume when the verifier supplies a new or reopened ledger issue. No shared deploy/codegen, environment edits or production-data changes were performed for these two fixes.

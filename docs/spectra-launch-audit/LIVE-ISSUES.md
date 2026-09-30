@@ -97,7 +97,8 @@ _Written by the verifier at the end._
 | P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | FAIL — after restarting local instance 8 with application commit `7bce0577`, Calendar loaded; every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The three default start/end pairs were 19:05–20:05, 19:06–20:06, and 19:07–20:07 local, rather than the next whole hour. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt` | LV-029 (VERIFIED), LV-033 (OPEN) | 7bce0577 |
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
-| P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | FAIL — LV-031 passed its exact deletion recheck at `a1bd0258`; LV-032 needs its post-fix recheck at `1a390f5c`; clicking Trash with the pointer timed out at 1280×720 while Enter opened it. Evidence: `.spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-031-postfix-observations-a1bd0258-redacted.txt`; `.spectra-local/live-verification/LV-034-library-trash-pointer-interception-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-034-library-trash-pointer-observations-a1bd0258-redacted.txt`; prior LV-032 evidence remains above | LV-031 (VERIFIED), LV-032 (FIXED; recheck pending), LV-034 (OPEN) | a1bd0258; pending `1a390f5c` |
+| P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | PASS — LV-031 permanent deletion passed; LV-032 displayed Retry offline and a Retry after reconnection restored the item once and persisted after reload; LV-034 Trash pointer activation passed at 1280×720. Evidence: .spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png; .spectra-local/live-verification/LV-032-postfix-offline-undo-toast-35921472-redacted.png; .spectra-local/live-verification/LV-034-postfix-pointer-35921472-redacted.png | LV-031 (VERIFIED), LV-032 (VERIFIED), LV-034 (VERIFIED) | a1bd0258 / 35921472 |
+| P3-WORKSPACE-FLOWS — Retry while already offline | LV-032 post-fix adjacent check | FAIL — in 2 of 2 attempts, clicking Retry while offline displayed two overlapping notices with two visible Retry buttons. Evidence: .spectra-local/live-verification/LV-032-postfix-offline-retry-state-35921472-redacted.png; .spectra-local/live-verification/LV-032-postfix-observations-35921472-redacted.txt | LV-035 (OPEN) | 35921472 |
 
 | P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
 | P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — the Calendar data view remained unavailable after HTTP 500, so no personal event, plan block, or official event control could be inspected; see LV-029 | LV-029 (OPEN) | 45281d26 |
@@ -1087,7 +1088,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-032 · Offline Undo in Library Trash has no retry action
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Low
 - **Surface / role:** Library Trash Undo / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 8
@@ -1105,6 +1106,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** After Undo, the status said, “This device is offline. You can keep working; Spectra will send changes when you reconnect.” No exact `Retry` button was present. After reconnect and reload, the disposable document remained in Trash.
 
 **Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`.
+
+**Verification** (verifier): VERIFIED — commit 35921472, 2026-09-30. On the verifier-created document, the expected offline Undo toast included Retry. Reconnecting and clicking Retry without a page reload restored the item, which remained in Recent after reload. The repeated-offline-Retry observation is recorded separately as LV-035. Evidence: .spectra-local/live-verification/LV-032-postfix-offline-undo-toast-35921472-redacted.png; .spectra-local/live-verification/LV-032-postfix-observations-35921472-redacted.txt.
 
 
 **Fix** (fixer)
@@ -1143,7 +1146,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-034 · Trash quick view does not respond to pointer click
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** Library Trash navigation / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 8
@@ -1160,6 +1163,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The pointer click did not activate Trash and timed out after 30 seconds. At the button center, the browser hit test returned the `Open actions` button; Trash remained unselected. Pressing Enter on Trash selected it and opened the view. The Trash button bounds were x=248, y=676, width=231, height=32; the hit target was also visible within x=240–1280, y=640–720.
 
 **Evidence:** `.spectra-local/live-verification/LV-034-library-trash-pointer-interception-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-034-library-trash-pointer-observations-a1bd0258-redacted.txt`; console: 0 errors and 1 Clerk development warning; no request was sent for the timed-out click.
+
+**Verification** (verifier): VERIFIED — commit 35921472, 2026-09-30. At 1280×720, the first pointer click selected Trash; the view showed its empty state and bounds x=248, y=580, width=231, height=32. Recent, Favorites, Shared and Trash remained navigable with the verifier document open. Browser summary: 0 console errors and 1 Clerk development warning. Evidence: .spectra-local/live-verification/LV-034-postfix-pointer-35921472-redacted.png; .spectra-local/live-verification/LV-034-postfix-observations-35921472-redacted.txt.
 
 **Fix** (fixer)
 - Commit:
@@ -1278,3 +1283,31 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Full suite: **4,455 passed, 1 failed, 1 skipped**; **506 passed files, 1 failed, 1 skipped** (508 files), duration **320.32 seconds**. Log: `.spectra-local/launch-fixer-LV034-full.log`. Sole failure: LV-017 hosted gateway Docker package omits a shared runtime module; the prohibited deployment-config edit remains unapplied. All other tests pass. Focused **20/20**, both TypeScript projects, full lint, all five gates and isolated browser before/after layout checks pass.
 - **NEEDS-DECISION:** LV-028 — current shortcut mappings versus reassigning Shift+F; LV-022 — post-save prose latency/usage versus a different saved-result presentation; LV-003 — expired-invite HTTP semantics; LV-012 — automatic Bridge discovery versus explicit activation. **CANNOT-REPRODUCE:** LV-004 — original MIME-encoded invitation artifacts; decoded generated token works; LV-007 — idle versus pending confirmation behavior, with pending controls retained/disabled. **NEEDS-INFO:** LV-017 — narrow hosted-package COPY exception unanswered. Earlier entries preserve details; no pending choice was assumed.
 - No OPEN, REOPENED or FIXING issue remains. LV-034 is FIXED and sent for live pointer/navigation recheck; LV-031 is now VERIFIED by the verifier. Stop between tasks as requested; no deployment, codegen, production-data or environment changes occurred.
+### LV-035 · Retrying an offline Library undo shows overlapping duplicate notices
+
+- **Status:** FIXED
+- **Severity:** Medium
+- **Surface / role:** Library Trash Undo / signed-in school administrator (saved Profile A)
+- **Report script:** P3-WORKSPACE-FLOWS · step 8; LV-032 post-fix adjacent check
+- **Commit tested:** 35921472 (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 completed retry-while-offline attempts
+
+**Steps**
+1. On local instance 8 at application commit 35921472, sign in with saved Profile A and open the verifier-created disposable document in Library > Recent.
+2. From the document's Actions menu, choose Move to Trash.
+3. Set the browser offline while the Undo action is visible, then choose Undo.
+4. When the offline error toast with Retry appears, choose Retry while the browser remains offline.
+5. Inspect the visible notifications and Retry controls; reconnect and choose Retry online.
+
+**Expected:** P3-WORKSPACE-FLOWS step 8 says, “Trash a work, then Undo while offline. Expected: an error toast with Retry.” After another offline Retry, the error state remains legible without overlapping duplicate notices; after reconnect, Retry restores the item without a reload.
+
+**Actual:** In 2 of 2 attempts, choosing Retry while still offline displayed two overlapping offline notices at the top of the page and two visible Retry buttons. Their button bounds were x=1194, y=10 and x=1194, y=6 in the 1280×720 viewport. After reconnect, choosing Retry restored the item; the Trash view was empty.
+
+**Evidence:** .spectra-local/live-verification/LV-032-postfix-offline-retry-state-35921472-redacted.png; .spectra-local/live-verification/LV-032-postfix-observations-35921472-redacted.txt; during the fast retry sequence, 0 console errors, 0 page errors and 0 failed requests were observed.
+
+**Fix** (fixer)
+- Commit: `3e22ac4c2a2e854f3082ff1760c1575f07c39806`.
+- Root cause: Sonner automatically animates an action toast out when Retry is clicked, but the Library runner created a new toast identity on each rejection. An immediate offline failure therefore displayed a second Retry notice while the first was still exiting. Both route-side work and conversation loaders used the same retry pattern.
+- Change: A small shared UI helper retains the action notice until the retry settles and updates the same operation identity on failure; callers dismiss it on success. It keeps unrelated operations distinct and guards against a second submission during a pending retry. Library actions and both route-side loaders now use it; no global toast suppression, stacking/style changes, new queue or mutation behavior was added.
+- Test: The real Sonner toaster mounted with the real organizer/action hooks reproduces two Retry buttons before the fix. Afterward two offline retries keep one notice and enqueue no mutation; reconnect/Retry restores the same item exactly once and clears the notice. A separate real-toaster test preserves distinct operations, and a pending-retry regression fails before its guard and proves one submission after. All **36 focused tests**, both TypeScript projects, full lint and all five gates pass; staged secret scan covers 3,321 files. Logs: `.spectra-local/LV035-{before,pending-before,focused-final,tsc-final,convex-tsc-final,lint-final,gates-final}.log`. Full suite is running.
+- Re-check nearby: Frontend reload only. Repeat offline Undo and Retry twice without reconnecting: expect one legible Retry notice, then reconnect/Retry and confirm one restore with the notice gone. Check repeated retry on another Library action, a pending online retry, and route-side work/conversation load retries when feasible. No backend sync, deploy or codegen required.

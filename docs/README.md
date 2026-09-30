@@ -130,6 +130,7 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 
 **Operator steps at deploy**
 
+- Complete internal `spectraArtifacts:backfillSummaries` on each deployment that lacks the current `catalog-artifact-summaries` completion marker: start with `{cursor:null,limit:10}`, then use each returned cursor until `done`. Agent and artifact catalogs require this complete, versioned traversal; partial tail repairs do not certify readiness. The existing migration caps each page at 25 rows and 2 MB. [S10-CONVEX]
 - `npx convex run metering:backfillSchoolUsageTotals '{}'` once, so school usage ceilings start from real totals. [RESIDUALS]
 - Check that Fly `kill_timeout 30s`, Railway `drainingSeconds 30` and Compose `stop_grace_period 30s` are accepted. [P3-SYNC-DURABILITY]
 

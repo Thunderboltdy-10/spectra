@@ -97,7 +97,7 @@ _Written by the verifier at the end._
 | P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | FAIL — after restarting local instance 8 with application commit `7bce0577`, Calendar loaded; every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The three default start/end pairs were 19:05–20:05, 19:06–20:06, and 19:07–20:07 local, rather than the next whole hour. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt` | LV-029 (VERIFIED), LV-033 (OPEN) | 7bce0577 |
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
-| P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | FAIL — the offline Undo showed “This device is offline. You can keep working; Spectra will send changes when you reconnect.” without a Retry button; the item remained in Trash after reconnect. A separate permanent delete while the item was open showed “Something went wrong” with 3 `WORK_NOT_FOUND` console errors. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-45281d26-redacted.png`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-observations-redacted.txt` | LV-031 (OPEN), LV-032 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | FAIL — LV-031 passed its exact deletion recheck at `a1bd0258`; LV-032 needs its post-fix recheck at `1a390f5c`; clicking Trash with the pointer timed out at 1280×720 while Enter opened it. Evidence: `.spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-031-postfix-observations-a1bd0258-redacted.txt`; `.spectra-local/live-verification/LV-034-library-trash-pointer-interception-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-034-library-trash-pointer-observations-a1bd0258-redacted.txt`; prior LV-032 evidence remains above | LV-031 (VERIFIED), LV-032 (FIXED; recheck pending), LV-034 (OPEN) | a1bd0258; pending `1a390f5c` |
 
 | P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
 | P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — the Calendar data view remained unavailable after HTTP 500, so no personal event, plan block, or official event control could be inspected; see LV-029 | LV-029 (OPEN) | 45281d26 |
@@ -1056,7 +1056,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-031 · Permanently deleting an open trashed work shows an error page
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** Library Trash and Work studio / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 8
@@ -1081,6 +1081,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Change: Both metadata queries return null for unavailable work without revealing private replica/transition state. Studios and resources publish that authoritative absence through the existing access coordinator, which evicts cached bodies and session references, fences pending older opens and retires only the affected Library/Workspace URL while preserving scope. The studio becomes read-only during retirement. Native Word/Office/history preparation explicitly rejects missing metadata before uploads/effects; payload and mutation authority remain strict. This also covers shared/revoked work, resources and storage controls.
 - Test: Two real-model tombstone/removal regressions and three native-preparation regressions fail before and pass after. Six hook/URL integration checks prove cached-body eviction, pending-open fencing, loading versus unavailable, no repeated snapshot loop and preserved/unrelated routes. All **130 focused tests**, both TypeScript checks, full lint and all five gates pass, including owner/collaborator filesystem privacy and strict revoked payload/mutation checks. Logs: `.spectra-local/LV031-{before,native-before,focused-final,tsc,convex-tsc,lint,gates,staged-secrets}.log`.
 - Re-check nearby: Sync the committed backend body through the owned local instance-8 launcher, reload, then repeat deleting a disposable trashed document while it is open. Confirm no application error, replica-query console error, stale tab or deleted-work URL; retain the Trash/workspace location and another open work. Also try deletion from another tab and a revoked shared work. No shared deploy/codegen or environment edit occurred.
+
+**Verification** (verifier): VERIFIED — commit `a1bd0258`, 2026-09-30. Repeated steps 1–5 with a verifier-created document. The expected confirmation appeared; after confirmation the URL returned to `/library`, the editor closed, Trash showed “The Trash is empty” and “0 items”, and no error boundary or retry controls appeared. Browser capture: 0 console errors, 0 page errors, 0 failed requests, and no `WORK_NOT_FOUND`. Evidence: `.spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-031-postfix-observations-a1bd0258-redacted.txt`.
 
 
 ### LV-032 · Offline Undo in Library Trash has no retry action
@@ -1138,6 +1140,40 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Change: Initialize and reset the paired defaults through one shared local-hour helper from one clock reading. Advance whole local civil hours so midnight, the spring gap and the repeated autumn hour keep an end after the start; existing scheduled durations and user-entered times retain their behavior.
 - Test: Six cases fail before and pass after in `calendar-application.component.test.tsx`: minute rounding, midnight, both DST changes, reopen after the clock advances and persisted default timestamps despite a UTC overview. The exact-hour control stays green. All 17 focused tests, both TypeScript projects, full lint and all five gates pass. Logs: `.spectra-local/LV033-{before,focused,tsc,convex-tsc,lint,gates}.log`.
 - Re-check nearby: Frontend reload only, then open/reopen away from an exact hour, save a disposable default event and confirm its whole local-hour display. Also check midnight and DST boundaries when feasible. No backend sync, deploy or codegen required.
+
+### LV-034 · Trash quick view does not respond to pointer click
+
+- **Status:** FIXED
+- **Severity:** Medium
+- **Surface / role:** Library Trash navigation / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 8
+- **Commit tested:** `a1bd0258` (local instance 8; web port 3000; saved Profile A)
+- **Frequency:** 1 of 1 captured direct pointer-click attempts; Enter opened the view
+
+**Steps**
+1. On local instance 8 at `a1bd0258`, sign in with saved Profile A and set the browser viewport to 1280×720.
+2. Open Library and locate the `Trash` quick-view button in its navigation rail.
+3. Click `Trash` with the pointer and wait for the view to open.
+
+**Expected:** P3-WORKSPACE-FLOWS step 8 says, “Open Trash, select the item and press Delete. Expected: \"Delete … forever?\", then it is gone.”
+
+**Actual:** The pointer click did not activate Trash and timed out after 30 seconds. At the button center, the browser hit test returned the `Open actions` button; Trash remained unselected. Pressing Enter on Trash selected it and opened the view. The Trash button bounds were x=248, y=676, width=231, height=32; the hit target was also visible within x=240–1280, y=640–720.
+
+**Evidence:** `.spectra-local/live-verification/LV-034-library-trash-pointer-interception-a1bd0258-redacted.png`; `.spectra-local/live-verification/LV-034-library-trash-pointer-observations-a1bd0258-redacted.txt`; console: 0 errors and 1 Clerk development warning; no request was sent for the timed-out click.
+
+**Fix** (fixer)
+- Commit:
+- Root cause:
+- Change:
+- Test:
+- Re-check nearby:
+
+**Fix** (fixer)
+- Commit: `0101aad9378edca44a915e53d73f9c5386b52cf1`.
+- Root cause: The shared organizer rail anchored its quick views at the viewport bottom without consuming the composer band's measured safe area. Adjacent list and board surfaces already used that contract, but the rail did not; Trash sat underneath the real Open actions button while its keyboard handler remained functional.
+- Change: Add the existing `spectra-composer-clearance` class to `OrganizerRail`. This applies the one existing measured-height contract to Library and workspace rails, including grown docks, without hard-coded offsets, new layout state, pointer suppression or z-index changes.
+- Test: The rail component regression fails before and passes after. An isolated headless browser fixture using real rail/dock-frame markup, compiled production CSS and the real safe-area publisher reproduces the exact reported bounds (Trash y=676–708, band top=640) and Open actions hit before the fix. Afterward the hit is Trash with 28px clearance in all three cases: 1280×720 with 80px and 160px bands, and 1024×600 with a collapsed sidebar. All **20 focused tests**, both TypeScript projects, full lint and all five gates pass; the layout detector returns no findings. Logs: `.spectra-local/LV034-{before,layout-before,layout-after,focused,tsc,convex-tsc,lint,gates,design-scan}.log`; reproducible isolated fixture/script: `.spectra-local/LV034-{fixture.test.tsx,layout.cjs}`. Full suite is running.
+- Re-check nearby: Frontend reload only, then click Trash with the pointer at 1280×720; check Recent/Favorites/Shared, an expanded folder tree, workspace rail, collapsed sidebar, taller live dock and narrow drawer. Confirm the composer actions remain usable and run LV-032's offline Undo/Retry check. No backend sync, deploy or codegen required.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--

@@ -907,7 +907,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-026 · Library full-title search returns broad partial matches
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/library` search / signed-in school administrator
 - **Report script:** exploration · first-week Library and search
@@ -931,7 +931,14 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Assessment** (fixer)
 - Root cause: Both orgTree.search and searchPage deliberately delegate ranking to the name full-text provider; they do not impose full-phrase or all-term matching. Library renders that ranked result set without a match category, and Enter opens its highlighted row. This is intended retrieval behavior with an ambiguous presentation contract, rather than a missing full-title record.
 - Reproduction: An ignored convex-test fixture calls the real searchPage query with both reported full-title queries against three ordinary titles. Both return partial results and zero full-phrase matches; the unique control returns zero. Test: `.spectra-local/LV026-search-repro.test.ts`, 1/1 passed; log `.spectra-local/LV026-repro.log`. No production records or application code changed.
-- Decision: (A) Require all query terms, producing a clear no-match state for a missing title but reducing broad discovery; or (B) preserve ranked broad retrieval and distinguish partial matches while making Enter's highlighted target clear, retaining useful nearby results but adding a result-presentation contract. Full-phrase priority can supplement either option when the exact title exists. The human chose option B on 30 September 2026: retain broad ranked results, clearly label partial matches, and make Enter's target explicit. This implementation is queued after the higher-severity Calendar issue; no application change has been made yet.
+- Decision: (A) Require all query terms, producing a clear no-match state for a missing title but reducing broad discovery; or (B) preserve ranked broad retrieval and distinguish partial matches while making Enter's highlighted target clear, retaining useful nearby results but adding a result-presentation contract. Full-phrase priority can supplement either option when the exact title exists. The human chose option B on 30 September 2026: retain broad ranked results, clearly label partial matches, and make Enter's target explicit. The approved presentation is implemented below.
+**Fix** (fixer)
+- Commit: `28a04b6b6bfffac99e20f5374f0cbadbd5d1c8bc`.
+- Root cause: Broad name retrieval was intentionally ranked by the full-text provider, but the organizer did not distinguish an absent complete title from related results. The search input opened the first row and the results grid opened its selected row without naming either target. The human approved preserving broad retrieval with explicit match and keyboard guidance.
+- Change: Label each search row as Exact title match or Partial match using the shared StatusBadge and a normalized complete-title comparison. Add a search description that names Enter's input target and any distinct selected result target, qualify partial results while more pages remain, and avoid announcing or opening stale first-page rows. The shared organizer covers Library and workspace search in both list/board views without altering retrieval or provider ordering.
+- Test: Three real-organizer component regressions fail before and pass after: broad-only results and input Enter, mixed exact/partial rows in provider order and clearing search, and selected-grid Enter versus input Enter. Additional checks cover incomplete pages, loading and ordinary unfiltered Enter. All **64 focused tests**, both TypeScript checks, full lint and all five gates pass; logs `.spectra-local/LV026-{before,focused-final,tsc,convex-tsc,lint,gates}.log`.
+- Re-check nearby: Reload the frontend, repeat both reported queries and the unique no-match control, inspect visible badges and named Enter targets, then use Arrow Down and Enter to open another result. Also check exact-title queries, clearing search and workspace-scoped search. No backend sync, environment edit, deploy or codegen is needed.
+
 
 ### LV-027 · AI clarification follow-up remains in progress during extended waits
 

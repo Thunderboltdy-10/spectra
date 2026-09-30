@@ -15,7 +15,7 @@ import {
   type SpectraThread,
 } from "../data/api";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
-import { spectraBus } from "../events";
+import { spectraBus, type SpectraCommands, type SpectraCommandOutcome } from "../events";
 import { requestViewportAction } from "../viewport-readiness";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
@@ -51,6 +51,8 @@ const ArtifactStudio = dynamic(
   { loading: () => <StudioSplitPlaceholder /> },
 );
 
+type ConversationTarget = string | SpectraCommands["run.openConversation"];
+
 export function RouteSidePanelHost() {
   const pathname = usePathname();
   const router = useRouter();
@@ -66,7 +68,15 @@ export function RouteSidePanelHost() {
     (workId, signal) => getSpectraArtifact(workId, { signal }),
   ));
   const [threadLoad] = useState(() => createLatestStudioLoad(
-    (threadId) => getSpectraThread(threadId),
+    async (target: ConversationTarget, signal) => {
+      const threadId = typeof target === "string"
+        ? target.trim()
+        : target.threadId?.trim() || (await getSpectraRunDetail(target.runId)).run.threadId;
+      signal.throwIfAborted();
+      if (!threadId) throw new Error("This run no longer has an available conversation.");
+      return getSpectraThread(threadId);
+    },
+    (target) => typeof target === "string" ? target.trim() : target.threadId?.trim() || target.runId,
   ));
   const artifacts = useMemo(() => (work ? [work] : []), [work]);
   const studio = useArtifactStudioState("spectra.route.studio", artifacts);
@@ -99,25 +109,33 @@ export function RouteSidePanelHost() {
     },
     [openWork],
   );
-  const openThread = useCallback(async (threadId: string) => {
-    const result = await threadLoad.load(threadId);
-    if (!result) return;
+  const openThread = useCallback(async (target: ConversationTarget) => {
+    const result = await threadLoad.load(target);
+    if (!result) return false;
     setThread(result.thread);
+    return true;
   }, [threadLoad]);
   const loadThread = useCallback(
-    async (threadId: string, failureToastId?: string | number) => {
+    async (
+      target: ConversationTarget,
+      failureToastId?: string | number,
+    ): Promise<SpectraCommandOutcome> => {
       try {
-        await openThread(threadId);
+        const opened = await openThread(target);
         if (failureToastId !== undefined) toast.dismiss(failureToastId);
+        return opened
+          ? { status: "completed", message: "Conversation opened." }
+          : { status: "failed", message: "This conversation open was cancelled." };
       } catch (error) {
         const failure = describeFailure(error, {
           fallback: "This conversation could not be opened. Check your connection, then try again.",
         });
-        showRetryToast(failure.message, (id) => loadThread(threadId, id), {
+        showRetryToast(failure.message, async (id) => { await loadThread(target, id); }, {
           id: failureToastId,
           description: `Reference ${failure.reference}`,
           label: "Try again",
         });
+        return { status: "failed", message: failure.message };
       }
     },
     [openThread],
@@ -179,7 +197,7 @@ export function RouteSidePanelHost() {
             targetId: artifactId,
             view: "artifact",
             navigate: () =>
-              surface === "full" ? fullscreen(artifactId) : openWork(artifactId),
+              surface === "full" ? fullscreen(artifactId) : loadWork(artifactId),
           }),
         navigate: (destination, targetId) => {
           if (destination === "library") {
@@ -208,7 +226,10 @@ export function RouteSidePanelHost() {
           requestViewportAction({
             targetId: threadId,
             view: "conversation",
-            navigate: () => openThread(threadId),
+            navigate: async () => {
+              const outcome = await loadThread(threadId);
+              if (outcome.status === "failed") throw new Error(outcome.message);
+            },
           }),
         addComment: ({ artifactId, body, regionId }) => postSpectra({
           action: "createArtifactComment",
@@ -220,7 +241,7 @@ export function RouteSidePanelHost() {
         preferences,
         replacePreferences,
       }),
-    [fullscreen, openThread, openWork, preferences, replacePreferences, router],
+    [fullscreen, loadThread, loadWork, preferences, replacePreferences, router],
   );
 
   useEffect(() => {
@@ -234,19 +255,13 @@ export function RouteSidePanelHost() {
     });
     const removeThread = spectraBus.handle(
       "run.openConversation",
-      async (command) => {
-        const resolvedThreadId =
-          command.threadId?.trim() ||
-          (await getSpectraRunDetail(command.runId)).run.threadId;
-        if (!resolvedThreadId) throw new Error("RUN_THREAD_NOT_FOUND");
-        await openThread(resolvedThreadId);
-      },
+      (command) => loadThread(command),
     );
     return () => {
       removeWork();
       removeThread();
     };
-  }, [eligible, fullscreen, loadWork, openThread]);
+  }, [eligible, fullscreen, loadThread, loadWork]);
 
   function closeWork() {
     workLoad.cancel();

@@ -40,6 +40,7 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
+| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — local:start:all --instance 8 reported the app, local Convex, gateway, and Bridge ready; the existing local database remained available | — | 396aa190 |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
 | Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
@@ -56,6 +57,7 @@ _Written by the verifier at the end._
 | ManageBac all-class sync progress polling | W1-16 · step 6 (local unthrottled observation) | PASS — newest run reached Complete in History and Sync now became available without a manual reload | LV-015 (VERIFIED) | 7c4169a8 |
 | P2-SYNC-RESUME · step 1 — large or throttled reconciliation | P2-SYNC-RESUME · step 1 | BLOCKED — no large tenant or throttled fixture was available; the local unthrottled run does not prove the >4-minute pause/resume path | LV-015 | 7c4169a8 |
 | ManageBac task/calendar admin views after a completed all-class sync | W1-16 · step 6 (admin surface check) | PASS — after one reload, Overview showed Tasks 258 and Calendar 81; both tabs rendered those records, and History remained Complete | LV-016 (VERIFIED) | 7c0e4b55 |
+| ManageBac school overview after local restart | exploration · school records | PASS — Profile A still showed Connected with Classes 22, Calendar 81, and Tasks 258 after the full local stack restart | — | 396aa190 |
 | ManageBac overview before first successful sync | exploration · first-use state | PASS | LV-013 (VERIFIED) | 0a8a2360 |
 | W3-07 student no-match identity and dependent sync | W3-07 · step 5 | BLOCKED — Profile A is the only supplied login and is a school admin/platform superadmin; the admin ManageBac view shows 22 class options, but this script requires an ordinary student identity | — | 6451c630 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
@@ -67,9 +69,11 @@ _Written by the verifier at the end._
 | P3-EDITORS — flashcard structured-list collaboration (E1 flashcards portion) | P3-EDITORS · Needs live verification · structured lists | PASS — A and B added a card within one second; both showed three cards after sync and each still had three after reload | — | 7c0e4b55 (app code) |
 | P3-EDITORS — Plan structured-list collaboration (E1 Plan portion) | P3-EDITORS · Needs live verification · structured lists | PASS — on commit 57dbcb87, both sessions retained the two simultaneous additions after sync and reload; LV-017 remains NEEDS-INFO for the separate package check | LV-017 (live recheck PASS) | 57dbcb87 (app code) |
 | P3-EDITORS — Plan non-overlapping concurrent updates (E2 Plan portion) | P3-EDITORS · Needs live verification · save does not revert a peer | PASS — A renamed task 1 while B marked task 2 done; both changes appeared in both sessions and remained after reload | — | 7c0e4b55 (app code) |
-| P3-EDITORS — quiz same-prompt concurrent text edits (E2 quiz portion) | P3-EDITORS · Needs live verification · save does not revert a peer | FAIL — in two valid concurrent runs, A and B stayed on different prompt text for more than six seconds with no conflict banner; after reload, one run showed `colors` and one showed `color` | LV-018 | 7c0e4b55 (app code) |
-| P3-BRIDGE-LENS — new document and Library browser health requests | P3-BRIDGE-LENS · step 9 | FAIL — Browser B initial open showed 180 console errors and reload showed 4 more; Browser A's later Library/editor session log had 96 CORS and 96 `net::ERR_FAILED` lines for Bridge health requests | LV-012 | 6451c630 (app code; Bridge predated this task) |
-| P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | BLOCKED — the Bridge was already running before this task; the user instructed the verifier not to stop or restart a process it did not start | LV-012 | ed76ef1f |
+| P3-EDITORS — quiz same-prompt concurrent text edits (E2 quiz portion) | P3-EDITORS · Needs live verification · save does not revert a peer | PASS — on 3574fca2, with both carets placed before the keystrokes, both focused editors showed `colors` after 6.5 seconds; both retained it after blur and reload | LV-018 (VERIFIED) | 3574fca2 (app code) |
+| P3-BRIDGE-LENS — new document and Library browser health requests | P3-BRIDGE-LENS · step 9 | PASS — after the authorized instance-8/Bridge restart, a new document opened in A and the same URL in B; repeated Bridge health GETs returned HTTP 200 and each browser had 0 console errors | LV-012 (NEEDS-DECISION) | 396aa190 |
+| P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | PASS — instance 8 and its Bridge restarted; Bridge reported ready for the app origin, and A/B had 0 console errors after document reload | LV-012 (NEEDS-DECISION) | 396aa190 |
+| P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | BLOCKED — answer streamed without visible IDs; the browser UI does not expose provider-call count, so the one-call expectation is not proven | — | 396aa190 |
+| P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | FAIL — the run ended Paused with “The response did not pass validation”; no completed essay or length note was shown | LV-019 | 396aa190 |
 
 ## Issues
 
@@ -609,11 +613,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ### LV-018 · Quiz prompt loses a concurrent text edit
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** Quiz editor / signed-in school administrator using two browser sessions
 - **Report script:** P3-EDITORS · Needs live verification · Save does not revert a peer (E2), step 2
-- **Commit tested:** `7c0e4b55` (app code; local instance 8)
+- **Commit tested:** `3574fca2` (app code; local instance 8)
 - **Frequency:** Two valid simultaneous-edit pairs both remained visibly divergent for more than six seconds with no conflict banner; after reload, one pair retained the merged text and one pair retained only Browser B's edit.
 
 **Steps**
@@ -634,6 +638,39 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Change: Publish human edits immediately into the parent's existing coalesced save loop and clear the already-published typing flag. Apply incoming ProseMirror deltas while focused, mapping the selection through the peer's insertion/deletion, without onChange echoes or adding peer hydration to local undo history. Blur cannot replay a stale previously published draft.
 - Test: Four regressions fail on the prior component and pass after the fix: immediate intent, focused merged text/caret/no echo, no stale blur replay, and two actual rich editors merging through real Yjs then preserving colors on focused convergence, blur and durable reload. All 45 focused rich-text/structured/quiz/flashcard/native-model tests pass; both TypeScript checks, full lint and all five gates pass. Final full suite: 4,379 passed, 1 failed, 1 skipped (502 passed files, 1 failed, 1 skipped). The sole failure is LV-017 hosted gateway packaging omitting the two required shared modules; all rich-text/editor cases passed. This is not a green full-suite result.
 - Re-check nearby: Reload both tabs for the committed frontend, repeat the reported colour/colours/color edits, and keep both fields focused beyond the existing six-second observation. Both should display colors before reload and retain colors after blur and reload. Repeat in shared flashcard text and planner descriptions; check caret position, formatting, remote insert/delete and local undo retaining peer edits. No backend or gateway restart, deploy or codegen is needed for this issue.
+
+**Verification** (verifier): VERIFIED on app commit `3574fca2b37302aa272141dd5f17e1fe6c575c47`, 2026-09-30. Reloaded both Profile A sessions. In A, set the shared prompt to `colour` and confirmed both sessions displayed it. Placed A's caret at the end and B's caret after four characters before either keystroke, then typed `s` in A and pressed Delete in B. After 6.5 seconds both editors displayed `colors` while focused; A's caret remained at the end and B's at offset 4. Pressed Tab in each session to blur, then reloaded both; each still displayed `colors`. The two browser logs contain only the existing Bridge CORS/health `net::ERR_FAILED` entries and no other console errors. Evidence: `.spectra-local/live-verification/LV-018-verified-3574fca2-6s-before-blur-A-redacted.png`; `.spectra-local/live-verification/LV-018-verified-3574fca2-6s-before-blur-B-redacted.png`; `.spectra-local/live-verification/LV-018-verified-3574fca2-6s-after-reload-A-redacted.png`; `.spectra-local/live-verification/LV-018-verified-3574fca2-6s-after-reload-B-redacted.png`.
+
+### LV-019 · Long chat answer pauses after validation failure
+
+- **Status:** FIXED
+- **Severity:** High
+- **Surface / role:** Chat AI answer / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Needs live verification · Answer, step 2
+- **Commit tested:** `396aa190` (local instance 8, web port 3000)
+- **Frequency:** 1 of 1 submitted long-essay requests; clicking Retry once left the same paused state visible, so no independent second request was counted.
+
+**Steps**
+1. On local instance 8 at commit `396aa190`, sign in using the saved Profile A session and open a new chat with no context objects selected.
+2. Send `Write a 4,000-word essay explaining the causes of World War I.`
+3. Wait until the run reaches a terminal state.
+4. Open the message details and inspect the final run state.
+5. Click **Retry** once and inspect the message again.
+
+**Expected:** P3-AI-ENGINE step 2 says to “Expect it to continue past the output limit with no duplicated text. If it still stops, expect the length note.”
+
+**Actual:** The chat streamed essay text, then ended with “The response did not pass validation” and “Spectra paused this run,” with a **Retry** button. No completed essay or length note appeared in the chat. Clicking **Retry** once left the same paused validation message visible. Playwright reported 0 console errors and 1 warning during this run.
+
+**Evidence:** `.spectra-local/live-verification/LV-019-ai-4000word-paused-first-redacted.png`; `.spectra-local/live-verification/LV-019-ai-4000word-paused-retry-redacted.png`; Playwright console excerpt: `Total messages: 3 (Errors: 0, Warnings: 1)`; the sole warning was Clerk's development-key notice.
+
+**Fix** (fixer)
+- Commit: `427cb3c9c3664e03a6ff62af41f39b19cafba913`.
+- Root cause: Ordinary model prose is adapted into the same validated plan envelope as operational completions, whose legacy finalResponse field capped replies at 4,000 characters. Local redacted diagnostics confirm both the original essay and Retry failed only at finalResponse with too_big; the initial answers were 29,388 and 27,457 characters. Repair turns encountered the same constraint, so continuation and Retry could not preserve the requested full answer.
+- Change: Remove the hidden prose length limit from the canonical validator and matching plan/creation provider schemas, keeping nonempty responses and all operation/ownership/intent checks. This also fixes long replies accompanying accepted edits and artifact creation; output continuation and truthful cutoff notes remain unchanged. Model, provider, reasoning and context settings are unchanged.
+- Test: Four regressions fail before and pass after through the public callModel boundary: long ordinary prose without repair, successfully continued prose without duplication, exhausted continuation retaining the full text and length note, and a long completion retaining accepted operations. A fifth checks both provider contracts match the validator. All 117 focused completion/agent-loop/diagnostics/run-route tests, both TypeScript checks, full lint and all five gates passed. Final full suite: 4,382 passed, 3 failed, 1 skipped; failures are the pending LV-017 hosted package and unchanged Stop-auth/sheets timing tests. Those two unchanged files then pass 136/136 in a separate re-check. This full suite is not green.
+- Re-check nearby: Reload the frontend and repeat the original new-chat essay, inspecting the completed answer and terminal state; check Retry on the earlier paused request and a detailed answer accompanying an edit. If output continuations truly exhaust their limit, the full partial answer must retain its explicit length note. No backend restart, deploy or codegen is needed.
+
+**Verification** (verifier):
 
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
@@ -667,6 +704,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 -->
 
 ## Fixer closeout · 30 September 2026
+
+- Latest fix: LV-019 is FIXED at `427cb3c9c3664e03a6ff62af41f39b19cafba913`. Local diagnostics confirm the same 4,000-character finalResponse bound rejected both the original essay and Retry. Remove that prose bound consistently from the validator and provider schemas; four public-planner regressions fail before and pass after, with a fifth provider-contract alignment check. All 117 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier received the commit and reload-only checks; live verification remains pending.
+- Latest full suite after LV-019: **4,382 passed, 3 failed, 1 skipped**; **500 passed files, 3 failed, 1 skipped** (504 files), duration 310.17 seconds. Failures: LV-017 hosted package omits shared runtime imports; unchanged run-route Stop auth case returned 409 instead of 403; unchanged sheets dense-cell patch took 49.1988 ms against its 40 ms bound. Both latter files then passed **136/136** in a separate run. Logs: `.spectra-local/launch-fixer-LV019-full.log` and `.spectra-local/LV019-full-failures-recheck.log`. The full-suite result is not green and the LV-017 package exception remains pending.
+- Latest implementation commit: `427cb3c9` — preserve long final prose through validation and continuation (LV-019). Earlier implementation commits and outstanding decisions/reproduction limits are retained below.
+
 
 - Latest batch: LV-018 is FIXED at `3574fca2b37302aa272141dd5f17e1fe6c575c47`. All four real rich-editor regressions fail before and pass after; paired rich editors merge colour/colours/color to colors, converge while focused, and retain it through blur and a Yjs reload. All 45 focused tests, both TypeScript checks, full lint and all five gates passed. The verifier received the code hash and no-restart frontend re-check steps.
 - LV-017 code fix is committed at `57dbcb87093133c547c320c9c111335d20ff25ed` and has a successful local two-tab/reload verification recorded by the verifier. Six regressions failed before and pass after; 66 focused tests, both TypeScript checks, lint and all gates passed. It remains **NEEDS-INFO** because the hosted gateway package omits its two new shared runtime imports. The user instruction forbids deployment-configuration edits; a narrow exception was requested for those two Docker COPY source entries. A reviewable patch is prepared at `.spectra-local/LV017-hosted-package.patch` and passes `git apply --check`; it is unapplied. No Dockerfile edit or deployment occurred.

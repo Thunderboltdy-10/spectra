@@ -164,6 +164,7 @@ function emptySchoolRead(action: string) {
   if (action === "schoolMembers") return ok({ members: [] });
   if (action === "search") return ok({ artifacts: [], workspaces: [] });
   if (action === "resultCards") return ok({ resultCards: [] });
+  if (action === "runTabs") return ok({ runTabs: [] });
   if (
     action === "timetableReminderNotifications" ||
     action === "plannerReminderNotifications" ||

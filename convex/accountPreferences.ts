@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./functions";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedAccount } from "./identityShared";
 import {
   PREFERENCE_SCHEMA_VERSION,
   mergePreferenceValues,
@@ -34,11 +34,12 @@ export const layers = query({
     deviceId: v.string(),
   },
   handler: async (ctx, args) => {
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor) return [];
+    const account = await getAuthenticatedAccount(ctx);
+    // Null keeps clients waiting for account registration; [] is ready but empty.
+    if (!account) return null;
     const rows = await ctx.db
       .query("accountPreferences")
-      .withIndex("by_account", (q) => q.eq("accountId", actor.accountId))
+      .withIndex("by_account", (q) => q.eq("accountId", account._id))
       .collect();
     return rows
       .filter((row) =>
@@ -53,8 +54,8 @@ export const layers = query({
 export const writeLayer = mutation({
   args: { scope: scopeValidator, scopeKey: v.string(), values: v.any() },
   handler: async (ctx, args) => {
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const account = await getAuthenticatedAccount(ctx);
+    if (!account) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const scope = preferenceScopeSchema.parse(args.scope);
     if (!args.scopeKey.trim()) throw new Error("PREFERENCE_SCOPE_KEY_REQUIRED");
     const values = preferenceLayerValuesSchema.parse(args.values);
@@ -66,7 +67,7 @@ export const writeLayer = mutation({
     const existing = await ctx.db
       .query("accountPreferences")
       .withIndex("by_account_scope_key", (q) =>
-        q.eq("accountId", actor.accountId).eq("scope", scope).eq("scopeKey", args.scopeKey),
+        q.eq("accountId", account._id).eq("scope", scope).eq("scopeKey", args.scopeKey),
       )
       .unique();
     const now = Date.now();
@@ -78,7 +79,7 @@ export const writeLayer = mutation({
       return existing._id;
     }
     return await ctx.db.insert("accountPreferences", {
-      accountId: actor.accountId,
+      accountId: account._id,
       scope,
       scopeKey: args.scopeKey,
       values,

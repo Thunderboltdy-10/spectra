@@ -236,8 +236,10 @@ export function useSpectraPreferences({
       const publish = () => {
         try {
           const value = watch.localQueryResult();
-          if (!value) return;
-          setRemoteLayers(value);
+          if (value === undefined) return;
+          setRemoteLayers(value ?? undefined);
+          // Keep watching while the signed-in account is being registered.
+          if (value === null) return;
           unsub?.();
           unsub = null;
         } catch (error) {
@@ -281,6 +283,7 @@ export function useSpectraPreferences({
     if (
       !convex ||
       !hydrated ||
+      !signedIn ||
       !currentDeviceId ||
       !remoteLayers ||
       migrated.current
@@ -306,10 +309,11 @@ export function useSpectraPreferences({
         }),
       );
     }
-    void Promise.all(writes).then(() =>
-      window.localStorage.setItem(MIGRATION_KEY, "true"),
+    void Promise.all(writes).then(
+      () => window.localStorage.setItem(MIGRATION_KEY, "true"),
+      () => setSaveError(PREFERENCE_SAVE_FAILURE),
     );
-  }, [convex, currentDeviceId, hydrated, remoteLayers, writeLayer]);
+  }, [convex, currentDeviceId, hydrated, remoteLayers, signedIn, writeLayer]);
 
   const revertFailedWrite = useCallback((generation: number) => {
     if (generation !== writeGeneration.current) return;
@@ -410,7 +414,7 @@ export function useSpectraPreferences({
     // value. Its existing completion refresh will reconcile server state.
     if (generation !== writeGeneration.current ||
       refreshGeneration !== externalRefreshGeneration.current || inflightWrites.current > 0) return;
-    setRemoteLayers(layers);
+    setRemoteLayers(layers ?? undefined);
   }, [convex, signedIn, currentDeviceId, workspaceId, workType]);
 
   return { preferences, hydrated, saveError, saving, update, replace, reset, refreshConfirmedPreferences };

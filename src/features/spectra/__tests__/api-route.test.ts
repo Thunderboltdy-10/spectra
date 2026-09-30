@@ -406,3 +406,29 @@ describe("Spectra API route", () => {
 });
 
 
+
+
+it.each(["", "&surface=workspace"])("returns empty run tabs before school membership (%s)", async (scope) => {
+  const convexQuery = vi.fn();
+  vi.doMock("@/lib/auth-server", () => mockAuth(vi.fn().mockRejectedValue(new Error("AUTH_NO_SCHOOL: no school"))));
+  vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+  const route = await import("@/app/api/spectra/route");
+  const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=runTabs&limit=120" + scope));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ runTabs: [] });
+  expect(convexQuery).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ["AUTH_NOT_SIGNED_IN: Sign in to continue.", 401],
+  ["AUTH_EMAIL_UNVERIFIED: Verify your email.", 403],
+])("keeps run-tab authorization failures visible (%s)", async (message, status) => {
+  const convexQuery = vi.fn();
+  vi.doMock("@/lib/auth-server", () => mockAuth(vi.fn().mockRejectedValue(new Error(String(message)))));
+  vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+  const route = await import("@/app/api/spectra/route");
+  const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=runTabs"));
+  expect(response.status).toBe(status);
+  expect(convexQuery).not.toHaveBeenCalled();
+});

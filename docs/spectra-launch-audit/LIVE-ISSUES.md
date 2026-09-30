@@ -94,9 +94,9 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — flashcard rewrite | P3-AI-ENGINE · Flashcard deck · rewrite | PASS — all 12 cards' fronts, backs and hints were in Spanish after rewrite and reload; card count remained 12 | — | 68587ec8 |
 | P3-AI-ENGINE — quiz create/edit/append | P3-AI-ENGINE · Quiz | PASS — created six questions with 4 multiple choice/2 short answer; the harder Q2 edit persisted; appended two enzyme questions and after reload retained all eight questions with 5 multiple choice/3 short answer; 0 console errors. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-quiz-append-verified-d61b1e25-redacted.png` | — | d61b1e25 |
 | P3-WORKSPACE-FLOWS — command bar keyboard focus and search | P3-WORKSPACE-FLOWS · step 5 | FAIL — clicking the visible command-bar button opened the list, showed Update memory, focused its Memory field, and both Escape steps restored focus correctly; searching `share` showed no command asking for an ID. Pressing Ctrl+Shift+F twice instead focused `Search recent chats` with no dialog. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt` | LV-028 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — Calendar DST view prerequisite | P3-WORKSPACE-FLOWS · step 2 | FAIL — browser timezone was Europe/Madrid, but the Calendar view returned HTTP 500 on both its initial read and Try again, leaving the error state visible; the 20 Oct–3 Nov date check and default-time event check could not be reached. Evidence: `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt` | LV-029 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — no public agent could be opened because the `/agents` list stayed in its load-error state; see LV-030 | LV-030 (OPEN) | 45281d26 |
-| Free exploration — `/agents` library | exploration · first-week /agents | FAIL — “Could not load agents. Retry” remained visible and 15 `/api/spectra?action=agentGraphPage` requests returned HTTP 400. Evidence: `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt` | LV-030 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | FAIL — after restarting local instance 8 with application commit `7bce0577`, Calendar loaded; every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The three default start/end pairs were 19:05–20:05, 19:06–20:06, and 19:07–20:07 local, rather than the next whole hour. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt` | LV-029 (VERIFIED), LV-033 (OPEN) | 7bce0577 |
+| P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
+| Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | FAIL — the offline Undo showed “This device is offline. You can keep working; Spectra will send changes when you reconnect.” without a Retry button; the item remained in Trash after reconnect. A separate permanent delete while the item was open showed “Something went wrong” with 3 `WORK_NOT_FOUND` console errors. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-45281d26-redacted.png`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-observations-redacted.txt` | LV-031 (OPEN), LV-032 (OPEN) | 45281d26 |
 
 | P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
@@ -991,12 +991,12 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-029 · Calendar page stays in an error state
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** `/calendar` / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 2
-- **Commit tested:** `45281d26` (local instance 8; web port 3000)
-- **Frequency:** 2 of 2 Calendar reads
+- **Commit tested:** `7bce0577` (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 pre-fix reads failed; 2 of 2 post-fix reads loaded
 
 **Steps**
 1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and open `/calendar`.
@@ -1009,6 +1009,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 **Evidence:** `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt`.
 
+**Verification (2026-09-30):** After restarting the verifier-owned local instance 8, `/calendar` loaded on the initial read and after a fresh reload. In Europe/Madrid, the selected 20 Oct view showed each date from 20 Oct through 3 Nov once, including 27 Oct. The initial read succeeded, so the former `Try again` control was not shown. The browser console had 0 errors. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`.
+
 **Fix** (fixer)
 - Commit: `7bce0577d382644b9d755e6243673d062b4621fa`.
 - Root cause: A read-only reproduction against local instance 8 failed with `ReferenceError: Buffer is not defined` in Calendar cursor encoding. Both cursor families unconditionally used Node Buffer, which is absent from Convex's web-standard query runtime; even an empty visible range creates a continuation. The Node-based test environment had hidden the same failure across all streams.
@@ -1019,12 +1021,12 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-030 · Agent library stays in a load-error state
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** `/agents` Agent library / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 7; free exploration
-- **Commit tested:** `45281d26` (local instance 8; web port 3000)
-- **Frequency:** 15 of 15 observed agent-list requests returned HTTP 400 within about two minutes
+- **Commit tested:** application `7bce0577`; local migration recorded in `17f7a5f9` (instance 8; web port 3000)
+- **Frequency:** 15 of 15 pre-fix agent-list requests returned HTTP 400; 2 of 2 post-migration reloads reached the empty state
 
 **Steps**
 1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and open `/agents`.
@@ -1037,6 +1039,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The page retained the “Could not load agents. Retry” button after the retry. The Published agents collection and the other collections displayed “No agents in this collection yet.” No public agent preview was available. Fifteen `GET /api/spectra?action=agentGraphPage` requests returned HTTP 400, and the console recorded 15 corresponding errors.
 
 **Evidence:** `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt`.
+
+**Verification (2026-09-30):** After the local catalog migration, `/agents` left its loading state and showed “No agents in this collection yet.” in all four collections. On the measured reload, the empty state appeared after 3.6 seconds. The old load-error message and Retry action were absent, no HTTP error response was observed during the measured reload, and the console had 0 errors. No authorized public agent fixture was available, so preview/install remains separately blocked under step 7. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt`.
 **Fix** (fixer)
 - Commit: `17f7a5f911989d42bb35d61135ac530b89631822` (operator-prerequisite documentation; the repair used the existing internal migration).
 - Root cause: Read-only reproduction returned `CATALOG_READ_MODEL_REQUIRED`, and local instance 8's read-model migration table was empty. Agent and artifact graph readers intentionally reject an uncertified catalog rather than returning partial results; the required complete summary migration was documented in S10-CONVEX but missing from the launch README operator checklist.
@@ -1047,7 +1051,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-031 · Permanently deleting an open trashed work shows an error page
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Library Trash and Work studio / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 8
@@ -1066,6 +1070,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The delete-confirmation dialog appeared and the document no longer appeared in Trash. The page at `/library?artifactId=<redacted>` then displayed “Something went wrong” with Try again and Reload page controls. The console recorded 3 errors, including `Uncaught ConvexError: WORK_NOT_FOUND` from `replicas:forWork`.
 
 **Evidence:** `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-45281d26-redacted.png`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-observations-redacted.txt`.
+**Fix** (fixer)
+- Commit: `518fe25248da17bbdaf1398d206b0b9740973223`.
+- Root cause: Live replica metadata threw WORK_NOT_FOUND as soon as deletion tombstoned the open work, reaching the application error boundary before the shell retired it. Storage-transition metadata had the same exceptional-resource assumption. A post-delete close alone could not cover the reactive race, another tab's deletion or revoked access.
+- Change: Both metadata queries return null for unavailable work without revealing private replica/transition state. Studios and resources publish that authoritative absence through the existing access coordinator, which evicts cached bodies and session references, fences pending older opens and retires only the affected Library/Workspace URL while preserving scope. The studio becomes read-only during retirement. Native Word/Office/history preparation explicitly rejects missing metadata before uploads/effects; payload and mutation authority remain strict. This also covers shared/revoked work, resources and storage controls.
+- Test: Two real-model tombstone/removal regressions and three native-preparation regressions fail before and pass after. Six hook/URL integration checks prove cached-body eviction, pending-open fencing, loading versus unavailable, no repeated snapshot loop and preserved/unrelated routes. All **130 focused tests**, both TypeScript checks, full lint and all five gates pass, including owner/collaborator filesystem privacy and strict revoked payload/mutation checks. Logs: `.spectra-local/LV031-{before,native-before,focused-final,tsc,convex-tsc,lint,gates,staged-secrets}.log`.
+- Re-check nearby: Sync the committed backend body through the owned local instance-8 launcher, reload, then repeat deleting a disposable trashed document while it is open. Confirm no application error, replica-query console error, stale tab or deleted-work URL; retain the Trash/workspace location and another open work. Also try deletion from another tab and a revoked shared work. No shared deploy/codegen or environment edit occurred.
+
 
 ### LV-032 · Offline Undo in Library Trash has no retry action
 
@@ -1087,6 +1098,27 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** After Undo, the status said, “This device is offline. You can keep working; Spectra will send changes when you reconnect.” No exact `Retry` button was present. After reconnect and reload, the disposable document remained in Trash.
 
 **Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`.
+
+
+### LV-033 · Personal event defaults retain the current minute
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/calendar` personal-event composer / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 2
+- **Commit tested:** `7bce0577` (local instance 8; web port 3000)
+- **Frequency:** 3 of 3 composer openings
+
+**Steps**
+1. On local instance 8 at application commit `7bce0577`, sign in with saved Profile A, whose browser timezone is Europe/Madrid, and open `/calendar`.
+2. Click `Add event` and inspect the default `Starts` and `Ends` fields without changing them.
+3. Close and reopen the composer twice, including once after reloading `/calendar`.
+
+**Expected:** P3-WORKSPACE-FLOWS step 2 says, “Create an event with the default time. Expected: the next whole hour, local time.”
+
+**Actual:** Across three openings, the start and end defaults were 19:05–20:05, then 19:06–20:06, then 19:07–20:07 local. The first form was read at 18:05:19 and the fresh-reload form at 18:07:58. Saving a disposable local personal event confirmed it appeared in Calendar as 19:07–20:07; it was then removed through `Remove from Calendar` and no longer appeared.
+
+**Evidence:** `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt`.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--

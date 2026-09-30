@@ -45,6 +45,7 @@ _Written by the verifier at the end._
 | ManageBac admin token connection | README · Open launch risks | BLOCKED — Profile A has no active school-admin membership because its invitation could not be accepted (LV-004) | — | d551198a |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
+| `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
 
 ## Issues
 
@@ -155,13 +156,15 @@ _Written by the verifier at the end._
 
 **Fix** (fixer)
 - Commit:
-- Root cause:
-- Change:
-- Test:
-- Re-check nearby:
+- Root cause: Not yet reproduced. First-time creation hashes the same random token sent in the URL, and neither the client request wrapper nor join-token parser retries or rewrites it.
+- Change: No application change pending live evidence.
+- Test: **16/16** onboarding, membership-accept and operator-route tests passed. A temporary real-model diagnostic used a generated 43-character token, created an initial-admin invitation for the signed-in platform operator, round-tripped its join URL, previewed the correct school/role/email match, accepted it, and read back one membership and a ready saga; the diagnostic was restored afterward.
+- Re-check nearby: Confirm the mail sink decodes the MIME HTML body before extracting its invitation href.
+
+**Question for verifier:** Was the link extracted from decoded HTML, including quoted-printable escapes and soft line breaks? Please follow the decoded href and report the token length, whether encoding artifacts were present, and the preview outcome without recording the token or identity. If still unavailable, capture the structured response code and confirm the invitation belongs to this local instance.
 ### LV-005 · School data surfaces fail when Profile A has no membership
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/school-data` and `/managebac` / signed-in superadmin without an active school membership
 - **Report script:** exploration · first-week superadmin, `/school-data` and ManageBac
@@ -178,6 +181,32 @@ _Written by the verifier at the end._
 **Actual:** `/school-data` says “School records could not be read just now” and “School could not load — Check your connection, then try loading School again.” Its `/api/spectra/managebac` and `?action=myClasses` requests each return HTTP 403 twice. `/managebac` shows the message “This account does not have an active school membership,” but its `?action=overview` request returns HTTP 403 twice. The two pages together record six failed requests.
 
 **Evidence:** .spectra-local/live-verification/LV-005-school-data-no-membership.png; .spectra-local/live-verification/LV-005-managebac-no-membership.png; Playwright console excerpts show the 403 responses; identity values redacted.
+
+**Fix** (fixer)
+- Commit: `952438614e8cf8f74c44782c38c69b8530b438f8` (`fix(school): require membership before mounting data readers (LV-005)`).
+- Root cause: The School and ManageBac pages mounted school-scoped readers without checking whether the signed-in account had a membership. The API correctly rejected those reads; School then discarded the structured refusal and showed connection advice. Development effect replay repeated the rejected reads.
+- Change: one shared server membership gate checks the current membership before mounting the readers on /school-data, its /school alias, and /managebac. Accounts without membership see shared invitation guidance; members keep the existing surfaces, and other auth/backend failures propagate. API authorization and school-data privacy remain enforced.
+- Test: Before the fix, all 15 route-boundary regression cases failed. After it, **29/29** focused route-boundary, School-action, ManageBac-dialog and operator-authorization tests passed. The regressions prove readers stay unmounted without membership, members mount them, fresh membership is requested, and signed-out/unverified/backend failures are not treated as no-school. Both TypeScript checks, full lint and all five gates passed.
+- Re-check nearby: open and reload /school-data, /school and /managebac before accepting an invitation: show the join guidance without ManageBac GETs, connection advice or Retry. After accepting, reload each route and confirm the normal records/integration UI loads. Check removed membership is reflected after reload. No codegen or shared deployment step is needed.
+### LV-006 · Analytics emits 403 errors for the no-membership state
+
+- **Status:** OPEN
+- **Severity:** Low
+- **Surface / role:** `/analytics` / signed-in superadmin without an active school membership
+- **Report script:** exploration · first-week superadmin, `/analytics`
+- **Commit tested:** d551198a
+- **Frequency:** Reproduced on initial load and reload (2 of 2); two failed requests per load
+
+**Steps**
+1. Start local instance 4 on commit `d551198a` and sign in through the saved Profile A session without an active school membership.
+2. Open `http://localhost:3060/analytics` and wait for the no-membership state.
+3. Reload the page and inspect the browser console.
+
+**Expected:** The page presents the unavailable state without failed requests.
+
+**Actual:** The page says “Personal analytics: Temporarily unavailable” and “This account does not have an active school membership.” Each load also sends two GET requests to `/api/spectra/analytics`, both returning HTTP 403 and appearing as console errors.
+
+**Evidence:** .spectra-local/live-verification/LV-006-analytics-no-membership.png; Playwright console excerpt: 2 HTTP 403 errors per load; date-range query values omitted.
 
 **Fix** (fixer)
 - Commit:

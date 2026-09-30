@@ -135,7 +135,7 @@ _Written by the verifier at the end._
 
 ### LV-004 · Unexpired initial school administrator invite is unavailable
 
-- **Status:** NEEDS-INFO
+- **Status:** CANNOT-REPRODUCE
 - **Severity:** High
 - **Surface / role:** `/join?token=<issued>` / signed-in initial school administrator
 - **Report script:** W2-14 · step 1; P2-EXPERIENCE · step 3
@@ -155,13 +155,13 @@ _Written by the verifier at the end._
 **Evidence:** .spectra-local/live-verification/LV-004-admin-invite-unavailable.png; Playwright console excerpt: 2 errors per load, both `/api/spectra/administration` POST requests returning 404; invitation token and identity redacted.
 
 **Fix** (fixer)
-- Commit:
-- Root cause: Not yet reproduced. First-time creation hashes the same random token sent in the URL, and neither the client request wrapper nor join-token parser retries or rewrites it.
-- Change: No application change pending live evidence.
+- Commit: assessment only; no application change.
+- Root cause: The real-model creation/preview/accept flow works with the issued token. The verifier subsequently confirmed the mail sink held quoted-printable MIME with 18 soft line breaks and encoded equals signs; following the decoded HTML href yielded the correct 43-character token, a valid preview, and an enabled Join school button. This points to the original link extraction from encoded mail, rather than the application rejecting its stored unexpired invitation.
+- Change: No application change. Record the corrected decoded-link observation; do not special-case MIME artifacts in invitation authentication.
 - Test: **16/16** onboarding, membership-accept and operator-route tests passed. A temporary real-model diagnostic used a generated 43-character token, created an initial-admin invitation for the signed-in platform operator, round-tripped its join URL, previewed the correct school/role/email match, accepted it, and read back one membership and a ready saga; the diagnostic was restored afterward.
-- Re-check nearby: Confirm the mail sink decodes the MIME HTML body before extracting its invitation href.
+- Re-check nearby: Continue acceptance with the decoded link, reload /workspace, and confirm one active membership plus a ready initial-admin saga. Decode MIME before extracting future invitation links.
 
-**Question for verifier:** Was the link extracted from decoded HTML, including quoted-printable escapes and soft line breaks? Please follow the decoded href and report the token length, whether encoding artifacts were present, and the preview outcome without recording the token or identity. If still unavailable, capture the structured response code and confirm the invitation belongs to this local instance.
+**Resolved live question:** Verifier reported quoted-printable encoding artifacts, 18 soft breaks, a decoded token length of 43, and a valid preview with Join school enabled. Token and identity were not logged.
 ### LV-005 · School data surfaces fail when Profile A has no membership
 
 - **Status:** FIXED
@@ -190,7 +190,7 @@ _Written by the verifier at the end._
 - Re-check nearby: open and reload /school-data, /school and /managebac before accepting an invitation: show the join guidance without ManageBac GETs, connection advice or Retry. After accepting, reload each route and confirm the normal records/integration UI loads. Check removed membership is reflected after reload. No codegen or shared deployment step is needed.
 ### LV-006 · Analytics emits 403 errors for the no-membership state
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Low
 - **Surface / role:** `/analytics` / signed-in superadmin without an active school membership
 - **Report script:** exploration · first-week superadmin, `/analytics`
@@ -209,11 +209,11 @@ _Written by the verifier at the end._
 **Evidence:** .spectra-local/live-verification/LV-006-analytics-no-membership.png; Playwright console excerpt: 2 HTTP 403 errors per load; date-range query values omitted.
 
 **Fix** (fixer)
-- Commit:
-- Root cause:
-- Change:
-- Test:
-- Re-check nearby:
+- Commit: `661791538f937d3774e559b903b7c7f511c5493a` (`fix(analytics): wait for membership before loading school metrics (LV-006)`).
+- Root cause: Analytics mounted its school-scoped reader before establishing that the account had a current school membership. Its API correctly refused the request, and development effect replay doubled it; the unavailable copy came only after those failures. This is the same missing page boundary diagnosed in LV-005.
+- Change: Reuse the shared server membership gate on /analytics. Without membership, invitation guidance is rendered before the analytics reader mounts; current members keep the existing analytics and other auth/backend errors still propagate.
+- Test: The five new Analytics boundary cases failed before the change while the 15 School/ManageBac cases stayed green. After it, **34/34** boundary, operator-authorization and bounded analytics model tests passed. Both TypeScript checks, full lint and all five gates passed. Full suite: **4,326 passed, 0 failed, 1 skipped** (497 passed files, 1 skipped).
+- Re-check nearby: open and reload /analytics without membership: invitation guidance, no analytics GETs and no 403 console errors. After acceptance, reload to confirm normal analytics, role-specific scope and metrics availability. API access still requires membership. No codegen or shared deployment step is required.
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -246,11 +246,10 @@ _Written by the verifier at the end._
 
 ## Fixer closeout · 30 September 2026
 
-- Fix commits: `454a7bbe` — finish Convex selection before detaching the stack (LV-001); `94d3cbb3` — settle account reads before joining a school (LV-002). `690266bc` records the LV-001 audit result; `3df6301a` records the LV-002 audit result. The accompanying LV-003 assessment commit records the pending response-contract decision.
-- Latest full suite (`npx vitest run`): **4,305 passed, 1 failed, 1 skipped** (495 passed files, 1 failed, 1 skipped). The unchanged run-route Stop authorization case timed out at 15 seconds under the full run; rerun alone: **59 passed**. Raw local result: `.spectra-local/launch-fixer-LV002-full.log`.
-- LV-003 assessment: **13 invitation/join/error-contract tests passed**, including the temporary Strict Mode two-request diagnostic. No implementation change.
-- LV-002 focused backend, route, preference-hook, merge, receipted-settings, AI scope-security, observation-writer and module-graph suites: **90 passed**. Both TypeScript checks, full lint and all five gates passed. Before/after evidence is in the LV-002 entry.
-- LV-001 regression: **4 Node tests passed**; focused stack suites: **22 Vitest tests passed**. Its full suite had **4,296 passed, 1 failed, 1 skipped**; the unchanged sheet timing assertion was 42.37 ms against 40 ms, and its file passed **77/77** alone. The verifier has since marked LV-001 VERIFIED.
-- Before any fixes, the full suite had **4,292 passed, 5 failed, 1 skipped**. The two failing files passed **66/66** tests in an isolated rerun. These results are baseline observations, not separate live ledger issues.
-- No issue remains OPEN, REOPENED or FIXING in this pass; LV-002 awaits live re-check. LV-003 is **NEEDS-DECISION** because the reported 404 responses and development effect replay are intended by the current contract; its entry describes retaining error statuses versus returning an unavailable preview outcome. No issue is left CANNOT-REPRODUCE.
-- Fresh local setup requires interactive project selection or both explicit local team/project values. Live product coverage continues. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.
+- Implementation commits: `454a7bbe` — complete foreground Convex selection (LV-001); `94d3cbb3` — settle account reads before school membership (LV-002); `95243861` — gate School and ManageBac readers on current membership (LV-005); `66179153` — reuse the membership gate for Analytics (LV-006).
+- Audit/assessment commits: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, and `6f1391aa` record validation, decisions, and live evidence. Each implementation entry gives its full commit hash and re-check instructions.
+- Latest full suite (`npx vitest run`): **4,326 passed, 0 failed, 1 skipped**; **497 passed files, 1 skipped**. Duration: 306.37 seconds. Raw local result: `.spectra-local/launch-fixer-LV006-full.log`. This green run supersedes earlier load-sensitive failures recorded in the individual entries.
+- Focused validation: LV-005 **29 passed**; LV-006 **34 passed**; both TypeScript checks, full lint and all five gates passed for each fix. LV-004's temporary generated-token real-model diagnostic and related suites passed **16 tests**, and its diagnostic source edits were restored. Earlier LV-001, LV-002 and LV-003 results remain in their entries.
+- LV-003 remains **NEEDS-DECISION**: keep the intended invalid/expired 404/410 responses, or change the API/client contract to a normal unavailable-preview result. LV-004 is **CANNOT-REPRODUCE**: the original mail link contained MIME encoding artifacts; the verifier followed the decoded 43-character-token href and obtained a valid preview with Join school enabled. No invitation authentication patch was needed.
+- No issue remains OPEN, REOPENED or FIXING in this pass. The verifier has marked LV-001 and LV-002 VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
+- Live coverage continues under the recorded local-verification authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.

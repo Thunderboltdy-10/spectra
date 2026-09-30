@@ -6,6 +6,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { DOMParser } from "@tiptap/pm/model";
 import { Equation, InlineEquation } from "../editor/equation-node";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { plannerDescriptionHtml, RichTextFormatBar } from "./artifact-studio";
@@ -35,7 +36,6 @@ export function ArtifactRichTextEditor({
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
   const focusedRef = useRef(false);
   const typedWhileFocusedRef = useRef(false);
-  const debounceRef = useRef<number | null>(null);
   const [initialContent] = useState(() => plannerDescriptionHtml(value));
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -55,6 +55,7 @@ export function ArtifactRichTextEditor({
       return;
     }
     onChangeRef.current(next);
+    typedWhileFocusedRef.current = false;
   };
   const editor = useEditor({
     extensions: [
@@ -86,10 +87,6 @@ export function ArtifactRichTextEditor({
     },
     onBlur: ({ editor: current }) => {
       focusedRef.current = false;
-      if (debounceRef.current) {
-        window.clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
       const html = current.getHTML();
       contentKeyRef.current = html;
       emitRichTextChange(html);
@@ -102,11 +99,8 @@ export function ArtifactRichTextEditor({
       typedWhileFocusedRef.current = true;
       const html = current.getHTML();
       contentKeyRef.current = html;
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      debounceRef.current = window.setTimeout(() => {
-        debounceRef.current = null;
-        emitRichTextChange(html);
-      }, 280);
+      // Publish intent before remote props arrive; the parent coalesces durable saves.
+      emitRichTextChange(html);
     },
   });
 
@@ -116,19 +110,27 @@ export function ArtifactRichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
-    if (focusedRef.current) return;
     const incoming = plannerDescriptionHtml(value);
     if (incoming === contentKeyRef.current) return;
     contentKeyRef.current = incoming;
-    editor.commands.setContent(incoming, { emitUpdate: false });
+    // Apply the incoming delta, rather than replacing the whole document, so
+    // a focused caret follows the peer's insertions/deletions.
+    const element = document.createElement("div");
+    element.innerHTML = incoming;
+    const next = DOMParser.fromSchema(editor.schema).parse(element, { preserveWhitespace: "full" });
+    const current = editor.state.doc;
+    const start = current.content.findDiffStart(next.content);
+    if (start === null) return;
+    const end = current.content.findDiffEnd(next.content)!;
+    const overlap = start - Math.min(end.a, end.b);
+    const endA = end.a + Math.max(0, overlap);
+    const endB = end.b + Math.max(0, overlap);
+    editor.view.dispatch(editor.state.tr
+      .replace(start, endA, next.slice(start, endB))
+      .setMeta("preventUpdate", true)
+      .setMeta("addToHistory", false));
+    typedWhileFocusedRef.current = false;
   }, [editor, value]);
-
-  useEffect(
-    () => () => {
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    },
-    [],
-  );
 
   return (
     <div

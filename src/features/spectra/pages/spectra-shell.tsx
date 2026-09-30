@@ -1744,7 +1744,7 @@ export function SpectraShell({
       object.id !== pendingArtifactOpen?.artifact._id &&
       !allArtifacts.some((artifact) => artifact._id === object.id && artifact.content !== undefined))
     .map((object) => object.id));
-  const hasOverview = Boolean(overview);
+  const hasOverview = Boolean(overview && overview.needsSchool !== true);
   useEffect(() => {
     const missing = JSON.parse(missingOpenArtifactIds) as string[];
     if (!hasOverview || missing.length === 0) return;

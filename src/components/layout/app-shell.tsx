@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { useAccountStorageReady } from "../account-storage-boundary";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -1062,7 +1063,16 @@ function ShellNavigation() {
   );
 }
 
-export function AppShell({
+export function AppShell(props: AppShellProps) {
+  const ready = useAccountStorageReady();
+  return ready ? (
+    <AppShellContent {...props} />
+  ) : (
+    <div className="min-h-dvh bg-[var(--bg-primary)]" aria-busy="true" />
+  );
+}
+
+function AppShellContent({
   children,
   fullBleed = false,
   noScroll = false,

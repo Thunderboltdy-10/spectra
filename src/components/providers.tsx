@@ -10,8 +10,8 @@ import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
 import { SpectraMotionConfig } from "@/features/spectra/motion/motion-primitives";
-import { clearAccountScopedStorage } from "@/lib/account-storage";
-import { useEffect, useRef, type ReactNode } from "react";
+import { AccountStorageBoundary } from "./account-storage-boundary";
+import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -19,19 +19,7 @@ const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 function LiveDataProvider({ children }: { children: React.ReactNode }) {
   if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");
-  return <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}><AccountStorageBoundary />{children}</ConvexProviderWithClerk>;
-}
-
-function AccountStorageBoundary() {
-  const { isLoaded, userId } = useAuth();
-  const previousUserId = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (previousUserId.current !== undefined && previousUserId.current !== userId)
-      clearAccountScopedStorage();
-    previousUserId.current = userId;
-  }, [isLoaded, userId]);
-  return null;
+  return <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}><AccountStorageBoundary>{children}</AccountStorageBoundary></ConvexProviderWithClerk>;
 }
 
 function PathScopedErrorBoundary({ children }: { children: ReactNode }) {

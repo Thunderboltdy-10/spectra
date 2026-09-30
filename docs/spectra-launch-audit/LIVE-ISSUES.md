@@ -46,6 +46,7 @@ _Written by the verifier at the end._
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
+| P3-SURFACES-2 · step 8 — ManageBac disconnect | P3-SURFACES-2 · step 8 | FAIL | LV-007 | d4e0f766 |
 
 ## Issues
 
@@ -214,6 +215,33 @@ _Written by the verifier at the end._
 - Change: Reuse the shared server membership gate on /analytics. Without membership, invitation guidance is rendered before the analytics reader mounts; current members keep the existing analytics and other auth/backend errors still propagate.
 - Test: The five new Analytics boundary cases failed before the change while the 15 School/ManageBac cases stayed green. After it, **34/34** boundary, operator-authorization and bounded analytics model tests passed. Both TypeScript checks, full lint and all five gates passed. Full suite: **4,326 passed, 0 failed, 1 skipped** (497 passed files, 1 skipped).
 - Re-check nearby: open and reload /analytics without membership: invitation guidance, no analytics GETs and no 403 console errors. After acceptance, reload to confirm normal analytics, role-specific scope and metrics availability. API access still requires membership. No codegen or shared deployment step is required.
+### LV-007 · Escape dismisses ManageBac disconnect confirmation
+
+- **Status:** CANNOT-REPRODUCE
+- **Severity:** Low
+- **Surface / role:** `/managebac` / school administrator
+- **Report script:** P3-SURFACES-2 · step 8
+- **Commit tested:** d4e0f766
+- **Frequency:** 3 of 3 attempts
+
+**Steps**
+1. In the saved Profile A session on local instance 4, open `/managebac` as the school administrator of the test school.
+2. Choose **Disconnect ManageBac** from Quick Actions.
+3. Press Escape while the confirmation is open.
+
+**Expected:** P3-SURFACES-2 step 8 says, “Escape during the disconnect does nothing.”
+
+**Actual:** The centered confirmation opens with focus on **Keep connected**. Pressing Escape dismisses the alert dialog and returns focus to **Disconnect ManageBac**. The connection remains configured. No ManageBac API response or browser console error was recorded during Escape.
+
+**Evidence:** .spectra-local/live-verification/P3-SURFACES-2-managebac-disconnect-confirmation.png; Playwright: alertdialog count 1 → 0; focus “Keep connected” → “Disconnect ManageBac”; center delta 0 px on both axes; 0 ManageBac API responses; 0 console errors. No email or API key was recorded.
+
+**Fix** (fixer)
+- Commit: assessment only; no application change.
+- Root cause: The recorded steps press Escape on the idle confirmation before clicking Disconnect; no disconnect request is pending. The report's S7 fix description and existing test require dismissal to be blocked while busy, and the live-script phrase “during the disconnect” refers to that running action. The shared ConfirmDialog intentionally allows cancellation before confirmation, then blocks dismissal and disables both answers while pending.
+- Change: none. Changing the idle dialog to ignore Escape would change the shared confirmation contract without reproducing a failure of its pending guard.
+- Test: **8/8** ManageBac-dialog and shared modal-focus tests passed. Temporary diagnostics reproduced the reported idle Escape calling onClose once with no onConfirm call, then confirmed that clicking Disconnect and rerendering pending leaves the alert dialog open on Escape, does not call onClose, and disables both answers. Existing “cannot be dismissed while the disconnect runs” also passes. Diagnostic source edits were restored byte-for-byte.
+- Re-check nearby: distinguish opening the confirmation from starting the disconnect. Before confirmation, Escape cancels and returns focus to the opener; during a pending confirmed action, Escape and both answers must do nothing. Continue Settings/Manifest focus-return checks. The pending contract can be tested with a delayed local mocked request without disconnecting a real provider.
+
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
 ### LV-000 · <short title>
@@ -250,6 +278,7 @@ _Written by the verifier at the end._
 - Audit/assessment commits: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, and `6f1391aa` record validation, decisions, and live evidence. Each implementation entry gives its full commit hash and re-check instructions.
 - Latest full suite (`npx vitest run`): **4,326 passed, 0 failed, 1 skipped**; **497 passed files, 1 skipped**. Duration: 306.37 seconds. Raw local result: `.spectra-local/launch-fixer-LV006-full.log`. This green run supersedes earlier load-sensitive failures recorded in the individual entries.
 - Focused validation: LV-005 **29 passed**; LV-006 **34 passed**; both TypeScript checks, full lint and all five gates passed for each fix. LV-004's temporary generated-token real-model diagnostic and related suites passed **16 tests**, and its diagnostic source edits were restored. Earlier LV-001, LV-002 and LV-003 results remain in their entries.
+- LV-007 assessment: **8 tests passed**, including temporary idle-versus-pending Escape diagnostics; no application/test source change remains. It is **CANNOT-REPRODUCE** for the report's pending-disconnect requirement because the live steps only opened the idle confirmation.
 - LV-003 remains **NEEDS-DECISION**: keep the intended invalid/expired 404/410 responses, or change the API/client contract to a normal unavailable-preview result. LV-004 is **CANNOT-REPRODUCE**: the original mail link contained MIME encoding artifacts; the verifier followed the decoded 43-character-token href and obtained a valid preview with Join school enabled. No invitation authentication patch was needed.
 - No issue remains OPEN, REOPENED or FIXING in this pass. The verifier has marked LV-001 and LV-002 VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
 - Live coverage continues under the recorded local-verification authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.

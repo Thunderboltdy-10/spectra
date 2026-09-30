@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { showRetryToast } from "@/components/ui/retry-toast";
 import { describeFailure } from "@/components/ui/truthful-state";
 import {
   getSpectraArtifact,
@@ -81,19 +82,18 @@ export function RouteSidePanelHost() {
     [openSplit, workLoad],
   );
   const loadWork = useCallback(
-    async (workId: string) => {
+    async (workId: string, failureToastId?: string | number) => {
       try {
         await openWork(workId);
+        if (failureToastId !== undefined) toast.dismiss(failureToastId);
       } catch (error) {
         const failure = describeFailure(error, {
           fallback: "This work could not be opened. Check your connection, then try again.",
         });
-        toast.error(failure.message, {
+        showRetryToast(failure.message, (id) => loadWork(workId, id), {
+          id: failureToastId,
           description: `Reference ${failure.reference}`,
-          action: {
-            label: "Try again",
-            onClick: () => void loadWork(workId),
-          },
+          label: "Try again",
         });
       }
     },
@@ -105,19 +105,18 @@ export function RouteSidePanelHost() {
     setThread(result.thread);
   }, [threadLoad]);
   const loadThread = useCallback(
-    async (threadId: string) => {
+    async (threadId: string, failureToastId?: string | number) => {
       try {
         await openThread(threadId);
+        if (failureToastId !== undefined) toast.dismiss(failureToastId);
       } catch (error) {
         const failure = describeFailure(error, {
           fallback: "This conversation could not be opened. Check your connection, then try again.",
         });
-        toast.error(failure.message, {
+        showRetryToast(failure.message, (id) => loadThread(threadId, id), {
+          id: failureToastId,
           description: `Reference ${failure.reference}`,
-          action: {
-            label: "Try again",
-            onClick: () => void loadThread(threadId),
-          },
+          label: "Try again",
         });
       }
     },

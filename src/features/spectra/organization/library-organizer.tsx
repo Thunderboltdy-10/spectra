@@ -25,6 +25,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
@@ -506,17 +507,18 @@ function LibraryOrganizerContent({
   const run = useCallback(async function execute(
     label: string,
     operation: () => Promise<unknown>,
+    failureToastId?: string | number,
   ) {
     setBusy(true);
     try {
       await operation();
+      if (failureToastId !== undefined) toast.dismiss(failureToastId);
     } catch (error) {
-      toast.error(treeFailureMessage(error, label), {
-        action: {
-          label: "Retry",
-          onClick: () => void execute(label, operation),
-        },
-      });
+      showRetryToast(
+        treeFailureMessage(error, label),
+        (id) => execute(label, operation, id),
+        { id: failureToastId },
+      );
     } finally {
       setBusy(false);
     }

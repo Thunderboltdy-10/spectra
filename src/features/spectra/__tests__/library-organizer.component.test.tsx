@@ -9,6 +9,7 @@ const toast = vi.hoisted(() => {
     success: vi.fn(),
     error: vi.fn(),
     message: vi.fn(),
+    dismiss: vi.fn(),
   });
   return fn;
 });
@@ -118,6 +119,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  toast.error.mockReset();
+  toast.success.mockReset();
+  toast.dismiss.mockReset();
   tree.useRealActions = false;
   tree.mutation.mockReset().mockImplementation(() => Promise.resolve({}));
   tree.folder = [node("n1", "Essay draft")];
@@ -237,6 +241,38 @@ describe("LibraryOrganizer", () => {
     await waitFor(() => expect(tree.actions.trash).toHaveBeenCalledWith(["n1"]));
   });
 
+  it("keeps one real Retry notice through repeated offline failures and clears it after success", async () => {
+    const sonner = await vi.importActual<typeof import("sonner")>("sonner");
+    toast.success.mockImplementation(sonner.toast.success);
+    toast.error.mockImplementation(sonner.toast.error);
+    toast.dismiss.mockImplementation(sonner.toast.dismiss);
+    tree.useRealActions = true;
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    render(<><LibraryOrganizer onOpenWork={vi.fn()} onOpenThread={vi.fn()} /><sonner.Toaster position="top-right" /></>);
+    try {
+      selectFirstRowAndPress("Delete");
+      const undo = await screen.findByRole("button", { name: "Undo" });
+      tree.mutation.mockClear();
+      online.mockReturnValue(false);
+      fireEvent.click(undo);
+      await screen.findByRole("button", { name: "Retry" });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+        await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(attempt + 2));
+        expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+      }
+      expect(tree.mutation).not.toHaveBeenCalled();
+      const firstId = toast.error.mock.results[0]!.value;
+      expect(toast.error.mock.calls.slice(1).every((call) => call[1]?.id === firstId)).toBe(true);
+      online.mockReturnValue(true);
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(tree.mutation).toHaveBeenCalledExactlyOnceWith({ nodeIds: ["n1"] }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Retry" })).toBeNull());
+    } finally {
+      sonner.toast.dismiss();
+    }
+  });
+
   it("rejects offline Undo before enqueueing and retries the same restore after reconnect", async () => {
     tree.useRealActions = true;
     const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
@@ -252,12 +288,12 @@ describe("LibraryOrganizer", () => {
     await act(async () => { options.action.onClick(); });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(tree.mutation).not.toHaveBeenCalled();
-    const [message, failure] = toast.error.mock.calls[0]! as [string, { action: { label: string; onClick: () => void } }];
+    const [message, failure] = toast.error.mock.calls[0]! as [string, { action: { label: string; onClick: (event: MouseEvent) => void } }];
     expect(message).toMatch(/offline.*reconnect/i);
     expect(failure.action.label).toBe("Retry");
     online.mockReturnValue(true);
     tree.mutation.mockResolvedValue({});
-    await act(async () => { failure.action.onClick(); });
+    await act(async () => { failure.action.onClick(new MouseEvent("click", { cancelable: true })); });
     expect(tree.mutation).toHaveBeenCalledExactlyOnceWith({ nodeIds: ["n1"] });
   });
 });

@@ -154,3 +154,38 @@ export function refreshPlannerSourceProjection(current, input) {
     content: refreshPlannerSourceContent(content, input.next, previous),
   };
 }
+
+/** The historical one-task payload's stable task, used by UI and room bootstrap. */
+export function legacyPlannerTask(value) {
+  const row = object(value);
+  return {
+    id: "task-1",
+    title: typeof row.taskTitle === "string" && row.taskTitle.trim() ? row.taskTitle.trim() : "First task",
+    description: row.description,
+    status: row.status,
+    estimateMinutes: row.estimateMinutes,
+    dueAt: row.dueAt,
+    officialDeadlineRef: row.officialDeadlineRef,
+    referenceIds: row.linkedArtifactIds,
+    sourceRefs: row.sourceRefs,
+    reminders: row.reminders ?? [],
+    checklist: row.subtasks ?? [],
+  };
+}
+export function defaultPlanViews() {
+  return [
+    { id: "list", kind: "list", title: "List" },
+    { id: "board", kind: "board", title: "Board" },
+    { id: "timeline", kind: "timeline", title: "Timeline" },
+  ];
+}
+export function withPlannerCollections(value) {
+  const row = object(value);
+  return {
+    ...row,
+    tasks: Array.isArray(row.tasks) ? row.tasks : [legacyPlannerTask(row)],
+    sections: Array.isArray(row.sections) ? row.sections : [],
+    milestones: Array.isArray(row.milestones) ? row.milestones : [],
+    views: Array.isArray(row.views) ? row.views : defaultPlanViews(),
+  };
+}

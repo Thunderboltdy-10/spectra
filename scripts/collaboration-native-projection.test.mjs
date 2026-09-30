@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { normalizePlanContent } from "../src/features/spectra/plan/model.ts";
 import { getBlueprint } from "../src/features/spectra/artifacts/blueprint-catalog.ts";
 import {
   codeYjsAdapter,
@@ -311,5 +312,40 @@ describe("native collaboration gateway projection", () => {
         lastProjectionSequence: null,
       }),
     ).toBe(false);
+  });
+});
+
+
+describe("first collection edits after gateway bootstrap", () => {
+  const exchange = (left, right) => {
+    const a = Y.encodeStateAsUpdate(left, Y.encodeStateVector(right));
+    const b = Y.encodeStateAsUpdate(right, Y.encodeStateVector(left));
+    Y.applyUpdate(right, a); Y.applyUpdate(left, b);
+  };
+  it("shares the legacy Plan task collection before either tab adds its first task", () => {
+    const left = new Y.Doc();
+    initializeNativeArtifactDocument(left, { typeKey: "planner_task", title: "Plan", tags: [], content: { taskTitle: "Starter", status: "todo" } });
+    const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const adapter = workYjsAdapter("planner_task");
+    const base = normalizePlanContent(adapter.project(left));
+    for (const [doc, id] of [[left, "a"], [right, "b"]])
+      adapter.applyProjection(doc, { ...base, tasks: [...base.tasks, { id, title: id, status: "todo" }] }, { kind: "human", clientId: id });
+    exchange(left, right);
+    const titles = doc => adapter.project(doc).tasks.map(task => task.title).sort();
+    expect(titles(left)).toEqual(["Starter", "a", "b"]);
+    expect(titles(right)).toEqual(titles(left));
+    const restored = new Y.Doc(); Y.applyUpdate(restored, Y.encodeStateAsUpdate(left));
+    expect(titles(restored)).toEqual(titles(left));
+  });
+  it("keeps both first cards in an empty gateway-bootstrapped deck", () => {
+    const left = new Y.Doc();
+    initializeNativeArtifactDocument(left, { typeKey: "flashcard_deck", title: "Deck", tags: [], content: { title: "Deck", cards: [] } });
+    const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const adapter = workYjsAdapter("flashcard_deck");
+    for (const [doc, id] of [[left, "a"], [right, "b"]])
+      adapter.applyProjection(doc, { title: "Deck", cards: [{ id, front: id, back: id }] }, { kind: "human", clientId: id });
+    exchange(left, right);
+    expect(adapter.project(left).cards.map(card => card.id).sort()).toEqual(["a", "b"]);
+    expect(adapter.project(right).cards.map(card => card.id).sort()).toEqual(["a", "b"]);
   });
 });

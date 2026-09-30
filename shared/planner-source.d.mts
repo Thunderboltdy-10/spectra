@@ -28,3 +28,7 @@ export type PlannerSourceRefresh = {
   force?: boolean;
 };
 export function refreshPlannerSourceProjection(current: PlannerSourceProjection, input: PlannerSourceRefresh): PlannerSourceProjection | null;
+
+export function legacyPlannerTask(value: unknown): Record<string, unknown>;
+export function withPlannerCollections(value: unknown): Record<string, unknown>;
+export function defaultPlanViews(): Array<{ id: string; kind: "list" | "board" | "timeline"; title: string }>;

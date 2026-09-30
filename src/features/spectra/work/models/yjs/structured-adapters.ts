@@ -1,4 +1,6 @@
 import * as Y from "yjs";
+import { isIdentityCollection } from "../../../../../../shared/yjs-collections.mjs";
+import { withPlannerCollections } from "../../../../../../shared/planner-source.mjs";
 import { enumerateArtifactRegions, validateArtifactContent } from "../../../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import { normalizeArtifactContent } from "../../../ai/content-normalization";
@@ -185,10 +187,8 @@ function plainEqual(left: unknown, right: unknown): boolean {
  * so a collaborator adding an item at the same moment is merged rather than
  * lost when one client swaps the whole field for a plain array.
  */
-function isKeyedCollectionValue(existing: unknown, values: readonly unknown[]) {
-  if (!values.every((entry) => isRecord(entry) && typeof entry.id === "string"))
-    return false;
-  return values.length > 0 || (existing instanceof Y.Map && isCollection(existing));
+function isKeyedCollectionValue(existing: unknown, values: readonly unknown[], path: readonly string[]) {
+  return isIdentityCollection(values, path, existing instanceof Y.Map && isCollection(existing));
 }
 
 function syncCollection(
@@ -218,7 +218,7 @@ function syncArray(
   values: readonly unknown[],
   path: readonly string[],
 ) {
-  const keyed = isKeyedCollectionValue(existing, values);
+  const keyed = isKeyedCollectionValue(existing, values, path);
   if (keyed) {
     if (!(existing instanceof Y.Map && isCollection(existing)))
       throw new Error("STRUCTURED_COLLECTION_MUST_BE_ATTACHED_BEFORE_SYNC");
@@ -317,7 +317,7 @@ function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly strin
       if (!(existing instanceof Y.Text)) map.set(key, text);
       replaceYText(text, entry);
     } else if (Array.isArray(entry)) {
-      const keyed = isKeyedCollectionValue(existing, entry);
+      const keyed = isKeyedCollectionValue(existing, entry, nextPath);
       let attached = existing;
       if (keyed && !(existing instanceof Y.Map && isCollection(existing))) {
         const collection = collectionMap();
@@ -754,7 +754,7 @@ export const flashcardDeckYjsAdapter = new StructuredWorkYjsAdapter(
 );
 export const plannerYjsAdapter = new StructuredWorkYjsAdapter(
   "planner_task",
-  normalizeGeneric("planner_task"),
+  value => withPlannerCollections(normalizeGeneric("planner_task")(value)),
 );
 export const agentYjsAdapter = new StructuredWorkYjsAdapter(
   "agent",

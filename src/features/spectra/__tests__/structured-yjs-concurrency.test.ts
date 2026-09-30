@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { flashcardDeckYjsAdapter } from "../work/models/yjs/structured-adapters";
+import { flashcardDeckYjsAdapter, plannerYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { workYjsOrigins } from "../work/models/yjs/origins";
 import {
   draftContentForLiveWrite,
   mergeConcurrentText,
   rebaseCollaborativeValue,
 } from "../components/artifact-studio-value-utils";
+
+import { normalizePlanContent } from "../plan/model";
 
 const actor = (clientId: string) => ({ clientId, kind: "human" as const });
 const card = (id: string, front = `front ${id}`) => ({ id, front, back: `back ${id}` });
@@ -106,4 +108,50 @@ describe("writing a studio draft into a room a peer already changed", () => {
       conflicts: ["/text"],
     });
   });
+});
+
+
+describe("first edits of structured collections", () => {
+  it("keeps both additions when a legacy one-task Plan is edited concurrently", () => {
+    const initial = { taskTitle: "Starter", status: "todo" };
+    const left = plannerYjsAdapter.createDocument(initial);
+    const right = new Y.Doc();
+    Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+    const base = normalizePlanContent(initial);
+    for (const [doc, id] of [[left, "from-a"], [right, "from-b"]] as const) {
+      const draft = { ...initial, ...base, tasks: [...base.tasks, { ...base.tasks[0], id, title: id, order: 1 }] };
+      plannerYjsAdapter.applyProjection(doc, draft, workYjsOrigins(actor(id)).localHuman);
+    }
+    exchange(left, right);
+    const titles = (doc: Y.Doc) => normalizePlanContent(plannerYjsAdapter.project(doc)).tasks.map(t => t.title).sort();
+    expect(titles(left)).toEqual(["Starter", "from-a", "from-b"]);
+    expect(titles(right)).toEqual(titles(left));
+    const restored = new Y.Doc();
+    Y.applyUpdate(restored, Y.encodeStateAsUpdate(left));
+    expect(titles(restored)).toEqual(titles(left));
+  });
+
+  it("keeps both first cards in an initially empty deck", () => {
+    const base = { title: "Deck", cards: [] };
+    const { left, right } = pair(base);
+    flashcardDeckYjsAdapter.applyProjection(left, { ...base, cards: [card("a")] } as never, workYjsOrigins(actor("a")).localHuman);
+    flashcardDeckYjsAdapter.applyProjection(right, { ...base, cards: [card("b")] } as never, workYjsOrigins(actor("b")).localHuman);
+    exchange(left, right);
+    expect(ids(left).sort()).toEqual(["a", "b"]);
+    expect(ids(right).sort()).toEqual(["a", "b"]);
+  });
+});
+
+
+it.each(["sections", "milestones"])("merges first concurrent additions to a Plan's %s", field => {
+  const initial = { taskTitle: "Starter", status: "todo" };
+  const left = plannerYjsAdapter.createDocument(initial);
+  const right = new Y.Doc(); Y.applyUpdate(right, Y.encodeStateAsUpdate(left));
+  const base = normalizePlanContent(initial);
+  for(const [doc, id] of [[left, "a"], [right, "b"]] as const)
+    plannerYjsAdapter.applyProjection(doc, { ...initial, ...base, [field]: [{ id, title: id, order: 0 }] }, workYjsOrigins(actor(id)).localHuman);
+  exchange(left, right);
+  const ids = (doc: Y.Doc) => (plannerYjsAdapter.project(doc)[field] as Array<{id:string}>).map(item => item.id).sort();
+  expect(ids(left)).toEqual(["a", "b"]);
+  expect(ids(right)).toEqual(["a", "b"]);
 });

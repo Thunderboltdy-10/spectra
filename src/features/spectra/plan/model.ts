@@ -2,7 +2,7 @@ import {
   normalizeMinutesBeforeReminders,
   type MinutesBeforeReminder,
 } from "../reminders/minutes-before";
-import { bindPlannerSourceTask, plannerSourceMetadata } from "../../../../shared/planner-source.mjs";
+import { bindPlannerSourceTask, plannerSourceMetadata, legacyPlannerTask, defaultPlanViews as defaultViews } from "../../../../shared/planner-source.mjs";
 
 export type PlanStatus = "backlog" | "todo" | "doing" | "blocked" | "done";
 
@@ -126,10 +126,6 @@ export function normalizePlanContent(value: unknown): PlanContent {
         : defaultViews(),
     };
   }
-  const title =
-    typeof row.taskTitle === "string" && row.taskTitle.trim()
-      ? row.taskTitle.trim()
-      : "First task";
   return {
     ...plannerSourceMetadata(row),
     version: 4,
@@ -139,19 +135,7 @@ export function normalizePlanContent(value: unknown): PlanContent {
     milestones: [],
     tasks: [
       normalizePlanTask(
-        bindPlannerSourceTask(row, {
-          id: "task-1",
-          title,
-          description: row.description,
-          status: row.status,
-          estimateMinutes: row.estimateMinutes,
-          dueAt: row.dueAt,
-          officialDeadlineRef: row.officialDeadlineRef,
-          referenceIds: row.linkedArtifactIds,
-          sourceRefs: row.sourceRefs,
-          reminders: row.reminders,
-          checklist: row.subtasks,
-        }),
+        bindPlannerSourceTask(row, legacyPlannerTask(row)),
         0,
       ),
     ],
@@ -207,13 +191,6 @@ function normalizePlanTask(value: unknown, index: number): PlanTask {
   };
 }
 
-function defaultViews(): PlanContent["views"] {
-  return [
-    { id: "list", kind: "list", title: "List" },
-    { id: "board", kind: "board", title: "Board" },
-    { id: "timeline", kind: "timeline", title: "Timeline" },
-  ];
-}
 
 export function validatePlanDependencies(plan: PlanContent) {
   const ids = new Set(plan.tasks.map((task) => task.id));

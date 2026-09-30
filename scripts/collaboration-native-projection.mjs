@@ -1,5 +1,7 @@
 import { yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import * as Y from "yjs";
+import { isIdentityCollection } from "../shared/yjs-collections.mjs";
+import { withPlannerCollections } from "../shared/planner-source.mjs";
 import { sheetCellRegionId } from "../shared/sheet-regions.mjs";
 import {
   documentBlocksFromJson as canonicalDocumentBlocksFromJson,
@@ -215,15 +217,7 @@ function syncCollection(collection, values, path) {
 }
 
 function syncArray(existing, values, path) {
-  const keyed =
-    values.length > 0 &&
-    values.every(
-      (entry) =>
-        entry &&
-        typeof entry === "object" &&
-        !Array.isArray(entry) &&
-        typeof entry.id === "string",
-    );
+  const keyed = isIdentityCollection(values, path, existing instanceof Y.Map && existing.get(COLLECTION_MARKER) === true);
   if (keyed) {
     syncCollection(existing, values, path);
     return existing;
@@ -363,15 +357,7 @@ function syncRecord(map, value, path) {
       if (text !== existing) map.set(key, text);
       replaceYText(text, entry);
     } else if (Array.isArray(entry)) {
-      const keyed =
-        entry.length > 0 &&
-        entry.every(
-          (candidate) =>
-            candidate &&
-            typeof candidate === "object" &&
-            !Array.isArray(candidate) &&
-            typeof candidate.id === "string",
-        );
+      const keyed = isIdentityCollection(entry, nextPath, existing instanceof Y.Map && existing.get(COLLECTION_MARKER) === true);
       let attached = existing;
       if (
         keyed &&
@@ -504,7 +490,9 @@ export function initializeNativeArtifactDocument(document, projection) {
   const bootstrapContent =
     projection.typeKey === "sheets"
       ? decodeSheetsContentForYjs(projection.content)
-      : projection.content;
+      : projection.typeKey === "planner_task"
+        ? withPlannerCollections(projection.content)
+        : projection.content;
   document.transact(() => {
     if (projection.typeKey === "document")
       initializeDocument(document, bootstrapContent);

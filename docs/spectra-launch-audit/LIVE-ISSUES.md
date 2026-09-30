@@ -1324,7 +1324,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-036 · Library work open while offline leaves a blank view
 
-- **Status:** FIXING
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Library work open / signed-in Profile A school administrator
 - **Report script:** exploration · LV-035 adjacent reliability check
@@ -1397,9 +1397,11 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Re-check after committed hash is provided: Frontend reload only. Use a clean cold Library context without fault routes; fail the offline open, remain offline through the auth refresh window, reconnect and verify the same shell stays usable and an online work opens/persists. Repeat LV-037 offline/repeated-Retry/reconnect with the actual conversation panel. Preserve the separately verified client-chunk Reload page behavior. No backend sync, codegen or deployment required.
 
 
+- Shared boundary fix commit: `07cfa20d6df5cd43c12ae50d685488d1163d6084`. All **22 focused tests**, both TypeScript projects, full lint and all five gates pass. The two continuity/retry regressions fail before this change. Full-suite run is in progress; frontend-only live recheck requested, and only the verifier sets VERIFIED.
+
 ### LV-037 · Route-side conversation open does not recover after an offline failure
 
-- **Status:** FIXING
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/school` route-side LiveDock conversation / signed-in Profile A school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · LV-035 adjacent verification: “Check repeated retry on another Library action, a pending online retry, and route-side work/conversation load retries when feasible.”
@@ -1441,6 +1443,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - The account-readiness gate used by AppShell could unmount RouteSidePanelHost while the same Clerk owner temporarily lost Convex authentication. The recovery toast survived outside that gate, but its callback then updated the old unmounted host, explaining a dismissed notice with no panel after reconnect. LV-036's shared owner-aware preparation correction retains this host across transient backend identity loss while preserving account/deployment isolation.
 - Before/after test: The real host, semantic bus, transport, retry notice and AccountStorageBoundary are exercised together using the same readiness gate as AppShell. Temporary authentication loss must retain the same context node; after reconnect the original Try again action mounts the conversation and clears its notice. This regression fails before the boundary correction and passes after; all 22 focused storage/boundary/host tests pass. Commit and required checks will be recorded after completion.
 
+
+- Shared boundary fix commit: `07cfa20d6df5cd43c12ae50d685488d1163d6084`. All **22 focused tests**, both TypeScript projects, full lint and all five gates pass. The two continuity/retry regressions fail before this change. Full-suite run is in progress; frontend-only live recheck requested, and only the verifier sets VERIFIED.
 
 ## Fixer closeout · LV-035
 
@@ -1485,3 +1489,11 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Latest full suite remains **4,459 passed, 13 failed, 1 skipped**; **503 passed files, 6 failed, 1 skipped** (510 files). Twelve backend/native/document failures subsequently pass **134/134** across all five affected files with one worker and unchanged assertions/time limits; LV-017 hosted packaging remains unresolved. LV-037 focused **33/33**, both TypeScript projects, lint and all five gates passed. No full-suite rerun was needed for this documentation-only assessment; logs remain in the preceding closeout.
 - **NEEDS-INFO:** LV-036 — actual AppShell removal is reproduced, but the ancestor's refresh/route-data transition is not identified; remaining child tags/classes and Clerk callback/RSC-request observations requested. LV-017 — narrow hosted-package exception unanswered. **NEEDS-DECISION:** LV-028 — shortcut mapping; LV-022 — post-save prose versus saved-result presentation; LV-003 — expired-invite HTTP semantics; LV-012 — automatic Bridge discovery versus explicit activation. **CANNOT-REPRODUCE:** LV-004 — invitation encoding artifact, decoded generated token works; LV-007 — idle versus pending confirmation with pending controls disabled.
 - No OPEN, REOPENED or FIXING entry remains. LV-037 remains FIXED pending its live retry check, and LV-036 is unresolved as NEEDS-INFO. Stop between tasks as requested, then resume when the requested observation or another actionable ledger issue arrives. No auth/middleware weakening, speculative cache or render fallback, deployment, codegen, production-data or environment change occurred.
+
+## Fixer closeout · account readiness and conversation recovery · 2026-10-01
+
+- Implementation commit: `07cfa20d6df5cd43c12ae50d685488d1163d6084` — retain the prepared shell through temporary token refresh (LV-036), also correcting LV-037's stranded route-host callback. This audit records the hash and final validation. Commits use the configured human Git identity and have no AI attribution or co-author trailer.
+- Before/after: **Two regressions fail before**, **22/22 focused tests pass** across storage, account boundary and real conversation host. Both TypeScript projects, full lint and all five gates pass. Existing CRLF endings preserved. Logs: `.spectra-local/LV036-owner-{before,focused,types,lint,gates}.log`.
+- Full suite: **4,469 passed, 11 failed, 1 skipped**; **501 passed files, 8 failed, 1 skipped** (510 files), **493.63 seconds**. Ten failures occur in seven unchanged actor-graph/native-document/run/spreadsheet files; all seven subsequently pass **289/289** with one worker and unchanged assertions/time limits (**77.38 seconds**). The remaining failure is LV-017 hosted packaging. Logs: `.spectra-local/launch-fixer-LV036-owner-full.log` and `.spectra-local/LV036-owner-full-failures-recheck.log`. The full suite is not green; the prohibited deployment-configuration patch remains unapplied.
+- **NEEDS-DECISION:** LV-028 — shortcut mapping; LV-022 — post-save prose versus saved-result presentation; LV-003 — expired-invite HTTP semantics; LV-012 — automatic Bridge discovery versus explicit activation. **CANNOT-REPRODUCE:** LV-004 — original invitation encoding artifact, decoded generated token works; LV-007 — idle versus pending confirmation with pending controls disabled. **NEEDS-INFO:** LV-017 — narrow hosted-package exception unanswered. No pending decision was assumed.
+- LV-036 and LV-037 are FIXED pending live recheck; only the verifier sets VERIFIED. The verifier received the committed hash, frontend-only reload instructions, clean cold Library/auth-refresh checks and repeated-offline-Retry/reconnect conversation checks. No OPEN, REOPENED or FIXING entry remains. Stop between tasks as requested. No auth/server authorization weakening, backend sync, deploy, codegen, production-data or environment changes occurred.

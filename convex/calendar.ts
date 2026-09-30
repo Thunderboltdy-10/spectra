@@ -113,16 +113,24 @@ type CalendarCursor = {
 
 type KeysetCursor = { updatedAt: number; key: string };
 
-function encodeCursor(value: CalendarCursor) {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+function encodeCursor(value: CalendarCursor | KeysetCursor) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function parseCursor(value: string): unknown {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 function decodeCursor(value: string | undefined): CalendarCursor | undefined {
   if (!value) return undefined;
   try {
-    const decoded = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
-    ) as CalendarCursor;
+    const decoded = parseCursor(value) as CalendarCursor;
     return decoded && (decoded.kind === "visible" || decoded.kind === "partial")
       ? decoded
       : undefined;
@@ -131,18 +139,12 @@ function decodeCursor(value: string | undefined): CalendarCursor | undefined {
   }
 }
 
-function encodeKeysetCursor(value: KeysetCursor) {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-}
-
 function decodeKeysetCursor(
   value: string | undefined,
 ): KeysetCursor | undefined {
   if (!value) return undefined;
   try {
-    const decoded = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
-    ) as KeysetCursor;
+    const decoded = parseCursor(value) as KeysetCursor;
     return typeof decoded.updatedAt === "number" &&
       typeof decoded.key === "string"
       ? decoded
@@ -282,7 +284,7 @@ async function readUnscheduledTasks(
   return {
     rows,
     nextCursor: cursorRow
-      ? encodeKeysetCursor(
+      ? encodeCursor(
           rowKeyset(cursorRow.updatedAt, String(cursorRow.itemId)),
         )
       : null,
@@ -491,7 +493,7 @@ async function readPlannerTasks(
   return {
     plans,
     nextCursor: cursorRow
-      ? encodeKeysetCursor(
+      ? encodeCursor(
           rowKeyset(
             cursorRow.updatedAt,
             `${String(cursorRow.planArtifactId)}:${cursorRow.taskId}`,
@@ -637,7 +639,7 @@ export const overview = query({
     const migrationPage = migrationRows.slice(0, limit);
     const migrationCursorRow = migrationRows.length > limit ? migrationPage.at(-1) : undefined;
     const nextMigrationCursor = migrationCursorRow
-      ? encodeKeysetCursor(
+      ? encodeCursor(
           rowKeyset(
             migrationCursorRow.updatedAt,
             String(migrationCursorRow.legacyArtifactId),
@@ -695,7 +697,7 @@ export const overview = query({
       }
       const titleCursorRow = titleRows.length > limit ? matches.at(-1) : undefined;
       targetTitleCursor = titleCursorRow
-        ? encodeKeysetCursor(rowKeyset(0, String(titleCursorRow.itemId)))
+        ? encodeCursor(rowKeyset(0, String(titleCursorRow.itemId)))
         : null;
     }
     const visibleItems = visiblePage.rows.flatMap((row) => {

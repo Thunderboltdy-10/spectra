@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from "vitest";
+import { Buffer as NodeBuffer } from "node:buffer";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api } from "./_generated/api";
@@ -11,6 +12,25 @@ import { fetchCalendarOverview, mergeCalendarPages } from "../src/features/spect
 
 const modules = import.meta.glob("./**/*.ts");
 const DAY = 86400000;
+
+async function withoutNodeBuffer<T>(query: () => Promise<T>): Promise<T> {
+  // Scope the Convex runtime constraint to the query; Node HTTP mocks need Buffer.
+  const buffer = globalThis.Buffer;
+  vi.stubGlobal("Buffer", undefined);
+  try {
+    return await query();
+  } finally {
+    vi.stubGlobal("Buffer", buffer);
+  }
+}
+function legacyCursor(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const parsed = JSON.parse(NodeBuffer.from(value, "base64url").toString("utf8"));
+  const legacy = NodeBuffer.from(JSON.stringify(parsed), "utf8").toString("base64url");
+  expect(value).toBe(legacy);
+  return legacy;
+}
+
 const identity = {
   subject: "review-school-pagination",
   email: "review@example.test",
@@ -96,7 +116,7 @@ describe("Calendar pagination source boundaries", () => {
       const params = new URL(url, "https://example.test").searchParams;
       const args: Record<string, string | number> = {};
       for (const [key, value] of params) args[key] = key === "from" || key === "to" ? Number(value) : value;
-      const data = await user.query(api.calendar.overview, args as { from: number; to: number });
+      const data = await withoutNodeBuffer(() => user.query(api.calendar.overview, args as { from: number; to: number }));
       return new Response(JSON.stringify({ data }));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -126,7 +146,7 @@ describe("Calendar pagination source boundaries", () => {
           title: `Plan ${i}`,
           content: {
             tasks: Array.from({ length: i === 0 ? 35 : 1 }, (_, j) => ({
-              id: `task:${String(j).padStart(3, "0")}`,
+              id: `tâche:🗓️:${String(j).padStart(3, "0")}`,
               title: `Task ${j}`,
               status: "todo",
             })),
@@ -158,19 +178,19 @@ describe("Calendar pagination source boundaries", () => {
     const plans = new Set<string>();
     let migrations = 0;
     for (let i = 0; i < 12; i++) {
-      const p = await user.query(api.calendar.overview, {
+      const p = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
         from: DAY,
         to: 2 * DAY,
         limit: 2,
         plannerCursor,
         migrationCursor,
         debug: true,
-      });
+      }));
       if (!plannerDone)
         for (const plan of p.unscheduledTasks) plans.add(plan.id);
       if (!migrationDone) migrations += p.migration.migratedArtifacts;
-      plannerCursor = p.pagination.planner ?? undefined;
-      migrationCursor = p.pagination.migration ?? undefined;
+      plannerCursor = legacyCursor(p.pagination.planner);
+      migrationCursor = legacyCursor(p.pagination.migration);
       plannerDone ||= !plannerCursor;
       migrationDone ||= !migrationCursor;
       expect(p.readMetrics!.canonicalQueries).toBe(0);
@@ -187,17 +207,17 @@ describe("Calendar pagination source boundaries", () => {
     const pages = [];
     let cursor: string | undefined;
     for (let i = 0; i < 4; i++) {
-      const p = await user.query(api.calendar.overview, {
+      const p = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
         from: DAY,
         to: 2 * DAY,
         limit: 2,
         unscheduledCursor: cursor,
-      });
+      }));
       pages.push({
         titles: p.unscheduledTasks.map((x) => x.title),
         cursor: p.pagination.unscheduled,
       });
-      cursor = p.pagination.unscheduled ?? undefined;
+      cursor = legacyCursor(p.pagination.unscheduled);
       if (!cursor) break;
     }
     expect(new Set(pages.flatMap((p) => p.titles)).size).toBe(5);
@@ -207,23 +227,23 @@ describe("Calendar pagination source boundaries", () => {
   it("continues partial-time discovery after a timestamp tie", async () => {
     const { user, items } = await fixture();
     await items(5, "official_event");
-    const p1 = await user.query(api.calendar.overview, {
+    const p1 = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
       from: DAY,
       to: 2 * DAY,
       limit: 2,
-    });
-    const p2 = await user.query(api.calendar.overview, {
+    }));
+    const p2 = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
       from: DAY,
       to: 2 * DAY,
       limit: 2,
-      partialCursor: p1.pagination.partial!,
-    });
-    const p3 = await user.query(api.calendar.overview, {
+      partialCursor: legacyCursor(p1.pagination.partial),
+    }));
+    const p3 = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
       from: DAY,
       to: 2 * DAY,
       limit: 2,
-      partialCursor: p2.pagination.partial!,
-    });
+      partialCursor: legacyCursor(p2.pagination.partial),
+    }));
     expect([
       ...p1.partialTimeItems,
       ...p2.partialTimeItems,
@@ -240,16 +260,16 @@ describe("Calendar pagination source boundaries", () => {
     let cursor: string | undefined;
     const ids: string[] = [];
     for (let i = 0; i < 12; i++) {
-      const p = await user.query(api.calendar.overview, {
+      const p = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
         from: 450 * DAY,
         to: 451 * DAY,
         limit: 2,
         cursor,
         debug: true,
-      });
+      }));
       ids.push(...p.items.map((x) => String(x.id)));
       expect(p.readMetrics!.rangeRowsRead).toBeLessThanOrEqual(2);
-      cursor = p.pagination.visible ?? undefined;
+      cursor = legacyCursor(p.pagination.visible);
       if (!cursor) break;
     }
     expect(cursor).toBeUndefined();
@@ -269,18 +289,18 @@ describe("Calendar pagination source boundaries", () => {
     const pages = [];
     let cursor: string | undefined;
     for (let i = 0; i < 4; i++) {
-      const p = await user.query(api.calendar.overview, {
+      const p = await withoutNodeBuffer(() => user.query(api.calendar.overview, {
         from: DAY,
         to: 2 * DAY,
         limit: 2,
         targetTitle: "Repeated title",
         targetCursor: cursor,
-      });
+      }));
       pages.push({
         ids: p.targetedItems.map((x) => x.id),
         cursor: p.pagination.targetTitle,
       });
-      cursor = p.pagination.targetTitle ?? undefined;
+      cursor = legacyCursor(p.pagination.targetTitle);
       if (!cursor) break;
     }
     expect(new Set(pages.flatMap((p) => p.ids)).size).toBe(5);

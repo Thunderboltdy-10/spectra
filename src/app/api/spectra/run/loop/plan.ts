@@ -2595,7 +2595,7 @@ export function singleCreationAgentTool(
             { type: "null" },
           ],
         },
-        finalResponse: { type: "string", minLength: 1, maxLength: 4_000 },
+        finalResponse: { type: "string", minLength: 1 },
       },
     },
   );

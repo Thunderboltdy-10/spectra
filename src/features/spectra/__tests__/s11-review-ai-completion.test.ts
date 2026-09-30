@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SPECTRA_PLAN_JSON_SCHEMA } from "@/features/spectra/operations/schema";
+import { singleCreationAgentTool } from "@/app/api/spectra/run/loop/plan";
 import { callModel } from "@/app/api/spectra/run/loop/plan";
 
 // Independent acceptance sources. These intentionally exercise the public
@@ -48,6 +50,54 @@ describe("S11 independent review: ordinary completion and whole request", () => 
     expect(result.plan.finalResponse).toBe(answer);
     expect(result.plan.operations).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+
+  it("keeps provider reply contracts aligned with unrestricted final prose", () => {
+    expect(SPECTRA_PLAN_JSON_SCHEMA.properties.finalResponse).toEqual({ type: "string", minLength: 1 });
+    const tool = singleCreationAgentTool("planner_task");
+    const parameters = tool.function.parameters as { properties: { finalResponse: unknown } };
+    expect(parameters.properties.finalResponse).toEqual({ type: "string", minLength: 1 });
+  });
+
+  it("preserves a long ordinary answer without repair or shortening", async () => {
+    const answer = "A complete paragraph of the requested explanation. ".repeat(600);
+    const fetchMock = vi.fn().mockImplementation(turn(answer));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("chat", "Explain this subject in detail.", {}, []);
+    expect(result.plan.finalResponse).toBe(answer.trim());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("preserves long continued prose and its truthful cutoff note (%s)", async (stillCutOff) => {
+    const prefix = "First part of a detailed explanation. ".repeat(350);
+    const tail = "The remaining explanation ends here.";
+    const limited = () => Promise.resolve(new Response(JSON.stringify({ choices: [{
+      finish_reason: "length", message: { content: prefix },
+    }] }), { status: 200 }));
+    const fetchMock = vi.fn().mockImplementationOnce(limited);
+    if (stillCutOff) fetchMock.mockImplementation(limited);
+    else fetchMock.mockImplementation(turn(tail));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("chat", "Explain this subject in detail.", {}, []);
+    expect(result.plan.finalResponse).toBe(stillCutOff
+      ? prefix.repeat(4).trimEnd() + "\n\n_This answer reached the length limit and stops here. Ask me to continue for the rest._"
+      : prefix + tail);
+    expect(fetchMock).toHaveBeenCalledTimes(stillCutOff ? 4 : 2);
+  });
+
+  it("preserves a long completion with accepted operations", async () => {
+    const answer = "The evidence note is ready for the next review. ".repeat(150);
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(turn("", "propose_operation", {
+        workSummary: "Updating the evidence note", fulfillsRequest: false, operation: note,
+      }))
+      .mockImplementation(turn(answer));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("artifact", "Update the evidence note and explain the review process.", context, []);
+    expect(result.plan.finalResponse).toBe(answer.trim());
+    expect(result.plan.operations).toEqual([note]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not execute JSON printed as an ordinary answer", async () => {

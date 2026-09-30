@@ -453,7 +453,9 @@ export const spectraPlanSchema = z
       ])
       .nullable()
       .optional(),
-    finalResponse: z.string().trim().min(1).max(4_000),
+    // Final prose may include the full requested answer or continued output.
+    // Metadata bounds must not become a hidden answer-length limit.
+    finalResponse: z.string().trim().min(1),
     presentedArtifactIds: z.array(idText).max(8).optional().default([]),
     operations: z.array(modelOperationSchema),
   })
@@ -1733,7 +1735,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         ],
       },
     },
-    finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
+    finalResponse: { type: "string", minLength: 1 },
     presentedArtifactIds: {
       type: "array",
       items: { type: "string" },

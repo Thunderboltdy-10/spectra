@@ -40,7 +40,7 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — on d61b1e25, local:stop then local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; the existing local deployment and school data remained available | — | d61b1e25 |
+| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — on 4f8103b6, local:stop then local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; the existing local deployment and school data remained available | — | 4f8103b6 |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
 | Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
@@ -74,13 +74,15 @@ _Written by the verifier at the end._
 | P3-BRIDGE-LENS — post-fix Bridge restart | P3-BRIDGE-LENS · step 9 | PASS — instance 8 and its Bridge restarted; Bridge reported ready for the app origin, and A/B had 0 console errors after document reload | LV-012 (NEEDS-DECISION) | 396aa190 |
 | P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | BLOCKED — answer streamed without visible IDs; the browser UI does not expose provider-call count, so the one-call expectation is not proven | — | 396aa190 |
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
+| P3-AI-ENGINE — no-context “Tighten my notes summary” request | P3-AI-ENGINE · Answer, step 3; clarification-skip neighbor check | FAIL — with 0 context objects selected, the answer said it could not edit a personal notes summary but the result card said “Saved progress and results” (LV-022); after one “Skip for now” click, 186 same-origin `/api/spectra/run` HTTP 409 console errors were recorded (LV-025). The final answer was visible and the choice closed. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-no-context-notes-summary-final-response-4f8103b6-redacted.png`; `.spectra-local/live-verification/LV-025-no-context-skip-console-network-redacted.txt` | LV-022 (NEEDS-DECISION), LV-025 (OPEN) | 9d6a4bf3 |
 | P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | PASS — after the fix, the exact rewrite prompt updated the document's four sections and conclusion; the changed text remained after reload and a later stack restart | LV-020 (VERIFIED) | 7a1a8508 |
-| P3-AI-ENGINE — document section-only edit | P3-AI-ENGINE · Document · Edit | PASS — exact prompt “Rewrite the second section to be more concise.” updated section 2 while preserving all four section headings and the conclusion; the change remained after reload. The Work Surface first changed 16.5s after send. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-document-section-rewrite-after-reload-d61b1e25-redacted.png` | — | d61b1e25 |
+| P3-AI-ENGINE — document section-only edit | P3-AI-ENGINE · Document · Edit; post-fix neighbor check | PASS — on application commit 9d6a4bf3, exact prompt “Rewrite the second section to be more concise.” changed only section 2 and persisted after reload; all four headings, original conclusion, and other current document content remained. The reply called the edit staged/not saved while it persisted after reload; see LV-022 (NEEDS-DECISION). Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-section-edit-after-reload-4f8103b6-redacted.png`; 0 console errors | LV-022 (NEEDS-DECISION) | 9d6a4bf3 |
 | P3-AI-ENGINE — document F5 first-token comparison | P3-AI-ENGINE · Document · Edit (F5) | BLOCKED — no pre-fix `main` baseline was available for comparison; the 16.5s Work Surface change is not a first-token measurement | — | d61b1e25 |
 | P3-AI-ENGINE — document conclusion append (report prompt) | P3-AI-ENGINE · Document · Append | PASS — the exact “Add a conclusion paragraph.” prompt produced the concluding paragraph, which remained in the document after reload and later stack restart; its save-state wording mismatch is tracked under LV-022 | LV-022 (NEEDS-DECISION) | 427cb3c9 |
 | P3-AI-ENGINE — document rich formatting | P3-AI-ENGINE · Document · formatting neighbor check | FAIL — the first bold request said it could not apply formatting; a repeated run stayed working for 120s, then reached `failed_terminal` while “leaders feared” became bold and remained bold after reload. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-after-reload-d61b1e25-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-bold-failed-run-d61b1e25-redacted.png` | LV-022 (NEEDS-DECISION) | d61b1e25 |
-| P3-AI-ENGINE — append to an existing document conclusion | P3-AI-ENGINE · Document · Append neighbor check | FAIL — two final-sentence additions ended `failed_terminal`; the requested addition remained absent after reload | LV-023 (FIXING) | d61b1e25 |
+| P3-AI-ENGINE — append to an existing document conclusion | P3-AI-ENGINE · Document · Append neighbor check | PASS — after the fix, both recorded final-sentence prompts completed; each requested sentence appeared once after reload, while the original conclusion and four section headings remained; 0 console errors | LV-023 (VERIFIED) | 9d6a4bf3 |
+| P3-AI-ENGINE — append a new final document paragraph (post-fix neighbor check) | P3-AI-ENGINE · Document · Append neighbor check for LV-023 | FAIL — one request produced two identical final paragraphs and a previously saved sentence disappeared; both copies remained after reload and full local stack restart | LV-024 (OPEN) | 9d6a4bf3 |
 | P3-AI-ENGINE — flashcard create and hint edit | P3-AI-ENGINE · Flashcard deck · create and edit | PASS — created exactly 8 cards; card 3's hint remained changed after reload | — | 7a1a8508 |
 | P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | PASS — the fixed append added four distinct cards; all 12 remained after reload and card 3's hint stayed intact | LV-021 (VERIFIED) | 68587ec8 |
 | P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
@@ -787,7 +789,7 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ### LV-023 · AI document append to an existing conclusion fails
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** `/library` document Work studio and Live Dock / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Document · Append; adjacent re-check for LV-020
@@ -813,6 +815,71 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Change: Normalize content-relative paths before mirror synchronization and in the shared pointer resolver used by apply/readback. This retains existing document/Sheets/whiteboard selector semantics and also fixes prefixed reads for decks and other content collections. Save/authority/readback checks, model/provider/reasoning/context and environment configuration are unchanged.
 - Test: Six regressions fail on previous code and pass after: append a final sentence to an existing paragraph, append a new final paragraph, read a prefixed stable block edit, and prefixed/direct pointer parity for a deck, sheet and whiteboard. Document cases exercise the actual write resolver and Yjs projection. All 199 focused patch/readback/native-model/reference/run-route/Convex-scope tests, both TypeScript checks, full lint and all five gates pass. Final full suite: 4,399 passed, 1 failed, 1 skipped (502 passed files, 1 failed, 1 skipped). The sole failure is pending LV-017 hosted packaging; all document/pointer/admission/run-route tests passed. This result is not green.
 - Re-check nearby: Sync/restart the verifier-owned local instance 8 to load the shared resolver into Convex, reload the frontend and repeat both reported additions after the existing conclusion. Confirm exact requested text persists after reload without duplicate text and preserves the original conclusion; re-check a new final paragraph, section edits and stable block paths. No shared deployment or code generation is required.
+
+**Verification** (verifier):
+
+VERIFIED on commit `9d6a4bf3`, 2026-09-30. After a full local instance-8 stop/start, both recorded final-sentence prompts completed; each requested sentence appeared once after reload, and the original conclusion plus all four section headings remained. Playwright showed 0 console errors and 1 Clerk development-key warning.
+
+
+### LV-024 · Document paragraph append duplicates content and removes a saved sentence
+
+- **Status:** FIXED
+- **Severity:** Blocker
+- **Surface / role:** `/library` document Work studio and Live Dock / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Document · Append; adjacent re-check for LV-023
+- **Commit tested:** `9d6a4bf3` (application code; repository HEAD `4f8103b6` adds audit documentation only)
+- **Frequency:** 1 of 1 new final-paragraph requests duplicated the paragraph and removed a previously saved sentence after reload.
+
+**Steps**
+1. On local instance 8 at application commit `9d6a4bf3`, use saved Profile A and open the verifier-created four-section `Causes of World War I` document. Before this test, it contains its original conclusion and two previously saved LV-023 append sentences.
+2. Start a new chat and confirm the open document is the only selected context object.
+3. Send `Append one new final paragraph after the conclusion explaining how long-standing tensions and decisions during the crisis both shaped the war; do not repeat any existing sentence.` Wait for the run to complete.
+4. Inspect the document's Work surface, then reload the page.
+5. Inspect the document again.
+
+**Expected:** P3-AI-ENGINE's append action is `Add a conclusion paragraph.` A single new final paragraph should appear, and previously saved document text should remain after reload.
+
+**Actual:** The assistant response described one new final paragraph. The Work surface showed the same paragraph twice. After reload and again after a full local stack restart, both copies remained. The previously saved sentence `The assassination was the spark; long-term tensions were the fuel.` was absent; the other previously saved appended sentence and original conclusion remained, along with all four section headings. Post-restart Work surface counts were: duplicate paragraph lead 2, first append sentence 1, second append sentence 0, original conclusion 1, section headings 1 each. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-document-new-paragraph-duplicate-before-reload-9d6a4bf3-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-new-paragraph-response-9d6a4bf3-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-duplicate-and-prior-sentence-missing-after-reload-9d6a4bf3-redacted.png`; `.spectra-local/live-verification/P3-AI-ENGINE-document-duplicate-response-9d6a4bf3-redacted.png`; `.spectra-local/live-verification/LV-024-duplicate-paragraph-after-stack-restart-4f8103b6-redacted.png`; `.spectra-local/live-verification/LV-024-browser-console-redacted.txt`.
+
+**Fix** (fixer)
+- Commit: `98677c5f5b791f9771f070ae765400844f845d05`.
+- Root cause: The accepted patch wrote a new stable paragraph identity into an occupied numeric slot, replacing the prior saved sentence. Independently, DocumentStudio treated any missing projected block as a canonical Word insert; an awareness preview authored a second Yjs node before the immutable admitted delta arrived, so both copies became durable.
+- Change: Shared patch resolution rejects whole-item identity collisions at occupied array slots and feeds the existing model repair path, while same-identity rewrites and both append pointers remain valid. The existing native projection transaction moved into a tested helper restricted to canonical Word reconciliation, with an explicit provisional-content flag from ArtifactStudio; ordinary and provisional collaborative content cannot author a second tree. The identity guard also covers deck cards, quiz questions, slides and other stable-ID collections.
+- Test: Seven regressions failed before the fix: four collection identity collisions and three real TipTap/Yjs preview or early-projection cases. Afterward, real write resolution preserves the conclusion and saved sentence alongside one new paragraph; collaborative editor reloads retain one copy, and canonical native inserts remain idempotent without altering rich existing content. All 128 focused tests pass including the native-model re-check (32/32); both TypeScript checks, full lint and all five gates passed. Full-suite validation will follow this queued-fix batch; the preceding result is recorded in closeout.
+- Re-check nearby: Sync/restart only the verifier-owned local instance 8, since Convex admission imports the shared patch helper, then reload. Use a fresh occupied-final-paragraph document; check one and then a second append, both prior literal sentences, an existing-paragraph rewrite, deck/quiz additions, and canonical Word trailing inserts through reload/restart. No shared deploy or codegen occurred.
+
+**Verification** (verifier):
+
+
+### LV-025 · Skip response produces repeated chat run conflicts
+
+- **Status:** OPEN
+- **Severity:** High
+- **Surface / role:** `/chat` AI answer and clarification choice / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Answer, step 3; clarification-skip neighbor check
+- **Commit tested:** `9d6a4bf3` (application code; repository HEAD `4f8103b6` adds audit documentation only)
+- **Frequency:** 1 of 1 “Skip for now” responses was followed by at least 186 HTTP 409 console errors.
+
+**Steps**
+1. On local instance 8 at application commit `9d6a4bf3`, use saved Profile A and open a fresh `/chat` with no artifact open and `0 context objects selected`.
+2. Send `Tighten my notes summary` and wait for the clarification asking which notes-related item is intended.
+3. Click `Skip for now` once without selecting an item.
+4. Wait until the assistant response is visible and the clarification choice has closed. Inspect the browser console and the recent same-origin requests.
+
+**Expected:** P3-AI-ENGINE Answer step 3 says, “The model must either do the work with tools or answer without claiming it saved anything.” After skipping the clarification without choosing an item, the run should reach a terminal answer without repeated failed `/api/spectra/run` requests.
+
+**Actual:** After one click, the assistant response became visible and the clarification choice closed. Playwright recorded 186 console errors, each shown as `Failed to load resource: the server responded with a status of 409 (Conflict)` at `http://localhost:3000/api/spectra/run`. The latest ten POST entries in the request list all returned HTTP 409; no additional request appeared during the following 8-second sample. No spinner or outstanding choice remained. The final assistant text said it could not edit a personal notes summary.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-no-context-notes-summary-final-response-4f8103b6-redacted.png`; `.spectra-local/live-verification/LV-025-no-context-skip-console-network-redacted.txt`; sanitized Playwright console log `.playwright-cli/console-2026-09-30T13-57-34-589Z.log` (same-origin `/api/spectra/run` HTTP 409 entries).
+
+**Fix** (fixer)
+- Commit:
+- Root cause:
+- Change:
+- Test:
+- Re-check nearby:
 
 **Verification** (verifier):
 

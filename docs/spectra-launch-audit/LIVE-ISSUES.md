@@ -93,6 +93,10 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
 | P3-AI-ENGINE — flashcard rewrite | P3-AI-ENGINE · Flashcard deck · rewrite | PASS — all 12 cards' fronts, backs and hints were in Spanish after rewrite and reload; card count remained 12 | — | 68587ec8 |
 | P3-AI-ENGINE — quiz create/edit/append | P3-AI-ENGINE · Quiz | PASS — created six questions with 4 multiple choice/2 short answer; the harder Q2 edit persisted; appended two enzyme questions and after reload retained all eight questions with 5 multiple choice/3 short answer; 0 console errors. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-quiz-append-verified-d61b1e25-redacted.png` | — | d61b1e25 |
+| P3-WORKSPACE-FLOWS — command bar keyboard focus and search | P3-WORKSPACE-FLOWS · step 5 | FAIL — clicking the visible command-bar button opened the list, showed Update memory, focused its Memory field, and both Escape steps restored focus correctly; searching `share` showed no command asking for an ID. Pressing Ctrl+Shift+F twice instead focused `Search recent chats` with no dialog. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt` | LV-028 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Calendar DST view prerequisite | P3-WORKSPACE-FLOWS · step 2 | FAIL — browser timezone was Europe/Madrid, but the Calendar view returned HTTP 500 on both its initial read and Try again, leaving the error state visible; the 20 Oct–3 Nov date check and default-time event check could not be reached. Evidence: `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt` | LV-029 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — no public agent could be opened because the `/agents` list stayed in its load-error state; see LV-030 | LV-030 (OPEN) | 45281d26 |
+| Free exploration — `/agents` library | exploration · first-week /agents | FAIL — “Could not load agents. Retry” remained visible and 15 `/api/spectra?action=agentGraphPage` requests returned HTTP 400. Evidence: `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt` | LV-030 (OPEN) | 45281d26 |
 
 ## Issues
 
@@ -897,7 +901,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-026 · Library full-title search returns broad partial matches
 
-- **Status:** NEEDS-DECISION
+- **Status:** OPEN
 - **Severity:** Medium
 - **Surface / role:** `/library` search / signed-in school administrator
 - **Report script:** exploration · first-week Library and search
@@ -921,11 +925,11 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Assessment** (fixer)
 - Root cause: Both orgTree.search and searchPage deliberately delegate ranking to the name full-text provider; they do not impose full-phrase or all-term matching. Library renders that ranked result set without a match category, and Enter opens its highlighted row. This is intended retrieval behavior with an ambiguous presentation contract, rather than a missing full-title record.
 - Reproduction: An ignored convex-test fixture calls the real searchPage query with both reported full-title queries against three ordinary titles. Both return partial results and zero full-phrase matches; the unique control returns zero. Test: `.spectra-local/LV026-search-repro.test.ts`, 1/1 passed; log `.spectra-local/LV026-repro.log`. No production records or application code changed.
-- Decision: (A) Require all query terms, producing a clear no-match state for a missing title but reducing broad discovery; or (B) preserve ranked broad retrieval and distinguish partial matches while making Enter's highlighted target clear, retaining useful nearby results but adding a result-presentation contract. Full-phrase priority can supplement either option when the exact title exists. The human choice is pending; no option has been implemented.
+- Decision: (A) Require all query terms, producing a clear no-match state for a missing title but reducing broad discovery; or (B) preserve ranked broad retrieval and distinguish partial matches while making Enter's highlighted target clear, retaining useful nearby results but adding a result-presentation contract. Full-phrase priority can supplement either option when the exact title exists. The human chose option B on 30 September 2026: retain broad ranked results, clearly label partial matches, and make Enter's target explicit. This implementation is queued after the higher-severity Calendar issue; no application change has been made yet.
 
 ### LV-027 · AI clarification follow-up remains in progress during extended waits
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/chat` AI clarification continuation / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Answer, step 3; Stop and steer neighbor check
@@ -945,6 +949,74 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 **Evidence:** `.spectra-local/live-verification/LV-027-clarification-pending-observations-redacted.txt`; `.spectra-local/live-verification/LV-025-postfix-skip-run-after-120s-45281d26-redacted.png`; `.spectra-local/live-verification/LV-025-postfix-choice-run-pending-45281d26-redacted.png`; `.spectra-local/live-verification/LV-027-clarification-choice-final-after-reload-45281d26-redacted.png`.
 
+**Fix** (fixer)
+- Commit: `7636be7719aaa00c2494d4f952ac4d88a801f69c`.
+- Root cause: Lifecycle discovery reused the short-lived run-tab cache after the choice started a continuation, so the poll could miss that worker and then wait minutes before rediscovering it. Closing the acknowledgement response removed the local request count even though the owned exchange remained active, hiding Stop. A reload loaded the already-saved final reply.
+- Change: Lifecycle changes force a fresh tab snapshot using the existing API cache boundary; releasing acknowledgement stream ownership triggers durable discovery again. Acknowledged exchanges enter streaming state and retain Stop until terminal settlement, while pre-acknowledgement rejection clears its provisional exchange. The same handoff serves Chat, Work, Workspace and retry; LV-025 sequence/attempt fences remain intact.
+- Test: Three regressions fail before the fix and pass after: Skip and a selected choice receive the durable final without reload, and a delayed snapshot retains Stop after the acknowledgement closes. An additional rejection case proves no provisional progress remains on a refused start. All 108 focused tests, both TypeScript projects, full lint and all five gates pass. Full-suite validation follows the queued fix batch.
+- Re-check nearby: Frontend reload only, then both clarification paths without a post-submission reload; check visible final settlement, Stop during an actual worker, typed clarification answers, retry and LV-025's no-conflict-barrage check. No backend sync, deployment or codegen is needed.
+
+### LV-028 · Command bar keyboard shortcut focuses chat search
+
+- **Status:** OPEN
+- **Severity:** Low
+- **Surface / role:** Spectra command bar shortcut / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 5
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 shortcut attempts
+
+**Steps**
+1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and open `/chat` with the command bar closed.
+2. Press `Ctrl+Shift+F`.
+3. Inspect the open dialogs and the focused control.
+
+**Expected:** P3-WORKSPACE-FLOWS step 5 says, “Press Mod+Shift+F and type "memory". Expected: "Update memory" is listed.”
+
+**Actual:** After each shortcut attempt, the focused control was the `Search recent chats` input and no dialog was open. Clicking the visible `Open Spectra command bar` button did open the command list, where `Update memory` was present.
+
+**Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt`.
+
+### LV-029 · Calendar page stays in an error state
+
+- **Status:** OPEN
+- **Severity:** High
+- **Surface / role:** `/calendar` / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 2
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 2 of 2 Calendar reads
+
+**Steps**
+1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and open `/calendar`.
+2. Wait for the Calendar contents to load.
+3. Choose `Try again` and wait for the next read.
+
+**Expected:** P3-WORKSPACE-FLOWS step 2 says, “Set the OS to Europe/Madrid and view 20 Oct – 3 Nov. Expected: each date appears once and 27 Oct is present.”
+
+**Actual:** The Calendar panel displayed “Calendar could not be loaded” after the initial read and after Try again. Both reads returned HTTP 500 from `/api/spectra/calendar`; the Plans panel displayed “Plans could not be read just now.” The requested date range and event-default-time check could not be reached.
+
+**Evidence:** `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt`.
+
+
+### LV-030 · Agent library stays in a load-error state
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/agents` Agent library / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 7; free exploration
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 15 of 15 observed agent-list requests returned HTTP 400 within about two minutes
+
+**Steps**
+1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and open `/agents`.
+2. Wait for the Agent library to finish loading.
+3. Choose `Could not load agents. Retry` once and wait again.
+4. Inspect the visible agent collections and browser console.
+
+**Expected:** P3-WORKSPACE-FLOWS step 7 says, “Open a public agent's preview; open "Add to a workspace". Expected: centred dialogs above the composer. Escape closes them. Install works.”
+
+**Actual:** The page retained the “Could not load agents. Retry” button after the retry. The Published agents collection and the other collections displayed “No agents in this collection yet.” No public agent preview was available. Fifteen `GET /api/spectra?action=agentGraphPage` requests returned HTTP 400, and the console recorded 15 corresponding errors.
+
+**Evidence:** `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt`.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--

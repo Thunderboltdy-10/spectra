@@ -1019,7 +1019,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-030 · Agent library stays in a load-error state
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/agents` Agent library / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 7; free exploration
@@ -1037,6 +1037,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The page retained the “Could not load agents. Retry” button after the retry. The Published agents collection and the other collections displayed “No agents in this collection yet.” No public agent preview was available. Fifteen `GET /api/spectra?action=agentGraphPage` requests returned HTTP 400, and the console recorded 15 corresponding errors.
 
 **Evidence:** `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt`.
+**Fix** (fixer)
+- Commit: `17f7a5f911989d42bb35d61135ac530b89631822` (operator-prerequisite documentation; the repair used the existing internal migration).
+- Root cause: Read-only reproduction returned `CATALOG_READ_MODEL_REQUIRED`, and local instance 8's read-model migration table was empty. Agent and artifact graph readers intentionally reject an uncertified catalog rather than returning partial results; the required complete summary migration was documented in S10-CONVEX but missing from the launch README operator checklist.
+- Change: Run the existing `spectraArtifacts:backfillSummaries` only on the disposable local instance 8, from `{cursor:null,limit:10}` through every returned cursor until done: **28 bounded pages, 275 derived summaries**, with a complete marker. Add the prerequisite and bounds to docs/README.md. No application guard, environment, deployment configuration, canonical artifact or shared-deployment data was changed; any other deployment must perform its own authorized contiguous migration.
+- Test: Before repair, the real local agent query rejected; afterward it completes **42 continuation pages without errors**, returning **0 authorized agent items**. Logs: `.spectra-local/LV030-{before,local-migration,after}.log`. The two focused real-model migration-guard/agent-card tests pass (32 unrelated cases skipped by the filter), both TypeScript checks, full lint and all five gates pass; logs `.spectra-local/LV030-{focused,tsc,convex-tsc,lint,gates}.log`.
+- Re-check nearby: Reload /agents and confirm a complete empty state without load/Retry errors or the HTTP 400 loop. The current actor has no authorized agents in the completed traversal, so public preview/install needs an appropriate existing fixture. Recheck artifact graph surfaces too; no code sync/restart is needed for this derived-data repair.
+
 
 ### LV-031 · Permanently deleting an open trashed work shows an error page
 
@@ -1163,3 +1170,9 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - **NEEDS-DECISION:** LV-022 — post-save model prose adds latency/usage, while an authoritative saved-result message with separately labeled pre-save explanation changes presentation; no option was selected. LV-003 — invalid/expired invite 404/410 semantics versus an unavailable-preview result. LV-012 — automatic Bridge discovery versus an explicit connection/activation workflow; the earlier authorized restart does not settle the presentation decision.
 - **CANNOT-REPRODUCE:** LV-004 — the original invitation had MIME encoding artifacts and the decoded generated token worked. LV-007 — the original Escape observation concerned an idle dialog; the pending-request check retained the dialog and disabled its controls. LV-017 remains NEEDS-INFO for the hosted-package exception described above.
 - No OPEN, REOPENED or FIXING issue remains. The fixer stops between tasks under the user's instruction, and will resume when the verifier supplies a new or reopened ledger issue. No shared deploy/codegen, environment edits or production-data changes were performed for these two fixes.
+
+## Batch validation · LV-027, LV-029 and LV-026
+
+- Commits: `7636be77` (continuation handoff), `7bce0577` (Convex-runtime Calendar cursors), `28a04b6b` (approved search presentation); audit commits `6b9c8f58`, `6c8489ad`, `41502faf`. LV-030 local catalog readiness is repaired and documented at `17f7a5f9`.
+- Full suite: **4,422 passed, 4 failed, 1 skipped**; **502 passed files, 3 failed, 1 skipped** (506 files), duration **324.60 seconds**. Log: `.spectra-local/launch-fixer-LV026-full.log`. Failures are pending LV-017 hosted packaging, two Stop-auth/timing cases and the sheet dense-cell performance threshold; the last three then pass with **136/136 tests** in `.spectra-local/LV030-full-failures-recheck.log`. The full result is not green; the deployment-config exception remains unanswered.
+- Fixing continues with LV-031, then Low findings LV-028/LV-032. Earlier NEEDS-DECISION, NEEDS-INFO and CANNOT-REPRODUCE entries remain unresolved as recorded.

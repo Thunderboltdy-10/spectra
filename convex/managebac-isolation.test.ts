@@ -1846,3 +1846,33 @@ describe("ManageBac account isolation", () => {
   });
 
 });
+
+
+describe("ManageBac credential-block recovery", () => {
+  it.each(["replacement-fingerprint", "original-fingerprint"])("permits identity retry after explicitly storing credential %s", async fingerprint => {
+    const t = setupTest(); const f = await seedFixture(t);
+    await t.run(ctx => ctx.db.patch(f.integrationId, { status: "blocked", credentialFingerprint: "original-fingerprint",
+      blockedReason: "The stored read-only credential was rejected by ManageBac.", nextSyncAt: undefined }));
+    const actor = t.withIdentity(admin);
+    await actor.mutation(api.managebac.configure, { baseUrl: "https://managebac-isolation.example.test", authHeaderName: "X-API-Key", authScheme: "raw", credentialFingerprint: fingerprint });
+    const integration = await t.run(ctx => ctx.db.get(f.integrationId));
+    expect(integration).toMatchObject({ status: "connected", credentialFingerprint: fingerprint });
+    expect(integration?.blockedReason).toBeUndefined();
+    await expect(actor.mutation(api.managebac.beginSync, { kind: "identity" })).resolves.toHaveProperty("syncRunId");
+  });
+  it("retains a credential block and explanation when only sync settings are saved", async () => {
+    const t = setupTest(); const f = await seedFixture(t);
+    const blockedReason = "The stored read-only credential was rejected by ManageBac.";
+    await t.run(ctx => ctx.db.patch(f.integrationId, { status: "blocked", blockedReason }));
+    await t.withIdentity(admin).mutation(api.managebac.configure, { baseUrl: "https://managebac-isolation.example.test", authHeaderName: "X-API-Key", authScheme: "raw", frequencyMinutes: 240 });
+    expect(await t.run(ctx => ctx.db.get(f.integrationId))).toMatchObject({ status: "blocked", blockedReason });
+  });
+  it("does not admit a replaced credential without a readable verified capability", async () => {
+    const t = setupTest(); const f = await seedFixture(t);
+    await t.run(async ctx => { await ctx.db.patch(f.integrationId, { status: "blocked" }); await ctx.db.patch(f.capabilityId, { verificationStatus: "unverified" }); });
+    const actor = t.withIdentity(admin);
+    await actor.mutation(api.managebac.configure, { baseUrl: "https://managebac-isolation.example.test", authHeaderName: "X-API-Key", authScheme: "raw", credentialFingerprint: "replacement-fingerprint" });
+    expect(await t.run(ctx => ctx.db.get(f.integrationId))).toMatchObject({ status: "validating" });
+    await expect(actor.mutation(api.managebac.beginSync, { kind: "identity" })).rejects.toThrow("INTEGRATION_NOT_READY");
+  });
+});

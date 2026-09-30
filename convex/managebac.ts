@@ -1008,7 +1008,10 @@ export const configure = mutation({
       | "blocked"
       | "revoked" = "validating";
     if (current && !connectionContractChanged) {
-      if (current.status === "revoked" || current.status === "validating") {
+      if (
+        current.status === "revoked" || current.status === "validating" ||
+        (current.status === "blocked" && args.credentialFingerprint !== undefined)
+      ) {
         const existingCapabilities = await ctx.db
           .query("integrationCapabilities")
           .withIndex("by_integration", (q) =>
@@ -1038,7 +1041,7 @@ export const configure = mutation({
       freshnessSlaMinutes: Math.max(180, syncPolicy.frequencyMinutes + 20),
       rotationDueAt: args.rotationDueAt,
       updatedByAccountId: actor.accountId,
-      blockedReason: undefined,
+      blockedReason: nextStatus === "blocked" ? current?.blockedReason : undefined,
       updatedAt: now,
     };
     let integrationId: Id<"schoolIntegrations">;

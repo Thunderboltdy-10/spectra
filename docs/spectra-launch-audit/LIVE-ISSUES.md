@@ -30,18 +30,24 @@ Severity:
 ## Summary
 
 _Written by the verifier at the end._
+- **Local test authorization (2026-09-30):** The user explicitly authorized edits to the repository-root `.env.local` for this verification run. Profile A may be used as the initial administrator of a locally created test school, and the configured ManageBac API key with its standard base URL may be used for non-mutating connection/read checks. The authorization does not permit sending real invitation emails or changing data at a real school.
 
 ## Coverage
 
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
-| Local runtime bootstrap (fresh Convex) | Run and test · local startup | FAIL | LV-001 | 14f31c0c |
+| Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
+| Signed-in workspace gate with no school | exploration · first use | FAIL | LV-002 | 690266bc |
+| P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
+| P2-EXPERIENCE step 2 — expired invitation | P2-EXPERIENCE · step 2 | FAIL | LV-003 | 690266bc |
+| Superadmin school onboarding email | exploration · create school | BLOCKED — submission would use configured SMTP; no safe mail sink supplied | — | 690266bc |
+| ManageBac admin token connection | README · Open launch risks | BLOCKED — configured host is the standard service host; no sandbox URL supplied | — | 690266bc |
 
 ## Issues
 
 ### LV-001 · Fresh local stack stops before readiness
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** Local stack startup / operator
 - **Report script:** Run and test · local startup
@@ -65,6 +71,61 @@ _Written by the verifier at the end._
 - Change: complete fresh configuration in the foreground with inherited input/output before detaching. The new `stack.mjs configure` command reuses the existing instance validation, local-only Convex selection and environment synchronization, then stops its owned backend; the detached stack restarts the saved identity and database. Failed or unsaved configuration aborts startup with an actionable next step.
 - Test: `node --test scripts/local/start-all.node.mjs` (4 passed), including a real child-process selection test that fails when stdin is discarded and passes with inherited input. It also proves saved instances do not reselect, and failed/unsaved setup cannot continue. Focused stack configuration/scaffolding/readiness Vitest tests: 22 passed. Both TypeScript checks, full lint and all five repository gates passed; final full suite: 4,296 passed, 1 failed, 1 skipped. The failure was the unchanged dense-sheet timing assertion (42.37 ms against 40 ms); its file passed all 77 tests alone.
 - Re-check nearby: run fresh startup in an interactive terminal, select the intended local project, confirm all services become ready, then restart the same saved instance and confirm no project prompt or database replacement. Check setup cancellation/failure and explicit team/project setup too. A headless fresh run still requires both `SPECTRA_LOCAL_CONVEX_TEAM` and `SPECTRA_LOCAL_CONVEX_PROJECT` in its instance `env.local`; no project can be selected without either explicit values or interactive input. No shared deployment/codegen step is required by this patch.
+
+**Verification** (verifier): VERIFIED, commit `690266bc`, 2026-09-30. A fresh instance with empty selectors displayed the project prompt in the terminal, then reported the local Convex backend, web app, gateway and Bridge ready. Stopping and restarting that instance returned it to ready without another project prompt and retained the same local deployment name; its local database file remained present. Cancelling setup on a separate fresh instance exited before readiness and left its ports unused.
+
+### LV-002 · Workspace gate emits repeated console errors without a school
+
+- **Status:** FIXED
+- **Severity:** Medium
+- **Surface / role:** `/workspace` / signed-in user without school membership
+- **Report script:** exploration · first use on a fresh local instance
+- **Commit tested:** 690266bc
+- **Frequency:** Reproduced on the initial load and reload (2 of 2); not reproduced on two post-restart loads.
+
+**Steps**
+1. Start a fresh local Convex instance on commit `690266bc` and sign in with the saved Profile A session; leave the new database without a school or membership.
+2. Open `http://localhost:3060/workspace` and wait for the page to load.
+3. Reload the page and inspect the Playwright console.
+
+**Expected:** The page displays “You are signed in. Accept the invitation for this school, then your workspace will load.” without console errors or failed requests.
+
+**Actual:** The invitation gate displays, but the browser records 26 console errors per load, including repeated `ConvexError: AUTH_ACCOUNT_REQUIRED` from `accountPreferences:writeLayer` and two HTTP 403 responses from `/api/spectra?action=runTabs&limit=120` (including the `surface=workspace` request).
+
+**Evidence:** .spectra-local/live-verification/LV-002-no-school-console.png; Playwright console excerpt (request IDs redacted): “26 errors, 1 warning”; `accountPreferences:writeLayer` → `AUTH_ACCOUNT_REQUIRED`; `/api/spectra?action=runTabs&limit=120` → 403. Rechecked after restart twice: 0 console errors, and workspace `runTabs` requests returned 200; screenshot .spectra-local/live-verification/LV-002-no-school-clean-recheck.png.
+
+**Fix** (fixer)
+- Commit: `94d3cbb3868420de73147424ee5d52f58c8f865f` (`fix(auth): settle account reads before joining a school (LV-002)`).
+- Root cause: Account preferences were indexed by account but authorized through `getAuthenticatedActor`, which requires an active school membership. Returning an empty layer list for the unavailable actor advertised readiness to every mounted preference hook, while migration writes failed and their promise had no rejection handler. Separately, the existing no-school empty-read contract omitted `runTabs`, so both the Live Dock and surface run observer received 403 despite the correct invitation gate.
+- Change: authorize preference reads/writes with the verified active account, keeping account isolation and rejecting unregistered, unverified and inactive accounts. Return `null` while account registration is pending; the preference subscription keeps watching and migration waits until a ready layer list arrives, with failures using the existing save-error state. Include run tabs in the shared no-school empty-read path, covering the global dock and every surface/filter without weakening other authorization errors.
+- Test: Before the fix, the backend/route regressions produced five failures (including both reported 403 requests); the migration failure test also failed with an unhandled rejection. After the fix, focused backend, route, hook, merge, receipted-settings, AI scope-security, observation-writer and module-graph suites passed **90 tests**. Both TypeScript checks, full lint and all five gates passed. Full suite: **4,305 passed, 1 failed, 1 skipped**; the unchanged run-route Stop authorization case timed out at 15 seconds. Its file passed **59/59** tests when rerun alone.
+- Re-check nearby: reload `/workspace` with a verified signed-in account and no school on a fresh database; the invitation gate should remain and there should be no preference mutation errors or failed run-tab requests. Check first registration, reload after migration, settings on `/superadmin` before membership, then joining a school and restoring normal run visibility. Check that a different account cannot see these preferences and that a signed-out/unverified account still cannot read run tabs. No schema/codegen or shared deployment step is required; the local verifier should load the committed backend code before re-checking.
+
+### LV-003 · Expired invitation request returns HTTP 404 errors
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/join?token=<expired>` / signed-in user
+- **Report script:** P2-EXPERIENCE · step 2
+- **Commit tested:** 690266bc
+- **Frequency:** Reproduced on 2 of 2 visits; each visit produced two failed requests
+
+**Steps**
+1. In the saved Profile A session, open `http://localhost:3060/join?token=expired-live-verification-sentinel` on the fresh local instance.
+2. Wait for the unavailable-invitation state and inspect the browser console and requests.
+
+**Expected:** “a plain message, no Retry button, no raw code, and the invitation cookie is cleared.”
+
+**Actual:** The page shows the plain alert “This invitation is unavailable.” with no Retry button or raw token. No invitation-named browser cookies remain. The same visit also produces two console errors: POST requests to `/api/spectra/administration` return HTTP 404.
+
+**Evidence:** .spectra-local/live-verification/LV-003-expired-invite.png; Playwright console: “2 errors” with two POST `/api/spectra/administration` responses of 404 (authorization values redacted).
+
+**Fix** (fixer)
+- Commit:
+- Root cause:
+- Change:
+- Test:
+- Re-check nearby:
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
@@ -98,9 +159,10 @@ _Written by the verifier at the end._
 
 ## Fixer closeout · 30 September 2026
 
-- Fix commit: `454a7bbe` — finish Convex selection before detaching the stack (LV-001). The accompanying ledger documentation commit records this result.
-- Final full suite (`npx vitest run`): **4,296 passed, 1 failed, 1 skipped** (493 passed files, 1 failed, 1 skipped). `sheets-operations.test.ts` exceeded its unchanged 40 ms timing threshold at 42.37 ms under the full run; rerun alone: **77 passed**. Raw local result: `.spectra-local/launch-fixer-LV001-full.log`.
-- Before changes, the full suite had **4,292 passed, 5 failed, 1 skipped**. The two failing files passed **66/66** tests in an isolated rerun. These results are reported as baseline observations, not separate live ledger issues.
-- LV-001 regression: **4 Node tests passed**; focused stack suites: **22 Vitest tests passed**. Web and Convex TypeScript checks, full lint and all five gates passed.
-- No issue remains OPEN, REOPENED or FIXING in this pass; LV-001 awaits the verifier's live re-check. No issue is left NEEDS-DECISION or CANNOT-REPRODUCE.
-- Fresh local setup requires interactive project selection or both explicit local team/project values. Live product coverage is still in progress. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.
+- Fix commits: `454a7bbe` — finish Convex selection before detaching the stack (LV-001); `94d3cbb3` — settle account reads before joining a school (LV-002). `690266bc` records the LV-001 audit result; the accompanying LV-002 ledger documentation commit records this closeout.
+- Latest full suite (`npx vitest run`): **4,305 passed, 1 failed, 1 skipped** (495 passed files, 1 failed, 1 skipped). The unchanged run-route Stop authorization case timed out at 15 seconds under the full run; rerun alone: **59 passed**. Raw local result: `.spectra-local/launch-fixer-LV002-full.log`.
+- LV-002 focused backend, route, preference-hook, merge, receipted-settings, AI scope-security, observation-writer and module-graph suites: **90 passed**. Both TypeScript checks, full lint and all five gates passed. Before/after evidence is in the LV-002 entry.
+- LV-001 regression: **4 Node tests passed**; focused stack suites: **22 Vitest tests passed**. Its full suite had **4,296 passed, 1 failed, 1 skipped**; the unchanged sheet timing assertion was 42.37 ms against 40 ms, and its file passed **77/77** alone. The verifier has since marked LV-001 VERIFIED.
+- Before any fixes, the full suite had **4,292 passed, 5 failed, 1 skipped**. The two failing files passed **66/66** tests in an isolated rerun. These results are baseline observations, not separate live ledger issues.
+- No issue remains OPEN, REOPENED or FIXING in this pass; LV-002 awaits live re-check. No issue is left NEEDS-DECISION or CANNOT-REPRODUCE.
+- Fresh local setup requires interactive project selection or both explicit local team/project values. Live product coverage continues. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.

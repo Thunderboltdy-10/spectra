@@ -53,7 +53,9 @@ _Written by the verifier at the end._
 | ManageBac identity resolution after admin capability review | W1-16 · step 6 | PASS — action completed with HTTP 200 | LV-010 (VERIFIED) | c119147d |
 | ManageBac Sync now after admin capability review | W1-16 · step 6 | PASS — latest manual run completed | LV-010 (VERIFIED) | c119147d |
 | ManageBac post-sync class selection and Overview/History consistency | W1-16 · step 6; exploration · post-sync class selection | PASS — post-fix picker, selected count, Overview count and completed sync remained consistent across save and reload | LV-014 (VERIFIED) | 6451c630 |
-| ManageBac all-class sync completion | W1-16 · step 6; P2-SYNC-RESUME · step 1 (local unthrottled attempt) | FAIL — latest run remained In progress for more than five minutes after the identity action returned HTTP 200 | LV-015 | 6451c630 |
+| ManageBac all-class sync progress polling | W1-16 · step 6 (local unthrottled observation) | PASS — newest run reached Complete in History and Sync now became available without a manual reload | LV-015 (VERIFIED) | 7c4169a8 |
+| P2-SYNC-RESUME · step 1 — large or throttled reconciliation | P2-SYNC-RESUME · step 1 | BLOCKED — no large tenant or throttled fixture was available; the local unthrottled run does not prove the >4-minute pause/resume path | LV-015 | 7c4169a8 |
+| ManageBac task and calendar materialization after a completed all-class sync | W1-16 · step 6 | FAIL — History says Complete and School data is current, but Overview reports Tasks 0 and Calendar 0 and both tabs show empty states | LV-016 | 7c4169a8 |
 | ManageBac overview before first successful sync | exploration · first-use state | PASS | LV-013 (VERIFIED) | 0a8a2360 |
 | W3-07 student no-match identity and dependent sync | W3-07 · step 5 | BLOCKED — Profile A is the only supplied login and is a school admin/platform superadmin; the admin ManageBac view shows 22 class options, but this script requires an ordinary student identity | — | 6451c630 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
@@ -504,8 +506,8 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - **Severity:** High
 - **Surface / role:** `/managebac` Sync history / school administrator
 - **Report script:** W1-16 · step 6; P2-SYNC-RESUME · step 1 (local, unthrottled observation)
-- **Commit tested:** 6451c630 (app code; local instance 8; ledger-only HEAD c1593b6b)
-- **Frequency:** 1 of 1 all-class runs; still In progress after more than five minutes.
+- **Commit tested:** 7c4169a8 (app code; local instance 8; ledger-only HEAD 763a5057)
+- **Frequency:** 1 of 1 post-fix all-class runs reached a terminal state without a manual reload; the pre-fix run remained In progress for more than five minutes before a reload showed its terminal partial result.
 
 **Steps**
 1. On local instance 8, sign in with saved Profile A as the school administrator for the configured local test school. Start from `/managebac` with no classes selected and no run currently shown as active.
@@ -525,6 +527,42 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Change: Refresh active queued/leased/running progress every three seconds, serially, and stop when no active run remains or the page unmounts. Failed reads retain an actionable error and retry; leased state is included in the UI contract/label. Background progress reads preserve the class candidate collection so unsaved class selections are not reset, and render the actual terminal outcome without converting partial results to success.
 - Test: Five UI regressions fail against the previous shell and pass after the fix: queued, leased and running transitions to a terminal result; failed-read retry/unmount cleanup; and slow-read non-overlap with preserved unsaved class choices and a partial terminal outcome. Focused UI/class-picker/honesty/real-model suites: 50 passed; both TypeScript checks, full lint and all five gates passed. A temporary real-route/Convex-model diagnostic also drained more than one reconciliation batch successfully (240 stale records); it was restored after diagnosis. Final full suite: 4,365 passed, 3 failed, 1 skipped (500 passed files, 1 failed, 1 skipped); all three failures are unchanged account-erasure lifecycle scheduled-drain timer-pump limits. That file passed all 7 tests in an isolated re-check; the full run is not green.
 - Re-check nearby: Reload once to load the committed frontend, repeat the existing identity/all-class flow, and leave History open without pressing Refresh or reloading. The row should follow the actual terminal outcome and release Sync now automatically; also check projection-stage completion, queued/leased work, transient read failures, and unsaved class edits while a run remains active. No backend deploy or codegen is needed. The reported Partially complete outcome and its gaps are not claimed to be repaired by this display fix; record any distinct provider/data failure separately with its observed recovery message.
+
+**Verification** (verifier): VERIFIED on app commit `7c4169a8` (ledger-only HEAD `763a5057`), 2026-09-30. Reloaded Profile A to load the committed frontend, resolved school identity, saved all 22 selected class options, and left Sync history open. The primary action first showed **Syncing…**; the newest row then showed **Complete** and “School data is current,” and **Sync now** was enabled without a manual refresh or reload. Two ManageBac POSTs and subsequent `overview` / `myClasses` reads returned HTTP 200; the browser showed 0 errors and 1 warning. The next row in History remained Partially complete, preserving its distinct earlier result. Evidence: `.spectra-local/live-verification/LV-015-verified-7c4169a8-history-redacted.png`; `.spectra-local/live-verification/LV-015-verified-7c4169a8-sync-ready-redacted.png`.
+
+### LV-016 · ManageBac reports no tasks or calendar events after a completed sync
+
+- **Status:** NEEDS-INFO
+- **Severity:** High
+- **Surface / role:** `/managebac` Overview, Tasks and Calendar / school administrator
+- **Report script:** W1-16 · step 6, ManageBac school journey
+- **Commit tested:** 7c4169a8 (app code; local instance 8; ledger-only HEAD 763a5057)
+- **Frequency:** 1 of 1 completed all-class runs after the LV-015 commit; both task and calendar surfaces still showed empty states.
+
+**Steps**
+1. On local instance 8, sign in with saved Profile A as the school administrator for the connected local test school; start from `/managebac` with no run currently shown as active.
+2. Choose **Resolve my school identity** once.
+3. Open Classes, select all 22 displayed class options, and choose **Save classes**.
+4. Open **Sync history** and leave it open until the newest run reaches a terminal state. Do not reload or manually refresh.
+5. Open Overview, then Tasks, then Calendar.
+
+**Expected:** W1-16 step 6 says to “Configure a read-only fixture, complete capability validation and authenticated school identity, select classes, materialize workspaces, sync tasks/calendar/resources, exercise review conflicts, then repeat the relevant surfaces as teacher and student.”
+
+**Actual:** The newest History row says **Complete** and “School data is current,” and Sync now is available. Overview reports Classes 22, Calendar 0 and Tasks 0. Tasks shows “No assignments or deadlines”; Calendar shows “No Calendar source events.” The user confirmed that this school has task and calendar data. The browser showed 0 errors and 1 warning; the observed ManageBac POSTs and overview/class reads returned HTTP 200.
+
+**Evidence:** `.spectra-local/live-verification/LV-015-verified-7c4169a8-history-redacted.png`; `.spectra-local/live-verification/LV-016-managebac-overview-tasks-zero-redacted.png`; `.spectra-local/live-verification/LV-016-managebac-overview-calendar-zero-redacted.png`; `.spectra-local/live-verification/LV-016-managebac-tasks-empty-redacted.png`; `.spectra-local/live-verification/LV-016-managebac-calendar-empty-redacted.png`; redacted browser summary: two ManageBac POSTs and subsequent `overview` / `myClasses` reads returned HTTP 200, with 0 browser errors and 1 warning.
+
+**Fix** (fixer)
+- Commit: Assessment only; no code change yet.
+- Diagnosis so far: GET overview chooses adminOverview for a school administrator. That query deliberately excludes mapped-account/personal records from school-wide previews, while the shell derives Tasks and Calendar solely from those previews. Personal myOverview already has an account/school/integration-scoped reader, but is not requested by the admin overview route. This is a candidate visibility cause; the ledger does not yet establish whether this live sync imported task/calendar rows or whether the provider returned none/skipped those routes. Broadening school-wide previews to every member's personal data would violate the existing privacy boundary and is not a valid fix.
+- Change: None pending source-versus-display evidence. No environment, AI configuration, source authorization or deployment was changed.
+- Test/evidence: Traced the real GET route (adminOverview versus myOverview), both Convex readers and the shell's task/calendar filters, plus the sync loop's route fan-out and skip conditions. Existing isolation tests prove personal records are account-scoped. The latest code remains the already tested LV-015 commit; no new full run is warranted for this assessment-only entry.
+- Re-check nearby: Answer the observations below from the same reported run. No fresh sync, credential change, process restart or provider inspection is required.
+
+**Question for verifier**
+1. After one reload of the same completed run, do Overview, Tasks and Calendar still show zero/empty? Report the displayed values.
+2. From the successful sync POST response already captured for that run, report its route summaries: displayed route name, records/pages, and any skipped/error text for assignment/deadline/assessment and timetable/lesson/calendar/class-event routes. Omit credentials, URLs, account/class identifiers and record contents. Also report the run's fetched/created/updated/skipped/error counts if visible. If the response body is no longer available, say so; do not repeat a sync solely to obtain it.
+
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
@@ -558,10 +596,11 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ## Fixer closeout · 30 September 2026
 
+- LV-016 is NEEDS-INFO: source-versus-display evidence is required before changing task/calendar reads. The admin preview privacy filter is a candidate cause, but live route record/skip counts are not yet known. Questions are recorded under the entry and sent to the verifier; no code or deployment change was made. LV-015 has a recorded successful live verification on `7c4169a8`.
 - Latest batch: LV-015 is FIXED at `7c4169a857ac088f9b826779e560bd36270de76a`; its five UI regressions fail before the change and pass afterward. All 50 focused tests, both TypeScript checks, full lint and all five gates passed. The verifier was sent the hash and asked to leave History open through a scheduled completion without another refresh/reload. Existing partial provider outcomes remain truthful; this fix does not claim to fill their gaps.
 - Latest full suite after LV-015 (`npx vitest run`): **4,365 passed, 3 failed, 1 skipped**; **500 passed files, 1 failed, 1 skipped** (502 files), duration 312.49 seconds. All three failures are in unchanged `convex/account-erasure-lifecycle.test.ts`: scheduled-function drains hit the 10,000 timer-pump limit. Its isolated re-check passed **7/7**. Logs: `.spectra-local/launch-fixer-LV015-full.log` and `.spectra-local/LV015-erasure-recheck.log`. This latest full run is not green; the earlier green LV-014 run below remains historical evidence.
 - Implementation commits: `454a7bbe` — foreground local Convex selection (LV-001); `94d3cbb3` — account reads before school membership (LV-002); `95243861` — School/ManageBac membership gate (LV-005); `66179153` — Analytics membership gate (LV-006); `683803d1` — reactive membership subscription guard (LV-008); `c9034739` — account/deployment ownership for restored workbench references (LV-009); `d873b89c` — connection-owned collaboration room (LV-011); `ed76ef1f` — app-origin-aware local Bridge readiness (LV-012, partial correction); `4bfe0a86` — preserved ManageBac action error reasons (LV-010, confirmed error-copy correction); `e8cd4740` — explicit credential recovery from a blocked connection (reopened LV-010); `0a8a2360` — truthful connection versus sync-history copy (LV-013); `6451c630` — one authorized class collection for picker and count (LV-014); `7c4169a8` — refresh scheduled sync progress without replacing class drafts (LV-015).
-- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce`, `d94ee311`, `c6f0108b` `c119147d` and `c1593b6b`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
+- Audit/assessment commits before this closeout: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, `d712d92b`, `ee89ec4d`, `ae83fe42`, `f988b6ce`, `d94ee311`, `c6f0108b`, `c119147d` and `c1593b6b`. Issue entries preserve full implementation hashes, evidence and re-check instructions.
 - Previous full suite after LV-014 (`npx vitest run`): **4,363 passed, 0 failed, 1 skipped**; **501 passed files, 0 failed, 1 skipped** (502 files). Duration: 313.98 seconds. Result: `.spectra-local/launch-fixer-LV014-full.log`. That LV-014 run was green. The earlier LV-013 full run had 4,356 passed, 3 failed, 1 skipped, all failures in unchanged account-erasure timer-pump drains, followed by a 7/7 isolated pass; that earlier result is retained in history and is superseded by this green full run.
 - The preceding batch full run returned **4,346 passed, 3 failed, 1 skipped**. It loaded the pre-fix ManageBac module while the three new regressions were being added; it is not final validation. Those regressions pass against the committed fix. Earlier full-suite results remain in the issue entries/history; the LV-006 full run was green.
 - Latest focused validation: LV-014 **42 UI/class-picker/honesty/real-model isolation tests passed**, both TypeScript checks, full lint and all five gates passed. Three original collection/count/error regressions failed before the fix; a fourth proves refresh updates count and controlled selection together. Earlier focused validation: reopened LV-010 **20 real-model/provider/scheduling tests passed**; LV-013 **17 UI/copy/honesty tests passed**. Both TypeScript checks, lint and all five gates passed for each. Earlier focused validation: LV-011 **37 Vitest + 7 Node checks passed**; LV-012 **36 Vitest + 4 Node checks passed**; LV-010 **25 focused tests passed** (19-test API/UI recheck also passed). Both TypeScript checks, full lint and all five gates passed for each change. Every new regression was observed failing before its fix.

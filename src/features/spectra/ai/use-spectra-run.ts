@@ -507,6 +507,7 @@ export function useSpectraRun({
     let pollAgain = false;
     let tabSnapshot: SpectraRunTab[] = [];
     let tabsFetchedAt = 0;
+    let forceTabRefresh = false;
     const hasSettledExecution = (tab: SpectraRunTab) => Boolean(
       tab.run.executionId &&
       eventCursors.current.get(tab.runId)?.settledExecutionId === tab.run.executionId,
@@ -530,10 +531,14 @@ export function useSpectraRun({
             tab.run.status === "awaiting_resolution",
         );
         if (
+          forceTabRefresh ||
           !tabSnapshot.length ||
           Date.now() - tabsFetchedAt >= (hasActiveTabs ? 60_000 : 180_000)
         ) {
+          const force = forceTabRefresh;
+          forceTabRefresh = false;
           const result = await getSpectraRunTabs({
+            force,
             limit: 120,
             threadId,
             artifactId: threadId ? undefined : artifactId,
@@ -768,6 +773,7 @@ export function useSpectraRun({
     };
     const requestDurablePoll = () => {
       if (disposed) return;
+      forceTabRefresh = true;
       tabsFetchedAt = 0;
       if (timer) {
         window.clearTimeout(timer);
@@ -864,7 +870,7 @@ export function useSpectraRun({
               promptByRun.current.set(event.runId, body.prompt);
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
-                ? { ...current, runId: event.runId }
+                ? { ...current, runId: event.runId, status: "streaming" }
                 : current,
             );
             activeRunIds.current.add(event.runId);
@@ -1112,6 +1118,10 @@ export function useSpectraRun({
         activeRunIds.current.delete(requestRunId);
         publishActiveRuns();
       }
+      // The POST acknowledges a durable worker. Refresh after releasing local
+      // stream ownership so polling can consume its events immediately.
+      if (requestRunId && !requestReachedTerminal)
+        spectraBus.emit("threads.changed", {});
     },
     [
       dispatchArtifactPatch,
@@ -1242,6 +1252,8 @@ export function useSpectraRun({
         )
           .catch((error) => {
             window.clearTimeout(beginTimeout);
+            if (!beginSettled)
+              setLiveExchange((current) => current?.id === exchangeId ? null : current);
             setCards((current) =>
               current.filter((card) => card.id !== optimisticCardId),
             );
@@ -1800,7 +1812,8 @@ export function useSpectraRun({
 
   const submitting =
     !stopSuppressed &&
-    (activeRequestCount > 0 || Boolean(observedContinuationRunId));
+    (activeRequestCount > 0 || Boolean(observedContinuationRunId) ||
+      liveExchange?.status === "streaming");
   return useMemo(
     () => ({
       cards,
@@ -1808,7 +1821,7 @@ export function useSpectraRun({
       liveExchange,
       activeRunId:
         observedContinuationRunId ??
-        (activeRequestCount > 0 ? liveExchange?.runId : undefined),
+        (submitting ? liveExchange?.runId : undefined),
       run,
       stop,
       retry,
@@ -1825,7 +1838,6 @@ export function useSpectraRun({
       closeDetails,
       keepAsThread,
       liveExchange,
-      activeRequestCount,
       observedContinuationRunId,
       onCardAction,
       openDetails,

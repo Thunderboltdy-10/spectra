@@ -102,4 +102,54 @@ describe("Durable run event consumption", () => {
     expect(transport).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["skip", "notes"])("hands an acknowledged %s continuation to fresh durable polling without reload", async (choiceKey) => {
+    const asking = tab(); const askingRows = [final()];
+    source(asking, askingRows);
+    const onFinal = vi.fn();
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread", onDataChanged: refresh, onFinal }));
+    await settle();
+    const continued = { ...tab("running", "continuing"), runId: "continued", run: { ...tab("running", "continuing").run, _id: "continued" } };
+    const reply = { ...final(1, "continuing"), runId: "continued", payload: { ...final().payload, runId: "continued", summary: "Continuation finished.", card: { ...(final().payload.card as Record<string, unknown>), runId: "continued", status: "completed" } } };
+    vi.mocked(getSpectraRunTabs).mockImplementation(async (options) => ({ runTabs: [options?.force ? continued : asking] }));
+    vi.mocked(getSpectraRunEvents).mockImplementation(async (runId, after = 0) => ({ events: runId === "continued" ? (after < 1 ? [reply] : []) : askingRows.filter(row => row.sequence > after) }));
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (body.action === "run") return new Response(JSON.stringify({ type: "run_created", runId: "continued", card: { id: "continued-card", runId: "continued", status: "queued", title: "Getting ready", variant: "status", actions: [], updatedAt: 4 } }) + "\n");
+      return new Response("{}", { status: 409 });
+    });
+    await act(async () => {
+      await result.current.run("Continue after clarification.", [], {threadId: "thread", clarificationId: "clarification", choiceKey, choiceMessageId: "message", executionId: "attempt"});
+    });
+    await settle(750);
+    expect(onFinal).toHaveBeenCalledWith(expect.objectContaining({runId: "continued", summary: "Continuation finished."}));
+    expect(result.current.liveExchange).toBeNull();
+    expect(result.current.submitting).toBe(false);
+  });
+  it("keeps Stop available after acknowledgement while the durable snapshot is in flight", async () => {
+    source(tab(), [final()]);
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread" }));
+    await settle();
+    vi.mocked(getSpectraRunTabs).mockImplementation(() => new Promise(() => {}));
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).action === "run") return new Response(JSON.stringify({type: "run_created", runId: "continued", card: {id:"continued-card",runId:"continued",status:"queued",title:"Getting ready",variant:"status",actions:[],updatedAt:4}}) + "\n");
+      return new Response("{}", {status:409});
+    });
+    await act(async () => { await result.current.run("Continue.", [], {threadId:"thread"}); });
+    await settle();
+    expect(result.current.submitting).toBe(true);
+    expect(result.current.activeRunId).toBe("continued");
+  });
+
+  it("clears the provisional exchange when a continuation is rejected before acknowledgement", async () => {
+    source(tab(), [final()]);
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread" }));
+    await settle();
+    transport.mockImplementation(async () => new Response("This continuation is no longer available.", {status:409}));
+    let accepted = true;
+    await act(async () => { accepted = await result.current.run("Continue.", [], {threadId:"thread"}); });
+    expect(accepted).toBe(false);
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.liveExchange).toBeNull();
+  });
+
 });

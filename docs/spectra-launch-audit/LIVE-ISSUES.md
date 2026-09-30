@@ -37,12 +37,14 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Signed-in workspace gate with no school | exploration · first use | FAIL | LV-008 | d712d92b |
+| Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
+| Artifact read during Workspace and Library navigation | exploration · workspace surfaces | FAIL | LV-009 | 683803d1 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
 | P2-EXPERIENCE step 2 — expired invitation | P2-EXPERIENCE · step 2 | BLOCKED — no actual expired stored invitation was available; LV-003 is NEEDS-DECISION | LV-003 | d551198a |
-| Superadmin local school record creation | exploration · create school | PASS | — | d551198a |
-| Initial school administrator invitation acceptance | W2-14 · step 1 | FAIL | LV-004 | d551198a |
-| ManageBac admin token connection | README · Open launch risks | BLOCKED — Profile A has no active school-admin membership because its invitation could not be accepted (LV-004) | — | d551198a |
+| Superadmin local school record creation | exploration · create school | PASS | — | 683803d1 |
+| Initial school administrator invitation acceptance | W2-14 · step 1 | PASS | LV-004 (CANNOT-REPRODUCE) | 683803d1 |
+| W2-14 step 1 — initial-admin workspace/Library reloads | W2-14 · step 1 | FAIL | LV-009 | 683803d1 |
+| ManageBac admin token connection | README · Open launch risks | BLOCKED — not yet run | — | 683803d1 |
 | `/school-data` without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | ManageBac personal overview without membership | exploration · first-week superadmin | FAIL | LV-005 | d551198a |
 | `/analytics` without membership | exploration · first-week superadmin | FAIL | LV-006 | d551198a |
@@ -246,7 +248,7 @@ _Written by the verifier at the end._
 
 ### LV-008 · Workspace fails for a signed-in account without a school
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** `/workspace` / signed-in platform superadmin without an active school membership
 - **Report script:** exploration · first-week superadmin, workspace without a school
@@ -270,6 +272,38 @@ _Written by the verifier at the end._
 - Change: reuse the existing reactive catalogGraph.identity in the shared guard; school reads wait while identity is loading or has no active membership, resume when membership appears, and stop when it is removed. The catalog identity bootstrap explicitly remains account-scoped to avoid a dependency cycle. The same guard covers every tree subscription, artifact/studio and Bridge replica/sync-policy/mount reads, and the conversation active-execution observer, retaining backend authorization and normal member behavior.
 - Test: Before the fix, the five regression cases failed, including both pending and absent membership with a saved workspace source. After it, **47/47** focused reactive-guard, replica-auth, catalog-caller, conversation-history, conflict-resolution, catalog-graph and module-graph tests passed; the new suite also checks membership arrival/removal, sign-out, explicit skip and identity bootstrap. Both TypeScript checks, full lint and all five gates passed. Full suite: **4,330 passed, 2 failed, 1 skipped**; the unchanged run-route no-school Stop case returned 409 instead of 403 under the full run, and the unchanged dense-sheet timing test took 43.89 ms against 40 ms. Both files passed **136/136** tests in an isolated rerun.
 - Re-check nearby: load/reload /workspace and /library on a fresh local database with signed-in no-school Profile A and saved open-object state; invitation guidance must remain without orgTree errors. Check stale workspace/work/thread deep links, then acceptance enabling normal reads and membership removal stopping them; re-check artifact Bridge controls and the conversation execution observer for a current member. No schema, codegen or shared deployment step is required.
+
+**Verification** (verifier): VERIFIED on commit `683803d1`, 2026-09-30. In fresh local instance 8 with saved Profile A and no membership, the initial `/workspace` load and reload showed the invitation gate; neither showed the generic error boundary, an `AUTH_NO_SCHOOL` console message, or a page error. A separate artifact request failure is recorded as LV-009.
+
+### LV-009 · Workspace and Library make failed artifact requests
+
+- **Status:** NEEDS-INFO
+- **Severity:** Medium
+- **Surface / role:** `/workspace` and `/library` / signed-in Profile A before and after accepting the local initial-admin invitation
+- **Report script:** exploration · first-week school admin, workspace and Library reloads
+- **Commit tested:** 683803d1
+- **Frequency:** no-school `/workspace` reload: 1 of 1 captured requests returned 403; after acceptance, 2 of 2 `/workspace` loads and 1 of 1 `/library` loads returned 500
+
+**Steps**
+1. Start fresh local instance 8 on commit `683803d1` and sign in with saved Profile A before it has a school membership.
+2. Open `http://localhost:3000/workspace` and reload once. The invitation gate appears, while the artifact request returns HTTP 403.
+3. In Super Admin, create the local test school with Profile A as its initial administrator; copy the secure link using the product button and accept the invitation as Profile A.
+4. Open `http://localhost:3000/workspace`, reload twice, then open `http://localhost:3000/library`.
+
+**Expected:** W2-14 step 1 says to “reload `/workspace`, and read back one active membership plus a ready initial-admin saga where applicable.” The workspace and Library should load without failed artifact requests or console errors.
+
+**Actual:** Before membership, the invitation gate renders, but one captured reload makes a GET request to `/api/spectra?action=artifact&artifactId=[redacted]` that returns HTTP 403 and produces a browser console error. After invitation acceptance, the workspace and Library views render, but each tested load makes the same GET request and receives HTTP 500, with one matching browser console error per response. The 500 response contains `error.code: INTERNAL_ERROR` and the message “Spectra could not finish this request. Check your connection, then try again.” No page errors were observed.
+
+**Evidence:** .spectra-local/live-verification/LV-009-workspace-artifact-500.png; Playwright network excerpt: GET `/api/spectra?action=artifact&artifactId=[redacted]` → HTTP 403 (one no-school reload), then HTTP 500 (2 workspace loads, 1 Library load); 500 response code/message as above; one corresponding console error per response; no page errors.
+
+**Fix** (fixer)
+- Commit: assessment only; no application change yet.
+- Root cause: Not established from the redacted request. The shell can restore and hydrate saved open-artifact IDs on Workspace and Library; the route forwards its artifactId to the typed spectraArtifacts:get query. That path enforces membership and resource capability, while argument validation runs outside the worded-error handler; the specific response/backend reason is needed to distinguish a stale or malformed ID from a genuine backend failure.
+- Change: none pending the diagnostic evidence below. Do not convert arbitrary backend failures to missing work or discard saved work based on a transient error.
+- Test: **43/43** current API-route, shell-artifact-access, shell-artifact-content and deployed worded-error tests passed. The reported particular 500 has not yet been reproduced against the code because its request ID provenance and backend reason are unknown.
+- Re-check nearby: saved open work and deep links on both surfaces, before membership and after acceptance, with separate outcomes for invalid IDs, deleted/denied work and transient failures.
+
+**Question for verifier:** Please report the failed response's structured error.code and matching local server/Convex error reason with IDs, tokens and identity redacted. Was the artifact created in instance 8, or restored from saved browser state? For a validation error, report only the field/table name and generic reason, never the ID value. No provider or production change is needed for this observation.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--
@@ -306,8 +340,9 @@ _Written by the verifier at the end._
 - Implementation commits: `454a7bbe` — complete foreground Convex selection (LV-001); `94d3cbb3` — settle account reads before school membership (LV-002); `95243861` — gate School and ManageBac readers on current membership (LV-005); `66179153` — reuse the membership gate for Analytics (LV-006); `683803d1` — wait for reactive membership before school subscriptions (LV-008).
 - Audit/assessment commits: `690266bc`, `3df6301a`, `d551198a`, `d3bac8ce`, `6f1391aa`, `d4e0f766`, and `d712d92b` record validation, decisions, and live evidence. Each implementation entry gives its full commit hash and re-check instructions.
 - Latest full suite (`npx vitest run`): **4,330 passed, 2 failed, 1 skipped**; **496 passed files, 2 failed, 1 skipped**. Duration: 301.20 seconds. Raw local result: `.spectra-local/launch-fixer-LV008-full.log`. The unchanged no-school Stop case returned 409 instead of 403, and the unchanged dense-sheet timing assertion took 43.89 ms against 40 ms. Both files passed **136/136** tests in an isolated rerun (`.spectra-local/launch-fixer-LV008-isolated.log`). The preceding full run was green: 4,326 passed, 0 failed, 1 skipped.
+- LV-009 is **NEEDS-INFO**: 43 triage tests pass; the exact failed request needs a structured response code, redacted backend reason, and saved-versus-new artifact provenance before a root fix can be selected.
 - Focused validation: LV-005 **29 passed**; LV-006 **34 passed**; LV-008 **47 passed**; both TypeScript checks, full lint and all five gates passed for each fix. LV-008’s five original regression cases failed before the fix; its six-case guard suite now passes, including saved open-object reads and reactive membership transitions. LV-004's temporary generated-token real-model diagnostic and related suites passed **16 tests**, and its diagnostic source edits were restored. Earlier LV-001, LV-002 and LV-003 results remain in their entries.
 - LV-007 assessment: **8 tests passed**, including temporary idle-versus-pending Escape diagnostics; no application/test source change remains. It is **CANNOT-REPRODUCE** for the report's pending-disconnect requirement because the live steps only opened the idle confirmation.
 - LV-003 remains **NEEDS-DECISION**: keep the intended invalid/expired 404/410 responses, or change the API/client contract to a normal unavailable-preview result. LV-004 is **CANNOT-REPRODUCE**: the original mail link contained MIME encoding artifacts; the verifier followed the decoded 43-character-token href and obtained a valid preview with Join school enabled. No invitation authentication patch was needed.
-- No issue remains OPEN, REOPENED or FIXING in this pass. The verifier has marked LV-001 and LV-002 VERIFIED; LV-005, LV-006 and LV-008 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
+- No issue remains OPEN, REOPENED or FIXING in this pass. The verifier has marked LV-001 and LV-002 VERIFIED; LV-008 is now VERIFIED; LV-005 and LV-006 await live re-check. Initial-admin acceptance continues using the decoded invitation link.
 - Live coverage continues under the recorded local-verification authorization. Per the user's instruction, the fixer stops between tasks and resumes when the verifier messages it about a ledger issue.

@@ -97,6 +97,12 @@ _Written by the verifier at the end._
 | P3-WORKSPACE-FLOWS — Calendar DST view prerequisite | P3-WORKSPACE-FLOWS · step 2 | FAIL — browser timezone was Europe/Madrid, but the Calendar view returned HTTP 500 on both its initial read and Try again, leaving the error state visible; the 20 Oct–3 Nov date check and default-time event check could not be reached. Evidence: `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt` | LV-029 (OPEN) | 45281d26 |
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — no public agent could be opened because the `/agents` list stayed in its load-error state; see LV-030 | LV-030 (OPEN) | 45281d26 |
 | Free exploration — `/agents` library | exploration · first-week /agents | FAIL — “Could not load agents. Retry” remained visible and 15 `/api/spectra?action=agentGraphPage` requests returned HTTP 400. Evidence: `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt` | LV-030 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | FAIL — the offline Undo showed “This device is offline. You can keep working; Spectra will send changes when you reconnect.” without a Retry button; the item remained in Trash after reconnect. A separate permanent delete while the item was open showed “Something went wrong” with 3 `WORK_NOT_FOUND` console errors. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-45281d26-redacted.png`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-observations-redacted.txt` | LV-031 (OPEN), LV-032 (OPEN) | 45281d26 |
+
+| P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — the Calendar data view remained unavailable after HTTP 500, so no personal event, plan block, or official event control could be inspected; see LV-029 | LV-029 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — scheduled plan block details | P3-WORKSPACE-FLOWS · step 4 | BLOCKED — the Calendar and Plans panels did not load, so no scheduled block could be opened; see LV-029 | LV-029 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — Chat search workspace selection | P3-WORKSPACE-FLOWS · step 6 | PASS — searched for `Wa`, selected the `General` workspace result, and the dialog closed with focus on the search button; reopening showed an empty field. Console: 0 errors, 1 Clerk warning | — | 45281d26 |
 
 ## Issues
 
@@ -978,7 +984,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-029 · Calendar page stays in an error state
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** `/calendar` / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 2
@@ -995,6 +1001,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The Calendar panel displayed “Calendar could not be loaded” after the initial read and after Try again. Both reads returned HTTP 500 from `/api/spectra/calendar`; the Plans panel displayed “Plans could not be read just now.” The requested date range and event-default-time check could not be reached.
 
 **Evidence:** `.spectra-local/live-verification/LV-029-calendar-load-500-45281d26-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-load-500-observations-redacted.txt`.
+
+**Fix** (fixer)
+- Commit: `7bce0577d382644b9d755e6243673d062b4621fa`.
+- Root cause: A read-only reproduction against local instance 8 failed with `ReferenceError: Buffer is not defined` in Calendar cursor encoding. Both cursor families unconditionally used Node Buffer, which is absent from Convex's web-standard query runtime; even an empty visible range creates a continuation. The Node-based test environment had hidden the same failure across all streams.
+- Change: Share one web-standard UTF-8/base64url encoder and parser between visible/partial and keyset cursors. Preserve the existing wire format and cursor validation; this covers Calendar/Plans, unscheduled tasks, planner tasks, migration rows and title-target discovery. Other unconditional Buffer uses are in explicitly Node actions; the thread reader already takes its web-standard branch.
+- Test: All six real-query `convex/calendar-pagination.test.ts` regressions fail without the fix and pass after when Buffer is unavailable during queries. Existing pagination assertions also feed legacy-encoded cursors back into the readers, including Unicode planner task IDs and timestamp ties. All **70 focused tests**, both TypeScript checks, full lint and all five gates pass; logs are `.spectra-local/LV029-{before,focused,tsc,convex-tsc,lint,gates}.log`.
+- Re-check nearby: Sync this committed backend body through the verifier-owned local instance-8 launcher (its functions sync only at startup), then reload Calendar. Confirm initial load and Try again are error-free, finish the previously blocked clock-change move, and check Plans/unscheduled and partial-time discovery. No shared deployment/codegen or environment edit was performed.
 
 
 ### LV-030 · Agent library stays in a load-error state
@@ -1017,6 +1030,49 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The page retained the “Could not load agents. Retry” button after the retry. The Published agents collection and the other collections displayed “No agents in this collection yet.” No public agent preview was available. Fifteen `GET /api/spectra?action=agentGraphPage` requests returned HTTP 400, and the console recorded 15 corresponding errors.
 
 **Evidence:** `.spectra-local/live-verification/LV-030-agents-load-400-45281d26-redacted.png`; `.spectra-local/live-verification/LV-030-agents-load-400-observations-redacted.txt`.
+
+### LV-031 · Permanently deleting an open trashed work shows an error page
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Library Trash and Work studio / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 8
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 1 of 1 permanent deletes with the trashed work open
+
+**Steps**
+1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and create a disposable document in the Library.
+2. From the document's Actions menu, choose `Move to Trash`.
+3. Open Trash and open the same document in the Work studio.
+4. From the document's Actions menu, choose `Delete forever` and confirm.
+5. Inspect the page and browser console.
+
+**Expected:** P3-WORKSPACE-FLOWS step 8 says, “Open Trash, select the item and press Delete. Expected: "Delete … forever?", then it is gone.”
+
+**Actual:** The delete-confirmation dialog appeared and the document no longer appeared in Trash. The page at `/library?artifactId=<redacted>` then displayed “Something went wrong” with Try again and Reload page controls. The console recorded 3 errors, including `Uncaught ConvexError: WORK_NOT_FOUND` from `replicas:forWork`.
+
+**Evidence:** `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-45281d26-redacted.png`; `.spectra-local/live-verification/LV-031-library-trash-delete-open-studio-error-observations-redacted.txt`.
+
+### LV-032 · Offline Undo in Library Trash has no retry action
+
+- **Status:** OPEN
+- **Severity:** Low
+- **Surface / role:** Library Trash Undo / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 8
+- **Commit tested:** `45281d26` (local instance 8; web port 3000)
+- **Frequency:** 1 of 1 completed offline Undo attempts
+
+**Steps**
+1. On local instance 8 at application commit `45281d26`, sign in with saved Profile A and create a disposable document in the Library.
+2. From the document's Actions menu, choose `Move to Trash`.
+3. While the “Moved to Trash” Undo control is visible, set the browser offline and choose `Undo`.
+4. Inspect the message and available controls. Reconnect, reload, and open Trash.
+
+**Expected:** P3-WORKSPACE-FLOWS step 8 says, “Trash a work, then Undo while offline. Expected: an error toast with Retry.”
+
+**Actual:** After Undo, the status said, “This device is offline. You can keep working; Spectra will send changes when you reconnect.” No exact `Retry` button was present. After reconnect and reload, the disposable document remained in Trash.
+
+**Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-library-trash-offline-undo-status-45281d26-redacted.png`; `.spectra-local/live-verification/LV-032-library-trash-offline-undo-observations-redacted.txt`.
 
 <!-- Template: copy for each issue. The verifier fills the top part; the fixer fills "Fix". -->
 <!--

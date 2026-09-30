@@ -71,6 +71,25 @@ async function fixture(format: "docx" | "xlsx", changed: boolean, local = true) 
 }
 
 describe("Native preparation before atomic admission", () => {
+  it.each(["docx", "xlsx"] as const)("rejects %s preparation before effects when replica metadata disappears", async (format) => {
+    const f = await fixture(format, true);
+    io.query.mockResolvedValue(null);
+    await expect(f.materialize(workId, f.content, options)).rejects.toThrow("WORK_NOT_FOUND");
+    expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects native history preparation when replica metadata disappears", async () => {
+    const f = await fixture("docx", false);
+    io.query.mockResolvedValue(null);
+    await expect(prepareWholeNativeHistoryRestore(workId, {
+      sourceVersionId: "exact-version", sourcePayloadHash: f.truth.hash, payloadRef: "version-copy",
+      nativeFormat: "docx", bytes: f.payload.length,
+    }, f.payload)).rejects.toThrow("WORK_NOT_FOUND");
+    expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
   it("prepares a human partial restore through the current-package preservation path", async () => {
     const f = await fixture("docx", true);
     const result = await preparePartialNativeHistoryRestore(workId, "docx", f.content);

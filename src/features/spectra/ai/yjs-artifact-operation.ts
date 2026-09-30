@@ -471,8 +471,9 @@ async function nativeGateContext(artifact: ArtifactRecord): Promise<{
   try {
     const truth = await convexQuery<
       { workId: string },
-      { replicas?: Array<{ fidelityMap?: unknown }> }
+      { replicas?: Array<{ fidelityMap?: unknown }> } | null
     >("replicas:forWork", { workId: artifact._id });
+    if (!truth) throw new Error("WORK_NOT_FOUND");
     const entries =
       truth.replicas?.flatMap((replica) => {
         const map = recordValue(replica.fidelityMap);

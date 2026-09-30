@@ -410,7 +410,8 @@ export const forWork = query({
   handler: async (ctx, { workId }) => {
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
-    if (!access.allowed || !access.capabilities.includes("read")) throw new Error("WORK_NOT_FOUND");
+    // Unavailability is a normal state of a live metadata subscription.
+    if (!access.allowed || !access.capabilities.includes("read")) return null;
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
     // Shared artifact access grants content authority, not access to another
     // account's Bridge filesystem. A collaborator can see the cloud truth and
@@ -636,7 +637,7 @@ export const strategyTransitionForWork = query({
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const work = await ctx.db.get(workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    if (!work || work.status === "deleted" || work.ownerAccountId !== actor.accountId) return null;
     const transitions = await ctx.db.query("storageStrategyTransitions")
       .withIndex("by_work_created", (q) => q.eq("workId", workId))
       .order("desc")

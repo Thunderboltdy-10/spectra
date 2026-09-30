@@ -58,3 +58,13 @@ export function spectraShellHref({
   const query = new URLSearchParams({ artifactId });
   return `${base}?${query.toString()}`;
 }
+
+/** Retire only the unavailable work named by the current URL, keeping its scope. */
+export function retireShellArtifactLocation(pathname: string, search: string, artifactId: string) {
+  if (artifactIdFromSpectraLocation(pathname, search) !== artifactId) return null;
+  const query = new URLSearchParams(search);
+  query.delete("artifactId");
+  const base = artifactIdFromSpectraPath(pathname) ? "/library" : pathname;
+  const rest = query.toString();
+  return rest ? `${base}?${rest}` : base;
+}

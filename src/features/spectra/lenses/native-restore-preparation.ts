@@ -51,9 +51,10 @@ export async function prepareWholeNativeHistoryRestore(workId: Id<"spectraArtifa
     throw new Error("NATIVE_RESTORE_SOURCE_INVALID");
   const [current, work] = await Promise.all([
     fetchVerifiedNativePayload(workId, "cloud"),
-    convexQuery<{ workId: Id<"spectraArtifacts"> }, { replicas: { _id: Id<"workReplicas">; kind: string; state: string }[] }>(
+    convexQuery<{ workId: Id<"spectraArtifacts"> }, { replicas: { _id: Id<"workReplicas">; kind: string; state: string }[] } | null>(
       "replicas:forWork", { workId }),
   ]);
+  if (!work) throw new Error("WORK_NOT_FOUND");
   if (source.nativeFormat !== current.truth.nativeFormat) throw new Error("NATIVE_RESTORE_FORMAT_MISMATCH");
   const [before, after, comparison] = await Promise.all([
     readback(workId, source.nativeFormat, current.payload, current.truth.hash),

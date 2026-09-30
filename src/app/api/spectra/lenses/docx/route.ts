@@ -134,15 +134,16 @@ async function materializeDocxArtifactAttempt(
   options?: NativeMaterializationOptions,
 ) {
   let cloud: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>;
-  let workTruth: WorkTruth;
+  let workTruth: WorkTruth | null;
   try {
     [cloud, workTruth] = await Promise.all([
       fetchVerifiedNativePayload(workId, "cloud"),
-      convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+      convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth | null>(
         "replicas:forWork",
         { workId },
       ),
     ]);
+    if (!workTruth) throw new Error("WORK_NOT_FOUND");
   } catch (error) {
     // Library import commits projection without a cloud replica payload URL.
     // Spectra already saved the edit — do not toast a false Word writeback failure.
@@ -537,10 +538,11 @@ export async function POST(request: Request) {
       // native file they just saved, while still failing closed on overlap.
       try {
         const local = await fetchVerifiedNativePayload(workId, "local-latest");
-        const workTruth = await convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+        const workTruth = await convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth | null>(
           "replicas:forWork",
           { workId },
         );
+        if (!workTruth) throw new Error("WORK_NOT_FOUND");
         const externalNeedsActivation = shouldActivateExternalNativeRevision({
           operations: workTruth.recentOperations,
           localHash: local.truth.hash,

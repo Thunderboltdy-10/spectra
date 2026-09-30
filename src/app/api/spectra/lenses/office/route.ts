@@ -200,16 +200,17 @@ async function materializeOfficeArtifactAttempt(
 ) {
   let cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"];
   let cloudPayload: Uint8Array;
-  let workTruth: WorkTruth;
+  let workTruth: WorkTruth | null;
   try {
     [{ truth: cloudTruth, payload: cloudPayload }, workTruth] =
       await Promise.all([
         fetchVerifiedNativePayload(workId, "cloud"),
-        convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+        convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth | null>(
           "replicas:forWork",
           { workId },
         ),
       ]);
+    if (!workTruth) throw new Error("WORK_NOT_FOUND");
   } catch (error) {
     // Library import commits projection/stub without a cloud replica payload URL.
     if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") {
@@ -623,8 +624,9 @@ export async function POST(request: Request) {
         const local = await fetchVerifiedNativePayload(workId, "local-latest");
         const workTruth = await convexQuery<
           { workId: Id<"spectraArtifacts"> },
-          WorkTruth
+          WorkTruth | null
         >("replicas:forWork", { workId });
+        if (!workTruth) throw new Error("WORK_NOT_FOUND");
         const externalNeedsActivation = shouldActivateExternalNativeRevision({
           operations: workTruth.recentOperations,
           localHash: local.truth.hash,

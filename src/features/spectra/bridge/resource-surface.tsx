@@ -1,4 +1,5 @@
 "use client";
+import { useWorkAvailability } from "../components/use-work-availability";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
@@ -52,6 +53,7 @@ export function ResourceSurface({
       workId: artifact._id as never,
     }),
   );
+  useWorkAvailability(artifact._id, truth);
   const applyProtectedPending = useMutation(api.replicas.applyProtectedPending);
   const forkProtectedPending = useMutation(api.replicas.forkProtectedPending);
   const discardProtectedPending = useMutation(

@@ -56,6 +56,15 @@ export function createShellArtifactAccess(readDetail: DetailReader = getSpectraA
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
+    // A completed reactive read is also an authoritative availability decision.
+    observeUnavailable(id: string) {
+      const observation = begin(id);
+      try {
+        if (observation.accept(id, null)) unavailable(id);
+      } finally {
+        observation.finish();
+      }
+    },
     async read(id: string, options?: { signal?: AbortSignal }) {
       const signal = options?.signal;
       if (signal?.aborted) throw new DOMException("Artifact read was superseded.", "AbortError");

@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
@@ -52,6 +52,27 @@ const payloadHash = (bytes: string) => createHash("sha256").update(bytes).digest
 const baseHash = payloadHash("base");
 const nextHash = payloadHash("next");
 const bridgeCredential = "bridge-test-credential-000000000001";
+
+describe("reactive work metadata availability", () => {
+  it("reports unavailable metadata after an open work is permanently deleted", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    expect(await user.query(api.replicas.forWork, { workId: fixture.workId })).not.toBeNull();
+    await t.run(ctx => ctx.db.patch(fixture.workId, { status: "deleted" }));
+    expect(await user.query(api.replicas.forWork, { workId: fixture.workId })).toBeNull();
+    expect(await user.query(api.replicas.strategyTransitionForWork, { workId: fixture.workId })).toBeNull();
+  });
+
+  it("returns no reactive metadata when the work record is gone", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    await t.run(ctx => ctx.db.delete(fixture.workId));
+    expect(await user.query(api.replicas.strategyTransitionForWork, { workId: fixture.workId })).toBeNull();
+    expect(await user.query(api.replicas.forWork, { workId: fixture.workId })).toBeNull();
+  });
+});
 
 describe("Bridge materialization receipt replay", () => {
   it("refreshes only the current authorized claim before the native write", async () => {
@@ -516,6 +537,7 @@ describe("replica truth machine", () => {
     const truth = await t
       .withIdentity(identity)
       .query(api.replicas.forWork, { workId: fixture.workId });
+    assert(truth, "Authorized work must have replica metadata");
     expect(
       truth.replicas.find((replica) => replica._id === staleLocalId),
     ).toMatchObject({
@@ -751,6 +773,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
+    assert(truth, "Authorized work must have replica metadata");
     expect(truth.pendingCount).toBe(0);
   });
 
@@ -823,10 +846,12 @@ describe("replica truth machine", () => {
     const ownerTruth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
+    assert(ownerTruth, "Authorized work must have replica metadata");
     expect(ownerTruth.replicas.length).toBeGreaterThan(0);
     const collaboratorTruth = await t
       .withIdentity(collaboratorIdentity)
       .query(api.replicas.forWork, { workId: fixture.workId });
+    assert(collaboratorTruth, "Authorized work must have replica metadata");
     expect(collaboratorTruth.replicas.map((replica) => replica._id)).toEqual(
       ownerTruth.replicas
         .filter((replica) => replica.kind === "cloud")
@@ -834,11 +859,9 @@ describe("replica truth machine", () => {
     );
     expect(collaboratorTruth.replicas.every((replica) => replica.kind === "cloud")).toBe(true);
     expect(collaboratorTruth.replicas.some((replica) => "relativePath" in replica)).toBe(false);
-    await expect(
-      t.withIdentity(strangerIdentity).query(api.replicas.forWork, {
-        workId: fixture.workId,
-      }),
-    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    expect(await t.withIdentity(strangerIdentity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    })).toBeNull();
   });
 
   it("forwards shared Office capability to cloud payloads and lens activation without exposing owner Bridge state", async () => {
@@ -1026,11 +1049,9 @@ describe("replica truth machine", () => {
       nativeFormat: "docx",
     });
     await t.run(async (ctx) => ctx.db.patch(ids.collaboratorGrantId, { revokedAt: Date.now() }));
-    await expect(
-      t.withIdentity(collaboratorIdentity).query(api.replicas.forWork, {
-        workId: fixture.workId,
-      }),
-    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    expect(await t.withIdentity(collaboratorIdentity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    })).toBeNull();
     await expect(
       t.withIdentity(collaboratorIdentity).query(api.replicas.payloadForWork, {
         workId: fixture.workId,
@@ -1296,6 +1317,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
+    assert(truth, "Authorized work must have replica metadata");
     expect(truth.pendingCount).toBe(0);
   });
 
@@ -1320,6 +1342,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
+    assert(truth, "Authorized work must have replica metadata");
     expect(truth.openConflictCount).toBe(0);
     expect(truth.conflicts).toEqual([]);
   });
@@ -2166,6 +2189,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
+    assert(truth, "Authorized work must have replica metadata");
     expect(truth.conflicts[0]?.previews).toEqual(previews);
   });
 

@@ -116,6 +116,7 @@ export type SpectraEvents = {
   "shell.sidebarCrowd": { crowded: boolean };
   "shell.focusSidebarSearch": Record<string, never>;
   "shell.openCommandBar": Record<string, never>;
+  "work.unavailable": { workId: string };
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.changed": { runId: string };
   "ai.ui.referenceReceipt": {

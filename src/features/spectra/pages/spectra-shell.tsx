@@ -1,5 +1,8 @@
 "use client";
 
+import { subscribeShellWorkAvailability } from "../components/use-work-availability";
+import { retireShellArtifactLocation } from "./shell-location";
+
 import {
   BookOpen,
   CalendarCheck2,
@@ -1300,11 +1303,14 @@ export function SpectraShell({
   const setObjectAvailability = useSpectraContextStore(
     (state) => state.setObjectAvailability,
   );
+  useEffect(() => subscribeShellWorkAvailability(artifactAccess), [artifactAccess]);
   useEffect(() => artifactAccess.subscribe((artifactId) => {
     const wasOpen = useSpectraContextStore.getState().openObjects.some((object) => object.type === "artifact" && object.id === artifactId);
     const wasOpening = cancelArtifactOpen(artifactId);
     revokeArtifact(artifactId);
     setObjectAvailability("artifact", artifactId);
+    const href = retireShellArtifactLocation(window.location.pathname, window.location.search, artifactId);
+    if (href) window.history.replaceState(window.history.state, "", href);
     if (wasOpen || wasOpening) toast.error("That work is no longer available.");
   }), [artifactAccess, cancelArtifactOpen, revokeArtifact, setObjectAvailability]);
   const liveIdentitySources = useMemo(() => {

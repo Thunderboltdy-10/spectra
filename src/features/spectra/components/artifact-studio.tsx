@@ -1,5 +1,7 @@
 "use client";
 
+import { useWorkAvailability } from "./use-work-availability";
+
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
@@ -2861,6 +2863,7 @@ function ArtifactStudioEditor({
       workId: artifact._id as never,
     }),
   );
+  useWorkAvailability(artifact._id, replicaTruth);
   const effectivePolicy = useQuery(
     api.syncPolicy.effective,
     useAuthedArgs({
@@ -2892,9 +2895,9 @@ function ArtifactStudioEditor({
     artifact.accessLevel === "read" || protectedOriginal
       ? "read_only"
       : "edit";
-  const permissionReadOnly = workType
+  const permissionReadOnly = replicaTruth === null || (workType
     ? !workCan(workType, sharingRole, "edit")
-    : artifact.accessLevel === "read";
+    : artifact.accessLevel === "read");
   // The live room is the editing substrate, not a feature unlocked by sharing.
   // Owners need the identical interaction fabric for private AI work; access
   // policy still decides who else may authenticate into that room.

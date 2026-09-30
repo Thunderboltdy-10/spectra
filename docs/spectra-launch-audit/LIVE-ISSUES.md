@@ -40,7 +40,7 @@ _Written by the verifier at the end._
 | Script or area | Report | Result | Issues | Commit tested |
 | --- | --- | --- | --- | --- |
 | Local runtime bootstrap (fresh Convex) | Run and test · local startup | PASS | LV-001 | 690266bc |
-| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — local:start:all --instance 8 reported the app, local Convex, gateway, and Bridge ready; the existing local database remained available | — | 396aa190 |
+| Local runtime restart (instance 8; web port 3000) | README · Run and test | PASS — after local:stop, local:start:all --instance 8 reported web 3000, local Convex 3002, gateway 3001 and Bridge 47615 ready; Profile A reloaded the existing local school and artifacts | — | 68587ec8 |
 | Signed-in workspace gate with no school | exploration · first use | PASS | LV-008 | 683803d1 |
 | Artifact read during Workspace and Library navigation | exploration · workspace surfaces | PASS | LV-009 (VERIFIED) | c9034739 |
 | P2-EXPERIENCE step 1 — `/join` without token | P2-EXPERIENCE · step 1 | PASS | — | 690266bc |
@@ -75,9 +75,10 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | BLOCKED — answer streamed without visible IDs; the browser UI does not expose provider-call count, so the one-call expectation is not proven | — | 396aa190 |
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
 | P3-AI-ENGINE — document create/edit with detailed answer | P3-AI-ENGINE · Document · create and edit; fixer re-check | PASS — created a four-section document, rewrote section 2, returned a 744-word answer (including the proposed rewrite) of 4,889 characters, and retained the edited text after reload; 0 console errors | LV-019 (VERIFIED) | 427cb3c9 |
-| P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | FAIL — two identical rewrite requests ended with “Could not finish”; the saved document retained its prior four sections and conclusion after reload | LV-020 | 427cb3c9 |
+| P3-AI-ENGINE — whole-document rewrite | P3-AI-ENGINE · Document · rewrite | PASS — after the fix, the exact rewrite prompt updated the document's four sections and conclusion; the changed text remained after reload and a later stack restart | LV-020 (VERIFIED) | 7a1a8508 |
 | P3-AI-ENGINE — flashcard create and hint edit | P3-AI-ENGINE · Flashcard deck · create and edit | PASS — created exactly 8 cards; card 3's hint remained changed after reload | — | 7a1a8508 |
-| P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | FAIL — identical append requests were rejected 2/2; the deck remained at 8 cards after reload | LV-021 | 7a1a8508 |
+| P3-AI-ENGINE — flashcard append | P3-AI-ENGINE · Flashcard deck · append | PASS — the fixed append added four distinct cards; all 12 remained after reload and card 3's hint stayed intact | LV-021 (VERIFIED) | 68587ec8 |
+| P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
 
 ## Issues
 
@@ -705,12 +706,14 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Test: Four regressions fail on prior source and pass after: whole-document text-pointer rewrite, formatted subtree retaining marks through Yjs reload, whole-tree replacement refreshing identities/outline, and block-then-tree order. The reverse mixed order also passes. All 187 focused patch/readback/live-admission/native-model/reference/academic/run-route/Convex-scope tests pass; both TypeScript checks, full lint and all five gates pass. Final full suite: 4,389 passed, 1 failed, 1 skipped (502 passed files, 1 failed, 1 skipped). The sole failure is the pending LV-017 hosted package missing shared runtime imports; every document/admission test passed. This full suite is not green.
 - Re-check nearby: Sync/restart the verifier-owned local instance 8 to load the shared helper into Convex, then reload the browser and repeat the original whole-document rewrite. Confirm rewritten text before and after reload; re-check section-only changes, formatting and appending a conclusion. No shared deployment or code generation is required.
 
-**Verification** (verifier):
+**Verification** (verifier): **VERIFIED** on fix commit `7a1a8508`, 2026-09-30. Restarted local instance 8, then opened the original `Causes of World War I` chat, selected the document as its sole context and sent the exact rewrite prompt. The assistant reported a staged rewrite; opening the document showed changed text across all four sections and the conclusion. Reloaded the browser and reopened the artifact; the rewritten opening, updated section headings and conclusion remained. After a later instance-8 restart at `68587ec8`, the same edited content remained. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/LV-020-whole-document-rewrite-result-redacted.png`; `.spectra-local/live-verification/LV-020-whole-document-rewrite-after-reload-redacted.png`; Playwright console excerpt `.playwright-cli/console-2026-09-30T11-12-08-966Z.log` (0 errors, 1 warning).
 
 
 ### LV-021 · Flashcard deck append is rejected
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** Chat AI flashcard deck update / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Needs live verification · Flashcard deck, append
@@ -736,6 +739,41 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 - Change: Restrict the existing final-total checks to artifact.create for decks and quizzes. Updates retain typed patch/content validation, authority/admission checks and post-save verification; no keyword routing, model/reasoning change, context truncation or alternate append mechanism was added.
 - Test: Four regressions fail before and pass after: deck and quiz patch appends through the public callModel/tool boundary, and complete deck/quiz updates with twelve items. Actual write resolver/Yjs projection keeps all eight original identities, adds the four new identities and leaves the source unchanged. Negative creation checks still reject twelve items when four were requested, and positive checks accept the requested twelve. All 97 focused completion/run-route/hollow-content/intent/document-patch tests, both TypeScript checks, full lint and all five gates pass. Final full suite: 4,392 passed, 2 failed, 1 skipped; the failures are pending LV-017 hosted packaging and the unchanged Stop-auth test (409 instead of 403). The run-route file passes 59/59 separately. This full-suite result is not green.
 - Re-check nearby: Reload the frontend and repeat Add 4 cards against the original eight-card deck; confirm twelve cards and preservation of the earlier card-3 hint after reload. Check Add 2 questions on an existing quiz, whole-deck rewrite and exact-count creation nearby. No backend restart, sync, deploy or codegen is required.
+
+**Verification** (verifier): **VERIFIED** on fix commit `68587ec8`, 2026-09-30. Restarted local instance 8 after the commit and reloaded Profile A. On the existing Photosynthesis deck, selected it as the only visible context and sent `Add 4 cards about the Calvin cycle.` The work surface showed 12 cards: the original eight plus four distinct Calvin-cycle prompts for carbon fixation, ATP/NADPH, net G3P output and RuBP regeneration. Reloaded the browser; all 12 cards remained, and card 3 retained its changed hint. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/LV-021-flashcard-append-verified-68587ec8-redacted.png`; `.spectra-local/live-verification/LV-021-card3-hint-after-reload-redacted.png`; Playwright console excerpt `.playwright-cli/console-2026-09-30T11-12-08-966Z.log` (0 errors, 1 warning).
+
+
+### LV-022 · Saved flashcard append is described as unsaved
+
+- **Status:** NEEDS-DECISION
+- **Severity:** Medium
+- **Surface / role:** Chat AI flashcard append status / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Needs live verification · Flashcard deck, append
+- **Commit tested:** `68587ec8` (local instance 8, web port 3000)
+- **Frequency:** 1 of 1 successful append responses said the update was not saved even though it persisted after reload.
+
+**Steps**
+1. On local instance 8 at commit `68587ec8`, sign in with saved Profile A and open the Photosynthesis deck in Library.
+2. With the deck as the only visible context, send `Add 4 cards about the Calvin cycle.`
+3. Wait for the assistant response. Read its save-state wording and inspect the card count in the Work surface.
+4. Reload the browser, reopen the deck and inspect the card count again.
+
+**Expected:** The P3-AI-ENGINE Flashcard deck script says to “Append: ‘Add 4 cards about the Calvin cycle.’” After the Work surface shows 12 cards and the same cards remain after reload, the assistant’s save-state text should describe that result consistently.
+
+**Actual:** The assistant said, “The four Calvin cycle cards are staged for the Photosynthesis deck: carbon fixation, the role of ATP and NADPH, net G3P output, and RuBP regeneration. The update is proposed, not yet saved.” The same Live chat panel showed “Saved progress and results.” The Work surface showed 12 cards, and all 12 remained after reload. Playwright reported 0 console errors and 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/LV-022-ai-flashcard-message-claims-unsaved-redacted.png`; `.spectra-local/live-verification/LV-022-ai-flashcard-append-persisted-after-reload-redacted.png`; Playwright console excerpt `.playwright-cli/console-2026-09-30T11-12-08-966Z.log` (0 errors, 1 warning).
+
+**Fix** (fixer)
+- Commit: Assessment only; no implementation change.
+- Root cause: The model's closing reply is drafted against staged tool results, before the executor saves and verifies changes. The normal success path then copies plan.finalResponse into finalSummary/resultSummary and the assistant message (runtime.ts around 2328-2340); the resumed path similarly reuses state.run.finalSummary (around 3235-3275). replyWithNativeReceipt adds only local-file state, leaving the now-stale proposal/save wording intact even when canonical saving is confirmed.
+- Change: NEEDS-DECISION on the final-reply contract. Option A: generate the final explanation after verified receipts, using the unchanged configured model and full request; this keeps natural final prose but adds latency/usage and requires a receipt-based fallback if the reporting turn fails. Option B: show a deterministic saved-result message and retain the earlier explanation separately labeled as a pre-save proposal; this avoids another model turn but changes reply presentation. Both must derive canonical/native state from receipts, preserve requested explanations and use the same behavior for initial and resumed runs. A text-specific replacement of the reported sentence would not fix this contract.
+- Test: A read-only node/tsx reproduction over the real replyWithNativeReceipt helper confirms the pre-save assertion is retained for canonical_saved, native_pending and native_verified. All 25 existing receipt-report tests pass, confirming that current coverage verifies local-file receipts but not transition of the pre-save model description. Evidence: .spectra-local/LV022-report-repro.ts and .spectra-local/LV022-receipt-review.log. No source, deployment configuration, model/context setting or data was changed; the latest full-suite result on unchanged implementation remains 4,392 passed, 2 failed, 1 skipped as recorded below.
+- Re-check nearby: After the reporting contract is decided and implemented, check append/edit/create replies and result-card summaries before and after reload, ordinary answers retaining their full explanations, confirmation/conflict resumes, partial/failed verification and native-pending versus native-verified outcomes.
+
+**Decision requested** (fixer): Which final-reply contract should Spectra use: a post-save model explanation, or an authoritative saved-result message with a separately labeled pre-save explanation? The user was asked through the decision tool; no option is assumed.
 
 **Verification** (verifier):
 
@@ -771,6 +809,10 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 -->
 
 ## Fixer closeout · 30 September 2026
+
+- Latest assessment: LV-022 is **NEEDS-DECISION**. The real receipt helper retains a pre-save claim for all three tested canonical/native receipt outcomes, and both initial and resumed reporting paths reuse that draft. Choose post-save model prose (extra latency/usage) or an authoritative saved-result message with a separately labeled pre-save explanation (different presentation); both must preserve the full requested explanation and authoritative canonical/native facts. The user decision is pending, so no implementation was selected. All 25 receipt-report tests pass. No code changed; latest full suite remains **4,392 passed, 2 failed, 1 skipped**, with the packaging and Stop-auth limits recorded below.
+- LV-021 is now VERIFIED by the live verifier: twelve distinct cards persist after reload and the earlier card-3 hint remains intact. Its four-line code correction is `68587ec8`; the preceding ledger commit is `defe6e8a`.
+
 
 - Latest fix: LV-021 is FIXED at `68587ec816eb80c33f04d8a17b9791dac75c5ef2`. Four regressions fail before and pass after: public-planner deck/quiz patch appends and full update payloads with a final count larger than the requested addition count. Real write resolution/Yjs projection keeps eight original identities and four added identities, while wrong creation totals remain rejected. All 97 focused tests, both TypeScript checks, full lint and all five gates pass. The verifier received the hash and reload-only re-check instructions; no backend restart, deploy or codegen is needed.
 - Latest full suite after LV-021: **4,392 passed, 2 failed, 1 skipped**; **501 passed files, 2 failed, 1 skipped** (504 files), duration 309.74 seconds. Failures: pending LV-017 hosted package lacks shared runtime modules; unchanged run-route Stop-auth case returned 409 instead of 403. The entire run-route file then passed **59/59** separately (and passed in the focused run). Logs: `.spectra-local/launch-fixer-LV021-full.log` and `.spectra-local/LV021-run-route-recheck.log`. This full result is not green; the Docker COPY exception remains unanswered and unapplied.

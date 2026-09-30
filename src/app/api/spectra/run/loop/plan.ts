@@ -1621,7 +1621,10 @@ export function assertRequestedArtifactContent(
       !Array.isArray(operation.input.content)
         ? (operation.input.content as Record<string, unknown>)
         : null;
+    // Requested creation counts describe the new collection. An update
+    // count may describe additions or selected items, not the final total.
     if (
+      operation.type === "artifact.create" &&
       operation.input.blueprintKey === "flashcard_deck" &&
       deckCount !== undefined &&
       (!Array.isArray(operationContent?.cards) ||
@@ -1631,6 +1634,7 @@ export function assertRequestedArtifactContent(
         `The generated deck must contain exactly ${deckCount} cards.`,
       );
     if (
+      operation.type === "artifact.create" &&
       operation.input.blueprintKey === "quiz" &&
       quizCount !== undefined &&
       (!Array.isArray(operationContent?.questions) ||

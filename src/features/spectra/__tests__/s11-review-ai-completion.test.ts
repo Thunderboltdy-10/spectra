@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SPECTRA_PLAN_JSON_SCHEMA } from "@/features/spectra/operations/schema";
-import { singleCreationAgentTool } from "@/app/api/spectra/run/loop/plan";
+import { resolveArtifactWriteInput } from "@/features/spectra/operations/artifact-write-content";
+import { parseModelOperation, SPECTRA_PLAN_JSON_SCHEMA } from "@/features/spectra/operations/schema";
+import { assertRequestedArtifactContent, singleCreationAgentTool } from "@/app/api/spectra/run/loop/plan";
 import { callModel } from "@/app/api/spectra/run/loop/plan";
 
 // Independent acceptance sources. These intentionally exercise the public
@@ -98,6 +99,56 @@ describe("S11 independent review: ordinary completion and whole request", () => 
     expect(result.plan.finalResponse).toBe(answer.trim());
     expect(result.plan.operations).toEqual([note]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+
+  it.each(["flashcard_deck", "quiz"] as const)("accepts an append to an existing %s without imposing a creation total", async (blueprintKey) => {
+    const field = blueprintKey === "quiz" ? "questions" : "cards";
+    const noun = blueprintKey === "quiz" ? "questions" : "cards";
+    const item = (id: string) => blueprintKey === "quiz"
+      ? { id, type: "short_answer", prompt: "What is carbon fixation?", correctAnswer: "Carbon dioxide becomes organic carbon." }
+      : { id, front: "What is carbon fixation?", back: "Carbon dioxide becomes organic carbon.", hint: "Track the carbon." };
+    const original = Array.from({ length: 8 }, (_, i) => item("old-" + i));
+    const changes = Array.from({ length: 4 }, (_, i) => ({ path: "/" + field + "/-", value: item("new-" + i) }));
+    const operation = { type: "artifact.update", input: {
+      artifactId: "review-deck", blueprintKey, title: null, summary: null, content: null, tags: null,
+      contentPatch: { changes },
+    } };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(turn("", "propose_operation", { workSummary: "Adding the four review items", fulfillsRequest: false, operation }))
+      .mockImplementation(turn("The four items are staged for addition."));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("artifact", "Add 4 " + noun + " about the Calvin cycle.", {
+      focusedArtifact: { id: "review-deck", title: "Photosynthesis", type: blueprintKey, content: { [field]: original } },
+    }, []);
+    expect(result.plan.operations).toHaveLength(1);
+    expect(result.plan.operations[0]).toMatchObject(operation);
+    const accepted = result.plan.operations[0]!;
+    expect(accepted.type).toBe("artifact.update");
+    if (accepted.type !== "artifact.update") throw new Error("Expected an update");
+    const saved = resolveArtifactWriteInput(blueprintKey, { [field]: original }, accepted.input, "Add four review items.").content as Record<string, Array<{ id: string }>>;
+    expect(saved[field]).toHaveLength(12);
+    expect(saved[field]!.slice(0, 8).map((value) => value.id)).toEqual(original.map((value) => value.id));
+    expect(saved[field]!.slice(8).map((value) => value.id)).toEqual(["new-0", "new-1", "new-2", "new-3"]);
+    expect(original).toHaveLength(8);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["flashcard_deck", "quiz"] as const)("allows full updates but preserves exact creation counts for %s", (blueprintKey) => {
+    const field = blueprintKey === "quiz" ? "questions" : "cards";
+    const noun = blueprintKey === "quiz" ? "questions" : "cards";
+    const content = { [field]: Array.from({ length: 12 }, (_, i) => blueprintKey === "quiz"
+      ? { id: "item-" + i, type: "short_answer", prompt: "Review question " + i, correctAnswer: "Review answer " + i }
+      : { id: "item-" + i, front: "Review question " + i, back: "Review answer " + i }) };
+    const update = parseModelOperation({ type: "artifact.update", input: {
+      artifactId: "review-deck", blueprintKey, title: null, summary: null, tags: null, content,
+    } });
+    expect(() => assertRequestedArtifactContent([update], "Add 4 " + noun + ".")).not.toThrow();
+    const create = parseModelOperation({ type: "artifact.create", input: {
+      blueprintKey, content, title: "New review", summary: null, tags: [], workspaceId: null, placement: "inbox",
+    } });
+    expect(() => assertRequestedArtifactContent([create], "Create a review with 4 " + noun + ".")).toThrow("must contain exactly 4");
+    expect(() => assertRequestedArtifactContent([create], "Create a review with 12 " + noun + ".")).not.toThrow();
   });
 
   it("does not execute JSON printed as an ordinary answer", async () => {

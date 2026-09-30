@@ -9,14 +9,14 @@ export { gatewayHealthPayload, isGatewayHealthBody };
 
 const BRIDGE_DEFAULT_URL = "http://127.0.0.1:47615";
 
-async function fetchJson(url, timeoutMs = 1_500) {
+async function fetchJson(url, timeoutMs = 1_500, headers = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...headers },
     });
     const text = await response.text();
     let body = null;
@@ -25,7 +25,10 @@ async function fetchJson(url, timeoutMs = 1_500) {
     } catch {
       body = text.trim();
     }
-    return { ok: response.ok, status: response.status, body };
+    return {
+      ok: response.ok, status: response.status, body,
+      allowedOrigin: response.headers.get("access-control-allow-origin"),
+    };
   } catch (error) {
     return {
       ok: false,
@@ -105,9 +108,11 @@ export async function probeWebReadiness(webOrigin) {
   };
 }
 
-export async function probeBridgeReadiness(bridgeUrl = BRIDGE_DEFAULT_URL) {
+export async function probeBridgeReadiness(bridgeUrl = BRIDGE_DEFAULT_URL, browserOrigin) {
   const base = String(bridgeUrl ?? BRIDGE_DEFAULT_URL).replace(/\/$/, "");
-  const probed = await fetchJson(`${base}/v1/health`);
+  const probed = await fetchJson(
+    `${base}/v1/health`, 1_500, browserOrigin ? { Origin: browserOrigin } : {},
+  );
   const body = probed.body;
   // Rust HealthResponse uses serde(rename_all = "camelCase"). Retain legacy
   // snake_case compatibility for older local Bridge builds.
@@ -122,6 +127,13 @@ export async function probeBridgeReadiness(bridgeUrl = BRIDGE_DEFAULT_URL) {
     typeof body.paired === "boolean" &&
     !bindError
   ) {
+    if (browserOrigin && probed.allowedOrigin !== browserOrigin) {
+      return {
+        service: "spectra-bridge", status: "not_ready",
+        detail: `Bridge does not allow ${browserOrigin}. Restart it through this local launcher to configure the app origin.`,
+        body,
+      };
+    }
     return {
       service: "spectra-bridge",
       status: "ready",

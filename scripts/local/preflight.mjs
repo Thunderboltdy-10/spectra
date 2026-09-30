@@ -84,7 +84,7 @@ async function main() {
     probeConvexReadiness(convexUrl),
     probeGatewayReadiness(gatewayOrigin),
     probeWebReadiness(webOrigin),
-    probeBridgeReadiness(),
+    probeBridgeReadiness(undefined, webOrigin),
     productionBuildHash(repositoryRoot),
   ]);
   const fixturePath = options.fixture ? resolve(options.fixture) : null;

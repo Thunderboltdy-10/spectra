@@ -78,3 +78,32 @@ describe("local readiness probes", () => {
     expect(isServiceReady(payload)).toBe(true);
   });
 });
+
+
+describe("Bridge readiness for the browser origin", () => {
+  it.each([null, "http://localhost:3020", "*"])("refuses reuse when CORS allows %s instead of this app", async allowed => {
+    let requestedOrigin;
+    const server = createServer((request, response) => {
+      requestedOrigin = request.headers.origin;
+      if (allowed) response.setHeader("Access-Control-Allow-Origin", allowed);
+      response.end(JSON.stringify({ protocolVersion: "1", paired: false }));
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const result = await bridgeStatus(`http://127.0.0.1:${server.address().port}`, "http://localhost:3000");
+      expect(requestedOrigin).toBe("http://localhost:3000");
+      expect(result.ok).toBe(false);
+      expect(result.detail).toContain("http://localhost:3000");
+    } finally { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); }
+  });
+  it("accepts an unpaired Bridge that allows the exact app origin", async () => {
+    const server = createServer((request, response) => {
+      if (request.headers.origin) response.setHeader("Access-Control-Allow-Origin", request.headers.origin);
+      response.end(JSON.stringify({ protocolVersion: "1", paired: false }));
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      expect((await bridgeStatus(`http://127.0.0.1:${server.address().port}`, "http://localhost:3000")).ok).toBe(true);
+    } finally { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); }
+  });
+});

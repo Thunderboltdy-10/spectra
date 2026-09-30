@@ -216,9 +216,9 @@ async function stackIsReady(ports) {
   return (await stackReadiness(ports)).ready;
 }
 
-async function bridgeStatus(bridgeOrigin = `http://127.0.0.1:${defaultBridgePort}`) {
-  const probe = await probeBridgeReadiness(bridgeOrigin);
-  return { ok: probe.status === "ready", body: probe.body };
+async function bridgeStatus(bridgeOrigin = `http://127.0.0.1:${defaultBridgePort}`, browserOrigin) {
+  const probe = await probeBridgeReadiness(bridgeOrigin, browserOrigin);
+  return { ok: probe.status === "ready", body: probe.body, detail: probe.detail };
 }
 
 function startDetached(label, executable, args, cwd, environment, logDirectory) {
@@ -355,14 +355,14 @@ async function main() {
     return;
   }
 
-  const existingBridge = await bridgeStatus();
+  const existingBridge = await bridgeStatus(undefined, webOrigin);
   if (existingBridge.ok && !existingBridge.body?.bind_error) {
     const detail = existingBridge.body?.paired ? "paired" : "listening (pairing required)";
     process.stdout.write(`Bridge is already running (${detail}); reusing it.\n`);
     return;
   }
   if (await isPortOccupied(defaultBridgePort)) {
-    throw new Error(`Port ${defaultBridgePort} is occupied, but it is not a healthy Spectra Bridge. Refusing to start a duplicate.`);
+    throw new Error(`Port ${defaultBridgePort} is occupied, but its Bridge is not ready for this app: ${existingBridge.detail}. Refusing to start a duplicate.`);
   }
 
   const executable = bridgeExecutable();
@@ -394,10 +394,10 @@ async function main() {
   );
   process.stdout.write(`Started Bridge (PID ${bridge.pid}).\n`);
   await waitFor("Bridge", async () => {
-    const status = await bridgeStatus();
+    const status = await bridgeStatus(undefined, webOrigin);
     return status.ok && !status.body?.bind_error;
   }, options.timeoutSeconds, bridge.pid);
-  const ready = await bridgeStatus();
+  const ready = await bridgeStatus(undefined, webOrigin);
   process.stdout.write(`Bridge ready: ${ready.body?.paired ? "paired" : "listening; pair it from Settings → Files and devices"}.\n`);
 }
 

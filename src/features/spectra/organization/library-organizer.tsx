@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -68,6 +69,7 @@ import {
   selectRow,
   selectedWorkSourceIds,
   sortRows,
+  titleSearchMatch,
   windowRange,
   type SortDirection,
   type SortKey,
@@ -357,6 +359,7 @@ function LibraryOrganizerContent({
      without another query. Cheap: it is only ever read during a drag. */
   const seenRef = useRef(new Map<string, TreeNode>());
 
+  const searchHelpId = useId();
   const searching = term.trim().length >= 2;
   const inFolder = location.kind === "folder";
   const currentParentId = inFolder ? location.nodeId : null;
@@ -401,6 +404,10 @@ function LibraryOrganizerContent({
     if (!flat || sortKey === "manual") return base;
     return sortRows(base, sortKey, sortDirection);
   }, [source, filter, sortKey, sortDirection, flat]);
+
+  const firstResult = !loading ? rows[0] : undefined;
+  const selectedSearchResult = rows.find((row) => row.nodeId === selection.cursorId);
+  const hasExactTitleMatch = rows.some((row) => titleSearchMatch(row.name, term) === "Exact title match");
 
   const nodesById = useMemo(() => {
     const map = seenRef.current;
@@ -1123,6 +1130,7 @@ function LibraryOrganizerContent({
           {/* One search, one filter, one create menu, for both views. */}
           <SurfaceSearch
             value={term}
+            descriptionId={searching ? searchHelpId : undefined}
             onChange={setTerm}
             scopeLabel={floorLabel}
             className="min-w-[140px] flex-1 basis-[180px]"
@@ -1136,8 +1144,7 @@ function LibraryOrganizerContent({
               scrollRef.current?.focus();
             }}
             onOpenFirstResult={() => {
-              const first = rows[0];
-              if (first) openNode(first);
+              if (firstResult) openNode(firstResult);
             }}
           />
 
@@ -1185,6 +1192,32 @@ function LibraryOrganizerContent({
           ) : null}
         </div>
       </header>
+
+      {searching ? (
+        <div
+          id={searchHelpId}
+          role="status"
+          className="flex shrink-0 flex-wrap gap-x-3 gap-y-1 border-b border-[var(--border-subtle)] px-4 py-2 text-caption text-[var(--text-secondary)]"
+        >
+          <span>
+            {loading
+              ? "Searching titles…"
+              : rows.length === 0
+                ? "No title matches in the loaded results."
+                : hasExactTitleMatch
+                  ? "Ranked title matches. Partial matches are labeled."
+                  : hasMore
+                    ? "No exact title match in the loaded results. Showing ranked partial matches."
+                    : "No exact title match. Showing ranked partial matches."}
+          </span>
+          {firstResult ? (
+            <span>Enter in search opens “{firstResult.name}”.</span>
+          ) : null}
+          {firstResult && selectedSearchResult && selectedSearchResult.nodeId !== firstResult.nodeId ? (
+            <span>Enter in results opens “{selectedSearchResult.name}”.</span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="relative flex min-h-0 flex-1">
         {showRail && !railCollapsed ? (
@@ -1408,6 +1441,7 @@ function LibraryOrganizerContent({
                           : false
                       }
                       showLocation={flat}
+                      searchMatch={searching ? titleSearchMatch(node.name, term) : undefined}
                       picking={selectionMode}
                       now={now}
                       callbacks={rowCallbacks}

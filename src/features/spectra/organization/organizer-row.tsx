@@ -49,6 +49,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   callbacks,
   picking = false,
   syncLabel,
+  searchMatch,
   syncTone = "attention",
 }: {
   node: TreeNode;
@@ -65,6 +66,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   callbacks: RowCallbacks;
   picking?: boolean;
   syncLabel?: string;
+  searchMatch?: "Exact title match" | "Partial match";
   syncTone?: StatusTone;
 }) {
   const identity = nodeIdentity(node);
@@ -218,6 +220,12 @@ export const OrganizerRow = memo(function OrganizerRow({
           ) : null}
         </span>
       )}
+
+      {searchMatch && !renaming ? (
+        <StatusBadge tone="neutral" className="shrink-0">
+          {searchMatch}
+        </StatusBadge>
+      ) : null}
 
       {inContext ? (
         <span className="shrink-0 rounded-chip bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">

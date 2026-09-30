@@ -94,6 +94,7 @@ export function SurfaceSearch({
   className,
   onMoveToResults,
   onOpenFirstResult,
+  descriptionId,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -102,6 +103,7 @@ export function SurfaceSearch({
   className?: string;
   onMoveToResults?: () => void;
   onOpenFirstResult?: () => void;
+  descriptionId?: string;
 }) {
   return (
     <div className={cn("relative min-w-9 w-[240px] max-w-full shrink", className)}>
@@ -111,6 +113,7 @@ export function SurfaceSearch({
         onChange={(event) => onChange(event.target.value)}
         placeholder={`Search ${scopeLabel}`}
         aria-label={`Search ${scopeLabel}`}
+        aria-describedby={descriptionId}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" && onMoveToResults) {
             event.preventDefault();

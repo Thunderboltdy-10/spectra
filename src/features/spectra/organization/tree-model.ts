@@ -356,3 +356,10 @@ export function windowRange(
     padBottom: Math.max(0, (total - end) * rowHeight),
   };
 }
+
+/** Search retrieval is broad; this label compares the complete displayed title. */
+export function titleSearchMatch(title: string, query: string) {
+  const normalize = (value: string) =>
+    value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  return normalize(title) === normalize(query) ? "Exact title match" : "Partial match";
+}

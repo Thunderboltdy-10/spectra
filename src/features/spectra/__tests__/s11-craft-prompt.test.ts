@@ -101,7 +101,9 @@ describe("S11 stable prompt and optional artifact guidance", () => {
   it("offers optional guide reads before a fresh create without a mandatory first create call", async () => {
     const packet = await capturePacket("Create a short document thanking the volunteers.");
     expect(packet.tools.some((tool) => tool.function.name === "read_artifact_skill")).toBe(true);
-    expect(packet.tools.some((tool) => tool.function.name === "create_document")).toBe(true);
+    expect(packet.tools.some((tool) => tool.function.name === "propose_operation")).toBe(true);
+    expect(packet.tools.some((tool) => tool.function.name === "search_objects")).toBe(true);
+    expect(packet.tools).toEqual((await capturePacket("Make a 6-slide deck on plate tectonics.")).tools);
     expect(packet.tool_choice).toBe("auto");
     const restricted = { selectedAgent: { tools: [] } };
     expect(selectedAgentAllowsModelTool(restricted, "read_artifact")).toBe(false);
@@ -116,24 +118,34 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     const fetchMock = vi.fn(async (url: unknown, options: RequestInit) => {
       expect(String(url)).toBe("https://openrouter.ai/api/v1/chat/completions");
       packets.push(JSON.parse(String(options.body)) as Packet);
-      if (packets.length > 2) throw new Error("Unexpected extra model request");
-      const name = packets.length === 1 ? "read_artifact_skill" : "create_document";
+      if (packets.length > (assigned ? 2 : 3)) throw new Error("Unexpected extra model request");
+      if (packets.length === 3) return new Response(JSON.stringify({ choices: [{ finish_reason: "stop",
+        message: { content: "The thank-you note is ready." },
+      }] }), { status: 200 });
+      const name = packets.length === 1 ? "read_artifact_skill" : assigned ? "create_document" : "propose_operation";
+      expect(packets.at(-1)!.tools.some(tool => tool.function.name === name)).toBe(true);
       const args = packets.length === 1
         ? { blueprintKey: "document", guideId: guide.id }
         : { title: "Thank you", workSummary: "Writing the thank-you note", summary: "A note for the volunteers.",
           content: { blocks: [{ id: "thanks", type: "paragraph", text: body }], outline: [] }, tags: [],
           conversationTitle: "Volunteer thanks", conversationSummary: "Prepared a thank-you note.",
           finalResponse: "The thank-you note is ready." };
+      const toolArgs = !assigned && packets.length === 2 ? {
+        workSummary: "Writing the thank-you note", fulfillsRequest: true, operation: {
+          type: "artifact.create", input: { blueprintKey: "document", title: "Thank you",
+            summary: "A note for the volunteers.", content: args.content, tags: [], workspaceId: null, placement: "inbox" },
+        },
+      } : args;
       return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: {
         content: "", tool_calls: [{ id: `call-${packets.length}`, type: "function",
-          function: { name, arguments: JSON.stringify(args) } }],
+          function: { name, arguments: JSON.stringify(toolArgs) } }],
       } }] }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
     const result = await callModel("chat", prompt, {}, [], undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, "synthetic-actor",
       assigned ? { blueprintKey: "document", label: "Document", clause: prompt } : undefined);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(assigned ? 2 : 3);
     expect(packets[0]!.tool_choice).toBe("auto");
     expect(packets[1]!.messages.slice(0, packets[0]!.messages.length)).toEqual(packets[0]!.messages);
     const observation = packets[1]!.messages.find((message) => message.role === "tool");

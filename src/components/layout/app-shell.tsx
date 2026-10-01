@@ -1158,6 +1158,8 @@ function AppShellContent({
       <UniversalKBar />
       <ShellNavigation />
       <main
+        id="main-content"
+        tabIndex={-1}
         style={{
           minHeight: "100dvh",
           ...(noScroll

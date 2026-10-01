@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { SkipLink } from "@/components/ui/skip-link";
 import { getClerkPublishableKey } from "@/lib/clerk-config";
 import { checkDeploymentConsistency } from "@/lib/boot-diagnostics";
 
@@ -60,10 +61,8 @@ export default function RootLayout({
         />
       </head>
       <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
-        <a href="#main-content" className="skip-link sr-only focus:not-sr-only">
-          Skip to content
-        </a>
-        <div id="main-content" tabIndex={-1}>
+        <SkipLink />
+        <div id="page-content" tabIndex={-1}>
           <Providers>{children}</Providers>
         </div>
       </body>

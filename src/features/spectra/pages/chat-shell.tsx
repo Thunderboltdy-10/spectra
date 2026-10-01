@@ -105,6 +105,7 @@ export function ChatShell() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<SpectraResultCard[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [contextLoadError, setContextLoadError] = useState(false);
   const [loading, setLoading] = useState(Boolean(requestedThreadId));
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -149,48 +150,54 @@ export function ChatShell() {
   }, []);
 
   const refresh = useCallback(
-    async (nextThreadId?: string | null, generation?: number) => {
-      const [threadRows, overview] = await Promise.all([
+    async (nextThreadId?: string | null, generation = loadGenerationRef.current) => {
+      const isCurrentLoad = () =>
+        generation === loadGenerationRef.current &&
+        (nextThreadId ?? null) === activeThreadRef.current;
+      // Catalogs hydrate independently; a selected conversation must not wait
+      // for the recent-chat list or the work/workspace overview.
+      const catalogs = Promise.all([
         getSpectraThreads({ limit: 100 }),
         getSpectraOverview(),
-      ]);
-      // A failed detail read is not a missing thread. Let the caller render a
-      // retryable error instead of replacing a recoverable conversation with a
-      // misleading new-chat state.
-      const selected = nextThreadId
-        ? await getSpectraThread(nextThreadId)
-        : null;
-      // Route loads are allowed to finish in the background, but an old
-      // request must never publish its data into a newer route. Non-route
-      // refreshes omit the generation and retain their existing semantics.
-      if (
-        generation !== undefined &&
-        generation !== loadGenerationRef.current
-      )
-        return { threadFound: true, stale: true };
-      setThreads(threadRows.threads);
-      setWorkspaces(overview.workspaces);
-      setArtifacts((current) => {
-        const next = new Map(
-          overview.artifacts.map((artifact) => [artifact._id, artifact] as const),
-        );
-        const currentlyOpenIds = new Set(
-          useSpectraContextStore
-            .getState()
-            .openObjects.filter((object) => object.type === "artifact")
-            .map((object) => object.id),
-        );
-        // The overview is deliberately bounded. An Inbox artifact opened from
-        // a result card can be absent from a later refresh while it remains a
-        // real, canonical object. Preserve only actively mounted artifacts so
-        // a run completion cannot make the editor look like a temporary tab.
-        for (const artifact of current)
-          if (currentlyOpenIds.has(artifact._id) && !next.has(artifact._id))
-            next.set(artifact._id, artifact);
-        return [...next.values()];
+      ]).then(([threadRows, overview]) => {
+        if (!isCurrentLoad()) return;
+        setThreads(threadRows.threads);
+        setWorkspaces(overview.workspaces);
+        setArtifacts((current) => {
+          const next = new Map(
+            overview.artifacts.map((artifact) => [artifact._id, artifact] as const),
+          );
+          const currentlyOpenIds = new Set(
+            useSpectraContextStore
+              .getState()
+              .openObjects.filter((object) => object.type === "artifact")
+              .map((object) => object.id),
+          );
+          // The overview is deliberately bounded. An Inbox artifact opened from
+          // a result card can be absent from a later refresh while it remains a
+          // real, canonical object. Preserve only actively mounted artifacts so
+          // a run completion cannot make the editor look like a temporary tab.
+          for (const artifact of current)
+            if (currentlyOpenIds.has(artifact._id) && !next.has(artifact._id))
+              next.set(artifact._id, artifact);
+          return [...next.values()];
+        });
+        setContextLoadError(false);
+        spectraBus.emit("threads.changed", {});
       });
-      if (nextThreadId === activeThreadRef.current) setDetail(selected);
-      spectraBus.emit("threads.changed", {});
+      if (nextThreadId) {
+        // Keep supplementary failures recoverable beside authoritative messages.
+        // Handle this promise immediately so a faster rejection cannot escape.
+        void catalogs.catch(() => {
+          if (isCurrentLoad()) setContextLoadError(true);
+        });
+      } else {
+        // A new-chat route has no primary detail read; catalogs own its load.
+        await catalogs;
+      }
+      const selected = nextThreadId ? await getSpectraThread(nextThreadId) : null;
+      if (!isCurrentLoad()) return { threadFound: true, stale: true };
+      setDetail(selected);
       return { threadFound: !nextThreadId || Boolean(selected), stale: false };
     },
     [],
@@ -204,6 +211,7 @@ export function ChatShell() {
       if (clearDetail) setDetail(null);
       setLoading(Boolean(nextThreadId));
       setLoadError(null);
+      setContextLoadError(false);
       void refresh(nextThreadId, generation)
         .then(({ threadFound, stale }) => {
           if (
@@ -690,7 +698,11 @@ export function ChatShell() {
     threadId,
   ]);
 
-  const visibleTitle = detail?.thread.title ?? "New conversation";
+  const visibleTitle =
+    detail?.thread.title ??
+    (threadId
+      ? loading ? "Loading conversation…" : "Conversation"
+      : "New conversation");
   const title = composerThread?.title ?? visibleTitle;
   const activeWorkspace = workspaces.find(
     (workspace) =>
@@ -942,14 +954,20 @@ export function ChatShell() {
           threadId={threadId ?? undefined}
           loading={loading}
           loadError={
-            detail && loadError ? (
+            detail && (loadError || contextLoadError) ? (
               <ProductErrorState
                 title={
-                  requestedThreadId
-                    ? "This conversation could not refresh"
-                    : "Chat could not refresh"
+                  loadError
+                    ? requestedThreadId
+                      ? "This conversation could not refresh"
+                      : "Chat could not refresh"
+                    : "Chat context could not load"
                 }
-                detail="The messages shown below are the last loaded copy. Try again to refresh this conversation."
+                detail={
+                  loadError
+                    ? "The messages shown below are the last loaded copy. Try again to refresh this conversation."
+                    : "Your messages are available. Work and workspace information could not load. Try again."
+                }
                 className="mb-5 min-h-0 items-start rounded-card border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] px-4 py-3 text-left"
                 action={
                   <button

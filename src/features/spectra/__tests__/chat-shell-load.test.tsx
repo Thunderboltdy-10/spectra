@@ -315,7 +315,7 @@ describe("ChatShell load states", () => {
     expect(screen.queryByText("Chat could not load")).toBeNull();
   });
 
-  it("keeps the last loaded messages visible when a background refresh fails", async () => {
+  it.each(["context", "conversation"] as const)("keeps the last loaded messages visible when a background %s refresh fails", async (scope) => {
     mocks.searchParams = new URLSearchParams("threadId=old-thread");
     mocks.getThread.mockResolvedValue({
       thread: { _id: "old-thread", title: "Saved conversation" },
@@ -325,14 +325,15 @@ describe("ChatShell load states", () => {
     render(<ChatShell />);
 
     expect(await screen.findByText("Keep this message visible.")).toBeTruthy();
-    mocks.getThreads.mockRejectedValueOnce(new Error("gateway unavailable"));
+    if (scope === "context") mocks.getThreads.mockRejectedValueOnce(new Error("gateway unavailable"));
+    else mocks.getThread.mockRejectedValueOnce(new Error("gateway unavailable"));
 
     await act(async () => {
       await mocks.runOptions.current?.onDataChanged?.();
     });
 
     expect(
-      await screen.findByText("This conversation could not refresh"),
+      await screen.findByText(scope === "context" ? "Chat context could not load" : "This conversation could not refresh"),
     ).toBeTruthy();
     expect(screen.getByText("Keep this message visible.")).toBeTruthy();
     expect(screen.queryByText(/New conversation/)).toBeNull();
@@ -489,8 +490,80 @@ describe("ChatShell chat actions", () => {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
+
+describe("ChatShell primary conversation hydration", () => {
+  const saved = (id = "saved-thread") => ({
+    thread: { _id: id, title: "Saved conversation" },
+    messages: [{ _id: "saved-message", content: "Saved answer is available." }],
+    traces: [],
+  });
+
+  it("starts and renders the selected conversation before slow catalogs finish", async () => {
+    const overview = deferred<{ workspaces: []; artifacts: [] }>();
+    const threads = deferred<{ threads: [] }>();
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getOverview.mockReturnValueOnce(overview.promise);
+    mocks.getThreads.mockReturnValueOnce(threads.promise);
+    mocks.getThread.mockResolvedValue(saved());
+    render(<ChatShell />);
+    expect(screen.getByText("Loading conversation…")).toBeTruthy();
+    try {
+      expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
+      expect(screen.getByText("Saved conversation")).toBeTruthy();
+      expect(screen.queryByText("Loading conversation")).toBeNull();
+      expect(mocks.getThread).toHaveBeenCalledWith("saved-thread");
+    } finally {
+      await act(async () => { overview.resolve({ workspaces: [], artifacts: [] }); threads.resolve({ threads: [] }); });
+    }
+  });
+
+  it("keeps the saved conversation available when supplementary context fails and can retry it", async () => {
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getOverview.mockRejectedValueOnce(new Error("context unavailable"));
+    mocks.getThread.mockResolvedValue(saved());
+    render(<ChatShell />);
+    expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
+    expect(await screen.findByText("Chat context could not load")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByText("Chat context could not load")).toBeNull());
+    expect(screen.getByText("Saved answer is available.")).toBeTruthy();
+    expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+  });
+
+  it("shows a primary read failure without waiting for supplementary context", async () => {
+    const overview = deferred<{ workspaces: []; artifacts: [] }>();
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getOverview.mockReturnValueOnce(overview.promise);
+    mocks.getThread.mockRejectedValueOnce(new Error("conversation unavailable"));
+    render(<ChatShell />);
+    try {
+      expect(await screen.findByText("This conversation could not load")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    } finally { await act(async () => { overview.resolve({ workspaces: [], artifacts: [] }); }); }
+  });
+
+  it("does not publish a late catalog failure into the next selected conversation", async () => {
+    const overview = deferred<{ workspaces: []; artifacts: [] }>();
+    mocks.searchParams = new URLSearchParams("threadId=old-thread");
+    mocks.getOverview.mockReturnValueOnce(overview.promise);
+    mocks.getThread.mockImplementation(async (id: string) => saved(id));
+    const view = render(<ChatShell />);
+    try {
+      expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
+      mocks.searchParams = new URLSearchParams("threadId=new-thread");
+      await act(async () => { view.rerender(<ChatShell />); });
+      await waitFor(() => expect(mocks.getThread).toHaveBeenCalledWith("new-thread"));
+      await act(async () => { overview.reject(new Error("old context unavailable")); });
+      expect(screen.getByText("Saved answer is available.")).toBeTruthy();
+      expect(screen.queryByText("Chat context could not load")).toBeNull();
+      expect(screen.queryByText("This conversation could not load")).toBeNull();
+    } finally { overview.resolve({ workspaces: [], artifacts: [] }); }
+  });
+});

@@ -59,6 +59,7 @@ import { useQuery } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { useWorkspaceCatalog } from "../data/use-catalog-pages";
 import { CatalogProgress } from "./catalog-progress";
 import { CommandBar } from "./command-bar";
@@ -109,10 +110,22 @@ function operationLabel(
 }
 
 type TraceLoadState = {
+  sourceRevision: string;
   trace?: SpectraThreadTrace;
   loading: boolean;
   error?: string;
 };
+
+function runTraceSourceRevision(
+  detail: (Pick<SpectraThreadDetail, "thread" | "messages"> & {
+    activeExecution?: { run: Pick<SpectraRun, "_id" | "executionId"> } | null;
+  }) | null,
+  runId: string,
+) {
+  const message = detail?.messages.filter((row) => row.runId === runId).at(-1);
+  const active = detail?.activeExecution?.run;
+  return JSON.stringify([detail?.thread._id, message?._id, active?._id === runId ? active.executionId : null]);
+}
 
 type TraceFamily = "operations" | "cards" | "events";
 
@@ -1610,9 +1623,27 @@ export function ConversationSurface({
         : null,
     };
   }, [detail, observedActiveExecution]);
-  const [traceStates, setTraceStates] = useState<Record<string, TraceLoadState>>({});
+  const [traceCache, setTraceStates] = useState<Record<string, TraceLoadState>>({});
+  const traceSourceRef = useRef(renderedDetail);
+  traceSourceRef.current = renderedDetail;
+  // A run ID survives Retry. Cached details belong to the execution and
+  // message projection that loaded them, including requests still in flight.
+  const traceStates = useMemo(() => Object.fromEntries(
+    Object.entries(traceCache).filter(([runId, state]) =>
+      state.sourceRevision === runTraceSourceRevision(renderedDetail, runId)),
+  ), [renderedDetail, traceCache]);
   const traceRequestRef = useRef(new Map<string, number>());
   const traceRequestSequenceRef = useRef(0);
+  useEffect(() => {
+    const stale = Object.keys(traceCache).filter((runId) => !traceStates[runId]);
+    if (!stale.length) return;
+    for (const runId of stale)
+      traceRequestRef.current.delete(observedThreadId + ":" + runId);
+    setTraceStates((current) => Object.fromEntries(
+      Object.entries(current).filter(([runId, state]) =>
+        state.sourceRevision === runTraceSourceRevision(traceSourceRef.current, runId)),
+    ));
+  }, [observedThreadId, traceCache, traceStates]);
   useEffect(() => {
     traceRequestRef.current.clear();
     setTraceStates({});
@@ -1634,6 +1665,7 @@ export function ConversationSurface({
     ) => {
       if (!observedThreadId) return;
       const key = `${observedThreadId}:${runId}`;
+      const sourceRevision = runTraceSourceRevision(traceSourceRef.current, runId);
       const requestId = ++traceRequestSequenceRef.current;
       traceRequestRef.current.set(key, requestId);
       const families: TraceFamily[] = options.family
@@ -1648,7 +1680,7 @@ export function ConversationSurface({
       if (!families.length) return;
       setTraceStates((current) => ({
         ...current,
-        [runId]: { ...current[runId], loading: true, error: undefined },
+        [runId]: { ...(current[runId]?.sourceRevision === sourceRevision ? current[runId] : {}), sourceRevision, loading: true, error: undefined },
       }));
       try {
         const pages = await Promise.all(
@@ -1669,11 +1701,12 @@ export function ConversationSurface({
         );
         if (
           traceRequestRef.current.get(key) !== requestId ||
+          runTraceSourceRevision(traceSourceRef.current, runId) !== sourceRevision ||
           (renderedDetail?.thread._id ?? observedThreadId) !== observedThreadId
         )
           return;
         setTraceStates((current) => {
-          let trace = current[runId]?.trace;
+          let trace = current[runId]?.sourceRevision === sourceRevision ? current[runId]?.trace : undefined;
           for (const result of pages) {
             const append =
               result.family === "operations"
@@ -1685,20 +1718,19 @@ export function ConversationSurface({
           }
           return {
             ...current,
-            [runId]: { loading: false, trace },
+            [runId]: { sourceRevision, loading: false, trace },
           };
         });
       } catch (error) {
-        if (traceRequestRef.current.get(key) !== requestId) return;
+        if (traceRequestRef.current.get(key) !== requestId ||
+          runTraceSourceRevision(traceSourceRef.current, runId) !== sourceRevision) return;
         setTraceStates((current) => ({
           ...current,
           [runId]: {
             ...current[runId],
+            sourceRevision,
             loading: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Could not load saved run details.",
+            error: readConvexError(error).message || "Could not load saved run details.",
           },
         }));
       }

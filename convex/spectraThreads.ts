@@ -178,10 +178,11 @@ function compactThread(thread: Doc<"spectraThreads">) {
 }
 
 function compactActiveExecution(
-  run: Pick<Doc<"spectraAiRuns">, "_id" | "status" | "phase" | "updatedAt">,
+  run: Pick<Doc<"spectraAiRuns">, "_id" | "executionId" | "status" | "phase" | "updatedAt">,
 ) {
   return {
     _id: run._id,
+    executionId: run.executionId,
     status: run.status,
     phase: run.phase,
     updatedAt: run.updatedAt,

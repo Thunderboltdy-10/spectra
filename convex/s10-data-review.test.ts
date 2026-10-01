@@ -57,7 +57,7 @@ async function fixture(history = 0) {
     }
     const runId = await ctx.db.insert("spectraAiRuns", {
       ownerAccountId: accountId, schoolId, threadId, sourceSurface: "chat", status: "running",
-      phase: "streaming", userPrompt: "Active prompt", contextSnapshot: { text: "ACTIVE-BODY".repeat(20_000) },
+      phase: "streaming", executionId: "current-attempt", userPrompt: "Active prompt", contextSnapshot: { text: "ACTIVE-BODY".repeat(20_000) },
       createdAt: now + history, updatedAt: now + history,
     });
     const run = (await ctx.db.get(runId))!;
@@ -95,8 +95,8 @@ describe("S10 DATA independent conversation reads", () => {
     const { ids, user } = await fixture(history);
     const detail = await measure(user, (ctx) => getHandler(ctx, { threadId: ids.threadId }));
     const active = await measure(user, (ctx) => activeHandler(ctx, { threadId: ids.threadId }));
-    expect(detail.result.activeExecution?.run).toMatchObject({ _id: ids.runId, status: "running" });
-    expect(active.result?.run).toMatchObject({ _id: ids.runId, status: "running" });
+    expect(detail.result.activeExecution?.run).toMatchObject({ _id: ids.runId, status: "running", executionId: "current-attempt" });
+    expect(active.result?.run).toMatchObject({ _id: ids.runId, status: "running", executionId: "current-attempt" });
     if (emitEvidence) {
       const safe = ({ result: _result, fetchedIds: _ids, ...sample }: typeof detail | typeof active) => sample;
       console.log(JSON.stringify({ history, detail: safe(detail), active: safe(active) }));

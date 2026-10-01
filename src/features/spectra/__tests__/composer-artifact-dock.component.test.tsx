@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import type { SpectraArtifact } from "../data/api";
+import type { ResultCardStreamView } from "../ai/stream-events";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -198,5 +199,52 @@ describe("composer artifact membership and pending requests", () => {
     host.unmount();
     await act(async () => next.reject(new Error("Unmounted request denied")));
     expect(mocks.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("composer artifact identity (LV-050)", () => {
+  const oldDeck: SpectraArtifact = { ...source, _id: "old-deck", blueprintKey: "flashcard_deck", title: "Photosynthesis" };
+  const newDeck: SpectraArtifact = { ...oldDeck, _id: "new-deck", updatedAt: 2 };
+  const result: ResultCardStreamView = { id: "result", runId: "run", status: "completed",
+    title: "Photosynthesis", variant: "artifact", actions: [], updatedAt: 2 };
+
+  it.each([
+    ["a failed creation", "I couldn’t save this as a Spectra flashcard deck—the creation request wasn’t accepted. Here are the 8 cards: Photosynthesis absorbs light."],
+    ["an ordinary answer", "Photosynthesis converts light energy into chemical energy."],
+    ["a proposed creation", "I will make a Photosynthesis deck with eight cards."],
+  ])("does not attach old catalogue work from %s", (_reason, assistantContent) => {
+    // Prose accompanies the dock, but it supplies no object identity.
+    const props = { artifacts: [oldDeck], assistantContent, onOpen: vi.fn(),
+      cards: [{ ...result, status: "failed" as const, variant: "error" as const,
+        summary: assistantContent, provenance: { artifactTitles: [oldDeck.title] } }],
+    };
+    render(<><p>{assistantContent}</p><ComposerArtifactDock {...props} /></>);
+    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Photosynthesis" })).toBeNull();
+  });
+
+  it.each(["provenance", "action", "selection"])(
+    "opens the exact %s identity when old and new works have the same title", kind => {
+      const onOpen = vi.fn();
+      const card = { ...result,
+        ...(kind === "provenance" ? { provenance: { artifactIds: [newDeck._id], artifactTitles: [newDeck.title] } } : {}),
+        actions: kind === "action" ? [{ key: "open", label: "Open", targetType: "artifact" as const, targetId: newDeck._id }] : [],
+      };
+      render(<ComposerArtifactDock artifacts={[oldDeck, newDeck]} cards={[card]}
+        explicitIds={kind === "selection" ? [newDeck._id] : []} onOpen={onOpen} />);
+      expect(screen.getAllByRole("button", { name: "Open Photosynthesis" })).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "Open Photosynthesis" }));
+      expect(onOpen).toHaveBeenCalledExactlyOnceWith(newDeck._id);
+    },
+  );
+
+  it("ignores unavailable identities and deduplicates valid evidence", () => {
+    const onOpen = vi.fn();
+    render(<ComposerArtifactDock artifacts={[newDeck]} explicitIds={[newDeck._id, "missing"]}
+      cards={[{ ...result, provenance: { artifactIds: [newDeck._id, "missing"] },
+        actions: [{ key: "open", label: "Open", targetType: "artifact", targetId: newDeck._id }] }]} onOpen={onOpen} />);
+    expect(screen.getAllByRole("button", { name: "Open Photosynthesis" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Open Photosynthesis" }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(newDeck._id);
   });
 });

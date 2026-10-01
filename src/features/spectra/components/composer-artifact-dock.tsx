@@ -24,46 +24,18 @@ function pendingKeepKey(threadId: string | undefined, sourceId: string) {
   return JSON.stringify([threadId ?? "", sourceId]);
 }
 
-function collectMentionedIds(
-  content: string | undefined,
-  artifacts: SpectraArtifact[],
-) {
-  if (!content?.trim() || artifacts.length === 0) return [] as string[];
-  const lower = content.toLowerCase();
-  const ranked = artifacts
-    .map((artifact) => {
-      const title = artifact.title.trim();
-      if (title.length < 3) return null;
-      const index = lower.indexOf(title.toLowerCase());
-      if (index === -1) return null;
-      return { id: artifact._id, index, length: title.length };
-    })
-    .filter((row): row is { id: string; index: number; length: number } =>
-      Boolean(row),
-    )
-    .sort((a, b) => b.length - a.length || a.index - b.index);
-  const ids: string[] = [];
-  for (const row of ranked) {
-    if (!ids.includes(row.id)) ids.push(row.id);
-    if (ids.length >= 8) break;
-  }
-  return ids;
-}
-
 export function ComposerArtifactDock({
   artifacts,
   cards,
   explicitIds,
-  assistantContent,
   threadId,
   onOpen,
   onDismiss,
 }: {
   artifacts: SpectraArtifact[];
   cards?: ResultCardStreamView[];
-  /** Explicit IDs the model asked to surface. */
+  /** Selected or explicitly surfaced artifact identities. */
   explicitIds?: string[];
-  assistantContent?: string;
   threadId?: string;
   onOpen?: (artifactId: string) => void;
   onDismiss?: (artifactId: string) => void;
@@ -101,12 +73,11 @@ export function ComposerArtifactDock({
         if (action.targetType === "artifact") push(action.targetId);
       }
     }
-    for (const id of collectMentionedIds(assistantContent, artifacts)) push(id);
     return ordered.slice(0, 6).flatMap((id) => {
       const artifact = byId.get(id);
       return artifact ? [artifact] : [];
     });
-  }, [artifacts, assistantContent, cards, explicitIds]);
+  }, [artifacts, cards, explicitIds]);
 
   useEffect(() => {
     activeView.current = {

@@ -1141,9 +1141,6 @@ export function ChatShell() {
             cards={runEngine.cards}
             explicitIds={[...selectedContextIds]}
             threadId={composerThread?.id ?? threadId ?? undefined}
-            assistantContent={
-              runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
-            }
             onOpen={openArtifact}
           />
           {pageComposer}

@@ -98,7 +98,7 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — flashcard rewrite | P3-AI-ENGINE · Flashcard deck · rewrite | PASS — all 12 cards' fronts, backs and hints were in Spanish after rewrite and reload; card count remained 12 | — | 68587ec8 |
 | P3-AI-ENGINE — quiz create/edit/append | P3-AI-ENGINE · Quiz | PASS — created six questions with 4 multiple choice/2 short answer; the harder Q2 edit persisted; appended two enzyme questions and after reload retained all eight questions with 5 multiple choice/3 short answer; 0 console errors. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-quiz-append-verified-d61b1e25-redacted.png` | — | d61b1e25 |
 | P3-WORKSPACE-FLOWS — command bar keyboard focus and search | P3-WORKSPACE-FLOWS · step 5 | FAIL — clicking the visible command-bar button opened the list, showed Update memory, focused its Memory field, and both Escape steps restored focus correctly; searching `share` showed no command asking for an ID. Pressing Ctrl+Shift+F twice instead focused `Search recent chats` with no dialog. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt` | LV-028 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | FAIL — after restarting local instance 8 with application commit `7bce0577`, Calendar loaded; every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The three default start/end pairs were 19:05–20:05, 19:06–20:06, and 19:07–20:07 local, rather than the next whole hour. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-7bce0577-fresh-redacted.png`; `.spectra-local/live-verification/LV-033-calendar-default-time-observations-redacted.txt` | LV-029 (VERIFIED), LV-033 (OPEN) | 7bce0577 |
+| P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | PASS — the date-range portion was verified on 7bce0577: every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The default-time portion was rechecked after the fix on 96f3b05d: a fresh form showed 09:00–10:00 local, a disposable event displayed the same time in Calendar and its details, and it remained removed after reload. No midnight/DST time transition was simulated in the latest recheck. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-postfix-observations-96f3b05d-redacted.txt`; `.spectra-local/live-verification/LV-033-postfix-saved-event-96f3b05d-redacted.png`; `.spectra-local/live-verification/LV-033-postfix-event-details-96f3b05d-redacted.png` | LV-029 (VERIFIED), LV-033 (VERIFIED) | 7bce0577 / 96f3b05d |
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | PASS — LV-031 permanent deletion passed; LV-032 displayed Retry offline and a Retry after reconnection restored the item once and persisted after reload; LV-034 Trash pointer activation passed at 1280×720. Evidence: .spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png; .spectra-local/live-verification/LV-032-postfix-offline-undo-toast-35921472-redacted.png; .spectra-local/live-verification/LV-034-postfix-pointer-35921472-redacted.png | LV-031 (VERIFIED), LV-032 (VERIFIED), LV-034 (VERIFIED) | a1bd0258 / 35921472 |
@@ -1134,7 +1134,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-033 · Personal event defaults retain the current minute
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** `/calendar` personal-event composer / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 2
@@ -1158,6 +1158,10 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Change: Initialize and reset the paired defaults through one shared local-hour helper from one clock reading. Advance whole local civil hours so midnight, the spring gap and the repeated autumn hour keep an end after the start; existing scheduled durations and user-entered times retain their behavior.
 - Test: Six cases fail before and pass after in `calendar-application.component.test.tsx`: minute rounding, midnight, both DST changes, reopen after the clock advances and persisted default timestamps despite a UTC overview. The exact-hour control stays green. All 17 focused tests, both TypeScript projects, full lint and all five gates pass. Logs: `.spectra-local/LV033-{before,focused,tsc,convex-tsc,lint,gates}.log`.
 - Re-check nearby: Frontend reload only, then open/reopen away from an exact hour, save a disposable default event and confirm its whole local-hour display. Also check midnight and DST boundaries when feasible. No backend sync, deploy or codegen required.
+
+**Live verification (2026-10-01; application commit 96f3b05d):** In saved Profile A at desktop 1280×720 with `Europe/Madrid`, Add event showed 09:00–10:00 after a fresh open. A uniquely named disposable personal event was saved; Calendar and its details panel both showed 09:00–10:00. The event was removed through the UI and remained absent after reload. The browser console had 0 errors and 1 Clerk development-key warning. This recheck did not simulate midnight or a DST transition.
+
+**Verification evidence:** `.spectra-local/live-verification/LV-033-postfix-observations-96f3b05d-redacted.txt`; `.spectra-local/live-verification/LV-033-postfix-saved-event-96f3b05d-redacted.png`; `.spectra-local/live-verification/LV-033-postfix-event-details-96f3b05d-redacted.png`.
 
 ### LV-034 · Trash quick view does not respond to pointer click
 
@@ -1598,7 +1602,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-039 · AI actions fail to return requested results on the School page and document creation
 
-- **Status:** FIXING
+- **Status:** NEEDS-INFO
 - **Severity:** High
 - **Surface / role:** /school page-scoped AI composer and /chat document creation / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Document · create; free exploration · first-week school administrator, School page AI composer
@@ -1656,6 +1660,8 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Correction: For the selected thread's latest run, when its last message is the unanswered user request and the authoritative active-execution projection is null, reuse the existing bounded trace loader once. Its existing failure/partial-result components show the saved outcome and Retry; completed answers and older history remain on demand. Failed trace reads retain the existing explicit Try again action and do not form an automatic request loop. Shared callers include chat, workspace and route-side conversations.
 - Before/after: The restored failure/Retry test fails before the change; **18/18 focused tests across two files pass**, including live-to-terminal transition, failed-read explicit retry, existing thread-switch fences/history and real Convex creation authority. Both TypeScript projects and all five gates pass; full lint and full suite are completing. Logs: `.spectra-local/LV039-recovery-{before,focused-final}.log`, `.spectra-local/LV039-{types,lint,gates}.log`, `.spectra-local/LV039-durable-state-probe.log`.
 - Remaining root-cause work: The underlying intake mutation timeout is still unresolved. This correction restores the durable recovery state and does not claim document generation is fixed. After a committed hash, frontend reload only: reopen the existing failed document conversation, verify its saved pause/failure and Retry are visible without Show details; verify ordinary completed answers still use on-demand history. No backend sync, deploy or codegen needed.
+- Recovery-display commit: `96f3b05d2e1abf24d4ccd4f2a190c4601953f28b`. Full lint also passes; full-suite validation is running. LV-039 remains NEEDS-INFO for the exact intake mutation timeout, with the display correction ready for frontend-only recheck.
+
 ## Fixer assessment closeout · LV-036 authenticated-read residual · 2026-10-01
 
 - Commits for the prior actual fix: `07cfa20d` — account-readiness shell continuity; `d11cec6c` — final validation/audit. This assessment preserves the verifier's new evidence and requests narrowly sanitized auth/socket observations. No new runtime code changed; configured human Git identity with no AI attribution.
@@ -1703,7 +1709,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-040 · Completed AI chats remain titled “New conversation”
 
-- **Status:** OPEN
+- **Status:** NEEDS-DECISION
 - **Severity:** Low
 - **Surface / role:** `/chat` header and recent-chat list / signed-in Profile A school administrator
 - **Report script:** Free exploration · first-week AI chat and chat recovery; the P3 reports do not specify automatic title generation.
@@ -1720,3 +1726,17 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 **Actual:** The assistant returned a relevant answer and it remained visible after reload, but the header and recent-chat row both continued to read `New conversation` (the row subtitle was `Inbox`). A separately completed clarification thread on the same commit also retained the generic header title. The browser console showed 0 errors and 1 Clerk development-key warning.
 
 **Evidence:** `.spectra-local/live-verification/LV-040-moon-title-observations-104ac5e8-redacted.txt`; `.spectra-local/live-verification/LV-040-moon-main-104ac5e8-redacted.png`; `.spectra-local/live-verification/LV-040-moon-recent-row-104ac5e8-redacted.png`; `.spectra-local/live-verification/LV-040-moon-main-after-reload-104ac5e8-redacted.png`.
+
+**Fixer assessment / product decision (2026-10-01):** beginRun deliberately stores the neutral New conversation label and explicitly says not to fabricate a prompt-truncation title (convex/spectraRuns.ts near 948). Existing run metadata is applied only when the returned plan supplies conversationTitle/conversationSummary; a plain direct answer can omit these. The P3 report does not define a fallback. This is a policy gap rather than a header/list rendering mismatch; both display the stored title consistently.
+
+- Option A: Use the first prompt as a fallback, then replace it if the existing model result supplies a title. No additional provider call or latency; titles may be longer/raw prompt excerpts. Preserve explicitly edited titles and existing metadata authority.
+- Option B: Generate a short title using the configured model when metadata is absent. Better summary titles, with extra provider usage/latency and a recoverable title-generation failure. Do not mandate planning for ordinary answers, lower reasoning/model capability or truncate AI context.
+- User question submitted through the async input tool. NEEDS-DECISION until answered; no naming behavior changed.
+
+## Fixer closeout · saved run recovery and title decision · 2026-10-01
+
+- Implementation commit: `96f3b05d2e1abf24d4ccd4f2a190c4601953f28b` — reveal the latest unanswered settled run's saved failure/recovery using the existing bounded trace loader. The restored failure/Retry regression fails before; **18/18 focused tests** pass, including active-to-terminal transition, failed-read explicit recovery and real creation authority. Both TypeScript projects, full lint and all five gates pass. Configured human Git identity, no AI attribution or co-author trailer. This audit commit records final validation and preserves the verifier's findings.
+- Full suite: **4,508 passed, 1 failed, 1 skipped**; **511 passed files, 1 failed, 1 skipped** (513 files), **800.07 seconds**, three workers with unchanged assertions/timeouts. Sole failure is LV-017 hosted Docker packaging omitting `shared/yjs-collections.mjs`; the prohibited deployment-configuration patch remains unapplied. The full result is not green. Log: `.spectra-local/launch-fixer-LV039-full.log`.
+- LV-039 remains **NEEDS-INFO**: the recovery-display cause is corrected, but its upstream intake mutation timeout is unresolved and the exact backend function record is unavailable in the retained log page. The verifier has the hash and frontend-only recheck of the existing failed conversation's outcome/Retry; no new submission is needed. LV-037 remains **NEEDS-INFO** for exact clicked notice, request outcome and host continuity. LV-017 remains **NEEDS-INFO** for the unanswered hosted-package exception.
+- **NEEDS-DECISION:** LV-040 — first-prompt title fallback versus an additional configured-model title call, with naming quality and latency/usage consequences; the async user question is pending. Earlier decisions remain LV-028 shortcut mapping, LV-022 post-save prose latency/usage, LV-003 expired-invite HTTP semantics, LV-012 Bridge activation. **CANNOT-REPRODUCE:** LV-004 — original invitation encoding artifact, decoded token works; LV-007 — idle versus pending confirmation, pending controls disabled. No option was assumed.
+- No OPEN, REOPENED or FIXING entry remains. LV-026 and LV-027 are now VERIFIED by the verifier; LV-038 remains VERIFIED. Stop between tasks as requested. No deployment, codegen, production-data, environment, dependency or model/provider/reasoning/context changes occurred. The local state diagnostic was read-only and printed only sanitized matching-run state/action facts.

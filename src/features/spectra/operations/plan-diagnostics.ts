@@ -1,3 +1,4 @@
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ZodError } from "zod";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { alignIntentWithCreates } from "./intent-alignment";
@@ -150,8 +151,7 @@ export function formatPlanApplicationPublicError(error: unknown, options?: { exp
   if (error instanceof TypeError)
     return explanationOnly ? "The run could not finish its remaining steps."
       : "Spectra could not finish its remaining steps. Your saved work is safe, and you can retry this run.";
-  const message =
-    error instanceof Error ? error.message : "Spectra run failed.";
+  const message = readConvexError(error).message || "Spectra run failed.";
   if (/PRESENTATION_CITATION_EVIDENCE_REQUIRED/i.test(message)) {
     return explanationOnly
       ? "This presentation needs verified citations on its narrative slides. Keep the cited sources in this conversation for the citation repair."

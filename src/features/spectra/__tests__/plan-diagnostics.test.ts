@@ -14,6 +14,19 @@ import { validatePlanAgainstIntent } from "../operations/validate-plan";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 
 describe("plan diagnostics and schema slip recovery", () => {
+  it("reads a framed inactive-run error without diagnosing a folder failure (LV-039)", () => {
+    const error = new Error("[Request ID: redacted] Server Error\nUncaught ConvexError: This run is no longer active.");
+    expect(formatPlanApplicationPublicError(error)).toBe("This run is no longer active.");
+  });
+
+  it("uses structured Convex words before matching operation diagnostics", () => {
+    const error = Object.assign(new Error("[Request ID: redacted] Server Error"), {
+      data: { code: null, message: "The selected artifactId is not an owned id." },
+    });
+    expect(formatPlanApplicationPublicError(error)).toContain("open or selected object");
+    expect(formatPlanApplicationPublicError(new Error("[Request ID: redacted] Server Error")))
+      .not.toMatch(/Server Error|list files|Convex|Request ID/);
+  });
   it("repairs an occupied-slot identity collision through the existing plan repair path", () => {
     const error = new Error("CONTENT_PATCH_IDENTITY_MISMATCH: append with /- instead.");
     expect(isRepairablePlanFailure(error)).toBe(true);

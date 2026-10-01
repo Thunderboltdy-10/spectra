@@ -1716,6 +1716,16 @@ export function ConversationSurface({
     },
     [renderedDetail?.traces, traceStates],
   );
+  useEffect(() => {
+    const runId = renderedDetail?.thread.lastRunId;
+    if (!runId || renderedDetail.activeExecution !== null ||
+      traceByRun.has(runId) || traceStates[runId]) return;
+    const lastMessage = renderedDetail.messages.at(-1);
+    if (lastMessage?.role !== "user" || lastMessage.runId !== runId) return;
+    // A settled run with no assistant reply needs its saved outcome now.
+    // Reuse the bounded trace loader; completed history remains on demand.
+    void requestRunTrace(runId);
+  }, [renderedDetail, requestRunTrace, traceByRun, traceStates]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);

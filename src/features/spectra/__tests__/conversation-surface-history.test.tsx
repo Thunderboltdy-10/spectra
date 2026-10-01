@@ -133,6 +133,49 @@ afterEach(() => {
 });
 
 describe("ConversationSurface history and saved results", () => {
+  it("restores the latest unanswered run's saved failure and Retry after reload", async () => {
+    mocks.useQuery.mockReturnValue(null);
+    const source = detail("thread-a", "Create a document");
+    source.thread.lastRunId = run._id;
+    source.messages[0].role = "user";
+    source.activeExecution = null;
+    mocks.getTrace.mockResolvedValue({ run: { ...run, status: "failed", retryable: true }, operations: [], cards: [], events: [], artifacts: [] });
+    const retry = vi.fn();
+    render(<ConversationSurface detail={source} threadId="thread-a" onRetryRun={retry} />);
+    expect(await screen.findByText("Spectra paused this run")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledWith(run._id);
+    expect(mocks.getTrace).toHaveBeenCalledTimes(3);
+  });
+  it("reveals recovery when the selected unanswered run settles, without loading active history", async () => {
+    const source = detail("thread-a", "Create a document");
+    source.thread.lastRunId = run._id;
+    source.messages[0].role = "user";
+    mocks.useQuery.mockReturnValue({ run: { ...run, status: "running" } });
+    mocks.getTrace.mockResolvedValue({ run: { ...run, status: "failed", retryable: true }, operations: [], cards: [], events: [], artifacts: [] });
+    const view = render(<ConversationSurface detail={source} threadId="thread-a" onRetryRun={vi.fn()} />);
+    expect(mocks.getTrace).not.toHaveBeenCalled();
+    mocks.useQuery.mockReturnValue(null);
+    view.rerender(<ConversationSurface detail={source} threadId="thread-a" onRetryRun={vi.fn()} />);
+    expect(await screen.findByText("Spectra paused this run")).toBeTruthy();
+    expect(mocks.getTrace).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a failed recovery read retryable without an automatic request loop", async () => {
+    const source = detail("thread-a", "Create a document");
+    source.thread.lastRunId = run._id;
+    source.messages[0].role = "user";
+    mocks.useQuery.mockReturnValue(null);
+    mocks.getTrace.mockRejectedValue(new Error("Saved outcome temporarily unavailable"));
+    const view = render(<ConversationSurface detail={source} threadId="thread-a" onRetryRun={vi.fn()} />);
+    expect(await screen.findByText("Saved outcome temporarily unavailable")).toBeTruthy();
+    view.rerender(<ConversationSurface detail={{ ...source }} threadId="thread-a" onRetryRun={vi.fn()} />);
+    expect(mocks.getTrace).toHaveBeenCalledTimes(3);
+    mocks.getTrace.mockResolvedValue({ run: { ...run, status: "failed", retryable: true }, operations: [], cards: [], events: [], artifacts: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Spectra paused this run")).toBeTruthy();
+    expect(mocks.getTrace).toHaveBeenCalledTimes(6);
+  });
   it("renders the thread without waiting for workspace discovery", async () => {
     mocks.getThread.mockResolvedValue(detail("thread-a", "The thread is ready"));
     render(<ThreadConversation threadId="thread-a" showComposer={false} />);

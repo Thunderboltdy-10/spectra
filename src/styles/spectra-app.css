@@ -925,7 +925,7 @@ body {
 .spectra-studio-split-panel {
   animation: spectra-studio-panel-in var(--motion-base) var(--ease-standard);
   min-width: 0 !important;
-  max-width: min(880px, calc(100% - 280px));
+  max-width: 880px;
 }
 
 /* Below the width where the library reserve and the studio's own floor both
@@ -948,6 +948,7 @@ body {
   overflow: hidden;
 }
 
+/* The canvas reserve belongs to the workbench row, not panel-sized route hosts. */
 .spectra-workbench-frame > [data-studio-panel] {
   min-width: 0 !important;
   max-width: min(880px, calc(100% - 280px));

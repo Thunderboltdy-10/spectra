@@ -381,6 +381,23 @@ function inFlowSiblingPanels(host: HTMLElement, panel: HTMLElement) {
   );
 }
 
+/** Fit against the canvas, never a route wrapper sized by the panel itself. */
+function splitSizingHost(panel: HTMLElement | null) {
+  return panel?.closest<HTMLElement>("[data-split-host], .spectra-global-stage") ?? null;
+}
+
+function splitSizingBounds(host: HTMLElement | null) {
+  if (!host) return { width: window.innerWidth, right: window.innerWidth };
+  const style = window.getComputedStyle(host);
+  const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
+  const rightPadding = Number.parseFloat(style.paddingRight) || 0;
+  const rightBorder = Number.parseFloat(style.borderRightWidth) || 0;
+  return {
+    width: Math.max(0, host.clientWidth - leftPadding - rightPadding),
+    right: host.getBoundingClientRect().right - rightPadding - rightBorder,
+  };
+}
+
 export function StudioSplitShell({
   width,
   onWidthChange,
@@ -445,7 +462,7 @@ export function StudioSplitShell({
     const host = panel.closest<HTMLElement>("[data-split-host]");
     if (!host) return;
     const measure = () => {
-      overlayRefMirror(host.clientWidth);
+      overlayRefMirror(splitSizingBounds(host).width);
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -516,8 +533,7 @@ export function StudioSplitShell({
     function fitPanel() {
       const panel = panelRef.current;
       if (!panel) return;
-      const host =
-        panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
+      const host = splitSizingHost(panel);
       if (!host) return;
       // While the panel is an overlay it has no in-flow width to fit; the
       // last fitted width is kept and clamped again when the split returns.
@@ -534,7 +550,7 @@ export function StudioSplitShell({
          below the width it can be read at. */
       const reserve = contentReserve;
       const floor = siblingCount > 0 ? Math.min(minWidth, 480) : minWidth;
-      const hostWidth = host.clientWidth;
+      const hostWidth = splitSizingBounds(host).width;
       const maximum = Math.max(
         floor,
         Math.min(880, hostWidth - siblingWidth - reserve),
@@ -575,9 +591,7 @@ export function StudioSplitShell({
       else if (width < floor) updateWidth(floor);
     }
     const frame = window.requestAnimationFrame(fitPanel);
-    const host =
-      panelRef.current?.closest<HTMLElement>(".spectra-wave-y") ??
-      panelRef.current?.parentElement;
+    const host = splitSizingHost(panelRef.current);
     const observer = host ? new ResizeObserver(fitPanel) : null;
     if (host) {
       observer?.observe(host);
@@ -632,8 +646,7 @@ export function StudioSplitShell({
       if (overlayRef.current) return;
       const panel = panelRef.current;
       if (!panel) return;
-      const host =
-        panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
+      const host = splitSizingHost(panel);
       const panelLeft = panel.getBoundingClientRect().left;
       const siblings = host ? inFlowSiblingPanels(host, panel) : [];
       const rightSiblingWidth = siblings
@@ -648,8 +661,8 @@ export function StudioSplitShell({
         (total, candidate) => total + candidate.getBoundingClientRect().width,
         0,
       );
-      const hostRight =
-        host?.getBoundingClientRect().right ?? window.innerWidth;
+      const bounds = splitSizingBounds(host);
+      const hostRight = bounds.right;
       const floor = siblings.length > 0 ? Math.min(minWidth, 300) : minWidth;
       /* Controlled panels are budgeted by the row allocator
          (`allocateWorkbenchPanes`): the drag reports the raw desired width
@@ -667,7 +680,7 @@ export function StudioSplitShell({
             )
           : (() => {
               const reserve = contentReserve;
-              const hostWidth = host?.clientWidth ?? window.innerWidth;
+              const hostWidth = bounds.width;
               const available = Math.max(
                 floor,
                 hostWidth - allSiblingWidth - reserve,

@@ -868,7 +868,9 @@ function setChartRef(workbook: Workbook, container: XmlElement, formula: string 
   let ref = existing;
   if (!ref) { ref = new XmlElement(preferStrings ? "strRef" : "numRef", "c"); container.appendChild(ref); }
   const f = child(ref, CHART_NS, "f") ?? (() => { const created = new XmlElement("f", "c"); ref!.insertBefore(created, ref!.elements()[0] ?? null); return created; })();
-  setText(f, absoluteRange(formula, defaultSheet));
+  // A cache refresh must preserve the existing source reference. Rewriting
+  // an unchanged formula can alter its spelling and fail native readback.
+  if (f.text() !== formula) setText(f, absoluteRange(formula, defaultSheet));
   removeCache(ref);
   const cache = cacheValues(workbook, formula, defaultSheet);
   if (cache) ref.appendChild(chartCacheXml(cache.kind, cache.values));

@@ -1039,7 +1039,10 @@ fn enqueue_lock_report(
             before,
             None,
         )?;
-        if operation.state == OpState::Verified && op == "locked" {
+        // Lock transitions can repeat without changing the native revision.
+        // A completed report belongs to the previous Office session; both
+        // its next lock and its next unlock need a fresh durable operation.
+        if operation.state == OpState::Verified {
             key = derived_change_key(
                 &grant.id,
                 &resource.local_resource_id,
@@ -1047,7 +1050,7 @@ fn enqueue_lock_report(
                 &resource.path_key,
                 before,
                 None,
-                &format!("locked:{}", uuid::Uuid::new_v4().simple()),
+                &format!("{op}:{}", uuid::Uuid::new_v4().simple()),
             );
             operation = journal.begin_intent(
                 &key,
@@ -3913,6 +3916,51 @@ mod tests {
                 .iter()
                 .find(|file| file.relative_path == name)
                 .and_then(|file| file.content_hash.clone())
+        }
+
+        #[test]
+        fn repeated_office_sessions_report_each_unlock_without_a_new_file_revision() {
+            let folder = Folder::new();
+            folder.settled("essay.docx", b"unchanged native revision");
+            let grant = folder.grant();
+            let journal = Journal::in_memory().unwrap();
+            let path = grant.device_root().join("essay.docx");
+            scan_local_files(&grant, &journal, 1).unwrap();
+            journal
+                .set_config(&format!("cloud_mount:{}", grant.id), "mount-test")
+                .unwrap();
+            let resource = journal.resources_for_grant(&grant.id).unwrap().remove(0);
+            let mut delivered_operations = std::collections::HashSet::new();
+
+            for session in 1..=3 {
+                for op in ["locked", "unlocked"] {
+                    assert_eq!(
+                        super::super::enqueue_lock_report(&grant, &journal, &path, op).unwrap(),
+                        1,
+                        "session {session} must report {op} even with unchanged file bytes"
+                    );
+                    assert_eq!(
+                        super::super::enqueue_lock_report(&grant, &journal, &path, op).unwrap(),
+                        0,
+                        "repeated probes must not duplicate an undelivered transition"
+                    );
+                    let queued = journal.due_queue(10).unwrap();
+                    assert_eq!(queued.len(), 1);
+                    let envelope: super::super::QueuedChangeEnvelope =
+                        serde_json::from_str(&queued[0].payload).unwrap();
+                    assert_eq!(envelope.change.op, op);
+                    assert!(delivered_operations.insert(queued[0].op_id.clone()));
+                    journal
+                        .acknowledge_change(&queued[0], &resource.local_resource_id, None)
+                        .unwrap();
+                    assert_eq!(
+                        super::super::enqueue_lock_report(&grant, &journal, &path, op).unwrap(),
+                        0,
+                        "repeated probes must not replay a delivered transition"
+                    );
+                }
+            }
+            assert_eq!(delivered_operations.len(), 6);
         }
 
         #[test]

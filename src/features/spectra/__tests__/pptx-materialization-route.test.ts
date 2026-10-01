@@ -5,6 +5,7 @@ import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route
 import { pptxLens } from "../lenses/pptx-lens";
 import { sha256Payload } from "../lenses/docx-lens";
 import { pptxArtifactContent } from "../lenses/office-content";
+import { normalizePresentationContent, presentationObjectText, withPresentationObjectText } from "../presentation/model";
 
 const io = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn(), resolveAsset: vi.fn() }));
 vi.mock("@/lib/convex-server", () => ({ convexQuery: io.query, convexMutation: io.mutation, hydrateContentForWrite: vi.fn(), checkpointArtifactDurableContent: vi.fn() }));
@@ -28,10 +29,42 @@ async function fixture(input?: Uint8Array) {
   const truth = { replicaId: "cloud-source", payloadRef: "retained-source", hash, revision: hash, bytes: payload.byteLength, nativeFormat: "pptx", replicaKind: "cloud", state: "current", compatibilityProfile: "strict-native", url: "https://example.invalid/unused" };
   io.fetchNative.mockResolvedValue({ truth, payload });
   io.query.mockResolvedValue({ replicas: [{ _id: "local-target", kind: "local", revision: hash, state: "current" }] });
-  return { payload, opened, content: pptxArtifactContent(opened.projection) };
+  return { truth, payload, opened, content: pptxArtifactContent(opened.projection) };
 }
 
 describe("PPTX actual materialization route", () => {
+  it.each(["\n", "\n\n", "\nSecond line\n"])("prepares a native body edit retaining authored paragraphs %j", async suffix => {
+    const { truth, content: imported } = await fixture(new Uint8Array(await readFile("fixtures/office/pptx/transition-law.pptx")));
+    const content = normalizePresentationContent(imported);
+    const slide = content.slides[0]!;
+    const body = slide.objects.filter(object => object.type === "text").at(-1)!;
+    const marker = `Body edited through the native presentation studio${suffix}`;
+    const editedBody = withPresentationObjectText(body, marker);
+    slide.objects = slide.objects.map(object => object.id === body.id ? editedBody : object);
+    const result = await materializeOfficeArtifact(workId, content, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared" || result.nativeCandidate.destination !== "bridge") throw new Error("Expected a prepared PPTX bridge candidate");
+    expect(io.mutation).not.toHaveBeenCalled();
+    expect(io.upload).toHaveBeenCalledTimes(1);
+    const actual = await pptxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
+    const actualBody = actual.projection.slides[0]!.objects.find(object => object.id === body.id)!;
+    expect(presentationObjectText(actualBody)).toBe(marker.trim());
+    expect((actualBody.content as { paragraphs: unknown }).paragraphs).toEqual((editedBody.content as { paragraphs: unknown }).paragraphs);
+    expect(result.nativeCandidate.queue.nativeReceipt?.semantic.resultDigest).toBe(actual.projection.nativeBinding.semanticDigest);
+    // Retry after the same native paragraphs already landed must be unchanged,
+    // even when the editor's redundant display string retains a final newline.
+    const writtenBytes = io.upload.mock.calls[0]![1] as Uint8Array;
+    const writtenHash = await sha256Payload(writtenBytes);
+    io.fetchNative.mockResolvedValue({ truth: { ...truth, hash: writtenHash, revision: writtenHash }, payload: writtenBytes });
+    io.upload.mockClear();
+    const repeated = await materializeOfficeArtifact(workId, content, options);
+    expect(repeated.state).toBe("prepared");
+    if (repeated.state !== "prepared") throw new Error("Expected the unchanged native candidate");
+    expect(repeated.nativeCandidate.destination).toBe("none");
+    expect(io.upload).not.toHaveBeenCalled();
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
   it.each(["insert", "replace"] as const)("resolves durable bytes and prepares a verified native image %s", async (change) => {
     const { content } = await fixture(new Uint8Array(await readFile("fixtures/office/pptx/media-preservation.pptx")));
     const png = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));

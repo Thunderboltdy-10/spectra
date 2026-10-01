@@ -5,16 +5,16 @@ import { ordered, pptxImageReadbackObject } from "./pptx-media-readback";
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
-function paragraphs(value: unknown): string[] {
+function paragraphs(value: unknown, includeEmpty = false): string[] {
   const content = record(value);
   if (Array.isArray(content.paragraphs)) return content.paragraphs.flatMap((paragraph) => {
     const runs = record(paragraph).runs;
     if (!Array.isArray(runs)) return [];
     const text = runs.map((run) => String(record(run).text ?? "")).join("");
-    return text.length ? [text] : [];
+    return includeEmpty || text.length ? [text] : [];
   });
   const text = typeof value === "string" ? value : typeof content.text === "string" ? content.text : "";
-  return text.split(/\r?\n/).filter((line) => line.length);
+  return text.split(/\r?\n/).filter((line) => includeEmpty || line.length);
 }
 
 /** Mirrors Slide.text's paragraph order only where the imported model proves
@@ -25,7 +25,7 @@ export function pptxTextFromObjects(objects: readonly PresentationObject[]): str
     if (object.type === "group" || object.type === "chart") return [];
     if (object.type !== "table") return paragraphs(object.content);
     const rows = record(object.content).rows;
-    return Array.isArray(rows) ? rows.flatMap((row) => Array.isArray(row) ? row.flatMap(paragraphs) : []) : [];
+    return Array.isArray(rows) ? rows.flatMap((row) => Array.isArray(row) ? row.flatMap(cell => paragraphs(cell)) : []) : [];
   });
 }
 
@@ -42,6 +42,19 @@ function refuse(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
 }
 
+/** Native shapeText is a display mirror of the rich paragraphs: it omits
+ * empty lines and outer whitespace. Keep every authored paragraph/run in the
+ * digest and normalize only a mirror proven to describe those same paragraphs. */
+function normalizeObjectTextMirror(object: PresentationObject): PresentationObject {
+  const content = record(object.content);
+  if (object.type !== "text" || !Array.isArray(content.paragraphs) || typeof content.text !== "string") return object;
+  const authoredText = paragraphs(content, true).join("\n");
+  const nativeText = paragraphs(content).join("\n").trim();
+  if (content.text !== authoredText && content.text !== nativeText)
+    refuse("PPTX_TEXT_INTENT_UNMODELED", "The text object's display text does not match its authored rich paragraphs.");
+  return { ...object, content: { ...content, text: nativeText } };
+}
+
 /** Resolve only proven derived mirrors. Every object, table cell, run, style,
  * array order and native-only property remains in the digest. An independent
  * title/text/order request that has no matching primary model is refused rather
@@ -50,7 +63,7 @@ export function normalizePptxProjectionForReadback(requested: PptxProjection, be
   const previousById = new Map(before.slides.map((slide) => [slide.id, slide]));
   return { ...requested, slides: requested.slides.map((slide) => {
     const previous = previousById.get(slide.id);
-    if (!previous) return slide;
+    if (!previous) return { ...slide, objects: slide.objects.map(normalizeObjectTextMirror) };
     const previousObjects = new Map(previous.objects.map((object) => [object.id, object]));
     const previousText = pptxTextFromObjects(previous.objects);
     const nextText = pptxTextFromObjects(slide.objects);
@@ -68,7 +81,8 @@ export function normalizePptxProjectionForReadback(requested: PptxProjection, be
       refuse("PPTX_TITLE_INTENT_UNMODELED", "Edit the title object's text to save this native slide title.");
     if (!coversTitle && topologyChanged)
       refuse("PPTX_TITLE_PROJECTION_INCOMPLETE", "This slide's native title is not represented by a modeled title object.");
-    const objects = slide.objects.map((object, index) => {
+    const objects = slide.objects.map((value, index) => {
+      const object = normalizeObjectTextMirror(value);
       const original = previousObjects.get(object.id);
       if (!original) return object;
       if (object.readingOrder !== undefined && object.readingOrder !== original.readingOrder && object.readingOrder !== index)

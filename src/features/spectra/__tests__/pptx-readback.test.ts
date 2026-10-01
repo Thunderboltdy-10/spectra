@@ -22,6 +22,35 @@ function fixture(): PptxProjection {
 const signature = (projection: PptxProjection) => JSON.stringify(pptxSemanticContent(projection));
 
 describe("PPTX readback checks", () => {
+  it("verifies a rich-text mirror while retaining blank paragraphs, spaces and run formatting", () => {
+    const base = fixture();
+    const requested = structuredClone(base);
+    const rich = {
+      text: "  Edited paragraph\n\n",
+      paragraphs: [
+        { runs: [{ text: "  Edited paragraph", bold: true }] },
+        { runs: [{ text: "" }] },
+        { runs: [{ text: "" }] },
+      ],
+      nativeShapeId: "3",
+    };
+    requested.slides[0]!.objects[2]!.content = rich;
+    const normalized = normalizePptxProjectionForReadback(requested, base);
+    expect(normalized.slides[0]!.objects[2]!.content).toEqual({ ...rich, text: "Edited paragraph" });
+    expect(requested.slides[0]!.objects[2]!.content).toEqual(rich);
+    expect(signature(normalized)).not.toBe(signature(base));
+    const lostParagraph = structuredClone(normalized);
+    (lostParagraph.slides[0]!.objects[2]!.content as typeof rich).paragraphs.pop();
+    expect(signature(lostParagraph)).not.toBe(signature(normalized));
+  });
+
+  it("refuses a text mirror that disagrees with its authored rich paragraphs", () => {
+    const base = fixture();
+    const requested = structuredClone(base);
+    requested.slides[0]!.objects[2]!.content = { ...content("Authored paragraph"), text: "A different request", nativeShapeId: "3" };
+    expect(() => normalizePptxProjectionForReadback(requested, base)).toThrow(/authored.*paragraph/);
+  });
+
   it("keeps first-match duplicate semantics across a batch of added slides", () => {
     const base = fixture();
     base.slides.push({ ...base.slides[0]!, id: "second-identical", index: 1 });

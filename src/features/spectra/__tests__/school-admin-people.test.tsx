@@ -15,9 +15,10 @@ const toasts = vi.hoisted(() => ({
 
 vi.mock("@/features/spectra/administration/api", () => api);
 vi.mock("sonner", () => ({ toast: toasts }));
+const navigation = vi.hoisted(() => ({ replace: vi.fn(), tab: "people" }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams("tab=people"),
+  useRouter: () => ({ push: vi.fn(), replace: navigation.replace }),
+  useSearchParams: () => new URLSearchParams("tab=" + navigation.tab),
 }));
 
 import { SchoolAdminShell } from "../pages/school-admin-shell";
@@ -33,6 +34,9 @@ const overview = {
     policyVersion: 1,
   },
   operatorSession: null,
+  metrics: { members: 0, active30d: 0, invitations: 0, pendingApprovals: 0, groups: 0, classWorkspaces: 0, feedbackNew: 0 },
+  metricStates: {}, usage: { series: [], totals: {} },
+  groupWorkspaces: [], feedback: [], recentActivity: [], privacy: "Only school data is shown.",
 };
 
 function peopleCalls() {
@@ -45,6 +49,7 @@ function invitationCalls() {
 }
 
 beforeEach(() => {
+  navigation.tab = "people";
   api.getAdministration.mockImplementation(async (kind: string) => {
     if (kind === "schoolOverview") return overview;
     if (kind === "people") return { people: [] };
@@ -57,6 +62,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 async function openInvite(email: string) {
@@ -69,6 +75,18 @@ async function openInvite(email: string) {
 }
 
 describe("School admin People", () => {
+  it("keeps Overview when the People tab is opened offline", async () => {
+    navigation.tab = "overview";
+    render(<SchoolAdminShell />);
+    const people = await screen.findByRole("button", { name: "People" });
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    fireEvent.click(people);
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(toasts.error).toHaveBeenCalledExactlyOnceWith("Spectra could not reach the server. Check your connection, then try again.");
+    expect(peopleCalls()).toHaveLength(0);
+    expect(screen.queryByPlaceholderText("Search verified school members")).toBeNull();
+  });
+
   it("answers a sent invitation with exactly one toast", async () => {
     api.mutateAdministration.mockResolvedValue({
       delivery: { status: "sent" },

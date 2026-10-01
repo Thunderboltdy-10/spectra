@@ -1,7 +1,7 @@
 "use client";
 import { useWorkAvailability } from "../components/use-work-availability";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";

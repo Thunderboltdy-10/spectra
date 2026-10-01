@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import NextLink from "next/link";
-import { useRouter } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import {
   Children,
   cloneElement,

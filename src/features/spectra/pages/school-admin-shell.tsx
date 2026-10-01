@@ -8,7 +8,8 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import {
   Activity,
   Archive,
@@ -605,10 +606,10 @@ export function SchoolAdminShell() {
 
   const setTab = useCallback(
     (next: Tab) => {
-      setTabState(next);
       const query = new URLSearchParams(searchParams.toString());
       query.set("tab", next);
-      router.replace(`/admin?${query.toString()}`, { scroll: false });
+      if (!router.replace(`/admin?${query.toString()}`, { scroll: false })) return;
+      setTabState(next);
     },
     [router, searchParams],
   );

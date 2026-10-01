@@ -21,7 +21,8 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import {
   useCallback,
   useEffect,

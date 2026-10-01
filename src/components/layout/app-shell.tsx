@@ -11,7 +11,8 @@ import {
 } from "react";
 import Link from "next/link";
 import { useAccountStorageReady } from "../account-storage-boundary";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { captureSpectraNavigation, useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { toast } from "sonner";
 import {
   Atom,
@@ -1128,6 +1129,7 @@ function AppShellContent({
 
   return (
     <div
+      onClickCapture={captureSpectraNavigation}
       data-sidebar-collapsed={shellEffectiveCollapsed}
       style={{
         minHeight: "100dvh",

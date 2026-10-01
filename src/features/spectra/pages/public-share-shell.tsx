@@ -19,7 +19,7 @@ import {
   Table2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
 import { requestSpectra } from "../data/request";

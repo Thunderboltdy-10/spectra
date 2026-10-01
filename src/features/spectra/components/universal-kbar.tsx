@@ -12,7 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -223,7 +224,7 @@ export function UniversalKBar() {
     const target = routeTarget(href);
     return requestViewportAction({
       ...target,
-      navigate: () => router.push(href),
+      navigate: () => { router.push(href); },
     });
   }, [router]);
 

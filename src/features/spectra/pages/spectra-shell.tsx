@@ -40,7 +40,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import dynamic from "next/dynamic";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";

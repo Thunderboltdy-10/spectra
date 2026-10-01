@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
+import { isClerkAPIResponseError, isClerkRuntimeError } from "@clerk/nextjs/errors";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { syncRetryDelayMs } from "../../shared/sync-retry-policy";
 
@@ -10,6 +10,7 @@ type TokenOptions = Parameters<ReturnType<typeof useAuth>["getToken"]>[0];
 function isTransientTokenFailure(error: unknown) {
   return error instanceof TypeError ||
     (error instanceof Error && error.name === "NetworkError") ||
+    (isClerkRuntimeError(error) && error.code === "network_error") ||
     (isClerkAPIResponseError(error) && (error.status === 429 || error.status >= 500));
 }
 
@@ -51,13 +52,18 @@ export function useRecoverableClerkAuth() {
     const signal = scope.controller.signal;
     let attempt = 0;
     while (!signal.aborted && latest.current.owner === owner) {
+      const startedOffline = !navigator.onLine;
       try {
         const token = await latest.current.auth.getToken(options);
-        return !signal.aborted && latest.current.owner === owner ? token : null;
+        if (signal.aborted || latest.current.owner !== owner) return null;
+        // Clerk Core 2 also returns null for failed offline requests. Only a
+        // known signed-in session may recheck that ambiguous result online.
+        if (token !== null || !latest.current.auth.isSignedIn ||
+          (!startedOffline && navigator.onLine)) return token;
       } catch (error) {
         if (!isTransientTokenFailure(error)) throw error;
-        await waitForTokenRetry(signal, ++attempt);
       }
+      await waitForTokenRetry(signal, ++attempt);
     }
     return null;
   }, [owner]);

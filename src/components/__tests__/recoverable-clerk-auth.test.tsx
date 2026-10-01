@@ -84,3 +84,38 @@ it("does not return an in-flight token after the owner changes", async () => {
   clerk.sessionId = "session-B"; view.rerender(app());
   resolve("old-session-token"); expect(await result).toBeNull();
 });
+
+it("recovers Core 2's offline null token without clearing authenticated readers", async () => {
+  offline(true); clerk.getToken.mockResolvedValueOnce(null).mockResolvedValue("new-token");
+  render(app()); let settled = false;
+  const result = fetchers[0]({forceRefreshToken:true}).then(value => { settled = true; return value; });
+  await flush(); expect(settled).toBe(false);
+  await act(async () => { await vi.advanceTimersByTimeAsync(75_000); });
+  expect(clerk.getToken).toHaveBeenCalledOnce();
+  offline(false); act(() => { window.dispatchEvent(new Event("online")); });
+  expect(await result).toBe("new-token"); expect(clerk.getToken).toHaveBeenCalledTimes(2);
+});
+it("keeps an online null terminal after an ambiguous offline null", async () => {
+  offline(true); clerk.getToken.mockResolvedValue(null);
+  render(app()); let settled = false;
+  const result = fetchers[0]({forceRefreshToken:true}).then(value => { settled = true; return value; });
+  await flush(); expect(settled).toBe(false);
+  offline(false); act(() => { window.dispatchEvent(new Event("online")); });
+  expect(await result).toBeNull(); expect(clerk.getToken).toHaveBeenCalledTimes(2);
+  expect(vi.getTimerCount()).toBe(0);
+});
+it("rechecks an offline-started null even if the network returns before it resolves", async () => {
+  offline(true); let resolve!: (token: null) => void;
+  clerk.getToken.mockImplementationOnce(() => new Promise<null>(done => { resolve = done; })).mockResolvedValue("new-token");
+  render(app()); const result = fetchers[0]({forceRefreshToken:true});
+  offline(false); resolve(null); await flush();
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(await result).toBe("new-token"); expect(clerk.getToken).toHaveBeenCalledTimes(2);
+});
+it("recovers Clerk's typed offline network error through its public guard", async () => {
+  class NetworkFailure extends Error { static kind = "ClerkRuntimeError"; code = "network_error"; }
+  clerk.getToken.mockRejectedValueOnce(new NetworkFailure("Disposable network error")).mockResolvedValue("new-token");
+  render(app()); const result = fetchers[0]({forceRefreshToken:true}); await flush();
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(await result).toBe("new-token"); expect(clerk.getToken).toHaveBeenCalledTimes(2);
+});

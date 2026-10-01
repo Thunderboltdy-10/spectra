@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Toaster, toast } from "sonner";
 import { spectraBus } from "../events";
 import { DEFAULT_SPECTRA_PREFERENCES } from "../settings/schema";
+import { GlobalRouteWorkbench } from "../components/global-route-workbench";
 import { RouteSidePanelHost } from "../components/route-side-panel-host";
 
 const session = vi.hoisted(() => ({ authenticated: true, account: { accountId: "account-A" } as { accountId: string } | undefined }));
@@ -29,13 +30,25 @@ vi.mock("../components/artifact-studio-shell", () => {
   return { useArtifactStudioState: () => studio, StudioSplitPlaceholder: () => null };
 });
 
+vi.mock("../ai/use-spectra-run", () => ({ useSpectraRun: () => ({}) }));
+vi.mock("../components/command-bar", () => ({ CommandBar: () => null }));
+vi.mock("../components/context-controls", () => ({ ContextFocusControl: () => null }));
+vi.mock("../pages/workbench-live-stack", () => ({ WorkbenchLiveStack: ({ children }: { children: import("react").ReactNode }) => children }));
+vi.mock("../components/live-dock", () => ({
+  LiveDock: ({ onOpen }: { onOpen: (runId: string, threadId: string, title: string, artifactId: string) => void }) => (
+    <button onClick={() => onOpen("run-a", "conversation-a", "Temporary conversation", "work-a")}>Open chat for Temporary conversation</button>
+  ),
+}));
+
 let offline = true;
 const fetchRequest = vi.fn(async (input: RequestInfo | URL) => {
   if (offline) throw new TypeError("Failed to fetch");
   const url = new URL(String(input), "http://localhost");
   const data = url.searchParams.get("action") === "runDetail"
     ? { run: { threadId: "conversation-a" } }
-    : { thread: { _id: url.searchParams.get("threadId"), title: "Temporary conversation" } };
+    : url.searchParams.get("action") === "artifact"
+      ? { artifact: { _id: url.searchParams.get("artifactId"), title: "Temporary work", type: "document" } }
+      : { thread: { _id: url.searchParams.get("threadId"), title: "Temporary conversation" } };
   return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
 });
 beforeEach(() => {
@@ -180,4 +193,29 @@ it("keeps the original recovery action across a long offline hold with the produ
   expect(screen.getByText("Opened conversation-a")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   expect(fetchRequest).toHaveBeenCalledTimes(4);
+});
+
+it.each(["conversation", "work"] as const)("recovers the Dock's associated conversation and work independently, %s first", async (first) => {
+  render(<><main>School context</main><GlobalRouteWorkbench /><RouteSidePanelHost /><Toaster expand /></>);
+  fireEvent.click(screen.getByRole("button", { name: "Open chat for Temporary conversation" }));
+  await screen.findByText("This conversation could not be opened. Check your connection, then try again.");
+  await screen.findByText("This work could not be opened. Check your connection, then try again.");
+  expect(fetchRequest).toHaveBeenCalledTimes(2);
+  const retry = (kind: "conversation" | "work") => {
+    const notice = screen.getByText(`This ${kind} could not be opened. Check your connection, then try again.`).closest("[data-sonner-toast]") as HTMLElement;
+    fireEvent.click(within(notice).getByRole("button", { name: "Try again" }));
+  };
+  retry(first);
+  await waitFor(() => expect(fetchRequest).toHaveBeenCalledTimes(3));
+  expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(2);
+  offline = false;
+  retry(first);
+  await waitFor(() => expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(1));
+  if (first === "conversation") expect(screen.getByText("Opened conversation-a")).toBeTruthy();
+  else expect(screen.queryByRole("button", { name: "Close live chat" })).toBeNull();
+  retry(first === "conversation" ? "work" : "conversation");
+  expect(await screen.findByText("Opened conversation-a")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+  expect(screen.getByText("School context")).toBeTruthy();
+  expect(fetchRequest).toHaveBeenCalledTimes(5);
 });

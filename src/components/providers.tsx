@@ -43,6 +43,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           position="top-right"
           richColors
           visibleToasts={3}
+          expand
           toastOptions={{
             className: "!rounded-xl !border-[var(--border-default)] !bg-[var(--bg-elevated)] !text-[var(--text-primary)] !shadow-[var(--shadow-soft)]",
             descriptionClassName: "!text-[var(--text-secondary)]",

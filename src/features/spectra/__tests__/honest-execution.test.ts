@@ -204,7 +204,7 @@ describe("P4.I3 honest execution and authority", () => {
     const plan = read("src/app/api/spectra/run/loop/plan.ts");
     const gate = plan.slice(
       plan.indexOf("const calendarActionRequested = promptRequestsCalendarAction"),
-      plan.indexOf("const openArtifactCreateCollision"),
+      plan.indexOf("const explicitlyTargetsFocusedArtifact"),
     );
     // Must not keep note+personal-event on create_note-only tool list.
     expect(gate).toContain(

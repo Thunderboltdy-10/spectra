@@ -647,6 +647,75 @@ describe("Spectra run route", () => {
     expect(vi.mocked(convexAction).mock.invocationCallOrder[prepared]).toBeLessThan(vi.mocked(applyAiArtifactMutation).mock.invocationCallOrder[0]!);
   });
 
+  it.each([
+    "Make a 6-slide deck on plate tectonics",
+    "Make flashcards for plate boundaries",
+    "Create a document and a presentation about plate tectonics",
+  ])("lets the model choose the artifact type before opening any artifact for %s", async prompt => {
+    const { fetchMock, convexMutation } = setup({});
+    fetchMock.mockImplementation(async () => ordinaryResponse("Which audience should this be for?"));
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt }),
+    }))).text();
+    const firstModelCall = fetchMock.mock.invocationCallOrder[0]!;
+    expect(firstModelCall).toBeDefined();
+    const earlyCreations = convexMutation.mock.calls.flatMap(([name], index) =>
+      String(name).includes("spectraArtifacts:createPending") && convexMutation.mock.invocationCallOrder[index]! < firstModelCall ? [name] : []);
+    expect(earlyCreations).toEqual([]);
+    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)) as { tool_choice: unknown; tools: Array<{ function: { name: string } }> };
+    expect(body.tool_choice).toBe("auto");
+    expect(body.tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining([
+      "propose_operation", "read_artifact_skill", "read_artifact", "search_objects", "web_search",
+    ]));
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
+  });
+  it("creates the model-selected six-slide presentation without a flashcard shell", async () => {
+    const content = { theme: { id: "theme-1", name: "Clean" }, slides: [
+      ["Plate tectonics", "Earth's outer shell is divided into moving tectonic plates."],
+      ["Moving plates", "Heat drives mantle circulation while slab pull and ridge push help plates move."],
+      ["Divergent boundaries", "Plates move apart and magma forms new crust at ocean ridges."],
+      ["Convergent boundaries", "Plates move together. Subduction creates trenches and volcanic arcs."],
+      ["Transform boundaries", "Plates slide past one another and faults can produce earthquakes."],
+      ["Evidence and hazards", "Matching fossils and seafloor ages support the theory. Plate boundaries concentrate hazards."],
+    ].map(([title, text], index) => ({
+      id: "slide-" + (index + 1), title, speakerNotes: text, objects: [{
+        id: "text-" + (index + 1), type: "text", x: 40, y: 100, width: 640, height: 240,
+        content: { text },
+      }],
+    })) };
+    const operation = { type: "artifact.create", input: {
+      blueprintKey: "presentation", title: "Plate Tectonics", summary: "Six slides explaining plate motion and boundaries.",
+      content, tags: ["geography"], workspaceId: null, placement: "inbox",
+    } };
+    const { fetchMock, convexMutation, getSavedArtifact } = setup({});
+    fetchMock.mockReset().mockResolvedValueOnce(new Response(JSON.stringify({
+      model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ finish_reason: "tool_calls", message: {
+        content: "", tool_calls: [{ id: "create-tectonics", type: "function", function: {
+          name: "propose_operation", arguments: JSON.stringify({
+            workSummary: "Building six slides on plate tectonics", fulfillsRequest: true, operation,
+          }),
+        } }],
+      } }],
+    }), { status: 200 })).mockImplementation(async () => ordinaryResponse("Prepared the six-slide presentation on plate tectonics."));
+    const route = await import("@/app/api/spectra/run/route");
+    const events = (await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Make a 6-slide deck on plate tectonics." }),
+    }))).text()).trim().split("\n").map(line => JSON.parse(line));
+    expect(events.some(event => event.type === "error")).toBe(false);
+    expect(events.some(event => event.type === "final")).toBe(true);
+    const creations = convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraArtifacts:createPending"));
+    expect(creations).toHaveLength(1);
+    expect(creations[0]![1]).toMatchObject({ blueprintKey: "presentation", title: "Plate Tectonics" });
+    const saved = getSavedArtifact();
+    expect(saved.blueprintKey).toBe("presentation");
+    expect((saved.content as { slides: unknown[] }).slides).toHaveLength(6);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && args.status === "completed")).toBe(true);
+    const firstModel = fetchMock.mock.invocationCallOrder[0]!;
+    const pendingIndex = convexMutation.mock.calls.findIndex(([name]) => String(name).includes("spectraArtifacts:createPending"));
+    expect(convexMutation.mock.invocationCallOrder[pendingIndex]!).toBeGreaterThan(firstModel);
+  });
+
   it("uses one ordinary model response for a factual answer without proposing work", async () => {
     const { fetchMock, convexMutation } = setup({});
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({
@@ -964,233 +1033,104 @@ describe("Spectra run route", () => {
     25_000,
   );
 
-  it("fans independent multi-output study packs into typed parallel workers", async () => {
-    const { fetchMock } = setup({});
-    fetchMock.mockImplementation(async (_url, init) => {
-      const payload = JSON.parse(String((init as RequestInit).body)) as {
-        tool_choice?: { function?: { name?: string } };
-        tools?: Array<{
-          function?: {
-            name?: string;
-            parameters?: {
-              properties?: { plan?: { type?: string; additionalProperties?: boolean; oneOf?: unknown } };
-            };
-          };
-        }>;
-      };
-      const toolName =
-        payload.tool_choice?.function?.name ??
-        payload.tools
-          ?.map((tool) => tool.function?.name)
-          .find((name) => name?.startsWith("create_"));
-      const isDocument = toolName === "create_document";
-      const args = {
-        title: isDocument ? "Review" : "Practice",
-        summary: isDocument ? "Compact review notes." : "Practice questions.",
-        content: isDocument
-          ? {
-              blocks: [{ id: "block-1", type: "paragraph", text: "Review content" }],
-              outline: [],
-            }
-          : quizPlan().operations[0].input.content,
-        tags: ["study-pack"],
-        conversationTitle: "Study Pack",
-        conversationSummary: "Created one part of the study pack.",
-        finalResponse: `Created ${isDocument ? "Review" : "Practice"}.`,
-      };
-      return new Response(
-        JSON.stringify({
-          model: "deepseek/deepseek-v4-pro-20260423",
-          provider: "DeepSeek",
-          choices: [{
-            finish_reason: "tool_calls",
-            message: {
-              content: "",
-              tool_calls: [{
-                id: `call-${toolName}`,
-                type: "function",
-                function: { name: toolName, arguments: JSON.stringify(args) },
-              }],
-            },
-          }],
-        }),
-        { status: 200 },
-      );
-    });
-    process.env.OPENROUTER_API_KEY = "test-key";
+  it("keeps model-selected independent outputs in one complete typed graph", async () => {
+    const quiz = quizPlan().operations[0];
+    const document = { type: "artifact.create", input: {
+      blueprintKey: "document", title: "Review", summary: "Compact review notes.",
+      content: { blocks: [{ id: "block-1", type: "paragraph", text: "Review content" }], outline: [] },
+      tags: ["study-pack"], workspaceId: "workspace-real", placement: "context",
+    } };
+    const plan = { decision: "operate", intent: {
+      mode: "create", requestedArtifactTypes: ["document", "quiz"], requestedVisibleArtifactCount: 2,
+      targetArtifactId: null, targetWorkspaceId: "workspace-real",
+    }, operations: [document, quiz], finalResponse: "Prepared the review and practice quiz." };
+    const { fetchMock, convexMutation } = setup(plan);
     const route = await import("@/app/api/spectra/run/route");
-    const response = await route.POST(
-      new NextRequest("http://localhost/api/spectra/run", {
-        method: "POST",
-        body: JSON.stringify({
-          action: "run",
-          surface: "workspace",
-          workspaceId: "workspace-real",
-          prompt:
-            "Build a compact study pack from the included deck. Create a document titled 'Review' and create a quiz titled 'Practice'.",
-        }),
-      }),
-    );
-    await response.text();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const selectedTools = fetchMock.mock.calls.map((call) => {
-      const payload = JSON.parse(String((call[1] as RequestInit).body)) as {
-        tool_choice?: { function?: { name?: string } };
-        tools?: Array<{
-          function?: {
-            name?: string;
-            parameters?: {
-              properties?: {
-                plan?: {
-                  type?: string;
-                  additionalProperties?: boolean;
-                  oneOf?: unknown;
-                };
-              };
-            };
-          };
-        }>;
-      };
-      return (
-        payload.tool_choice?.function?.name ??
-        payload.tools
-          ?.map((tool) => tool.function?.name)
-          .find((name) => name?.startsWith("create_"))
-      );
-    });
-    expect(selectedTools).toEqual(
-      expect.arrayContaining(["create_document", "create_quiz"]),
-    );
-    expect(selectedTools).not.toContain("submit_plan");
-  }, 60_000);
-
-  it("keeps quoted planner subtask verbs inside one creation and enforces the explicit contract locally", async () => {
-    const { fetchMock, getSavedArtifact } = setup({});
-    fetchMock.mockImplementation(async (_url, init) => {
-      const payload = JSON.parse(String((init as RequestInit).body)) as {
-        tool_choice?: { function?: { name?: string } };
-      };
-      const toolName = payload.tool_choice?.function?.name;
-      if (toolName === "create_planner_task") {
-        return new Response(JSON.stringify({
-          model: "deepseek/deepseek-v4-pro-20260423",
-          provider: "DeepSeek",
-          choices: [{
-            finish_reason: "tool_calls",
-            message: {
-              content: "",
-              tool_calls: [{
-                id: "planner-worker",
-                type: "function",
-                function: {
-                  name: "create_planner_task",
-                  // Deliberately omit the requested due date and subtasks. The
-                  // harness owns exact user-stated contract values.
-                  arguments: JSON.stringify({
-                    title: "Review Task Graph Notes",
-                    summary: "Review the graph notes.",
-                    content: {
-                      description: "Review the task graph notes (q57f4cwrc4y1fvkv9qsmmwbaad8af46w).",
-                      dueAt: null,
-                      startAt: null,
-                      endAt: null,
-                      allDay: true,
-                      status: "todo",
-                      priority: "medium",
-                      linkedArtifactIds: [],
-                      linkedThreadIds: [],
-                      subtasks: [],
-                      attachments: [],
-                      reminders: [],
-                      estimateMinutes: null,
-                      progressNote: "",
-                      sourceRefs: [],
-                    },
-                    tags: [],
-                    conversationTitle: "Review Task Graph Notes",
-                    conversationSummary: "Created the review task.",
-                    finalResponse: "Created the review task.",
-                  }),
-                },
-              }],
-            },
-          }],
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({
-        model: "deepseek/deepseek-v4-pro-20260423",
-        provider: "DeepSeek",
-        choices: [{
-          finish_reason: "tool_calls",
-          message: {
-            content: "",
-            tool_calls: [{
-              id: "coordination-worker",
-              type: "function",
-              function: {
-                name: "submit_plan",
-                arguments: JSON.stringify({
-                  plan: {
-                    decision: "answer",
-                    intent: {
-                      mode: "answer",
-                      requestedArtifactTypes: ["task"],
-                      requestedVisibleArtifactCount: 0,
-                      targetArtifactId: null,
-                      targetWorkspaceId: null,
-                    },
-                    conversationTitle: null,
-                    conversationSummary: null,
-                    choices: null,
-                    operations: [],
-                    finalResponse: "The creation worker owns the requested task.",
-                  },
-                }),
-              },
-            }],
-          },
-        }],
-      }), { status: 200 });
-    });
-    const route = await import("@/app/api/spectra/run/route");
-    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
-      method: "POST",
-      body: JSON.stringify({
-        action: "run",
-        surface: "workspace",
-        workspaceId: "workspace-real",
-        artifactId: "artifact-real",
-        prompt: "Create a planner task titled 'Review Task Graph Notes' due tomorrow at 4:00 PM with exactly 2 subtasks named 'Read both sections' and 'Write one correction'. Add the tag 'task-graph-source' to this document and link the new task to this document with relation follow_up.",
-      }),
-    }));
-    await response.text();
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const tools = fetchMock.mock.calls.map((call) =>
-      (JSON.parse(String((call[1] as RequestInit).body)) as { tool_choice?: { function?: { name?: string } } })
-        .tool_choice?.function?.name,
-    );
-    expect(tools.filter((name) => name === "create_planner_task")).toHaveLength(1);
-    expect(tools.filter((name) => name === "submit_plan")).toHaveLength(1);
-    const creationCall = fetchMock.mock.calls.find((call) =>
-      (JSON.parse(String((call[1] as RequestInit).body)) as { tool_choice?: { function?: { name?: string } } })
-        .tool_choice?.function?.name === "create_planner_task",
-    );
-    expect(String((creationCall?.[1] as RequestInit).body)).not.toContain("Add the tag");
-    const content = getSavedArtifact().content as {
-      dueAt?: number;
-      description?: string;
-      subtasks?: Array<{ title: string; done: boolean }>;
-    };
-    expect(content.dueAt).toEqual(expect.any(Number));
-    expect(new Date(content.dueAt!).getHours()).toBe(16);
-    expect(new Date(content.dueAt!).getMinutes()).toBe(0);
-    expect(content.description).toBe("Review the task graph notes.");
-    expect(content.subtasks).toEqual([
-      expect.objectContaining({ title: "Read both sections", done: false }),
-      expect.objectContaining({ title: "Write one correction", done: false }),
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real",
+        prompt: "Build a compact study pack from the included deck. Create a document titled 'Review' and create a quiz titled 'Practice'." }),
+    }))).text();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)).tool_choice).toBe("auto");
+    const recorded = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraOperations:recordPlan"));
+    expect(recorded?.[1].operations).toEqual([
+      expect.objectContaining({ type: "artifact.create", input: expect.objectContaining({ blueprintKey: "document", title: "Review" }) }),
+      expect.objectContaining({ type: "artifact.create", input: expect.objectContaining({ blueprintKey: "quiz" }) }),
     ]);
-  }, 60_000);
+  });
+
+  it("keeps a new planner task, existing edit and dependent link in the model's graph", async () => {
+    const task = { type: "artifact.create", input: {
+      blueprintKey: "planner_task", title: "Review Task Graph Notes", summary: "Review the task graph notes.",
+      content: { description: "Review the task graph notes.", dueAt: null, startAt: null, endAt: null,
+        allDay: true, status: "todo", priority: "medium", linkedArtifactIds: [], linkedThreadIds: [],
+        subtasks: [], attachments: [], reminders: [], estimateMinutes: null, progressNote: "", sourceRefs: [] },
+      tags: [], workspaceId: "workspace-real", placement: "context",
+    } };
+    const edit = { type: "artifact.update", input: {
+      artifactId: "artifact-real", blueprintKey: "document", title: null, summary: null,
+      content: null, contentPatch: null, tags: ["task-graph-source"],
+    } };
+    const link = { type: "artifact.link", input: {
+      sourceArtifactId: "@created:0", targetArtifactId: "artifact-real", relationType: "follow_up",
+      label: null, explanation: null, workspaceId: "workspace-real",
+    } };
+    const { fetchMock, convexMutation, convexQuery, getSavedArtifact } = setup({ decision: "operate", intent: {
+      mode: "mixed", requestedArtifactTypes: ["planner_task"], requestedVisibleArtifactCount: 1,
+      targetArtifactId: "artifact-real", targetWorkspaceId: "workspace-real",
+    }, operations: [task, edit, link], finalResponse: "Prepared the review task, source tag and link." }, "queued", {
+      blueprintKey: "document", title: "Task Graph Notes", content: {
+        blocks: [{ id: "p1", type: "paragraph", text: "Task graph notes." }], outline: [],
+      },
+    }, [{ _id: "artifact-real", blueprintKey: "document", title: "Task Graph Notes", summary: "Task graph notes.", updatedAt: 1 }]);
+    // This fixture normally models one artifact. A mixed graph must keep the
+    // original document and its newly created task as distinct canonical reads.
+    const artifacts = new Map<string, Record<string, unknown>>([["artifact-real", { ...getSavedArtifact() }]]);
+    const read = convexQuery.getMockImplementation()!;
+    convexQuery.mockImplementation(async (name, args) => {
+      if (name.includes("spectraArtifacts:get") && typeof args?.artifactId === "string")
+        return artifacts.get(args.artifactId) ?? read(name, args);
+      return read(name, args);
+    });
+    const write = convexMutation.getMockImplementation()!;
+    convexMutation.mockImplementation(async (name, args) => {
+      const result = await write(name, args);
+      if (name.includes("spectraArtifacts:createPending"))
+        artifacts.set("artifact-pending", { ...getSavedArtifact() });
+      if (name.includes("spectraArtifacts:finalizePending") && typeof args.artifactId === "string")
+        artifacts.set(args.artifactId, { ...getSavedArtifact(), _id: args.artifactId });
+      return result;
+    });
+    const { applyAiArtifactMutation } = await import("@/features/spectra/ai/yjs-artifact-operation");
+    const apply = vi.mocked(applyAiArtifactMutation);
+    const commit = apply.getMockImplementation()!;
+    apply.mockImplementation(async params => {
+      const current = artifacts.get(params.artifactId)!;
+      const result = await commit({ ...params, resolveDesired: () => params.resolveDesired({
+        title: String(current.title), summary: current.summary as string | undefined,
+        content: current.content, tags: current.tags as string[],
+      }) });
+      artifacts.set(params.artifactId, { ...getSavedArtifact(), blueprintKey: current.blueprintKey });
+      return result;
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    await (await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST", body: JSON.stringify({ action: "run", surface: "artifact", workspaceId: "workspace-real", artifactId: "artifact-real",
+        prompt: "Create a planner task titled 'Review Task Graph Notes' due tomorrow at 4:00 PM with exactly 2 subtasks named 'Read both sections' and 'Write one correction'. Add the tag 'task-graph-source' to this document and link the new task to this document with relation follow_up." }),
+    }))).text();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
+    expect(request.tool_choice).toBe("auto");
+    expect(JSON.stringify(request.messages)).toContain("Add the tag");
+    const recorded = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraOperations:recordPlan"));
+    const operations = recorded?.[1].operations as Array<{ type: string; input: { content?: { dueAt: number; subtasks: Array<{ title: string }> } } }>;
+    expect(operations.map(operation => operation.type)).toEqual(["artifact.create", "artifact.update", "artifact.link"]);
+    const content = operations[0]!.input.content!;
+    expect(new Date(content.dueAt).getHours()).toBe(16);
+    expect(new Date(content.dueAt).getMinutes()).toBe(0);
+    expect(content.subtasks.map(step => step.title)).toEqual(["Read both sections", "Write one correction"]);
+    expect(operations[2]).toMatchObject({ input: { sourceArtifactId: "@created:0", targetArtifactId: "artifact-real", relationType: "follow_up" } });
+  });
 
   it("treats multiple-choice questions as one quiz rather than multiple artifacts", async () => {
     const { convexMutation, fetchMock, getSavedArtifact } = setup(quizPlan());
@@ -1255,18 +1195,7 @@ describe("Spectra run route", () => {
         String(name).includes("spectraArtifacts:finalizePending"),
       ),
     ).toBe(true);
-    expect(
-      convexMutation.mock.calls.some(
-        ([name, args]) =>
-          String(name).includes("spectraArtifacts:patchPendingContent") &&
-          Array.isArray(
-            ((args as { content?: { questions?: unknown[] } }).content)
-              ?.questions,
-          ) &&
-          ((args as { content: { questions: unknown[] } }).content.questions
-            .length === 6),
-      ),
-    ).toBe(true);
+    expect((getSavedArtifact().content as { questions: unknown[] }).questions).toHaveLength(6);
     expect(events.some((event) => event.type === "error")).toBe(false);
   });
 
@@ -1389,12 +1318,12 @@ describe("Spectra run route", () => {
       expect.arrayContaining([
         "retrieve_memory",
         "web_search",
-        "create_flashcard_deck",
+        "propose_operation",
       ]),
     );
     expect(
       payload.tools?.some((tool) => tool.function?.name === "search_objects"),
-    ).toBe(false);
+    ).toBe(true);
     expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
     const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");

@@ -5,7 +5,6 @@ import {
   promptLooksLikeFocusedStructuralEdit,
   promptLooksLikeFreshCreate,
 } from "../operations/intent-alignment";
-import { matchSpectraCreationShorthand } from "../operations/creation-intent";
 import {
   coerceCommonPlanSchemaSlips,
   formatPlanApplicationPublicError,
@@ -40,38 +39,11 @@ const VALIDATION_COLUMN_PROMPT =
   "add a validation column that flags whether each enzyme's Km is below 5";
 
 describe("vague sheets create intent", () => {
-  it("matches Launch Studio QC shorthand without an explicit create verb", () => {
-    expect(
-      matchSpectraCreationShorthand(
-        "small sheet comparing enzyme Km and Vmax",
-      )?.blueprintKey,
-    ).toBe("sheets");
-    expect(
-      matchSpectraCreationShorthand(
-        "a spreadsheet of enzyme kinetics constants",
-      )?.blueprintKey,
-    ).toBe("sheets");
-    expect(
-      matchSpectraCreationShorthand(
-        "make a timetable for enzyme revision this week",
-      ),
-    ).toBeNull();
-    expect(
-      matchSpectraCreationShorthand(
-        "draft a tutor agent for cell biology",
-      )?.blueprintKey,
-    ).toBe("agent");
-    expect(promptLooksLikeFreshCreate("small sheet comparing enzyme Km and Vmax")).toBe(
-      true,
-    );
-  });
-
   it("treats open-sheet validation-column edits as focused updates, not creates", () => {
     expect(promptLooksLikeFocusedStructuralEdit(VALIDATION_COLUMN_PROMPT)).toBe(
       true,
     );
     expect(promptLooksLikeFreshCreate(VALIDATION_COLUMN_PROMPT)).toBe(false);
-    expect(matchSpectraCreationShorthand(VALIDATION_COLUMN_PROMPT)).toBeNull();
     expect(
       promptLooksLikeFocusedStructuralEdit(
         "rewrite section 2 of the open document",

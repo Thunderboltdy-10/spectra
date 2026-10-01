@@ -1,73 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { matchSpectraCreationShorthand } from "../operations/creation-intent";
+import { declaredSingleCreation } from "../operations/creation-intent";
+import { parseSpectraPlan, type RequestIntent } from "../operations/schema";
 
-describe("matchSpectraCreationShorthand", () => {
-  it("routes vague whiteboard / code / sheets / presentation prompts to single creation", () => {
-    expect(
-      matchSpectraCreationShorthand(
-        "whiteboard map of enzyme inhibitors",
-      )?.blueprintKey,
-    ).toBe("whiteboard");
-    expect(
-      matchSpectraCreationShorthand(
-        "code a tiny carbon cycle diagram sketch",
-      )?.blueprintKey,
-    ).toBe("code");
-    expect(
-      matchSpectraCreationShorthand(
-        "make a small sheet of enzyme Km and Vmax comparison data",
-      )?.blueprintKey,
-    ).toBe("sheets");
-    expect(
-      matchSpectraCreationShorthand(
-        "small sheet comparing enzyme Km and Vmax",
-      )?.blueprintKey,
-    ).toBe("sheets");
-    expect(
-      matchSpectraCreationShorthand("spreadsheet comparing Km and Vmax")
-        ?.blueprintKey,
-    ).toBe("sheets");
-    expect(
-      matchSpectraCreationShorthand(
-        "create a presentation with 5 slides introducing enzyme inhibitors",
-      )?.blueprintKey,
-    ).toBe("presentation");
+function plan(types: RequestIntent["requestedArtifactTypes"], count: number, mode: RequestIntent["mode"] = "create") {
+  const parsed = parseSpectraPlan({
+    decision: mode === "answer" ? "answer" : "operate",
+    intent: {
+      mode,
+      requestedArtifactTypes: types,
+      requestedVisibleArtifactCount: count,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    },
+    operations: mode === "answer" ? [] : [{ type: "artifact.create", input: {
+      blueprintKey: "document", title: "Model-selected draft", summary: null,
+      content: { blocks: [{ id: "p1", type: "paragraph", text: "An authored paragraph." }], outline: [] },
+      tags: [], workspaceId: null, placement: "inbox",
+    } }],
+    choices: null,
+    finalResponse: "Model-selected artifact contract.",
+  });
+  return { ...parsed, intent: { ...parsed.intent, mode, requestedArtifactTypes: types, requestedVisibleArtifactCount: count } };
+}
+
+describe("declared creation contract", () => {
+  it("uses the model's presentation choice without a shorthand guess", () => {
+    expect(declaredSingleCreation(plan(["presentation"], 1))).toEqual({
+      blueprintKey: "presentation", label: "presentation",
+    });
+    expect(declaredSingleCreation(plan(["flashcard_deck"], 1))).toEqual({
+      blueprintKey: "flashcard_deck", label: "flashcard deck",
+    });
   });
 
-  it("keeps Calendar requests out of work creation and still creates agents", () => {
-    expect(
-      matchSpectraCreationShorthand(
-        "make a timetable for enzyme revision this week",
-      ),
-    ).toBeNull();
-    expect(
-      matchSpectraCreationShorthand(
-        "build a study schedule for enzyme revision",
-      ),
-    ).toBeNull();
-    expect(
-      matchSpectraCreationShorthand(
-        "create a tutor agent for enzyme kinetics",
-      )?.blueprintKey,
-    ).toBe("agent");
-    expect(
-      matchSpectraCreationShorthand("draft an agent that quizzes me on enzymes")
-        ?.blueprintKey,
-    ).toBe("agent");
+  it("keeps multiple outputs outside single-creation reconciliation", () => {
+    expect(declaredSingleCreation(plan(["document", "presentation"], 2))).toBeNull();
+    expect(declaredSingleCreation(plan(["presentation"], 2))).toBeNull();
   });
 
-  it("does not treat edit requests as creates", () => {
-    expect(
-      matchSpectraCreationShorthand("edit the whiteboard title"),
-    ).toBeNull();
-    expect(
-      matchSpectraCreationShorthand("update the presentation slides"),
-    ).toBeNull();
-    expect(matchSpectraCreationShorthand("open the whiteboard")).toBeNull();
-    expect(
-      matchSpectraCreationShorthand(
-        "add a validation column that flags whether each enzyme's Km is below 5",
-      ),
-    ).toBeNull();
+  it("keeps answer and update intent outside creation reconciliation", () => {
+    expect(declaredSingleCreation(plan([], 0, "answer"))).toBeNull();
+    expect(declaredSingleCreation(plan(["presentation"], 1, "update"))).toBeNull();
+  });
+
+  it("retains a declared single creation beside an existing-object edit", () => {
+    expect(declaredSingleCreation(plan(["document"], 1, "mixed"))?.blueprintKey).toBe("document");
   });
 });

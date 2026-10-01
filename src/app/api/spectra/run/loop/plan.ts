@@ -22,7 +22,6 @@ import {
   SINGLE_CREATION_TOOL_NAMES,
   assertSelectedAgentAllowsOperations,
   normalizeNativeProgress,
-  provisionalSingleCreation,
   selectedAgentAllowsModelTool,
   selectedAgentRecord,
 } from "./intake";
@@ -3932,9 +3931,9 @@ export async function callModel(
     /\b(?:edit|update|change|rewrite|replace|repair|fix|remove|archive)\s+(?:absolutely\s+)?everything\b/i.test(
       prompt,
     );
-  const speculativeSingleCreation = explicitMutationOnly
+  const assignedSingleCreation = explicitMutationOnly
     ? null
-    : effectiveForcedSingleCreation ?? provisionalSingleCreation(prompt);
+    : effectiveForcedSingleCreation ?? null;
   const calendarActionRequested = promptRequestsCalendarAction(prompt);
   // Any Calendar write (personal event, schedule existing task, or new planner
   // + schedule) needs the ordinary agent tool set. Single-creation note/planner
@@ -3945,17 +3944,6 @@ export async function callModel(
   const calendarNeedsCoordination = !forcedSingleCreation && calendarActionRequested;
   const effectiveCalendarNeedsCoordination =
     !explicitMutationOnly && calendarNeedsCoordination;
-  // An open presentation + "make slide 3 more concise" still matches create
-  // shorthand for the same blueprint. Keep that as a focused update unless the
-  // user explicitly asked to create/build another object (or a worker was
-  // already assigned that create).
-  const openArtifactCreateCollision =
-    !effectiveForcedSingleCreation &&
-    Boolean(updateTarget) &&
-    Boolean(speculativeSingleCreation) &&
-    speculativeSingleCreation!.blueprintKey === updateTarget!.blueprintKey &&
-    !/\b(?:new|another|separate)\b/i.test(prompt) &&
-    !/\b(?:create|build|generate)\b/i.test(prompt);
   const explicitlyTargetsFocusedArtifact =
     promptExplicitlyTargetsFocusedArtifact(prompt, contextRecord);
   const directFocusedMutation =
@@ -3963,7 +3951,6 @@ export async function callModel(
     explicitlyTargetsFocusedArtifact &&
     !requestsBroadMutation &&
     (promptLooksLikeFocusedStructuralEdit(prompt) ||
-      openArtifactCreateCollision ||
       /\b(?:rewrite|replace|edit|update|change|set|repair|fix|add|remove)\b/i.test(
         prompt,
       ));
@@ -4010,12 +3997,11 @@ export async function callModel(
       ? effectiveForcedSingleCreation
       : forceGeneralPlan ||
           directFocusedAction ||
-          openArtifactCreateCollision ||
           (Boolean(updateTarget) &&
             promptLooksLikeFocusedStructuralEdit(prompt) &&
             !/\b(?:new|another|separate)\b/i.test(prompt))
         ? null
-        : speculativeSingleCreation;
+        : assignedSingleCreation;
   const singleCreationBlueprint = boundedSingleCreation?.blueprintKey;
   // Offer the guide reader (and so an unforced tool choice) only to families
   // that actually have specialist guides; other creations stay one forced turn.
@@ -4115,12 +4101,6 @@ export async function callModel(
     const creationNeedsSourceRead =
       Boolean(singleCreationBlueprint) &&
       /\b(?:from|using|based\s+on|with\s+the\s+included|into)\b/i.test(prompt);
-    const ordinaryAgentTools = SPECTRA_AGENT_TOOLS.filter(
-          (tool) =>
-            !Object.values(
-              SINGLE_CREATION_TOOL_NAMES as Record<string, string>,
-            ).includes(tool.function.name),
-        );
     const baseAgentTools = forcedCoordination
       ? [COMPACT_COORDINATION_TOOL]
       : singleCreationBlueprint
@@ -4139,7 +4119,7 @@ export async function callModel(
                 )),
             singleCreationAgentTool(singleCreationBlueprint),
           ]
-        : ordinaryAgentTools;
+        : SPECTRA_AGENT_TOOLS;
     const updateScopeReadTools = new Set([
       "search_objects", "search_library", "read_artifact", "read_artifact_skill", "read_workspace",
       "read_thread", "retrieve_memory", "get_school_data", "read_calendar",

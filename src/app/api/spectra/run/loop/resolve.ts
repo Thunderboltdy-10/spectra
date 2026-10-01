@@ -1,7 +1,7 @@
 import { runLog } from "@/features/spectra/ai/run-log";
 import { buildContext } from "./gather";
 import type { AuthenticatedPlacement } from "./discovery";
-import { provisionalSingleCreation } from "./intake";
+import { declaredSingleCreation } from "@/features/spectra/operations/creation-intent";
 import { remapDocumentSectionRewriteChanges } from "@/features/spectra/ai/document-content-patch";
 import { PRESENTATION_LAYOUT_IDS } from "@/features/spectra/presentation/layouts";
 import {
@@ -1032,7 +1032,7 @@ export function reconcileExplicitRequestContract(
   plan: SpectraPlan,
   prompt: string,
 ) {
-  const requestedCreation = provisionalSingleCreation(prompt);
+  const requestedCreation = declaredSingleCreation(plan);
   if (!requestedCreation || plan.decision !== "operate") return plan;
   let retainedCreate = false;
   const forbiddenUpdateNoun: Record<
@@ -1726,7 +1726,7 @@ export function resolveAndValidatePlan(
   context: Awaited<ReturnType<typeof buildContext>>,
   prompt: string,
 ): ResolvedPlan {
-  const requestedCreation = provisionalSingleCreation(prompt);
+  const requestedCreation = declaredSingleCreation(plan);
   const workspaceId =
     typeof context.currentWorkspace?.id === "string"
       ? context.currentWorkspace.id
@@ -1832,7 +1832,7 @@ export function resolveAndValidatePlan(
         ...new Set(creates.map((operation) => operation.input.blueprintKey)),
       ];
       const requested =
-        provisionalSingleCreation(prompt) ??
+        declaredSingleCreation(resolved) ??
         (createdTypes.length === 1
           ? {
               blueprintKey: createdTypes[0]!,
@@ -1887,7 +1887,7 @@ export function resolveAndValidatePlan(
       const creates = resolved.operations.filter(
         (operation) => operation.type === "artifact.create",
       );
-      const requested = provisionalSingleCreation(prompt);
+      const requested = declaredSingleCreation(resolved);
       if (
         requested &&
         creates.length === 0 &&

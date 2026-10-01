@@ -32,10 +32,7 @@ import {
 import {
   agentCanHandleLikelyMutation,
   assertSelectedAgentAllowsOperations,
-  hasNonCreationMutationIntent,
   normalizeNativeProgress,
-  parallelCreationContract,
-  provisionalSingleCreation,
   requestsOrdinarySpectra,
   selectAgentRuntime,
   selectedAgentOperationApprovalReasons,
@@ -45,9 +42,7 @@ import { hydrateApplicationLocalFileCounts } from "./loop/authority";
 import { createAgentLoopExecution } from "./loop/orchestrator";
 import {
   assertRequestedArtifactContent,
-  callMixedTaskGraphWorkers,
   callModel,
-  callParallelCreationWorkers,
   fastFocusedDeckHintPlan,
   fastFocusedMetadataPlan,
   fastFocusedPlannerPlan,
@@ -98,7 +93,6 @@ import {
   attachmentInputBytes,
   attachmentSha256,
 } from "@/features/spectra/compute/files/attachment-retention";
-import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
 import { evaluatePlanPolicy } from "@/features/spectra/operations/policy";
 import {
@@ -599,31 +593,6 @@ async function runAttemptInLedger(
       /\b(?:rename|edit|update|transform|rewrite|write|draft|add|remove|reorganize|change|set|replace|fix|correct)\b/i.test(
         params.prompt,
       );
-    // A focused-artifact request is overwhelmingly an edit, even when the
-    // user naturally says "write a hint" or "draft a better summary". Only
-    // materialize a creation shell there when they explicitly ask for a new,
-    // separate object. This prevents invisible orphan shells on every edit.
-    // An open artifact is often the source or update target for a larger task;
-    // it must not disable explicit creation work in that same request.
-    const parallelCreations = restoredStagedWork ? [] : parallelCreationContract(
-      params.prompt,
-      Boolean(params.artifactId),
-    );
-    const provisionalCreation = restoredStagedWork
-      ? null
-      : params.artifactId &&
-      promptLooksLikeFocusedStructuralEdit(params.prompt) &&
-      !/\b(?:new|another|separate)\b/i.test(params.prompt)
-        ? null
-        : !params.artifactId ||
-            /\b(?:new|another|separate)\b/i.test(params.prompt)
-          ? provisionalSingleCreation(params.prompt)
-          : null;
-    const provisionalShells = parallelCreations.length
-      ? parallelCreations
-      : provisionalCreation
-        ? [provisionalCreation]
-        : [];
     const contextBody = {
         workspaceId: params.workspaceId,
         scopeNodeId: params.scopeNodeId,
@@ -657,57 +626,6 @@ async function runAttemptInLedger(
           })
         : null,
     ]);
-    // Awaited once the creation shells are open; a failure must not surface
-    // as an unhandled rejection before then.
-    contextReads.catch(() => undefined);
-    for (const [provisionalIndex, shell] of provisionalShells.entries()) {
-      const provisionalTitle =
-        shell.requestedTitle ?? `New ${shell.label.toLowerCase()}`;
-      const workspaceId =
-        params.surface === "workspace" || params.surface === "artifact"
-          ? params.workspaceId
-          : undefined;
-      const pending = await mutate<unknown & object, { artifactId: string }>(
-        "spectraArtifacts:createPending",
-        {
-          actorClerkId: params.actorClerkId,
-          blueprintKey: shell.blueprintKey,
-          title: provisionalTitle,
-          workspaceId,
-          runId: params.runId,
-          executionId: params.executionId,
-          threadId: params.threadId,
-          sourceAttachmentIds: params.attachments?.flatMap((attachment) =>
-            attachment.id ? [attachment.id] : [],
-          ),
-        },
-      );
-      earlyPendingByIndex.set(provisionalIndex, pending.artifactId);
-      earlyPendingBlueprintByIndex.set(provisionalIndex, shell.blueprintKey);
-      pendingArtifactCount = earlyPendingByIndex.size;
-      bindArtifactEffect(provisionalIndex, pending.artifactId);
-      hadVisibleActivity = true;
-      publishNativeProgress({
-        title: `Opening a live ${shell.label.toLowerCase()} canvas`,
-        detail: `The artifact shell is visible while its typed content is formed`,
-        activity: "create",
-        operationIndex: provisionalIndex,
-        artifactType: shell.blueprintKey,
-        regionHint: "artifact:structure",
-      });
-      publish({
-        type: "operation_preview",
-        runId: params.runId,
-        operationId: `preview-${provisionalIndex + 1}`,
-        operationType: "artifact.create",
-        preview: {
-          action: "create",
-          title: provisionalTitle,
-          blueprintKey: shell.blueprintKey,
-          pendingArtifactId: pending.artifactId,
-        },
-      });
-    }
     const [orientationContext, hydratedContext] = await contextReads;
     const explicitlyTargetsFocusedArtifact =
       promptExplicitlyTargetsFocusedArtifact(params.prompt, orientationContext.packet);
@@ -736,7 +654,7 @@ async function runAttemptInLedger(
       agentSelection &&
       agentSelection.source !== "explicit" &&
       !agentCanHandleLikelyMutation(agentSelection.runtime, {
-        hasCreation: provisionalShells.length > 0,
+        hasCreation: false,
         hasFocusedEdit: signalsFocusedEdit,
       })
     ) {
@@ -749,7 +667,7 @@ async function runAttemptInLedger(
     if (
       agentSelection?.source === "explicit" &&
       !agentCanHandleLikelyMutation(agentSelection.runtime, {
-        hasCreation: provisionalShells.length > 0,
+        hasCreation: false,
         hasFocusedEdit: signalsFocusedEdit,
       })
     )
@@ -910,7 +828,7 @@ async function runAttemptInLedger(
     // P4.I2 owns splitting breadth-first indexing from post-resolution depth.
     loop.enter("plan");
     const focusedToolPlan =
-      restoredStagedWork || parallelCreations.length || (params.attachments?.length ?? 0) > 0
+      restoredStagedWork || (params.attachments?.length ?? 0) > 0
         ? null
         : (explicitlyTargetsFocusedArtifact
             ? (fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
@@ -956,55 +874,6 @@ async function runAttemptInLedger(
       }
     }
     const modelAttachments = params.attachments ?? [];
-    const invokeModel: typeof callModel = parallelCreations.length
-      ? (
-          surface,
-          prompt,
-          modelContext,
-          attachments,
-          onPublicText,
-          onReasoningText,
-          signal,
-          onPlanOperation,
-          onRepairRetry,
-          onProgressUpdate,
-          onPartialCreation,
-          actorClerkId,
-          _forcedSingleCreation,
-          _forceGeneralPlan,
-          _forcedCoordination,
-          onUiEvent,
-        ) => {
-          const callbacks = {
-            onPublicText,
-            onReasoningText,
-            signal,
-            onPlanOperation,
-            onRepairRetry,
-            onProgressUpdate,
-            onPartialCreation,
-            onUiEvent,
-            actorClerkId,
-          };
-          return hasNonCreationMutationIntent(params.prompt)
-            ? callMixedTaskGraphWorkers(
-                surface,
-                prompt,
-                modelContext,
-                attachments,
-                parallelCreations,
-                callbacks,
-              )
-            : callParallelCreationWorkers(
-                surface,
-                prompt,
-                modelContext,
-                attachments,
-                parallelCreations,
-                callbacks,
-              );
-        }
-      : callModel;
     advanceProtocolState("running_model");
     const modelResult = focusedToolPlan
       ? {
@@ -1013,7 +882,7 @@ async function runAttemptInLedger(
           provider: "Spectra",
           usage: undefined,
         }
-      : await invokeModel(
+      : await callModel(
           params.surface,
           params.prompt,
           {
@@ -1331,9 +1200,7 @@ async function runAttemptInLedger(
             progressiveWrites.push(progressiveWrite);
           },
           params.actorClerkId,
-          provisionalCreation
-            ? { ...provisionalCreation, clause: params.prompt }
-            : undefined,
+          undefined,
           false,
           false,
           (event) =>
@@ -2272,11 +2139,11 @@ async function runAttemptInLedger(
       }),
     ]);
     recordPhase("operations_committed_and_verified");
-    // A speculative shell is finalized by a matching artifact.create. If the
+    // A model-selected draft is finalized by a matching artifact.create. If the
     // final plan instead updates, answers, or creates a different object, it
     // must not leak into the workspace. Finalized artifacts no longer have the
-    // pending AI state, so this only removes unused provisional shells.
-    if (provisionalCreation)
+    // pending AI state, so this only removes unused drafts.
+    if (earlyPendingByIndex.size > 0)
       await mutate("spectraArtifacts:discardPendingForRun", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,

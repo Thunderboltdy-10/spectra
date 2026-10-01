@@ -17,6 +17,8 @@ export function showRetryToast(
   let retrying = false;
   const id: string | number = toast.error(message, {
     ...options,
+    duration: Infinity,
+    closeButton: true,
     action: {
       label,
       onClick: async (event) => {

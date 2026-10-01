@@ -39,3 +39,13 @@ it("does not submit a second retry while the first is still pending", async () =
     finish();
   }
 });
+
+it("lets a person explicitly dismiss an unfinished recovery notice", async () => {
+  render(<Toaster />);
+  const retry = vi.fn();
+  showRetryToast("Try again when connected.", retry);
+  await screen.findByRole("button", { name: "Retry" });
+  fireEvent.click(screen.getByRole("button", { name: "Close toast" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Retry" })).toBeNull());
+  expect(retry).not.toHaveBeenCalled();
+});

@@ -49,10 +49,11 @@ beforeEach(() => {
 afterEach(() => {
   toast.dismiss();
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 function mountHost() {
-  render(<><main>School context</main><RouteSidePanelHost /><Toaster duration={Infinity} /></>);
+  render(<><main>School context</main><RouteSidePanelHost /><Toaster /></>);
 }
 async function openConversation(threadId?: string) {
   let result: Awaited<ReturnType<typeof spectraBus.commandAsyncResults>> | undefined;
@@ -136,7 +137,7 @@ function PreparedRouteHost() {
   return useAccountStorageReady() ? <><main>School context</main><RouteSidePanelHost /></> : <p>Preparing account</p>;
 }
 function accountGatedHost() {
-  return <><AccountStorageBoundary><PreparedRouteHost /></AccountStorageBoundary><Toaster duration={Infinity} /></>;
+  return <><AccountStorageBoundary><PreparedRouteHost /></AccountStorageBoundary><Toaster /></>;
 }
 it("retains the route host and its retry action while the same account refreshes authentication", async () => {
   const view = render(accountGatedHost());
@@ -154,4 +155,29 @@ it("retains the route host and its retry action while the same account refreshes
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByText("Opened conversation-a")).toBeTruthy();
   await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
+});
+
+it("keeps the original recovery action across a long offline hold with the production toast lifetime", async () => {
+  vi.useFakeTimers();
+  mountHost();
+  await openConversation("conversation-a");
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  for (let i = 0; i < 2; i++) {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+  expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(1);
+  offline = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+  expect(screen.getByText("Opened conversation-a")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  expect(fetchRequest).toHaveBeenCalledTimes(4);
 });

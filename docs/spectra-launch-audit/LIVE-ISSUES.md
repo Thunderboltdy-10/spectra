@@ -190,6 +190,7 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Flashcard deck create (current post-fix recheck) | P3-AI-ENGINE · Flashcard deck · Create | FAIL — the run finalized in 38.2 seconds, but the assistant explicitly said it could not save an editable deck and returned eight cards as chat text. No deck or open control appeared before or after reload; the browser was online, with no offline copy and 0 console errors. See LV-039. Evidence: .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-redacted.txt; .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-failed-save.png; .spectra-local/live-verification/LV050-create-current-a3fe7d78-after-reload-settled.png | LV-039 (NEEDS-INFO) | a3fe7d78 (app code); checkout 7f5d36d2 |
 | LV-050 post-fix recheck — rejected duplicate-title create does not surface old work | fixer re-check · failed-create identity path | PASS — with existing Photosynthesis work present, the failed create showed no “Work from this conversation” or “Open Photosynthesis” control before or after reload. The failed artifact request is recorded separately under LV-039. Evidence: .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-redacted.txt; .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-failed-save.png; .spectra-local/live-verification/LV050-create-current-a3fe7d78-after-reload-settled.png | LV-050 (partial recheck); LV-039 (NEEDS-INFO) | a3fe7d78 (app code) |
 | LV-050 post-fix recheck — successful duplicate-title creation, explicit open and Keep in conversation | fixer re-check · successful create and identity actions | BLOCKED — the current create returned only chat text and no editable artifact, so the successful-create identity and Keep actions were unavailable in this run. The ordinary-answer title path and failed-create stale-control path are checked separately; explicit selection/open and Keep remain pending. See LV-039. | LV-050 (partial recheck) | a3fe7d78 (app code) |
+| P3-AI-ENGINE — Sheet create with monthly totals (current retest) | P3-AI-ENGINE · Sheet · Create | FAIL — the newest “Monthly Budget” Library item persisted and reopened after reload, but its “Annual Budget” grid had no monthly expense-total or remaining-balance column; B2’s formula field was empty and B14 showed only =SUM(B2:B13). The assistant described monthly expense and remaining-balance formulas. Save-state wording mismatch is recorded under LV-022. Browser online; 0 console errors and 1 warning. | LV-052 (OPEN); LV-022 (NEEDS-DECISION) | 734dcd58 (app); e88a6423 (checkout) |
 
 ## Issues
 
@@ -888,6 +889,23 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 **Verification** (verifier):
 
+Additional verifier occurrence (2026-10-02; application code 734dcd58):
+
+**Steps**
+
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh /chat with no context object selected.
+2. Submit “Make a budget sheet with monthly totals.” once and wait for the run to settle.
+3. Read the assistant’s final reply and the run activity status.
+4. In Library, open the newest “Monthly Budget” sheet with summary “Workbook with 60 filled cells about Monthly Budget.”
+5. Reload the Library artifact route and check that the same sheet remains available.
+
+**Expected:** The P3-AI-ENGINE · Sheet script says: “Create: "Make a budget sheet with monthly totals."” After the Library item exists and remains available after reload, the reply’s save-state wording should describe that persisted result consistently. LV-022 remains NEEDS-DECISION on which final-reply contract to use.
+
+**Actual:** The assistant said, “It isn’t saved yet—the staged change still needs to be applied and verified.” The same chat article showed “Saved progress and results.” Library listed the new “Monthly Budget” sheet, and the sheet remained openable after reload. This is one additional occurrence of the LV-022 save-state mismatch; no status change is made.
+
+**Frequency:** 1 of 1 observed budget-sheet runs.
+
+**Evidence:** .spectra-local/live-verification/LV022-budget-save-status-734dcd58.png; .spectra-local/live-verification/LV022-budget-library-item-persisted-734dcd58.png; .spectra-local/live-verification/LV022-LV052-budget-sheet-recheck-734dcd58-redacted.txt.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -2778,3 +2796,39 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 - Documentation-only follow-up: record the latest incomplete editable create, its completed answer state and absence of accepted operations. No source/tests changed from 734dcd58; its last frozen full-suite result remains **4,586 passed, 1 failed, 1 skipped** (known LV-017 package failure), with 64 focused tests, both TypeScript projects, lint and five gates passing.
 - LV-039 remains NEEDS-INFO because the operation/tool rejection evidence is unavailable and local execution logs no longer cover the submission window. The next naturally observed create timestamp/capture question is recorded above. Existing NEEDS-DECISION and CANNOT-REPRODUCE entries remain unchanged with their reasons in the preceding closeout; no OPEN, REOPENED or FIXING issue remains. The fixer stops between actionable reports as requested.
+
+### LV-052 · Budget sheet omits requested monthly totals
+
+- **Status:** NEEDS-INFO
+- **Severity:** High
+- **Surface / role:** /chat AI sheet creation and /library Sheets editor / signed-in school administrator
+- **Report script:** P3-AI-ENGINE · Needs live verification · Sheet · Create
+- **Commit tested:** 734dcd58 (application code; local instance 8, web port 3000); e88a6423 (documentation checkout)
+- **Frequency:** 1 of 1 fresh zero-context sheet runs produced a saved workbook without monthly totals.
+
+**Steps**
+
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh /chat with no context object selected.
+2. Submit “Make a budget sheet with monthly totals.” once and wait for the run to settle.
+3. In Library, open the newest “Monthly Budget” sheet with summary “Workbook with 60 filled cells about Monthly Budget.”
+4. Inspect the “Annual Budget” grid. Use the Name box to select B2 and B14 and read the formula field.
+5. Reload the Library artifact route and inspect the workbook again.
+
+**Expected:** The P3-AI-ENGINE · Sheet script says: “Create: "Make a budget sheet with monthly totals."” The workbook should provide monthly totals for the requested months and remain available after reload.
+
+**Actual:** The chat response described “automatic monthly expense and remaining-balance formulas, and annual totals.” The Library listed the newly created SHEETS item “Monthly Budget” with summary “Workbook with 60 filled cells about Monthly Budget,” and the item remained available after reload. The reopened “Annual Budget” grid had headers Month, Income, Housing, Utilities, Groceries, Transport, Health, Debt payments, and Personal. Rows January through December had no monthly expense-total or remaining-balance column. B2’s formula field was empty. The only visible total row was “Year total”; B14’s formula field showed “=SUM(B2:B13)” and the row displayed zeros. No monthly expense total or remaining-balance values were present in the reopened sheet. The separate save-state wording mismatch is recorded under LV-022. At recheck navigator.onLine was true; no offline or run-failure/interruption copy appeared; Playwright reported 0 console errors and 1 warning.
+
+**Evidence:** .spectra-local/live-verification/LV052-budget-monthly-cell-blank-734dcd58.png; .spectra-local/live-verification/LV052-budget-annual-row-formula-734dcd58.png; .spectra-local/live-verification/LV022-budget-library-item-persisted-734dcd58.png; .spectra-local/live-verification/LV022-LV052-budget-sheet-recheck-734dcd58-redacted.txt.
+
+**Fixer reproduction (2026-10-02; read-only local store and real workbook model):** The recorded operation and the saved artifact both contain the requested monthly totals. The persisted cell map uses the standard spectra-sheet-cells-v1 chunk encoding; decoding/normalizing through the real sheet model yields 60 stored cells, 26 columns and no hidden columns. K1 is Total expenses and L1 is Remaining; each January–December row has K2:K13 =SUM(Cn:Jn) and L2:L13 =Bn-Kn. B2 is an empty income-input cell, so its empty formula field is consistent with this workbook. The reported visible headers A–I do not cover K/L and cannot establish those columns are absent. The annual total in B14 is additional to the monthly formulas. No saved content or runtime behavior was changed.
+
+**Test:** .spectra-local/LV052-budget-model-repro.ts runs against the persisted content using normalizeSheetsContent and sheetsCalculation. It asserts the two headers and all 24 monthly formulas. With income 3000 and expenses 1000, 150 and 50 inserted only in the in-memory copy, the actual calculation engine produces a monthly expense total of 1200 and remaining balance of 1800. The script passes; output is .spectra-local/LV052-budget-model-repro.log. The raw persisted content capture remains local/ignored. This does not yet prove the editor renders or reveals K/L correctly.
+
+**Question for verifier:** In the same saved Monthly Budget artifact after reload, use the Name box to inspect K1, L1, K2, L2, K13 and L13, or scroll horizontally to columns K/L. Report the visible labels and exact formula fields, including any inability to reach those columns. This distinguishes omitted formulas from a partial viewport or a UI navigation/rendering failure. The question was sent to the verifier; LV-052 is NEEDS-INFO pending that observation. LV-022's unsaved prose and the missing post-reload dock control remain separate concerns; no template, routing, model, reasoning or validation workaround was introduced.
+
+
+### Fixer closeout · LV-052 monthly-total reproduction · 2026-10-02 (Europe/Madrid)
+
+- Documentation-only assessment: the real persisted workbook contains all requested monthly total/balance formulas, and the real calculation-engine reproduction passes. LV-052 is NEEDS-INFO for the targeted editor K/L visibility check; no formula or content fix is claimed.
+- No source/tests changed from 734dcd58. Its frozen full-suite result remains **4,586 passed, 1 failed, 1 skipped**, with the known LV-017 gateway package failure; 64 focused tests, both TypeScript projects, lint and five gates pass. No redundant full suite was run for this read-only assessment.
+- Existing NEEDS-DECISION entries remain LV-003, LV-012, LV-022, LV-028 and LV-040; CANNOT-REPRODUCE remains LV-004, LV-007 and LV-051, with their reasons recorded in the prior closeout. NEEDS-INFO includes LV-017, LV-039, LV-046 and now LV-052. No OPEN, REOPENED or FIXING entry remains. The fixer stops while the verifier checks the narrow observation.

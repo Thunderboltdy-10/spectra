@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import { strFromU8, unzipSync } from "fflate";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route";
-import { xlsxLens } from "../lenses/xlsx-lens";
+import { xlsxLens, xlsxSemanticDigest, type XlsxProjection } from "../lenses/xlsx-lens";
 import { sha256Payload } from "../lenses/docx-lens";
 import { xlsxArtifactContent } from "../lenses/office-content";
+import { canonicalJsonValue } from "../collaboration/artifact-yjs-model";
+import { encodeArtifactContentForStorage, decodeSheetsContentFromStorage } from "../../../../shared/sheet-cells";
 
 const io = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), fetchNative: vi.fn(), upload: vi.fn() }));
 vi.mock("@/lib/convex-server", () => ({ convexQuery: io.query, convexMutation: io.mutation, hydrateContentForWrite: vi.fn(), checkpointArtifactDurableContent: vi.fn() }));
@@ -51,6 +53,47 @@ describe("XLSX actual materialization route", () => {
     }
     expect(result.nativeCandidate.queue.nativeReceipt?.semantic.resultDigest).toBe(readback.projection.nativeBinding.semanticDigest);
     expect(result.nativeCandidate.queue.nativeReceipt?.semantic.readbackDigest).toBe(readback.projection.nativeBinding.semanticDigest);
+  });
+
+  it.each([["B3", "Saved cell edit"], ["B5", "Another saved cell edit"], ["A3", 10]] as const)("verifies persisted canonical %s edits regardless of nested field order", async (ref, value) => {
+    const { content } = await fixture();
+    content.sheets[0]!.cells[ref] = { ...content.sheets[0]!.cells[ref], value };
+    const persisted = decodeSheetsContentFromStorage(canonicalJsonValue(encodeArtifactContentForStorage("sheets", content)));
+    const result = await materializeOfficeArtifact(workId, persisted, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared" || result.nativeCandidate.destination !== "bridge") throw new Error("Expected a persisted workbook candidate");
+    const actual = await xlsxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
+    expect(actual.projection.sheets[0]!.cells.find(cell => cell.ref === ref)?.value).toBe(value);
+    expect(result.nativeCandidate.queue.nativeReceipt?.semantic.resultDigest).toBe(actual.projection.nativeBinding.semanticDigest);
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
+
+  it.each(["value", "format", "chart-source", "cell-order"] as const)("keeps %s authoritative while ignoring object field insertion order", async field => {
+    const { opened } = await fixture();
+    const base = opened.projection;
+    const reordered = canonicalJsonValue(base) as XlsxProjection;
+    const originalDigest = await xlsxSemanticDigest(base);
+    expect(await xlsxSemanticDigest(reordered)).toBe(originalDigest);
+    const changed = structuredClone(reordered);
+    const sheet = changed.sheets[0]!;
+    if (field === "value") sheet.cells[0]!.value = "A different native value";
+    if (field === "format") sheet.cells[0]!.format = { ...sheet.cells[0]!.format, bold: true };
+    if (field === "chart-source") sheet.charts![0]!.sourceRange = "Sheet1!$A$1:$A$6";
+    if (field === "cell-order") [sheet.cells[0], sheet.cells[1]] = [sheet.cells[1]!, sheet.cells[0]!];
+    expect(await xlsxSemanticDigest(changed)).not.toBe(originalDigest);
+  });
+
+  it("uses freshly read native truth when an editor retains an older binding digest", async () => {
+    const { payload, content } = await fixture();
+    if (!content.nativeBinding) throw new Error("Expected an imported native binding");
+    content.nativeBinding.semanticDigest = "0".repeat(64);
+    content.sheets[0]!.cells.B3 = { ...content.sheets[0]!.cells.B3, value: "Edit with an older stored binding" };
+    const result = await materializeOfficeArtifact(workId, canonicalJsonValue(content), options);
+    if (result.state !== "prepared" || result.nativeCandidate.destination !== "bridge") throw new Error("Expected a candidate fenced by the native source");
+    expect(result.nativeCandidate.queue.nativeReceipt?.basePayloadHash).toBe(await sha256Payload(payload));
+    const actual = await xlsxLens.open(io.upload.mock.calls[0]![1] as Uint8Array);
+    expect(result.nativeCandidate.queue.nativeReceipt?.semantic.readbackDigest).toBe(actual.projection.nativeBinding.semanticDigest);
+    expect(io.mutation).not.toHaveBeenCalled();
   });
 
   it("rejects a writer that loses a requested cell edit before upload or admission", async () => {

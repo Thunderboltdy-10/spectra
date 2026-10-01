@@ -1,3 +1,4 @@
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
 import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xlsx";
 import { dateToSerial } from "../sheets/excel-serial";
 import { comparePackages } from "@ariadng/office/preservation";
@@ -383,7 +384,7 @@ function findSheet(workbook: Workbook, sheetId: string) {
 export async function xlsxSemanticDigest(
   { calculationMode, activeSheetId, sheets, definedNames }: Pick<XlsxProjection, "calculationMode" | "activeSheetId" | "sheets" | "definedNames">,
 ) {
-  return sha256Payload(new TextEncoder().encode(JSON.stringify({
+  return sha256Payload(new TextEncoder().encode(JSON.stringify(canonicalJsonValue({
     calculationMode,
     activeSheetId,
     sheets: sheets.map((sheet) => ({
@@ -408,7 +409,7 @@ export async function xlsxSemanticDigest(
       conditionalFormats: sheet.conditionalFormats,
     })),
     definedNames,
-  })));
+  }))));
 }
 
 async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: XlsxSemanticDelta) {

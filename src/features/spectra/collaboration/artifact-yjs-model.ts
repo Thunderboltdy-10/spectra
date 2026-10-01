@@ -1,4 +1,6 @@
 import * as Y from "yjs";
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
+export { canonicalJsonValue };
 import {
   enumerateArtifactRegions,
   requireArtifactTypeManifest,
@@ -565,16 +567,6 @@ function structureSignature(
  */
 function compareCodeUnits(left: string, right: string) {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-export function canonicalJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalJsonValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => compareCodeUnits(left, right))
-      .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
-  );
 }
 
 export function canonicalJsonEqual(left: unknown, right: unknown) {

@@ -34,6 +34,62 @@ afterEach(() => { cleanup(); stopObservingUiRun("run"); vi.clearAllTimers(); vi.
 async function settle(milliseconds = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); }); }
 
 describe("Durable run event consumption", () => {
+  it.each(["failed", "cancelled"] as const)("reconciles a saved %s run after its first cursor reads fail", async (status) => {
+    source(tab("running"), []);
+    vi.mocked(getSpectraRunEvents).mockRejectedValue(new Error("INTERNAL_ERROR"));
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).action === "run") return new Response(JSON.stringify({ type: "run_created", runId: "run", card: { id: "card", runId: "run", status: "queued", title: "Getting ready", variant: "status", actions: [], updatedAt: 2 } }) + "\n");
+      return new Response("{}", { status: 409 });
+    });
+    const onFinal = vi.fn();
+    const onDataChanged = vi.fn();
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread", onDataChanged, onFinal }));
+    await settle();
+    await act(async () => { await result.current.run("Hi", [], { threadId: "thread" }); });
+    await settle();
+    expect(result.current.submitting).toBe(true);
+    expect(result.current.liveExchange?.runId).toBe("run");
+    expect(getSpectraRunEvents).toHaveBeenCalled();
+    const stopped: SpectraRunTab = { ...tab("running"), run: { ...tab("running").run, status, updatedAt: 10 }, card: { _id: "card", runId: "run", status, title: "Run interrupted", variant: "status", actions: [{ key: "retry", label: "Retry", targetType: "run", targetId: "run" }], createdAt: 1, updatedAt: 10 } };
+    vi.mocked(getSpectraRunTabs).mockResolvedValue({ runTabs: [stopped] });
+    spectraBus.emit("threads.changed", {});
+    await settle();
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.liveExchange).toBeNull();
+    expect(result.current.cards).toContainEqual(expect.objectContaining({ status, title: "Run interrupted", actions: [expect.objectContaining({ key: "retry" })] }));
+    expect(onDataChanged).toHaveBeenCalledTimes(1);
+    expect(onFinal).not.toHaveBeenCalled();
+    spectraBus.emit("threads.changed", {});
+    await settle();
+    expect(onDataChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a local retry stream authoritative over a lagging failed snapshot", async () => {
+    source(tab("running", "retrying"), []);
+    let closeStream!: () => void;
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).action !== "run") return new Response("{}", { status: 409 });
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "run_created", runId: "run", card: { id: "card", runId: "run", status: "running", title: "Retrying", variant: "status", actions: [], updatedAt: 20 } }) + "\n"));
+        closeStream = () => controller.close();
+      } }));
+    });
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread" }));
+    await settle();
+    let pending!: Promise<boolean>;
+    await act(async () => { pending = result.current.run("Continue", [], { threadId: "thread" }); });
+    await settle();
+    const stale: SpectraRunTab = { ...tab("running", "old"), run: { ...tab("running", "old").run, status: "failed" } };
+    vi.mocked(getSpectraRunTabs).mockResolvedValue({ runTabs: [stale] });
+    spectraBus.emit("threads.changed", {});
+    await settle();
+    expect(result.current.submitting).toBe(true);
+    expect(result.current.liveExchange?.runId).toBe("run");
+    expect(result.current.cards[0]?.title).toBe("Retrying");
+    vi.mocked(getSpectraRunTabs).mockResolvedValue({ runTabs: [tab("running", "retrying")] });
+    await act(async () => { closeStream(); await pending; });
+  });
+
   it("consumes a clarification final once even when refreshing the thread triggers another poll", async () => {
     source(tab(), [final()]);
     const onFinal = vi.fn();

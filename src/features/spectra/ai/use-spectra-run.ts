@@ -571,6 +571,30 @@ export function useSpectraRun({
             tab.surface === (surface === "artifacts" ? "artifact" : surface)
           );
         });
+        // A failed first cursor read leaves no event cursor. Reconcile the
+        // acknowledged run from its saved terminal snapshot so a lost worker
+        // cannot leave its provisional exchange spinning indefinitely.
+        // A locally owned stream can still be retrying; it retains authority.
+        for (const tab of relevant) {
+          if (
+            (tab.run.status !== "failed" && tab.run.status !== "cancelled") ||
+            !tab.run.executionId ||
+            activeRunIds.current.has(tab.runId) ||
+            hasSettledExecution(tab) ||
+            (!promptByRun.current.has(tab.runId) && !eventCursors.current.has(tab.runId))
+          ) continue;
+          if (tab.card && !tab.card.hiddenAt && !dismissedCardIds.current.has(tab.card._id))
+            upsert(persistedToStream(tab.card));
+          setLiveExchange((current) => current?.runId === tab.runId ? null : current);
+          setObservedContinuationRunId((current) => current === tab.runId ? null : current);
+          eventCursors.current.set(tab.runId, {
+            sequence: eventCursors.current.get(tab.runId)?.sequence ?? 0,
+            settledExecutionId: tab.run.executionId,
+          });
+          stopObservingUiRun(tab.runId, true);
+          clearRunFeedActivity(tab.runId);
+          void onDataChanged?.();
+        }
         const active = relevant.filter(
           (tab) => !hasSettledExecution(tab) && (
             tab.run.status === "queued" ||

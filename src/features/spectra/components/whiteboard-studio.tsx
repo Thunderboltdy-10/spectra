@@ -292,6 +292,33 @@ function workTypeName(artifact?: SpectraArtifact) {
   )?.userFacingName;
 }
 
+function nodeFontWeight(
+  node: WhiteboardNode,
+  content: Record<string, unknown>,
+): CSSProperties["fontWeight"] {
+  const fallback = node.type === "text" ? 650 : 500;
+  const contentWeight = content.fontWeight;
+  const value = styleValue(
+    node,
+    "fontWeight",
+    typeof contentWeight === "string" || typeof contentWeight === "number"
+      ? contentWeight
+      : fallback,
+  );
+  if (
+    value === "normal" ||
+    value === "bold" ||
+    value === "bolder" ||
+    value === "lighter"
+  ) {
+    return value;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 1 && numeric <= 1000
+    ? numeric
+    : fallback;
+}
+
 function BoardNode({
   node,
   artifact,
@@ -581,19 +608,7 @@ function BoardNode({
                 node.type === "text" ? 30 : 14,
               ),
             ),
-            fontWeight: Number(
-              visual(
-                node,
-                content,
-                "fontWeight",
-                ["fontWeight"],
-                content.fontWeight === "bold"
-                  ? 700
-                  : node.type === "text"
-                    ? 650
-                    : 500,
-              ),
-            ),
+            fontWeight: nodeFontWeight(node, content),
             fontStyle: content.fontStyle === "italic" ? "italic" : undefined,
             textAlign:
               content.textAlign === "left" ||

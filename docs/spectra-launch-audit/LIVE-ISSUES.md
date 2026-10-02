@@ -34,7 +34,11 @@ Severity:
 
 ## Summary
 
-_Written by the verifier at the end._
+The desktop verification pass has coverage rows for all 22 P2/P3 reports and the locally checkable README startup, launch-risk, school, ManageBac and first-week role areas. It covered the editors, AI chat and artifact attempts, workspace/library/calendar/search, school/admin/superadmin surfaces, sync and offline recovery, Bridge/Lens browser paths, appearance, keyboard and reduced-motion checks. Coverage has 218 rows: 109 PASS, 64 FAIL and 45 BLOCKED. That is 173/218 (79%) with a live observed outcome; FAIL rows are proven failures, not passes. The user explicitly excluded mobile-dimension testing.
+
+**Open issues:** 2 High (LV-062, LV-063), 7 Medium (LV-060, LV-061, LV-064, LV-066–LV-069), and 1 Low (LV-065). The eight-card flashcard attempt still refused to create an editable deck after 41.9 seconds (LV-039), and its conversation header remained `New conversation` after reload (LV-040). LV-050’s stale title-matched artifact behavior is VERIFIED on `fda81f87`. LV-006 is marked FIXED by the fixer, but its no-membership live recheck remains blocked because the only supplied Profile A account currently has a school membership; its active-member request path returned HTTP 200.
+
+**Still blocked or requiring external proof:** role- and identity-dependent checks (student/member, independent collaborator and signed-out invitee), screen-reader dialog flow, absent timetable/comment/import fixtures, and throttled or large-tenant sync; the expired-invitation fixture is unavailable. Production-only proof remains for Convex error redaction, gateway deploy drain/capacity, and the named Clerk/Vercel operations and codegen check. Native Word, Excel and PowerPoint round trips require a paired Bridge and disposable Office files; the Europe/Madrid clock-change date is 25 October 2026 and had not occurred. No mobile-dimension checks were run per the user’s explicit instruction.
 
 ## Coverage
 
@@ -86,7 +90,7 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Moon answer UI recheck (fresh online chat) | P3-AI-ENGINE · Needs live verification · Answer, step 1 | PASS — “Why can we see the Moon?” returned a relevant answer, visible by 15 seconds and in a completed Answer card by 20 seconds; it remained visible at 30 seconds. The browser was online, no offline or connection-check copy appeared, and there were 0 console errors. Evidence: .spectra-local/live-verification/LV039-moon-run-166d84d2-redacted.txt; .spectra-local/live-verification/LV039-moon-answer-166d84d2.png | — | 166d84d2 |
 | P3-AI-ENGINE — simple “Hi” response and reload | User-requested AI reliability check · fresh no-context chat | PASS — “Hi” returned “Hi! What can I help you with?” on the first page-text read after send. The local OpenRouter log recorded request, phase and response; request-to-response elapsed time was 1869 ms. The answer remained after reload; browser online; 0 console errors and 1 Clerk development-key warning. The title remained “New conversation” after reload (LV-040). Evidence: .spectra-local/live-verification/LV040-hi-live-recheck-734dcd58-redacted.txt; .spectra-local/live-verification/LV040-hi-title-row-after-reload-734dcd58.png; .spectra-local/live-verification/LV040-hi-answer-after-reload-734dcd58.png | LV-040 (NEEDS-DECISION) | 734dcd58 (app); 77e583a5 (checkout) |
 | P3-AI-ENGINE — Moon answer API requests (fresh online chat) | P3-AI-ENGINE · Needs live verification · Answer, step 1 · request reliability | FAIL — The answer completed, but one GET /api/spectra request failed with net::ERR_ABORTED while online. See LV-051. Evidence: .spectra-local/live-verification/LV039-moon-run-166d84d2-redacted.txt; .spectra-local/live-verification/LV039-moon-answer-166d84d2.png | LV-051 (OPEN) | 166d84d2 |
-| Free exploration — title after a successful AI answer | exploration · first-week chat; user flagged missing thread titles | FAIL — after a relevant Moon answer on app commit 628f4987, both the header and most-recent row still read “New conversation” after completion and reload. Repeated on 734dcd58: the fresh zero-context answer appeared on the first read after send, and the local OpenRouter log recorded request, phase and response; the header and sidebar row still read “New conversation” after completion and reload about two minutes later. See LV-040. Evidence: .spectra-local/live-verification/LV040-current-628f4987-answer-title.png; .spectra-local/live-verification/LV040-current-628f4987-answer-title-after-reload.png; .spectra-local/live-verification/LV040-new-chat-title-after-reload-628f4987.png; .spectra-local/live-verification/LV040-moon-title-628f4987-redacted.txt; .spectra-local/live-verification/LV040-moon-title-row-734dcd58.png; .spectra-local/live-verification/LV040-moon-answer-title-after-reload-734dcd58.png; .spectra-local/live-verification/LV040-moon-title-live-recheck-734dcd58-redacted.txt | LV-040 (NEEDS-DECISION) | 628f4987; 734dcd58 |
+| Free exploration — title after a successful AI answer | exploration · first-week chat; user flagged missing thread titles | FAIL — after a relevant Moon answer on app commit 628f4987, both the header and most-recent row still read “New conversation” after completion and reload. Repeated on 734dcd58: the fresh zero-context answer appeared on the first read after send, and the local OpenRouter log recorded request, phase and response; the header and sidebar row still read “New conversation” after completion and reload about two minutes later. Repeated after a completed presentation-create response on fda81f87: header and sidebar row remained “New conversation” after reload about 3.5 minutes later. See LV-040. Evidence: .spectra-local/live-verification/LV040-current-628f4987-answer-title.png; .spectra-local/live-verification/LV040-current-628f4987-answer-title-after-reload.png; .spectra-local/live-verification/LV040-new-chat-title-after-reload-628f4987.png; .spectra-local/live-verification/LV040-moon-title-628f4987-redacted.txt; .spectra-local/live-verification/LV040-moon-title-row-734dcd58.png; .spectra-local/live-verification/LV040-moon-answer-title-after-reload-734dcd58.png; .spectra-local/live-verification/LV040-moon-title-live-recheck-734dcd58-redacted.txt; .spectra-local/live-verification/LV040-presentation-thread-title-after-reload-fda81f87-20261002.png; .spectra-local/live-verification/LV040-presentation-title-fda81f87-20261002-redacted.txt | LV-040 (NEEDS-DECISION) | 628f4987; 734dcd58; fda81f87 |
 | Free exploration — sidebar thread-title typography | user-reported desktop UX; P3-UI-SYSTEM type scale | FAIL — on /library and /chat at 1280×720, recent chat-title text computed to 15px/24px at weight 400; the adjacent main-destination link also computed to 15px/24px. The user requested smaller sidebar thread-title text. Evidence: .spectra-local/live-verification/LV047-sidebar-thread-title-size-628f4987.png; .spectra-local/live-verification/LV047-sidebar-thread-title-size-628f4987-redacted.txt | LV-047 (VERIFIED) | 628f4987 |
 | P3-UI-SYSTEM — sidebar title typography after fixer recheck | LV-047 desktop shared-typography follow-up | PASS — on app code 7407840f, pinned/recent/search titles were 12px in Default and 13px in Large interface text; metadata remained smaller, search no-results rendered, and keyboard focus remained visible on navigation. Preference was restored to Default. Evidence: .spectra-local/live-verification/LV047-postfix-default-sidebar-7407840f.png; .spectra-local/live-verification/LV047-postfix-large-sidebar-7407840f.png; .spectra-local/live-verification/LV047-postfix-verification-7407840f-redacted.txt | LV-047 (VERIFIED) | 7407840f |
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
@@ -119,13 +123,13 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — flashcard append save-state message | P3-AI-ENGINE · Flashcard deck · append | FAIL — response said “The update is proposed, not yet saved” while the chat showed “Saved progress and results” and all 12 cards remained after reload | LV-022 | 68587ec8 |
 | P3-AI-ENGINE — flashcard rewrite | P3-AI-ENGINE · Flashcard deck · rewrite | PASS — all 12 cards' fronts, backs and hints were in Spanish after rewrite and reload; card count remained 12 | — | 68587ec8 |
 
-| P3-AI-ENGINE — flashcard create (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · create | FAIL — The assistant said the creation request was not accepted, while “Open Photosynthesis” opened a title-matched Flashcard Deck with 12 Spanish selector options. The two Library matches were both marked “1d ago”; a new eight-card result was not established. See LV-039 and LV-050. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-flashcard-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-answered-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-open-attempt-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-library-after-create-2741fd45.png | LV-039 (NEEDS-INFO); LV-050 (OPEN) | 2741fd45 (app code at submit); reload after 49b76cbf |
-| P3-AI-ENGINE — flashcard card 3 hint edit (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · edit | BLOCKED — No newly created eight-card deck was available to edit. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (OPEN) | 2741fd45 |
-| P3-AI-ENGINE — flashcard append (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · append | BLOCKED — No newly created eight-card deck was available for the four-card append. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (OPEN) | 2741fd45 |
-| P3-AI-ENGINE — flashcard rewrite (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · rewrite | BLOCKED — No newly created eight-card deck was available for the Spanish rewrite. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (OPEN) | 2741fd45 |
+| P3-AI-ENGINE — flashcard create (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · create | FAIL — The assistant said the creation request was not accepted, while “Open Photosynthesis” opened a title-matched Flashcard Deck with 12 Spanish selector options. The two Library matches were both marked “1d ago”; a new eight-card result was not established. See LV-039 and LV-050. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-flashcard-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-answered-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-open-attempt-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-library-after-create-2741fd45.png | LV-039 (NEEDS-INFO); LV-050 (VERIFIED) | 2741fd45 (app code at submit); reload after 49b76cbf |
+| P3-AI-ENGINE — flashcard card 3 hint edit (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · edit | BLOCKED — No newly created eight-card deck was available to edit. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (VERIFIED) | 2741fd45 |
+| P3-AI-ENGINE — flashcard append (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · append | BLOCKED — No newly created eight-card deck was available for the four-card append. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (VERIFIED) | 2741fd45 |
+| P3-AI-ENGINE — flashcard rewrite (post-fix live recheck) | P3-AI-ENGINE · Flashcard deck · rewrite | BLOCKED — No newly created eight-card deck was available for the Spanish rewrite. The title-matched deck was marked “1d ago” and was left unchanged. | LV-039 (NEEDS-INFO); LV-050 (VERIFIED) | 2741fd45 |
 | P3-AI-ENGINE — quiz create/edit/append | P3-AI-ENGINE · Quiz | PASS — created six questions with 4 multiple choice/2 short answer; the harder Q2 edit persisted; appended two enzyme questions and after reload retained all eight questions with 5 multiple choice/3 short answer; 0 console errors. Evidence: `.spectra-local/live-verification/P3-AI-ENGINE-quiz-append-verified-d61b1e25-redacted.png` | — | d61b1e25 |
 | P3-WORKSPACE-FLOWS — command bar keyboard focus and search | P3-WORKSPACE-FLOWS · step 5 | FAIL — clicking the visible command-bar button opened the list, showed Update memory, focused its Memory field, and both Escape steps restored focus correctly; searching `share` showed no command asking for an ID. Pressing Ctrl+Shift+F twice instead focused `Search recent chats` with no dialog. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-command-bar-shortcut-45281d26-redacted.png`; `.spectra-local/live-verification/LV-028-command-bar-shortcut-observation-redacted.txt` | LV-028 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — Calendar DST view and default event time | P3-WORKSPACE-FLOWS · step 2 | PASS — the date-range portion was verified on 7bce0577: every date from 20 Oct through 3 Nov appeared once, including 27 Oct. The default-time portion was rechecked after the fix on 96f3b05d: a fresh form showed 09:00–10:00 local, a disposable event displayed the same time in Calendar and its details, and it remained removed after reload. No midnight/DST time transition was simulated in the latest recheck. Evidence: `.spectra-local/live-verification/LV-029-calendar-dst-postfix-7bce0577-redacted.png`; `.spectra-local/live-verification/LV-029-calendar-postfix-7bce0577-observations-redacted.txt`; `.spectra-local/live-verification/LV-033-postfix-observations-96f3b05d-redacted.txt`; `.spectra-local/live-verification/LV-033-postfix-saved-event-96f3b05d-redacted.png`; `.spectra-local/live-verification/LV-033-postfix-event-details-96f3b05d-redacted.png` | LV-029 (VERIFIED), LV-033 (VERIFIED) | 7bce0577 / 96f3b05d |
+| P3-WORKSPACE-FLOWS — Calendar DST view, personal event and default time | P3-WORKSPACE-FLOWS · step 2; adjacent form validation/removal | PASS — on app fda81f87 in Europe/Madrid, the 20 Oct–3 Nov sequence was checked across the 20–29 and 27 Oct–5 Nov windows: headings TUE 20 through TUE 3 appeared in order once each, including 27 once. Add personal event defaulted to 14:00–15:00 on 2 Oct (next local whole hour); two disposable events appeared at that time, were removed with confirmation and were absent after reload. Starts 15:00/Ends 14:00 showed “End must be after start” and disabled Add. Browser online; 0 console errors, 1 Clerk warning. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-dst-range-oct20-29-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-dst-oct27-nov3-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-default-time-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-invalid-end-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-event-created-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-event-removed-after-reload-fda81f87-20261002.png` | — | fda81f87 |
 | P3-WORKSPACE-FLOWS — public agent preview and install | P3-WORKSPACE-FLOWS · step 7 | BLOCKED — after the local catalog migration, `/agents` reached its empty state; no authorized public agent fixture was available for the preview/install actions | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | Free exploration — `/agents` library | exploration · first-week /agents | PASS — after the local catalog migration, all four collections showed “No agents in this collection yet.” The measured reload reached the empty state in 3.6 seconds; no load error, Retry action, or HTTP error was observed. Evidence: `.spectra-local/live-verification/LV-030-agents-empty-state-17f7a5f9-redacted.png`; `.spectra-local/live-verification/LV-030-agents-empty-state-observations-redacted.txt` | LV-030 (VERIFIED) | 7bce0577 / local migration `17f7a5f9` |
 | P3-WORKSPACE-FLOWS — Library Trash and offline Undo | P3-WORKSPACE-FLOWS · step 8 | PASS — LV-031 permanent deletion passed; LV-032 displayed Retry offline and a Retry after reconnection restored the item once and persisted after reload; LV-034 Trash pointer activation passed at 1280×720. Evidence: .spectra-local/live-verification/LV-031-postfix-empty-trash-a1bd0258-redacted.png; .spectra-local/live-verification/LV-032-postfix-offline-undo-toast-35921472-redacted.png; .spectra-local/live-verification/LV-034-postfix-pointer-35921472-redacted.png | LV-031 (VERIFIED), LV-032 (VERIFIED), LV-034 (VERIFIED) | a1bd0258 / 35921472 |
@@ -137,7 +141,10 @@ _Written by the verifier at the end._
 | Free exploration — /school route-side conversation panel and artifact split | exploration · first-week school administrator, desktop | PASS — verified on d5a53285 at 1280×720 in two Profile A pages: Live chat measured 480 px and the disposable prompt bubble 360 px across three lines; drag expanded it to 520 px and close/reopen retained 520 px. With Work studio open beside Live chat, their panes measured 424 px and 360 px, the editor remained mounted, and document scroll width stayed 1280 px. Work studio alone resized 483→542 px without horizontal overflow. See LV-038. Evidence: .spectra-local/live-verification/LV-038-d5a53285-layout-recheck-redacted.txt; .spectra-local/live-verification/LV-038-d5a53285-route-chat-recheck-redacted.png; .spectra-local/live-verification/LV-038-d5a53285-workstudio-livechat-split-redacted.png | LV-038 (VERIFIED) | d5a53285 |
 | Free exploration — /school page-scoped AI composer | exploration · first-week school administrator, AI from the School page | FAIL — 2 of 3 submissions of the same benign online prompt returned HTTP 500; the third clean repeat returned HTTP 200 and completed a visible 106-character answer. The exact offline message remained absent in all three. See LV-039. Evidence: .spectra-local/live-verification/LV-039-ai-run-observations-d5a53285-redacted.txt; .spectra-local/live-verification/LV-039-clean-repeats-20261001-redacted.txt | LV-039 (NEEDS-INFO) | d5a53285 |
 | Offline status while connected and after reconnect | exploration · reliability | PASS — prior d3d5baa6 offline cycles showed the exact message only when navigator.onLine=false and absent after reconnect. The Playwright context was deliberately set offline for the offline/reconnect screenshots and restored online afterward. Fresh Profile A recheck at 1280×720 on app code d5a53285: both tabs showed the exact banner during an offline pulse and cleared it within 25 ms after reconnect. On /chat, a real overview request intercepted during reload with synthetic HTTP 503 and a separate timed-out abort both left navigator.onLine=true, exact offline text absent, and visible “Check your connection” copy absent. A separate 3-second delayed overview read also left the banner absent. The console had one unrelated Clerk development advisory and one net::ERR_TIMED_OUT error from the deliberately aborted request; no offline-related console warning matched. All synthetic routes were removed. Recheck on app commit 076101f3: six synthetic HTTP 503 responses for /api/spectra reads and a 3-second delayed overview response (HTTP 200) left the page online with no offline or connection-check copy; the clean post-route reload had 0 console errors (one warning). Evidence: .spectra-local/live-verification/LV-036-d3d5baa6-three-cold-contexts-redacted.txt; .spectra-local/live-verification/offline-status-false-positive-d3d5baa6-redacted.txt; .spectra-local/live-verification/LV-039-ai-run-observations-d5a53285-redacted.txt; .spectra-local/live-verification/LV-039-clean-repeats-20261001-redacted.txt; .spectra-local/live-verification/offline-banner-online-recheck-20261001.txt; .spectra-local/live-verification/offline-banner-chat-503-20261001.js; .spectra-local/live-verification/offline-banner-chat-timeout-20261001.js; .spectra-local/live-verification/offline-status-076101f3-redacted.txt | — | 076101f3 (earlier evidence: d5a53285) |
-| P3-AI-ENGINE — Presentation create and artifact-type display | P3-AI-ENGINE · Presentation · Create | FAIL — on app code 2741fd45, the initial prompt POST returned HTTP 500 with an empty body; a resubmission remained Thinking / Getting ready for over 7 minutes, then Stop returned HTTP 409 and the saved run showed Paused. Retry produced a correctly typed Presentation titled “Plate Tectonics: A Moving Planet,” but remained at “Creating artifact” for about nine minutes; the opened canvas showed “Incomplete draft preserved from an interrupted Spectra run” and “Add a clear idea,” not the requested six-slide content. LV-049 is VERIFIED for artifact type; LV-039 records the incomplete run. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-presentation-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-presentation-artifact-opened-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-presentation-after-7m-2741fd45.png | LV-049 (VERIFIED), LV-039 (NEEDS-INFO) | 2741fd45 |
+| P3-AI-ENGINE — Presentation create and artifact-type display | P3-AI-ENGINE · Presentation · Create | FAIL — on app code 2741fd45, the initial prompt POST returned HTTP 500 with an empty body; a resubmission remained Thinking / Getting ready for over 7 minutes, then Stop returned HTTP 409 and the saved run showed Paused. Retry produced a correctly typed Presentation titled “Plate Tectonics: A Moving Planet,” but remained at “Creating artifact” for about nine minutes; the opened canvas showed “Incomplete draft preserved from an interrupted Spectra run” and “Add a clear idea,” not the requested six-slide content. On app code fda81f87, a fresh exact-prompt submission returned a six-slide outline in chat text but said it was not saved as an editable presentation; no editor, open control, or new Library item appeared after reload (1/1). LV-049 is VERIFIED for artifact type; LV-039 records the incomplete runs. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-presentation-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-presentation-artifact-opened-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-presentation-after-7m-2741fd45.png; .spectra-local/live-verification/LV039-presentation-create-fda81f87-20261002.png; .spectra-local/live-verification/LV039-presentation-library-search-fda81f87-20261002.png; .spectra-local/live-verification/LV039-presentation-create-fda81f87-20261002-redacted.txt | LV-049 (VERIFIED), LV-039 (NEEDS-INFO) | 2741fd45; fda81f87 |
+| P3-BRIDGE-LENS — disposable Bridge-linked DOCX open console request | P3-BRIDGE-LENS · Word · open through Bridge | FAIL — the first route open of the copied DOCX emitted HTTP 400 for `/api/spectra/lenses/docx` while the document surface rendered. A reload and fresh-tab route open initially had 0 console errors; a later read of the still-open route logged one realtime WebSocket error after 17m28s while the browser was online, tracked separately under LV-062. The open copy displayed “Office still has this file open.” See LV-061. Evidence: .spectra-local/live-verification/P3-BRIDGE-docx-open-400-redacted.txt; .spectra-local/live-verification/P3-BRIDGE-docx-syncing-20261002.png; .spectra-local/live-verification/P3-BRIDGE-docx-office-open-status-20261002.png | LV-061 (OPEN), LV-062 (OPEN) | fda81f87 |
+| P3-EDITORS — new document realtime connection while online | P3-EDITORS · save/reload and collaboration reliability | FAIL — on a fresh disposable document, the first browser tab logged 27 repeated WebSocket handshake errors over 17m09s for `/_spectra/realtime`; a second tab logged 19 more over 11m39s. The same error appeared once on the Bridge-linked DOCX route after 17m28s. A “Connection interrupted. Your draft stays on this device.” status appeared while `navigator.onLine` was true; that status was absent at a later read while console errors continued. The synthetic text was visible in both tabs in the same saved Profile A browser context, which does not establish server persistence. See LV-062. Evidence: .spectra-local/live-verification/P3-EDITORS-realtime-errors-fda81f87-redacted.txt; .spectra-local/live-verification/P3-EDITORS-realtime-draft-in-second-tab-fda81f87.png | LV-062 (OPEN) | fda81f87 |
+| P3-CONTEXT — summarize recently typed document text | P3-CONTEXT · unsaved document text summary | FAIL — with `New Document · 1 context` selected, two consecutive submissions of “Summarise what I just wrote.” produced different context outcomes: the first summarized the visible orchid text and marker; the second returned a statement about an unrelated earlier World War I request and omitted that text. `navigator.onLine` was true; see LV-063. Evidence: .spectra-local/live-verification/P3-CONTEXT-orchid-summary-fda81f87-redacted.txt; .spectra-local/live-verification/P3-CONTEXT-orchid-unsaved-before-ai-fda81f87.png; .spectra-local/live-verification/P3-CONTEXT-orchid-first-summary-fda81f87.png; .spectra-local/live-verification/P3-CONTEXT-orchid-repeat-wrong-summary-fda81f87.png; .spectra-local/live-verification/P3-CONTEXT-orchid-ai-result-fda81f87.png; .spectra-local/live-verification/P3-CONTEXT-orchid-after-answer-fda81f87.png | LV-063 (OPEN) | fda81f87 |
 | P3-AI-ENGINE — Presentation Retry recovery | P3-AI-ENGINE · recovery; adjacent check | FAIL — on app code 2741fd45, Retry showed “Resumed from the last safe point” and presentation-creation activity, but remained at “Creating artifact” for about nine minutes. Three runEvents reads, one overview read and two runTabs reads returned HTTP 500 while the browser was online. Stop returned HTTP 409; the UI and reload showed Paused with Retry. See LV-039. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-presentation-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-presentation-retry-after-6m-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-presentation-retry-after-stop-2741fd45.png; .spectra-local/live-verification/P3-AI-ENGINE-presentation-retry-after-stop-reload-2741fd45.png | LV-039 (NEEDS-INFO) | 2741fd45 |
 | P3-AI-ENGINE — Presentation edit (slide 3) | P3-AI-ENGINE · Presentation · Edit | BLOCKED — the opened Presentation canvas contained only “Add a clear idea”; no authored slide 3 content was present for “Tighten slide 3's bullets.” See LV-039. | LV-039 (NEEDS-INFO); LV-049 (VERIFIED for artifact type) | 2741fd45 |
 | P3-AI-ENGINE — Presentation append (summary slide) | P3-AI-ENGINE · Presentation · Append | BLOCKED — the opened Presentation canvas contained only “Add a clear idea”; no authored deck content was present to append “Add a summary slide.” See LV-039. | LV-039 (NEEDS-INFO); LV-049 (VERIFIED for artifact type) | 2741fd45 |
@@ -157,9 +164,10 @@ _Written by the verifier at the end._
 | P2-EXPERIENCE step 5 — offline comment action and recovery | P2-EXPERIENCE · step 5 partial action check | PASS — on a disposable Document, offline Post comment showed the exact prescribed toast; the draft remained in the field and 0 comments were saved (4/4 submits). Three controlled online recovery repeats retained the draft after 3–18 seconds, with no offline or Reconnecting status (3/3). One earlier blank-field read after an unauthenticated diagnostic request did not recur in these repeats; see the redacted note. Evidence: .spectra-local/live-verification/P2-EXPERIENCE-offline-actions-7407840f-redacted.txt; .spectra-local/live-verification/P2-EXPERIENCE-offline-comment-toast-7407840f.png; .spectra-local/live-verification/P2-EXPERIENCE-comment-before-recovery-7407840f.png; .spectra-local/live-verification/P2-EXPERIENCE-comment-after-recovery-7407840f.png | — | 7407840f |
 | Mobile-dimension checks | explicit user scope instruction · 2026-09-30 | BLOCKED — the user explicitly instructed the verifier not to conduct mobile-dimension testing; no further phone-width or mobile-drawer verification will be run | — | — |
 
-| P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | BLOCKED — Calendar returned HTTP 500 before a block could be loaded or dragged; see LV-029 | LV-029 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — the Calendar data view remained unavailable after HTTP 500, so no personal event, plan block, or official event control could be inspected; see LV-029 | LV-029 (OPEN) | 45281d26 |
-| P3-WORKSPACE-FLOWS — scheduled plan block details | P3-WORKSPACE-FLOWS · step 4 | BLOCKED — the Calendar and Plans panels did not load, so no scheduled block could be opened; see LV-029 | LV-029 (OPEN) | 45281d26 |
+| P3-WORKSPACE-FLOWS — stale Calendar conflict | P3-WORKSPACE-FLOWS · step 1 | FAIL — four stale-tab drags each recorded one HTTP 409 Conflict console entry while navigator.onLine was true. In 3 of 4, a notice said “The block changed elsewhere, so Calendar restored its latest position.” and the event returned to the newer position without reloading. In 1 of 4, the notice was absent on immediate and later reads; the stale position first remained, then the event updated to the newer position without visible copy. See LV-069. Evidence: .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-redacted-20261002.png; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-toast-redacted-20261002.png | LV-029 (VERIFIED), LV-069 (OPEN) | fda81f87 |
+| P3-WORKSPACE-FLOWS — Calendar removal and official-event controls | P3-WORKSPACE-FLOWS · step 3 | BLOCKED — personal-event create/remove passed and the official “Maths Unit 7 Test” details had no Remove action, but a scheduled plan block was not removed. The checked “File Processing Test” block could not be opened because another 16:00 Calendar item occupied the same screen bounds; see LV-060. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-official-deadline-details-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002-redacted.txt` | LV-060 (OPEN) | fda81f87 |
+| P3-WORKSPACE-FLOWS — scheduled plan block details | P3-WORKSPACE-FLOWS · step 4 | FAIL — the `File Processing Test` scheduled block could not be opened; the overlapping `Maths Unit 7 Test` official deadline received the click at the same screen bounds. The expected plan details were therefore unavailable; see LV-060. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002-redacted.txt` | LV-060 (OPEN) | fda81f87 |
+| P3-WORKSPACE-FLOWS — Calendar official deadline controls | P3-WORKSPACE-FLOWS · step 3 | PASS — `Maths Unit 7 Test` opened as an `Official deadlines` item; its details showed the Official source note and no Remove action. Browser online, 0 console errors and 1 Clerk warning. Evidence: `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-official-deadline-details-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002-redacted.txt` | — | fda81f87 |
 | P3-WORKSPACE-FLOWS — Chat search workspace selection | P3-WORKSPACE-FLOWS · step 6 | PASS — searched for `Wa`, selected the `General` workspace result, and the dialog closed with focus on the search button; reopening showed an empty field. Console: 0 errors, 1 Clerk warning | — | 45281d26 |
 
 | P3-WORKSPACE-FLOWS — conversation and work retries after notification-stack update | LV-035 adjacent verification · route-side conversation/work retry | PASS — on app commit 076101f3, both separate notices and visible Try again actions remained after two offline conversation retries and a 10.5-second hold; the conversation retry opened the panel after reconnect, and the independent work retry preserved the open panel. The route stayed /school in one page. A clean online reload at 08:56:29 UTC had 0 console errors, 0 HTTP failures, 0 request failures and 0 pageerrors, with no offline copy. See LV-037. Evidence: `.spectra-local/live-verification/LV-037-076101f3-recheck-redacted.txt` | LV-037 (VERIFIED) | 076101f3 |
@@ -211,19 +219,68 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — alternate fresh document create (Moon phases) | P3-AI-ENGINE · Document · Create; adjacent current-code check without repeating WW1 prompt | FAIL — the zero-context request completed in 35,273 ms with an answer explicitly saying no artifact was saved. No editable document/Open document control appeared before or after reload; Library's Documents filter showed no exact title match. The local model telemetry recorded a request at 08:47:54Z and a response at 08:48:19Z (elapsedMs 24,887); POST `/api/spectra/run` returned HTTP 200. Browser online; 0 console errors and 1 Clerk development warning. See LV-039. Evidence: `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-redacted.txt` and linked screenshots. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
 | P3-AI-ENGINE — fresh editable-document create (“How Plants Make Food”) | P3-AI-ENGINE · Document · Create | FAIL — on 46889f21, the fresh zero-context request returned chat text beginning “I couldn’t save an editable document in this run”; no editor/open control appeared and the exact-title Document Library search returned no match. See LV-039. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt | LV-039 (NEEDS-INFO) | 46889f21 |
 | P3-AI-ENGINE — result-status copy on failed document create | P3-AI-ENGINE · run result status | FAIL — “Saved progress and results” appeared for the same run that said no editable document was saved and produced no Library artifact. The user clarified that no-artifact messages should not show this box and artifact changes should show their artifact card; occurrence recorded under LV-022. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO) | 46889f21 |
-| P3-AI-ENGINE — fresh WWI document create after fda81f87 | P3-AI-ENGINE · Document · Create | FAIL — the exact zero-context request returned a four-section draft saying the creation request was not accepted; no document editor or new Library item appeared. Two exact-title matches were last updated 2d ago. See LV-039. Evidence: .spectra-local/live-verification/LV039-ww1-post-fda81f87-refusal-20261002.png; .spectra-local/live-verification/LV039-ww1-library-exact-search-fda81f87-20261002.png; .spectra-local/live-verification/LV039-ww1-post-fda81f87-redacted.txt | LV-039 (NEEDS-INFO) | fda81f87 |
+| P3-AI-ENGINE — fresh WWI document create after fda81f87 | P3-AI-ENGINE · Document · Create | FAIL — 2 of 2 fresh zero-context submissions of the exact request on application commit fda81f87 produced no editable document. This repeat showed Still running at the first and +15s checks; later Playwright reads timed out, and the refusal with four-section draft was first visible after reload. Local telemetry recorded 32,682 ms request-to-response; this is not an exact UI completion measurement. No new Library item appeared. See LV-039. Evidence: .spectra-local/live-verification/LV039-ww1-response-after-fda81f87-20261002.png; .spectra-local/live-verification/LV039-ww1-library-results-rows-after-fda81f87-20261002.png; .spectra-local/live-verification/LV039-ww1-repeat-after-fda81f87-redacted.txt | LV-039 (NEEDS-DECISION) | fda81f87 |
 | P3-EDITORS — Presentation text save, reload and offline reconnect | P3-EDITORS · Presentation E3 partial | PASS — title, summary, slide text and speaker notes remained after reload; a same-Profile-A second tab showed the summary edit, and slide text typed offline remained after reconnect and reload. This is a same-identity local persistence/cross-tab check, not independent-user collaboration. Browser online after reconnect; 0 console errors, 1 Clerk development-key warning. Evidence: .spectra-local/live-verification/P3-EDITORS-presentation-reload-20261002.png; .spectra-local/live-verification/P3-EDITORS-presentation-observations-20261002-redacted.txt | — | 46889f21 |
+| P3-SYNC-DURABILITY - chat offline/online banner recovery | P3-SYNC-DURABILITY · online/offline/reconnect state | PASS - online state had no offline banner; during each controlled offline interval the exact status appeared and saved prompt/reply stayed visible; within 5 seconds online the banner cleared and content remained. Four net::ERR_INTERNET_DISCONNECTED console errors occurred during deliberate offline intervals on redacted Clerk Convex-token requests; subsequent token resource entries after reconnect returned HTTP 200. Evidence: .spectra-local/live-verification/P3-SYNC-chat-offline-online-redacted.txt; .spectra-local/live-verification/P3-SYNC-chat-offline-banner-20261002.png; .spectra-local/live-verification/P3-SYNC-chat-online-after-reconnect-20261002.png | — | fda81f87 |
 | P3-EDITORS — Presentation E3 independent peer collaboration | P3-EDITORS · Presentation E3 | BLOCKED — only Profile A was supplied for this run; the two tabs shared the same signed-in identity, so an independent user/browser peer check could not be made. | — | 46889f21 |
 
 | LV-022 follow-up — saved-result box on ordinary no-artifact answer | user-clarified result-status expectation | FAIL — the fresh zero-context “Hi” answer completed in 8,976 ms, but its chat card displayed “Saved progress and results” without a created, modified or referenced artifact. The user clarified that no-artifact messages should not show this box and artifact changes should show their artifact card. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt | LV-022 (NEEDS-DECISION) | 4823b413 (app); 5708da7e (checkout) |
 | LV-022 post-fix result-display recheck | user-clarified no-artifact and artifact-card expectation | PASS — the failed WWI create and a fresh “Hi.” answer showed no generic “Saved progress and results” box. A saved flashcard result showed the “Spectra run results” card with Done and Open; Open displayed the eight-card Photosynthesis deck in the Work studio. The older answer/status wording mismatch remains in LV-022. Evidence: .spectra-local/live-verification/LV022-postfix-result-display-redacted.txt; .spectra-local/live-verification/LV022-postfix-no-artifact-20261002.png; .spectra-local/live-verification/LV022-postfix-artifact-result-card-20261002.png; .spectra-local/live-verification/LV039-ww1-post-fda81f87-refusal-20261002.png | LV-022 (NEEDS-DECISION) | fda81f87 |
 | LV-058 — short-message bubble width | free exploration · user-message rendering at desktop width | FAIL — in a fresh no-context “Hi.” chat at 1280×720, the user-message bubble spanned approximately 672 px. See LV-058. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV058-short-user-message-width-4823b413-redacted.txt | LV-058 (OPEN) | 4823b413 (app); 5708da7e (checkout) |
 | LV-058 post-fix live recheck — short message through reload | fixer recheck · desktop user-message sizing | PASS — a fresh “Hi.” rendered as a 63 px right-aligned bubble at 1280×720 and remained 63 px after reload. The assistant answered, the browser stayed online, and no generic saved-progress box appeared. Evidence: .spectra-local/live-verification/LV058-post-fda81f87-hi-20261002.png; .spectra-local/live-verification/LV058-post-fda81f87-hi-reload-redacted.txt | LV-058 (VERIFIED) | fda81f87 |
-| P3-AI-ENGINE — fresh “Hi.” check after fda81f87 | user launch reliability criterion · simple no-context greeting | PASS — “Hi!” was visible in the settled response by the end of a Playwright call that took 6.33 seconds overall, meeting the under-10-second target. The browser was online, no generic saved-progress box appeared, and there were 0 browser-console errors. Exact response timestamp was not separately captured. Evidence: .spectra-local/live-verification/LV039-hi-under-10s-fda81f87-20261002.png; .spectra-local/live-verification/LV039-hi-under-10s-fda81f87-20261002-redacted.txt | — | fda81f87 |
+| LV-058 neighboring live recheck - multiline text, URL and attachment | fixer recheck - persisted message rendering | PASS - the 672 px right-aligned bubble kept three line breaks, wrapped the long unbroken URL and retained the synthetic attachment chip after reload; document width remained 1280 px with no horizontal overflow. Evidence: .spectra-local/live-verification/LV058-long-attachment-postreload-redacted.txt; .spectra-local/live-verification/LV058-long-attachment-persist-20261002.png; .spectra-local/live-verification/LV058-long-attachment-post-reload-20261002.png | LV-058 (VERIFIED) | fda81f87 |
+| P3-AI-ENGINE — fresh “Hi.” check after fda81f87 | user launch reliability criterion · simple no-context greeting | PASS — in a further fresh run, “Hi! What can I help you with?” was visible on the first text search after a 3-second wait, under 4 seconds after send. Local telemetry request-to-response was 1,561 ms. Browser online; no generic saved-progress box or artifact-result card; 0 console errors and 1 Clerk warning. Exact bubble appearance time was not separately sampled. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-hi-under-10s-after-fda81f87-20261002.png; .spectra-local/live-verification/P3-AI-ENGINE-hi-repeat-after-fda81f87-redacted.txt; earlier first-run evidence: .spectra-local/live-verification/LV039-hi-under-10s-fda81f87-20261002.png | — | fda81f87 |
+| P3-AI-ENGINE — 8-card flashcard create and re-open after fda81f87 | P3-AI-ENGINE · Flashcard deck · Create, save-state and reload | FAIL — the exact prompt produced an eight-card deck that opened and persisted after reload. However, the reply said “It hasn’t been saved yet”; the “Spectra run results” card was available only after expanding Show details and was hidden in the default collapsed chat after reload. No generic “Saved progress and results” box appeared. The UI completion time was not sampled; local telemetry request-to-response was 16,315 ms. See LV-022. Evidence: .spectra-local/live-verification/LV022-photosynthesis-reply-default-after-reload-fda81f87-20261002.png; .spectra-local/live-verification/LV022-photosynthesis-result-card-after-reload-fda81f87-20261002.png; .spectra-local/live-verification/LV022-photosynthesis-open-deck-after-fda81f87-20261002.png; .spectra-local/live-verification/LV022-photosynthesis-create-after-fda81f87-redacted.txt | LV-022 (NEEDS-DECISION) | fda81f87 |
+| P3-AI-ENGINE - fresh attached-text context answer | user AI reliability - attachment reading | PASS - with 0 selected workspace contexts, the assistant answered from the synthetic attached text file that it covered persistence and line breaks in 7,402 ms. Browser online; 0 console errors; no generic saved-progress box. Evidence: .spectra-local/live-verification/LV058-long-attachment-postreload-redacted.txt; .spectra-local/live-verification/LV058-long-attachment-post-reload-20261002.png | - | fda81f87 |
 | LV-059 — local app routes after web-process restart | free exploration · signed-in route access and sign-in fallback | FAIL — after the port-3000 web process restarted and health returned ready, /chat, /library and /workspace rendered blank across reloads; /sign-in showed no form after 5 seconds. Evidence: .spectra-local/live-verification/post-web-restart-chat-empty-shell-after-reload-20261002.png; .spectra-local/live-verification/post-web-restart-workspace-empty-shell-20261002.png; .spectra-local/live-verification/post-web-restart-sign-in-no-form-20261002.png; .spectra-local/live-verification/LV059-post-web-restart-blank-routes-redacted.txt | LV-059 (OPEN) | 46889f21 |
 | P3-AI-ENGINE — fresh document create after clean web-process restart | P3-AI-ENGINE · Document · Create; fixer-requested adjacent live check | BLOCKED — the new /chat route rendered no application shell or composer after the port-3000 process restart, and the /sign-in route showed no sign-in controls. No prompt was submitted. See LV-059. | LV-059 (OPEN) | 46889f21 |
 | LV-059 post-restart warm-up recheck | fixer follow-up · delayed route recovery | PASS — after later warm-up, /chat and /library rendered their page content and /workspace displayed 23 workspaces after a 5-second wait. The browser was online, window.Clerk.loaded was true, the Clerk browser script returned HTTP 200, and Playwright reported 0 console errors and 1 Clerk development-key warning. The post-warm /sign-in route was not rechecked. Evidence: .spectra-local/live-verification/LV059-after-warm-chat-20261002.png; .spectra-local/live-verification/LV059-workspace-after-warm-20261002.png; .spectra-local/live-verification/LV059-post-web-restart-blank-routes-redacted.txt | LV-059 (NEEDS-INFO) | 46889f21; fda81f87 |
 | P3-UI-SYSTEM — context-picker Escape and focus return (partial) | P3-UI-SYSTEM · floating surface keyboard close | PASS — the context picker opened with its search field focused; Escape closed it and focus returned to “Choose AI focus: QA Desktop Presentation 2026-10-02 · 1 context.” Origin/exit animation was not evaluated. Evidence: .spectra-local/live-verification/P3-UI-SYSTEM-context-picker-focus-return-20261002.png; .spectra-local/live-verification/P3-UI-SYSTEM-context-picker-observations-20261002-redacted.txt | — | 46889f21 |
+| P3-CONTEXT — remaining attachment, memory, long-thread, large-read, embed and worker scenarios | P3-CONTEXT · remaining live verification bullets | BLOCKED — only a single synthetic attachment has been exercised. This pass did not provide a four-format attachment bundle, an isolated memory profile, a 20+ turn thread, 60-block/300-cell/64 KB test artifacts, a summary embed host, or a second worker process that can be safely interrupted. Provider bill counts and worker-total reconciliation are not visible in the browser. The new-document summary check is FAIL under LV-063. | LV-063 (OPEN) | fda81f87 |
+| P3-CLIENT-PERF — large artifacts, repeated saves, reorders and region recovery | P3-CLIENT-PERF · all six benchmark bullets | BLOCKED — the provided Office fixture set has a complex 11-page DOCX, multi-sheet workbook and short deck, but no disposable 60-page document, 100-slide deck, 5,000-row sheet, large board, or 200-save benchmark artifact. Long-list reorder and region-recovery benchmark preconditions were not present. No phone-width checks were run per the user's explicit exclusion. | — | fda81f87 |
+| P3-CONVEX-ERRORS — production response shape, conflict copy, retries, gateway build and codegen | P3-CONVEX-ERRORS · steps 1–7 | BLOCKED — the report explicitly requires a production Convex deployment. This run is restricted to the local instance and must not touch production. `convex codegen` would edit generated files outside the sole permitted ledger file. | — | fda81f87 |
+| P3-SYNC-DURABILITY — hosted drain, deployment schema and external-volume cases | P3-SYNC-DURABILITY · steps 1–4 and 6 | BLOCKED — Fly and Railway deployments, Docker Compose stop behavior, exFAT media and OneDrive Files-On-Demand are not part of the running local instance. No external deployment or removable/cloud drive was used. The local Bridge folder and Office-open state are recorded under LV-061/LV-062. | LV-061 (OPEN), LV-062 (OPEN) | fda81f87 |
+| P3-UI-SYSTEM — remaining desktop motion, modal, reduced-motion, presence and tab-rail checks | P3-UI-SYSTEM · remaining desktop checks | BLOCKED — dialog animations, other ConfirmDialog variants and pending states, Spectra Reduce/None preference, presence with an independent person, tab-rail close focus and remaining Bridge surface states remain unchecked. Calendar ConfirmDialog Escape/focus return and the OS reduced-motion command-bar subcheck are covered separately. No phone-width checks were run per the explicit exclusion. | — | fda81f87 |
+| P3-SURFACES-2 — chat rename, three follow-up messages and empty-title behavior | P3-SURFACES-2 · step 1 | PASS — the synthetic chat title remained in the header, recent row and Library chat list after three messages and reload; clearing the title left Save disabled. Evidence: `.spectra-local/live-verification/P3-SURFACES-2-chat-rename-three-messages-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-chat-rename-empty-disabled-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-live-actions-fda81f87-20261002-redacted.txt` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-SURFACES-2 — delete chat from header and Undo | P3-SURFACES-2 · step 2 | PASS — Delete chat opened `/chat?new=1` with “Chat moved to Trash.” and Undo; Undo reopened the same thread and its reply remained. Evidence: `.spectra-local/live-verification/P3-SURFACES-2-delete-chat-undo-toast-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-delete-chat-restored-after-undo-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-live-actions-fda81f87-20261002-redacted.txt` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-SURFACES-2 — trash a chat from the Library | P3-SURFACES-2 · step 2 | BLOCKED — Library > Browse chats displayed the target chat and opened a Live chat preview. Its row, preview controls and Live Dock More actions menu showed no Trash action, so the scripted operation could not be performed from the displayed controls. Evidence: `.spectra-local/live-verification/P3-SURFACES-2-library-chat-browser-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-live-actions-fda81f87-20261002-redacted.txt` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-SURFACES-2 — pin six chats and reload | P3-SURFACES-2 · step 3 | PASS — all six synthetic chats remained under Pinned after reload and were reachable by scrolling; all six were unpinned afterward and none remained pinned after reload. Evidence: `.spectra-local/live-verification/P3-SURFACES-2-pin-six-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-pin-six-bottom-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-live-actions-fda81f87-20261002-redacted.txt` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-SURFACES-2 — `/chat` with more than 10 chats and search with no match | P3-SURFACES-2 · step 3 | PASS — the sidebar reported 40 chats and all 40 thread links were present in the page; searching for `zznochatmatch20261002` showed “No recent chats match …” and zero thread links. Evidence: `.spectra-local/live-verification/P3-SURFACES-2-chat-list-over-10-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-chat-search-empty-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-SURFACES-2-live-actions-fda81f87-20261002-redacted.txt` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-SURFACES-2 — new-account empty chat list and Admin People edge cases | P3-SURFACES-2 · step 3 and step 5 | BLOCKED — only the supplied signed-in Profile A administrator identity was available. No new-account empty state or disposable invited member was available; no role was changed on the last administrator. | — | fda81f87 (app); 18a31274 (checkout) |
+| P2-ACCOUNT-LIFECYCLE — Clerk erasure, usage ceiling and invitation logging | P2-ACCOUNT-LIFECYCLE · A1–A6 | BLOCKED — deleting a supplied Clerk identity, pausing an erasure deployment, and staging-sized erasure/usage jobs were not authorized for this local audit. No disposable student account or isolated enforced-ceiling fixture was supplied. Local SMTP has no listener; no real invitation email was sent. | — | fda81f87 |
+| P2-AI-QUALITY — ordinary answer, artifact work and selected-context accuracy | P2-AI-QUALITY · steps 1–6 | FAIL — simple “Hi” and Moon answers completed in prior rows; document/presentation creation refusals and a repeated context summary returning an unrelated World War I request are recorded under LV-039/LV-063. Provider error injection, Bridge-backed AI write/readback, full first-token attribution, and the remaining tone prompts were not completed in this run. | LV-039 (NEEDS-INFO), LV-063 (OPEN) | fda81f87 |
+| P2-CODE-HEALTH — switched callers, exports, conflict controls, codegen and build | P2-CODE-HEALTH · steps 1–5 | BLOCKED — remaining class-shelf/public-share/code-export offline callers and large export artifacts were not exercised; Safari and Firefox are unavailable in this saved Profile A Playwright session. The real region-conflict controls, deployment codegen, and a separate primary-checkout `next build` were not run while the local dev stack was active. Existing offline action checks are recorded under P2-EXPERIENCE/P3-SYNC-DURABILITY. | — | fda81f87 |
+| P2-EXPERIENCE — remaining invite, error-redaction, modal and reduced-motion checks | P2-EXPERIENCE · steps 3–4, 6, 9–12 | BLOCKED — no disposable signed-out invitee/member or screen-reader session was supplied. Error-redaction source access, signed-out invite flow, reduced-motion checks on /join, Library, Admin LoadingPanel and Settings, and the screen-reader dialog Tab-trap/announcement sequence remain unverified. Calendar ConfirmDialog Escape/focus return and the OS reduced-motion command-bar subcheck are covered separately. Notifications had no share/reminder item; offline step 5 and clarification step 8 have separate rows. | — | fda81f87 |
+| P2-OPS-PERFORMANCE — hosted env, scheduled jobs and gateway capacity | P2-OPS-PERFORMANCE · steps 1–8 | BLOCKED — Vercel build variables, production route p95, scheduled-run reconciliation, Fly classroom capacity/SIGTERM, preview collaboration URL, deployment lifecycle jobs and deployment codegen require hosted environments not used in this local-only audit. | — | fda81f87 |
+| P2-OUTCOMES — native Word readback, conflict choice, concurrent flashcards, large restore and code preview | P2-OUTCOMES · steps 1–6 | BLOCKED — the disposable DOCX remained open in Word with a recovery session; no independent second user/browser was supplied for peer conflicts or same-deck human/AI writes. A >50-linked-copy restore/version fixture and code-preview offline fixture were not available. Keyboard grading and remaining modal flows were not completed. | LV-062 (OPEN) | fda81f87 |
+| P2-RESIDUALS — long erasure, metering backfill and superseded Word write | P2-RESIDUALS · steps 1–4 | BLOCKED — deployment cron intervals, Agent Foundry/evaluation metering, staging backfill, and production/staging data checks are outside the local instance. No superseded write was forced against a disposable DOCX during this pass. | — | fda81f87 |
+| P2-SCALE — Fly load, HA/SIGTERM, large-school sync/export/purge and expired-session Stop | P2-SCALE · steps 1–7 | BLOCKED — Fly machine sizing, deployment SIGTERM timing, large ManageBac tenant, realistic-size staging school, staging export/purge, preview environment-variable check and expired authenticated session require unavailable hosted fixtures. | — | fda81f87 |
+| P2-SECURITY-PRIVACY — sanitizer payloads, public-link membership, school purge, SSRF and parallel admission | P2-SECURITY-PRIVACY · F1–F5 | BLOCKED — no browser payload-import batch, disposable student identity, staging purge school, isolated SSRF target tenant, or five-worker student-account session was provided. No production, real ManageBac tenant or supplied user's account was used for destructive security checks. | — | fda81f87 |
+| P2-SYNC-RESUME — interrupted sync, credential replacement, student sync and key drain | P2-SYNC-RESUME · steps 2–5 | BLOCKED — interrupting a deployment, replacing the active local test-school credential mid-run, running as a student, and checking deployment storage-key drain require hosted/staging or a second role fixture not available here. Large/throttled reconciliation step 1 is already marked BLOCKED above. | — | fda81f87 |
+| P2-WRITE-PATHS — live receipts, human caret, large restore and staged planner failure | P2-WRITE-PATHS · steps 1–6 | BLOCKED — UI-visible receipts cannot establish exact replay identity; no independent user session, 760 KB restore fixture, or staged failing planner fixture was supplied. The sidebar shared icon and clarification checks were not completed during this live pass. | — | fda81f87 |
+
+| P3-AI-ENGINE — third fresh WW1 document-create repeat | P3-AI-ENGINE · Document · Create | FAIL — the third fresh zero-context submission of the exact prompt returned a four-section chat draft, explicitly said the creation proposal was not accepted, and produced no editor, Open control or new artifact card after reload. See LV-039. Evidence: `.spectra-local/live-verification/LV039-WW1-create-repeat-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-WW1-library-existing-exact-title-20261002.png`; `.spectra-local/live-verification/LV039-WW1-create-repeat-fda81f87-20261002-redacted.txt` | LV-039 (NEEDS-DECISION) | fda81f87 (app); 18a31274 (checkout) |
+| P3-AI-ENGINE — controlled single-section document edit and reload | P3-AI-ENGINE · Document · Edit | FAIL — section 2 changed and persisted after reload, while the assistant said “It hasn’t been saved yet.” A Work-from-this-conversation artifact card was present; the generic “Saved progress and results” box was absent. See LV-022. Evidence: `.spectra-local/live-verification/P3-AI-edit-fixture-chat-result-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-AI-edit-fixture-after-ai-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-AI-edit-fixture-observation-fda81f87-20261002-redacted.txt` | LV-022 (NEEDS-DECISION) | fda81f87 (app); 18a31274 (checkout) |
+| P3-AI-ENGINE — single-section edit response timing | P3-AI-ENGINE · Document · Edit · F5 timing | FAIL — the first visible final assistant text appeared about 21.5 seconds after submission. UI milestones appeared at about 1.4s, 9.0s and 15.5s. No separate provider first-token timestamp or provider-call count was captured. See LV-064. Evidence: `.spectra-local/live-verification/P3-AI-edit-fixture-observation-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-AI-edit-fixture-chat-result-fda81f87-20261002.png` | LV-064 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| P3-AI-ENGINE — F5 comparison with main-path first-token timing | P3-AI-ENGINE · Document · Edit · F5 comparison | BLOCKED — this run captured the current edit’s visible UI milestones, but no comparable main-path first-token baseline; no before/after reduction can be established from this observation. | LV-064 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| P3-AI-ENGINE — ordinary no-artifact greeting result display | User-requested chat result-card behavior · fresh zero-context “Hi” | PASS — the assistant answered; no generic “Saved progress and results” box and no artifact card appeared. Browser online, 0 console errors and 1 Clerk warning. Evidence: `.spectra-local/live-verification/LV058-LV022-hi-postfix-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV022-hi-no-result-box-fda81f87-20261002.png` | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS / P3-SYNC-DURABILITY — additional online realtime errors during Library checks | P3-EDITORS · save/reload; P3-SYNC-DURABILITY · reconnect state | FAIL — 15 further identical `/_spectra/realtime` WebSocket handshake errors were recorded over 8m48s while the browser reported online during Library document checks. The document remained visible after reload. See LV-062. Evidence: `.spectra-local/live-verification/LV062-library-realtime-errors-fda81f87-20261002-redacted.txt` | LV-062 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| Free exploration — blank New chat after selecting an artifact in another conversation | `/chat` new-conversation and context isolation | FAIL — a blank New chat retained the prior thread’s synthetic document card and `1 context object selected`, including after reload. See LV-056. Evidence: `.spectra-local/live-verification/LV056-new-chat-context-from-other-thread-fda81f87-20261002.png`; `.spectra-local/live-verification/LV056-new-chat-context-fda81f87-20261002-redacted.txt` | LV-056 (REOPENED) | fda81f87 (app); 18a31274 (checkout) |
+| Free exploration — title after successful document edit | Free exploration · first-week AI chat and reload | FAIL — after the edited document persisted through reload, the chat header and recent-chat row still read `New conversation`; the row subtitle was `Inbox`. See LV-040. Evidence: `.spectra-local/live-verification/LV040-post-ai-edit-title-header-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-row-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-fda81f87-20261002-redacted.txt` | LV-040 (NEEDS-DECISION) | fda81f87 (app); 18a31274 (checkout) |
+| P3-UI-SYSTEM — short-message sizing and no-artifact display recheck | User-requested desktop chat layout and result display · 1280×720 | PASS — “Hi” rendered in a 63px right-aligned bubble in the 820px conversation column; its ordinary reply had no generic saved-results box or artifact card. Evidence: `.spectra-local/live-verification/LV039-hi-message-width-fda81f87-20261002.png`; `.spectra-local/live-verification/LV058-LV022-hi-postfix-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV022-hi-no-result-box-fda81f87-20261002.png` | LV-058 (VERIFIED) | fda81f87 (app); 18a31274 (checkout) |
+| P2-AI-QUALITY — controlled short artifact edit reliability and latency | P2-AI-QUALITY · selected-context accuracy and task completion; P3-AI-ENGINE · Document · Edit | FAIL — the synthetic document edit persisted but its reply said it was unsaved and took about 21.5s to produce visible final text; fresh document-create attempts continued to return text without editable artifacts. Provider-call counts and a comparable first-token baseline were not captured. See LV-022/LV-039/LV-064. | LV-022 (NEEDS-DECISION), LV-039 (NEEDS-DECISION), LV-064 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+
+| P3-EDITORS-2 — quiz, deck and plan workbar Undo/Redo | P3-EDITORS-2 · step 3 | FAIL — Undo/Redo were disabled before edits and correctly reversed and reapplied temporary quiz, deck and plan changes, restoring the original content afterward. In all three tested bars, question/card navigation or Plan view controls appeared before Undo and Redo, contrary to the script’s expected order; see LV-065. The same Library session logged 13 realtime handshake errors while online; see LV-062. Evidence: `.spectra-local/live-verification/P3-EDITORS-2-workbar-live-observations-fda81f87-20261002-redacted.txt` and the linked screenshots | LV-062 (OPEN), LV-065 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — Plan reminder picker reset | P3-EDITORS-2 · step 9, Plan portion | PASS — selecting “15 minutes before” added a reminder and the picker returned to “Add reminder…”. The temporary reminder was removed, leaving the placeholder. Evidence: .spectra-local/live-verification/P3-EDITORS-2-plan-reminder-reset-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-add-actions-and-reminder-fda81f87-20261002-redacted.txt | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — Quiz Add question and Plan Add task commands | P3-EDITORS-2 · step 12, Quiz and Plan portions | PASS — the full-surface Quiz bar showed Add question; one click increased the question count from 3 to 4 and Undo restored 3. The Plan side-panel bar displayed Add task; the temporary task was undone after the earlier add/redo check. Evidence: .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-temporary-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-undo-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-workbar-live-observations-fda81f87-20261002-redacted.txt | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — Quiz Add question availability in the side panel | P3-EDITORS-2 · step 12, side-panel check | FAIL — the Quiz Work studio side panel had no Add question button; the More quiz menu contained only Import questions. The same work displayed Add question in its full surface. See LV-068. Evidence: .spectra-local/live-verification/P3-EDITORS-2-quiz-sidepanel-more-menu-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-add-actions-and-reminder-fda81f87-20261002-redacted.txt | LV-068 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — full-surface Code General menu | P3-EDITORS-2 · step 12, full-surface menu | PASS — the General More code actions menu listed New file and Rename file. Evidence: .spectra-local/live-verification/P3-EDITORS-2-code-full-menu-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — Code New file and Rename path operations | P3-EDITORS-2 · step 12, New file and Rename | FAIL — none of 5 New file path submissions added a file; neither of 2 Rename submissions changed index.html. The file selector still showed only 1 · index.html after reload. See LV-066 and LV-067. Evidence: .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt | LV-066 (OPEN), LV-067 (OPEN) | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — Timetable workbar Undo/Redo, event fields and Add command | P3-EDITORS-2 · steps 3, 9 and 12, Timetable portions | BLOCKED — Library name search for “Timetable” returned 0 items; the Timetable type filter also returned 0, and the Library New menu offered no Timetable creation action. Therefore timetable workbar, recurrence, linked-work, custom-RRULE and Add-command checks could not be run. Plan reminders are covered separately. Evidence: .spectra-local/live-verification/P3-EDITORS-2-timetable-fixture-search-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-timetable-search-empty-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-new-menu-no-timetable-fda81f87-20261002.png | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-EDITORS-2 — remaining image, peer-history, import, comment and citation checks | P3-EDITORS-2 · steps 1–2, 4–8 and 10–11 | BLOCKED — no Quiz or flashcard image fixture, orphaned comment, Word-source-backed citation fixture, or staged large CSV/PDF import was available. No independent signed-in peer identity was supplied for speaker-notes, whiteboard-drag, collaborative Code undo, Sheets insert, or import/history collaboration checks. | — | fda81f87 (app); 18a31274 (checkout) |
+| P3-UI-SYSTEM · step 4 — Calendar ConfirmDialog Escape/focus return | P3-UI-SYSTEM · step 4, partial | PASS — the Calendar Remove confirmation in saved Profile A opened with Cancel focused; Escape closed it, restored focus to the opener and left scrollY unchanged at 0. A second confirmation removed the disposable event; it remained absent after reload, with the browser online and 0 console errors. Other dialog variants and pending-spinner state remain unchecked. Evidence: .spectra-local/live-verification/P3-UI-SYSTEM-calendar-confirmdialog-focus-20261002-redacted.txt | — | fda81f87 |
+| P3-AI-ENGINE — LV-050 flashcard-create recheck on fda81f87 | P3-AI-ENGINE · Flashcard deck · Create; LV-050 stale-title regression | FAIL — the exact eight-card create produced eight text cards but no editable deck. The chat still said “Still running” at 13,575 ms; the first inspection showing its refusal was at 41,867 ms. The refusal persisted after reload, with no “Work from this conversation” or “Open Photosynthesis” card, so the old-title attachment behavior did not recur. See LV-039 for the failed creation, LV-040 for the retained “New conversation” header, and LV-050 for its verified stale-title behavior. Browser online; 0 console errors, 1 Clerk warning. Evidence: .spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png; .spectra-local/live-verification/LV050-current-flashcard-create-redacted-fda81f87-20261002.png | LV-039 (NEEDS-DECISION); LV-040 (NEEDS-DECISION); LV-050 (VERIFIED) | fda81f87 (app); 18a31274 (checkout) |
+| LV-006 post-fix active-member analytics request check | LV-006 recheck · after membership is active, partial | PASS — with the supplied Profile A school-admin membership, /analytics showed current-account totals and no no-membership/offline copy. Both /api/spectra/analytics resource entries returned HTTP 200 (209 ms and 265 ms); 0 console errors and 1 Clerk warning. Historical Work/AI-run totals stayed Partial coverage/Not measured after about 14.5 seconds, so this is only the active-member request-boundary portion. LV-006’s no-membership recheck remains blocked in its separate row. Evidence: .spectra-local/live-verification/LV006-active-member-analytics-fda81f87-20261002-redacted.txt | LV-006 (FIXED; negative-state recheck blocked) | fda81f87 (app); 18a31274 (checkout) |
 
 ## Issues
 
@@ -1026,6 +1083,25 @@ Additional verifier occurrence (2026-10-02; application code 734dcd58):
 **User clarification (2026-10-02): no generic saved-progress box**
 
 No-artifact messages should not show the bottom “Saved progress and results” box. When artifacts are involved, the result should show the card for the created, modified or referenced artifacts.
+
+**Additional verifier occurrence (2026-10-02; application code fda81f87; fresh flashcard create):**
+
+**Steps**
+1. In saved Profile A on local instance 8 at 1280×720, open a fresh `/chat?new=1` with 0 context objects selected and confirm the browser is online.
+2. Submit `Create a flashcard deck about photosynthesis with 8 cards.` once.
+3. Read the final assistant reply and status in the collapsed chat view.
+4. Expand `Show details`, inspect the `Spectra run results` card, and activate `Open`.
+5. Inspect the deck title and card count. Reload the chat; inspect the default collapsed view, then expand details and reopen the deck.
+
+**Expected:** P3-AI-ENGINE · Flashcard deck says: “Create: \"Create a flashcard deck about photosynthesis with 8 cards.\"” The user clarified: “When artifacts are involved, then it should show the card for it.” After the deck is created and available, its result card should be present in the chat; the reply’s save-state wording should describe the persisted result consistently.
+
+**Actual:** The assistant said, “I’ve staged an 8-card flashcard deck covering the photosynthesis process, equation, where it happens, and the factors that affect its rate. It hasn’t been saved yet.” Expanding `Show details` exposed a `Spectra run results` card marked `Done` with `Open` and `Undo this run`. `Open` displayed `Photosynthesis — 8 Flashcards` with eight selectable cards. After reloading the chat, the default collapsed view again showed only the reply and `Show details`; the result card was not visible until details were expanded. It then reopened the same eight-card deck. No generic “Saved progress and results” box appeared. The browser was online; Playwright reported 0 errors and 1 Clerk warning. The exact final-reply time was not sampled; the card/deck was available by the next check at about 25–30 seconds. Local telemetry recorded request-to-response in 16,315 ms.
+
+**Frequency:** 1 of 1 fresh eight-card deck runs showed the “hasn’t been saved yet” wording while the deck was available and persisted after reload; in 1 of 1 post-reload default chat views, the result card was hidden until `Show details` was expanded.
+
+**Evidence:** `.spectra-local/live-verification/LV022-photosynthesis-reply-default-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-result-card-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-open-deck-after-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-create-after-fda81f87-redacted.txt`.
+
+**Commit tested:** Application code fda81f87; local web app on port 3000; documentation checkout 18a31274.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -2333,8 +2409,8 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 - **Severity:** Low
 - **Surface / role:** `/chat` header and recent-chat list / signed-in Profile A school administrator
 - **Report script:** Free exploration · first-week AI chat and chat recovery; the P3 reports do not specify automatic title generation.
-- **Commit tested:** `104ac5e8` (original observation); rechecked on `28f82f36`, `628f4987`, `7407840f` and `734dcd58` (local app on port 3000).
-- **Frequency:** 6 of 8 observed completed AI-response chats retained the generic title in the header; all 4 checked Moon chats and the recent simple “Hi” chat retained it in the recent-chat row after reload. The flashcard-creation chat received “Photosynthesis — 8 Flashcards”; the whiteboard chat showed “Water Cycle — Mind” while its Library artifact title was “Water Cycle — Mind Map.”
+- **Commit tested:** `104ac5e8` (original observation); rechecked on `28f82f36`, `628f4987`, `7407840f`, `734dcd58` and `fda81f87` (local app on port 3000).
+- **Frequency:** 8 of 10 observed completed AI-response chats retained the generic title in the header; all 4 checked Moon chats, the recent simple “Hi” chat, and the post-create presentation and post-edit document chats retained the generic header and recent-row title after reload. The flashcard-creation chat received “Photosynthesis — 8 Flashcards”; the whiteboard chat showed “Water Cycle — Mind” while its Library artifact title was “Water Cycle — Mind Map.”
 
 **Steps**
 1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected.
@@ -2909,7 +2985,7 @@ Evidence: `.spectra-local/live-verification/LV043-postfix-repeated-word-readback
 
 ### LV-050 · Failed flashcard creation opens a title-matched deck with a different card count and language
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** Chat AI “Work from this conversation” open control and Flashcard Deck / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Flashcard deck · Create, edit, append and rewrite
@@ -2942,6 +3018,22 @@ Evidence: `.spectra-local/live-verification/LV043-postfix-repeated-word-readback
 **Verifier re-check:** With an older Photosynthesis deck present, submit the fresh eight-card request. If creation is rejected and no exact artifact identity is surfaced by the model/run or selected by the user, its prose must not offer the old deck as work from the conversation. Check an ordinary answer mentioning an existing title, a successful new create sharing a title with older work, explicit selection/open and Keep in conversation nearby. The request acceptance/HTTP failures remain separate under LV-039.
 
 **Partial verifier re-check (2026-10-01; application code a3fe7d78; ordinary answer mentioning an existing title):** In a fresh zero-context chat with the existing Photosynthesis deck in Library, "What is photosynthesis? Give me one short definition." returned a relevant one-sentence answer. The prompt POST returned HTTP 200 in 1,129 ms; the answer was visible at 21:33:44.545 UTC. Playwright found neither "Open Photosynthesis" nor "Work from this conversation." After reload, the answer remained visible and no title-matched artifact control appeared; the activity display read "Saved progress and results" with "Show details." Browser status remained online, with 0 console errors and 1 Clerk development-key warning. Evidence: `.spectra-local/live-verification/LV050-ordinary-title-current-a3fe7d78-redacted.txt`; `.spectra-local/live-verification/LV050-ordinary-title-current-a3fe7d78-start.png`; `.spectra-local/live-verification/LV050-ordinary-title-current-a3fe7d78-answer.png`; `.spectra-local/live-verification/LV050-ordinary-title-current-a3fe7d78-after-reload.png`. This covers the ordinary-answer title-mention path only; the successful duplicate-title creation, explicit selection/open and Keep in conversation checks remain pending.
+**Verification** (verifier): VERIFIED on application commit `fda81f87`, 2026-10-02 (Europe/Madrid).
+
+1. In saved Profile A on local instance 8, open a fresh `/chat?new=1` with 0 context objects selected while online.
+2. Submit exactly: `Create a flashcard deck about photosynthesis with 8 cards.`
+3. Inspect the completed reply and any “Work from this conversation” or “Open Photosynthesis” controls.
+4. Reload the resulting conversation and inspect the reply and artifact controls again.
+
+**Expected:** The fixer’s re-check instruction says: “If creation is rejected and no exact artifact identity is surfaced by the model/run or selected by the user, its prose must not offer the old deck as work from the conversation.”
+
+**Actual:** The chat still said “Still running” at 13,575 ms. At the first inspection showing the final reply (41,867 ms after send), the assistant said the editable flashcard create had not been saved and returned eight text cards. Neither artifact control appeared in the main chat. After reload, the refusal and cards remained, and neither “Work from this conversation” nor “Open Photosynthesis” appeared. This verifies the stale title-matched deck attachment behavior for the rejected-create path. The new deck request itself failed; that remains under LV-039. A current-commit ordinary Photosynthesis-answer mention also persisted after reload without an artifact control; see `.spectra-local/live-verification/LV050-ordinary-title-current-fda81f87-20261002-redacted.txt`.
+
+**Frequency:** The rejected-create reproduction returned no title-matched artifact control in 1 of 1 current-commit attempts. Successful duplicate-title creation, explicit selection/open, and Keep in conversation could not be exercised because the create request failed; those neighboring paths are not claimed as verified.
+
+**Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`; `.spectra-local/live-verification/LV050-current-flashcard-create-redacted-fda81f87-20261002.png`.
+
+**Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
 
 ### LV-051 · A Spectra API read is aborted during a completed Moon answer
 
@@ -3252,12 +3344,12 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-056 · New chat displays another conversation’s approval and work item
 
-- **Status:** VERIFIED
+- **Status:** REOPENED
 - **Severity:** High
 - **Surface / role:** `/chat` new-conversation result and work card / signed-in Profile A school administrator
 - **Report script:** Free exploration · chat with the AI and create-new-chat flow
-- **Commit tested:** Application `4823b413` (post-fix local instance 8 recheck, web port 3000)
-- **Frequency:** 3 of 3 observations (bare `/chat`, New chat navigation, and reload of the new conversation)
+- **Commit tested:** Application `4823b413` (post-fix local instance 8 recheck); regression rechecked on application code `fda81f87` (local web port 3000; documentation checkout `18a31274`)
+- **Frequency:** 3 of 3 original post-fix observations had no foreign item; 1 of 1 current blank New chat checks retained the artifact context and work card after reload.
 
 **Steps**
 
@@ -3391,6 +3483,63 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** .spectra-local/live-verification/LV039-ww1-post-fda81f87-refusal-20261002.png; .spectra-local/live-verification/LV039-ww1-library-exact-search-fda81f87-20261002.png; .spectra-local/live-verification/LV039-ww1-post-fda81f87-redacted.txt.
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; saved Profile A.
+
+### LV-039 additional verifier occurrence · fresh WWI document create repeat after fda81f87 · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh `/chat` with 0 context objects selected and confirm the browser is online.
+2. Submit the P3-AI-ENGINE document-create request exactly once: `Create a document on the causes of WW1 with 4 sections.`
+3. Inspect the run immediately and again after about 15 seconds; check whether an editable document or open control appears.
+4. After later Playwright reads time out, reload the same conversation and inspect the persisted answer and controls.
+5. In Library, filter to Document and search `Causes of World War I`.
+
+**Expected:** P3-AI-ENGINE · Document · Create says: “Create: \"Create a document on the causes of WW1 with 4 sections.\"” The request should create an editable four-section document that can be opened and appears in Library.
+
+**Actual:** The initial view showed `Still running`, `Thinking` and `Getting ready`; the same state remained at the next check after 15 seconds. Subsequent Playwright snapshot reads timed out after 30 seconds, a screenshot request timed out after 5 seconds, and other page queries did not return. Reload succeeded at 10:49:19 UTC. The persisted answer began, “I couldn’t save this as an editable document: the creation request wasn’t accepted. Here’s the four-section draft:” and contained four section headings with draft text. No document editor, `Open document` control, `Spectra run results` card or generic `Saved progress and results` box appeared. The filtered Library search returned two title matches, both marked 2d ago; no new row appeared. The browser was online after reload; Playwright reported 0 errors and 1 Clerk warning. The exact time the final reply appeared in the UI was not sampled.
+
+**Console/network and timing:** Local instance-8 telemetry recorded a request at 10:39:38.608 UTC and a response event at 10:40:11.290 UTC (`elapsedMs=32682`). Header and five `agent_turn_headers` phase records were HTTP 200. This event interval does not establish the UI completion time or account-side billing. See the redacted text note for the recorded phase timestamps; no provider/model/usage values are included.
+
+**Frequency:** 2 of 2 fresh submissions of this exact prompt on application code fda81f87 produced no editable document. On this repeat, the visible settled answer was first observed after reload; the tool timeouts prevent asserting that the whole interval between submission and reload was product run time.
+
+**Evidence:** `.spectra-local/live-verification/LV039-ww1-response-after-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-ww1-library-results-rows-after-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-ww1-repeat-after-fda81f87-redacted.txt`.
+
+**Commit tested:** Application code fda81f87; local web app on port 3000; documentation checkout 18a31274.
+
+### LV-039 additional verifier occurrence · fresh six-slide presentation create after fda81f87 · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh `/chat` with 0 context objects selected and confirm the browser is online.
+2. Submit the P3-AI-ENGINE Presentation/Create prompt exactly: `Make a 6-slide deck on plate tectonics.`
+3. Inspect the run at the first check (~10 seconds) and the next check (~31 seconds after submission); inspect the answer and available presentation controls.
+4. Reload the same chat about 3.5 minutes after submission and inspect the persisted answer.
+5. In Library, select All types and search `Plate Tectonics`.
+
+**Expected:** P3-AI-ENGINE says: `Create: "Make a 6-slide deck on plate tectonics."` The request should create an editable presentation that can be opened and appears in Library.
+
+**Actual:** At the first check, the run showed `Still running` and `Thinking`; no Stop control was visible. At the next check, the response was visible and began, “I drafted the six-slide deck content, but it wasn’t saved as an editable presentation: the staging request was rejected before an artifact was created.” It then listed a six-slide outline. No editable presentation surface, `Open presentation` control, or artifact result card appeared. No generic `Saved progress and results` box appeared for this response. The prompt and response remained after reload. Library returned two partial matches (a Chat and a Presentation), both marked 16h ago; no new item for this request appeared. Browser online; Playwright recorded 0 console errors and 1 Clerk development-key warning. The exact UI completion time, provider-call count, and `/api/spectra/run` timing were not captured.
+
+**Frequency:** 1 of 1 fresh submissions of this prompt in this occurrence produced no editable presentation.
+
+**Evidence:** `.spectra-local/live-verification/LV039-presentation-create-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-presentation-library-search-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-presentation-create-fda81f87-20261002-redacted.txt`.
+
+**Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
+
+### LV-040 additional verifier occurrence · post-create presentation title after fda81f87 · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In the completed presentation-create conversation, inspect the header and current sidebar row.
+2. Reload the same conversation about 3.5 minutes after submission and inspect the header and row after the transcript returns.
+
+**Expected:** LV-040 records the free-exploration expectation that the header and recent-chat row distinguish a completed conversation from other chats; no P3 report defines automatic title generation.
+
+**Actual:** The presentation-create answer remained visible after reload, but the chat header and sidebar row still read `New conversation`; the row subtitle was `Inbox`. Browser online; 0 console errors and 1 Clerk development-key warning.
+
+**Frequency:** 1 of 1 completed chats in this occurrence retained the generic title after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV040-presentation-thread-title-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-presentation-title-fda81f87-20261002-redacted.txt`.
+
+**Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
+
 ### LV-058 · Short user messages occupy most of the chat column
 
 - **Status:** VERIFIED
@@ -3421,6 +3570,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Verifier recheck:** After the application renders, reload the existing greeting and confirm the short user bubble fits its content. Check a normally occurring sending prompt and its persisted version in full/compact views; long text and unbroken URLs should wrap without horizontal overflow, line breaks and attachment chips remain readable, and right alignment is retained. No extra AI greeting is needed. Only the verifier sets VERIFIED; the source commit hash follows in the documentation closeout.
 **Verification (verifier):** **VERIFIED** on application commit fda81f87, 2026-10-02. On a fresh no-context chat at desktop 1280×720, “Hi.” measured 63 px wide and was right-aligned; after reload the same message remained 63 px wide. The regular Send command completed the exchange. Browser online; 0 console errors and 1 Clerk development-key warning. Evidence: .spectra-local/live-verification/LV058-post-fda81f87-hi-20261002.png; .spectra-local/live-verification/LV058-post-fda81f87-hi-reload-redacted.txt.
+**Neighboring recheck (verifier):** A fresh four-line user message with a long unbroken example.com URL and a synthetic text-file attachment rendered right-aligned in a 672 px bubble. The URL wrapped without horizontal overflow, all explicit line breaks remained visible, and the attachment chip persisted after reload. The assistant answered from the attachment content in 7,402 ms. Browser online; 0 console errors and 1 Clerk development-key warning. Evidence: .spectra-local/live-verification/LV058-long-attachment-postreload-redacted.txt; .spectra-local/live-verification/LV058-long-attachment-persist-20261002.png; .spectra-local/live-verification/LV058-long-attachment-post-reload-20261002.png.
 
 ### LV-059 · Application routes render blank after the web process restarts
 
@@ -3466,3 +3616,371 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - Latest full suite on unchanged runtime: **4,647 passed, 2 failed, 1 skipped**, 105.10 seconds, with an additional unchanged skip-link teardown timeout. Both TS projects, lint and five gates passed; all 118 conversation/sheet/skip-link tests passed in isolation. This assessment adds **26/26 passing real-loop tests**; documentation-only work does not require repeating the frozen full suite.
 - NEEDS-DECISION: LV-003 (expired-invite HTTP behavior), LV-012 (Bridge discovery/activation), LV-022 (post-save reply contract), LV-028 (shortcut mapping), LV-039 (distinct write recovery after a no-progress read stall), LV-040 (fallback title versus another configured-model call). CANNOT-REPRODUCE: LV-004 (decoded invitation works), LV-007 (idle/pending Escape behavior), LV-051 (aborted read with completed answer), LV-052 (monthly K/L formulas present). Evidence and consequences are recorded in the entries.
 - NEEDS-INFO remains LV-017 (deployment exception), LV-046 (stale waiting-label correlation), LV-054 (original generation of blank labels unavailable), LV-059 (post-restart loading boundary; signed-in routes recover after warm-up, sign-in not yet rechecked). Earlier LV-039 intake timeouts remain unresolved independently of its confirmed guard-policy question. No OPEN, REOPENED or FIXING issue remains; stop pending the decision or another actionable verifier report.
+
+### LV-060 · Scheduled Calendar block cannot be opened when an official deadline occupies the same slot
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Calendar week grid, scheduled plan blocks and ManageBac official deadlines / signed-in Profile A school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 4, scheduled plan block details; step 3, official-event controls
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** 1 of 1 attempts to open the `File Processing Test` scheduled block from the Calendar item failed; the overlapping `Maths Unit 7 Test` official deadline opened.
+
+**Steps**
+1. In saved Profile A at 1280×720, open `/calendar` on local instance 8.
+2. Use the date control to display 22–28 Sept 2026.
+3. Locate the Calendar items `16:00 File Processing Test` and `16:00 Maths Unit 7 Test`.
+4. Try to open `File Processing Test` from its Calendar item.
+5. Open `Maths Unit 7 Test` from the same slot and inspect its details and available controls.
+
+**Expected:** P3-WORKSPACE-FLOWS step 4 says: “Click a scheduled block. Expected: details with Mark complete, +30 min and ‘Open plan’, which opens the plan.” Step 3 says an official ManageBac record should have no Remove button.
+
+**Actual:** The `File Processing Test` item remained listed in the Calendar accessibility tree, but the click timed out after 5 seconds. The click log identified `Maths Unit 7 Test` as the pointer target at the same screen bounds (x=532, y=311, width=90, height=24). The scheduled block did not open. Clicking `Maths Unit 7 Test` succeeded and displayed details labelled `Official deadlines`, with time 16:00 and an `Official source` note; no Remove action appeared. The browser was online; Playwright recorded 0 console errors and 1 Clerk warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-official-deadline-details-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002-redacted.txt`.
+
+### LV-061 · DOCX open emits one failed lens request
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Library Work studio and Bridge-linked DOCX open / signed-in Profile A school administrator
+- **Report script:** P3-BRIDGE-LENS · Word fixtures · “Open each through the Bridge in Spectra.”
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** 1 of 3 observed route loads emitted the HTTP 400 console error: the first open. A reload and a separate fresh-tab route open each recorded 0 console errors.
+
+**Steps**
+1. In saved Profile A, use the Ready Bridge folder `bridge-disposable-20261002-run1` containing the disposable copy `Spectra Bridge Disposable Complex DOCX Sample.docx`.
+2. Open that DOCX from Library and inspect the Work studio and browser console.
+3. Reload the same artifact route and inspect the console again.
+4. Open the same artifact route in a fresh tab and inspect the console and Work studio status.
+
+**Expected:** P3-BRIDGE-LENS says to “Open each through the Bridge in Spectra.” No failed document request should be recorded during the open.
+
+**Actual:** The first open rendered the DOCX in Work studio, while the Playwright console recorded `Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://localhost:3000/api/spectra/lenses/docx:0`. One reload and one fresh-tab route open each showed 0 console errors and 1 Clerk development-key warning. The later Work studio status read “Office still has this file open. Spectra will verify it after Office finishes saving.” The same synthetic copy was open in the test desktop's Word session. The 400 did not recur on those two later opens, and the failed request did not prevent the document surface from appearing. No request or response body was retained.
+
+**Evidence:** `.spectra-local/live-verification/P3-BRIDGE-docx-open-400-redacted.txt`; `.spectra-local/live-verification/P3-BRIDGE-docx-syncing-20261002.png`; `.spectra-local/live-verification/P3-BRIDGE-docx-office-open-status-20261002.png`.
+
+### LV-062 · Document editor repeatedly reports realtime connection failure while browser is online
+
+- **Status:** OPEN
+- **Severity:** High
+- **Surface / role:** New Document Work studio, local draft state and realtime collaboration / signed-in Profile A school administrator
+- **Report script:** P3-EDITORS · save/reload and collaboration persistence; P3-SYNC-DURABILITY · browser reconnect state
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** 27 identical realtime WebSocket errors in the first editor tab over 17 minutes 9 seconds; 19 more in a fresh tab over 11 minutes 39 seconds; one on the Bridge-linked DOCX route after 17 minutes 28 seconds; 15 additional errors in the Library observation over 8 minutes 48.296 seconds; 13 in the Quiz, deck and Plan session; 17 further errors in its continued Code-workspace log; and 30 in the following Code file-action session. A “Connection interrupted” status was observed once in the fresh tab while the browser was online; it was absent in a later read while console errors continued. At least 122 matching errors are recorded across these observations.
+
+**Steps**
+1. In saved Profile A on local instance 8, use Library → New → Document.
+2. Type this synthetic paragraph into the Work surface without pressing a separate Save control: `Spectra verification note: violet orchids need 17 minutes of gentle morning light in our fictional greenhouse. The invented label is ORCHID-CODE-742.`
+3. Keep the browser online and inspect the page console for about 3 minutes.
+4. Open the same artifact route in another tab in the same saved Profile A browser session; inspect the Work studio status and console.
+
+**Expected:** P3-EDITORS says to “reload both browsers and confirm the result persisted.” While online, the editing session should not repeatedly report failed realtime WebSocket handshakes.
+
+**Actual:** `navigator.onLine` was `true`. The first tab logged 27 identical errors over 17 minutes 9 seconds: `WebSocket connection to 'ws://localhost:3000/_spectra/realtime' failed: Connection closed before receiving a handshake response`. The fresh tab showed `Connection interrupted. Your draft stays on this device.` at the first settled read, and its console logged 19 more identical errors over 11 minutes 39 seconds. The same error appeared once on the Bridge-linked DOCX route after 17 minutes 28 seconds. That route displayed “Office still has this file open” because the disposable copy remained open in Word. The synthetic text appeared in both tabs in the same browser profile. At a later read the interrupted status was absent while console errors continued. Because both tabs share one saved browser profile, this check does not establish that the text reached the server or an independent peer.
+
+**Evidence:** `.spectra-local/live-verification/P3-EDITORS-realtime-errors-fda81f87-redacted.txt`; `.spectra-local/live-verification/P3-EDITORS-realtime-draft-in-second-tab-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-unsaved-before-ai-fda81f87.png`; `.spectra-local/live-verification/P3-BRIDGE-docx-office-open-status-20261002.png`.
+
+### LV-063 · Context summary returns text from an unrelated World War I request
+
+- **Status:** OPEN
+- **Severity:** High
+- **Surface / role:** Live Dock AI summary with a selected document context / signed-in Profile A school administrator
+- **Report script:** P3-CONTEXT · recently edited document text and live-room context
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** 1 of 2 consecutive identical context-summary submissions returned an answer unrelated to the selected document's visible text; the first answer summarized it correctly.
+
+**Steps**
+1. In saved Profile A on local instance 8, use Library → New → Document.
+2. Type this synthetic paragraph into the document: `Spectra verification note: violet orchids need 17 minutes of gentle morning light in our fictional greenhouse. The invented label is ORCHID-CODE-742.` Do not press a separate Save control.
+3. Confirm the Live Dock shows `New Document · 1 context` and submit exactly: `Summarise what I just wrote.`
+4. Submit the exact same prompt once more without changing the document text or selected context.
+5. Compare both answers with the visible document text and its unique marker.
+
+**Expected:** P3-CONTEXT says: “A document edited within the last 30 s, then ‘summarise what I just wrote’: the answer must reflect the unsaved text (live room reachable), and fall back to the saved copy when the gateway is down.”
+
+**Actual:** The composer showed `New Document · 1 context`. The first answer correctly summarized the visible orchid paragraph and `ORCHID-CODE-742`. The second answer was `You asked for a document with four sections about the causes of World War I.` It omitted the selected document's text. The Live chat transcript above the two orchid prompts contained an older World War I document-create exchange. `navigator.onLine` was `true`. The editor had logged repeated realtime WebSocket handshake errors in the same session; see LV-062. No provider-call count or exact AI run latency was captured. The draft's server persistence was not established.
+
+**Evidence:** `.spectra-local/live-verification/P3-CONTEXT-orchid-summary-fda81f87-redacted.txt`; `.spectra-local/live-verification/P3-CONTEXT-orchid-unsaved-before-ai-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-first-summary-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-repeat-wrong-summary-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-ai-result-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-after-answer-fda81f87.png`.
+
+### LV-039 additional verifier occurrence · third fresh WW1 document create after fda81f87 · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A at desktop 1280×720 on local instance 8, open a fresh `/chat` with 0 context objects selected.
+2. Submit exactly: `Create a document on the causes of WW1 with 4 sections.`
+3. Observe the run status and wait for the final response.
+4. Inspect for an editable document, an Open document control, and an artifact result card.
+5. Reload the same conversation, then search Library for the exact title `Causes of World War I`.
+
+**Expected:** P3-AI-ENGINE says: `Create: "Create a document on the causes of WW1 with 4 sections."` The request should produce an editable document with the requested four sections.
+
+**Actual:** At about 12.6 seconds the page still showed `Still running`, `Thinking`, and `Getting ready`. The four-section answer was first observed at about 32.8 seconds from the observer start immediately before submission; the exact send-to-visible duration was not separately measured. It began: `I wasn’t able to save a Spectra document: the creation proposal wasn’t accepted. Here’s the four-section content:` No document editor, Open document control, or artifact result card appeared. The answer remained after reload. Library search showed an exact-title Document row marked `2d ago` and older partial matches, but no newly updated row for this run. No generic `Saved progress and results` box appeared. `navigator.onLine` was true; the tab had 0 console errors and 1 Clerk warning. Performance entries showed two distinct `/api/spectra/run` requests with status 200 and durations 472 ms and 199 ms. One `/api/spectra` entry had responseStatus 0 without a matching console error. No provider-call count or account-side usage was captured; browser resource timing does not establish model-provider timing.
+
+**Frequency:** This was the third observed fresh submission of this exact prompt on application code `fda81f87`; all three returned chat text without a newly editable document.
+
+**Evidence:** `.spectra-local/live-verification/LV039-WW1-create-repeat-fda81f87-20261002.png`; `.spectra-local/live-verification/LV039-WW1-library-existing-exact-title-20261002.png`; `.spectra-local/live-verification/LV039-WW1-create-repeat-fda81f87-20261002-redacted.txt`.
+
+**Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+### LV-022 additional verifier occurrence · synthetic document edit save-state wording · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, create a disposable Library Document titled `Spectra Verifier Orchid Edit Fixture 20261002` with two sections: Water — `Give the fictional orchid 40 milliliters of water each Monday`; Light — `Place it beneath a gentle lamp for 17 minutes each morning`.
+2. Reload the document once and confirm the title and both sections remain.
+3. Open a fresh chat and select this document as the only context item.
+4. Submit exactly: `Rewrite the second section to be more concise.`
+5. Read the assistant reply and Show details, inspect the document, then reload its route and inspect the same sections.
+
+**Expected:** P3-AI-ENGINE Document says: `Edit: with it open, "Rewrite the second section to be more concise."` After the edit remains in the document after reload, the reply’s save-state wording should describe the persisted change consistently. LV-022 remains NEEDS-DECISION on the final-reply contract.
+
+**Actual:** The assistant said the revised sentence was staged and `It hasn’t been saved yet.` Show details reported `1 action completed`, `Done`, and `Based on 1 work item and 1 thread`. Section 2 changed to `Give it 17 minutes of gentle lamp light each morning.` while section 1 remained unchanged. The section-2 wording remained after reloading the artifact route. The chat showed the artifact under `Work from this conversation`; the generic `Saved progress and results` box was absent. The browser was online; the chat tab had 0 console errors and 1 Clerk warning. Two `/api/spectra/run` resource entries returned status 200 with durations 473 ms and 200 ms; these are browser request timings, not provider-call timings.
+
+**Frequency:** 1 of 1 controlled selected-document edits completed and persisted after reload while the assistant said the change had not been saved.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-edit-fixture-observation-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-AI-edit-fixture-chat-result-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-AI-edit-fixture-after-ai-reload-fda81f87-20261002.png`.
+
+**Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+### LV-040 additional verifier occurrence · title after successful document edit · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A, complete the selected-context document edit recorded under LV-022.
+2. Reload the same chat thread.
+3. Inspect the chat header and the most-recent sidebar row.
+
+**Expected:** LV-040 records: `After a chat receives a final response, its header and recent-chat row should show a title that distinguishes it from other completed conversations.`
+
+**Actual:** After the document edit had persisted after reload, the chat header read `New conversation`; the most-recent sidebar row also read `New conversation`, with subtitle `Inbox`. The browser was online; the tab showed 0 console errors and 1 Clerk warning.
+
+**Frequency:** 1 of 1 successful document-edit chats retained the generic header and recent-row titles after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV040-post-ai-edit-title-header-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-row-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-fda81f87-20261002-redacted.txt`.
+
+**Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+### LV-056 additional verifier occurrence · artifact context retained by blank New chat · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A, open a fresh chat and select `Spectra Verifier Orchid Edit Fixture 20261002` as its only context item.
+2. Without submitting a prompt, select `New chat`.
+3. Inspect the new conversation for messages, selected context, and work cards.
+4. Reload `/chat?new=1` and inspect those items again.
+
+**Expected:** LV-056 says: `A new conversation should not display a pending result, approval action, or work item from another conversation. Before a prompt is sent, the new conversation should have no conversation messages or result for that other thread.`
+
+**Actual:** The new conversation had 0 message articles but displayed the synthetic document card and `1 context object selected`. The same context and work card remained after reloading `/chat?new=1`. The browser was online; Playwright recorded 0 console errors and 1 Clerk warning. No approval control was present or used.
+
+**Frequency:** 1 of 1 blank New chat navigations from the selected-context thread carried the artifact context and work card into the new conversation, including after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV056-new-chat-context-from-other-thread-fda81f87-20261002.png`; `.spectra-local/live-verification/LV056-new-chat-context-fda81f87-20261002-redacted.txt`.
+
+**Commit tested:** Original verification commit `4823b413`; regression observed on application code `fda81f87`, local instance 8, web port 3000; documentation checkout `18a31274`.
+
+### LV-062 additional verifier occurrence · Library realtime errors while browser is online · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, open the disposable Library Document and keep the browser online.
+2. During document view, creation, edit, and reload checks, inspect the Playwright browser console for realtime connection errors.
+3. Check `navigator.onLine`, the visible editor content, and any connection-status copy before and after reload.
+
+**Expected:** P3-EDITORS says to `reload both browsers and confirm the result persisted.` During the online Library session, the browser should not repeatedly report failed realtime handshakes.
+
+**Actual:** The saved Profile A console recorded 15 identical errors over 8 minutes 48.296 seconds, with offsets 156568–684864 ms: `WebSocket connection to 'ws://localhost:3000/_spectra/realtime' failed: Connection closed before receiving a handshake response`. `navigator.onLine` was true at the Library editor checks before and after reload; the document remained visible after reload. The note does not attribute the separate AI result to these errors.
+
+**Frequency:** 15 additional identical errors in this Library observation interval; at least 62 matching errors are now recorded across the existing LV-062 observations.
+
+**Evidence:** `.spectra-local/live-verification/LV062-library-realtime-errors-fda81f87-20261002-redacted.txt`; console excerpt `.playwright-cli/console-2026-10-02T12-47-55-757Z.log`, lines 4–8, 12–17 and 21–24.
+
+**Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+### LV-064 · Selected-document AI edit takes about 21.5 seconds to show a final response
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/chat` selected-context Document edit / signed-in Profile A school administrator
+- **Report script:** P3-AI-ENGINE · Document · Edit; P2-AI-QUALITY · selected-context task completion
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** 1 of 1 controlled short section edits showed the first visible final assistant text about 21.5 seconds after submission.
+
+**Steps**
+1. In saved Profile A on local instance 8, create a disposable Library Document titled `Spectra Verifier Orchid Edit Fixture 20261002` with two short sections: Water — `Give the fictional orchid 40 milliliters of water each Monday`; Light — `Place it beneath a gentle lamp for 17 minutes each morning`.
+2. Reload the document and confirm both sections remain.
+3. Open a fresh chat, select the document as the only context item, and submit exactly: `Rewrite the second section to be more concise.`
+4. Observe the status copy and elapsed time from submit to the first visible final assistant text.
+
+**Expected:** P3-AI-ENGINE says: `Edit: with it open, "Rewrite the second section to be more concise."` and `Time to first token should drop compared with main (F5).` The user stated that simple tasks should take `just a few seconds.`
+
+**Actual:** `Still running` appeared about 1.4 seconds after submit, `Reading source material` at about 9.0 seconds, `Loaded the current artifact` at about 15.5 seconds, and the final assistant text at about 21.5 seconds after submit. The document edit completed and persisted after reload. This measurement is time to visible final assistant text, not a separately measured provider first-token timestamp. Browser online; 0 console errors and 1 Clerk warning. Performance entries showed two `/api/spectra/run` responses, both HTTP 200, with browser timings 473 ms and 200 ms. No provider-call count or account-side usage was captured.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-edit-fixture-observation-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-AI-edit-fixture-chat-result-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-AI-edit-fixture-after-ai-reload-fda81f87-20261002.png`.
+
+**F5 comparison:** No comparable main-path first-token baseline was captured during this observation, so a relative first-token change cannot be established.
+### LV-065 · Undo and Redo are not first in three tested editor bars
+
+- **Status:** OPEN
+- **Severity:** Low
+- **Surface / role:** Quiz, flashcard deck and Plan Workbars / signed-in Profile A school administrator
+- **Report script:** P3-EDITORS-2 · step 3
+- **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`
+- **Frequency:** The same order appeared in all 3 tested workbars (Quiz, Deck and Plan); timetable was not checked.
+
+**Steps**
+1. In saved Profile A on local instance 8, open the `LIVE-QA Quiz` work from Library and inspect its workbar before editing.
+2. Open `LIVE-QA Flashcards` and inspect the Deck workbar before editing.
+3. Open `LIVE-QA Plan` and inspect the Plan workbar before editing.
+
+**Expected:** P3-EDITORS-2 says: “Undo and Redo sit first in the bar and are disabled before any edit.”
+
+**Actual:** Before any test edit, Undo and Redo were disabled in all three workbars. In Quiz, the Previous question, Current question and Next question controls appeared before Undo and Redo. In Deck, Previous card, Current card and Next card appeared before them. In Plan, List, Board and Timeline appeared before them. The reversible edit check in each of the three workbars restored its original value after Undo; Redo reapplied the temporary value and a final Undo restored the original state.
+
+**Evidence:** `.spectra-local/live-verification/P3-EDITORS-2-quiz-workbar-before-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-EDITORS-2-deck-workbar-before-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-EDITORS-2-plan-workbar-before-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-EDITORS-2-workbar-live-observations-fda81f87-20261002-redacted.txt`.
+### LV-062 additional verifier occurrence · Quiz, deck and Plan Library workspaces · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, open `/library` and inspect the local `LIVE-QA Quiz`, `LIVE-QA Flashcards` and `LIVE-QA Plan` workspaces.
+2. Keep the browser online while viewing the editors, making and undoing temporary changes, and reloading the Plan workspace.
+3. Check `navigator.onLine`, the visible page for offline-status copy, and the Playwright browser console.
+
+**Expected:** The existing LV-062 entry quotes P3-EDITORS: “reload both browsers and confirm the result persisted.” While the browser reports online, it should not repeatedly report failed realtime handshakes.
+
+**Actual:** The browser reported `navigator.onLine` as `true`; searching the visible page for `offline` returned no match. The saved console recorded 13 identical errors over 484,387 ms. Nine occurred before reload at offsets 30,646–332,985 ms, and four after reload at offsets 370,848, 408,667, 446,647 and 484,387 ms: `WebSocket connection to 'ws://localhost:3000/_spectra/realtime' failed: Connection closed before receiving a handshake response`. The final post-reload Playwright console count was 4 errors and 1 Clerk development-key warning. No offline-status copy was visible at that check.
+
+**Frequency:** 13 additional identical errors in this Library/Work studio session; at least 75 matching errors are recorded across the existing LV-062 observations.
+
+**Evidence:** `.spectra-local/live-verification/P3-EDITORS-2-workbar-live-observations-fda81f87-20261002-redacted.txt`; console excerpt `.playwright-cli/console-2026-10-02T13-48-34-964Z.log`, lines 4–20.
+
+**Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+| P3-UI-SYSTEM / P2-EXPERIENCE — OS reduced-motion command bar and Escape focus | P3-UI-SYSTEM · step 7, command bar; P2-EXPERIENCE · step 10, partial | PASS — emulated prefers-reduced-motion: reduce; the command-bar dialog opened with 0 running animations after 120 ms. Escape closed it, left 0 dialogs open, and returned focus to Open Spectra command bar. The emulation was reset to no-preference; 0 console errors and 1 Clerk warning. Other motion surfaces remain unchecked. Evidence: .spectra-local/live-verification/P3-UI-SYSTEM-reduced-motion-commandbar-fda81f87-20261002-redacted.txt | — | fda81f87 |
+
+### LV-062 additional verifier occurrence · continued Code work and file-action sessions · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, keep the synthetic Code work open while inspecting file actions and reloading the Library Work studio.
+2. Check navigator.onLine, visible offline-status copy, and the Playwright console during the same browser session.
+
+**Expected:** The existing LV-062 entry quotes P3-EDITORS: “reload both browsers and confirm the result persisted.” During these online Code work checks, the browser should not repeatedly report failed realtime handshakes.
+
+**Actual:** At the post-reload Code check, navigator.onLine was true and the visible page contained no offline or connection warning copy. The earlier console log, which already included the 13-error Quiz/Deck/Plan occurrence through offset 484,387 ms, now contained 17 further identical errors at offsets 522,142–1,131,287 ms. The following Code file-action console log contained 30 identical errors at offsets 5,462–1,104,605 ms. Every console error entry in these intervals matched WebSocket connection to ws://localhost:3000/_spectra/realtime failed: Connection closed before receiving a handshake response; no Uncaught or Unhandled promise entry appeared in those logs. The Code file selector still showed only 1 · index.html after reload; see LV-066 and LV-067.
+
+**Frequency:** 47 additional identical errors in these two Code/editor intervals; at least 122 matching errors are recorded across the existing LV-062 observations.
+
+**Evidence:** .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-full-menu-fda81f87-20261002.png.
+
+**Commit tested:** Application code fda81f87; local instance 8, web port 3000; documentation checkout 18a31274.
+
+### LV-066 · Code New file submission closes without creating a file
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Code Work studio file actions in side panel and full surface / signed-in Profile A school administrator
+- **Report script:** P3-EDITORS-2 · step 12
+- **Commit tested:** Application code fda81f87; local instance 8, web port 3000; documentation checkout 18a31274
+- **Frequency:** 0 of 5 New file path submissions added a file during this verification session.
+
+**Steps**
+1. In saved Profile A on local instance 8, open the synthetic Spectra Code New File Check 20261002 work in Library. Confirm the file selector shows only 1 · index.html.
+2. In the Work studio side panel, open More code actions and choose New file.
+3. Enter src/launch-audit-check.js and press Enter.
+4. Inspect the file selector, then reload the Library work and inspect the selector again.
+
+**Expected:** P3-EDITORS-2 says: “the file is created and opened.”
+
+**Actual:** The New path form closed after Enter, but the selector remained 1 · index.html; after reload it still contained only that file. Four further path submissions also added no file: src/launch-audit-check.py with Enter, src/launch-audit-check.js with the visible Create button, launch-audit-check.js with Enter in the side panel, and full-surface-check.js with Enter in the full surface.
+
+**Evidence:** .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-enter-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-create-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-full-after-newfile-enter-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png.
+
+### LV-067 · Code Rename file submission leaves the original path
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Code Work studio file actions in side panel / signed-in Profile A school administrator
+- **Report script:** P3-EDITORS-2 · step 12
+- **Commit tested:** Application code fda81f87; local instance 8, web port 3000; documentation checkout 18a31274
+- **Frequency:** 0 of 2 Rename path submissions changed the selected file name during this verification session.
+
+**Steps**
+1. In saved Profile A on local instance 8, open the synthetic Spectra Code New File Check 20261002 work in Library and confirm the selector shows 1 · index.html.
+2. Open More code actions and choose Rename file. The path field shows index.html.
+3. Enter launch-audit-renamed.html and click Rename.
+4. Inspect the file selector, then reload the Library work and inspect it again.
+
+**Expected:** P3-EDITORS-2 says: “it renames the file.”
+
+**Actual:** The Rename form closed, but the file selector remained 1 · index.html. A second Rename attempt using src/launch-audit-renamed.html also left the selector unchanged. After reload, the selector still showed only 1 · index.html.
+
+**Evidence:** .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-create-fda81f87-20261002.png.
+
+### LV-068 · Quiz side-panel workbar has no Add question action
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** Quiz Work studio side panel / signed-in Profile A school administrator
+- **Report script:** P3-EDITORS-2 · step 12
+- **Commit tested:** Application code fda81f87; local instance 8, web port 3000; documentation checkout 18a31274
+- **Frequency:** The Add question action was absent in 1 of 1 side-panel checks; it was present in the same work’s full surface.
+
+**Steps**
+1. In saved Profile A on local instance 8, open LIVE-QA Quiz from Library in the Work studio side panel.
+2. Inspect the General and Questions categories and open More quiz.
+3. Check the visible Quiz work surface and menu for an Add question action.
+4. Open the same work in its full surface and inspect the General workbar.
+
+**Expected:** P3-EDITORS-2 says: “Check that quiz, plan and timetable commands named ‘Add …’ appear in their bars.”
+
+**Actual:** In the side panel, no Add question control was visible in the Quiz work surface; the More quiz menu contained only Import questions. In the full surface, two Add question buttons were visible. Clicking one increased the question selector from three to four entries; Undo returned it to the original three. The Plan side panel separately displayed its Add task control.
+
+**Evidence:** .spectra-local/live-verification/P3-EDITORS-2-quiz-sidepanel-more-menu-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-temporary-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-undo-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-add-actions-and-reminder-fda81f87-20261002-redacted.txt.
+### LV-069 · Stale Calendar conflict recovery notice is inconsistent
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** /calendar personal-event drag conflict across two saved Profile A tabs / signed-in school administrator
+- **Report script:** P3-WORKSPACE-FLOWS · step 1
+- **Commit tested:** Application code fda81f87; local instance 8; web port 3000; documentation checkout 18a31274
+- **Frequency:** 1 of 4 stale-tab drags had no visible conflict notice on immediate and later reads; 3 of 4 showed the same recovery notice. Each stale drag recorded one HTTP 409 Conflict console entry.
+
+**Steps**
+1. In saved Profile A on local instance 8, open /calendar in two tabs and create a disposable personal event titled Spectra Stale Calendar Check 20261002.
+2. With both tabs showing the same event position, drag the event in tab A to another time. Leave tab B on its earlier displayed position.
+3. In tab B, drag the event from its earlier position to a different time.
+4. Read the notice and event position immediately and after about 3 seconds without reloading the route.
+
+**Expected:** P3-WORKSPACE-FLOWS says: “the CALENDAR_GESTURE_CONFLICT code reaches the client, then ‘Calendar changed’ and a reload.”
+
+**Actual:** In 4 of 4 stale drags, the browser console recorded “Failed to load resource: the server responded with a status of 409 (Conflict)” while navigator.onLine was true. In 3 of 4, a notice said “The block changed elsewhere, so Calendar restored its latest position.” and the event returned to tab A’s newer position. In 1 of 4, no matching notice appeared on the immediate or later text reads; tab B first retained its older 18:00–18:30 position, then showed tab A’s 18:45–19:15 position without visible copy. The browser remained at /calendar; no route reload was observed. No event loss was observed.
+
+**Evidence:** .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-redacted-20261002.png; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-toast-redacted-20261002.png.
+### LV-039 additional verifier occurrence · eight-card flashcard create after fda81f87 · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, open a fresh `/chat?new=1` with 0 context objects selected and confirm the browser is online.
+2. Submit exactly: `Create a flashcard deck about photosynthesis with 8 cards.`
+3. Observe the run at 13.575 seconds and inspect the first visible final response; note elapsed time and whether an editable deck or artifact-open control appeared.
+4. Reload the conversation and check whether the reply and artifact controls persist.
+
+**Expected:** P3-AI-ENGINE says: “Create a flashcard deck about photosynthesis with 8 cards.” The request should create an editable eight-card Flashcard Deck.
+
+**Actual:** At 13,575 ms after send, the chat still said “Still running.” At the first inspection showing the final answer, 41,867 ms after send, the assistant said “I couldn’t save this as an editable flashcard deck in this run. Here are the eight cards:” and returned eight text-only front/back pairs. No editable deck, “Work from this conversation,” or “Open Photosynthesis” control appeared in the main chat. After reload, the refusal and text cards persisted and the artifact controls remained absent. This additional create failure has no account-side model/provider attribution; the associated browser’s two `/api/spectra/run` resource timings were 557 ms and 216 ms and do not establish provider first-token timing or call count. Browser online; 0 console errors and 1 Clerk warning; no offline copy.
+
+**Frequency:** 1 of 1 fresh eight-card create attempts in this occurrence did not produce an editable deck; final refusal was first observed at 41,867 ms after send.
+
+**Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`; `.spectra-local/live-verification/LV050-current-flashcard-create-redacted-fda81f87-20261002.png`.
+
+**Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+### LV-040 additional verifier occurrence · completed flashcard-create reply retains “New conversation” header · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8, open a fresh `/chat?new=1` with 0 context objects selected while online.
+2. Submit: `Create a flashcard deck about photosynthesis with 8 cards.`
+3. Wait for the terminal assistant response, then inspect the conversation header.
+4. Reload the conversation and inspect the header again.
+
+**Expected:** LV-040 describes that completed AI chats should not remain titled `New conversation` after an AI response has completed.
+
+**Actual:** The request ended with an assistant refusal and eight text cards. The main conversation header remained `New conversation` both before and after reload. The chat answer itself persisted. The Library recent-chat row showed prompt text, while the open conversation header continued to show `New conversation`.
+
+**Frequency:** The header remained `New conversation` in 1 of 1 current-commit create responses, including after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`.
+
+**Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.

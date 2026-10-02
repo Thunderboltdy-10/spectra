@@ -4,6 +4,8 @@ import { selectedAgentAllowsModelTool } from "@/app/api/spectra/run/loop/intake"
 import { runSpectraAgentLoop, type SpectraAgentMessage } from "../ai/agent-loop";
 import { appendPromptContext } from "../ai/prompt-messages";
 import { documentSkill } from "../artifacts/skills/document";
+import { ARTIFACT_TYPE_KEYS } from "../artifacts/types";
+import { SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS, parseSpectraPlan } from "../operations/schema";
 import { artifactQualityPromptSection, artifactQualityTaskSection } from "../quality/rubrics";
 
 type Packet = { messages: SpectraAgentMessage[]; tools: Array<{ function: { name: string } }>; tool_choice: unknown };
@@ -178,5 +180,31 @@ describe("S11 stable prompt and optional artifact guidance", () => {
     expect(last.slice(0, 2)).toEqual(initial);
     expect(last.at(-1)).toMatchObject({ role: "system", content: expect.stringContaining("Reliability guardrail:") });
     expect(last.some((message) => message.role === "tool")).toBe(true);
+  });
+});
+
+describe("native content contracts in authoring guidance", () => {
+  it.each(ARTIFACT_TYPE_KEYS)("exposes the same %s contract used by typed creation", async (blueprintKey) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeAgentReadTool("synthetic-actor", {
+      name: "read_artifact_skill", arguments: JSON.stringify({ blueprintKey }),
+    }) as { ok: boolean; contentSchema?: unknown };
+    expect(result.ok).toBe(true);
+    expect(result.contentSchema).toEqual(SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[blueprintKey]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("makes required editable document fields discoverable before staging", async () => {
+    const result = await executeAgentReadTool("synthetic-actor", {
+      name: "read_artifact_skill", arguments: JSON.stringify({ blueprintKey: "document" }),
+    }) as unknown as { contentSchema: { required: string[]; properties: { blocks: { items: { required: string[] } } } } };
+    expect(result.contentSchema.required).toContain("blocks");
+    expect(result.contentSchema.properties.blocks.items.required).toEqual(expect.arrayContaining(["id", "type", "text"]));
+    const content = { blocks: [{ id: "introduction", type: "paragraph", text: "Editable content" }], outline: [] };
+    expect(parseSpectraPlan({
+      decision: "operate", finalResponse: "Prepared the document.",
+      operations: [{ type: "artifact.create", input: { blueprintKey: "document", title: "A document", summary: "Editable content", tags: [], workspaceId: null, placement: "inbox", content } }],
+    }).operations[0]?.input).toMatchObject({ content });
   });
 });

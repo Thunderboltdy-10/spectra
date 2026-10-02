@@ -89,7 +89,9 @@ export function registerApplicationTools() {
     ...readDefaults,
     id: "read_artifact_skill",
     title: "Read work guidance",
-    description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
+    // One finite built-in guide/schema bundle; preserve nested contract fields.
+    selfBoundedOutputCharacters: 96_000,
+    description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance, the canonical editable content schema and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
     inputSchema: z.object({
       blueprintKey: z.enum(ARTIFACT_TYPE_KEYS),
       guideId: z.string().min(1).max(100).optional(),
@@ -97,7 +99,13 @@ export function registerApplicationTools() {
     execute: async (_context, value) => {
       const input = value as { blueprintKey: typeof ARTIFACT_TYPE_KEYS[number]; guideId?: string };
       const { loadArtifactSkill } = await import("../../artifacts/registry");
-      return artifactSkillReadResult(await loadArtifactSkill(input.blueprintKey), input.guideId);
+      const result = artifactSkillReadResult(await loadArtifactSkill(input.blueprintKey), input.guideId);
+      if (input.guideId) return result;
+      const { SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS } = await import("../../operations/schema");
+      return {
+        ...result,
+        contentSchema: SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[input.blueprintKey],
+      };
     },
   });
   define({

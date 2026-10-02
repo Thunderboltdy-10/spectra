@@ -52,7 +52,15 @@ vi.mock("@/lib/utils", () => ({ cn: (...values: unknown[]) => values.filter(Bool
 vi.mock("../components/spectra-rich-content", () => ({
   SpectraRichContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
-vi.mock("../components/progress-trace", () => ({ ProgressTrace: () => <div /> }));
+vi.mock("../components/progress-trace", () => ({
+  ProgressTrace: ({ steps, summary }: {
+    steps: Array<{ id: string; title: string }>;
+    summary?: string;
+  }) => <div data-testid="progress-trace">
+    {steps.map(step => <span key={step.id}>{step.title}</span>)}
+    {summary ? <p>{summary}</p> : null}
+  </div>,
+}));
 vi.mock("../components/artifact-embed-host", () => ({ ArtifactEmbedList: () => null }));
 vi.mock("../components/result-card", () => ({
   ResultCardStack: ({ cards }: { cards: Array<{ title: string }> }) => (
@@ -444,5 +452,34 @@ describe("ConversationSurface history and saved results", () => {
       clarificationId: "clarification-1",
       executionId: "execution-1",
     });
+  });
+});
+
+describe("conversation answer ownership", () => {
+  it.each([false, true])("shows a saved answer once after expanding details (compact=%s)", async (compact) => {
+    const answer = "The document could not be saved. Here is the prepared draft.";
+    mocks.getTrace.mockResolvedValue({
+      run: { ...run, finalSummary: answer }, operations: [], cards: [], artifacts: [],
+      events: [{
+        _id: "validation-progress", runId: run._id, executionId: run.executionId,
+        sequence: 1, type: "progress", payload: { title: "Checked the document" }, createdAt: 1,
+      }],
+    });
+    render(<ConversationSurface detail={detail("thread-a", answer)} threadId="thread-a" compact={compact} />);
+    expect(screen.getAllByText(answer)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    await screen.findByText("Checked the document");
+    expect(screen.getAllByText(answer)).toHaveLength(1);
+  });
+
+  it.each([false, true])("shows a live failure answer once beside its trace (compact=%s)", (compact) => {
+    const answer = "The document could not be saved. Here is the prepared draft.";
+    render(<ConversationSurface detail={null} compact={compact} liveExchange={{
+      id: "live-failure", prompt: "Create a document", content: answer,
+      status: "failed", startedAt: 1,
+      steps: [{ id: "validation", title: "Checked the document", status: "error", createdAt: 1 }],
+    }} />);
+    expect(screen.getByText("Checked the document")).toBeTruthy();
+    expect(screen.getAllByText(answer)).toHaveLength(1);
   });
 });

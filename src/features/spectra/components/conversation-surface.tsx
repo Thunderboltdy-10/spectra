@@ -1155,7 +1155,6 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         Boolean(trace.run.finalSummary) ||
         !["queued", "running"].includes(trace.run.status)
       }
-      summary={trace.run.finalSummary}
       persistKey={trace.run._id}
     />
   );
@@ -2231,11 +2230,6 @@ export function ConversationSurface({
                       hasOutput={
                         Boolean(liveExchange.content) ||
                         liveExchange.status === "failed"
-                      }
-                      summary={
-                        liveExchange.status === "streaming"
-                          ? undefined
-                          : liveExchange.content?.slice(0, 180)
                       }
                       persistKey={liveExchange.runId ?? liveExchange.id}
                     />

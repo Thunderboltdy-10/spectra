@@ -200,9 +200,12 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Sheet create with monthly totals (current retest) | P3-AI-ENGINE · Sheet · Create | PASS — after reloading the saved “Monthly Budget” artifact, the Name box showed K1 “Total expenses”, L1 “Remaining”, K2:K13 =SUM(Cn:Jn), and L2:L13 =Bn-Kn. The formulas remained present through December. Browser online; 0 console errors and 1 warning. The separate save-state wording mismatch remains under LV-022. | LV-052 (CANNOT-REPRODUCE); LV-022 (NEEDS-DECISION) | 734dcd58 (app); 77e583a5 (checkout) |
 | P3-AI-ENGINE — Flashcard deck create (current app recheck) | P3-AI-ENGINE · Flashcard deck · Create | PASS — the exact 8-card prompt completed after about 25 seconds. Library showed a new “Photosynthesis — 8 Flashcards” deck; opening and reloading it retained all 8 numbered cards. Browser online; 0 console errors and 1 Clerk development-key warning. The assistant’s “hasn’t been confirmed saved yet” statement conflicts with the completed/saved result and Library artifact; see LV-022. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-734dcd58-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-chat-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcards-library-item-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-deck-after-reload-734dcd58.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO, prior failed occurrence) | 734dcd58 (app); 77e583a5 (checkout) |
 | P3-AI-ENGINE — saved WW1 document response recheck after staging-feedback commit | P3-AI-ENGINE · Document · Create; saved result and Show details | FAIL — the 06:36 request was submitted on 5348c019 and durably completed in about 34 seconds, but the persisted answer explicitly says the editable document request was rejected; only the four-section chat draft appears, with no document editor/open control. On UI build 6319725b it persisted after reload; Show details displayed the refusal and each section once. See LV-039/LV-055. Evidence: `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.png` | LV-039 (NEEDS-INFO); LV-055 (partial) | 5348c019 (submission); 6319725b (UI) |
+| P3-AI-ENGINE — fresh WW1 editable document create after 0904c931 | P3-AI-ENGINE · Document · Create; saved result and reload | FAIL — one fresh zero-context submission on application 01f4566f returned a four-section chat draft and stated that the editable document request was rejected before staging. No editor/Open document control appeared; the answer persisted after reload. Browser online; 0 console errors and 1 warning. The local runtime trace recorded completion in about 35 seconds and no operation preview/result event. See LV-039. Evidence: .spectra-local/live-verification/LV039-ww1-post-e402776c-failure-redacted.txt; .spectra-local/live-verification/LV039-ww1-post-e402776c-failure-redacted.png | LV-039 (NEEDS-INFO) | 01f4566f |
+| LV-055 follow-up — live failed response with Show details after f5202aa8 | P3-AI-ENGINE · Document · Create; saved/live full chat, compact chat and dock hover | PASS — after reload on application 52b5969c, Show details in both full and compact chat left one refusal and each section heading once, with no Thought duplicate or Open document control. The Live Dock hover showed one refusal and Open conversation. Browser online; 0 console errors and 1 warning. Evidence: .spectra-local/live-verification/LV055-post-f5202aa-details-redacted.txt; .spectra-local/live-verification/LV055-post-f5202aa-details-redacted.png; .spectra-local/live-verification/LV055-post-f5202aa-compact-details-redacted.png; .spectra-local/live-verification/LV055-post-f5202aa-dock-hover-summary-redacted.png | LV-055 (VERIFIED) | 52b5969c |
 | LV-055 follow-up — full saved WW1 response with Show details | fixer recheck · saved answer duplication | PASS — after reload on 6319725b, expanding Show details left the refusal and all four section headings visible once each; no Thought duplicate appeared. Compact chat, a live failed answer and standalone dock hover remain unverified. Evidence: `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.png` | LV-055 (partial; FIXED) | 6319725b |
 | Free exploration — new chat while another conversation awaits approval | first-week chat · new-chat isolation and reload | PASS — on application commit `01f4566f`, the pending source approval remained available without activation; New chat and reload each showed zero messages/context and no foreign approval or work item. Browser online, 0 console errors and 1 warning; see LV-056. Evidence: `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.txt`; `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.png` | LV-056 (VERIFIED) | 01f4566f |
 
+| Free exploration — selecting current run from Runs & chats | first-week chat · run-list navigation with an open conversation | FAIL — selecting the first current “New conversation” entry with count 2 cleared the main pane to the empty landing view while the same thread URL remained. Reload restored the saved answer. Reproduced 2/2; browser online, 0 console errors and 1 warning. See LV-057. Evidence: .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.txt; .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.png | LV-057 (OPEN) | 52b5969c |
 ## Issues
 
 ### LV-001 · Fresh local stack stops before readiness
@@ -3054,9 +3057,33 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Console/network:** At the settled view and after reload, `navigator.onLine` was true; Playwright reported 0 console errors and 1 warning. The local instance-8 OpenRouter telemetry file had 659 records at baseline and 672 afterward. It recorded one `request` at `2026-10-02T00:16:14.634Z`, ten `phase` events, one `plan_recovery_failure` event at `2026-10-02T00:16:52.560Z`, and one `response` at `2026-10-02T00:17:22.266Z` (`elapsedMs=67632`, `fallback=false`). The local telemetry does not independently establish whether OpenRouter account-side usage registered or billed the request. The prompt-route HTTP status was not captured. No model/provider identifiers or usage values are included.
 
+### Verifier occurrence · LV-039 · WW1 document create after 0904c931 · 2026-10-02 (Europe/Madrid)
+
+- **Severity / surface / role:** High · /chat AI document creation · signed-in Profile A school administrator.
+- **Report script:** P3-AI-ENGINE · Document · Create.
+- **Commit tested:** Application 01f4566f (local instance 8; web port 3000).
+- **Submission:** 2026-10-02T07:45:59.119Z; conversation gs7tkekjssnqp31945ffctmssn8fg86w.
+
+**Steps**
+
+1. Open a fresh /chat?new=1 and confirm zero message articles, zero selected context, no approval/work card, and navigator.onLine is true.
+2. Submit “Create a document on the causes of WW1 with 4 sections.” once.
+3. Wait for the run to settle and inspect the response and document controls.
+4. Reload the same conversation and inspect the saved response and controls.
+5. Expand Show details after reload and count the rendered refusal and section headings.
+
+**Expected:** P3-AI-ENGINE · Document · Create asks for a four-section document that can be opened.
+
+**Actual:** The answer stated that the creation request was rejected before it could be staged and included a four-section draft. It contained the four requested section headings and a summary, but no editable document or Open document control. “Saved progress and results” appeared below it. The refusal and draft remained after reload. After Show details, the refusal appeared once, each heading appeared once, there were zero Thought occurrences, and no Open document control appeared.
+
+**Frequency:** 1 of 1 fresh exact-prompt submissions on application 01f4566f returned a draft without an editable/openable document; the same result remained after reload.
+
+**Evidence:** .spectra-local/live-verification/LV039-ww1-post-e402776c-failure-redacted.txt; .spectra-local/live-verification/LV039-ww1-post-e402776c-failure-redacted.png; .spectra-local/live-verification/LV055-post-f5202aa-details-redacted.png.
+
+**Console/network:** Browser online; Playwright reported 0 console errors and 1 warning. Its request list did not expose a prompt-route HTTP status, so none is asserted. The fixer provided this local run trace: created 07:45:59.457Z, completed 07:46:34.524Z, updated 07:46:34.943Z, provider telemetry elapsed 32,079 ms; four guidance reads and one propose_operation were recorded, with no operation preview/result events. No model/provider identifiers or usage fields are included.
 ### LV-055 · Failed AI document response is duplicated after expanding details
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** Medium
 - **Surface / role:** `/chat` AI response details / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Document · Create; first-week chat exploration
@@ -3095,6 +3122,8 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Follow-up verifier recheck:** After f5202aa8, reload the exact WW1 conversation and expand Show details; check that the refusal and each section heading occur once in rendered conversation content, while distinct result cards and action controls remain available. The original source fix 8ae8a10e was partial; f5202aa8 closes the identified result-card duplication path. Only the verifier sets VERIFIED.
 
+
+**Verifier recheck after f5202aa8:** VERIFIED on application 52b5969c. After reload and Show details, both the full conversation and the compact Live chat panel contained one refusal and one occurrence of each of the four section headings, with zero Thought duplicates and no Open document control. The Live Dock hover summary showed the refusal once and offered Open conversation. Browser online; Playwright reported 0 console errors and 1 warning. Evidence: .spectra-local/live-verification/LV055-post-f5202aa-details-redacted.txt; .spectra-local/live-verification/LV055-post-f5202aa-details-redacted.png; .spectra-local/live-verification/LV055-post-f5202aa-compact-details-redacted.png; .spectra-local/live-verification/LV055-post-f5202aa-dock-hover-summary-redacted.png.
 ### Fixer closeout · Authoring contract and reopened answer duplication · 2026-10-02 (Europe/Madrid)
 
 - Commits: 8ae8a10e removed duplicate conversation progress summaries (partial LV-055 fix); f899a7bd recorded that fix and exact initial validation; 5348c019 exposes canonical content contracts through optional core guidance for every type (LV-039 contract-availability fix); f5202aa8 fixes the reopened LV-055 result-card path. These commits use the configured human identity without AI co-author trailers.
@@ -3162,3 +3191,36 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - LV-039 remains NEEDS-INFO: the fresh 07:45:59.119Z create completed in 35,405 ms as an answer-only refusal with no editable document, and the existing log does not identify its rejecting tool boundary. The new diagnostic records the outcome code during the next naturally observed occurrence. LV-053 and LV-056 are VERIFIED by the verifier, including their updated Coverage rows; LV-053's normal/imported typography subcheck is separately blocked for lack of a sample.
 - NEEDS-DECISION remains LV-003 (expired-invite HTTP), LV-012 (Bridge activation/discovery), LV-022 (post-save prose latency/usage), LV-028 (shortcut mapping) and LV-040 (fallback title versus another model call). CANNOT-REPRODUCE remains LV-004 (decoded invitation works), LV-007 (Escape/pending-state behavior), LV-051 (aborted read with completed answer) and LV-052 (monthly K/L formulas present). Their reasons and choices remain in the entries.
 - Other NEEDS-INFO entries remain LV-017 (deployment exception), LV-046 (stale waiting-label correlation) and LV-054 (generated labels absent before persistence; raw generation unavailable). No OPEN, REOPENED or FIXING entry remains. The fixer stops between actionable reports and the verifier continues the existing reload and natural workflow checks.
+
+### LV-057 · Runs & chats selection clears the current conversation view
+
+- **Status:** FIXED
+- **Severity:** High
+- **Surface / role:** /chat Runs & chats selection from an open saved conversation / signed-in Profile A school administrator.
+- **Report script:** P3-AI-ENGINE · compact conversation and run detail recheck; free exploration · first-week chat.
+- **Commit tested:** Application 52b5969c (local instance 8; web port 3000).
+- **Frequency:** 2 of 2 selections of the current conversation entry in Runs & chats replaced the main content with the empty landing view; reloading the same URL restored the saved response both times.
+
+**Steps**
+
+1. Open the saved “New conversation” whose user message is “Create a document on the causes of WW1 with 4 sections.” Confirm the refusal and four section headings appear after reload.
+2. Select “Open runs” in the conversation header.
+3. In “Runs & chats,” select the first “New conversation” entry with the “2” count. Its result preview is the same saved refusal shown in the current conversation.
+4. Observe the main pane and URL.
+5. Reload the same URL. Repeat steps 2–4 once, then reload again.
+
+**Expected:** Selecting the current conversation/run from Runs & chats leaves the saved conversation content visible or displays its corresponding detail. The same thread URL does not show an empty landing page in place of its saved messages.
+
+**Actual:** In both selections, the runs panel closed and the main pane displayed “Good morning. What shall we make easier?” with workspace cards, zero message articles, and zero selected context. The URL remained /chat?threadId=gs7tkekjssnqp31945ffctmssn8fg86w. Reloading restored the saved prompt, refusal, and four section headings both times. No compact detail view appeared.
+
+**Evidence:** .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.txt; .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.png.
+
+**Console/network:** Browser online; Playwright reported 0 console errors and 1 warning. No offline message appeared.
+
+**Root cause and change:** The shared selectThread handler cleared the loaded detail even when selecting the already active conversation. It replaced the URL with that same thread URL, so the URL-owned hydration effect did not rerun and the cleared pane remained empty until reload. Selecting the active nonempty conversation is now an identity-preserving no-op in that shared handler; the history caller still closes Runs & chats, and different-thread/New chat navigation retains its existing loading path. This also covers current-thread selection through the shared conversation-open and artifact-thread paths.
+
+**Before/after proof:** Two regressions in chat-shell-load.test.tsx fail on the pre-fix source because selecting the current history item removes its saved answer; both pass after the three-line guard. They cover a normally loaded conversation and one retaining its last known messages after a background refresh error, each selected twice, with the panel closing, messages retained, and no redundant route replacement or reload. All **58 focused tests** across chat-load, conversation-history and durable-run files pass, including existing different-thread, stale-load, new-chat and recovery cases. Evidence logs: .spectra-local/LV057-before.log and LV057-focused.log.
+
+**Validation:** Both TypeScript projects, full lint and architecture/copy/design-token/capability/secrets gates pass. Final frozen full suite: **4,631 passed, 1 failed, 1 skipped**, 103.76 seconds; 518 passed files / 1 failed / 1 skipped across 520. The sole failure is the known LV-017 gateway packaging omission of shared/yjs-collections.mjs; log .spectra-local/LV057-full.log. No thresholds, deployment settings or AI behavior changed; no codegen/deploy-side step is required.
+
+**Verifier recheck:** Reload the committed build, open the saved conversation, select its current entry in Runs & chats twice, and confirm the panel closes while its saved messages/results remain visible at the same URL. Check a different conversation and New chat still navigate correctly; check selecting the current conversation while its background refresh has a recoverable error retains the last loaded messages. Only the verifier sets VERIFIED. The actual source commit hash is recorded below after committing.

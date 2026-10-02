@@ -505,6 +505,28 @@ describe("ChatShell primary conversation hydration", () => {
     traces: [],
   });
 
+  it.each([false, true])("keeps the current conversation when its history entry is selected (refresh failure=%s)", async (refreshFailure) => {
+    mocks.searchParams = new URLSearchParams("threadId=saved-thread");
+    mocks.getThreads.mockResolvedValue({ threads: [{ _id: "saved-thread", title: "Saved conversation", messageCount: 2 }] });
+    mocks.getThread.mockResolvedValue(saved());
+    render(<ChatShell />);
+    expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
+    if (refreshFailure) {
+      mocks.getThread.mockRejectedValueOnce(new Error("temporary read failure"));
+      await act(async () => { await mocks.runOptions.current?.onDataChanged?.(); });
+      expect(await screen.findByText("This conversation could not refresh")).toBeTruthy();
+    }
+    const reads = mocks.getThread.mock.calls.length;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fireEvent.click(screen.getByRole("button", { name: "Open runs" }));
+      fireEvent.click(await screen.findByRole("button", { name: /Saved conversation/ }));
+      expect(screen.queryByRole("heading", { name: "Runs & chats" })).toBeNull();
+      expect(screen.getByText("Saved answer is available.")).toBeTruthy();
+      expect(mocks.getThread).toHaveBeenCalledTimes(reads);
+      expect(mocks.router.replace).not.toHaveBeenCalled();
+    }
+  });
+
   it("starts and renders the selected conversation before slow catalogs finish", async () => {
     const overview = deferred<{ workspaces: []; artifacts: [] }>();
     const threads = deferred<{ threads: [] }>();

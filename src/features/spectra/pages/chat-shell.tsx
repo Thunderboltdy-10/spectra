@@ -339,6 +339,9 @@ export function ChatShell() {
 
   const selectThread = useCallback(
     (id: string | null) => {
+      // Reselecting the active thread does not change the URL or reload it.
+      // Preserve its loaded messages rather than clearing them indefinitely.
+      if (id && id === activeThreadRef.current) return;
       setThreadId(id);
       activeThreadRef.current = id;
       setDetail(null);

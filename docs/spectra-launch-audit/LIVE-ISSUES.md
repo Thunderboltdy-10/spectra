@@ -2931,7 +2931,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-053 · Opening a whiteboard logs an invalid fontWeight console error
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/library` Whiteboard Work surface and chat result “Open” action / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Whiteboard · Create and open
@@ -2950,6 +2950,14 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Actual:** The whiteboard opened each time, but Playwright recorded one error on each of the three opens/reopens: `NaN is an invalid value for the "%s" css style property. fontWeight @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:1052`. A Library load before opening the whiteboard had 0 console errors. On each opening the browser remained online and Playwright also recorded 1 Clerk development-key warning.
 
 **Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-reload-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-fit-to-content-734dcd58.png`.
+
+**Fixer root cause and change:** The shared board-node renderer converted node.style.fontWeight through Number(), turning valid CSS keywords such as bold into NaN; its content fallback also discarded imported normal/bolder/lighter weights because they were strings. One renderer resolver now preserves the four CSS font-weight keywords, accepts finite numeric weights from 1 through 1000, and keeps the existing node-type default for invalid values, with native style still taking precedence over imported content. This covers ordinary text/note/shape labels on full and compact Whiteboard surfaces; it does not invent the empty labels reported in LV-054.
+
+**Regression proof:** whiteboard-studio-font-weight.test.tsx exercises the real normalized board and studio renderer for 12 combinations of keyword/numeric/default/invalid weights and checks console output. Nine cases failed before the change; all 12 pass after, together with undo, clipboard, import and content-patch tests (23 tests in five files). Both TypeScript projects, repository lint and architecture/copy/design-token/capability/secret gates pass.
+
+**Verifier recheck:** Open the existing saved Water Cycle board from chat and Library, reload it, and confirm the NaN/fontWeight console error is absent. Also check bold and normal text weights on native and imported nodes; missing labels and forced transparent text-node fills remain separate from this font-weight fix.
+
+**Fix commit:** 17f93bd512ea3fa01741032b2066f9f25852799a. Full-suite result: 4,597 passed, 2 failed, 1 skipped (517 passed files, 2 failed, 1 skipped; 520 files total). The first run measured the dense-sheet patch at 49 ms and the second at 78 ms against 40 ms; that unchanged test passes in isolation. Both runs also fail the known LV-017 gateway package omission of shared/yjs-collections.mjs. Logs: .spectra-local/LV053-full.log and LV053-full-final.log. No test threshold or deployment configuration changed.
 
 ### LV-054 · AI-created water-cycle whiteboard has no readable node labels
 
@@ -2976,3 +2984,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Fixer diagnosis (2026-10-02):** The read-only saved model, the accepted artifact.create input, and all retained streamed content previews already contain nine text nodes with content: {}. The editor therefore has no labels to render; this is earlier than the save/reload boundary. The accepted recolor operation did persist fill/stroke on evaporation, so lack of saved recolor is not established by the screenshot. The raw model tool arguments before normalization are not retained in these events; attributing the empty nodes to generation versus field loss would be speculation. Local ignored captures: .spectra-local/LV054-water-cycle-content.json, LV054-operations.json and LV054-create-events.json. LV-053 is an independent font-weight rendering defect.
 
 **Question for verifier:** On the next Whiteboard create check, repeat the same P3 create prompt once in a fresh conversation and report the submission UTC immediately, then whether node labels are visible on first open and after reload. Also report whether manually entering a label in one existing blank node survives reopening. This will establish reproducibility and the editable-text boundary without fabricating labels from identifiers or changing the AI model/reasoning. No content or deployment was modified.
+
+**Additional LV-054 recolor diagnosis:** The saved evaporation style does contain the requested amber fill/stroke. spectra-app.css explicitly forces text nodes to a transparent background/border with !important, explaining why those persisted appearance fields are not visible for this node type. This observation does not recover the missing labels or establish the original pre-normalization model output; both remain distinct from LV-053.
+
+### Fixer closeout · Whiteboard font-weight fix · 2026-10-02 (Europe/Madrid)
+
+- Commits: 184a4846 records the LV-054 pre-persistence evidence and narrow verifier question; 17f93bd5 fixes LV-053 with 12 real-studio regression cases. Commits use the configured human Git identity and contain no AI co-author trailer.
+- Validation: 23 focused tests across five whiteboard files pass; both TypeScript projects, repository lint and architecture/copy/design-token/capability/secret gates pass. Final full suite: **4,597 passed, 2 failed, 1 skipped**. The failures are the known LV-017 gateway package omission and an unchanged dense-sheet 40 ms timing assertion (passes in isolation, exceeds the limit under the full suite); no full-suite success is claimed.
+- NEEDS-DECISION remains LV-003 (expired-invitation HTTP behavior), LV-012 (Bridge startup/discovery), LV-022 (saved-result prose contract), LV-028 (shortcut target), and LV-040 (conversation title behavior), with the options/consequences retained in their entries. No product option was selected by the fixer.
+- CANNOT-REPRODUCE remains LV-004 (invitation encoding observation), LV-007 (Escape behavior depended on idle/pending state), LV-051 (aborted read did not prevent the completed answer), and LV-052 (the reported monthly formulas exist and the verifier confirmed them in K/L).
+- NEEDS-INFO remains LV-017, LV-039, LV-046 and LV-054. LV-054 is reproduced as empty stored labels but its original generation/normalization boundary still lacks the raw arguments; the targeted live question is above. No OPEN, REOPENED or FIXING entry remains. The fixer stops between actionable reports while the verifier continues.

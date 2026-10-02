@@ -84,8 +84,9 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Moon answer | P3-AI-ENGINE · Needs live verification · Answer, step 1 | FAIL — on app commit 628f4987, two clean zero-context submissions of “Why can we see the Moon?” produced one POST /api/spectra/run HTTP 500 with no response and one HTTP 200 with a relevant no-ID answer after resubmission; the failed prompt was absent after reload. A later clean submission on this app code returned a relevant no-ID answer after Thinking and persisted after reload. A separate fresh zero-context question about tides returned a relevant one-sentence answer; two POST /api/spectra/run responses were HTTP 200, all 42 captured Spectra API responses were HTTP 200, the browser was online, and the settled page had 0 console errors. On 7407840f, another clean Moon answer completed while one POST /api/spectra/run (`ui_observer`) returned 409 and one GET `runTabs` returned 500 INTERNAL_ERROR (request ID af14ec59); two failed-resource console entries were recorded with the browser online. A separate clean weather answer and follow-up completed despite one POST /api/spectra HTTP 500 console error. See the additional occurrence below. The required provider-call-count check is BLOCKED because the browser view exposes only the route request. Evidence: .spectra-local/live-verification/LV039-moon-current-628f4987-redacted.txt; .spectra-local/live-verification/LV039-moon-current-628f4987-no-response.png; .spectra-local/live-verification/LV039-moon-current-628f4987-after-reload.png; .spectra-local/live-verification/LV039-moon-first-response-live-rerun-628f4987.png; .spectra-local/live-verification/LV039-moon-next-answer-628f4987.png; .spectra-local/live-verification/LV039-moon-next-answer-628f4987-redacted.txt; .spectra-local/live-verification/LV039-ai-request-errors-7407840f.png; .spectra-local/live-verification/LV039-ai-request-errors-7407840f-redacted.txt | LV-039 (NEEDS-INFO) | 628f4987; 7407840f |
 
 | P3-AI-ENGINE — Moon answer UI recheck (fresh online chat) | P3-AI-ENGINE · Needs live verification · Answer, step 1 | PASS — “Why can we see the Moon?” returned a relevant answer, visible by 15 seconds and in a completed Answer card by 20 seconds; it remained visible at 30 seconds. The browser was online, no offline or connection-check copy appeared, and there were 0 console errors. Evidence: .spectra-local/live-verification/LV039-moon-run-166d84d2-redacted.txt; .spectra-local/live-verification/LV039-moon-answer-166d84d2.png | — | 166d84d2 |
+| P3-AI-ENGINE — simple “Hi” response and reload | User-requested AI reliability check · fresh no-context chat | PASS — “Hi” returned “Hi! What can I help you with?” on the first page-text read after send. The local OpenRouter log recorded request, phase and response; request-to-response elapsed time was 1869 ms. The answer remained after reload; browser online; 0 console errors and 1 Clerk development-key warning. The title remained “New conversation” after reload (LV-040). Evidence: .spectra-local/live-verification/LV040-hi-live-recheck-734dcd58-redacted.txt; .spectra-local/live-verification/LV040-hi-title-row-after-reload-734dcd58.png; .spectra-local/live-verification/LV040-hi-answer-after-reload-734dcd58.png | LV-040 (NEEDS-DECISION) | 734dcd58 (app); 77e583a5 (checkout) |
 | P3-AI-ENGINE — Moon answer API requests (fresh online chat) | P3-AI-ENGINE · Needs live verification · Answer, step 1 · request reliability | FAIL — The answer completed, but one GET /api/spectra request failed with net::ERR_ABORTED while online. See LV-051. Evidence: .spectra-local/live-verification/LV039-moon-run-166d84d2-redacted.txt; .spectra-local/live-verification/LV039-moon-answer-166d84d2.png | LV-051 (OPEN) | 166d84d2 |
-| Free exploration — title after a successful AI answer | exploration · first-week chat; user flagged missing thread titles | FAIL — after a relevant Moon answer on app commit 628f4987, both the header and most-recent row still read “New conversation” after completion and reload. See LV-040. Evidence: .spectra-local/live-verification/LV040-current-628f4987-answer-title.png; .spectra-local/live-verification/LV040-current-628f4987-answer-title-after-reload.png; .spectra-local/live-verification/LV040-new-chat-title-after-reload-628f4987.png; .spectra-local/live-verification/LV040-moon-title-628f4987-redacted.txt | LV-040 (NEEDS-DECISION) | 628f4987 |
+| Free exploration — title after a successful AI answer | exploration · first-week chat; user flagged missing thread titles | FAIL — after a relevant Moon answer on app commit 628f4987, both the header and most-recent row still read “New conversation” after completion and reload. Repeated on 734dcd58: the fresh zero-context answer appeared on the first read after send, and the local OpenRouter log recorded request, phase and response; the header and sidebar row still read “New conversation” after completion and reload about two minutes later. See LV-040. Evidence: .spectra-local/live-verification/LV040-current-628f4987-answer-title.png; .spectra-local/live-verification/LV040-current-628f4987-answer-title-after-reload.png; .spectra-local/live-verification/LV040-new-chat-title-after-reload-628f4987.png; .spectra-local/live-verification/LV040-moon-title-628f4987-redacted.txt; .spectra-local/live-verification/LV040-moon-title-row-734dcd58.png; .spectra-local/live-verification/LV040-moon-answer-title-after-reload-734dcd58.png; .spectra-local/live-verification/LV040-moon-title-live-recheck-734dcd58-redacted.txt | LV-040 (NEEDS-DECISION) | 628f4987; 734dcd58 |
 | Free exploration — sidebar thread-title typography | user-reported desktop UX; P3-UI-SYSTEM type scale | FAIL — on /library and /chat at 1280×720, recent chat-title text computed to 15px/24px at weight 400; the adjacent main-destination link also computed to 15px/24px. The user requested smaller sidebar thread-title text. Evidence: .spectra-local/live-verification/LV047-sidebar-thread-title-size-628f4987.png; .spectra-local/live-verification/LV047-sidebar-thread-title-size-628f4987-redacted.txt | LV-047 (VERIFIED) | 628f4987 |
 | P3-UI-SYSTEM — sidebar title typography after fixer recheck | LV-047 desktop shared-typography follow-up | PASS — on app code 7407840f, pinned/recent/search titles were 12px in Default and 13px in Large interface text; metadata remained smaller, search no-results rendered, and keyboard focus remained visible on navigation. Preference was restored to Default. Evidence: .spectra-local/live-verification/LV047-postfix-default-sidebar-7407840f.png; .spectra-local/live-verification/LV047-postfix-large-sidebar-7407840f.png; .spectra-local/live-verification/LV047-postfix-verification-7407840f-redacted.txt | LV-047 (VERIFIED) | 7407840f |
 | P3-AI-ENGINE — 4,000-word essay | P3-AI-ENGINE · Needs live verification · Answer, step 2 | PASS — after the fix, a fresh no-context request returned a 3,730-word completed answer without repeated paragraphs; Retry on the earlier paused request returned a 4,479-word completed answer without repeated paragraphs | LV-019 (VERIFIED) | 427cb3c9 |
@@ -144,6 +145,8 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Code identifier preservation in an editable file (F3) | P3-AI-ENGINE · Code · Edit | BLOCKED — the create response was an inline code block with no function definition and no editable Code file was opened; the follow-up introduced `plot_wave()` rather than renaming an existing function. The exact byte-for-byte file comparison could not be performed. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-code-chat-7407840f-redacted.txt | — | 7407840f |
 | P3-AI-ENGINE — Whiteboard create and Retry | P3-AI-ENGINE · Whiteboard · Create; recovery | FAIL — “Draw a mind map of the water cycle” paused after 53 seconds with four runEvents HTTP 500 responses. Retry progressed for about a minute, then paused again without a whiteboard editor or answer; after reload the UI briefly showed Still running with no Stop/Retry before returning to Paused. See LV-039. Evidence: .spectra-local/live-verification/LV039-whiteboard-create-retry-7407840f-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-create-53s-7407840f.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-retry-60s-7407840f.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-reload-25s-7407840f.png | LV-039 (NEEDS-INFO) | 7407840f |
 | P3-AI-ENGINE — Whiteboard edit (recolor evaporation) | P3-AI-ENGINE · Whiteboard · Edit | BLOCKED — the Create action did not produce or open a whiteboard with an evaporation node, so “Recolor the evaporation node” could not be applied; see LV-039. | LV-039 (NEEDS-INFO) | 7407840f |
+| P3-AI-ENGINE — Whiteboard create (current app recheck) | P3-AI-ENGINE · Whiteboard · Create | FAIL — the exact prompt completed and Library retained a 9-node Whiteboard, but after reload its canvas showed white node shapes without readable labels; only connector text was visible. Opening/reloading the whiteboard produced one `NaN`/`fontWeight` console error on each of three opens. Browser online; see LV-053 and LV-054. The reply also said “not confirmed as saved” while the Library item existed; see LV-022. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-fit-to-content-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-canvas-content-after-reload-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO); LV-053 (OPEN); LV-054 (OPEN) | 734dcd58 (app); 77e583a5 (checkout) |
+| P3-AI-ENGINE — Whiteboard recolor and Retry (current app recheck) | P3-AI-ENGINE · Whiteboard · Edit and recovery | FAIL — “Recolor the evaporation node.” paused and offered Retry; one Retry returned a warm-amber staged-change reply, but after reloading the Library artifact, the visible node shapes remained white and no readable evaporation label or amber fill appeared. Browser online; see LV-039 and LV-054. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-edit-paused-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-chat-save-wording-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-recolor-reload-734dcd58.png | LV-039 (NEEDS-INFO); LV-054 (OPEN) | 734dcd58 (app); 77e583a5 (checkout) |
 | P2-EXPERIENCE step 5 — offline actions and navigation | P2-EXPERIENCE · step 5 | PASS — on application commit 2741fd45, one exact scripted toast appeared within 0.23–0.80 seconds on Calendar→Library, Chat→Calendar and Admin Overview→People; each original view and offline shell remained visible. The same control navigated after reconnect in all 3 paths. On Calendar the toast was absent by 4.914 seconds after activation. The already-open Add event and offline comment action checks also showed the prescribed toast and retained their state. Evidence: .spectra-local/live-verification/LV048-postfix-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/LV048-postfix-visible-calendar-toast-2741fd45.png; .spectra-local/live-verification/LV048-postfix-visible-chat-calendar-toast-2741fd45.png; .spectra-local/live-verification/LV048-postfix-visible-admin-people-toast-2741fd45.png; .spectra-local/live-verification/LV048-postfix-toast-expired-2741fd45.png | LV-048 (VERIFIED) | 2741fd45 |
 | Free exploration — app navigation while offline | reliability · Library, Calendar and Admin People surfaces | PASS — on application commit 2741fd45, the exact toast appeared within one second on each route, current view and offline shell remained, and each same control navigated after reconnect. The Calendar toast was absent by 4.914 seconds after activation. Evidence: .spectra-local/live-verification/LV048-postfix-recheck-2741fd45-redacted.txt; .spectra-local/live-verification/LV048-postfix-visible-calendar-toast-2741fd45.png; .spectra-local/live-verification/LV048-postfix-visible-chat-calendar-toast-2741fd45.png; .spectra-local/live-verification/LV048-postfix-visible-admin-people-toast-2741fd45.png | LV-048 (VERIFIED) | 2741fd45 |
 | P2-EXPERIENCE step 5 — offline Add event action on an already-open Calendar | P2-EXPERIENCE · step 5 partial action check | PASS — while /calendar and the Add personal event dialog were already loaded, submitting a disposable event with the browser offline showed exactly “Spectra could not reach the server. Check your connection, then try again.” The dialog stayed open and the event was not saved; Cancel closed it. Evidence: .spectra-local/live-verification/P2-EXPERIENCE-offline-actions-7407840f-redacted.txt; .spectra-local/live-verification/P2-EXPERIENCE-offline-calendar-event-7407840f.png | — | 7407840f |
@@ -190,7 +193,8 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Flashcard deck create (current post-fix recheck) | P3-AI-ENGINE · Flashcard deck · Create | FAIL — the run finalized in 38.2 seconds, but the assistant explicitly said it could not save an editable deck and returned eight cards as chat text. No deck or open control appeared before or after reload; the browser was online, with no offline copy and 0 console errors. See LV-039. Evidence: .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-redacted.txt; .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-failed-save.png; .spectra-local/live-verification/LV050-create-current-a3fe7d78-after-reload-settled.png | LV-039 (NEEDS-INFO) | a3fe7d78 (app code); checkout 7f5d36d2 |
 | LV-050 post-fix recheck — rejected duplicate-title create does not surface old work | fixer re-check · failed-create identity path | PASS — with existing Photosynthesis work present, the failed create showed no “Work from this conversation” or “Open Photosynthesis” control before or after reload. The failed artifact request is recorded separately under LV-039. Evidence: .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-redacted.txt; .spectra-local/live-verification/LV039-flashcard-create-current-a3fe7d78-failed-save.png; .spectra-local/live-verification/LV050-create-current-a3fe7d78-after-reload-settled.png | LV-050 (partial recheck); LV-039 (NEEDS-INFO) | a3fe7d78 (app code) |
 | LV-050 post-fix recheck — successful duplicate-title creation, explicit open and Keep in conversation | fixer re-check · successful create and identity actions | BLOCKED — the current create returned only chat text and no editable artifact, so the successful-create identity and Keep actions were unavailable in this run. The ordinary-answer title path and failed-create stale-control path are checked separately; explicit selection/open and Keep remain pending. See LV-039. | LV-050 (partial recheck) | a3fe7d78 (app code) |
-| P3-AI-ENGINE — Sheet create with monthly totals (current retest) | P3-AI-ENGINE · Sheet · Create | FAIL — the newest “Monthly Budget” Library item persisted and reopened after reload, but its “Annual Budget” grid had no monthly expense-total or remaining-balance column; B2’s formula field was empty and B14 showed only =SUM(B2:B13). The assistant described monthly expense and remaining-balance formulas. Save-state wording mismatch is recorded under LV-022. Browser online; 0 console errors and 1 warning. | LV-052 (OPEN); LV-022 (NEEDS-DECISION) | 734dcd58 (app); e88a6423 (checkout) |
+| P3-AI-ENGINE — Sheet create with monthly totals (current retest) | P3-AI-ENGINE · Sheet · Create | PASS — after reloading the saved “Monthly Budget” artifact, the Name box showed K1 “Total expenses”, L1 “Remaining”, K2:K13 =SUM(Cn:Jn), and L2:L13 =Bn-Kn. The formulas remained present through December. Browser online; 0 console errors and 1 warning. The separate save-state wording mismatch remains under LV-022. | LV-052 (CANNOT-REPRODUCE); LV-022 (NEEDS-DECISION) | 734dcd58 (app); 77e583a5 (checkout) |
+| P3-AI-ENGINE — Flashcard deck create (current app recheck) | P3-AI-ENGINE · Flashcard deck · Create | PASS — the exact 8-card prompt completed after about 25 seconds. Library showed a new “Photosynthesis — 8 Flashcards” deck; opening and reloading it retained all 8 numbered cards. Browser online; 0 console errors and 1 Clerk development-key warning. The assistant’s “hasn’t been confirmed saved yet” statement conflicts with the completed/saved result and Library artifact; see LV-022. Evidence: .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-734dcd58-redacted.txt; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-chat-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcards-library-item-734dcd58.png; .spectra-local/live-verification/P3-AI-ENGINE-flashcard-deck-after-reload-734dcd58.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO, prior failed occurrence) | 734dcd58 (app); 77e583a5 (checkout) |
 
 ## Issues
 
@@ -906,6 +910,43 @@ Additional verifier occurrence (2026-10-02; application code 734dcd58):
 **Frequency:** 1 of 1 observed budget-sheet runs.
 
 **Evidence:** .spectra-local/live-verification/LV022-budget-save-status-734dcd58.png; .spectra-local/live-verification/LV022-budget-library-item-persisted-734dcd58.png; .spectra-local/live-verification/LV022-LV052-budget-sheet-recheck-734dcd58-redacted.txt.
+
+**Additional verifier occurrence (2026-10-02; application code 734dcd58; flashcard create):**
+
+**Steps**
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh `/chat` with 0 context objects selected.
+2. Submit `Create a flashcard deck about photosynthesis with 8 cards.` once and wait for the response to settle.
+3. Expand the run details and read the assistant reply and result state.
+4. In Library, open the newly created “Photosynthesis — 8 Flashcards” deck.
+5. Reload the Library artifact route and inspect the card count and content again.
+
+**Expected:** The P3-AI-ENGINE Flashcard deck script says: “Create: "Create a flashcard deck about photosynthesis with 8 cards."” After the Library artifact exists and remains available after reload, the reply’s save-state wording should describe that persisted result consistently. LV-022 remains NEEDS-DECISION on which final-reply contract to use.
+
+**Actual:** The assistant said, “I prepared an editable 8-card flashcard deck on photosynthesis. It’s staged for validation and saving; it hasn’t been confirmed saved yet.” The same result showed “1 action completed,” “Done,” “Open” and “Saved progress and results.” Library showed the newly created deck; its summary said “8-card deck about Photosynthesis — 8 Flashcards.” The reopened artifact route displayed eight numbered cards after reload. Browser online; 0 console errors and 1 Clerk development-key warning. This is one additional LV-022 save-state wording occurrence; no status change is made.
+
+**Frequency:** 1 of 1 fresh 8-card deck runs showed the not-confirmed-saved wording while the deck was available and retained all eight cards after reload.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-flashcard-create-chat-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-flashcards-library-item-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-flashcard-deck-after-reload-734dcd58.png`.
+
+**Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5.
+
+**Additional verifier occurrence (2026-10-02; application code 734dcd58; Whiteboard create):**
+
+**Steps**
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh `/chat` with 0 context objects selected.
+2. Submit `Draw a mind map of the water cycle.` once and wait for the response.
+3. Read the final assistant reply and result status.
+4. In Library, open the new “Water Cycle — Mind Map” whiteboard with the 9-node summary, then reload its artifact route and confirm it remains available.
+
+**Expected:** The P3-AI-ENGINE Whiteboard script says: “Create: \"Draw a mind map of the water cycle.\"” Once the Library item exists and remains openable after reload, the reply’s save-state wording should describe that persisted result consistently. LV-022 remains NEEDS-DECISION on which final-reply contract to use.
+
+**Actual:** The assistant said, “It’s staged for saving; it hasn’t been confirmed as saved yet.” The result status showed “Saved progress and results.” Library listed the new “Water Cycle — Mind Map” Whiteboard with a “9-node whiteboard about Water Cycle — Mind Map” summary, and its artifact route opened after reload. This is one additional LV-022 save-state wording occurrence; no status change is made.
+
+**Frequency:** 1 of 1 fresh whiteboard-create runs showed not-confirmed-saved wording while a 9-node Library item remained available after reload.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-chat-save-wording-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png`.
+
+**Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -2123,14 +2164,29 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 
 **Remaining evidence question:** On the next naturally observed incomplete create, please notify the fixer at submission with the UTC timestamp, then report the visible result promptly. This permits a concurrent bounded capture of existing local logs before retention expires. If the visible reply explicitly says creation was rejected, preserve that exact wording and the current run event types; the fixer still needs the server/model-tool rejection evidence rather than a diagnosis from the browser.
 
+**Additional verifier occurrence (2026-10-02; application code 734dcd58; Whiteboard create/edit):**
+
+1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected and submit the P3 prompt “Draw a mind map of the water cycle.” The run displayed Still running / Thinking / Getting ready, then returned a reply after about 25 seconds and a Library item with summary “9-node whiteboard about Water Cycle — Mind Map.” The local OpenRouter response event recorded 24448 ms.
+2. Open the resulting whiteboard, reload its Library artifact route, and inspect the board. It remained available after reload. The fit-to-content view showed white node shapes without readable labels; only connector labels were visible. Opening the whiteboard produced one console error each time it was opened or reloaded (also recorded under LV-053). Browser online.
+3. With the whiteboard selected as the single context object, submit “Recolor the evaporation node.” The run reached Paused and showed Retry. After one Retry, the assistant said, “The evaporation node is staged to change to a warm amber, with a darker amber outline. The change hasn’t been confirmed as saved yet. Updated ‘Water Cycle — Mind Map’.” The local OpenRouter response event recorded 17163 ms.
+4. Reload the Library artifact route and inspect the canvas and conversation. The white node shapes remained white with no readable evaporation label; no amber-filled node was visible. The prompt/result remained in the conversation, and Retry/Paused were no longer visible. Browser online.
+
+**Expected:** The P3-AI-ENGINE Whiteboard script says: “Create: \"Draw a mind map of the water cycle.\"” and “Edit: \"Recolor the evaporation node.\"” The creation should provide a readable mind map; the requested edit should remain visible after reload.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-fit-to-content-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-canvas-content-after-reload-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-edit-paused-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-recolor-reload-734dcd58.png`.
+
+**Frequency:** 1 of 1 new board creates produced an openable, reloaded Library item; its node labels were not readable. 1 of 1 whiteboard edit prompts paused; one Retry returned a staged color reply, but the visible color change did not remain after reload.
+
+**Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5. LV-039 remains NEEDS-INFO.
+
 ### LV-040 · Completed AI chats remain titled “New conversation”
 
 - **Status:** NEEDS-DECISION
 - **Severity:** Low
 - **Surface / role:** `/chat` header and recent-chat list / signed-in Profile A school administrator
 - **Report script:** Free exploration · first-week AI chat and chat recovery; the P3 reports do not specify automatic title generation.
-- **Commit tested:** `104ac5e8` (original observation); rechecked on `28f82f36` (local app on port 3000).
-- **Frequency:** 4 of 4 observed completed AI-response chats retained the generic title in the header; all 3 checked Moon chats also retained it in the recent-chat row after reload.
+- **Commit tested:** `104ac5e8` (original observation); rechecked on `28f82f36`, `628f4987`, `7407840f` and `734dcd58` (local app on port 3000).
+- **Frequency:** 6 of 8 observed completed AI-response chats retained the generic title in the header; all 4 checked Moon chats and the recent simple “Hi” chat retained it in the recent-chat row after reload. The flashcard-creation chat received “Photosynthesis — 8 Flashcards”; the whiteboard chat showed “Water Cycle — Mind” while its Library artifact title was “Water Cycle — Mind Map.”
 
 **Steps**
 1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected.
@@ -2184,6 +2240,40 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 **Additional evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-code-chat-7407840f-redacted.txt`; `.spectra-local/live-verification/LV040-code-chat-sidebar-row-7407840f.png`; `.spectra-local/live-verification/P3-AI-ENGINE-code-edit-after-reload-7407840f.png`.
 
 **Commit tested:** Application code 7407840f; local web app on port 3000; documentation checkout HEAD e5905d99.
+
+**Additional verifier occurrence (2026-10-02; application code 734dcd58; fresh Moon answer):**
+
+**Steps**
+1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected and `navigator.onLine=true`.
+2. Submit `Why can we see the Moon?` once and wait for the answer.
+3. Inspect the chat header and most-recent sidebar row, reload the same chat, and inspect both title locations again.
+
+**Expected:** P3-AI-ENGINE says: “Expect one model call and streamed text with no ids.” The separate free-exploration title expectation is that the completed chat have a title that distinguishes it from other conversations.
+
+**Actual:** The relevant answer was visible on the first page-text read after send. The local OpenRouter telemetry appended a request, phase and response; the `/api/spectra/run` POST returned HTTP 200, and its response event recorded 2812 ms. The browser remained online, no offline text appeared, and Playwright reported 0 console errors and 1 Clerk development-key warning. The header and most-recent sidebar row both read “New conversation” after completion. After reload about two minutes later, the prompt and answer remained visible and both title locations still read “New conversation”; the row subtitle was “Inbox.”
+
+**Frequency:** 1 of 1 fresh zero-context Moon chats retained the generic header and sidebar title after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV040-moon-title-row-734dcd58.png`; `.spectra-local/live-verification/LV040-moon-answer-title-after-reload-734dcd58.png`; `.spectra-local/live-verification/LV040-moon-title-live-recheck-734dcd58-redacted.txt`.
+
+**Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5.
+
+**Additional verifier occurrence (2026-10-02; application code 734dcd58; simple Hi chat):**
+
+**Steps**
+1. In saved Profile A, open a fresh `/chat` with 0 context objects selected.
+2. Submit `Hi` once and wait for the reply.
+3. Inspect the header and most-recent sidebar row, reload the chat, and inspect the persisted reply and title again.
+
+**Expected:** The completed chat should have a title that distinguishes it from other conversations; the simple prompt should receive a completed reply in under 10 seconds, as requested by the user.
+
+**Actual:** `Hi! What can I help you with?` appeared on the first page-text read after send. The local OpenRouter telemetry recorded request, phase and response, with 1869 ms from request to response. The reply remained visible after reload. The header and most-recent sidebar row still read “New conversation” after reload; the row subtitle was “Inbox.” Browser online; no offline text; 0 console errors and 1 Clerk development-key warning.
+
+**Frequency:** 1 of 1 fresh simple “Hi” chats retained the generic header and sidebar title after reload.
+
+**Evidence:** `.spectra-local/live-verification/LV040-hi-title-row-after-reload-734dcd58.png`; `.spectra-local/live-verification/LV040-hi-answer-after-reload-734dcd58.png`; `.spectra-local/live-verification/LV040-hi-live-recheck-734dcd58-redacted.txt`.
+
+**Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5.
 
 - Option A: Use the first prompt as a fallback, then replace it if the existing model result supplies a title. No additional provider call or latency; titles may be longer/raw prompt excerpts. Preserve explicitly edited titles and existing metadata authority.
 - Option B: Generate a short title using the configured model when metadata is absent. Better summary titles, with extra provider usage/latency and a recoverable title-generation failure. Do not mandate planning for ordinary answers, lower reasoning/model capability or truncate AI context.
@@ -2797,28 +2887,27 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - Documentation-only follow-up: record the latest incomplete editable create, its completed answer state and absence of accepted operations. No source/tests changed from 734dcd58; its last frozen full-suite result remains **4,586 passed, 1 failed, 1 skipped** (known LV-017 package failure), with 64 focused tests, both TypeScript projects, lint and five gates passing.
 - LV-039 remains NEEDS-INFO because the operation/tool rejection evidence is unavailable and local execution logs no longer cover the submission window. The next naturally observed create timestamp/capture question is recorded above. Existing NEEDS-DECISION and CANNOT-REPRODUCE entries remain unchanged with their reasons in the preceding closeout; no OPEN, REOPENED or FIXING issue remains. The fixer stops between actionable reports as requested.
 
-### LV-052 · Budget sheet omits requested monthly totals
+### LV-052 · Budget sheet monthly totals reported missing (not reproduced)
 
-- **Status:** NEEDS-INFO
+- **Status:** CANNOT-REPRODUCE
 - **Severity:** High
 - **Surface / role:** /chat AI sheet creation and /library Sheets editor / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Needs live verification · Sheet · Create
-- **Commit tested:** 734dcd58 (application code; local instance 8, web port 3000); e88a6423 (documentation checkout)
-- **Frequency:** 1 of 1 fresh zero-context sheet runs produced a saved workbook without monthly totals.
+- **Commit tested:** 734dcd58 (application code; local instance 8, web port 3000); 77e583a5 (documentation checkout)
+- **Frequency:** 0 of 1 targeted post-reload UI rechecks; the monthly formulas were present. The original inspection did not reach columns K/L.
 
 **Steps**
 
 1. In saved Profile A on local instance 8 at web port 3000, open a fresh /chat with no context object selected.
 2. Submit “Make a budget sheet with monthly totals.” once and wait for the run to settle.
-3. In Library, open the newest “Monthly Budget” sheet with summary “Workbook with 60 filled cells about Monthly Budget.”
-4. Inspect the “Annual Budget” grid. Use the Name box to select B2 and B14 and read the formula field.
-5. Reload the Library artifact route and inspect the workbook again.
+3. In Library, open the newest “Monthly Budget” sheet and reload its artifact route.
+4. In the “Annual Budget” sheet, use the Name box to select K1, L1, K2, L2, K13 and L13; read the visible formula field for each selection.
 
 **Expected:** The P3-AI-ENGINE · Sheet script says: “Create: "Make a budget sheet with monthly totals."” The workbook should provide monthly totals for the requested months and remain available after reload.
 
-**Actual:** The chat response described “automatic monthly expense and remaining-balance formulas, and annual totals.” The Library listed the newly created SHEETS item “Monthly Budget” with summary “Workbook with 60 filled cells about Monthly Budget,” and the item remained available after reload. The reopened “Annual Budget” grid had headers Month, Income, Housing, Utilities, Groceries, Transport, Health, Debt payments, and Personal. Rows January through December had no monthly expense-total or remaining-balance column. B2’s formula field was empty. The only visible total row was “Year total”; B14’s formula field showed “=SUM(B2:B13)” and the row displayed zeros. No monthly expense total or remaining-balance values were present in the reopened sheet. The separate save-state wording mismatch is recorded under LV-022. At recheck navigator.onLine was true; no offline or run-failure/interruption copy appeared; Playwright reported 0 console errors and 1 warning.
+**Actual:** The artifact remained available after reload. The Name box displayed K1 “Total expenses” and L1 “Remaining”. K2:K13 displayed `=SUM(Cn:Jn)` for January through December, and L2:L13 displayed `=Bn-Kn` for the same months. No missing monthly formula was reproduced. The first inspection covered columns A–I plus B2 and B14, which did not establish whether the monthly formulas existed in K/L. The separate save-state wording mismatch is recorded under LV-022. At recheck navigator.onLine was true; no offline or run-failure/interruption copy appeared; Playwright reported 0 console errors and 1 warning.
 
-**Evidence:** .spectra-local/live-verification/LV052-budget-monthly-cell-blank-734dcd58.png; .spectra-local/live-verification/LV052-budget-annual-row-formula-734dcd58.png; .spectra-local/live-verification/LV022-budget-library-item-persisted-734dcd58.png; .spectra-local/live-verification/LV022-LV052-budget-sheet-recheck-734dcd58-redacted.txt.
+**Evidence:** .spectra-local/live-verification/LV052-sheet-K1-total-expenses-header-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L1-remaining-header-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-K2-total-expense-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L2-remaining-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-K13-year-end-total-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L13-year-end-remaining-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-formulas-after-reload-734dcd58-redacted.txt.
 
 **Fixer reproduction (2026-10-02; read-only local store and real workbook model):** The recorded operation and the saved artifact both contain the requested monthly totals. The persisted cell map uses the standard spectra-sheet-cells-v1 chunk encoding; decoding/normalizing through the real sheet model yields 60 stored cells, 26 columns and no hidden columns. K1 is Total expenses and L1 is Remaining; each January–December row has K2:K13 =SUM(Cn:Jn) and L2:L13 =Bn-Kn. B2 is an empty income-input cell, so its empty formula field is consistent with this workbook. The reported visible headers A–I do not cover K/L and cannot establish those columns are absent. The annual total in B14 is additional to the monthly formulas. No saved content or runtime behavior was changed.
 
@@ -2832,3 +2921,58 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - Documentation-only assessment: the real persisted workbook contains all requested monthly total/balance formulas, and the real calculation-engine reproduction passes. LV-052 is NEEDS-INFO for the targeted editor K/L visibility check; no formula or content fix is claimed.
 - No source/tests changed from 734dcd58. Its frozen full-suite result remains **4,586 passed, 1 failed, 1 skipped**, with the known LV-017 gateway package failure; 64 focused tests, both TypeScript projects, lint and five gates pass. No redundant full suite was run for this read-only assessment.
 - Existing NEEDS-DECISION entries remain LV-003, LV-012, LV-022, LV-028 and LV-040; CANNOT-REPRODUCE remains LV-004, LV-007 and LV-051, with their reasons recorded in the prior closeout. NEEDS-INFO includes LV-017, LV-039, LV-046 and now LV-052. No OPEN, REOPENED or FIXING entry remains. The fixer stops while the verifier checks the narrow observation.
+
+### Verifier recheck · LV-052 · 2026-10-02 (Europe/Madrid)
+
+- The targeted post-reload Profile A UI check found the requested monthly formulas in the visible formula field: K1 “Total expenses”; L1 “Remaining”; K2:K13 `=SUM(Cn:Jn)`; L2:L13 `=Bn-Kn`. The formulas were present through December. Browser online; no offline copy; 0 console errors and 1 warning.
+- Result: LV-052 is CANNOT-REPRODUCE. The earlier A–I/B2/B14 inspection was insufficient to establish that K/L formulas were absent. The prior pending question is answered by this UI check.
+- Evidence: .spectra-local/live-verification/LV052-sheet-K1-total-expenses-header-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L1-remaining-header-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-K2-total-expense-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L2-remaining-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-K13-year-end-total-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-L13-year-end-remaining-after-reload-734dcd58.png; .spectra-local/live-verification/LV052-sheet-formulas-after-reload-734dcd58-redacted.txt.
+- App commit `734dcd58`; documentation checkout `77e583a5`.
+
+### LV-053 · Opening a whiteboard logs an invalid fontWeight console error
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** `/library` Whiteboard Work surface and chat result “Open” action / signed-in Profile A school administrator
+- **Report script:** P3-AI-ENGINE · Whiteboard · Create and open
+- **Commit tested:** 734dcd58 (application code; local instance 8, web port 3000); 77e583a5 (documentation checkout)
+- **Frequency:** 3 of 3 whiteboard opens/reopens of the same saved artifact produced one identical console error.
+
+**Steps**
+1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected.
+2. Submit the P3 prompt `Draw a mind map of the water cycle.` and wait for the 9-node “Water Cycle — Mind Map” item.
+3. Open the whiteboard from the chat result and inspect the Playwright console.
+4. Reload `/chat`, open the new whiteboard from Library, and inspect the console again.
+5. Reload the Library artifact route and inspect the console after the whiteboard surface loads.
+
+**Expected:** The P3-AI-ENGINE Whiteboard script says: “Create: \"Draw a mind map of the water cycle.\"” Opening the resulting Whiteboard should not produce a browser console error.
+
+**Actual:** The whiteboard opened each time, but Playwright recorded one error on each of the three opens/reopens: `NaN is an invalid value for the "%s" css style property. fontWeight @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_1e8vcs8._.js:1052`. A Library load before opening the whiteboard had 0 console errors. On each opening the browser remained online and Playwright also recorded 1 Clerk development-key warning.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-reload-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-fit-to-content-734dcd58.png`.
+
+### LV-054 · AI-created water-cycle whiteboard has no readable node labels
+
+- **Status:** NEEDS-INFO
+- **Severity:** High
+- **Surface / role:** `/chat` AI Whiteboard creation and `/library` Whiteboard editor / signed-in Profile A school administrator
+- **Report script:** P3-AI-ENGINE · Whiteboard · Create; adjacent Edit prompt “Recolor the evaporation node.”
+- **Commit tested:** 734dcd58 (application code; local instance 8, web port 3000); 77e583a5 (documentation checkout)
+- **Frequency:** 1 of 1 created water-cycle Whiteboards had no readable node labels in the editor after reload.
+
+**Steps**
+1. In saved Profile A at desktop 1280×720, open a fresh `/chat` with 0 context objects selected.
+2. Submit `Draw a mind map of the water cycle.` and wait for the assistant’s final response.
+3. Open the new “Water Cycle — Mind Map” Whiteboard from Library.
+4. Activate “Fit to content” and inspect the canvas text and node shapes.
+5. Reload the Library artifact route and inspect the board again.
+
+**Expected:** The P3-AI-ENGINE Whiteboard script says: “Create: \"Draw a mind map of the water cycle.\"” The resulting mind map should show readable labels on its water-cycle nodes so that users can identify the concepts and select the requested evaporation node for the adjacent Edit step.
+
+**Actual:** Library described the item as a “9-node whiteboard about Water Cycle — Mind Map.” At Fit to content, the canvas showed white rectangular node shapes without readable text inside them; only connector labels such as “heats surface water,” “vapour rises,” and “clouds become saturated” were readable. The word “evaporation” appeared in the assistant reply but not as a visible canvas node label. The same unlabeled shapes remained after reloading the artifact route. The adjacent “Recolor the evaporation node.” run and its single Retry did not leave a visible amber node after reload; that run occurrence is also recorded under LV-039. Opening/reloading the artifact produced the separate LV-053 console error. The browser remained online.
+
+**Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-fit-to-content-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-canvas-content-after-reload-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-after-recolor-reload-734dcd58.png`.
+
+**Fixer diagnosis (2026-10-02):** The read-only saved model, the accepted artifact.create input, and all retained streamed content previews already contain nine text nodes with content: {}. The editor therefore has no labels to render; this is earlier than the save/reload boundary. The accepted recolor operation did persist fill/stroke on evaporation, so lack of saved recolor is not established by the screenshot. The raw model tool arguments before normalization are not retained in these events; attributing the empty nodes to generation versus field loss would be speculation. Local ignored captures: .spectra-local/LV054-water-cycle-content.json, LV054-operations.json and LV054-create-events.json. LV-053 is an independent font-weight rendering defect.
+
+**Question for verifier:** On the next Whiteboard create check, repeat the same P3 create prompt once in a fresh conversation and report the submission UTC immediately, then whether node labels are visible on first open and after reload. Also report whether manually entering a label in one existing blank node survives reopening. This will establish reproducibility and the editable-text boundary without fabricating labels from identifiers or changing the AI model/reasoning. No content or deployment was modified.

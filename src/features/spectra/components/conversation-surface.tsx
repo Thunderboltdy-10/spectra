@@ -164,10 +164,10 @@ function mergeTracePage(
   };
 }
 
-function savedRunStatusCopy(
+function runDetailsStatusCopy(
   run: Pick<SpectraRun, "status" | "phase"> | undefined,
 ) {
-  if (!run) return "Saved progress and results";
+  if (!run) return undefined;
   if (run.status === "awaiting_confirmation") return "Waiting for your approval";
   if (run.status === "awaiting_resolution")
     return run.phase === "conflict"
@@ -180,7 +180,7 @@ function savedRunStatusCopy(
   return "Recovery details";
 }
 
-function SavedRunDisclosure({
+function RunDetailsDisclosure({
   run,
   state,
   onLoad,
@@ -190,11 +190,14 @@ function SavedRunDisclosure({
   onLoad: () => void;
 }) {
   if (state?.trace) return null;
+  const status = state?.error ?? runDetailsStatusCopy(run);
   return (
-    <div className="mt-3 flex items-center gap-2 rounded-control bg-[var(--bg-secondary)] px-3 py-2">
-      <span className="min-w-0 flex-1 text-micro text-[var(--text-secondary)]">
-        {state?.error ?? savedRunStatusCopy(run)}
-      </span>
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      {status ? (
+        <span className="min-w-0 text-micro text-[var(--text-secondary)]">
+          {status}
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={onLoad}
@@ -2010,7 +2013,7 @@ export function ConversationSurface({
                           {messageMeta(message)}
                         </div>
                         {shouldOfferTrace && message.runId ? (
-                          <SavedRunDisclosure
+                          <RunDetailsDisclosure
                             run={activeRun}
                             state={traceState}
                             onLoad={() => void requestRunTrace(message.runId!)}
@@ -2051,7 +2054,7 @@ export function ConversationSurface({
                         )}
                       />
                       {shouldOfferTrace && message.runId ? (
-                        <SavedRunDisclosure
+                        <RunDetailsDisclosure
                           run={activeRun}
                           state={traceState}
                           onLoad={() => void requestRunTrace(message.runId!)}

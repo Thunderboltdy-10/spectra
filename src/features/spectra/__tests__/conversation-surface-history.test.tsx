@@ -141,6 +141,18 @@ afterEach(() => {
 });
 
 describe("ConversationSurface history and saved results", () => {
+  it.each([false, true])("does not present a saved-result box before any artifact result is loaded (compact=%s)", async (compact) => {
+    mocks.getTrace.mockResolvedValue({ run, operations: [], events: [], cards: [], artifacts: [] });
+    render(<ConversationSurface detail={detail("thread-a", "No editable document was created.")} threadId="thread-a" compact={compact} />);
+    expect(screen.queryByText("Saved progress and results")).toBeNull();
+    const disclosure = screen.getByRole("button", { name: "Show details" });
+    expect(disclosure.parentElement?.className).not.toContain("bg-[var(--bg-secondary)]");
+    fireEvent.click(disclosure);
+    await waitFor(() => expect(mocks.getTrace).toHaveBeenCalledTimes(3));
+    expect(screen.getByText("No editable document was created.")).toBeTruthy();
+    expect(screen.queryByTestId("result-cards")).toBeNull();
+  });
+
   it("restores the latest unanswered run's saved failure and Retry after reload", async () => {
     mocks.useQuery.mockReturnValue(null);
     const source = detail("thread-a", "Create a document");
@@ -384,7 +396,8 @@ describe("ConversationSurface history and saved results", () => {
 
     mocks.useQuery.mockReturnValue(null);
     first.rerender(<ConversationSurface detail={detail("thread-a", "Saved answer")} threadId="thread-a" />);
-    expect(await screen.findByText("Saved progress and results")).toBeTruthy();
+    expect(screen.queryByText("Saved progress and results")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Show details" })).toBeTruthy();
     expect(mocks.getMessages).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));

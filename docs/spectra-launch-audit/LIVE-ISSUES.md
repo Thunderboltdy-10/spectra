@@ -209,6 +209,12 @@ _Written by the verifier at the end._
 | LV-057 post-fix live recheck — Runs & chats selection with loaded and refresh-error states | fixer recheck · current conversation selection and recovery | PASS — three selections retained the saved WW1 refusal and four headings at the same URL. With a controlled Playwright 503 on conversation reads, selecting the active “New conversation” also retained the last loaded messages and refresh notice; removing the route and reloading showed both saved prompt/response pairs. The LV-056 pending-approval → New chat neighbor check passed. Browser online; unmocked reload had 0 console errors and 1 Clerk development warning. Evidence: `.spectra-local/live-verification/LV057-post-4823b413-redacted.txt` and linked screenshots. | LV-057 (VERIFIED); LV-056 (VERIFIED) | 4823b413 (app); 5708da7e (checkout) |
 | P3-AI-ENGINE — fresh no-context “Hi” latency recheck | user launch reliability criterion · simple chat response | PASS — Playwright recorded the final “Saved progress and results” marker 8,976 ms after the send timer started immediately before the click. The two-message exchange remained saved after reload. Browser online; 0 console errors and 1 Clerk development warning. This pass does not clear the separate earlier LV-039 failures. Evidence: `.spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt`; `.spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png`. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
 | P3-AI-ENGINE — alternate fresh document create (Moon phases) | P3-AI-ENGINE · Document · Create; adjacent current-code check without repeating WW1 prompt | FAIL — the zero-context request completed in 35,273 ms with an answer explicitly saying no artifact was saved. No editable document/Open document control appeared before or after reload; Library's Documents filter showed no exact title match. The local model telemetry recorded a request at 08:47:54Z and a response at 08:48:19Z (elapsedMs 24,887); POST `/api/spectra/run` returned HTTP 200. Browser online; 0 console errors and 1 Clerk development warning. See LV-039. Evidence: `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-redacted.txt` and linked screenshots. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
+| P3-AI-ENGINE — fresh editable-document create (“How Plants Make Food”) | P3-AI-ENGINE · Document · Create | FAIL — on 46889f21, the fresh zero-context request returned chat text beginning “I couldn’t save an editable document in this run”; no editor/open control appeared and the exact-title Document Library search returned no match. See LV-039. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt | LV-039 (NEEDS-INFO) | 46889f21 |
+| P3-AI-ENGINE — result-status copy on failed document create | P3-AI-ENGINE · run result status | FAIL — “Saved progress and results” appeared for the same run that said no editable document was saved and produced no Library artifact. The user clarified that the bottom box should only appear when it shows created/modified/referenced artifacts; occurrence recorded under LV-022. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO) | 46889f21 |
+| P3-EDITORS — Presentation text save, reload and offline reconnect | P3-EDITORS · Presentation E3 partial | PASS — title, summary, slide text and speaker notes remained after reload; a same-Profile-A second tab showed the summary edit, and slide text typed offline remained after reconnect and reload. This is a same-identity local persistence/cross-tab check, not independent-user collaboration. Browser online after reconnect; 0 console errors, 1 Clerk development-key warning. Evidence: .spectra-local/live-verification/P3-EDITORS-presentation-reload-20261002.png; .spectra-local/live-verification/P3-EDITORS-presentation-observations-20261002-redacted.txt | — | 46889f21 |
+| P3-EDITORS — Presentation E3 independent peer collaboration | P3-EDITORS · Presentation E3 | BLOCKED — only Profile A was supplied for this run; the two tabs shared the same signed-in identity, so an independent user/browser peer check could not be made. | — | 46889f21 |
+| LV-022 follow-up — saved-result box on ordinary no-artifact answer | user-clarified result-status expectation | FAIL — the fresh zero-context “Hi” answer completed in 8,976 ms, but its chat card displayed “Saved progress and results” without a created, modified or referenced artifact. The user clarified that the bottom box should only appear when it shows those artifacts. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt | LV-022 (NEEDS-DECISION) | 4823b413 (app); 5708da7e (checkout) |
+
 ## Issues
 
 ### LV-001 · Fresh local stack stops before readiness
@@ -960,6 +966,50 @@ Additional verifier occurrence (2026-10-02; application code 734dcd58):
 **Evidence:** `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-recheck-734dcd58-redacted.txt`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-chat-save-wording-734dcd58.png`; `.spectra-local/live-verification/P3-AI-ENGINE-whiteboard-library-item-734dcd58.png`.
 
 **Commit tested:** Application code 734dcd58; local web app on port 3000; documentation checkout 77e583a5.
+
+**Additional verifier occurrence (2026-10-02; application commit 46889f21; editable-document create):**
+
+**Steps**
+1. In saved Profile A on local instance 8 at web port 3000, open a fresh /chat with 0 context objects selected.
+2. Submit “Create an editable document titled ‘How Plants Make Food’ for a middle-school student. Use these three section headings: What photosynthesis means, What plants need, Why it matters. Write two clear sentences under each heading and add a one-sentence conclusion.”
+3. Read the settled answer and the result-status label.
+4. In Library, filter to Document and search the exact title “How Plants Make Food.”
+
+**Expected:** The request asked for an editable document. The P3-AI-ENGINE · Document script says: “Create: "Create a document on the causes of WW1 with 4 sections."” The user clarified on 2026-10-02: “Only want that bottom box when it is showing the created/modified/referenced artifacts.”
+
+**Actual:** The answer began, “I couldn’t save an editable document in this run, but here is the requested text:” and provided the requested three headings, two sentences under each, and a conclusion as chat text. No document editor or open-document control appeared. The chat displayed “Saved progress and results”; the Document-filtered Library search showed no match for “How Plants Make Food.” This is one additional LV-022 occurrence; its separate final-reply contract decision remains open.
+
+**Frequency:** 1 of 1 fresh editable-document runs showed “Saved progress and results” with no created document or artifact reference.
+
+**Evidence:** .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt.
+
+**Commit tested:** Application code 46889f21; local web app on port 3000; saved Profile A.
+
+**Additional verifier occurrence (2026-10-02; application code 4823b413; ordinary no-artifact answer):**
+
+**Steps**
+1. In saved Profile A on local instance 8 at desktop 1280×720, open a fresh /chat with 0 context objects selected.
+2. Send “Hi.” using the regular Send command control.
+3. Read the completed assistant answer and its result-status card.
+4. Reload the conversation and check that the two-message exchange remains visible.
+
+**Expected:** The user clarified on 2026-10-02: “Only want that bottom box when it is showing the created/modified/referenced artifacts.” An ordinary greeting with no requested or returned artifact has no created, modified or referenced artifact to show in that box.
+
+**Actual:** “Hi” received the answer “Hi! What can I help you with?” and the two-message exchange remained saved after reload. The result card displayed “Saved progress and results” with “Show details”; no artifact was requested or returned. This is 1 of 1 fresh greeting runs in this check.
+
+**Frequency:** 1 of 1 fresh no-context greeting answers displayed the box without an artifact receipt.
+
+**Evidence:** .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt.
+
+**Commit tested:** Application code 4823b413; local web app on port 3000; documentation checkout 5708da7e.
+
+**Saved-result placeholder fix (2026-10-02):** The clarified bottom-box preference concerns a separate UI mechanism from the still-open final-reply decision. The reported “Saved progress and results” box was a lazy run-trace disclosure: when no run projection was loaded, it supplied that label and a filled box even though no artifact result was known. It is now an inline RunDetailsDisclosure: an unknown run has no saved-result claim, known run/recovery status remains inspectable beside the existing Show details/Try again control, and actual loaded artifact cards continue to carry artifact results. Both assistant and user-only saved-run disclosure paths, full and compact, use the same component; no post-save reply policy was selected.
+
+**Before/after proof:** Two full/compact conversation-history regressions fail before and pass after for an answer with no created editable document: no generic saved-result box appears, its answer remains visible, and Show details still loads all three trace families without manufacturing an artifact card. Existing artifact-result, approval/recovery, history-paging and conflict/choice cases remain green; the paged-history test still reveals a real Saved result artifact card. All **33 focused tests** pass across history, choice and conflict suites. Logs: .spectra-local/LV022-disclosure-before.log and LV022-disclosure-focused.log.
+
+**Validation:** Both TS projects, full lint and architecture/copy/design-token/capability/secrets gates pass. Final frozen full suite: **4,643 passed, 2 failed, 1 skipped**, 103.17 seconds; 517 passed files / 2 failed / 1 skipped across 520. Failures are known LV-017 gateway packaging and the dense-sheet timing check (48.2585 ms versus 40 ms). All **77 sheet tests pass in isolation**, LV022-disclosure-sheet-isolated.log; full log .spectra-local/LV022-disclosure-full.log. No thresholds, backend data, AI settings or deployment changed; no codegen or deploy step is required.
+
+**Verifier recheck:** On the committed build, reload the failed Plants/Moon create and an ordinary answer in full and compact conversation. There should be no generic saved-progress/results box; the inline details control should still reveal trace data, and an actual saved work result should remain an artifact card. Check active status, failed-run recovery and user-only saved-run details nearby. LV-022 remains NEEDS-DECISION solely for the previously recorded post-save final-reply alternatives; this UI placeholder fix does not choose either. The actual commit hash is recorded below after committing.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -3278,3 +3328,22 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - Full suite: **4,641 passed, 2 failed, 1 skipped**, 103.67 seconds; 517 passed files / 2 failed / 1 skipped across 520. The failures are LV-017's gateway packaging omission and the recurring Stop/no-school status assertion. All 63 route tests pass in isolation; all 123 focused tests, both TS projects, full lint and five gates pass.
 - NEEDS-DECISION remains LV-003 (expired-invite HTTP), LV-012 (Bridge discovery/activation), LV-022 (post-save prose latency/usage), LV-028 (shortcut mapping) and LV-040 (fallback title versus another model call). CANNOT-REPRODUCE remains LV-004 (decoded invitation works), LV-007 (Escape/pending-state behavior), LV-051 (aborted read with completed answer) and LV-052 (monthly K/L formulas present). Their choices and evidence remain in their entries.
 - NEEDS-INFO remains LV-017 (deployment exception), LV-039 (post-fix live create and earlier interruption boundary), LV-046 (stale waiting-label correlation) and LV-054 (generated labels absent before persistence with raw generation unavailable). The current guide-recovery cause is identified and repaired; broader LV-039 is not declared verified. LV-053, LV-055, LV-056 and LV-057 retain the verifier's VERIFIED statuses. No OPEN, REOPENED or FIXING entry remains. The fixer stops between actionable reports while verification continues normal workflows.
+
+### Verifier occurrence · LV-039 · fresh editable-document create · 2026-10-02 (Europe/Madrid)
+
+**Steps**
+1. In saved Profile A on local instance 8 at desktop 1280×720, with the browser online, open a fresh /chat with 0 context objects selected.
+2. At approximately 09:10 UTC, submit: “Create an editable document titled ‘How Plants Make Food’ for a middle-school student. Use these three section headings: What photosynthesis means, What plants need, Why it matters. Write two clear sentences under each heading and add a one-sentence conclusion.”
+3. At approximately 09:10:40 UTC, inspect the run state. It showed “Still running,” “Thinking” and “Getting ready.” A Playwright snapshot attempt timed out after 30 seconds.
+4. Reload the same conversation at approximately 09:18 UTC and inspect the persisted answer, editor controls and result status.
+5. In Library, select the Document filter and search the exact title “How Plants Make Food.”
+
+**Expected:** P3-AI-ENGINE · Document · Create says: “Create: "Create a document on the causes of WW1 with 4 sections."” The requested work should be an editable document that can be opened. This prompt explicitly requested an editable document and specified its title, headings and content.
+
+**Actual:** After reload, the answer began, “I couldn’t save an editable document in this run, but here is the requested text:” It provided the requested title, all three headings, two sentences per heading and a one-sentence conclusion in chat text. No document editor or open-document control appeared. The header remained “New conversation.” The chat also displayed “Saved progress and results.” The Document-filtered Library search returned no match for the exact title. This is 1 of 1 occurrence for this fresh request. The final settled response was first observed after reload at approximately 09:18 UTC; the exact completion time was not observed.
+
+**Console/network:** The browser was online. Before submission, Playwright recorded 0 errors and 1 warning; after reload, 0 errors and 1 Clerk development-key warning were recorded. No offline-status copy was visible after reload. The local instance-8 OpenRouter telemetry excerpt records one request at 09:10:27 UTC and one response at 09:10:53 UTC; this local trace does not confirm account-side OpenRouter usage. The prompt-route response status was not captured.
+
+**Evidence:** .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt; .spectra-local/live-verification/LV039-how-plants-openrouter-events-redacted.txt.
+
+**Commit tested:** Application code 46889f21; local web app on port 3000; saved Profile A.

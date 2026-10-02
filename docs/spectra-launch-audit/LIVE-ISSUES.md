@@ -210,10 +210,15 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — fresh no-context “Hi” latency recheck | user launch reliability criterion · simple chat response | PASS — Playwright recorded the final “Saved progress and results” marker 8,976 ms after the send timer started immediately before the click. The two-message exchange remained saved after reload. Browser online; 0 console errors and 1 Clerk development warning. This pass does not clear the separate earlier LV-039 failures. Evidence: `.spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt`; `.spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png`. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
 | P3-AI-ENGINE — alternate fresh document create (Moon phases) | P3-AI-ENGINE · Document · Create; adjacent current-code check without repeating WW1 prompt | FAIL — the zero-context request completed in 35,273 ms with an answer explicitly saying no artifact was saved. No editable document/Open document control appeared before or after reload; Library's Documents filter showed no exact title match. The local model telemetry recorded a request at 08:47:54Z and a response at 08:48:19Z (elapsedMs 24,887); POST `/api/spectra/run` returned HTTP 200. Browser online; 0 console errors and 1 Clerk development warning. See LV-039. Evidence: `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-redacted.txt` and linked screenshots. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
 | P3-AI-ENGINE — fresh editable-document create (“How Plants Make Food”) | P3-AI-ENGINE · Document · Create | FAIL — on 46889f21, the fresh zero-context request returned chat text beginning “I couldn’t save an editable document in this run”; no editor/open control appeared and the exact-title Document Library search returned no match. See LV-039. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt | LV-039 (NEEDS-INFO) | 46889f21 |
-| P3-AI-ENGINE — result-status copy on failed document create | P3-AI-ENGINE · run result status | FAIL — “Saved progress and results” appeared for the same run that said no editable document was saved and produced no Library artifact. The user clarified that the bottom box should only appear when it shows created/modified/referenced artifacts; occurrence recorded under LV-022. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO) | 46889f21 |
+| P3-AI-ENGINE — result-status copy on failed document create | P3-AI-ENGINE · run result status | FAIL — “Saved progress and results” appeared for the same run that said no editable document was saved and produced no Library artifact. The user clarified that no-artifact messages should not show this box and artifact changes should show their artifact card; occurrence recorded under LV-022. Evidence: .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png | LV-022 (NEEDS-DECISION); LV-039 (NEEDS-INFO) | 46889f21 |
 | P3-EDITORS — Presentation text save, reload and offline reconnect | P3-EDITORS · Presentation E3 partial | PASS — title, summary, slide text and speaker notes remained after reload; a same-Profile-A second tab showed the summary edit, and slide text typed offline remained after reconnect and reload. This is a same-identity local persistence/cross-tab check, not independent-user collaboration. Browser online after reconnect; 0 console errors, 1 Clerk development-key warning. Evidence: .spectra-local/live-verification/P3-EDITORS-presentation-reload-20261002.png; .spectra-local/live-verification/P3-EDITORS-presentation-observations-20261002-redacted.txt | — | 46889f21 |
 | P3-EDITORS — Presentation E3 independent peer collaboration | P3-EDITORS · Presentation E3 | BLOCKED — only Profile A was supplied for this run; the two tabs shared the same signed-in identity, so an independent user/browser peer check could not be made. | — | 46889f21 |
-| LV-022 follow-up — saved-result box on ordinary no-artifact answer | user-clarified result-status expectation | FAIL — the fresh zero-context “Hi” answer completed in 8,976 ms, but its chat card displayed “Saved progress and results” without a created, modified or referenced artifact. The user clarified that the bottom box should only appear when it shows those artifacts. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt | LV-022 (NEEDS-DECISION) | 4823b413 (app); 5708da7e (checkout) |
+
+| LV-022 follow-up — saved-result box on ordinary no-artifact answer | user-clarified result-status expectation | FAIL — the fresh zero-context “Hi” answer completed in 8,976 ms, but its chat card displayed “Saved progress and results” without a created, modified or referenced artifact. The user clarified that no-artifact messages should not show this box and artifact changes should show their artifact card. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt | LV-022 (NEEDS-DECISION) | 4823b413 (app); 5708da7e (checkout) |
+| LV-058 — short-message bubble width | free exploration · user-message rendering at desktop width | FAIL — in a fresh no-context “Hi.” chat at 1280×720, the user-message bubble spanned approximately 672 px. See LV-058. Evidence: .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV058-short-user-message-width-4823b413-redacted.txt | LV-058 (OPEN) | 4823b413 (app); 5708da7e (checkout) |
+| LV-059 — local app routes after web-process restart | free exploration · signed-in route access and sign-in fallback | FAIL — after the port-3000 web process restarted and health returned ready, /chat, /library and /workspace rendered blank across reloads; /sign-in showed no form after 5 seconds. Evidence: .spectra-local/live-verification/post-web-restart-chat-empty-shell-after-reload-20261002.png; .spectra-local/live-verification/post-web-restart-workspace-empty-shell-20261002.png; .spectra-local/live-verification/post-web-restart-sign-in-no-form-20261002.png; .spectra-local/live-verification/LV059-post-web-restart-blank-routes-redacted.txt | LV-059 (OPEN) | 46889f21 |
+| P3-AI-ENGINE — fresh document create after clean web-process restart | P3-AI-ENGINE · Document · Create; fixer-requested adjacent live check | BLOCKED — the new /chat route rendered no application shell or composer after the port-3000 process restart, and the /sign-in route showed no sign-in controls. No prompt was submitted. See LV-059. | LV-059 (OPEN) | 46889f21 |
+| P3-UI-SYSTEM — context-picker Escape and focus return (partial) | P3-UI-SYSTEM · floating surface keyboard close | PASS — the context picker opened with its search field focused; Escape closed it and focus returned to “Choose AI focus: QA Desktop Presentation 2026-10-02 · 1 context.” Origin/exit animation was not evaluated. Evidence: .spectra-local/live-verification/P3-UI-SYSTEM-context-picker-focus-return-20261002.png; .spectra-local/live-verification/P3-UI-SYSTEM-context-picker-observations-20261002-redacted.txt | — | 46889f21 |
 
 ## Issues
 
@@ -999,17 +1004,23 @@ Additional verifier occurrence (2026-10-02; application code 734dcd58):
 
 **Frequency:** 1 of 1 fresh no-context greeting answers displayed the box without an artifact receipt.
 
-**Evidence:** .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt.
+**Evidence:** .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV058-short-user-message-width-4823b413-redacted.txt.
 
 **Commit tested:** Application code 4823b413; local web app on port 3000; documentation checkout 5708da7e.
 
 **Saved-result placeholder fix (2026-10-02):** The clarified bottom-box preference concerns a separate UI mechanism from the still-open final-reply decision. The reported “Saved progress and results” box was a lazy run-trace disclosure: when no run projection was loaded, it supplied that label and a filled box even though no artifact result was known. It is now an inline RunDetailsDisclosure: an unknown run has no saved-result claim, known run/recovery status remains inspectable beside the existing Show details/Try again control, and actual loaded artifact cards continue to carry artifact results. Both assistant and user-only saved-run disclosure paths, full and compact, use the same component; no post-save reply policy was selected.
+
+**UI fix commit:** 9dfb286885650a2b7675dce7270467aa96e9f431. The separate final-reply contract remains NEEDS-DECISION.
 
 **Before/after proof:** Two full/compact conversation-history regressions fail before and pass after for an answer with no created editable document: no generic saved-result box appears, its answer remains visible, and Show details still loads all three trace families without manufacturing an artifact card. Existing artifact-result, approval/recovery, history-paging and conflict/choice cases remain green; the paged-history test still reveals a real Saved result artifact card. All **33 focused tests** pass across history, choice and conflict suites. Logs: .spectra-local/LV022-disclosure-before.log and LV022-disclosure-focused.log.
 
 **Validation:** Both TS projects, full lint and architecture/copy/design-token/capability/secrets gates pass. Final frozen full suite: **4,643 passed, 2 failed, 1 skipped**, 103.17 seconds; 517 passed files / 2 failed / 1 skipped across 520. Failures are known LV-017 gateway packaging and the dense-sheet timing check (48.2585 ms versus 40 ms). All **77 sheet tests pass in isolation**, LV022-disclosure-sheet-isolated.log; full log .spectra-local/LV022-disclosure-full.log. No thresholds, backend data, AI settings or deployment changed; no codegen or deploy step is required.
 
 **Verifier recheck:** On the committed build, reload the failed Plants/Moon create and an ordinary answer in full and compact conversation. There should be no generic saved-progress/results box; the inline details control should still reveal trace data, and an actual saved work result should remain an artifact card. Check active status, failed-run recovery and user-only saved-run details nearby. LV-022 remains NEEDS-DECISION solely for the previously recorded post-save final-reply alternatives; this UI placeholder fix does not choose either. The actual commit hash is recorded below after committing.
+
+**User clarification (2026-10-02): no generic saved-progress box**
+
+No-artifact messages should not show the bottom “Saved progress and results” box. When artifacts are involved, the result should show the card for the created, modified or referenced artifacts.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -1848,6 +1859,10 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - LV-036 and LV-037 are FIXED pending live recheck; only the verifier sets VERIFIED. The verifier received the committed hash, frontend-only reload instructions, clean cold Library/auth-refresh checks and repeated-offline-Retry/reconnect conversation checks. No OPEN, REOPENED or FIXING entry remains. Stop between tasks as requested. No auth/server authorization weakening, backend sync, deploy, codegen, production-data or environment changes occurred.
 
 ### LV-039 · AI runs fail to return requested results on School and chat surfaces
+
+**Plants occurrence correlation (fixer, 2026-10-02):** The exact local request 983b15bf entered intake at 09:10:26.711 UTC; provider execution ran from 09:10:27.792 to 09:10:53.296 (25,504 ms). Three read_artifact_skill observations returned artifact_skill_guide_not_found, followed by identical_tool_call_repeated; the later propose call was rejected as finalization_required before staging validation. Act and verify were skipped. This confirms the failed tool sequence, but neither the proposed payload nor the presence of the new recovery catalog in model-visible results was retained. Sanitized evidence: .spectra-local/LV039-plants-091027-tool-codes-redacted.json.
+
+**Clean-runtime question (NEEDS-INFO):** The compiled dev chunk contains the new catalog recovery helper, while application-tool registration skips already registered definitions. A retained old execution closure during development hot reload is possible, not proven; the compiled helper alone cannot establish which closure handled this request. Before the next normal authoring workflow, the verifier has been asked to restart only the web/dev process it originally started, without resetting the instance or changing configuration, and record that clean-runtime check and its normal outcome. No extra AI repeat is required. Do not infer a valid proposed operation or weaken finalization guards from these codes; no speculative runtime patch was made.
 
 - **Status:** NEEDS-INFO
 - **Severity:** High
@@ -3347,3 +3362,51 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-refusal.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-library-no-document.png; .spectra-local/live-verification/LV039-how-plants-create-post-46889f21-redacted.txt; .spectra-local/live-verification/LV039-how-plants-openrouter-events-redacted.txt.
 
 **Commit tested:** Application code 46889f21; local web app on port 3000; saved Profile A.
+
+### LV-058 · Short user messages occupy most of the chat column
+
+- **Status:** OPEN
+- **Severity:** Medium
+- **Surface / role:** /chat user-message bubble / signed-in Profile A
+- **Report script:** Free exploration · first-week user chat · desktop message layout
+- **Commit tested:** 4823b413 (application code); 5708da7e (documentation checkout)
+- **Frequency:** 1 of 1 fresh short-message checks rendered the “Hi.” bubble at most of the available chat width.
+
+**Steps**
+1. At desktop 1280×720, in saved Profile A, open a fresh /chat with 0 context objects selected.
+2. Send “Hi.” using the regular Send command control.
+3. Inspect the width of the rendered user-message bubble.
+
+**Expected:** The user clarified: “If the user message is also small, should not take the max width.” A short user message should occupy only the space needed for its content.
+
+**Actual:** The three-character “Hi.” message appeared in a right-aligned pale bubble about 672 px wide in the 1280 px viewport. In the screenshot, the bubble spans approximately x=498–1170, although its text is only “Hi.”
+
+**Evidence:** .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV058-short-user-message-width-4823b413-redacted.txt.
+
+### LV-059 · Application routes render blank after the web process restarts
+
+- **Status:** FIXING
+- **Severity:** Blocker
+- **Surface / role:** Application shell, /chat, /library, /workspace and /sign-in / saved Profile A
+- **Report script:** Free exploration · first-week app access and workspace; post-restart live reliability check
+- **Commit tested:** 46889f21 (local app, port 3000)
+- **Frequency:** 1 of 1 web-process restarts left all three checked signed-in routes blank after navigation and reload; the sign-in route showed no form after 5 seconds.
+
+**Steps**
+1. In saved Profile A, keep the browser online and signal the verified port-3000 Next process to restart under its existing local web supervisor. Do not reset the Convex instance.
+2. After the port-3000 listener returns and /api/health reports ready, navigate to /chat, /library and /workspace?home=1. Wait at least 5 seconds and reload /chat.
+3. Inspect the visible page and body text on those routes.
+4. Navigate to /sign-in, wait 5 seconds and inspect for the sign-in form.
+
+**Expected:** The signed-in application shell and route content should render after the web service is ready. The sign-in route should provide its sign-in controls if an unauthenticated sign-in page is shown.
+
+**Actual:** On /chat, /library and /workspace?home=1, the viewport was blank; the only body text was “Skip to content,” and the page-content container had no visible text. The result remained after route reloads and a 5-second wait. On /sign-in, the page showed “Sign in,” “Sign up,” “Welcome back” and the introductory paragraph, but no input fields or sign-in controls appeared after a 5-second wait. The browser remained online. GET /chat and GET /library returned HTTP 200; captured static bundle requests returned HTTP 200. /api/health reported service=spectra-web, status=ready, mode=development. The gateway remained on port 3001 PID 39912 and local Convex on port 3002 PID 23788; only the port-3000 Next listener changed from PID 17104 to PID 60616. Playwright recorded 0 console errors; a protected-route load showed 1 warning, and /sign-in showed 0 warnings. No AI prompt was submitted because the composer was not available.
+
+**Evidence:** .spectra-local/live-verification/post-web-restart-chat-empty-shell-before-reload-20261002.png; .spectra-local/live-verification/post-web-restart-chat-empty-shell-after-reload-20261002.png; .spectra-local/live-verification/post-web-restart-workspace-empty-shell-20261002.png; .spectra-local/live-verification/post-web-restart-sign-in-no-form-20261002.png; .spectra-local/live-verification/LV059-post-web-restart-blank-routes-redacted.txt.
+
+### Fixer closeout · LV-022 artifact-result disclosure · 2026-10-02 (Europe/Madrid)
+
+- Source commit: **9dfb2868** removes the generic saved-result claim and filled box from shared lazy run details in full and compact conversations; real artifact result cards and trace inspection remain available. This documentation follow-up records the actual hash and the LV-039 clean-runtime question. Commits use the configured human Git identity with no AI co-author trailer.
+- Full suite: **4,643 passed, 2 failed, 1 skipped**, 103.17 seconds; 517 passed files / 2 failed / 1 skipped across 520. Failures are the known LV-017 gateway package omission and dense-sheet timing at 48.2585 ms against 40 ms. All 77 sheet tests pass in isolation; all 33 focused tests, both TypeScript projects, lint and five gates pass.
+- NEEDS-DECISION: LV-003 (expired-invite HTTP behavior), LV-012 (Bridge discovery/activation), LV-022 (post-save final prose contract), LV-028 (shortcut mapping), LV-040 (fallback title versus another configured-model call). CANNOT-REPRODUCE: LV-004 (decoded invitation works), LV-007 (idle/pending Escape behavior), LV-051 (aborted read with completed answer), LV-052 (monthly K/L formulas present). Their evidence and options remain in their entries.
+- NEEDS-INFO: LV-017 (deployment exception), LV-039 (initial interruptions and clean-runtime outcome for the repeated unknown-guide sequence), LV-046 (stale waiting-label correlation), LV-054 (blank generated labels before persistence; raw generation unavailable). LV-053, LV-055, LV-056 and LV-057 retain verifier VERIFIED statuses. New LV-059 (Blocker: blank routes after restart) and LV-058 (Medium: short-message width) arrived during this closeout and will be handled in that order. Only the verifier sets VERIFIED.

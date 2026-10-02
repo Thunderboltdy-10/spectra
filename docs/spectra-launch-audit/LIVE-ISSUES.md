@@ -102,6 +102,8 @@ _Written by the verifier at the end._
 | P3-AI-ENGINE — Document / Create fresh repeat (628f4987) | P3-AI-ENGINE · Document · Create; live reliability recheck | FAIL — the zero-context create produced three POST /api/spectra/run HTTP 200 responses, then four runEvents and one overview HTTP 500 INTERNAL_ERROR before later reads returned HTTP 200. The chat showed “Chat context could not load,” then “Spectra paused this run”; reload retained Retry, with no document editor or open control visible. A Library full-title search showed no exact-title row. See LV-039. Evidence: .spectra-local/live-verification/LV039-document-create-628f4987-redacted.txt; .spectra-local/live-verification/LV039-document-create-running-628f4987.png; .spectra-local/live-verification/LV039-document-create-after-reload-628f4987.png; .spectra-local/live-verification/LV039-library-search-exact-title-628f4987.png | LV-039 (NEEDS-INFO) | 628f4987 |
 | P3-AI-ENGINE — Document / Create Retry after pause (628f4987) | P3-AI-ENGINE · Document · recovery action | FAIL — one Retry briefly showed resumed/document progress, then returned to “Spectra paused this run”; reload retained the paused card. One runEvents read returned HTTP 500 INTERNAL_ERROR (request ID 8c8deff4). The Document-filtered Library query showed no exact-title row. See LV-039. Evidence: .spectra-local/live-verification/LV039-document-create-628f4987-redacted.txt; .spectra-local/live-verification/LV039-document-create-retry-paused-628f4987.png; .spectra-local/live-verification/LV039-document-create-retry-after-reload-628f4987.png; .spectra-local/live-verification/LV039-library-document-filter-after-retry-628f4987.png | LV-039 (NEEDS-INFO) | 628f4987 |
 | P3-AI-ENGINE — Document create post-fix live recheck | P3-AI-ENGINE · Document · Create; LV-039 post-fix occurrence | FAIL — the exact prompt produced a four-section text draft, but the assistant said “I couldn’t create the document in your workspace—the creation request wasn’t accepted.” No document editor or open control appeared, and the same result remained after reload. Browser online; 0 console errors, 1 warning. Local OpenRouter telemetry recorded one request and response (29,572 ms, fallback=false); the prompt-route HTTP status was not captured. Evidence: `.spectra-local/live-verification/LV039-document-create-734dcd58-redacted.txt`; `.spectra-local/live-verification/LV039-document-create-734dcd58-response.png`; `.spectra-local/live-verification/LV039-document-create-734dcd58-complete.png`; `.spectra-local/live-verification/LV039-document-create-734dcd58-after-reload.png` | LV-039 (NEEDS-INFO) | 734dcd58 (app); 9b7ed4e4 (checkout) |
+| P3-AI-ENGINE — Document create repeated exact-prompt check | P3-AI-ENGINE · Document · Create; fresh zero-context recheck | FAIL — one fresh submission returned a four-section chat draft and explicitly said no editable document was created; no editor/open control appeared, and the response remained after reload. The local instance-8 telemetry recorded a request and response from 00:16:14.634 to 00:17:22.266 UTC, with a `plan_recovery_failure` event during the run; this local trace does not confirm account-side OpenRouter usage. Browser online; 0 console errors and 1 warning. See LV-039. Evidence: `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-refusal-after-reload.png` | LV-039 (NEEDS-INFO) | 734dcd58 (app); 8faccc24 (checkout) |
+| Free exploration — duplicate AI response after expanding details | first-week chat; saved response and Show details | FAIL — after reload, the refusal and draft appeared once in the Answer. Clicking Show details rendered the same text in both Thought and Answer sections, with two copies visible together. See LV-055. Evidence: `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-expanded-details-redacted.png` | LV-055 (OPEN) | 734dcd58 (app); 8faccc24 (checkout) |
 | Free exploration — chat history restoration on reload | free exploration · AI chat and reloads | PASS — on checkout 60e2ba0c (includes chat change b27682c2), four post-fix same-page reloads across the completed Moon chat (4.166 s, 2.943 s) and settled failed document-create chat (3.445 s, 2.838 s) restored saved content. At about 150 ms the failed chat showed “Loading conversation...” and placeholders; saved prompt, paused state and Retry were present after settling. Browser stayed online; selected-thread GETs returned HTTP 200 and started 31 ms/13 ms after recent threads GETs; observed runTabs reads returned HTTP 200; Playwright recorded 0 errors, 1 warning. No Retry or new prompt was submitted. Evidence: .spectra-local/live-verification/LV042-postfix-0d1f4e16-redacted.txt; .spectra-local/live-verification/LV042-postfix-moon-initial-b27682c2.png; .spectra-local/live-verification/LV042-postfix-moon-settled-b27682c2.png; .spectra-local/live-verification/LV042-postfix-failed-initial-0d1f4e16-trial-1.png; .spectra-local/live-verification/LV042-postfix-failed-settled-0d1f4e16-trial-1.png; .spectra-local/live-verification/LV042-postfix-failed-initial-0d1f4e16-trial-2.png; .spectra-local/live-verification/LV042-postfix-failed-settled-0d1f4e16-trial-2.png | LV-042 (VERIFIED) | 60e2ba0c |
 | P3-AI-ENGINE — fresh `/chat` runTabs read after commit | P3-AI-ENGINE · reliability; Playwright console error check | FAIL — 1 of 2 `/chat` route load/reload checks recorded HTTP 500 for GET `/api/spectra?action=runTabs&limit=120&surface=chat`; the subsequent completed-chat reload had 0 console errors. This request failure is recorded under LV-039. Evidence: `.spectra-local/live-verification/LV-039-postfix-recheck-96f3b05d-redacted.txt` | LV-039 (NEEDS-INFO) | 96f3b05d |
 | P3-AI-ENGINE — connected `/chat` route read after Profile A restore | P3-AI-ENGINE · reliability; LV-039 adjacent recheck | PASS — on app commit 96f3b05d, both `runTabs` requests for `/chat` returned HTTP 200, the browser was online, the page had no offline-status text and Playwright recorded 0 console errors (1 warning in the CLI page summary). No prompt was submitted; the route load does not resolve LV-039's missing-result report. The DOM contained 37 exact `New conversation` labels; completion state for those rows was not inspected. Evidence: `.spectra-local/live-verification/LV-039-chat-route-runTabs-post-96f3b05d-redacted.txt` | — | 96f3b05d |
@@ -2994,3 +2996,59 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - NEEDS-DECISION remains LV-003 (expired-invitation HTTP behavior), LV-012 (Bridge startup/discovery), LV-022 (saved-result prose contract), LV-028 (shortcut target), and LV-040 (conversation title behavior), with the options/consequences retained in their entries. No product option was selected by the fixer.
 - CANNOT-REPRODUCE remains LV-004 (invitation encoding observation), LV-007 (Escape behavior depended on idle/pending state), LV-051 (aborted read did not prevent the completed answer), and LV-052 (the reported monthly formulas exist and the verifier confirmed them in K/L).
 - NEEDS-INFO remains LV-017, LV-039, LV-046 and LV-054. LV-054 is reproduced as empty stored labels but its original generation/normalization boundary still lacks the raw arguments; the targeted live question is above. No OPEN, REOPENED or FIXING entry remains. The fixer stops between actionable reports while the verifier continues.
+
+### Verifier occurrence · LV-039 · WW1 document create repeat · 2026-10-02 (Europe/Madrid)
+
+- **Severity / surface / role:** High · `/chat` AI document creation · signed-in Profile A school administrator.
+- **Report script:** P3-AI-ENGINE · Document · Create.
+- **Commit tested:** Application `734dcd58` (local instance 8, web port 3000); documentation checkout `8faccc24`.
+
+**Steps**
+
+1. In saved Profile A, open a fresh `/chat` with 0 context objects selected and confirm the browser is online.
+2. Submit “Create a document on the causes of WW1 with 4 sections.” once.
+3. Wait for the run to settle and inspect the response and document controls.
+4. Reload the same conversation and check whether the response and document controls remain.
+
+**Expected:** P3-AI-ENGINE · Document · Create asks: “Create a document on the causes of WW1 with 4 sections.” The requested four-section document should be returned and openable.
+
+**Actual:** The Answer said, “I couldn’t save the editable document: the creation request failed validation, and no document was created. Here’s the four-section text that was prepared:” and supplied four sections as chat text. No document editor or open-document control appeared. After reload, the refusal and four-section text remained. The chat status read “Saved progress and results.” No offline message appeared. A separate repeated-content observation after clicking “Show details” is recorded under LV-055.
+
+**Frequency:** 1 of 1 fresh exact-prompt submissions on this runtime returned a draft without an editable/openable document; the same result remained after 1 reload.
+
+**Evidence:** `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-refusal-after-reload.png`.
+
+**Console/network:** At the settled view and after reload, `navigator.onLine` was true; Playwright reported 0 console errors and 1 warning. The local instance-8 OpenRouter telemetry file had 659 records at baseline and 672 afterward. It recorded one `request` at `2026-10-02T00:16:14.634Z`, ten `phase` events, one `plan_recovery_failure` event at `2026-10-02T00:16:52.560Z`, and one `response` at `2026-10-02T00:17:22.266Z` (`elapsedMs=67632`, `fallback=false`). The local telemetry does not independently establish whether OpenRouter account-side usage registered or billed the request. The prompt-route HTTP status was not captured. No model/provider identifiers or usage values are included.
+
+### LV-055 · Failed AI document response is duplicated after expanding details
+
+- **Status:** FIXED
+- **Severity:** Medium
+- **Surface / role:** `/chat` AI response details / signed-in Profile A school administrator
+- **Report script:** P3-AI-ENGINE · Document · Create; first-week chat exploration
+- **Commit tested:** Application `734dcd58` (local instance 8, web port 3000); documentation checkout `8faccc24`
+
+**Steps**
+
+1. In saved Profile A, open a fresh `/chat` with 0 context objects selected and confirm the browser is online.
+2. Submit “Create a document on the causes of WW1 with 4 sections.” once and wait for the Answer.
+3. Reload the conversation. Confirm the refusal and four-section draft appear once in the Answer.
+4. Click “Show details” and scroll to the current response.
+
+**Expected:** The P3-AI-ENGINE Document · Create script says: “The requested four-section document should be returned and openable.” The expanded details should identify the same run while the chat presents its response.
+
+**Actual:** Before expanding details after reload, the response appeared once in the Answer. After clicking “Show details,” the same refusal and four-section draft appeared in a separate Thought section as well as the Answer section. Both copies were visible together when scrolled to the response. The repeated refusal/draft is part of the same failed document-create run recorded under LV-039.
+
+**Frequency:** 1 of 1 “Show details” expansions after reload reproduced the duplicate visible response.
+
+**Evidence:** `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-create-repeat-734dcd58-expanded-details-redacted.png`.
+
+**Console/network:** Browser online; Playwright reported 0 console errors and 1 warning. No additional model prompt was submitted for this details-toggle check. The original run’s local telemetry is recorded under LV-039; it does not confirm account-side OpenRouter usage.
+
+**Fix commit:** 8ae8a10eb7aa8dce65ac1cd9595a0d9da85ee943.
+
+**Root cause and change:** run.finalSummary is the persisted final response, not a separate thinking summary. ConversationSurface passed that same response to ProgressTrace and then rendered the assistant message below; the live failure path also passed an answer excerpt beside the full answer. Conversation callers now render only progress steps in that trace and leave the answer with its existing renderer, covering full/compact and saved/live conversations. The standalone dock summary remains available.
+
+**Proof and validation:** Four saved/live full/compact regression cases in conversation-surface-history.test.tsx show two answer copies before the fix and one after while preserving progress steps. All 29 focused tests in history, choice and conflict files pass; both TypeScript projects, lint and five gates pass. Full suite: **4,601 passed, 2 failed, 1 skipped** (517 passed files, 2 failed, 1 skipped), .spectra-local/LV055-full.log. The failures are the known LV-017 gateway package omission and the Stop/no-school authorization test returning 409 rather than 403; all 63 run-route tests pass in isolation. Correction to the source commit body: this run did not fail the sheet timing test. No history was rewritten.
+
+**Verifier recheck:** Reload the reported failed document conversation, expand Show details in full and compact chat, and confirm the refusal/draft appears once while progress remains inspectable. Also inspect a live failed answer and the standalone dock hover summary. This fix does not claim to repair the document validation failure.

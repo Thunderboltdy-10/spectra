@@ -5,6 +5,7 @@ import { runSpectraAgentLoop, type SpectraAgentMessage } from "../ai/agent-loop"
 import { appendPromptContext } from "../ai/prompt-messages";
 import { documentSkill } from "../artifacts/skills/document";
 import { ARTIFACT_TYPE_KEYS } from "../artifacts/types";
+import { loadArtifactSkill } from "../artifacts/registry";
 import { SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS, parseSpectraPlan } from "../operations/schema";
 import { artifactQualityPromptSection, artifactQualityTaskSection } from "../quality/rubrics";
 
@@ -251,5 +252,56 @@ describe("schema feedback during staged authoring", () => {
     });
     expect(result.plan.operations).toHaveLength(1);
     expect(result.plan.operations[0]).toMatchObject({ type: "artifact.create", input: { content: { blocks: [expect.objectContaining({ text: body })] } } });
+  });
+});
+
+describe("missing specialist guidance recovery", () => {
+  it.each(ARTIFACT_TYPE_KEYS)("returns the exact %s guide catalog without silently substituting instructions", async (blueprintKey) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeAgentReadTool("synthetic-actor", {
+      name: "read_artifact_skill", arguments: JSON.stringify({ blueprintKey, guideId: "unlisted-specialist" }),
+    });
+    const skill = await loadArtifactSkill(blueprintKey);
+    expect(result).toMatchObject({ ok: false, code: "artifact_skill_guide_not_found", retryable: false,
+      blueprintKey, guides: (skill.specialistGuides ?? []).map(({ id, trigger }) => ({ id, trigger })),
+      suggestedAction: expect.stringContaining("Omit guideId"),
+    });
+    expect(result).not.toHaveProperty("instructions");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("discovers core guidance after an unknown guide and stages the requested document", async () => {
+    const packets: Packet[] = [];
+    const body = "Thank you for making the workshop possible. Your preparation gave every participant time to practice.";
+    let missing: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, options: RequestInit) => {
+      const packet = JSON.parse(String(options.body)) as Packet;
+      packets.push(packet);
+      const turn = packets.length;
+      if (turn === 1) return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: { content: "",
+        tool_calls: [{ id: "missing-guide", type: "function", function: { name: "read_artifact_skill", arguments: JSON.stringify({ blueprintKey: "document", guideId: "unlisted-specialist" }) } }],
+      } }] }), { status: 200 });
+      if (turn === 2) {
+        missing = JSON.parse(String(packet.messages.filter(message => message.role === "tool").at(-1)?.content));
+        if (!Array.isArray(missing?.guides)) return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "The guidance lookup failed." } }] }), { status: 200 });
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: { content: "",
+          tool_calls: [{ id: "core-guide", type: "function", function: { name: "read_artifact_skill", arguments: JSON.stringify({ blueprintKey: "document" }) } }],
+        } }] }), { status: 200 });
+      }
+      if (turn === 3) return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: { content: "",
+        tool_calls: [{ id: "create", type: "function", function: { name: "propose_operation", arguments: JSON.stringify({ operation: { type: "artifact.create", input: { blueprintKey: "document", title: "Thank you", summary: "A note for the volunteers.", content: { blocks: [{ id: "thanks", type: "paragraph", text: body }], outline: [] }, tags: [], workspaceId: null, placement: "inbox" } } }) } }],
+      } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "The note is prepared." } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("chat", "Create a short document thanking the volunteers.", {}, [], undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, "synthetic-actor");
+    expect(missing).toMatchObject({ status: 1, code: "artifact_skill_guide_not_found", retryable: false,
+      blueprintKey: "document", guides: documentSkill.specialistGuides!.map(({ id, trigger }) => ({ id, trigger })),
+      suggestedAction: expect.stringContaining("Omit guideId"),
+    });
+    expect(result.plan.operations).toHaveLength(1);
+    expect(result.plan.operations[0]).toMatchObject({ input: { content: { blocks: [expect.objectContaining({ text: body })] } } });
   });
 });

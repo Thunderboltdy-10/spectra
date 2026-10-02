@@ -27,7 +27,15 @@ export function artifactSkillPrompt(skill: ArtifactSkill, creation = false) {
 export function artifactSkillReadResult(skill: ArtifactSkill, guideId?: string) {
   if (guideId) {
     const guide = skill.specialistGuides?.find((entry) => entry.id === guideId);
-    if (!guide) throw new Error(`ARTIFACT_SKILL_GUIDE_NOT_FOUND: ${skill.typeKey}/${guideId}`);
+    if (!guide) return {
+      ok: false,
+      code: "artifact_skill_guide_not_found",
+      retryable: false,
+      message: "That specialist guide is not available for this work type.",
+      blueprintKey: skill.typeKey,
+      guides: (skill.specialistGuides ?? []).map(({ id, trigger }) => ({ id, trigger })),
+      suggestedAction: "Omit guideId to read core guidance and the content schema, or select an exact guide id from guides.",
+    };
     return { ok: true, blueprintKey: skill.typeKey, guideId: guide.id, trigger: guide.trigger, instructions: guide.instructions };
   }
   return {

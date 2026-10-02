@@ -205,7 +205,10 @@ _Written by the verifier at the end._
 | LV-055 follow-up — full saved WW1 response with Show details | fixer recheck · saved answer duplication | PASS — after reload on 6319725b, expanding Show details left the refusal and all four section headings visible once each; no Thought duplicate appeared. Compact chat, a live failed answer and standalone dock hover remain unverified. Evidence: `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.txt`; `.spectra-local/live-verification/LV039-ww1-post-0904-answer-redacted.png` | LV-055 (partial; FIXED) | 6319725b |
 | Free exploration — new chat while another conversation awaits approval | first-week chat · new-chat isolation and reload | PASS — on application commit `01f4566f`, the pending source approval remained available without activation; New chat and reload each showed zero messages/context and no foreign approval or work item. Browser online, 0 console errors and 1 warning; see LV-056. Evidence: `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.txt`; `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.png` | LV-056 (VERIFIED) | 01f4566f |
 
-| Free exploration — selecting current run from Runs & chats | first-week chat · run-list navigation with an open conversation | FAIL — selecting the first current “New conversation” entry with count 2 cleared the main pane to the empty landing view while the same thread URL remained. Reload restored the saved answer. Reproduced 2/2; browser online, 0 console errors and 1 warning. See LV-057. Evidence: .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.txt; .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.png | LV-057 (OPEN) | 52b5969c |
+| Free exploration — selecting current run from Runs & chats | first-week chat · run-list navigation with an open conversation | FAIL — selecting the first current “New conversation” entry with count 2 cleared the main pane to the empty landing view while the same thread URL remained. Reload restored the saved answer. Reproduced 2/2; browser online, 0 console errors and 1 warning. See LV-057. Evidence: .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.txt; .spectra-local/live-verification/LV057-run-selection-empty-thread-redacted.png | LV-057 (historical; now VERIFIED) | 52b5969c |
+| LV-057 post-fix live recheck — Runs & chats selection with loaded and refresh-error states | fixer recheck · current conversation selection and recovery | PASS — three selections retained the saved WW1 refusal and four headings at the same URL. With a controlled Playwright 503 on conversation reads, selecting the active “New conversation” also retained the last loaded messages and refresh notice; removing the route and reloading showed both saved prompt/response pairs. The LV-056 pending-approval → New chat neighbor check passed. Browser online; unmocked reload had 0 console errors and 1 Clerk development warning. Evidence: `.spectra-local/live-verification/LV057-post-4823b413-redacted.txt` and linked screenshots. | LV-057 (VERIFIED); LV-056 (VERIFIED) | 4823b413 (app); 5708da7e (checkout) |
+| P3-AI-ENGINE — fresh no-context “Hi” latency recheck | user launch reliability criterion · simple chat response | PASS — Playwright recorded the final “Saved progress and results” marker 8,976 ms after the send timer started immediately before the click. The two-message exchange remained saved after reload. Browser online; 0 console errors and 1 Clerk development warning. This pass does not clear the separate earlier LV-039 failures. Evidence: `.spectra-local/live-verification/LV039-hi-post-4823b413-redacted.txt`; `.spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png`. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
+| P3-AI-ENGINE — alternate fresh document create (Moon phases) | P3-AI-ENGINE · Document · Create; adjacent current-code check without repeating WW1 prompt | FAIL — the zero-context request completed in 35,273 ms with an answer explicitly saying no artifact was saved. No editable document/Open document control appeared before or after reload; Library's Documents filter showed no exact title match. The local model telemetry recorded a request at 08:47:54Z and a response at 08:48:19Z (elapsedMs 24,887); POST `/api/spectra/run` returned HTTP 200. Browser online; 0 console errors and 1 Clerk development warning. See LV-039. Evidence: `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-redacted.txt` and linked screenshots. | LV-039 (NEEDS-INFO) | 4823b413 (app); 5708da7e (checkout) |
 ## Issues
 
 ### LV-001 · Fresh local stack stops before readiness
@@ -2217,6 +2220,35 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 
 **Question for verifier:** On the next naturally observed incomplete create after the diagnostic commit recorded below, send its submission UTC promptly and the actual result when settled; the fixer can then read spectra.agent.tool_observation codes while logs are current. Finish the current reload-persistence check normally. No extra repeated prompts, Stop action, codegen or deploy step is required. LV-039 remains NEEDS-INFO because the actual rejecting boundary is still unidentified; no product outcome is marked fixed or verified.
 
+**Additional verifier occurrence — alternate fresh document create (2026-10-02; application 4823b413):**
+
+1. In saved Profile A, open `/chat?new=1` and confirm the new conversation has zero messages and zero selected context.
+2. Submit “Create a document about the phases of the Moon with four clear sections.” This alternate topic did not repeat the recorded WW1 prompt.
+3. Wait for the final “Saved progress and results” marker; Playwright measured 35,273 ms from immediately before the Send command click.
+4. Inspect the answer and available controls.
+5. Reload the same thread URL and inspect the saved answer and document controls again.
+6. In Library, search “phases of the Moon” with the Document filter selected.
+
+**Expected:** P3-AI-ENGINE · Document · Create lists the scripted prompt “Create a document on the causes of WW1 with 4 sections.” For this alternate create check, an editable four-section Spectra document should appear and remain available after reload.
+
+**Actual:** The response said, “I couldn’t create the document: the document-authoring guidance lookup failed, and no artifact was saved. The four sections I intended were: why the Moon changes shape, the main phases, waxing and waning, and observing the lunar cycle.” No editable document or Open document control appeared before or after reload. Library reported “No exact title match. Showing ranked partial matches”; its two visible document rows were marked Partial match, with neither matching the requested Moon phases document.
+
+**Frequency:** 1 of 1 alternate document-create attempts.
+
+**Evidence:** `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-redacted.txt`; `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-before-reload.png`; `.spectra-local/live-verification/LV039-moon-phase-create-post-4823b413-after-reload.png`; `.spectra-local/live-verification/LV039-moon-phase-create-library-search-post-4823b413.png`.
+
+**Console/network:** Browser online; Playwright reported 0 console errors and 1 Clerk development-key warning. Request 391 (`POST /api/spectra/run`) returned HTTP 200. Local runtime telemetry recorded a model-request event at 2026-10-02T08:47:54Z and a response event at 08:48:19Z with `elapsedMs=24,887`; provider, model and token-usage values are omitted.
+
+**Moon create rejection diagnosis and guide-recovery fix (2026-10-02):** Correlation with request 5cb5fd8f establishes the actual rejection chain: read_artifact_skill returned artifact_skill_guide_not_found at 08:47:56.070Z, 08:47:59.137Z and 08:48:05.132Z; the fourth read was identical_tool_call_repeated at 08:48:08.242Z, and propose_operation was rejected as finalization_required at 08:48:17.279Z, before staging. The provider response completed at 08:48:19.162Z with elapsedMs 24,887. This is a known guide lookup/recovery failure, not a content-schema rejection or apply failure. Redacted capture: .spectra-local/LV039-moon-084754-tool-codes-redacted.json.
+
+**Root cause and change:** An unknown specialist-guide id threw a bare exception, so the model received a failed lookup without the actual specialist catalog or a corrected core-guidance request. Repeated failed reads exhausted progress recovery before the creation proposal could execute. The shared artifactSkillReadResult now returns a structured failure with the exact available guide ids/triggers and a suggested action to omit guideId for core/schema guidance or choose a listed id. It keeps the same code and retryable=false for the unavailable id, does not silently substitute guide instructions, and applies to every artifact type without changing budgets, guardrails, provider/model/reasoning, routing, planning or context.
+
+**Before/after proof:** Eleven regressions fail on the pre-fix helper and pass after: ten exercise an unknown guide through the real read-tool boundary for every artifact type, including empty guide catalogs; the agent-loop regression receives that failure, discovers core guidance and stages one valid editable document instead of returning a lookup refusal. Existing valid specialist/core contract and staging-feedback tests remain green. All **123 focused tests** across craft-prompt, application-action-contract and agent-loop pass. Evidence: .spectra-local/LV039-guide-recovery-before.log and LV039-guide-recovery-focused.log.
+
+**Validation:** Both TS projects, full lint and architecture/copy/design-token/capability/secrets gates pass. Final frozen full suite: **4,641 passed, 2 failed, 1 skipped**, 103.67 seconds; 517 passed files / 2 failed / 1 skipped across 520. Failures: known LV-017 gateway package omission of shared/yjs-collections.mjs, and the previously observed Stop/no-school route test (409 rather than 403). All **63 run-route tests pass in isolation**, .spectra-local/LV039-guide-recovery-route-isolated.log; full log LV039-guide-recovery-full.log. No test thresholds, deployment configuration or data changed; no codegen/deploy-side step is required.
+
+**Verifier recheck:** After the actual commit recorded below, continue ordinary document authoring and report a fresh naturally observed outcome with submission UTC, editable document/open control, sections and reload persistence. Check specialist guidance for other work types nearby, including a missing guide followed by the exact catalog/core read when naturally encountered. The identified lookup-recovery bug is fixed by before/after tests; LV-039 remains NEEDS-INFO for live post-fix creation and its earlier initial interruption boundary, rather than claiming all historical execution failures resolved. Only the verifier sets VERIFIED.
+
 ### LV-040 · Completed AI chats remain titled “New conversation”
 
 - **Status:** NEEDS-DECISION
@@ -3146,7 +3178,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 - **Severity:** High
 - **Surface / role:** `/chat` new-conversation result and work card / signed-in Profile A school administrator
 - **Report script:** Free exploration · chat with the AI and create-new-chat flow
-- **Commit tested:** Application `6319725b` (local instance 8, web port 3000)
+- **Commit tested:** Application `4823b413` (post-fix local instance 8 recheck, web port 3000)
 - **Frequency:** 3 of 3 observations (bare `/chat`, New chat navigation, and reload of the new conversation)
 
 **Steps**
@@ -3168,6 +3200,8 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Fix commit:** e402776cd4fc3e87dab46a835072e7108d020eee.
 **Verified:** Application commit `01f4566f`; 2026-10-02 (Europe/Madrid). Repeated the new-chat navigation and reload from the still-pending “Revise chemistry” approval. The new conversation had zero messages and zero selected context, with no approval, work item, or active-response controls; the source approval remained available and untouched. Browser online; Playwright reported 0 console errors and 1 warning. Evidence: `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.txt`; `.spectra-local/live-verification/LV056-post-e402776c-new-chat-redacted.png`.
+
+**Post-fix verifier recheck:** Application commit `4823b413`; 2026-10-02 (Europe/Madrid). Opened “Revise chemistry,” confirmed the pending calendar approval, then selected New chat and reloaded `/chat?new=1`. Both views had zero messages and context, with no foreign approval/work card or active-response controls. Returning to the source conversation showed the pending approval still available and untouched. Browser online; the request buffer contained 67 HTTP 200 responses and no network error marker; Playwright reported 0 console errors and 1 warning. Evidence: `.spectra-local/live-verification/LV056-post-4823b413-new-chat-redacted.txt`; `.spectra-local/live-verification/LV056-post-4823b413-new-chat.png`.
 
 **Root cause and change:** Durable run discovery treated an absent conversation id as a request for every run on the shared chat surface, or for runs sharing its artifact/workspace context. It then replayed unrelated approval and work-card events into the empty conversation; navigation also retained another thread's observed live exchange and busy state. The shared hook now discovers chat runs only for the current conversation, using its existing thread_ready identity during acknowledgement before the parent adopts the thread; it filters snapshots before observation and clears another thread's observed progress on scope changes. This covers new Chat, route composers and the agent-library chat composer while retaining artifact/workspace recovery.
 
@@ -3194,11 +3228,11 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-057 · Runs & chats selection clears the current conversation view
 
-- **Status:** FIXED
+- **Status:** VERIFIED
 - **Severity:** High
 - **Surface / role:** /chat Runs & chats selection from an open saved conversation / signed-in Profile A school administrator.
 - **Report script:** P3-AI-ENGINE · compact conversation and run detail recheck; free exploration · first-week chat.
-- **Commit tested:** Application 52b5969c (local instance 8; web port 3000).
+- **Commit tested:** Application 4823b413 (local instance 8; web port 3000).
 - **Frequency:** 2 of 2 selections of the current conversation entry in Runs & chats replaced the main content with the empty landing view; reloading the same URL restored the saved response both times.
 
 **Steps**
@@ -3218,6 +3252,8 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Console/network:** Browser online; Playwright reported 0 console errors and 1 warning. No offline message appeared.
 
 **Fix commit:** 4823b41356c953cfe449c64a2256efc7a8d03b30.
+
+**Verified:** Application commit `4823b413`; 2026-10-02 (Europe/Madrid). The saved WW1 conversation remained visible at its original URL after three selections of its current “New conversation” run. The four section headings and refusal stayed visible, with no empty welcome view. A separate controlled Playwright 503 for conversation reads showed the refresh-error notice while preserving the last loaded messages; reselecting the current conversation kept that state. After removing the route and reloading, all four saved messages appeared and the refresh error cleared. The pending-approval → New chat neighboring check also passed. Browser online; Playwright reported 0 console errors and 1 warning after unmocked reload. Evidence: `.spectra-local/live-verification/LV057-post-4823b413-redacted.txt`; `.spectra-local/live-verification/LV057-post-4823b413-preserved.png`; `.spectra-local/live-verification/LV057-post-4823b413-background-refresh-error.png`; `.spectra-local/live-verification/LV057-post-4823b413-background-refresh-recovered.png`.
 
 **Root cause and change:** The shared selectThread handler cleared the loaded detail even when selecting the already active conversation. It replaced the URL with that same thread URL, so the URL-owned hydration effect did not rerun and the cleared pane remained empty until reload. Selecting the active nonempty conversation is now an identity-preserving no-op in that shared handler; the history caller still closes Runs & chats, and different-thread/New chat navigation retains its existing loading path. This also covers current-thread selection through the shared conversation-open and artifact-thread paths.
 

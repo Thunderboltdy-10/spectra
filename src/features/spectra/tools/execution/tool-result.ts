@@ -106,15 +106,10 @@ export function toModelToolResult(result: unknown) {
             : typeof rec.code === "string"
               ? rec.code
               : "The tool could not complete.";
-      return {
-        status: 1,
-        error: message,
-        ...(typeof rec.code === "string" ? { code: rec.code } : {}),
-        ...(rec.retryable === true ? { retryable: true } : {}),
-        ...(typeof rec.suggestedAction === "string"
-          ? { suggestedAction: rec.suggestedAction }
-          : {}),
-      };
+      // Error-specific feedback (schema issues, quality findings and repair
+      // guidance) must reach the model just like successful tool data.
+      const { ok: _ok, message: _message, error: _error, ...feedback } = rec;
+      return { ...feedback, status: 1, error: message };
     }
     const { ok: _ok, ...rest } = rec;
     return { status: 0, ...rest };

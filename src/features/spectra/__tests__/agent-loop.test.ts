@@ -2,6 +2,25 @@ import { describe, expect, it, vi } from "vitest";
 import { runSpectraAgentLoop } from "../ai/agent-loop";
 
 describe("runSpectraAgentLoop", () => {
+  it("preserves quality findings and repair guidance in a failed tool observation", async () => {
+    const failure = {
+      ok: false, code: "quality_critique_failed", retryable: true,
+      message: "The draft needs correction.", critiqueAttempt: 1, critiqueLimit: 3,
+      score: 40, passScore: 80,
+      findings: [{ criterionId: "evidence", severity: "error", message: "Support this claim.", path: "blocks.0" }],
+      repair: "Read the supplied source and revise the unsupported claim.",
+    };
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ id: "create", name: "propose_operation", arguments: "{}" }] })
+      .mockResolvedValueOnce({ text: "The draft needs correction.", toolCalls: [] });
+    await runSpectraAgentLoop({ messages: [], requestTurn,
+      executeTool: vi.fn().mockResolvedValue(failure), isTerminalTool: () => false });
+    const messages = requestTurn.mock.calls[1]![0] as Array<{ role: string; content: string }>;
+    const observation = JSON.parse(messages.find(message => message.role === "tool")!.content);
+    const { ok: _ok, message, ...feedback } = failure;
+    expect(observation).toEqual({ ...feedback, status: 1, error: message });
+  });
+
   it("gives a read cycle actionable feedback while keeping all requested writes available", async () => {
     const read = { id: "read", name: "read_artifact", arguments: '{"artifactId":"deck"}' };
     const write = (id: string) => ({ id, name: "propose_operation", arguments: JSON.stringify({ id }) });

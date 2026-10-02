@@ -207,6 +207,13 @@ function recordPlanRecoveryFailure(stage: string, error: unknown, candidate: str
   });
 }
 
+function stagedSchemaFeedback(error: unknown) {
+  if (!(error instanceof ZodError)) return {};
+  const issues = describeZodPlanIssues(error, Number.POSITIVE_INFINITY);
+  runLog().warn("spectra.operation.validation", { issues });
+  return { retryable: true, issues };
+}
+
 export { systemPrompt };
 
 export type UpdateTargetHint = {
@@ -5127,7 +5134,13 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
                 : "The staged position was replaced after validation. It is staged, not saved.",
             };
           } catch (error) {
-            return { ok: false, code: "invalid_staged_revision", retryable: true, message: publicError(error) };
+            return {
+              ok: false,
+              code: "invalid_staged_revision",
+              retryable: true,
+              message: publicError(error),
+              ...stagedSchemaFeedback(error),
+            };
           }
         }
         if (call.name === "propose_operation") {
@@ -5186,6 +5199,7 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
                 ? "quality_critique_failed"
                 : "invalid_operation",
               message: publicError(error),
+              ...stagedSchemaFeedback(error),
               ...(isArtifactQualityError(error)
                 ? {
                     retryable:

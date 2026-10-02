@@ -208,3 +208,48 @@ describe("native content contracts in authoring guidance", () => {
     }).operations[0]?.input).toMatchObject({ content });
   });
 });
+
+describe("schema feedback during staged authoring", () => {
+  it.each([false, true])("corrects a rejected mutation from its field details (revision=%s)", async (revision) => {
+    const packets: Packet[] = [];
+    const body = "Thank you for making the workshop possible. Your preparation gave every participant time to practice.";
+    const operation = { type: "artifact.create", input: {
+      blueprintKey: "document", title: "Thank you", summary: "A note for the volunteers.",
+      content: { blocks: [{ id: "thanks", type: "paragraph", text: body }], outline: [] },
+      tags: [], workspaceId: null, placement: "inbox",
+    } };
+    const malformed = { ...operation, input: { ...operation.input, content: { outline: [] } } };
+    const invalidTurn = revision ? 2 : 1;
+    let rejection: Record<string, unknown> | undefined;
+    const fetchMock = vi.fn(async (_url: unknown, options: RequestInit) => {
+      const packet = JSON.parse(String(options.body)) as Packet;
+      packets.push(packet);
+      const turn = packets.length;
+      if (turn === invalidTurn + 1) {
+        rejection = JSON.parse(String(packet.messages.filter(message => message.role === "tool").at(-1)?.content)) as Record<string, unknown>;
+        if (!Array.isArray(rejection.issues)) return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Unable to prepare the note." } }] }), { status: 200 });
+      }
+      if (turn > invalidTurn + 1) {
+        if (turn !== invalidTurn + 2) throw new Error("Unexpected model turn");
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "The note is prepared." } }] }), { status: 200 });
+      }
+      const proposed = turn === invalidTurn ? malformed : operation;
+      const name = revision && turn > 1 ? "revise_staged_operation" : "propose_operation";
+      const args = name === "revise_staged_operation"
+        ? { operationIndex: 0, action: "replace", operation: proposed }
+        : { workSummary: "Writing the thank-you note", operation: proposed };
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "tool_calls", message: { content: "",
+        tool_calls: [{ id: "call-" + turn, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+      } }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await callModel("chat", "Create a short document thanking the volunteers.", {}, [], undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, "synthetic-actor");
+    expect(rejection).toMatchObject({ status: 1, retryable: true,
+      code: revision ? "invalid_staged_revision" : "invalid_operation",
+      issues: expect.arrayContaining([expect.objectContaining({ path: "input.content.blocks", code: "invalid_type" })]),
+    });
+    expect(result.plan.operations).toHaveLength(1);
+    expect(result.plan.operations[0]).toMatchObject({ type: "artifact.create", input: { content: { blocks: [expect.objectContaining({ text: body })] } } });
+  });
+});

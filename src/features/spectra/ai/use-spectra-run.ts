@@ -464,6 +464,12 @@ export function useSpectraRun({
     );
     if (previousScopeKey.current !== scopeKey) {
       previousScopeKey.current = scopeKey;
+      if (surface === "chat") {
+        setObservedContinuationRunId(null);
+        setLiveExchange((current) =>
+          current?.threadId && current.threadId !== threadId ? null : current,
+        );
+      }
       setCards((current) =>
         current.length === 0 && sanitized.length === 0 ? current : sanitized,
       );
@@ -479,7 +485,7 @@ export function useSpectraRun({
           attemptId: card.run.attemptId ?? card.run.executionId,
         });
     });
-  }, [initialCards, scopeKey]);
+  }, [initialCards, scopeKey, surface, threadId]);
 
   const upsert = useCallback((card: ResultCardStreamView) => {
     dismissedCardIds.current.delete(card.id);
@@ -523,6 +529,17 @@ export function useSpectraRun({
         // The cursor endpoint is the live transport. Refresh the tab index only
         // for discovery/recovery; polling the full tab projection per cursor
         // tick re-reads every run's summary while progress is streaming.
+        // A conversation owns its runs. Artifact/workspace context and the
+        // shared chat surface are not substitutes for a conversation id.
+        // thread_ready supplies this identity before the parent adopts it.
+        const observedThreadId = threadId ?? (surface === "chat" ? durableThreadId.current : undefined);
+        if (surface === "chat" && !observedThreadId) return;
+        const isRelevantTab = (tab: SpectraRunTab) => {
+          if (observedThreadId) return tab.threadId === observedThreadId;
+          if (artifactId) return tab.run.artifactId === artifactId;
+          if (workspaceId) return tab.workspaceId === workspaceId;
+          return tab.surface === (surface === "artifacts" ? "artifact" : surface);
+        };
         const hasActiveTabs = tabSnapshot.some(
           (tab) =>
             tab.run.status === "queued" ||
@@ -540,15 +557,16 @@ export function useSpectraRun({
           const result = await getSpectraRunTabs({
             force,
             limit: 120,
-            threadId,
-            artifactId: threadId ? undefined : artifactId,
-            workspaceId: threadId || artifactId ? undefined : workspaceId,
+            threadId: observedThreadId,
+            artifactId: observedThreadId ? undefined : artifactId,
+            workspaceId: observedThreadId || artifactId ? undefined : workspaceId,
             surface:
               surface === "artifacts"
                 ? "artifact"
                 : (surface as "chat" | "workspace" | "artifact"),
           });
-          tabSnapshot = result.runTabs;
+          if (disposed) return;
+          tabSnapshot = result.runTabs.filter(isRelevantTab);
           for (const tab of tabSnapshot) {
             if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(tab.run.status) &&
               !hasSettledExecution(tab))
@@ -563,14 +581,7 @@ export function useSpectraRun({
         }
         const runTabs = tabSnapshot;
         if (disposed) return;
-        const relevant = runTabs.filter((tab) => {
-          if (threadId) return tab.threadId === threadId;
-          if (artifactId) return tab.run.artifactId === artifactId;
-          if (workspaceId) return tab.workspaceId === workspaceId;
-          return (
-            tab.surface === (surface === "artifacts" ? "artifact" : surface)
-          );
-        });
+        const relevant = runTabs.filter(isRelevantTab);
         // A failed first cursor read leaves no event cursor. Reconcile the
         // acknowledged run from its saved terminal snapshot so a lost worker
         // cannot leave its provisional exchange spinning indefinitely.
@@ -605,7 +616,7 @@ export function useSpectraRun({
         );
         observedActive = active.length > 0;
         setObservedContinuationRunId(
-          threadId ? (active[0]?.runId ?? null) : null,
+          observedThreadId ? (active[0]?.runId ?? null) : null,
         );
         const observed = relevant.filter(
           (tab) =>

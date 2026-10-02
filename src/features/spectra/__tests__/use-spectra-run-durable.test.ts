@@ -14,7 +14,7 @@ vi.mock("../collaboration/artifact-ai-activity", () => ({ publishArtifactAiActiv
 vi.mock("sonner", () => ({ toast: { dismiss: vi.fn(), message: vi.fn(), error: vi.fn() } }));
 
 const transport = vi.fn(async () => new Response(JSON.stringify({ error: "This observed action is no longer available." }), { status: 409 }));
-function tab(status: "running" | "awaiting_resolution" = "awaiting_resolution", executionId = "attempt") {
+function tab(status: "running" | "awaiting_resolution" | "awaiting_confirmation" = "awaiting_resolution", executionId = "attempt") {
   return { _id: "tab", runId: "run", threadId: "thread", surface: "chat", run: { _id: "run", executionId, status, userPrompt: "Tighten my notes summary", createdAt: 1, updatedAt: 2 }, thread: { _id: "thread", title: "Notes" } } as SpectraRunTab;
 }
 function final(sequence = 1, executionId = "attempt"): SpectraRunEvent {
@@ -25,6 +25,15 @@ function source(current: SpectraRunTab, rows: SpectraRunEvent[]) {
   vi.mocked(getSpectraRunEvents).mockImplementation(async (_runId, after = 0) => ({ events: rows.filter((row) => row.sequence > after) }));
   vi.mocked(getSpectraRunDetail).mockResolvedValue({ run: current.run } as Awaited<ReturnType<typeof getSpectraRunDetail>>);
 }
+
+function approvalEvents(): SpectraRunEvent[] {
+  const card = { id: "approval", runId: "run", status: "awaiting_confirmation", title: "Approve calendar.schedule", variant: "operation", actions: [{ key: "confirm", label: "Apply changes" }], updatedAt: 3 };
+  return [
+    { ...final(), type: "confirmation_required", payload: { type: "confirmation_required", runId: "run", reasons: ["Confirmation required"], card } },
+    { ...final(2), type: "result_card", payload: { type: "result_card", runId: "run", card: { ...card, id: "work", title: "Revise chemistry", variant: "artifact" } } },
+  ];
+}
+
 const refresh = vi.fn(async () => { spectraBus.emit("threads.changed", {}); });
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); vi.stubGlobal("fetch", transport);
@@ -34,6 +43,75 @@ afterEach(() => { cleanup(); stopObservingUiRun("run"); vi.clearAllTimers(); vi.
 async function settle(milliseconds = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); }); }
 
 describe("Durable run event consumption", () => {
+  it.each([{}, { artifactId: "artifact" }, { workspaceId: "workspace" }])("does not discover other conversations for a new chat with context %j", async (context) => {
+    const foreign = { ...tab("awaiting_confirmation"), run: { ...tab("awaiting_confirmation").run, artifactId: "artifact" }, workspaceId: "workspace" };
+    source(foreign, approvalEvents());
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", ...context }));
+    await settle();
+    expect(result.current.cards).toEqual([]);
+    expect(result.current.liveExchange).toBeNull();
+    expect(getSpectraRunTabs).not.toHaveBeenCalled();
+    expect(getSpectraRunEvents).not.toHaveBeenCalled();
+  });
+
+  it("leaves another thread's approval behind when switching to a new chat", async () => {
+    source(tab(), [final()]);
+    const { result, rerender } = renderHook(({ threadId }) => useSpectraRun({ surface: "chat", threadId }),
+      { initialProps: { threadId: "thread" as string | undefined } });
+    await settle();
+    expect(result.current.cards).toHaveLength(1);
+    const foreign = { ...tab("running", "other-attempt"), runId: "other-run", threadId: "other-thread" };
+    source(foreign, [{ ...final(1, "other-attempt"), runId: "other-run", payload: { ...final().payload, runId: "other-run" } }]);
+    vi.mocked(getSpectraRunTabs).mockClear();
+    vi.mocked(getSpectraRunEvents).mockClear();
+    rerender({ threadId: undefined });
+    await settle();
+    expect(result.current.cards).toEqual([]);
+    expect(result.current.liveExchange).toBeNull();
+    expect(getSpectraRunTabs).not.toHaveBeenCalled();
+    expect(getSpectraRunEvents).not.toHaveBeenCalled();
+  });
+
+  it("clears observed progress when leaving a running conversation for a new chat", async () => {
+    source(tab("running"), [{ ...final(), type: "text_replace", payload: { type: "text_replace", runId: "run", content: "Working on another conversation." } }]);
+    const { result, rerender } = renderHook(({ threadId }) => useSpectraRun({ surface: "chat", threadId }),
+      { initialProps: { threadId: "thread" as string | undefined } });
+    await settle();
+    expect(result.current.liveExchange?.threadId).toBe("thread");
+    rerender({ threadId: undefined });
+    await settle();
+    expect(result.current.liveExchange).toBeNull();
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.activeRunId).toBeFalsy();
+  });
+
+  it.each(["artifact", "workspace"] as const)("retains durable %s recovery outside a conversation", async (surface) => {
+    source({ ...tab("awaiting_confirmation"), surface, workspaceId: "workspace", run: { ...tab("awaiting_confirmation").run, artifactId: "artifact" } }, approvalEvents());
+    const { result } = renderHook(() => useSpectraRun({ surface, artifactId: surface === "artifact" ? "artifact" : undefined,
+      workspaceId: surface === "workspace" ? "workspace" : undefined }));
+    await settle();
+    expect(result.current.cards.map(card => card.id)).toEqual(["approval", "work"]);
+  });
+
+  it("recovers only the newly acknowledged conversation before its parent adopts the thread", async () => {
+    source(tab("running"), [final()]);
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).action !== "run") return new Response("{}", { status: 409 });
+      return new Response([
+        { type: "run_created", runId: "run", card: { id: "card", runId: "run", status: "queued", title: "Getting ready", variant: "status", actions: [], updatedAt: 1 } },
+        { type: "thread_ready", runId: "run", threadId: "thread" },
+      ].map(event => JSON.stringify(event)).join("\n") + "\n");
+    });
+    const onThreadReady = vi.fn();
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat", onThreadReady }));
+    await settle();
+    await act(async () => { await result.current.run("A new request", [], { threadId: null }); });
+    await settle();
+    expect(onThreadReady).toHaveBeenCalledWith("thread");
+    expect(getSpectraRunTabs).toHaveBeenLastCalledWith(expect.objectContaining({ threadId: "thread" }));
+    expect(result.current.cards).toContainEqual(expect.objectContaining({ title: "Choose notes" }));
+  });
+
   it.each(["failed", "cancelled"] as const)("reconciles a saved %s run after its first cursor reads fail", async (status) => {
     source(tab("running"), []);
     vi.mocked(getSpectraRunEvents).mockRejectedValue(new Error("INTERNAL_ERROR"));

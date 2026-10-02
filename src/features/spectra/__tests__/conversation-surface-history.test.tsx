@@ -63,8 +63,8 @@ vi.mock("../components/progress-trace", () => ({
 }));
 vi.mock("../components/artifact-embed-host", () => ({ ArtifactEmbedList: () => null }));
 vi.mock("../components/result-card", () => ({
-  ResultCardStack: ({ cards }: { cards: Array<{ title: string }> }) => (
-    <div data-testid="result-cards">{cards.map((card) => card.title).join(", ")}</div>
+  ResultCardStack: ({ cards }: { cards: Array<{ title: string; summary?: string; actions?: Array<{ key: string; label: string }> }> }) => (
+    <div data-testid="result-cards">{cards.map((card, index) => <div key={index}><span>{card.title}</span>{card.summary ? <p>{card.summary}</p> : null}{card.actions?.map(action => <button key={action.key}>{action.label}</button>)}</div>)}</div>
   ),
 }));
 vi.mock("@/components/ui/select", () => ({ SelectField: () => null }));
@@ -481,5 +481,31 @@ describe("conversation answer ownership", () => {
     }} />);
     expect(screen.getByText("Checked the document")).toBeTruthy();
     expect(screen.getAllByText(answer)).toHaveLength(1);
+  });
+});
+
+describe("saved answer cards after loading details", () => {
+  it.each([false, true])("keeps one answer with meaningful/actionable cards (compact=%s)", async (compact) => {
+    const answer = "The requested document could not be saved. Here is the draft.";
+    const card = { _id: "answer-card", runId: run._id, status: "completed", variant: "status", title: "Answer", summary: answer, actions: [], createdAt: 1, updatedAt: 1 };
+    mocks.getTrace.mockResolvedValue({
+      run: { ...run, finalSummary: answer }, operations: [], events: [], artifacts: [],
+      cards: [card,
+        { ...card, _id: "result", variant: "artifact", title: "Saved work", actions: [{ key: "open", label: "Open", targetType: "artifact", targetId: "work-1" }] },
+        { ...card, _id: "recovery", variant: "error", status: "failed", title: "Retry available", actions: [{ key: "retry", label: "Retry", targetType: "run", targetId: run._id }] },
+        { ...card, _id: "approval", variant: "operation", status: "awaiting_confirmation", title: "Approval required", actions: [{ key: "confirm", label: "Apply changes" }, { key: "cancel", label: "Reject" }] },
+        { ...card, _id: "other", title: "Validation", summary: "Checked editable content" },
+      ],
+    });
+    render(<ConversationSurface detail={detail("thread-a", answer)} threadId="thread-a" compact={compact} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    await screen.findByText("Saved work");
+    expect(screen.getAllByText(answer)).toHaveLength(1);
+    expect(screen.queryByText("Answer")).toBeNull();
+    expect(screen.getByText("Retry available")).toBeTruthy();
+    for (const name of ["Open", "Retry", "Apply changes", "Reject"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+    expect(screen.getByText("Checked editable content")).toBeTruthy();
   });
 });

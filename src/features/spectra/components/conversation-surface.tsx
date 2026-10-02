@@ -1953,6 +1953,15 @@ export function ConversationSurface({
                   (message.role === "assistant" ||
                     !persistedAssistantRunIds.has(message.runId)),
               );
+              const conversationCards = (trace?.cards ?? []).flatMap((card) => {
+                const repeatsAnswer = Boolean(message.content.trim()) &&
+                  card.summary?.trim() === message.content.trim();
+                if (repeatsAnswer && card.status === "completed" &&
+                  card.variant === "status" && card.actions.length === 0) return [];
+                // Keep work links, recovery and approval controls without
+                // repeating prose already owned by the assistant message.
+                return [{ ...card, summary: repeatsAnswer ? undefined : card.summary }];
+              });
               const affectedWorkspaceIds = trace
                 ? [
                     ...new Set(
@@ -2133,9 +2142,9 @@ export function ConversationSurface({
                           />
                         </>
                       ) : null}
-                      {trace?.cards.length ? (
+                      {conversationCards.length ? (
                         <ResultCardStack
-                          cards={trace.cards.map((card) => ({
+                          cards={conversationCards.map((card) => ({
                               id: card._id,
                               runId: card.runId,
                               status: card.status,

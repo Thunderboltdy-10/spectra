@@ -2,6 +2,49 @@ import { describe, expect, it, vi } from "vitest";
 import { runSpectraAgentLoop } from "../ai/agent-loop";
 
 describe("runSpectraAgentLoop", () => {
+  it("reports tool observation codes without authored or credential payloads", async () => {
+    const read = { id: "read", name: "read_artifact_skill", arguments: '{"secret":"private-input"}' };
+    const write = { id: "write", name: "propose_operation", arguments: "{}" };
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [read] })
+      .mockResolvedValueOnce({ text: "", toolCalls: [write] })
+      .mockResolvedValueOnce({ text: "The document still needs correction.", toolCalls: [] });
+    const executeTool = vi.fn()
+      .mockResolvedValueOnce({ ok: true, content: "private-artifact-body" })
+      .mockResolvedValueOnce({ ok: false, code: "invalid_operation", retryable: true,
+        message: "private-error-details", issues: [{ path: "input.content.blocks", code: "invalid_type", message: "private-validation-details" }] });
+    const onToolObservation = vi.fn();
+    await runSpectraAgentLoop({ messages: [], requestTurn, executeTool, isTerminalTool: () => false, onToolObservation });
+    expect(onToolObservation.mock.calls.map(([value]) => value)).toEqual([
+      { tool: "read_artifact_skill", status: 0 },
+      { tool: "propose_operation", status: 1, code: "invalid_operation", retryable: true, issuePaths: ["input.content.blocks"] },
+    ]);
+    expect(JSON.stringify(onToolObservation.mock.calls)).not.toContain("private-");
+    const nextMessages = requestTurn.mock.calls[2]![0] as Array<{ role: string; content: string }>;
+    expect(JSON.parse(nextMessages.filter(message => message.role === "tool").at(-1)!.content)).toMatchObject({ error: "private-error-details" });
+  });
+
+  it("reports tool observation for a proposal rejected before execution by the loop", async () => {
+    const requestTurn = vi.fn();
+    for (let index = 0; index < 4; index++) requestTurn.mockResolvedValueOnce({ text: "", toolCalls: [{ id: "read-" + index, name: "read_artifact_skill", arguments: JSON.stringify({ guideId: "guide-" + index }) }] });
+    requestTurn.mockResolvedValueOnce({ text: "", toolCalls: [{ id: "write", name: "propose_operation", arguments: "{}" }] })
+      .mockResolvedValueOnce({ text: "Creation was not staged.", toolCalls: [] });
+    const executeTool = vi.fn().mockResolvedValue({ ok: false, code: "invalid_arguments", message: "The guide request is invalid.", retryable: false });
+    const onToolObservation = vi.fn();
+    await runSpectraAgentLoop({ messages: [], requestTurn, executeTool, isTerminalTool: () => false, onToolObservation });
+    expect(executeTool).toHaveBeenCalledTimes(4);
+    expect(onToolObservation).toHaveBeenLastCalledWith({ tool: "propose_operation", status: 1, code: "finalization_required" });
+  });
+
+  it("keeps the agent result intact when a tool observation callback fails", async () => {
+    const requestTurn = vi.fn()
+      .mockResolvedValueOnce({ text: "", toolCalls: [{ id: "read", name: "read_artifact_skill", arguments: "{}" }] })
+      .mockResolvedValueOnce({ text: "The answer is complete.", toolCalls: [] });
+    const result = await runSpectraAgentLoop({ messages: [], requestTurn, executeTool: vi.fn().mockResolvedValue({ ok: true }),
+      isTerminalTool: () => false, onToolObservation: () => { throw new Error("diagnostic failure"); } });
+    expect(result.text).toBe("The answer is complete.");
+  });
+
   it("preserves quality findings and repair guidance in a failed tool observation", async () => {
     const failure = {
       ok: false, code: "quality_critique_failed", retryable: true,

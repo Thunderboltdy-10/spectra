@@ -125,6 +125,14 @@ export async function runSpectraAgentLoop(input: {
   ) => boolean;
   signal?: AbortSignal;
   onTurn?: (turn: OpenRouterAgentTurn, index: number) => void;
+  /** Diagnostic metadata only; never include arguments, content or errors. */
+  onToolObservation?: (observation: {
+    tool: string;
+    status: 0 | 1;
+    code?: string;
+    retryable?: boolean;
+    issuePaths?: string[];
+  }) => void;
   /** Exact harness task state (staged graph, receipts) kept across compaction. */
   taskState?: () => string | undefined;
   /**
@@ -473,6 +481,22 @@ export async function runSpectraAgentLoop(input: {
     );
     for (const [index, call] of turn.toolCalls.entries()) {
       const result = toModelToolResult(results[index]);
+      try {
+        input.onToolObservation?.({
+          tool: call.name,
+          status: result.status === 1 ? 1 : 0,
+          ...("code" in result && typeof result.code === "string" ? { code: result.code } : {}),
+          ...("retryable" in result && typeof result.retryable === "boolean" ? { retryable: result.retryable } : {}),
+          ...("issues" in result && Array.isArray(result.issues) ? {
+            issuePaths: result.issues.flatMap((issue: unknown) =>
+              issue && typeof issue === "object" && "path" in issue && typeof issue.path === "string"
+                ? [issue.path] : [],
+            ),
+          } : {}),
+        });
+      } catch {
+        // Observability must never change execution or the model observation.
+      }
       append({
         role: "tool",
         tool_call_id: call.id,

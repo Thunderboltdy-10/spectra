@@ -5471,6 +5471,9 @@ ${safeJson(acceptedAgentOperations.map((operation, operationIndex) => ({ operati
         answerStream?.flush();
         return agentTurn;
       },
+      onToolObservation: (observation) => {
+        runLog().info("spectra.agent.tool_observation", observation);
+      },
       onTurn: (turn, index) => {
         runLog().info("spectra.agent.turn", {
           index,

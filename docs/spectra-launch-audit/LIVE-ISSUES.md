@@ -3365,7 +3365,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-058 · Short user messages occupy most of the chat column
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** /chat user-message bubble / signed-in Profile A
 - **Report script:** Free exploration · first-week user chat · desktop message layout
@@ -3383,9 +3383,19 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** .spectra-local/live-verification/LV039-hi-8s976-post-4823b413.png; .spectra-local/live-verification/LV058-short-user-message-width-4823b413-redacted.txt.
 
+**Fixer root cause and change:** Both persisted and sending user messages used a normal block container with only max-width:82%, causing even tiny content to occupy that limit. Both shared ConversationSurface paths now use intrinsic fit-content width while retaining the same right alignment and maximum; overflow-wrap:anywhere safely wraps unbroken URLs, and the sending path preserves line breaks like the saved path. Full and compact conversations, including route-side/workspace callers, receive the same small fix without input-specific rules or a second message component.
+
+**Before/after proof:** Four real-browser regressions over rendered ConversationSurface markup and generated Tailwind CSS fail before (672.390625 px for desktop Hi.; 344.390625 px for compact) and pass after. They cover saved/sending and full/compact modes, short greetings, long prose, unbroken URLs, explicit line breaks and saved attachment chips, asserting content preservation, right alignment, the 82% cap and no horizontal overflow. All **37 focused tests** pass in the final isolated run; together with unchanged sheet and skip-link suites, **118/118 tests across five files pass**. Evidence: .spectra-local/LV058-before.log and LV058-isolated.log. An earlier focused run overlapping the full suite passed all 37 assertions but timed out closing its browser; the final isolated run requires no timeout change.
+
+**Validation:** Both TypeScript projects, full lint and all five gates pass. Frozen full suite: **4,647 passed, 2 failed, 1 skipped**, 105.10 seconds; 516 passed files / 3 failed / 1 skipped across 520. Failures are known LV-017 gateway packaging, sheet timing (46.3744 ms against 40 ms), and an unchanged skip-link browser teardown hook timeout; sheet and skip-link files both pass in the 118-test isolation above. The four new layout tests pass in the full run. No thresholds, AI behavior, backend data, deployment or codegen changed.
+
+**Verifier recheck:** After the application renders, reload the existing greeting and confirm the short user bubble fits its content. Check a normally occurring sending prompt and its persisted version in full/compact views; long text and unbroken URLs should wrap without horizontal overflow, line breaks and attachment chips remain readable, and right alignment is retained. No extra AI greeting is needed. Only the verifier sets VERIFIED; the source commit hash follows in the documentation closeout.
+
 ### LV-059 · Application routes render blank after the web process restarts
 
-- **Status:** FIXING
+**Fixer reproduction and question:** The real AppShell explicitly renders an empty aria-busy container until AccountStorageBoundary has prepared the authenticated account scope. That path explains the reported blank application routes if Clerk or the backend identity remains loading; the independently missing SignIn controls suggest inspecting Clerk loading first, but do not prove its failure boundary. Providers and the restart supervisor preserve their existing inputs; HTTP health only establishes web readiness. Please record sanitized Clerk script/network status and timing or Clerk loaded-state facts on the existing blank page, and whether it remains blank after warm-up. No prompt, new session, instance reset or configuration change is needed. This live-only state cannot yet be reproduced conclusively from code; no authentication bypass or guessed retry patch was made. Reports reviewed: P3-UI-SYSTEM and P2-OPS-PERFORMANCE (shell/error and local-readiness boundaries).
+
+- **Status:** NEEDS-INFO
 - **Severity:** Blocker
 - **Surface / role:** Application shell, /chat, /library, /workspace and /sign-in / saved Profile A
 - **Report script:** Free exploration · first-week app access and workspace; post-restart live reliability check

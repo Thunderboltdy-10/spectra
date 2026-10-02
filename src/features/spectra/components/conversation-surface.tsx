@@ -1990,8 +1990,8 @@ export function ConversationSurface({
                 >
                   {message.role === "user" ? (
                     <>
-                      <div className="ml-auto max-w-[82%]">
-                        <div className="whitespace-pre-wrap rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
+                      <div className="ml-auto w-fit max-w-[82%]">
+                        <div className="whitespace-pre-wrap [overflow-wrap:anywhere] rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
                           {message.content}
                           {messageAttachments(message).length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -2219,8 +2219,8 @@ export function ConversationSurface({
               {!liveExchange.runId ||
               !persistedUserRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
-                  <div className="ml-auto max-w-[82%]">
-                    <div className="rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
+                  <div className="ml-auto w-fit max-w-[82%]">
+                    <div className="whitespace-pre-wrap [overflow-wrap:anywhere] rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
                       {liveExchange.prompt}
                     </div>
                     <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">

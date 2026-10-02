@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationSurface, ThreadConversation } from "../components/conversation-surface";
 import type { SpectraRun, SpectraThreadDetail } from "../data/api";
+import { existsSync } from "node:fs";
+import { compile } from "@tailwindcss/node";
+import { chromium, type Browser } from "playwright-core";
 
 const mocks = vi.hoisted(() => ({
   activeExecution: undefined as unknown,
@@ -521,4 +524,56 @@ describe("saved answer cards after loading details", () => {
     }
     expect(screen.getByText("Checked editable content")).toBeTruthy();
   });
+});
+
+// Measure the real rendered messages with generated Tailwind CSS in an isolated
+// browser fixture. This never visits the running app or an account session.
+const layoutBrowserPath = [process.env.SPECTRA_LAYOUT_BROWSER,
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "/usr/bin/chromium", "/usr/bin/google-chrome",
+].find(path => path && existsSync(path));
+const layoutSuite = layoutBrowserPath ? describe : describe.skip;
+layoutSuite("user message content sizing", () => {
+  let browser: Browser;
+  beforeAll(async () => { browser = await chromium.launch({ executablePath: layoutBrowserPath, headless: true }); });
+  afterAll(async () => { await browser?.close(); });
+
+  it.each([false, true].flatMap(compact => [false, true].map(live => ({ compact, live }))))(
+    "sizes short prompts and wraps long prompts (compact=$compact, live=$live)",
+    async ({ compact, live }) => {
+      for (const prompt of ["Hi.", "Please explain how plants turn sunlight into food. ".repeat(30), "https://example.test/" + "x".repeat(400), "First line\nSecond line", "See attached"]) {
+        const source = detail("thread-a", prompt);
+        source.messages[0].role = "user";
+        delete source.messages[0].runId;
+        if (prompt === "See attached") source.messages[0].metadata = { attachments: [{ name: "Reference.pdf" }] };
+        const view = render(<ConversationSurface compact={compact} detail={live ? null : source} liveExchange={live ? {
+          id: "sending", prompt, content: "", status: "starting", startedAt: 1, steps: [],
+        } : null} />);
+        const article = view.container.querySelector("article")!;
+        const compiler = await compile('@import "tailwindcss";', { base: process.cwd(), onDependency: () => {} });
+        const candidates = [...view.container.querySelectorAll("[class]")].flatMap(element => [...element.classList]);
+        const css = compiler.build(candidates);
+        const page = await browser.newPage({ viewport: { width: compact ? 420 : 1280, height: 720 } });
+        try {
+          await page.setContent('<style>' + css + '</style><div style="width:100%;max-width:820px;margin:auto">' + article.outerHTML + '</div>');
+          const sizes = await page.evaluate(() => {
+            const article = document.querySelector("article")!;
+            const wrapper = article.firstElementChild!;
+            const bubble = wrapper.firstElementChild!;
+            return { column: article.getBoundingClientRect().width, bubble: bubble.getBoundingClientRect().width,
+              right: article.getBoundingClientRect().right - wrapper.getBoundingClientRect().right,
+              overflow: bubble.scrollWidth - bubble.clientWidth, text: bubble.textContent,
+              whitespace: getComputedStyle(bubble).whiteSpace };
+          });
+          if (prompt === "Hi.") expect(sizes.bubble).toBeLessThan(100);
+          expect(sizes.bubble).toBeLessThanOrEqual(sizes.column * 0.82 + 1);
+          expect(Math.abs(sizes.right)).toBeLessThan(1);
+          expect(sizes.overflow).toBeLessThanOrEqual(1);
+          expect(sizes.text).toBe(!live && prompt === "See attached" ? prompt + "Reference.pdf" : prompt);
+          if (prompt.includes("\n")) expect(sizes.whitespace).toBe("pre-wrap");
+        } finally { await page.close(); cleanup(); }
+      }
+    }, 20_000,
+  );
 });

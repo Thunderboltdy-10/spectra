@@ -3,6 +3,7 @@ import { SignIn } from "@clerk/nextjs";
 import { SpectraMark } from "@/components/spectra-mark";
 import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { SignedInContinue } from "@/components/signed-in-continue";
+import { SignInConnectionState } from "@/components/account-connection-state";
 import { authHrefForRedirect } from "@/lib/invitation-session";
 
 function getSearchParam(value: string | string[] | undefined) {
@@ -54,6 +55,7 @@ function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
             <SignedInContinue to={redirectUrl} />
+            <SignInConnectionState />
             <SignIn
               fallbackRedirectUrl={redirectUrl || "/workspace"}
               forceRedirectUrl={redirectUrl || "/workspace"}

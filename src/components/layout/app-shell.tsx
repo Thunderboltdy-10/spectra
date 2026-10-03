@@ -11,6 +11,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { useAccountStorageReady } from "../account-storage-boundary";
+import { AccountConnectionState } from "../account-connection-state";
 import { usePathname, useSearchParams } from "next/navigation";
 import { captureSpectraNavigation, useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { toast } from "sonner";
@@ -1066,11 +1067,7 @@ function ShellNavigation() {
 
 export function AppShell(props: AppShellProps) {
   const ready = useAccountStorageReady();
-  return ready ? (
-    <AppShellContent {...props} />
-  ) : (
-    <div className="min-h-dvh bg-[var(--bg-primary)]" aria-busy="true" />
-  );
+  return ready ? <AppShellContent {...props} /> : <AccountConnectionState />;
 }
 
 function AppShellContent({

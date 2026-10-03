@@ -6,7 +6,7 @@ import { makeFunctionReference } from "convex/server";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import type { RestoredClarification } from "../src/app/api/spectra/run/loop/contract";
+import type { RestoredClarification } from "../src/app/api/spectra/run/harness/contract";
 
 const modules = import.meta.glob("./**/*.ts");
 // Typed references keep the generated API untouched until coordinated codegen.

@@ -69,6 +69,9 @@ import { ArtifactEmbedList } from "./artifact-embed-host";
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
+import { HarnessInputPanel, HarnessWidgets, WorkTouchCards, messageTouches } from "./harness-run-parts";
+import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
+import { parseSpectraStreamEvent } from "../ai/stream-events";
 
 function operationLabel(
   operation: SpectraThreadTrace["operations"][number],
@@ -184,13 +187,15 @@ function RunDetailsDisclosure({
   run,
   state,
   onLoad,
+  caption,
 }: {
   run?: Pick<SpectraRun, "status" | "phase">;
   state?: TraceLoadState;
   onLoad: () => void;
+  caption?: string;
 }) {
   if (state?.trace) return null;
-  const status = state?.error ?? runDetailsStatusCopy(run);
+  const status = state?.error ?? caption ?? runDetailsStatusCopy(run);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {status ? (
@@ -1018,7 +1023,44 @@ function TerminalRunFailureNote({
   );
 }
 
+/** A harness run's trace, rebuilt from its saved events. */
+function harnessTraceFields(trace: SpectraThreadTrace): HarnessExchangeFields | null {
+  const events = (trace.events ?? []).filter(
+    (event) => !trace.run.executionId || event.executionId === trace.run.executionId,
+  );
+  if (!events.some((event) => event.type === "caption" || event.type === "step")) return null;
+  let fields: HarnessExchangeFields = { steps: [] };
+  for (const row of [...events].sort((a, b) => a.sequence - b.sequence)) {
+    try {
+      const event = parseSpectraStreamEvent(row.payload);
+      if (isHarnessExchangeEvent(event)) fields = applyHarnessEvent(fields, event, row.createdAt);
+    } catch {
+      // A malformed row never hides the rest of the trace.
+    }
+  }
+  const settled = trace.run.status !== "queued" && trace.run.status !== "running";
+  return settled
+    ? { ...fields, steps: fields.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)) }
+    : fields;
+}
+
 function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
+  const harness = harnessTraceFields(trace);
+  if (harness)
+    return (
+      <ProgressTrace
+        steps={harness.steps}
+        caption={harness.caption}
+        answers={harness.answers}
+        active={trace.run.status === "queued" || trace.run.status === "running"}
+        hasOutput={Boolean(trace.run.finalSummary) || !["queued", "running"].includes(trace.run.status)}
+        persistKey={trace.run._id}
+      />
+    );
+  return <LegacyProgressTrace trace={trace} />;
+}
+
+function LegacyProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
   const rows = (trace.events ?? []).filter((event) => {
     if (trace.run.executionId && event.executionId !== trace.run.executionId)
       return false;
@@ -1587,6 +1629,7 @@ export function ConversationSurface({
   liveExchange,
   onChoice,
   onRetryRun,
+  onAnswer,
 }: {
   detail: SpectraThreadDetail | null;
   threadId?: string;
@@ -1606,8 +1649,17 @@ export function ConversationSurface({
   liveExchange?: SpectraLiveExchange | null;
   onChoice?: (choice: ConversationChoice) => Promise<void> | void;
   onRetryRun?: (runId: string) => Promise<unknown> | unknown;
+  /** Answers the run's open question or approval. */
+  onAnswer?: (runId: string, toolCallId: string, value: HarnessAnswerValue) => Promise<boolean> | boolean;
 }) {
   const observedThreadId = threadId ?? detail?.thread._id;
+  // Approvals and retries the thread can act on. The open question of the
+  // run shown live is answered in its own panel, not repeated as a card.
+  const actionableCards = (activeCards ?? []).filter(
+    (card) =>
+      card.actions.some((action) => ["confirm", "cancel", "reject", "retry"].includes(action.key)) &&
+      !(liveExchange?.input && card.runId === liveExchange.runId),
+  );
   const observedActiveExecution = useQuery(
     api.spectraThreads.getActiveExecution,
     useAuthedArgs(
@@ -1956,6 +2008,9 @@ export function ConversationSurface({
                   (message.role === "assistant" ||
                     !persistedAssistantRunIds.has(message.runId)),
               );
+              const touches = message.role === "assistant" ? messageTouches(message.metadata) : [];
+              const savedCaption =
+                typeof message.metadata?.caption === "string" ? message.metadata.caption : undefined;
               const conversationCards = (trace?.cards ?? []).flatMap((card) => {
                 const repeatsAnswer = Boolean(message.content.trim()) &&
                   card.summary?.trim() === message.content.trim();
@@ -1963,7 +2018,9 @@ export function ConversationSurface({
                   card.variant === "status" && card.actions.length === 0) return [];
                 // Keep work links, recovery and approval controls without
                 // repeating prose already owned by the assistant message.
-                return [{ ...card, summary: repeatsAnswer ? undefined : card.summary }];
+                const actions = touches.length ? card.actions.filter((action) => action.key !== "open") : card.actions;
+                if (repeatsAnswer && card.status === "completed" && card.variant !== "error" && actions.length === 0) return [];
+                return [{ ...card, actions, summary: repeatsAnswer ? undefined : card.summary }];
               });
               const affectedWorkspaceIds = trace
                 ? [
@@ -2057,9 +2114,11 @@ export function ConversationSurface({
                         <RunDetailsDisclosure
                           run={activeRun}
                           state={traceState}
+                          caption={savedCaption}
                           onLoad={() => void requestRunTrace(message.runId!)}
                         />
                       ) : null}
+                      <WorkTouchCards touches={touches} onOpen={onOpenArtifact} />
                       {(() => {
                         const choices = messageChoices(
                           message,
@@ -2194,6 +2253,7 @@ export function ConversationSurface({
                         </button>
                       ) : null}
                       {trace &&
+                      touches.length === 0 &&
                       isSettledAiRunStatus(trace.run.status) &&
                       trace.artifacts.map((artifact) => (
                         <ArtifactResult
@@ -2238,7 +2298,9 @@ export function ConversationSurface({
                     </span>
                     <ProgressTrace
                       steps={liveExchange.steps}
-                      active={liveExchange.status !== "failed"}
+                      caption={liveExchange.caption}
+                      answers={liveExchange.answers}
+                      active={liveExchange.status !== "failed" && liveExchange.status !== "waiting"}
                       hasOutput={
                         Boolean(liveExchange.content) ||
                         liveExchange.status === "failed"
@@ -2250,6 +2312,15 @@ export function ConversationSurface({
                         content={liveExchange.content}
                         streaming={liveExchange.status === "streaming"}
                         compact={compact}
+                      />
+                    ) : null}
+                    <HarnessWidgets widgets={liveExchange.widgets} />
+                    <WorkTouchCards touches={liveExchange.artifacts ?? []} onOpen={onOpenArtifact} />
+                    {liveExchange.input && liveExchange.runId && onAnswer ? (
+                      <HarnessInputPanel
+                        key={liveExchange.input.toolCallId}
+                        input={liveExchange.input}
+                        onAnswer={(value) => onAnswer(liveExchange.runId!, liveExchange.input!.toolCallId, value)}
                       />
                     ) : null}
                     {liveExchange.runId ? (
@@ -2331,27 +2402,9 @@ export function ConversationSurface({
               onOpenSource={onOpenArtifact}
             />
           ) : null}
-          {activeCards?.some((card) =>
-            card.actions.some(
-              (action) =>
-                action.key === "confirm" ||
-                action.key === "cancel" ||
-                action.key === "reject" ||
-                action.key === "retry",
-            ),
-          ) ? (
+          {actionableCards.length ? (
             <ResultCardStack
-              cards={activeCards
-                .filter((card) =>
-                  card.actions.some(
-                    (action) =>
-                      action.key === "confirm" ||
-                      action.key === "cancel" ||
-                      action.key === "reject" ||
-                      action.key === "retry",
-                  ),
-                )
-                .slice(0, 2)}
+              cards={actionableCards.slice(0, 2)}
               className="mt-5"
               onOpen={onCardOpen}
               onAction={onCardAction}
@@ -2489,7 +2542,8 @@ export function ThreadConversation({
       threadId={threadId}
       loading={loading}
       compact={compact}
-      liveExchange={parentLiveExchange ?? runEngine.liveExchange}
+      liveExchange={runEngine.liveExchange ?? parentLiveExchange}
+      onAnswer={runEngine.answer}
       workspaces={workspaces}
       onOpenArtifact={onOpenArtifact}
       onOpenWorkspace={onOpenWorkspace}

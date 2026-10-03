@@ -3,6 +3,7 @@ import { makeFunctionReference } from "convex/server";
 import { mutation } from "./functions";
 import { getAuthenticatedActor } from "./identityShared";
 import { normalizeAiPreferencePatch } from "../src/features/spectra/settings/schema/preferences";
+import { patchTouchesAiPermissions } from "../src/features/spectra/settings/schema/ai-permissions";
 import { applicationApprovalScope, applicationOperationScope, applicationWriteReceipt } from "./spectraApplicationWriteScope";
 import { mapOperationArtifactReferences } from "../src/features/spectra/operations/dependencies";
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
@@ -13,7 +14,10 @@ import { assertUiObservationFence } from "./spectraUiObservation";
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-const confirmedCommands = new Set(["change_spectra_settings", "delete_library_items", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes"]);
+// Moving items to the Trash is undoable, so it asks only when desktop files
+// are affected (counted below), like organising the library.
+export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes"]);
+const localEffectCommands = new Set(["organize_library", "change_sync_policy", "delete_library_items"]);
 
 function semanticInput(input: Row) {
   const args = { ...row(input.args) };
@@ -139,11 +143,14 @@ export const execute = mutation({
     }
     if (run.status !== "running" || operation.status !== "executing")
       throw new Error("AI_APPLICATION_OPERATION_NOT_ACTIVE");
+    // The AI never changes its own permissions, whatever the approval says.
+    if (input.command === "change_spectra_settings" && patchTouchesAiPermissions(row(input.args).patch))
+      throw new Error("AI_PERMISSION_SELF_GRANT: Spectra cannot change its own permissions. Only you can, in Settings.");
     let needsConfirmation = operation.requiresConfirmation || confirmedCommands.has(String(input.command));
     const targetIds = strings(row(input.args).targetIds);
     // Deletion's bounded approval scope below includes exact local identities;
     // repeating the legacy count query would expand the subtree without a bound.
-    if (["organize_library", "change_sync_policy"].includes(String(input.command)) && targetIds.length) {
+    if (localEffectCommands.has(String(input.command)) && targetIds.length) {
       const isPolicy = input.command === "change_sync_policy";
       const effect = await ctx.runQuery(makeFunctionReference<"query">(isPolicy ? "replicas:localEffectCount" : "replicas:localEffectCountForNodes"), isPolicy ? { workIds: targetIds } : { nodeIds: targetIds });
       const count = Number(row(effect).count);

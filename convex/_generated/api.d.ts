@@ -115,6 +115,7 @@ import type * as spectraArtifactWriteScope from "../spectraArtifactWriteScope.js
 import type * as spectraArtifactWrites from "../spectraArtifactWrites.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraContext from "../spectraContext.js";
+import type * as spectraHarness from "../spectraHarness.js";
 import type * as spectraOperations from "../spectraOperations.js";
 import type * as spectraRunContinuations from "../spectraRunContinuations.js";
 import type * as spectraRunLifecycle from "../spectraRunLifecycle.js";
@@ -244,6 +245,7 @@ declare const fullApi: ApiFromModules<{
   spectraArtifactWrites: typeof spectraArtifactWrites;
   spectraArtifacts: typeof spectraArtifacts;
   spectraContext: typeof spectraContext;
+  spectraHarness: typeof spectraHarness;
   spectraOperations: typeof spectraOperations;
   spectraRunContinuations: typeof spectraRunContinuations;
   spectraRunLifecycle: typeof spectraRunLifecycle;

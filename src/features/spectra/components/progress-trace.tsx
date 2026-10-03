@@ -6,6 +6,7 @@ import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
+import type { AnsweredInput } from "../ai/harness-exchange";
 import { pastTenseProgressTitle } from "./progress-title";
 
 const groupOpenByKey = new Map<string, boolean>();
@@ -17,6 +18,8 @@ export function ProgressTrace({
   summary,
   compact = false,
   persistKey,
+  caption,
+  answers,
 }: {
   steps: SpectraLiveExchange["steps"];
   active: boolean;
@@ -27,6 +30,10 @@ export function ProgressTrace({
   compact?: boolean;
   /** Remember open/closed across remounts (dock hover, thread traces). */
   persistKey?: string;
+  /** The past-tense caption naming what the finished run did. */
+  caption?: string;
+  /** Questions and approvals already answered: one line each. */
+  answers?: AnsweredInput[];
 }) {
   /* The trace is run feedback, so it runs on the completion/reveal grammar:
      steps entering are `reveal`, the group opening is `morph`, and the whole
@@ -40,7 +47,7 @@ export function ProgressTrace({
     if (persistKey && groupOpenByKey.has(persistKey)) {
       return groupOpenByKey.get(persistKey)!;
     }
-    return thinking;
+    return false;
   });
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
   const [userTouched, setUserTouched] = useState<Set<string>>(() => new Set());
@@ -72,11 +79,6 @@ export function ProgressTrace({
       if (step.status === "running") completedAtRef.current.delete(step.id);
     }
   }, [steps, userTouched]);
-
-  useEffect(() => {
-    if (persistKey && groupOpenByKey.has(persistKey)) return;
-    setGroupOpen(thinking);
-  }, [thinking, persistKey]);
 
   useEffect(() => {
     const ids = steps.map((step) => step.id);
@@ -132,7 +134,7 @@ export function ProgressTrace({
     };
   }, [steps]);
 
-  if (!thinking && steps.length === 0 && !summary?.trim()) return null;
+  if (!thinking && steps.length === 0 && !summary?.trim() && !caption?.trim() && !answers?.length) return null;
 
   const orderedSteps = displayOrder
     .map((id) => steps.find((step) => step.id === id))
@@ -149,6 +151,11 @@ export function ProgressTrace({
   }
 
   const showTraceToggle = thinking || steps.length > 0;
+  // The header says what Spectra is doing now, then what it did.
+  const runningStep = [...steps].reverse().find((step) => step.status === "running");
+  const headline = finished
+    ? caption?.trim() || (steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done")
+    : runningStep?.title || steps.at(-1)?.title || "Thinking";
 
   return (
     <div
@@ -165,16 +172,16 @@ export function ProgressTrace({
               return next;
             })
           }
-          className="mb-1.5 flex w-full items-center gap-1.5 py-0.5 text-left"
+          className="mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left"
           aria-expanded={groupOpen}
         >
           <span
             className={cn(
-              "text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
+              "min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
               thinking && "thinking-wave",
             )}
           >
-            {finished ? "Thought" : "Thinking"}
+            {headline}
           </span>
           <ChevronDown
             className={cn(
@@ -298,6 +305,19 @@ export function ProgressTrace({
           </motion.div>
         ) : null}
       </AnimatePresence>
+      {answers?.length ? (
+        <ul className="mb-1.5 space-y-1" aria-label="Your answers">
+          {answers.map((answer) => (
+            <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-micro text-[var(--text-secondary)]">
+              <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+              <span className="min-w-0 truncate">
+                {answer.question ? <span className="text-[var(--text-tertiary)]">{answer.question} · </span> : null}
+                <span className="font-semibold">{answer.label}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {finished && summary?.trim() ? (
         <p
           className={cn(

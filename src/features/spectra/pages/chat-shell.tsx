@@ -1025,6 +1025,7 @@ export function ChatShell() {
           }
           onCardRevise={(card, revision) => runEngine.revise(card, revision)}
           onRetryRun={runEngine.retry}
+          onAnswer={runEngine.answer}
           empty={
             loadError ? (
               <ProductErrorState

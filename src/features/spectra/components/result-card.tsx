@@ -172,29 +172,26 @@ export function ResultCardStack({
                   className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-control border border-[color-mix(in_oklab,var(--warning)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_5%,var(--bg-primary))] px-2 py-1"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <span className="mr-1 text-micro font-medium text-[var(--text-secondary)]">
-                    Review these changes before they are saved.
-                  </span>
                   <button
                     type="button"
                     className="rounded-chip bg-[var(--text-primary)] px-2 py-1 text-micro font-semibold text-[var(--bg-primary)] hover:opacity-90"
                     onClick={() => onAction?.(card, "confirm", card.runId)}
                   >
-                    Apply changes
+                    Allow
                   </button>
                   {onRevise || onAction ? <button
                     type="button"
                     className="rounded-chip px-2 py-1 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                     onClick={() => setRevisingCardId((current) => current === card.id ? null : card.id)}
                   >
-                    Ask for changes
+                    Suggest changes
                   </button> : null}
                   <button
                     type="button"
                     className="rounded-chip px-2 py-1 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                     onClick={() => onAction?.(card, "cancel", card.runId)}
                   >
-                    Reject
+                    Don&apos;t allow
                   </button>
                   {(onRevise || onAction) && revisingCardId === card.id ? <form className="mt-1 flex w-full gap-1.5" onSubmit={(event) => {
                     event.preventDefault();

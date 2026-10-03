@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PERMISSION_CATEGORIES } from "./ai-permissions";
 
 export const PREFERENCE_SCHEMA_VERSION = 2;
 export const preferenceScopeSchema = z.enum([
@@ -35,6 +36,9 @@ const aiSchema = z.object({
   expandRequiredInput: z.boolean().default(true),
   newThreadShortcut: z.enum(["modifier_enter", "shift_enter", "menu_only"]).default("modifier_enter"),
   showProviderDiagnostics: z.boolean().default(false),
+  // Set only by the user: Settings, or "Always allow" on an approval.
+  permissionFullControl: z.boolean().default(false),
+  permissionAllow: z.array(z.enum(PERMISSION_CATEGORIES)).max(PERMISSION_CATEGORIES.length).default([]),
 });
 
 const writingSchema = z.object({

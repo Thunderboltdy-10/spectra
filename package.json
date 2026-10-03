@@ -35,6 +35,7 @@
     "check:capabilities": "tsx scripts/check-capability-ir.ts",
     "check:secrets": "node scripts/scan-secrets.mjs",
     "check:deploy-env": "node scripts/check-deploy-env.mjs",
+    "smoke:ai": "vitest run --config vitest.smoke.config.ts",
     "test:realtime": "vitest run workers/collaboration",
     "fidelity:docx": "tsx scripts/fidelity-harness/docx.ts",
     "fidelity:office": "tsx scripts/fidelity-harness/office.ts",

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), apply: vi.fn() }));
-vi.mock("@/app/api/spectra/run/loop/io", () => ({ mutate: seams.mutate, query: seams.query }));
+vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query }));
 vi.mock("../ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.apply }));
-import { executeReferenceInsertion } from "@/app/api/spectra/run/loop/reference-command";
+import { executeReferenceInsertion } from "@/app/api/spectra/run/harness/reference-command";
 
 const input = { actorClerkId: "actor", runId: "run", executionId: "attempt", operationId: "operation", hostWorkId: "host", targetWorkId: "source" };
 const receipt = { phase: "canonical_write", operationId: "operation", embedId: "embed", versionId: "version" };

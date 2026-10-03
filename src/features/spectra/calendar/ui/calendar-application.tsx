@@ -397,6 +397,21 @@ function isGestureConflict(error: unknown) {
   );
 }
 
+/**
+ * One notice for every stale Calendar gesture. It is shown as soon as the
+ * conflict arrives, before the reload, and under one id, so a second conflict
+ * replaces the first instead of stacking or racing it.
+ */
+const GESTURE_CONFLICT_TOAST_ID = "calendar-gesture-conflict";
+function announceGestureConflict(reopen: boolean) {
+  toast.error(
+    reopen
+      ? "Calendar changed elsewhere, so it now shows the latest version. Open the block again to continue."
+      : "Calendar changed elsewhere, so it now shows the block's latest position.",
+    { id: GESTURE_CONFLICT_TOAST_ID, duration: 8_000 },
+  );
+}
+
 async function calendarPost(body: Record<string, unknown>) {
   const response = await requestSpectra("/api/spectra/calendar", {
     method: "POST",
@@ -689,9 +704,9 @@ export function CalendarApplication() {
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
       if (isGestureConflict(nextError)) {
-        await load("replace", visibleRange.from, visibleRange.to, true);
         setSelected(null);
-        toast.error("Calendar changed, so the latest block position was restored. Open it again to continue.");
+        announceGestureConflict(true);
+        await load("replace", visibleRange.from, visibleRange.to, true);
       } else {
         toast.error(message);
       }
@@ -737,8 +752,8 @@ export function CalendarApplication() {
       upsertItem(item);
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
       if (isGestureConflict(nextError)) {
+        announceGestureConflict(false);
         await load("replace", visibleRange.from, visibleRange.to, true);
-        toast.error("The block changed elsewhere, so Calendar restored its latest position.");
       } else {
         toast.error(message);
       }

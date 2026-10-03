@@ -54,6 +54,8 @@ function overview(items: unknown[] = [], timezone = "Europe/Madrid") {
 
 let posts: Array<Record<string, unknown>> = [];
 let gets = 0;
+/** While set, overview reads never answer: a reload that has not finished. */
+let holdGets = false;
 
 function installFetch(
   onPost: Handler,
@@ -62,6 +64,7 @@ function installFetch(
 ) {
   posts = [];
   gets = 0;
+  holdGets = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,6 +76,7 @@ function installFetch(
         return onPost(url, init) ?? json(200, { ok: true, data: {} });
       }
       gets += 1;
+      if (holdGets) return new Promise<Response>(() => {});
       return overview(items, timezone);
     }),
   );
@@ -232,9 +236,15 @@ describe("Calendar application", () => {
     render(<CalendarApplication />);
     fireEvent.click(await screen.findByTitle("Essay draft"));
     const loadsBefore = gets;
+    // The notice must not wait for the reload: a slow reload left the block
+    // jumping back with no explanation.
+    holdGets = true;
     fireEvent.click(screen.getByRole("button", { name: "+ 30 min" }));
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    expect(toastError.mock.calls[0]![0]).toMatch(/Calendar changed/);
+    expect(toastError.mock.calls[0]![0]).toMatch(/^Calendar changed/);
+    expect(toastError.mock.calls[0]![1]).toMatchObject({
+      id: "calendar-gesture-conflict",
+    });
     await waitFor(() => expect(gets).toBeGreaterThan(loadsBefore));
   });
 

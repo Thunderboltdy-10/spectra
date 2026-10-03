@@ -10,6 +10,7 @@ import { encodeDurableFrontier } from "../../shared/collaboration-durable-fronti
 import { encodeArtifactContentForStorage } from "../../shared/sheet-cells";
 import { boundedRegionClaims } from "../../shared/region-claim-policy";
 import { contentDependencies } from "../../shared/durable-dependencies.mjs";
+import { inlineContentFitsNesting } from "../../shared/convex-nesting.mjs";
 import { readArtifactYjsDocument, type ArtifactLiveValue } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "@/features/spectra/work/models/yjs/native-artifact-model";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -62,7 +63,11 @@ export async function storeCommitContent(
   const stored = await storeArtifactContent(context.artifactId, value);
   // This transaction carries two projections plus the conflict envelope. Size
   // the JSON-string encoding too, since quoted text is escaped again there.
-  if (Buffer.byteLength(JSON.stringify(JSON.stringify(stored))) <= 128 * 1024) return stored;
+  // The version keeps both bodies as snapshots, one level below where the
+  // artifact holds them, so a Word table at the artifact's nesting limit
+  // must travel by reference too, however small it is.
+  if (Buffer.byteLength(JSON.stringify(JSON.stringify(stored))) <= 128 * 1024 &&
+      inlineContentFitsNesting(stored)) return stored;
   const bytes = Buffer.from(JSON.stringify(value));
   const digest = createHash("sha256").update(bytes).digest("hex");
   const uploaded = await bridge("storeDurablePayload", { ...context, kind: "projection", digest,

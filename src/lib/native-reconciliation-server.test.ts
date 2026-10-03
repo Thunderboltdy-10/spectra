@@ -8,7 +8,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("./convex-server", () => ({ convexQuery: calls.query, convexMutation: calls.mutation, storeArtifactContent: calls.store }));
 vi.mock("./env", () => ({ getConvexUrl: () => "http://native-fixture.invalid" }));
 vi.mock("../../scripts/collaboration-gateway-bridge-client.mjs", () => ({ createCollaborationGatewayBridgeClient: () => calls.bridge }));
-import { reconcileNativeRevision } from "./native-reconciliation-server";
+import { reconcileNativeRevision, storeCommitContent } from "./native-reconciliation-server";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const content = (native: string, human: string) => ({ blocks: [
@@ -155,6 +155,24 @@ describe("native server durable-state reconstruction", () => {
       expect(JSON.parse(request.append.projectionJson).content.spectraContentRef.payloadRef).toBe("blob-projection");
       expect(Buffer.byteLength(JSON.stringify({ payloadJson: JSON.stringify(request) }))).toBeLessThan(1400 * 1024);
     } finally { document.destroy(); }
+  });
+
+  it("sends a small but deeply nested projection by reference, so its version snapshot fits Convex", async () => {
+    calls.store.mockImplementation(async (_artifactId: string, value: unknown) => value);
+    calls.bridge.mockImplementation(async (operation: string, payload: Record<string, unknown>) => {
+      if (operation === "storeDurablePayload") return { payloadRef: `blob-${payload.kind}`, dependencies: [] };
+      throw new Error(`Unexpected ${operation}`);
+    });
+    const context = { artifactId: "artifact", partitionKey: "root", accountId: "owner", policyVersion: 0 };
+    // A Word table cell holding a bold nested list: a few bytes, 15 levels.
+    let deep: unknown = { type: "text", text: "deepest", marks: [{ type: "bold" }] };
+    for (let level = 0; level < 6; level += 1) deep = { type: "node", content: [deep] };
+    const deepStored = await storeCommitContent({ tiptap: deep }, context, calls.bridge as never);
+    expect((deepStored as { spectraContentRef?: { payloadRef: string } }).spectraContentRef?.payloadRef)
+      .toBe("blob-projection");
+
+    const shallow = { blocks: [{ id: "intro", type: "paragraph", text: "Body" }] };
+    expect(await storeCommitContent(shallow, context, calls.bridge as never)).toEqual(shallow);
   });
 
   it("prepares native first activation from current cloud content while the canonical resource is empty", async () => {

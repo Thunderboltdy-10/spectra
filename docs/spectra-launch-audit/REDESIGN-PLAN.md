@@ -124,6 +124,6 @@ compat shims, and say so in the commit.
 
 | Lane | Branch / worktree | State |
 | --- | --- | --- |
-| A1 | `redesign/ai-harness` · `<local-workspace>` | Running |
+| A1 | `lane/ai-harness` · `<local-workspace>` | Running |
 | R1 | `main` · primary checkout | Running |
 | Visual spec | — | In progress (orchestrator) |

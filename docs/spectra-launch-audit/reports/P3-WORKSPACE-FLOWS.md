@@ -93,7 +93,7 @@ Run these on a production-like deployment with Clerk, Convex and a paired Bridge
 4. **Plan block.** Click a scheduled block.
    - Expected: details with Mark complete, +30 min and "Open plan", which opens the plan.
 5. **kbar.**
-   - Press Mod+Shift+F and type "memory". Expected: "Update memory" is listed.
+   - Press Mod+K and type "memory". Expected: "Update memory" is listed. (Mod+Shift+F focuses sidebar search; it does not open the command bar.)
    - Choose it. Expected: the cursor is in the field. Escape returns to the list; a second Escape closes the bar and focus returns.
    - Search "share". Expected: no command asks for an ID.
 6. **Chat search.** Open search in /chat, type two letters and pick a workspace.

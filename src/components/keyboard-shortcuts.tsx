@@ -21,6 +21,7 @@ export type Shortcut = {
 
 /** The help surface and registrar share this list. Unwired commands stay out. */
 export const SHORTCUTS: readonly Shortcut[] = [
+  { keys: ["Mod", "K"], description: "Open command bar", context: "global" },
   {
     keys: ["Mod", "Shift", "F"],
     description: "Focus sidebar search",

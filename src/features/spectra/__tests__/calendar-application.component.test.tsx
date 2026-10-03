@@ -238,6 +238,35 @@ describe("Calendar application", () => {
     await waitFor(() => expect(gets).toBeGreaterThan(loadsBefore));
   });
 
+  it("keeps every block that shares a time slot clickable", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [
+      {
+        ...workBlock(),
+        taskItemId: undefined,
+        planArtifactId: "plan-1",
+        planTaskId: "task-1",
+        linkedWorkIds: ["plan-1"],
+      },
+      {
+        ...workBlock(),
+        id: "official-2",
+        kind: "official_event",
+        title: "Maths Unit 7 Test",
+        taskItemId: undefined,
+        sourceLocked: true,
+      },
+    ]);
+    render(<CalendarApplication />);
+    const block = await screen.findByTitle("Essay draft");
+    const official = screen.getByTitle("Maths Unit 7 Test");
+    expect(block.style.width).toBe("calc(50% - 8px)");
+    expect(official.style.width).toBe("calc(50% - 8px)");
+    expect(new Set([block.style.left, official.style.left]).size).toBe(2);
+    fireEvent.click(block);
+    expect(screen.getByRole("button", { name: /Open plan/ })).toBeTruthy();
+  });
+
   it("removes a personal event after confirmation", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(

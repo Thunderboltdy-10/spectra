@@ -57,6 +57,7 @@ import {
   defaultLocalEventTimes,
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
+import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -1512,6 +1513,13 @@ function WeekGrid({
           const columnItems = timedItems.filter(
             (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
+          const lanes = layoutTimedLanes(
+            columnItems.map((item) => ({
+              id: item.id,
+              start: item.startAt!,
+              end: item.startAt! + timedBlockDuration(item),
+            })),
+          );
           const preview =
             gesturePreview && zonedDayKey(gesturePreview.startAt, timezone) === localDayKey(day.getTime())
               ? gesturePreview
@@ -1544,6 +1552,7 @@ function WeekGrid({
                 <TimedBlock
                   key={item.id}
                   item={item}
+                  lane={lanes.get(item.id) ?? { lane: 0, lanes: 1 }}
                   timezone={timezone}
                   previewing={gesturePreview?.itemId === item.id}
                   pending={pendingItemIds.has(item.id)}
@@ -1593,8 +1602,14 @@ function PreviewBlock({
   );
 }
 
+/** How much of the grid a timed block covers: never less than 30 minutes. */
+function timedBlockDuration(item: CalendarItem) {
+  return Math.max(30 * 60_000, item.endAt! - item.startAt!);
+}
+
 function TimedBlock({
   item,
+  lane,
   timezone,
   previewing,
   pending,
@@ -1605,6 +1620,7 @@ function TimedBlock({
   onResizeStart,
 }: {
   item: CalendarItem;
+  lane: TimedLane;
   timezone: string;
   previewing: boolean;
   pending: boolean;
@@ -1619,8 +1635,10 @@ function TimedBlock({
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
   const top = (minutesOnDay(item.startAt!, timezone) / 60) * HOUR_PX;
-  const duration = Math.max(30 * 60_000, item.endAt! - item.startAt!);
+  const duration = timedBlockDuration(item);
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
+  // Blocks sharing time sit side by side, so each one stays clickable.
+  const laneWidth = 100 / lane.lanes;
   return (
     <button
       type="button"
@@ -1633,13 +1651,15 @@ function TimedBlock({
       onDragEnd={onDragEnd}
       onClick={onOpen}
       className={cn(
-        "group absolute inset-x-1 z-chrome overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-chrome hover:shadow-md",
+        "group absolute z-chrome overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-chrome hover:shadow-md",
         previewing && "opacity-25",
         pending && "animate-pulse",
       )}
       style={{
         top,
         height,
+        left: `calc(${lane.lane * laneWidth}% + 4px)`,
+        width: `calc(${laneWidth}% - 8px)`,
         borderColor: `${layer.color}55`,
         background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`,
         color: layer.color,

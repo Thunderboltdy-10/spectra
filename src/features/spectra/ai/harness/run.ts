@@ -50,7 +50,7 @@ export type HarnessEvent =
 
 export type RunCheckpoint = {
   state: LoopState;
-  status: "running" | "paused" | "completed" | "stopped" | "failed";
+  status: "running" | "paused" | "completed" | "stopped" | "failed" | "yielded";
 };
 
 export type HarnessSink = {
@@ -91,6 +91,8 @@ export type HarnessRunInput = {
   budgets?: LoopBudgets;
   now?: () => number;
   textFlushMs?: number;
+  /** Hand the run to a fresh worker at the next tool boundary. */
+  shouldYield?: () => boolean;
 };
 
 export type HarnessRunResult = LoopOutcome & { durationMs: number };
@@ -193,6 +195,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
       budgets: input.budgets,
       compact: input.compactor === undefined ? defaultCompactor() : (input.compactor ?? undefined),
       now,
+      shouldYield: input.shouldYield,
       hooks: {
         onText: (delta) => {
           latestText += delta;
@@ -246,7 +249,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
 
   const status: RunCheckpoint["status"] =
     outcome.status === "paused" ? "paused" : outcome.status;
-  if (outcome.status === "paused") captions?.cancel();
+  if (outcome.status === "paused" || outcome.status === "yielded") captions?.cancel();
   else await quietly(() => captions?.finish({ stopped: outcome.status !== "completed" }));
   await quietly(() => input.sink.checkpoint({ state: outcome.state, status }));
   return { ...outcome, durationMs: now() - started };

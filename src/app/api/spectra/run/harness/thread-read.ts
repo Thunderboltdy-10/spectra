@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { rows } from "./gather";
+import { rows } from "./effects";
 import { readQuery } from "./io";
 
 /** The three history views have separate cursors. Never silently fall back to

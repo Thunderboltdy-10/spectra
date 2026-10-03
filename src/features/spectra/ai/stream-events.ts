@@ -54,6 +54,34 @@ export const resultCardStreamViewSchema = z
 
 const affectedSchema = z.object({ type: z.string(), id: z.string() }).strict();
 
+export const harnessInputOptionSchema = z
+  .object({ key: z.string(), label: z.string(), description: z.string().optional() })
+  .strict();
+
+/** A question or approval the run is waiting on, in plain words. */
+export const harnessInputSchema = z
+  .object({
+    kind: z.enum(["question", "approval"]),
+    toolCallId: z.string(),
+    executionId: z.string(),
+    question: z.string(),
+    options: z.array(harnessInputOptionSchema).optional(),
+    allowText: z.boolean().optional(),
+    /** "Always allow sharing", when the user can store this choice. */
+    alwaysAllowLabel: z.string().optional(),
+  })
+  .strict();
+
+export const harnessArtifactTouchSchema = z
+  .object({
+    id: z.string(),
+    type: z.string(),
+    title: z.string(),
+    action: z.enum(["created", "edited", "referenced"]),
+    change: z.string().optional(),
+  })
+  .strict();
+
 export const spectraStreamEventSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -242,6 +270,74 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      type: z.literal("step"),
+      runId: z.string(),
+      id: z.string(),
+      label: z.string(),
+      status: z.enum(["running", "done", "error"]),
+      durationMs: z.number().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("caption"),
+      runId: z.string(),
+      text: z.string(),
+      detail: z.string().optional(),
+      final: z.boolean(),
+      stepIds: z.array(z.string()),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("input_required"),
+      runId: z.string(),
+      input: harnessInputSchema,
+      card: resultCardStreamViewSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("input_answered"),
+      runId: z.string(),
+      toolCallId: z.string(),
+      /** One line: "Allowed", "Not allowed", or the chosen answer. */
+      label: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("artifact_touched"),
+      runId: z.string(),
+      artifact: harnessArtifactTouchSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("todos"),
+      runId: z.string(),
+      todos: z.array(
+        z.object({ content: z.string(), status: z.enum(["pending", "in_progress", "completed"]) }).strict(),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("widget"),
+      runId: z.string(),
+      id: z.string(),
+      title: z.string(),
+      html: z.string(),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("compacted"), runId: z.string() })
+    .strict(),
+  z
+    .object({ type: z.literal("thread_title"), runId: z.string(), title: z.string() })
+    .strict(),
+  z
+    .object({
       type: z.literal("final"),
       runId: z.string(),
       summary: z.string(),
@@ -259,6 +355,8 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ResultCardStreamView = z.infer<typeof resultCardStreamViewSchema>;
+export type HarnessInputView = z.infer<typeof harnessInputSchema>;
+export type HarnessArtifactTouchView = z.infer<typeof harnessArtifactTouchSchema>;
 export type SpectraStreamEvent = z.infer<typeof spectraStreamEventSchema>;
 
 export function parseSpectraStreamEvent(value: unknown) {

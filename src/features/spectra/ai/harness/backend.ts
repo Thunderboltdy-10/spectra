@@ -108,4 +108,14 @@ export interface HarnessBackend {
   readCalendar(input: { from: number; to: number; title?: string }, signal: AbortSignal): Promise<string>;
   readSchoolData(input: { purpose: string; classId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;
+  /**
+   * Record a command before the run pauses to ask, so the user's approval
+   * binds to exactly this change. Optional: the in-memory backend needs none.
+   */
+  stageCommand?(request: CommandRequest, signal: AbortSignal): Promise<void>;
+  /** Record an edit that needs approval (removing everything) before asking. */
+  stageArtifactUpdate?(
+    input: { id: string; type: ArtifactTypeKey; title?: string; content: Record<string, unknown>; toolCallId: string },
+    signal: AbortSignal,
+  ): Promise<void>;
 }

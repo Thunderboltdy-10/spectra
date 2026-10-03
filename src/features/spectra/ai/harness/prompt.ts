@@ -79,6 +79,8 @@ export type EnvironmentInput = {
   permissions: string;
   memory?: string[];
   attachments?: string[];
+  /** A custom agent the user chose for this conversation. */
+  agent?: { title: string; instructions: string };
 };
 
 function localTime(now: number, timeZone: string) {
@@ -126,6 +128,11 @@ export function environmentBlock(input: EnvironmentInput) {
   if (input.attachments?.length) lines.push(`Attached to this message: ${input.attachments.join(", ")}`);
   if (input.bridge) lines.push(`Spectra Bridge: ${input.bridge}`);
   lines.push(`Permissions: ${input.permissions}`);
+  if (input.agent)
+    lines.push(
+      `The user chose their agent "${input.agent.title}" for this conversation. Follow its instructions where they fit the rules above:
+${input.agent.instructions.slice(0, 4_000)}`,
+    );
   if (input.memory?.length)
     lines.push(`What you remember about the user:\n${input.memory.map((entry) => `- ${entry}`).join("\n")}`);
   return lines.join("\n");

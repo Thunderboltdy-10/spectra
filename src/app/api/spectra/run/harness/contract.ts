@@ -1,4 +1,3 @@
-import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
 import type { ModelOperation, SpectraPlan } from "@/features/spectra/operations/schema";
 
 export type Surface = "chat" | "workspace" | "artifacts" | "artifact";
@@ -22,13 +21,18 @@ export type ParkedCandidate = {
   carried?: boolean;
 };
 
+export type HarnessAnswerInput =
+  | { kind: "approval"; allowed: boolean; alwaysAllow?: boolean }
+  | { kind: "question"; choiceKey?: string; text?: string };
+
 export type Body = {
   action?:
     | "run"
+    | "answer"
+    | "steer"
     | "retry"
     | "confirm"
     | "cancel"
-    | "revise"
     | "stop"
     | "revert"
     | "clear_agent"
@@ -45,39 +49,19 @@ export type Body = {
   threadId?: string;
   runId?: string;
   executionId?: string;
-  attemptId?: string;
-  clarificationId?: string;
-  choiceMessageId?: string;
-  choiceKey?: string;
-  clarificationExecutionId?: string;
-  /** Trusted run context for a same-thread continuation returned by beginRun. */
-  continuationRunId?: string;
-  batchSelections?: Array<{
-    questionId: string;
-    choiceKey: string;
-    choiceTitle: string;
-  }>;
-  revision?: string;
+  /** The open question or approval this answer is for. */
+  toolCallId?: string;
+  answer?: HarnessAnswerInput;
+  /** A steer: a message typed while the run works, read at its next turn. */
+  text?: string;
+  /** The user's IANA time zone, for dates and the calendar. */
+  timeZone?: string;
   attachments?: AttachmentInput[];
-  focusMode?: EffectiveFocusMode;
-  selectedArtifactIds?: string[];
-  explicitContextObjects?: Array<{
-    type?: string;
-    id?: string;
-    label?: string;
-    workspaceId?: string;
-    semanticTargetId?: string;
-    semanticAnchor?: Record<string, unknown>;
-    contextSummary?: string;
-  }>;
   currentView?: string;
   submissionKey?: string;
   agentId?: string;
-  disableAgentRouting?: boolean;
   actorClerkId?: string;
   resultCardId?: string;
-  conflictOperationId?: string;
-  collaborationClientId?: string;
   payload?: Record<string, unknown>;
 };
 
@@ -189,9 +173,6 @@ export type RunState = {
   };
   contextSnapshot?: {
     scopeNodeId?: string;
-    focusMode?: EffectiveFocusMode;
-    selectedObjectIds?: string[];
-    explicitContextObjects?: Body["explicitContextObjects"];
     currentView?: string;
     requestedAgentId?: string;
     disableAgentRouting?: boolean;
@@ -221,25 +202,3 @@ export type RetryReset = {
   /** The answered run when this run continues a clarification. */
   continuationRunId?: string;
 };
-
-export type NativeProgressActivity =
-  | "plan"
-  | "retrieve"
-  | "inspect"
-  | "create"
-  | "edit"
-  | "verify"
-  | "approval"
-  | "other";
-
-export type NativeProgressUpdate = {
-  title: string;
-  detail?: string;
-  activity: NativeProgressActivity;
-  operationIndex?: number;
-  artifactType?: string;
-  regionHint?: string;
-};
-
-export type NativeProgressInput =
-  string | NativeProgressUpdate | Record<string, unknown>;

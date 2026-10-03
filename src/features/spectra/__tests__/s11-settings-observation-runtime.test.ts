@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { awaitedUiOperation, cancelUiObservation, notifyUiObservation, waitForSettingsAction } from "@/app/api/spectra/run/loop/ui-observation";
+import { awaitedUiOperation, cancelUiObservation, notifyUiObservation, waitForSettingsAction } from "@/app/api/spectra/run/harness/ui-observation";
 import { SMART_COMPLETION_TARGET } from "../actions/protocol/semantic-action";
 const io = vi.hoisted(() => ({ mutate: vi.fn() }));
-vi.mock("@/app/api/spectra/run/loop/io", () => io);
+vi.mock("@/app/api/spectra/run/harness/io", () => io);
 const identity = { runId: "run", executionId: "attempt", operationId: "toggle" };
 const fence = { epoch: 1, sequence: 0 as const, operationDigest: "a".repeat(64) };
 const offered = () => ({ phase: "waiting", action: { ...identity, ...fence, kind: "settings_toggle", target: SMART_COMPLETION_TARGET, checked: false, expiresAt: Date.now() + 15_000 }, participants: [{ clientId: "tab", mode: "follow" }] });

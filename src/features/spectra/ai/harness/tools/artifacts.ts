@@ -171,7 +171,18 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
         return { ok: false, content: `edit_artifact: ${errorText(error)}` };
       }
       const wipe = classifyArtifactContentWipe(current.type, current.content, authored.content);
-      if (wipe.fullContentDeletion && !ctx.approved)
+      if (wipe.fullContentDeletion && !ctx.approved) {
+        // Record the exact edit first, so the approval binds to it.
+        await session.backend.stageArtifactUpdate?.(
+          {
+            id: current.id,
+            type: current.type,
+            ...(args.title ? { title: args.title } : {}),
+            content: authored.content,
+            toolCallId: ctx.toolCallId,
+          },
+          ctx.signal,
+        );
         return {
           ok: false,
           content: "",
@@ -181,6 +192,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
             category: "permanent_delete",
           },
         };
+      }
       await session.backend.updateArtifact(
         {
           id: current.id,

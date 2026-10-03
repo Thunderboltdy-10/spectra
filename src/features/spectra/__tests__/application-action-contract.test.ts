@@ -2,14 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn() }));
-vi.mock("@/app/api/spectra/run/loop/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
-vi.mock("@/app/api/spectra/run/loop/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
-vi.mock("@/app/api/spectra/run/loop/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
-vi.mock("@/app/api/spectra/run/loop/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
+vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
+vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
+vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
+vi.mock("@/app/api/spectra/run/harness/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
 
-import { executeApplicationCommand } from "@/app/api/spectra/run/loop/act";
-import { executeAgentReadTool } from "@/app/api/spectra/run/loop/plan";
-import { isRegisteredApplicationAction, prepareApplicationCommand } from "../operations/application-command";
+import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
+import { prepareApplicationCommand } from "../operations/application-command";
 import { spectraToolRegistry } from "../tools/registry";
 import { spectraToolExecutor } from "../tools/execution/tool-executor";
 import { CALENDAR_COMMAND_ALIASES } from "../calendar/domain/command";
@@ -77,14 +76,6 @@ describe("application action contract matrix (stubbed persistence)", () => {
     await executeApplicationCommand("actor", "run", "attempt", alias, operation.input.args, undefined, undefined, undefined, "operation");
     expect(seams.calendar).toHaveBeenCalledWith(expect.objectContaining({ command: canonical, runId: "run", executionId: "attempt", operationId: "operation" }));
   });
-
-  it.each(spectraToolRegistry.list().filter((tool) => isRegisteredApplicationAction(tool.id)).map((tool) => tool.id))(
-    "prevents %s from executing at the read boundary", async (command) => {
-      expect(await executeAgentReadTool("actor", { name: command, arguments: "{}" })).toMatchObject({ ok: false, code: "application_operation_required" });
-      expect(seams.mutate).not.toHaveBeenCalled();
-      expect(seams.calendar).not.toHaveBeenCalled();
-      expect(seams.reference).not.toHaveBeenCalled();
-    });
 
   it.each(spectraToolRegistry.list().filter((tool) => tool.capability === "operate_application" && tool.aiAvailability === "prohibited").map((tool) => tool.id))(
     "provides an explicit limitation for %s", (command) => {

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn() }));
-vi.mock("@/app/api/spectra/run/loop/io", () => ({
+vi.mock("@/app/api/spectra/run/harness/io", () => ({
   mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse,
 }));
-vi.mock("@/app/api/spectra/run/loop/authority", () => ({
+vi.mock("@/app/api/spectra/run/harness/authority", () => ({
   evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn(),
 }));
 
-import { executeApplicationCommand } from "@/app/api/spectra/run/loop/act";
+import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
 
 describe("S10 independent review: cancellation at application write boundaries", () => {
   beforeEach(() => {

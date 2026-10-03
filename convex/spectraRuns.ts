@@ -200,12 +200,17 @@ const vResultAction = v.object({
 });
 
 function eventStep(type: string, payload: unknown) {
-  if (!["progress", "checkpoint", "operation_result"].includes(type))
+  if (!["progress", "checkpoint", "operation_result", "caption"].includes(type))
     return undefined;
   const record =
     payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as Record<string, unknown>)
       : {};
+  // The AI harness narrates its work as captions; they are the Dock's steps.
+  if (type === "caption")
+    return typeof record.text === "string" && record.text.trim()
+      ? record.text.trim().slice(0, 240)
+      : undefined;
   const item =
     record.runItem && typeof record.runItem === "object"
       ? (record.runItem as Record<string, unknown>)

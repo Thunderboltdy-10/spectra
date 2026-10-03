@@ -134,12 +134,18 @@ export type LoopDeps = {
   hooks?: LoopHooks;
   compact?: Compactor;
   now?: () => number;
+  /**
+   * The host must hand the run to a fresh worker (a serverless time limit).
+   * Checked at tool boundaries only, so the run resumes from a checkpoint.
+   */
+  shouldYield?: () => boolean;
 };
 
 export type LoopOutcome =
   | { status: "completed"; state: LoopState }
   | { status: "paused"; state: LoopState; pending: PendingInput }
   | { status: "stopped"; state: LoopState }
+  | { status: "yielded"; state: LoopState }
   | { status: "failed"; state: LoopState; error: ProviderUnavailableError };
 
 const STOPPED_RESULT =
@@ -599,10 +605,15 @@ export async function runHarnessLoop(
     appendSteers(await checkpoint());
   }
 
+  const turnsAtStart = state.turns;
   while (true) {
     if (deps.signal.aborted) {
       await checkpoint();
       return { status: "stopped", state };
+    }
+    if (state.turns > turnsAtStart && deps.shouldYield?.()) {
+      await checkpoint();
+      return { status: "yielded", state };
     }
     const budgetSpent =
       state.turns >= budgets.maxTurns || elapsed() >= budgets.wallClockMs;

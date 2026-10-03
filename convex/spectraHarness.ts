@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import { mutation, query } from "./functions";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -6,6 +7,8 @@ import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
 import { currentArtifactApprovalScope } from "./spectraArtifactWriteScope";
 import { requireCurrentExecution } from "./spectraRunLifecycle";
+import { mergeUiObserverInterest } from "./spectraUiObservation";
+import { vUiObserverInterest } from "./spectraUiObservationSchema";
 import {
   PREFERENCE_SCHEMA_VERSION,
   mergePreferenceValues,
@@ -92,7 +95,11 @@ export const saveCheckpoint = mutation({
     const patch = {
       executionId: args.executionId,
       state: args.state,
-      ...(args.toolOperations !== undefined ? { toolOperations: args.toolOperations } : {}),
+      ...(args.toolOperations !== undefined
+        ? { toolOperations: args.toolOperations }
+        : row && row.executionId !== args.executionId
+          ? { toolOperations: {} }
+          : {}),
       ...(args.pending !== undefined ? { pending: args.pending, answer: undefined } : {}),
       ...(args.clearPending ? { pending: undefined, answer: undefined } : {}),
       steers: [],
@@ -121,8 +128,10 @@ export const recordToolOperations = mutation({
     const { actor, run } = await ownedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     const row = await stateRow(ctx, args.runId);
-    const toolOperations = { ...record(row?.toolOperations), [args.toolCallId]: args.operationIds };
-    if (row) await ctx.db.patch(row._id, { toolOperations, updatedAt: Date.now() });
+    // A retry is a new attempt: operations of the previous one never carry over.
+    const current = row?.executionId === args.executionId ? record(row?.toolOperations) : {};
+    const toolOperations = { ...current, [args.toolCallId]: args.operationIds };
+    if (row) await ctx.db.patch(row._id, { executionId: args.executionId, toolOperations, updatedAt: Date.now() });
     else
       await ctx.db.insert("spectraHarnessStates", {
         runId: args.runId,
@@ -235,6 +244,8 @@ export const answer = mutation({
         alwaysAllow: v.optional(v.boolean()),
       }),
     ),
+    /** The open client watches a settings change land in its own UI. */
+    uiObserver: v.optional(vUiObserverInterest),
   },
   handler: async (ctx, args) => {
     const { actor, run } = await ownedRun(ctx, args.runId);
@@ -321,6 +332,9 @@ export const answer = mutation({
       approval: run.approval
         ? { ...run.approval, status: args.answer.allowed ? "accepted" : "rejected", claimedAt: now, decidedAt: now }
         : undefined,
+      ...(args.uiObserver && args.answer.allowed
+        ? { uiObserverInterests: mergeUiObserverInterest(run, args.executionId, args.uiObserver) }
+        : {}),
       workerId: undefined,
       leaseExpiresAt: undefined,
       heartbeatAt: now,
@@ -356,6 +370,8 @@ export const ensureApproved = mutation({
       const operation = operationId ? await ctx.db.get(operationId) : null;
       if (!operation || operation.runId !== run._id || operation.executionId !== args.executionId || operation.status !== "proposed")
         throw new Error("AI_PERMISSION_REQUIRED: This step changed.");
+      // Ordinary writes need no approval; only asking effects are checked.
+      if (!operation.requiresConfirmation) continue;
       const output = record(operation.output);
       const scope =
         operation.type === "app.command"
@@ -389,5 +405,42 @@ export const ensureApproved = mutation({
       updatedAt: now,
     });
     return null;
+  },
+});
+
+/**
+ * Hand a long run to a fresh worker. A serverless route has a time limit; the
+ * loop stops at a tool boundary after its checkpoint, and the next worker
+ * resumes from that checkpoint in the same attempt.
+ */
+export const handoff = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    resultCardId: v.id("spectraResultCards"),
+    payload: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, run } = await ownedRun(ctx, args.runId);
+    requireCurrentExecution(run.executionId, args.executionId);
+    if (run.status !== "running") return { handedOff: false };
+    const card = await ctx.db.get(args.resultCardId);
+    if (!card || card.runId !== args.runId) throw new Error("Result card not found");
+    const now = Date.now();
+    await ctx.db.patch(run._id, {
+      status: "queued",
+      workerId: undefined,
+      leaseExpiresAt: undefined,
+      heartbeatAt: now,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.executionScheduler.dispatchSpectraRun, {
+      actorClerkId: actor.clerkId,
+      runId: args.runId,
+      resultCardId: args.resultCardId,
+      executionId: args.executionId,
+      payload: args.payload,
+    });
+    return { handedOff: true };
   },
 });

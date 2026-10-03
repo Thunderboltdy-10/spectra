@@ -37,7 +37,8 @@ export const preparationContext = internalQuery({
     if (run.status !== "running") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
     const selected = args.operationId ? await ctx.db.get(args.operationId) : null;
     if (args.operationId && (!selected || selected.runId !== run._id || selected.executionId !== args.executionId ||
-        selected.actorType !== "ai" || selected.type !== "artifact.create" || !["proposed", "executing"].includes(selected.status)))
+        selected.actorType !== "ai" || !["artifact.create", "artifact.update"].includes(selected.type) ||
+        !["proposed", "executing"].includes(selected.status) || (selected.type === "artifact.update" && selected.status !== "proposed")))
       throw new Error("AI_ARTIFACT_PREPARATION_CHANGED");
     const operations = selected ? [selected] : await ctx.db.query("spectraOperations")
       .withIndex("by_run_execution_status", q => q.eq("runId", run._id).eq("executionId", args.executionId).eq("status", "proposed"))

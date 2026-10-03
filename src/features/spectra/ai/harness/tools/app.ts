@@ -43,6 +43,12 @@ function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): HarnessT
     label: spec.label,
     ...(spec.question ? { question: spec.question } : {}),
     parse: spec.parse,
+    stage: async (args, ctx) => {
+      await session.backend.stageCommand?.(
+        { ...spec.command(args), toolCallId: ctx.toolCallId, approved: false },
+        ctx.signal,
+      );
+    },
     execute: async (args, ctx) => {
       const request = spec.command(args);
       const result = await session.backend.runCommand(

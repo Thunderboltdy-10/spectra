@@ -864,6 +864,14 @@ export function documentBlocksFromJson(json) {
   });
 }
 
+const MIRROR_KEYS = ["type", "text", "rows", "richRows", "inlineContent", "attrs"];
+
+function blockMirrorsNode(block, node) {
+  const own = documentBlocksFromJson({ content: [node] })[0];
+  return MIRROR_KEYS.every((key) =>
+    JSON.stringify(block[key] ?? null) === JSON.stringify(own?.[key] ?? null));
+}
+
 function containsCanonicalReference(node) {
   return node?.type === "spectraReference" || (node?.content ?? []).some(containsCanonicalReference);
 }
@@ -972,6 +980,10 @@ export function documentContentToProseMirrorJson(contentValue) {
         const block =
           typeof blockId === "string" ? byId.get(blockId) : undefined;
         if (referenceNodes.has(node)) return retainCanonicalReference(node, block);
+        // A mirror that is exactly this node's own projection says nothing
+        // new. Rebuilding from it would drop what the mirror cannot carry
+        // (an inline code mark beside an equation, a colour, a task state).
+        if (block && blockMirrorsNode(block, node)) return node;
         const attrs = record(block?.attrs);
         const richNode = block
           ? docxRichBlockToJson(block, content.nativeBinding)

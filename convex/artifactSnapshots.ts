@@ -6,7 +6,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { ensureArtifactDeletionReconciliation } from "./artifactDeletionScheduling";
-import { canonicalSnapshotJson, snapshotHash } from "./snapshotHash";
+import { canonicalSnapshotJson, decodeSnapshotPayload, encodeSnapshotPayload, snapshotHash } from "./snapshotHash";
 
 export { canonicalSnapshotJson, snapshotHash };
 
@@ -24,17 +24,17 @@ export async function retainSnapshotObject(
   const now = Date.now();
   if (existing) {
     if (existing.state === "deleted") {
-      await ctx.db.patch(existing._id, { strategy, payload, byteLength, refCount: 1, state: "hot", lastReferencedAt: now, verifiedAt: now });
+      await ctx.db.patch(existing._id, { strategy, payload: encodeSnapshotPayload(payload), byteLength, refCount: 1, state: "hot", lastReferencedAt: now, verifiedAt: now });
       return { snapshotRef: hash, integrityHash: hash, byteLength, deduplicated: false };
     }
-    if (canonicalSnapshotJson(existing.payload) !== canonicalSnapshotJson(payload)) {
+    if (canonicalSnapshotJson(decodeSnapshotPayload(existing.payload)) !== canonicalSnapshotJson(payload)) {
       await ctx.db.patch(existing._id, { state: "corrupt", lastReferencedAt: now });
       throw new Error("ARTIFACT_SNAPSHOT_HASH_COLLISION");
     }
     await ctx.db.patch(existing._id, { refCount: existing.refCount + 1, lastReferencedAt: now, state: existing.state === "cold" ? "hot" : existing.state });
     return { snapshotRef: hash, integrityHash: hash, byteLength, deduplicated: true };
   }
-  await ctx.db.insert("artifactSnapshotObjects", { schoolId, hash, strategy, payload, byteLength, refCount: 1, state: "hot", createdAt: now, lastReferencedAt: now, verifiedAt: now });
+  await ctx.db.insert("artifactSnapshotObjects", { schoolId, hash, strategy, payload: encodeSnapshotPayload(payload), byteLength, refCount: 1, state: "hot", createdAt: now, lastReferencedAt: now, verifiedAt: now });
   return { snapshotRef: hash, integrityHash: hash, byteLength, deduplicated: false };
 }
 
@@ -42,11 +42,12 @@ export async function loadSnapshotObject(ctx: SnapshotCtx, schoolId: Id<"schools
   const object = await ctx.db.query("artifactSnapshotObjects").withIndex("by_school_hash", (q) => q.eq("schoolId", schoolId).eq("hash", snapshotRef)).unique();
   if (!object || object.state === "deleted") throw new Error("ARTIFACT_SNAPSHOT_UNAVAILABLE");
   if (object.state === "corrupt") throw new Error("ARTIFACT_SNAPSHOT_CORRUPT");
-  const calculated = await snapshotHash(object.payload);
+  const payload = decodeSnapshotPayload(object.payload);
+  const calculated = await snapshotHash(payload);
   if (calculated.hash !== object.hash || calculated.byteLength !== object.byteLength) {
     throw new Error("ARTIFACT_SNAPSHOT_INTEGRITY_FAILED");
   }
-  return object.payload;
+  return payload;
 }
 
 export async function loadVersionAfter(ctx: SnapshotCtx, version: Doc<"spectraArtifactVersions">) {

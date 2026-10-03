@@ -3,6 +3,7 @@ import { makeFunctionReference } from "convex/server";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isTransientCollaborationFailure } from "./collaboration-persist.mjs";
 import { contentDependencies } from "../shared/durable-dependencies.mjs";
+import { inlineContentFitsNesting } from "../shared/convex-nesting.mjs";
 import { rethrowWorded } from "../shared/convex-error.mjs";
 
 const gatewayExchange = makeFunctionReference(
@@ -109,13 +110,16 @@ export function createCollaborationGatewayBridgeClient({
     if (operation === "storeDurablePayload") return store(payload, options);
     // The immutable content body uses Convex's existing blob upload path. Only
     // a complete, verified handle and hot metadata enter the atomic mutation.
+    // Content too deep to embed in a Convex row travels the same way.
     for (const field of ["projectionJson", "observedProjectionJson"]) {
-    if (typeof payload[field] === "string" &&
+    const projectedInline = typeof payload[field] === "string" ? JSON.parse(payload[field]) : null;
+    if (projectedInline &&
       (Buffer.byteLength(payload[field]) > 256 * 1024 ||
-       Buffer.byteLength(JSON.stringify({ payloadJson: JSON.stringify(payload) })) > 1400 * 1024)) {
+       Buffer.byteLength(JSON.stringify({ payloadJson: JSON.stringify(payload) })) > 1400 * 1024 ||
+       !inlineContentFitsNesting(projectedInline.content))) {
       const bytes = Buffer.from(payload[field]);
       const digest = createHash("sha256").update(bytes).digest("hex");
-      const projected = JSON.parse(payload[field]);
+      const projected = projectedInline;
       const stored = await store({
         artifactId: payload.artifactId, accountId: payload.accountId,
         partitionKey: payload.partitionKey, policyVersion: payload.policyVersion,

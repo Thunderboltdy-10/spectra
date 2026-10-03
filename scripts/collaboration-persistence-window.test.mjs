@@ -42,7 +42,8 @@ function harness(persist = vi.fn(async () => undefined)) {
     unappliedDocumentMessages: unapplied, mergeCanonicalIntoLive,
     canonicalRoom: () => ({ run: async work => work({ refresh: async () => ({ document: canonical }) }) }) };
   const confirm = new Function(...Object.keys(confirmDeps), `return ({${confirmCode}}).onStateless;`)(...Object.values(confirmDeps));
-  return { ...handlers, persist, sent, confirm, release, reject, canonical, unapplied, queues, persistenceDocuments };
+  return { ...handlers, persist, sent, confirm, release, reject, canonical, unapplied, queues, persistenceDocuments,
+    reauthorize: confirmDeps.reauthorize };
 }
 const entry = () => ({ documentUpdate: new Uint8Array([0, 0]), context: { artifactId: "fixture" }, messageId: "update", connection: {} });
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
@@ -119,7 +120,9 @@ it("keeps one pending batch while storage is slow and backpressures a full batch
   doc.destroy();
 });
 
-it.each([false, true])("confirms only after the durable barrier (failure=%s), outside the apply gate", async failure => {
+// Hocuspocus fires stateless hooks without awaiting them: a rejected hook is an
+// unhandled rejection that exits the gateway and drops every room (LV-062).
+it.each([false, true])("confirms only after the durable barrier (failure=%s), outside the apply gate, and never rejects", async failure => {
   let finish;
   const h = harness(vi.fn(() => new Promise((resolve, reject) => { finish = failure ? () => reject(new Error("durable failure")) : resolve; })));
   const doc = new Y.Doc(); const connection = { context: {}, socketId: "fixture" };
@@ -130,9 +133,19 @@ it.each([false, true])("confirms only after the durable barrier (failure=%s), ou
   expect(h.release).toHaveBeenCalledOnce();
   expect(h.sent.mock.calls.some(call => call[1].type === "spectra.durable_ack")).toBe(false);
   finish();
-  expect(await outcome).toBe(failure ? "failed" : "ok");
+  expect(await outcome).toBe("ok");
   expect(h.sent.mock.calls.filter(call => call[1].type === "spectra.durable_ack")).toHaveLength(failure ? 0 : 1);
   expect(h.reject).toHaveBeenCalledTimes(failure ? 1 : 0);
+  doc.destroy();
+});
+
+it("tells only the peer when reauthorization fails during a stateless request", async () => {
+  const h = harness(); const doc = new Y.Doc(); const connection = { context: {}, socketId: "fixture" };
+  h.reauthorize.mockRejectedValueOnce(new Error("COLLABORATION_AUTH_UNAVAILABLE"));
+  await expect(h.confirm({ connection, document: doc,
+    payload: JSON.stringify({ type: "spectra.durable_confirm", confirmationId: "recovery:2" }) })).resolves.toBeUndefined();
+  expect(h.reject).toHaveBeenCalledWith(connection, "Error: COLLABORATION_AUTH_UNAVAILABLE");
+  expect(h.release).not.toHaveBeenCalled();
   doc.destroy();
 });
 

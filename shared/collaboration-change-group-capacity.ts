@@ -1,3 +1,5 @@
+import { fitsConvexNesting } from "./convex-nesting.mjs";
+
 /**
  * Open changeGroups must not dual-copy hot artifact rows past Convex's 1 MiB
  * document ceiling. Formal-paper / large-sheet content already fits once on
@@ -101,6 +103,8 @@ export function fitChangeGroupSnapshots(
       snapshotCarriesInlineContent(baseSnapshot));
   const needsOmit =
     omittedSiblingWouldMix ||
+    // Content at the artifact row's limit is one level too deep here.
+    !fitsConvexNesting({ baseSnapshot, finalSnapshot }) ||
     inlineChars > MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS ||
     baseChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS ||
     finalChars > MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS;
@@ -159,7 +163,8 @@ export function resolveCommitSnapshotStrategy(
     return { strategy: base, inline: false, promotedOffRow: false };
   }
   if (
-    estimateJsonChars({ before, after }) <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS
+    estimateJsonChars({ before, after }) <= MAX_CHANGE_GROUP_SNAPSHOT_JSON_CHARS &&
+    fitsConvexNesting({ before, after })
   ) {
     return { strategy: "normalized", inline: true, promotedOffRow: false };
   }

@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { PAYLOAD_RELEASE_GRACE_MS } from "../shared/replica-truth";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { resolveContentDependencies } from "./durableContentDependencies";
+import { decodeSnapshotPayload } from "./snapshotHash";
 import type { Doc } from "./_generated/dataModel";
 
 // Retention references may be authored data. Only this discriminator attests
@@ -36,7 +37,7 @@ async function retainVersionNativeReferences(ctx: MutationCtx, value: unknown, r
     if (!snapshotRef) continue;
     const snapshot = await ctx.db.query("artifactSnapshotObjects").withIndex("by_school_hash", q => q.eq("schoolId", version.schoolId).eq("hash", snapshotRef)).unique();
     if (!snapshot || snapshot.state === "deleted" || snapshot.state === "corrupt") unresolved = true;
-    else snapshots.push(snapshot.payload);
+    else snapshots.push(decodeSnapshotPayload(snapshot.payload));
   }
   const hashes = new Set<string>();
   const visit = (item: unknown) => {

@@ -2,6 +2,7 @@ import { signTrustedIntakeAttestation } from "./server-secrets";
 import { createHash } from "node:crypto";
 import { makeFunctionReference } from "convex/server";
 import type { ConvexHttpClient } from "convex/browser";
+import { inlineContentFitsNesting } from "../../shared/convex-nesting.mjs";
 import { isDurableContentRef, MAX_INLINE_CONTENT_BYTES, MAX_DURABLE_PAYLOAD_BYTES, type DurableContentRef } from "../../shared/durable-content";
 import { contentDependencies } from "../../shared/durable-dependencies.mjs";
 
@@ -39,7 +40,7 @@ export async function hydrateDurableContent(value: unknown, client: ConvexHttpCl
 export async function persistDurableContent(value: unknown, artifactId: string, client: ConvexHttpClient): Promise<unknown> {
   if (isDurableContentRef(value)) return value;
   const bytes = Buffer.from(JSON.stringify(value));
-  if (bytes.length <= MAX_INLINE_CONTENT_BYTES) return value;
+  if (bytes.length <= MAX_INLINE_CONTENT_BYTES && inlineContentFitsNesting(value)) return value;
   if (bytes.length > MAX_DURABLE_PAYLOAD_BYTES) throw new Error("COLLABORATION_DURABLE_PAYLOAD_SIZE");
   const digest = createHash("sha256").update(bytes).digest("hex");
   const upload = await client.mutation(makeFunctionReference<"mutation">("artifactContent:issueUpload"), { artifactId });

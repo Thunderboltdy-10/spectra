@@ -20,6 +20,7 @@ import {
   resolveCommitSnapshotStrategy,
 } from "../shared/collaboration-change-group-capacity";
 import { confirmCanonicalPlacements } from "./artifactEmbeds";
+import { fitsConvexNesting } from "../shared/convex-nesting.mjs";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
 
@@ -550,7 +551,8 @@ export async function commitNativeReconciliationVersion(
   // The server action must spill each large body through immutable content
   // storage. Never replace this precise native boundary with a later head.
   if (isOmittedChangeGroupSnapshot(before) || isOmittedChangeGroupSnapshot(after) ||
-      new TextEncoder().encode(JSON.stringify({ before, after })).byteLength > 850_000)
+      new TextEncoder().encode(JSON.stringify({ before, after })).byteLength > 850_000 ||
+      !fitsConvexNesting({ baseSnapshot: before, finalSnapshot: after }))
     throw new Error("NATIVE_RECONCILIATION_SNAPSHOT_REQUIRED");
   const now = Date.now();
   const summary = `Imported changes from ${input.nativeFormat.toUpperCase()}`;

@@ -35,6 +35,7 @@ COPY shared/collaboration-framing.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \
      shared/convex-error.mjs \
+     shared/convex-nesting.mjs \
      shared/planner-source.mjs \
      shared/yjs-collections.mjs \
      shared/sync-retry-policy.json \

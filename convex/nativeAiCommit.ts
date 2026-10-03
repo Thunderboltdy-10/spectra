@@ -14,6 +14,7 @@ import { artifactOperationDigest, artifactOperationTarget, artifactOutput, artif
   assertVerifiedAiArtifactWriteAdmission, lookupVerifiedAiArtifactWriteReplay, preparedArtifactScope } from "./spectraArtifactWriteScope";
 import { nativeAiRequestDigest, nativeAiUpdateIdentity } from "../shared/native-ai-commit";
 import { validateNativeSaveReceipt } from "../shared/native-office-contract";
+import { fitsConvexNesting } from "../shared/convex-nesting.mjs";
 import type { AdmittedAiCommit } from "../src/features/spectra/ai/admitted-ai-update";
 
 /** Authenticated physical head for cold Node preparation. Reading this head
@@ -241,7 +242,8 @@ async function admitNativeHistoryAndEffect(ctx: MutationCtx, args: NativeAiCommi
   const after = { title: updated.title, summary: updated.summary, content: updated.content, tags: updated.tags };
   const baseSnapshot = { ...before, nativeSources: [{ sourcePayloadHash: native.source.hash }] };
   const finalSnapshot = { ...after, nativeSources: [{ sourcePayloadHash: native.resultHash }] };
-  if (new TextEncoder().encode(JSON.stringify({ baseSnapshot, finalSnapshot })).byteLength > 850_000)
+  if (new TextEncoder().encode(JSON.stringify({ baseSnapshot, finalSnapshot })).byteLength > 850_000 ||
+      !fitsConvexNesting({ baseSnapshot, finalSnapshot }))
     throw new Error("AI_NATIVE_SNAPSHOT_REQUIRED");
   let groupId = "changeGroupId" in appended ? appended.changeGroupId : undefined;
   if (groupId) {

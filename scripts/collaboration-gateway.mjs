@@ -1258,17 +1258,17 @@ const server = new Server({
     if (!["spectra.durable_confirm", "spectra.recovery_request", "spectra.recovery_current", "spectra.canonical_refresh"].includes(request?.type) ||
         typeof request.confirmationId !== "string" ||
         !/^[a-zA-Z0-9:-]{1,120}$/.test(request.confirmationId)) return;
-    await reauthorize(connection.context);
-    await acquireDocumentMessage(document, connection.socketId);
-    let barrier;
-    let frontierHash;
     try {
       await reauthorize(connection.context);
-      frontierHash = documentFrontierHash(document);
-      barrier = flushPersistence(document);
-    }
-    finally { releaseDocumentMessage(connection.socketId); }
-    try {
+      await acquireDocumentMessage(document, connection.socketId);
+      let barrier;
+      let frontierHash;
+      try {
+        await reauthorize(connection.context);
+        frontierHash = documentFrontierHash(document);
+        barrier = flushPersistence(document);
+      }
+      finally { releaseDocumentMessage(connection.socketId); }
       await barrier;
       if (request.type === "spectra.recovery_request" || request.type === "spectra.recovery_current" ||
           request.type === "spectra.canonical_refresh") {
@@ -1318,8 +1318,12 @@ const server = new Server({
         updateIds: [],
       });
     } catch (error) {
-      rejectPeerUpdate(connection, collaborationFailureMessage(error));
-      throw error;
+      // Hocuspocus dispatches stateless frames without awaiting them, so a
+      // rejection here becomes an unhandled rejection that exits the whole
+      // gateway and drops every room. This peer hears the failure instead.
+      const reason = collaborationFailureMessage(error);
+      process.stderr.write(`[stateless] ${reason}\n`);
+      rejectPeerUpdate(connection, reason);
     }
   },
 

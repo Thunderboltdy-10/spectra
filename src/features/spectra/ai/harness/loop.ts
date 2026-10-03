@@ -10,6 +10,7 @@ import {
   type InputAnswer,
   type ModelTurn,
   type PendingInput,
+  type PermissionCategory,
   type ProviderToolSpec,
   type TodoItem,
   type ToolEffect,
@@ -125,7 +126,8 @@ export type LoopDeps = {
   systemPrompt: string;
   tools: readonly AnyHarnessTool[];
   callModel: ModelCaller;
-  policy: (tool: AnyHarnessTool, args: Record<string, unknown>, effect: ToolEffect) => PermissionDecision;
+  /** Reads only the effect and its category; the user's choices are bound in. */
+  policy: (effect: ToolEffect, category: PermissionCategory | undefined) => PermissionDecision;
   runId: string;
   signal: AbortSignal;
   budgets?: LoopBudgets;
@@ -210,6 +212,7 @@ type Prepared = {
   args?: Record<string, unknown>;
   effect: ToolEffect;
   label: string;
+  category?: PermissionCategory;
   error?: string;
   targets: string[];
 };
@@ -269,11 +272,27 @@ function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Pre
   } catch {
     targets = [];
   }
-  return { call, tool, args, effect, label: safeLabel(tool, args), targets };
+  let category: PermissionCategory | undefined;
+  try {
+    category = tool.category?.(args);
+  } catch {
+    category = undefined;
+  }
+  return { call, tool, args, effect, category, label: safeLabel(tool, args), targets };
 }
 
 function fallbackLabel(name: string) {
   return name.replace(/_/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
+function safeQuestion(prepared: Prepared) {
+  try {
+    const question = prepared.tool?.question?.(prepared.args ?? {})?.trim();
+    if (question) return question;
+  } catch {
+    // Fall through to the label.
+  }
+  return `Allow Spectra to continue: ${prepared.label.replace(/^\w/, (letter) => letter.toLowerCase())}?`;
 }
 
 function safeLabel(tool: AnyHarnessTool, args: Record<string, unknown>) {
@@ -358,7 +377,12 @@ export async function runHarnessLoop(
     hooks.onToolEnd?.({ ...step, outcome, durationMs: now() - startedAt });
   };
 
-  const executeOne = async (prepared: Prepared): Promise<ToolOutcome> => {
+  const asksFirst = (prepared: Prepared) =>
+    Boolean(prepared.tool && prepared.args && !prepared.error) &&
+    (prepared.effect === "irreversible" || prepared.effect === "settings") &&
+    deps.policy(prepared.effect, prepared.category) === "ask";
+
+  const executeOne = async (prepared: Prepared, approved = false): Promise<ToolOutcome> => {
     const startedAt = now();
     const step: ToolStepInfo = {
       call: prepared.call,
@@ -375,11 +399,26 @@ export async function runHarnessLoop(
       outcome = { ok: false, content: STOPPED_RESULT };
     } else {
       try {
-        outcome = await prepared.tool.execute(prepared.args, {
-          signal: deps.signal,
-          runId: deps.runId,
-          toolCallId: prepared.call.id,
-        });
+        const run = (granted: boolean) =>
+          prepared.tool!.execute(prepared.args!, {
+            signal: deps.signal,
+            runId: deps.runId,
+            toolCallId: prepared.call.id,
+            approved: granted,
+          });
+        outcome = await run(approved);
+        // A tool can discover mid-call that its effect needs approval (a
+        // Bridge move that touches desktop files). The user's stored choices
+        // apply exactly as they do to declared effects.
+        if (outcome.pause?.kind === "approval") {
+          if (approved)
+            outcome = {
+              ok: false,
+              content: `${prepared.tool.name} asked for approval again after it was given. Nothing more was done for this step.`,
+            };
+          else if (deps.policy("irreversible", outcome.pause.category) === "allow")
+            outcome = await run(true);
+        }
       } catch (error) {
         outcome = isAbort(error, deps.signal)
           ? { ok: false, content: STOPPED_RESULT }
@@ -395,6 +434,9 @@ export async function runHarnessLoop(
     }
     return outcome;
   };
+
+  /** Pauses a call already returned this segment, so it is not run twice. */
+  const knownPauses = new Map<string, NonNullable<ToolOutcome["pause"]>>();
 
   const toolMessage = (call: HarnessToolCall, outcome: ToolOutcome): HarnessMessage => ({
     role: "tool",
@@ -425,7 +467,7 @@ export async function runHarnessLoop(
               effect: prepared.effect,
             });
           outcome = pendingAnswer.allowed
-            ? await executeOne(prepared)
+            ? await executeOne(prepared, true)
             : {
                 ok: false,
                 content: `The user did not allow this (${prepared.label}). Do not try it again in this run. Continue with anything else that is left, then tell the user what was not done.`,
@@ -451,24 +493,20 @@ export async function runHarnessLoop(
         continue;
       }
       // A fresh deferred call: ask for approval, or run it to get its question.
-      if (
-        prepared.tool &&
-        prepared.args &&
-        !prepared.error &&
-        (prepared.effect === "irreversible" || prepared.effect === "settings") &&
-        deps.policy(prepared.tool, prepared.args, prepared.effect) === "ask"
-      ) {
+      if (asksFirst(prepared)) {
         const pending: PendingInput = {
           kind: "approval",
           toolCallId: call.id,
           toolName: call.name,
-          question: prepared.tool.question?.(prepared.args) ?? `${prepared.label}?`,
-          category: prepared.tool.category?.(prepared.args),
+          question: safeQuestion(prepared),
+          category: prepared.category,
         };
         state.pending = pending;
         return pending;
       }
-      const outcome = await executeOne(prepared);
+      const known = knownPauses.get(call.id);
+      knownPauses.delete(call.id);
+      const outcome = known ? { ok: true, content: "", pause: known } : await executeOne(prepared);
       if (outcome.pause) {
         const pending: PendingInput = {
           ...outcome.pause,
@@ -491,11 +529,7 @@ export async function runHarnessLoop(
     const chains = new Map<string, Promise<void>>();
     const tasks: Promise<void>[] = [];
     for (const item of prepared) {
-      const asks =
-        Boolean(item.tool && item.args && !item.error) &&
-        (item.effect === "irreversible" || item.effect === "settings") &&
-        deps.policy(item.tool!, item.args!, item.effect) === "ask";
-      if (asks) {
+      if (asksFirst(item)) {
         deferred.add(item.call.id);
         continue;
       }
@@ -505,7 +539,10 @@ export async function runHarnessLoop(
       });
       const task = Promise.all(waits).then(async () => {
         const outcome = await executeOne(item);
-        if (outcome.pause) deferred.add(item.call.id);
+        if (outcome.pause) {
+          deferred.add(item.call.id);
+          knownPauses.set(item.call.id, outcome.pause);
+        }
         else outcomes.set(item.call.id, outcome);
       });
       const settled = task.then(

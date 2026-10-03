@@ -12,16 +12,11 @@ export type ToolEffect = "read" | "write" | "irreversible" | "settings";
  * Categories the user can "Always allow". Only effects that ask (irreversible
  * and settings) carry a category.
  */
-export const PERMISSION_CATEGORIES = [
-  "permanent_delete",
-  "external_send",
-  "managebac",
-  "bridge_files",
-  "settings",
-  "sharing",
-  "connections",
-] as const;
-export type PermissionCategory = (typeof PERMISSION_CATEGORIES)[number];
+export {
+  PERMISSION_CATEGORIES,
+  type PermissionCategory,
+} from "@/features/spectra/settings/schema/ai-permissions";
+import type { PermissionCategory } from "@/features/spectra/settings/schema/ai-permissions";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -101,6 +96,8 @@ export type ToolContext = {
   signal: AbortSignal;
   runId: string;
   toolCallId: string;
+  /** The user (or their stored choice) approved this call. */
+  approved?: boolean;
 };
 
 export class ToolInputError extends Error {

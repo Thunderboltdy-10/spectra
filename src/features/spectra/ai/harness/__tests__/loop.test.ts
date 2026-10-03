@@ -522,4 +522,73 @@ describe("runHarnessLoop", () => {
     expect(model.seen[0]).toHaveLength(3);
     expect(outcome.status).toBe("completed");
   });
+
+  it("lets a tool ask for approval mid-call and honours the stored choice", async () => {
+    const runs: boolean[] = [];
+    const move = tool({
+      name: "move_files",
+      effect: "write",
+      execute: async (_args, ctx) => {
+        runs.push(Boolean(ctx.approved));
+        if (!ctx.approved)
+          return {
+            ok: false,
+            content: "",
+            pause: { kind: "approval", question: "Move 3 desktop files?", category: "bridge_files" },
+          };
+        return { ok: true, content: "moved" };
+      },
+    });
+    const script = () =>
+      scripted([
+        { text: "", toolCalls: [call("m", "move_files")] },
+        { text: "Moved.", toolCalls: [] },
+      ]);
+    const shared = script();
+    const paused = await runHarnessLoop(
+      emptyLoopState([user("tidy")]),
+      deps({ callModel: shared.caller, tools: [move] }),
+    );
+    expect(paused.status).toBe("paused");
+    expect(runs).toEqual([false]);
+    const resumed = await runHarnessLoop(
+      paused.state,
+      deps({ callModel: shared.caller, tools: [move] }),
+      { kind: "approval", allowed: true },
+    );
+    expect(resumed.status).toBe("completed");
+    expect(runs).toEqual([false, true]);
+
+    runs.length = 0;
+    const allowed = await runHarnessLoop(
+      emptyLoopState([user("tidy")]),
+      deps({
+        callModel: script().caller,
+        tools: [move],
+        policy: (_effect, category) => (category === "bridge_files" ? "allow" : "ask"),
+      }),
+    );
+    expect(allowed.status).toBe("completed");
+    expect(runs).toEqual([false, true]);
+  });
+
+  it("runs ask_user once before pausing", async () => {
+    let executions = 0;
+    const ask = tool({
+      name: "ask_user",
+      execute: async () => {
+        executions += 1;
+        return { ok: true, content: "", pause: { kind: "question", question: "Which?" } };
+      },
+    });
+    const outcome = await runHarnessLoop(
+      emptyLoopState([user("go")]),
+      deps({
+        callModel: scripted([{ text: "", toolCalls: [call("q", "ask_user")] }]).caller,
+        tools: [ask],
+      }),
+    );
+    expect(outcome.status).toBe("paused");
+    expect(executions).toBe(1);
+  });
 });

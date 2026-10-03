@@ -174,6 +174,12 @@ function findSection(markdown: string, heading: string, label: string): Section 
   throw new AuthoringError(`${label}: "${heading}" matches ${matches.length} headings. Use the full heading text.`);
 }
 
+/** The Markdown of one section (its heading and everything under it). */
+export function documentSectionMarkdown(markdown: string, heading: string) {
+  const section = findSection(markdown, heading, "read");
+  return markdown.slice(section.start, section.end).trim();
+}
+
 function insertionPoint(
   markdown: string,
   target: { after?: string; before?: string; position?: "start" | "end" },

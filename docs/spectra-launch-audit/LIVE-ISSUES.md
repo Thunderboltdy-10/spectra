@@ -343,7 +343,7 @@ The desktop verification pass has coverage rows for all 22 P2/P3 reports and the
 **Verification** (verifier): VERIFIED on commit `d551198a`, 2026-09-30. Restarted local instance 4 on the committed code, opened `/workspace` in Profile A with no school membership, and reloaded it. The invitation gate remained visible; the page had 0 console errors. Both `runTabs` requests (default and `surface=workspace`) returned HTTP 200. Opening `/settings` before membership rendered the Conversations settings with 0 console errors. Screenshot: .spectra-local/live-verification/LV-002-verified-d551198a.png.
 ### LV-003 · Expired invitation request returns HTTP 404 errors
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/join?token=<expired>` / signed-in user
 - **Report script:** P2-EXPERIENCE · step 2
@@ -367,6 +367,13 @@ The desktop verification pass has coverage rows for all 22 P2/P3 reports and the
 - Test: existing join-page, invitation-session and production-redaction/worded-error suites passed **13/13**. A temporary diagnostic wrapping the real Join page in `StrictMode` also passed an assertion of exactly two preview requests while retaining the final plain error and clearing the cookie; the diagnostic edits were restored, leaving application/test source unchanged. Installed Next enables App Router Strict Mode by default, and this checkout does not override it. Earlier P3-CONVEX-ERRORS explicitly records invalid invitations mapping to 404.
 - Decision options: **Keep the current 404/410 contract** — unavailable invitations remain final request failures with truthful statuses, and expected browser network-error entries are accepted by verification/monitoring. **Return a normal preview result with an explicit unavailable outcome** — expected invalid/expired previews can answer 200 and avoid those browser network errors; the administration preview response, client outcome handling and contract tests must change together, while authentication/transport failures retain their error statuses. Neither option is selected by the fixer.
 - Re-check nearby: after a decision, verify unknown, revoked and genuinely expired tokens, valid previews, cookie clearing, no final-decision retry, and transient-failure retry. If duplicate requests occur in a production-mode build, record that separately; the exact two-request pattern has been reproduced in development Strict Mode.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `f97645c7`.
+- Root cause: Decision applied: `previewInvitation` threw INVITATION_INVALID/EXPIRED/SCHOOL_UNAVAILABLE, which the route mapped to 404/410, so the join page's designed unavailable state came with failed requests. The query now returns `{ outcome: "unavailable", reason, message }` for an unknown, revoked or expired link or an inactive school; authentication still throws and `acceptInvitation` keeps its statuses. The join page clears the cookie and shows the message with no Retry.
+- Test: `convex/memberships-accept.test.ts` (unknown, revoked, expired outcomes; signed-out still throws) and `join-page.test.tsx` (200 with an outcome, no retry; transient 500 still retries) fail on the prior code.
+- Live recheck: `/join?token=expired-live-verification-sentinel`: alert "This invitation is unavailable.", no Retry, no join cookie, both administration POSTs 200, 0 console errors.
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-004 · Unexpired initial school administrator invite is unavailable
 
@@ -615,7 +622,7 @@ The desktop verification pass has coverage rows for all 22 P2/P3 reports and the
 
 ### LV-012 · Document startup repeatedly logs failed Bridge health requests
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/library` document startup / signed-in school administrator
 - **Report script:** P3-BRIDGE-LENS · step 9, new artifact
@@ -656,6 +663,13 @@ After the LV-012 commit, `npm run local:start:all -- --instance 8 --timeout-seco
 - Change discovery to an explicit user connection/activation workflow instead of probing an unconfigured installed Bridge automatically. This avoids unsolicited health failures on normal editor opens but gives up automatic attachment/detection and changes Files and devices UX; it requires an agreed product flow.
 
 No Bridge allowlist was broadened, no existing process was stopped, and no frontend retry/error suppression was added to conceal the reported condition.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `f77efa73`.
+- Root cause: Decision applied: every Bridge surface probed `127.0.0.1:47615/v1/health` on mount, on focus and every 15 s, so an installed Bridge not configured for this origin produced a CORS failure per probe on devices that never asked for Bridge. Discovery now starts only after this device has paired once (per-device flag; earlier sessions migrate), backs off 15 s to 5 min while unreachable, mounted surfaces share one probe, and Files and devices offers "Connect Bridge". No allowlist changed.
+- Test: `bridge-discovery-gate.test.tsx` (no probe when never connected, backoff, shared probe, migration) fails on the prior code.
+- Live recheck: Never-paired Profile A browser: `/library`, the DOCX studio and Files and devices made 0 `/v1/health` requests with 0 console errors; Files and devices shows "Connect Bridge" (`.spectra-local/live-verification/LV-012-connect-bridge-f77efa73.png`). Pairing was not attempted.
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-013 · ManageBac overview claims a completed partial sync before the first sync
 
@@ -787,7 +801,7 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ### LV-017 · Plan omits one task submitted during a concurrent add
 
-- **Status:** NEEDS-INFO
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** Plan editor / signed-in school administrator using two browser sessions
 - **Report script:** P3-EDITORS · Needs live verification · structured lists (E1), step 3
@@ -817,6 +831,13 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 **Verification** (verifier): Local live behavior VERIFIED on app commit `57dbcb87` (`57dbcb87093133c547c320c9c111335d20ff25ed`), 2026-09-30. Restarted only the recorded managed instance-8 Convex/gateway/Next stack; the pre-existing Bridge remained running. Created a fresh Plan with one starter task and opened it in both Profile A sessions. After A and B submitted distinct task titles, both sessions showed three tasks including both additions. Reloaded both sessions; both titles and all three tasks remained. The ledger status remains NEEDS-INFO for the separate package check. Evidence: `.spectra-local/live-verification/LV-017-verified-57dbcb87-plan-A-redacted.png`; `.spectra-local/live-verification/LV-017-verified-57dbcb87-plan-B-redacted.png`.
 
 **Packaging constraint / question for user:** The code fix is committed and locally tested, but the hosted gateway import-graph test proves the existing Docker package omits its two required shared runtime files. The user instruction says “Do not change deployment configuration”; a narrow exception was requested to add only shared/planner-source.mjs and shared/yjs-collections.mjs to deploy/collaboration-gateway/Dockerfile's existing COPY list. No Dockerfile edit or deployment has been performed; LV-017 remains NEEDS-INFO until that exception is resolved. Local verification may proceed on the owned stack, but this is not a package-ready FIXED claim.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `51d67062`.
+- Root cause: The hosted gateway Dockerfile copies an explicit file list that predates two runtime imports, `shared/planner-source.mjs` and `shared/yjs-collections.mjs`, so the image would fail with ERR_MODULE_NOT_FOUND and the package import-graph test failed on every full run. The two files are added to the existing COPY list (the later LV-062 commit also adds `shared/convex-nesting.mjs`); nothing else in deployment changed.
+- Test: The gateway package import-graph test, which failed before, passes.
+- Live recheck: No Docker build was run locally (packaging only); the local gateway runs these modules and stayed up through the session. The Plan behaviour itself was already VERIFIED at `57dbcb87`.
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-018 · Quiz prompt loses a concurrent text edit
 
@@ -1277,7 +1298,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 ### LV-028 · Command bar keyboard shortcut focuses chat search
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** Low
 - **Surface / role:** Spectra command bar shortcut / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 5
@@ -1299,6 +1320,13 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 - Root cause: This observation matches an intentional current mapping rather than a missing key listener. `KeyboardShortcutsRegistrar` routes Mod+Shift+F to the AppShell sidebar-search event, and `SHORTCUTS` labels that chord “Focus sidebar search”; `UniversalKBar` owns Mod+K. The older report script contradicts these two implemented contracts.
 - Reproduction: Mounted the real registrar and command bar together in jsdom with both Ctrl and Meta. Both cases confirm Shift+F invokes sidebar search with no dialog, then K opens the command bar without invoking search again. All **2/2** diagnostic tests pass; log `.spectra-local/LV028-probe.log`. No production code was changed and no shortcut was selected on the user's behalf.
 - Decision requested: (1) Keep Mod+K for the command bar and Mod+Shift+F for sidebar search, correct the audit script and include Mod+K in help; existing users retain both mappings. (2) Add Mod+Shift+F as a command-bar alias; sidebar search loses that shortcut unless another is assigned, and help/registrar/command ownership must be updated together. A text question is pending with the user; move on until answered.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `5d603a77`.
+- Root cause: Decision applied: Mod+K stays the command bar and Mod+Shift+F sidebar search. The audit script expected Mod+Shift+F to open the command bar, and the shortcut help did not list Mod+K. The help now lists "Open command bar" (Mod+K) and the P3-WORKSPACE-FLOWS step is corrected.
+- Test: `src/components/__tests__/keyboard-shortcuts-help.test.tsx`.
+- Live recheck: "?" shows both rows; Ctrl+K opens the "Spectra command bar" dialog.
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-029 · Calendar page stays in an error state
 
@@ -2759,7 +2787,7 @@ Evidence: `.spectra-local/live-verification/LV043-postfix-repeated-word-readback
 
 ### LV-046 · PPTX remains marked “Waiting for Office” after the native write lands
 
-- **Status:** NEEDS-INFO
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Bridge / Presentation PPTX / Library sync status / signed-in Profile A school administrator
 - **Report script:** P3-BRIDGE-LENS · step 10, B1 (same-file Office lock and write status)
@@ -2784,6 +2812,14 @@ Evidence: `.spectra-local/live-verification/LV043-postfix-repeated-word-readback
 - Checks: **81/81 tests across four files pass** (sync presentation, replica truth, organizer interactions and real Convex Bridge acknowledgement/lock lifecycle), including rejection of stale waiting acknowledgements after verification. Read-only probe verified loopback instance 8 identity/ports before reading the retained disposable artifact; no live/native/canonical/production state was changed. Logs: `.spectra-local/LV046-status-assessment.log`, `.spectra-local/LV046-canonical-read.log`.
 - Status is NEEDS-INFO until label location or correlated stale-state evidence distinguishes a missed Library refresh, studio subscription, or delayed device acknowledgement. No runtime fix, faster polling, speculative label clearing, deployment or codegen change has been made. The verifier received the question and continues other coverage. Only the verifier sets VERIFIED.
 **Verifier clarification (2026-10-01):** The verifier independently inspected the named waiting-after-close screenshot and confirmed that it contains the edited PPTX body and a separate failed-chat dock card, but no visible Waiting for Office label. The written observation does not distinguish studio header, Library row or replica disclosure; a later natural recurrence will be captured with the exact label location and UTC time before reload. No product state was changed for this clarification. LV-046 remains NEEDS-INFO; assessment commit `526ab7a6` and its 81/81 checks remain applicable, with no runtime/test changes or additional full-suite run.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `3fd448d9`.
+- Root cause: The Library reads `presentationsForAccount` once and parks the subscription until focus, visibility or the 180 s idle refresh. A snapshot taken while PowerPoint held the deck kept "Waiting for Office" on the Library row after the device acknowledged the write, which matches the one 50 s cycle and the cycles that cleared on a later refresh. The loader now parks only a settled answer and stays subscribed while any row has a pending write, a pending replica or an Office lock; the studio already used the live `replicas.forWork` query.
+- Test: `library-replica-loader.test.tsx` (stays live while locked, parks once settled) fails with the old parking rule.
+- Live recheck: Library renders with 0 console errors. The native cycle needs a paired Bridge, which this lane may not do. To check: with Native write & sync on a disposable PPTX, open it in PowerPoint, edit in Spectra with the Library row visible, close PowerPoint, and watch the Library row (not only the studio header): "Waiting for Office" should clear within seconds of the write landing, with no focus change or reload.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-047 · Sidebar chat-thread titles look oversized on desktop
 
 - **Status:** VERIFIED
@@ -3576,7 +3612,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Fixer reproduction and question:** The real AppShell explicitly renders an empty aria-busy container until AccountStorageBoundary has prepared the authenticated account scope. That path explains the reported blank application routes if Clerk or the backend identity remains loading; the independently missing SignIn controls suggest inspecting Clerk loading first, but do not prove its failure boundary. Providers and the restart supervisor preserve their existing inputs; HTTP health only establishes web readiness. Please record sanitized Clerk script/network status and timing or Clerk loaded-state facts on the existing blank page, and whether it remains blank after warm-up. No prompt, new session, instance reset or configuration change is needed. This live-only state cannot yet be reproduced conclusively from code; no authentication bypass or guessed retry patch was made. Reports reviewed: P3-UI-SYSTEM and P2-OPS-PERFORMANCE (shell/error and local-readiness boundaries).
 
-- **Status:** NEEDS-INFO
+- **Status:** FIXED
 - **Severity:** Blocker
 - **Surface / role:** Application shell, /chat, /library, /workspace and /sign-in / saved Profile A
 - **Report script:** Free exploration · first-week app access and workspace; post-restart live reliability check
@@ -3595,6 +3631,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** .spectra-local/live-verification/post-web-restart-chat-empty-shell-before-reload-20261002.png; .spectra-local/live-verification/post-web-restart-chat-empty-shell-after-reload-20261002.png; .spectra-local/live-verification/post-web-restart-workspace-empty-shell-20261002.png; .spectra-local/live-verification/post-web-restart-sign-in-no-form-20261002.png; .spectra-local/live-verification/LV059-post-web-restart-blank-routes-redacted.txt.
 **Verifier warm-up follow-up (2026-10-02):** Later in the same Profile A session, /chat and /library rendered their content, and /workspace?home=1 rendered its workspace content after a 5-second wait. window.Clerk.loaded was true; a sanitized Clerk browser-script resource entry returned HTTP 200 (48 ms duration). The browser remained online and Playwright reported 0 console errors with 1 Clerk development-key warning. The /sign-in page was not retested after warm-up. Evidence: .spectra-local/live-verification/LV059-after-warm-chat-20261002.png; .spectra-local/live-verification/LV059-workspace-after-warm-20261002.png.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `024b5cde`.
+- Root cause: The app shell gated all content on Clerk and the account record with an empty `aria-busy` div, so when the sign-in service stalled or failed the page showed only "Skip to content" with no message or retry; blocking the Clerk script reproduces it exactly, while plain web restarts rendered normally. The wait is now `AccountConnectionState`: quiet for 1.5 s, then "connecting", an immediate error with Try again on failure, and a stalled-load message with Try again after 15 s; sign-in and sign-up show the same placeholder.
+- Test: `src/components/__tests__/account-connection-state.test.tsx`.
+- Live recheck: After full instance-8 restarts (including 2026-10-03), `/library`, `/artifacts/<id>`, `/settings?section=devices` and `/join` rendered with 0 console errors.
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### Fixer closeout · LV-022 artifact-result disclosure · 2026-10-02 (Europe/Madrid)
 
@@ -3619,7 +3662,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-060 · Scheduled Calendar block cannot be opened when an official deadline occupies the same slot
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Calendar week grid, scheduled plan blocks and ManageBac official deadlines / signed-in Profile A school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 4, scheduled plan block details; step 3, official-event controls
@@ -3639,9 +3682,16 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-official-deadline-details-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-overlap-fda81f87-20261002-redacted.txt`.
 
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `c57ef0e8`.
+- Root cause: Every timed block filled its whole day column (`inset-x-1`), so when an official deadline shared a slot with a scheduled block the later-painted one covered the other and it could not be clicked. Overlapping blocks now get side-by-side lanes (`calendar/domain/timed-lanes.ts`), with each group sharing one lane count.
+- Test: `calendar-timed-lanes.test.ts` (4 tests) and the component test "keeps every block that shares a time slot clickable".
+- Live recheck: At 1280×720 the 16:00 official deadline and "Maths Unit 7 Test" sit side by side and each opens. Out of scope, noted: the opened notes render raw `<p>` HTML.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-061 · DOCX open emits one failed lens request
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Library Work studio and Bridge-linked DOCX open / signed-in Profile A school administrator
 - **Report script:** P3-BRIDGE-LENS · Word fixtures · “Open each through the Bridge in Spectra.”
@@ -3660,9 +3710,16 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** `.spectra-local/live-verification/P3-BRIDGE-docx-open-400-redacted.txt`; `.spectra-local/live-verification/P3-BRIDGE-docx-syncing-20261002.png`; `.spectra-local/live-verification/P3-BRIDGE-docx-office-open-status-20261002.png`.
 
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `cefef83d`.
+- Root cause: The one Lens 400 sat next to Convex "Document is too nested (17 > 16)" errors: a small but deep Word projection was sent inline to the native reconciliation commit, whose version write then failed. `storeCommitContent` now spills content to a durable reference when it is too large or too deep to embed.
+- Test: `native-reconciliation-server.test.ts` "sends a small but deeply nested projection by reference" (failed before).
+- Live recheck: Reopening DOCX `z97btek17vgv6dw3708grawynd8fgfeh` on restarted instance 8: both `/api/spectra/lenses/docx` requests returned 200, 0 console errors, no 400 in the stack log. A first open of a fresh Bridge-linked DOCX was not rechecked because this browser is not paired to Bridge.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-062 · Document editor repeatedly reports realtime connection failure while browser is online
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** New Document Work studio, local draft state and realtime collaboration / signed-in Profile A school administrator
 - **Report script:** P3-EDITORS · save/reload and collaboration persistence; P3-SYNC-DURABILITY · browser reconnect state
@@ -3680,6 +3737,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Actual:** `navigator.onLine` was `true`. The first tab logged 27 identical errors over 17 minutes 9 seconds: `WebSocket connection to 'ws://localhost:3000/_spectra/realtime' failed: Connection closed before receiving a handshake response`. The fresh tab showed `Connection interrupted. Your draft stays on this device.` at the first settled read, and its console logged 19 more identical errors over 11 minutes 39 seconds. The same error appeared once on the Bridge-linked DOCX route after 17 minutes 28 seconds. That route displayed “Office still has this file open” because the disposable copy remained open in Word. The synthetic text appeared in both tabs in the same browser profile. At a later read the interrupted status was absent while console errors continued. Because both tabs share one saved browser profile, this check does not establish that the text reached the server or an independent peer.
 
 **Evidence:** `.spectra-local/live-verification/P3-EDITORS-realtime-errors-fda81f87-redacted.txt`; `.spectra-local/live-verification/P3-EDITORS-realtime-draft-in-second-tab-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-unsaved-before-ai-fda81f87.png`; `.spectra-local/live-verification/P3-BRIDGE-docx-office-open-status-20261002.png`.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `fdcfcf4c`.
+- Root cause: The gateway process exited about every 38 s. A Bridge-linked DOCX sits exactly at Convex's 16-level nesting limit, every durable append embedded it one level deeper in a changeGroups snapshot, Convex rejected the row, and the failure reached `onStateless`, which Hocuspocus does not await, so the unhandled rejection killed every room; clients reconnected and the loop repeated. `onStateless` now reports the failure to the one peer instead of rejecting, `shared/convex-nesting.mjs` measures nesting the way Convex does, and too-deep snapshots and content travel by reference or as JSON text, like oversized ones.
+- Test: `scripts/collaboration-deep-content.test.mjs` and the persistence-window regression fail on the prior code and pass.
+- Live recheck: On restarted instance 8 the gateway kept the same PID with the deep DOCX open for over a minute, the stack log had 0 "too nested" lines, and the page had 0 console errors (2026-10-03). The fix also touched `convex/nativeAiCommit.ts` (worded `*_SNAPSHOT_REQUIRED` error only).
+- Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-063 · Context summary returns text from an unrelated World War I request
 
@@ -3870,7 +3934,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-066 · Code New file submission closes without creating a file
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Code Work studio file actions in side panel and full surface / signed-in Profile A school administrator
 - **Report script:** P3-EDITORS-2 · step 12
@@ -3889,9 +3953,16 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-enter-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-create-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-full-after-newfile-enter-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png.
 
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `eae0d851`.
+- Root cause: Code file text is bound to Y.Text, and a collaborative save only rewrote title, summary and tags in the Yjs metadata, so a new, renamed or removed file never reached the shared document and reload restored the old structure. A metadata save now applies the Code project structure (files added, removed, renamed, reordered, settings) without replaying any existing file's text; Format now writes through the shared Y.Text too.
+- Test: `native-yjs-models.test.ts` "carries Code file creation and rename through a metadata-only save without replaying file text" (failed before).
+- Live recheck: Fixture "Spectra Code New File Check 20261002": New file `src/r1-check.js` was created and persisted after reload; 0 console errors.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-067 · Code Rename file submission leaves the original path
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Code Work studio file actions in side panel / signed-in Profile A school administrator
 - **Report script:** P3-EDITORS-2 · step 12
@@ -3910,9 +3981,16 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Evidence:** .spectra-local/live-verification/P3-EDITORS-2-code-file-actions-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-EDITORS-2-code-file-list-reload-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-code-newfile-after-create-fda81f87-20261002.png.
 
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `eae0d851`.
+- Root cause: Same root cause as LV-066: the rename lived only in React state, because the collaborative save wrote metadata only and never the project structure.
+- Test: Same regression as LV-066.
+- Live recheck: Renamed `src/r1-check.js` to `src/r1-renamed.js`; only the new path remained after reload; 0 console errors.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-068 · Quiz side-panel workbar has no Add question action
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Quiz Work studio side panel / signed-in Profile A school administrator
 - **Report script:** P3-EDITORS-2 · step 12
@@ -3930,9 +4008,17 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Actual:** In the side panel, no Add question control was visible in the Quiz work surface; the More quiz menu contained only Import questions. In the full surface, two Add question buttons were visible. Clicking one increased the question selector from three to four entries; Undo returned it to the original three. The Plan side panel separately displayed its Add task control.
 
 **Evidence:** .spectra-local/live-verification/P3-EDITORS-2-quiz-sidepanel-more-menu-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-temporary-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-quiz-add-question-undo-fda81f87-20261002.png; .spectra-local/live-verification/P3-EDITORS-2-add-actions-and-reminder-fda81f87-20261002-redacted.txt.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `656e1676`.
+- Root cause: In the side panel the question rail is hidden and the workbar had no Add question binding, so there was no way to add a question there. When the builder runs without the rail, the workbar now offers an essential "Add question" binding with a capability entry; the full surface is unchanged.
+- Test: `quiz-studio-panel-add.test.tsx` (failed before).
+- Live recheck: LIVE-QA Quiz in the side panel: Add question went from 3 to 4 questions, Undo back to 3; 0 console errors.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-069 · Stale Calendar conflict recovery notice is inconsistent
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** /calendar personal-event drag conflict across two saved Profile A tabs / signed-in school administrator
 - **Report script:** P3-WORKSPACE-FLOWS · step 1
@@ -3950,6 +4036,14 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Actual:** In 4 of 4 stale drags, the browser console recorded “Failed to load resource: the server responded with a status of 409 (Conflict)” while navigator.onLine was true. In 3 of 4, a notice said “The block changed elsewhere, so Calendar restored its latest position.” and the event returned to tab A’s newer position. In 1 of 4, no matching notice appeared on the immediate or later text reads; tab B first retained its older 18:00–18:30 position, then showed tab A’s 18:45–19:15 position without visible copy. The browser remained at /calendar; no route reload was observed. No event loss was observed.
 
 **Evidence:** .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-fda81f87-20261002-redacted.txt; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-redacted-20261002.png; .spectra-local/live-verification/P3-WORKSPACE-FLOWS-calendar-stale-conflict-toast-redacted-20261002.png.
+
+**Fix** (R1 reliability fixer, 2026-10-03)
+- Commit: `fdccb829`.
+- Root cause: On a stale move the notice was raised only after the reload finished, from two code paths with different copy, so it appeared late and inconsistently. Both paths now announce once, before the reload, through one toast id (`calendar-gesture-conflict`) and one sentence.
+- Test: Component test with a held reload GET: the toast must already be shown, with that id.
+- Live recheck: Personal event "Spectra R1 Stale Check 20261003" dragged stale across two tabs: 2 of 2 conflicts showed the notice 180–300 ms after the 409, before the reload, then the latest position.
+- Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-039 additional verifier occurrence · eight-card flashcard create after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**

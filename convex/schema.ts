@@ -4660,6 +4660,26 @@ export default defineSchema({
     .index("by_run_sequence", ["runId", "sequence"])
     .index("by_run_created", ["runId", "createdAt"]),
 
+  /*
+   * The AI harness checkpoint for one run: the loop state at the last tool
+   * boundary, the operation recorded for each tool call that writes, the
+   * open question or approval, the user's answer, and messages the user sent
+   * while the run worked. One row per run (spectraHarness.ts).
+   */
+  spectraHarnessStates: defineTable({
+    runId: v.id("spectraAiRuns"),
+    ownerAccountId: v.id("accounts"),
+    executionId: v.string(),
+    state: v.any(),
+    toolOperations: v.optional(v.any()),
+    pending: v.optional(v.any()),
+    answer: v.optional(v.any()),
+    steers: v.optional(
+      v.array(v.object({ text: v.string(), createdAt: v.number() })),
+    ),
+    updatedAt: v.number(),
+  }).index("by_run", ["runId"]),
+
   spectraRunTabs: defineTable({
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),

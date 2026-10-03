@@ -498,6 +498,25 @@ export async function runHarnessLoop(
       }
       // A fresh deferred call: ask for approval, or run it to get its question.
       if (asksFirst(prepared)) {
+        if (prepared.tool?.stage && !(open && open.kind === "approval")) {
+          try {
+            await prepared.tool.stage(prepared.args, {
+              signal: deps.signal,
+              runId: deps.runId,
+              toolCallId: call.id,
+            });
+          } catch (error) {
+            const startedAt = now();
+            hooks.onToolStart?.({ call, tool: prepared.tool, args: prepared.args, label: prepared.label, effect: prepared.effect });
+            const outcome: ToolOutcome = isAbort(error, deps.signal)
+              ? { ok: false, content: STOPPED_RESULT }
+              : { ok: false, content: `${prepared.tool.name} failed: ${error instanceof Error ? error.message : String(error)}` };
+            finishStep(prepared, outcome, startedAt);
+            state.messages.push(toolMessage(call, outcome));
+            state.pendingCalls.shift();
+            continue;
+          }
+        }
         const pending: PendingInput = {
           kind: "approval",
           toolCallId: call.id,

@@ -128,6 +128,12 @@ export type HarnessTool<A = Record<string, unknown>> = {
   /** Validate and normalise raw JSON arguments. Throw ToolInputError. */
   parse?: (raw: Record<string, unknown>) => A;
   execute: (args: A, ctx: ToolContext) => Promise<ToolOutcome>;
+  /**
+   * Record what the call will do before the run pauses to ask, so the
+   * approval binds to that exact change. Throwing turns the call into an
+   * error for the model instead of a question.
+   */
+  stage?: (args: A, ctx: ToolContext) => Promise<void>;
   /** Turns a user's answer into the tool result (ask_user). */
   answer?: (args: A, answer: InputAnswer) => ToolOutcome;
 };

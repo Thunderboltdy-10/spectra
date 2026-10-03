@@ -410,7 +410,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         executionId,
         status: pending.kind === "approval" ? "awaiting_confirmation" : "awaiting_resolution",
         outcome: "awaiting_input",
-        ...(pending.kind === "approval" ? { approvalReasons: [pending.question.slice(0, 400)] } : {}),
+        // "clarify" lets the Dock take a typed answer; the route sends it to this run.
+        ...(pending.kind === "approval" ? { approvalReasons: [pending.question.slice(0, 400)] } : { decision: "clarify" as const }),
         resultTitle: pending.kind === "approval" ? "Needs your OK" : "Needs your answer",
         resultSummary: pending.question.slice(0, 600),
         resultVariant: "status",

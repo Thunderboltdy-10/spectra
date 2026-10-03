@@ -1430,6 +1430,7 @@ export function useSpectraRun({
         }
         // A steer joins the working run's next turn. Only a steer with new
         // files, or one the run finished before reading, starts a new turn.
+        let notWorking = false;
         if (nextAttachments.length === 0) {
           const version = await resolveDisplayedRunVersion(runId, true);
           const queued = await requestSpectra("/api/spectra/run", {
@@ -1452,7 +1453,9 @@ export function useSpectraRun({
             );
             return true;
           }
-          if (queued.status !== 409)
+          // 409: the run is paused on a question or approval, or finished.
+          if (queued.status === 409) notWorking = true;
+          else
             throw new Error(
               await spectraFailureMessage(queued, {
                 fallback: "Spectra could not take that message just now. Try again.",
@@ -1469,6 +1472,13 @@ export function useSpectraRun({
           throw new Error(
             "This response is not attached to a saved conversation, so it cannot be continued in a new chat. Open the conversation and continue there.",
           );
+        // A run that is not working has nothing to stop: the message goes to
+        // its thread, where it answers an open question or approval (the
+        // server routes it) or starts the next turn.
+        if (notWorking) {
+          queuedSteering.current.delete(runId);
+          return await run(clean, [], { threadId: targetThreadId });
+        }
         // Steering is a stop-then-continue transaction. The tab projection can
         // lag the run detail by a heartbeat, and the old worker can still be
         // unwinding while the stop response reaches the browser. Resolve a

@@ -314,6 +314,83 @@ async function dispatch(input: {
   });
 }
 
+type HarnessAnswer = NonNullable<Body["answer"]>;
+
+/**
+ * Records the answer to a paused run's open question or approval and resumes
+ * it. Feedback given with the answer ("not like that: ...") joins the next turn.
+ */
+async function answerAndResume(input: {
+  actorClerkId: string;
+  runId: string;
+  executionId: string;
+  toolCallId: string;
+  answer: HarnessAnswer;
+  feedback?: string;
+  uiObserver?: unknown;
+  timeZone?: string;
+  /** The reply was typed in the composer: the stream opens like a new run. */
+  asNewTurn?: boolean;
+}) {
+  const { actorClerkId, runId, executionId } = input;
+  let answered: { alreadyAnswered: boolean; label?: string };
+  try {
+    answered = await mutate<unknown & object, typeof answered>("spectraHarness:answer", {
+      actorClerkId,
+      runId,
+      executionId,
+      toolCallId: input.toolCallId,
+      answer: input.answer,
+      ...(input.uiObserver ? { uiObserver: uiObserverSchema.parse(input.uiObserver) } : {}),
+    });
+  } catch (error) {
+    return new Response(publicError(error), { status: 409 });
+  }
+  if (answered.alreadyAnswered) return new Response("This was already answered in another view.", { status: 409 });
+  const feedback = input.feedback?.trim();
+  if (feedback)
+    await mutate("spectraHarness:queueSteer", { actorClerkId, runId, executionId, text: feedback.slice(0, 8_000) }).catch(() => null);
+  const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId, runId });
+  const card = detail.cards[0];
+  if (!card) return new Response("Result card not found", { status: 409 });
+  return dispatch({
+    actorClerkId,
+    runId,
+    resultCardId: card._id,
+    executionId,
+    payload: payloadForRun(detail.run, "resume", input.timeZone),
+    prelude: (emit) => {
+      if (input.asNewTurn) {
+        emit({ type: "run_created", runId, card: streamCard(card) });
+        if (detail.run.threadId) emit({ type: "thread_ready", runId, threadId: detail.run.threadId });
+      } else emit({ type: "result_card", runId, card: streamCard(card) });
+    },
+  });
+}
+
+/**
+ * A thread whose last run is paused on a question or approval. A message typed
+ * there answers it, as in Claude Code, instead of starting a separate run that
+ * would lose the paused work: the text answers a question, and turns down an
+ * approval with the text as what to do instead.
+ */
+async function pausedRunInThread(actorClerkId: string, threadId: string | undefined) {
+  if (!threadId) return null;
+  const active = await query<unknown & object, { run?: { _id: string; executionId?: string; status: string } } | null>(
+    "spectraThreads:getActiveExecution",
+    { actorClerkId, threadId },
+  ).catch(() => null);
+  const run = active?.run;
+  if (!run?.executionId || (run.status !== "awaiting_resolution" && run.status !== "awaiting_confirmation")) return null;
+  const loaded = await query<unknown & object, { executionId?: string; pending?: { toolCallId?: string; kind?: string } | null } | null>(
+    "spectraHarness:load",
+    { actorClerkId, runId: run._id },
+  ).catch(() => null);
+  const pending = loaded?.pending;
+  if (!pending?.toolCallId || loaded?.executionId !== run.executionId) return null;
+  return { runId: run._id, executionId: run.executionId, toolCallId: pending.toolCallId, kind: pending.kind === "approval" ? "approval" : "question" } as const;
+}
+
 export function handleSpectraRunRequest(request: NextRequest) {
   return withSpectraRequestLog({ method: request.method, path: request.nextUrl.pathname }, () => handleSpectraRunRequestInLog(request));
 }
@@ -367,6 +444,32 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       attachments = await prepareRunAttachments(body.attachments);
     } catch (error) {
       return new Response(publicError(error), { status: 400 });
+    }
+    if (attachments.length === 0) {
+      const paused = await pausedRunInThread(actor.clerkId, body.threadId?.trim() || undefined);
+      if (paused) {
+        if (body.threadId)
+          await mutate("spectraThreads:appendMessage", {
+            actorClerkId: actor.clerkId,
+            threadId: body.threadId.trim(),
+            role: "user",
+            content: prompt,
+            runId: paused.runId,
+            executionId: paused.executionId,
+            ...(body.submissionKey?.trim() ? { clientMessageId: body.submissionKey.trim() } : {}),
+            metadata: { answersInput: paused.toolCallId },
+          }).catch(() => null);
+        return answerAndResume({
+          actorClerkId: actor.clerkId,
+          runId: paused.runId,
+          executionId: paused.executionId,
+          toolCallId: paused.toolCallId,
+          answer: paused.kind === "approval" ? { kind: "approval", allowed: false } : { kind: "question", text: prompt },
+          ...(paused.kind === "approval" ? { feedback: prompt } : {}),
+          timeZone: body.timeZone,
+          asNewTurn: true,
+        });
+      }
     }
     const workspaceId = await inferWorkspaceForRun(actor.clerkId, body);
     let created: { runId: string; resultCardId: string; threadId: string; executionId: string; created: boolean };
@@ -481,39 +584,15 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       toolCallId = loaded?.pending?.toolCallId;
     }
     if (!toolCallId || !answer) return new Response("This question is no longer open.", { status: 409 });
-    let answered: { alreadyAnswered: boolean; label?: string };
-    try {
-      answered = await mutate<unknown & object, typeof answered>("spectraHarness:answer", {
-        actorClerkId: actor.clerkId,
-        runId,
-        executionId: expectedExecutionId,
-        toolCallId,
-        answer,
-        ...(body.uiObserver ? { uiObserver: uiObserverSchema.parse(body.uiObserver) } : {}),
-      });
-    } catch (error) {
-      return new Response(publicError(error), { status: 409 });
-    }
-    if (answered.alreadyAnswered) return new Response("This was already answered in another view.", { status: 409 });
-    // Feedback given with the answer ("not like that: ...") joins the next turn.
-    const feedback = body.text?.trim();
-    if (feedback)
-      await mutate("spectraHarness:queueSteer", {
-        actorClerkId: actor.clerkId,
-        runId,
-        executionId: expectedExecutionId,
-        text: feedback.slice(0, 8_000),
-      }).catch(() => null);
-    const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    const card = detail.cards[0];
-    if (!card) return new Response("Result card not found", { status: 409 });
-    return dispatch({
+    return answerAndResume({
       actorClerkId: actor.clerkId,
       runId,
-      resultCardId: card._id,
       executionId: expectedExecutionId,
-      payload: payloadForRun(detail.run, "resume", body.timeZone),
-      prelude: (emit) => emit({ type: "result_card", runId: runId!, card: streamCard(card) }),
+      toolCallId,
+      answer,
+      feedback: body.text,
+      uiObserver: body.uiObserver,
+      timeZone: body.timeZone,
     });
   }
 

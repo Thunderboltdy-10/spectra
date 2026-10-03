@@ -1,4 +1,3 @@
-import { runLog } from "@/features/spectra/ai/run-log";
 import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";

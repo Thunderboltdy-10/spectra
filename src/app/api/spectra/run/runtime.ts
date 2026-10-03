@@ -471,14 +471,14 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
 
   if (action === "answer" || action === "confirm" || action === "cancel") {
     let toolCallId = body.toolCallId?.trim();
-    let answer = body.answer;
-    if (action !== "answer") {
-      const loaded = await query<unknown & object, { pending?: { toolCallId?: string; kind?: string } | null } | null>("spectraHarness:load", {
+    const answer = action === "answer" ? body.answer : { kind: "approval" as const, allowed: action === "confirm" };
+    // Controls that show only the run (a Dock card) answer its open question.
+    if (!toolCallId) {
+      const loaded = await query<unknown & object, { pending?: { toolCallId?: string } | null } | null>("spectraHarness:load", {
         actorClerkId: actor.clerkId,
         runId,
       }).catch(() => null);
       toolCallId = loaded?.pending?.toolCallId;
-      answer = { kind: "approval", allowed: action === "confirm" };
     }
     if (!toolCallId || !answer) return new Response("This question is no longer open.", { status: 409 });
     let answered: { alreadyAnswered: boolean; label?: string };
@@ -495,6 +495,15 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       return new Response(publicError(error), { status: 409 });
     }
     if (answered.alreadyAnswered) return new Response("This was already answered in another view.", { status: 409 });
+    // Feedback given with the answer ("not like that: ...") joins the next turn.
+    const feedback = body.text?.trim();
+    if (feedback)
+      await mutate("spectraHarness:queueSteer", {
+        actorClerkId: actor.clerkId,
+        runId,
+        executionId: expectedExecutionId,
+        text: feedback.slice(0, 8_000),
+      }).catch(() => null);
     const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
     const card = detail.cards[0];
     if (!card) return new Response("Result card not found", { status: 409 });

@@ -33,6 +33,13 @@ export function protocolItemForLegacyEvent(
   if (type === "confirmation_required")
     return { type: "approval", request: event };
   if (type === "choice_required") return { type: "question", request: event };
+  if (type === "input_required")
+    return {
+      type: (event.input as { kind?: string } | undefined)?.kind === "approval" ? "approval" : "question",
+      request: event,
+    };
+  if (type === "caption")
+    return { type: "progress", summary: String(event.text ?? "Working").slice(0, 240) };
   if (type === "waiting" || type === "interrupted")
     return { type: "wait", reason: event };
   if (type === "final") return { type: "final", result: event };
@@ -142,6 +149,10 @@ export async function saveAssistantMessage(params: {
   provider?: string;
   usage?: OpenRouterUsage;
   choices?: SpectraPlan["choices"];
+  /** The work this run created, edited or referenced: one card each. */
+  artifacts?: Array<{ id: string; type: string; title: string; action: string; change?: string }>;
+  /** The past-tense caption naming what the run did. */
+  caption?: string;
 }) {
   if (!params.threadId || !params.content.trim()) return;
   await mutate("spectraThreads:appendMessage", {
@@ -160,6 +171,8 @@ export async function saveAssistantMessage(params: {
       provider: params.provider,
       usage: params.usage,
       choices: params.choices ?? null,
+      ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
+      ...(params.caption ? { caption: params.caption } : {}),
     },
   });
 }

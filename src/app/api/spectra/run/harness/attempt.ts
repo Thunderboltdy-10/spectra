@@ -295,6 +295,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       return { steers: result.steers };
     };
 
+    let finalCaption: string | undefined;
     const onEvent = (event: HarnessEvent) => {
       switch (event.type) {
         case "text":
@@ -310,6 +311,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           publish({ type: "step", runId, id: event.id, label: event.label, status: event.ok ? "done" : "error", durationMs: event.durationMs });
           return;
         case "caption":
+          if (event.final) finalCaption = event.text;
           publish({
             type: "caption",
             runId,
@@ -403,7 +405,16 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         resultTitle: pending.kind === "approval" ? "Needs your OK" : "Needs your answer",
         resultSummary: pending.question.slice(0, 600),
         resultVariant: "status",
-        resultActions: [],
+        // The Dock answers an approval in place; a question is answered in the thread.
+        resultActions:
+          pending.kind === "approval"
+            ? [
+                { key: "confirm", label: "Allow", targetType: "run", targetId: runId },
+                { key: "cancel", label: "Don't allow", targetType: "run", targetId: runId },
+              ]
+            : params.threadId
+              ? [{ key: "continue", label: "Answer in the conversation", targetType: "thread", targetId: params.threadId }]
+              : [],
         ...(usage ? { usage } : {}),
       });
       const card = await latestCard(actorClerkId, runId);
@@ -505,6 +516,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       content,
       decision: backend.executedAny ? "operate" : "answer",
       affected: backend.affected,
+      artifacts: touches,
+      caption: finalCaption,
       model: getSpectraModelId(),
     }).catch(() => null);
     if (params.mode === "start")

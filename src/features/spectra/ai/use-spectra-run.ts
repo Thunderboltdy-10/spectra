@@ -6,7 +6,9 @@ import { uniqueToken } from "@/lib/unique-token";
 import {
   parseSpectraStreamEvent,
   type ResultCardStreamView,
+  type SpectraStreamEvent,
 } from "./stream-events";
+import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessExchangeFields, type HarnessAnswerValue } from "./harness-exchange";
 import {
   getSpectraRunEvents,
   getSpectraRunDetail,
@@ -139,7 +141,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
 }
 
 export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";
-export type SpectraLiveExchange = {
+export type SpectraLiveExchange = Omit<HarnessExchangeFields, "steps"> & {
   id: string;
   runId?: string;
   threadId?: string;
@@ -152,9 +154,31 @@ export type SpectraLiveExchange = {
     status: "running" | "done" | "error";
     createdAt: number;
   }>;
-  status: "starting" | "streaming" | "failed";
+  /** "waiting": the run asked a question or for approval and is paused. */
+  status: "starting" | "streaming" | "waiting" | "failed";
   startedAt: number;
 };
+
+const userTimeZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Harness events that change what the live exchange shows. */
+function applyExchangeEvent(exchange: SpectraLiveExchange, event: SpectraStreamEvent): SpectraLiveExchange {
+  if (isHarnessExchangeEvent(event)) {
+    const next = applyHarnessEvent(exchange, event);
+    if (event.type === "input_required") return { ...next, status: "waiting" };
+    if (event.type === "input_answered") return { ...next, status: "streaming" };
+    return next.status === "starting" ? { ...next, status: "streaming" } : next;
+  }
+  return exchange;
+}
+
+const isExchangeEvent = isHarnessExchangeEvent;
 
 const EMPTY_INITIAL_CARDS: SpectraResultCard[] = [];
 
@@ -385,11 +409,16 @@ export function useSpectraRun({
   const [observedContinuationRunId, setObservedContinuationRunId] = useState<
     string | null
   >(null);
+  const liveExchangeRef = useRef<SpectraLiveExchange | null>(null);
   const [liveExchange, setLiveExchange] = useState<SpectraLiveExchange | null>(
     null,
   );
+  useEffect(() => {
+    liveExchangeRef.current = liveExchange;
+  }, [liveExchange]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
+  const streamCoveredRuns = useRef(new Set<string>());
   const attachmentsByThreadId = useRef(
     new Map<string, CommandAttachment[]>(),
   );
@@ -656,6 +685,12 @@ export function useSpectraRun({
             if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(observedRun.status))
               observeUiRun(tab.runId, observedRun.executionId);
           }
+          if (streamCoveredRuns.current.has(tab.runId)) {
+            streamCoveredRuns.current.delete(tab.runId);
+            const last = Math.max(after, ...events.map((row) => row.sequence));
+            eventCursors.current.set(tab.runId, { ...eventCursors.current.get(tab.runId), sequence: last });
+            continue;
+          }
           for (const row of events.sort((a, b) => a.sequence - b.sequence)) {
             if (row.sequence <= (eventCursors.current.get(tab.runId)?.sequence ?? 0))
               continue;
@@ -676,12 +711,16 @@ export function useSpectraRun({
               event.type === "final"
             )
               upsert(event.card);
+            if (event.type === "input_required" && event.card) upsert(event.card);
+            if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
+            if (event.type === "artifact_touched") void onDataChanged?.();
             if (
               event.type === "text_delta" ||
               event.type === "text_replace" ||
               event.type === "progress" ||
               event.type === "operation_preview" ||
-              event.type === "status"
+              event.type === "status" ||
+              isExchangeEvent(event)
             ) {
               setLiveExchange((current) => {
                 const base =
@@ -726,7 +765,7 @@ export function useSpectraRun({
                     base,
                     operationPreviewMessage(event.preview),
                   );
-                return base;
+                return applyExchangeEvent(base, event);
               });
             }
             if (event.type === "artifact_patch")
@@ -875,6 +914,7 @@ export function useSpectraRun({
       const decoder = new TextDecoder();
       let buffer = "";
       let changed = false;
+      let sawInput = false;
       while (true) {
         const { value, done } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
@@ -935,6 +975,18 @@ export function useSpectraRun({
             );
             void onThreadReady?.(event.threadId);
           }
+          if (isExchangeEvent(event))
+            setLiveExchange((current) =>
+              current && (!liveExchangeId || current.id === liveExchangeId)
+                ? applyExchangeEvent({ ...current, runId: event.runId ?? current.runId }, event)
+                : current,
+            );
+          if (event.type === "input_required") {
+            if (event.card) upsert(event.card);
+            changed = sawInput = true;
+          }
+          if (event.type === "artifact_touched") changed = true;
+          if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
           if (event.type === "text_delta")
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
@@ -1149,6 +1201,9 @@ export function useSpectraRun({
             : current,
         );
       activeRequests.current.delete(controller);
+      // This stream already showed everything up to the open question; the
+      // durable poll must not replay it into the same exchange.
+      if (requestRunId && sawInput) streamCoveredRuns.current.add(requestRunId);
       if (requestRunId) {
         activeRunIds.current.delete(requestRunId);
         publishActiveRuns();
@@ -1276,6 +1331,7 @@ export function useSpectraRun({
             selectedArtifactIds,
             explicitContextObjects,
             currentView,
+            timeZone: userTimeZone(),
             attachments,
           },
           optimisticCardId,
@@ -1371,6 +1427,38 @@ export function useSpectraRun({
           spectraBus.emit("threads.changed", {});
           queuedSteering.current.delete(runId);
           return true;
+        }
+        // A steer joins the working run's next turn. Only a steer with new
+        // files, or one the run finished before reading, starts a new turn.
+        if (nextAttachments.length === 0) {
+          const version = await resolveDisplayedRunVersion(runId, true);
+          const queued = await requestSpectra("/api/spectra/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "steer", runId, executionId: version.executionId, text: clean }),
+          });
+          if (queued.ok) {
+            queuedSteering.current.delete(runId);
+            setLiveExchange((current) =>
+              current?.runId === runId
+                ? {
+                    ...current,
+                    steps: [
+                      ...current.steps,
+                      { id: `steer:${uniqueToken()}`, title: "Noted your message", summary: clean, status: "done" as const, createdAt: Date.now() },
+                    ].slice(-12),
+                  }
+                : current,
+            );
+            return true;
+          }
+          if (queued.status !== 409)
+            throw new Error(
+              await spectraFailureMessage(queued, {
+                fallback: "Spectra could not take that message just now. Try again.",
+                signedOut: "Sign in again to message Spectra.",
+              }),
+            );
         }
         let targetThreadId = target?.threadId;
         if (!targetThreadId) {
@@ -1549,13 +1637,13 @@ export function useSpectraRun({
         try {
           const version = await resolveDisplayedRunVersion(card.runId);
           await consume({
-            action: "revise",
+            action: "answer",
             runId: card.runId,
-            revision: clean,
             executionId: version.executionId,
-            attemptId: version.attemptId,
+            answer: { kind: "approval", allowed: false },
+            text: clean,
+            timeZone: userTimeZone(),
           });
-          await run(`Revise the pending proposal with this feedback: ${clean}`);
         } catch (error) {
           toast.error(
             error instanceof Error
@@ -1635,9 +1723,59 @@ export function useSpectraRun({
           );
       }
     },
-    [consume, onDataChanged, onOpenArtifact, resolveDisplayedRunVersion, run],
+    [consume, onDataChanged, onOpenArtifact, resolveDisplayedRunVersion],
   );
 
+  /** The user's answer to the run's open question or approval. */
+  const answer = useCallback(
+    async (runId: string, toolCallId: string, value: HarnessAnswerValue) => {
+      setActiveRequestCount((count) => count + 1);
+      try {
+        const version = await resolveDisplayedRunVersion(runId);
+        const allowed = value.kind === "approval" && value.allowed;
+        if (allowed) observeUiRun(runId, version.executionId, false);
+        const shown = liveExchangeRef.current;
+        const exchangeId = shown?.runId === runId ? shown.id : `answer:${uniqueToken()}`;
+        setLiveExchange((current) =>
+          current?.runId === runId
+            ? { ...current, id: exchangeId, status: "streaming" }
+            : {
+                id: exchangeId,
+                runId,
+                threadId: durableThreadId.current,
+                prompt: promptByRun.current.get(runId) ?? "",
+                content: "",
+                steps: [],
+                status: "streaming",
+                startedAt: Date.now(),
+              },
+        );
+        await consume(
+          {
+            action: "answer",
+            runId,
+            executionId: version.executionId,
+            toolCallId,
+            answer: value,
+            timeZone: userTimeZone(),
+            ...(allowed ? { uiObserver: uiObserverForRun(runId) } : {}),
+          },
+          undefined,
+          exchangeId,
+        );
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Spectra could not take that answer. Try again.");
+        spectraBus.emit("threads.changed", {});
+        return false;
+      } finally {
+        setActiveRequestCount((count) => Math.max(0, count - 1));
+      }
+    },
+    [consume, resolveDisplayedRunVersion],
+  );
+
+  /** "Suggest changes" on an approval: not this, and here is what to do instead. */
   const revise = useCallback(
     async (card: ResultCardStreamView, revision: string) => {
       const clean = revision.trim();
@@ -1646,32 +1784,26 @@ export function useSpectraRun({
       try {
         const version = await resolveDisplayedRunVersion(card.runId);
         await consume({
-          action: "revise",
+          action: "answer",
           runId: card.runId,
-          revision: clean,
           executionId: version.executionId,
-          attemptId: version.attemptId,
+          answer: { kind: "approval", allowed: false },
+          text: clean,
+          timeZone: userTimeZone(),
         });
+        return true;
       } catch (error) {
         toast.error(
           error instanceof Error
             ? error.message
-            : "Could not return the proposal for revision.",
+            : "Spectra could not take that suggestion. Try again.",
         );
         return false;
       } finally {
         setActiveRequestCount((count) => Math.max(0, count - 1));
       }
-      const threadId = card.provenance?.threadId;
-      return run(
-        `Revise the pending proposal with this feedback: ${clean}`,
-        threadId
-          ? (attachmentsByThreadId.current.get(threadId) ?? [])
-          : [],
-        threadId ? { threadId } : undefined,
-      );
     },
-    [consume, resolveDisplayedRunVersion, run],
+    [consume, resolveDisplayedRunVersion],
   );
 
   const openDetails = useCallback(
@@ -1830,6 +1962,7 @@ export function useSpectraRun({
             submissionKey: crypto.randomUUID(),
             executionId: version.executionId,
             attemptId: version.attemptId,
+            timeZone: userTimeZone(),
           },
           undefined,
           exchangeId,
@@ -1861,6 +1994,7 @@ export function useSpectraRun({
       stop,
       retry,
       revise,
+      answer,
       steer,
       onCardAction,
       selectedRunId,
@@ -1878,6 +2012,7 @@ export function useSpectraRun({
       openDetails,
       retry,
       revise,
+      answer,
       steer,
       run,
       selectedRunId,

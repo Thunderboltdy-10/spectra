@@ -101,7 +101,7 @@ describe("document Markdown", () => {
     const content = documentFromMarkdown(SAMPLE, undefined, sequentialIdFactory());
     // Formatting Markdown cannot express, on an untouched block.
     const outputs = content.tiptap.content.at(-1)!;
-    outputs.content = [{ type: "text", text: "Glucose and oxygen.", marks: [{ type: "textStyle", attrs: { color: "#f00" } }] }];
+    outputs.content = [{ type: "text", text: "Glucose and oxygen.", marks: [{ type: "textStyle", attrs: { color: "var(--danger)" } }] }];
     const edited = applyDocumentEdits(documentToMarkdown(content), [
       { op: "replace", find: "Split water", replace: "Split water molecules" },
     ]);
@@ -110,7 +110,7 @@ describe("document Markdown", () => {
     const before = ids(content.tiptap.content);
     const after = ids(next.tiptap.content);
     expect(after.filter((id) => before.includes(id))).toHaveLength(before.length - 1);
-    expect(next.tiptap.content.at(-1)!.content![0]!.marks).toEqual([{ type: "textStyle", attrs: { color: "#f00" } }]);
+    expect(next.tiptap.content.at(-1)!.content![0]!.marks).toEqual([{ type: "textStyle", attrs: { color: "var(--danger)" } }]);
     expect(documentReadback(next, content)).toContain("Split water molecules");
   });
 

@@ -116,7 +116,7 @@ describe("compaction", () => {
   it("summarises older turns past 80% of the window and keeps recent turns verbatim", async () => {
     const messages = big(30);
     const tokens = estimateTokens(messages);
-    const summarise = vi.fn(async () => "## What the user wants\nStuff");
+    const summarise = vi.fn(async (_input: { transcript: string; signal: AbortSignal }) => "## What the user wants\nStuff");
     const compact = createCompactor({ contextWindow: Math.floor(tokens / 0.85), summarise });
     const result = await compact({ system: { role: "system", content: "s" }, messages, signal: new AbortController().signal });
     expect(result).not.toBeNull();

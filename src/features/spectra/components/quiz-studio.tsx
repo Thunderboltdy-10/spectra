@@ -1540,6 +1540,20 @@ export function QuizStudio({
               },
             ]
           : []),
+        // The question list carries Add question on the full surface. A side
+        // panel has no list, so the bar offers it instead.
+        ...(view === "builder" && !showQuestionRail
+          ? [
+              {
+                id: "add-question",
+                label: "Add question",
+                icon: Plus,
+                priority: "essential" as const,
+                keepLabel: true,
+                onSelect: addQuestion,
+              },
+            ]
+          : []),
         ...(view === "builder"
           ? [
               {

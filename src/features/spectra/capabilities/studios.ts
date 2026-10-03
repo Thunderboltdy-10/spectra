@@ -38,6 +38,7 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "quiz", localId: "build", description: "Return to building this quiz." },
   { type: "quiz", localId: "settings", description: "Open quiz settings." },
   { type: "quiz", localId: "questions", description: "Show or hide the question list." },
+  { type: "quiz", localId: "add-question", description: "Add a question to this quiz.", requires: "edit" },
   {
     type: "quiz",
     localId: "question-details",

@@ -321,9 +321,14 @@ describe("Live Dock V2", () => {
     );
     expect(controls).toContain("if (next?.runId)");
     const bridge = read("src/features/spectra/bridge/use-bridge.ts");
-    expect(bridge).toContain("}, 15_000);");
+    // Bridge checks start at 15 s and back off while Bridge is unreachable
+    // (LV-012); a hidden page is never polled.
+    expect(bridge).toContain("bridgeDiscoveryDelay(misses)");
     expect(bridge).toContain(
-      'if (document.visibilityState === "visible") void refresh();',
+      'if (document.visibilityState === "visible") void check(false);',
+    );
+    expect(read("src/features/spectra/bridge/client.ts")).toContain(
+      "BRIDGE_DISCOVERY_INTERVAL_MS = 15_000",
     );
   });
 

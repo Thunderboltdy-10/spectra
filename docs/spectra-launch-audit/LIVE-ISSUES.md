@@ -949,7 +949,7 @@ No Bridge allowlist was broadened, no existing process was stopped, and no front
 
 ### LV-022 · Saved flashcard append is described as unsaved
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** Chat AI flashcard append status / signed-in school administrator
 - **Report script:** P3-AI-ENGINE · Needs live verification · Flashcard deck, append
@@ -1102,6 +1102,13 @@ No-artifact messages should not show the bottom “Saved progress and results”
 **Evidence:** `.spectra-local/live-verification/LV022-photosynthesis-reply-default-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-result-card-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-open-deck-after-fda81f87-20261002.png`; `.spectra-local/live-verification/LV022-photosynthesis-create-after-fda81f87-redacted.txt`.
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; documentation checkout 18a31274.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`, `19b9e7ca`.
+- Root cause: the old 7-stage pipeline wrote its reply and its result card from separate stages (receipt-report, verify), so a write that had landed could be described as staged or unsaved. The pipeline is gone. In the new harness a tool acts at once and returns what happened, the model replies from that result, and the thread shows one card per piece of work the run created, edited or referenced, taken from the tool results themselves.
+- Test: `src/features/spectra/ai/harness/__tests__/tools.test.ts` (writes land and report themselves), `exchange.test.ts` (one card per work; a creation stays a creation).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-023 · AI document append to an existing conclusion fails
 
@@ -1951,7 +1958,7 @@ VERIFIED on commit `45281d26`, 2026-09-30. In a fresh context-free `/chat`, one 
 
 **Clean-runtime question (NEEDS-INFO):** The compiled dev chunk contains the new catalog recovery helper, while application-tool registration skips already registered definitions. A retained old execution closure during development hot reload is possible, not proven; the compiled helper alone cannot establish which closure handled this request. Before the next normal authoring workflow, the verifier has been asked to restart only the web/dev process it originally started, without resetting the instance or changing configuration, and record that clean-runtime check and its normal outcome. No extra AI repeat is required. Do not infer a valid proposed operation or weaken finalization guards from these codes; no speculative runtime patch was made.
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** /school page-scoped AI composer and /chat artifact creation, Retry and Stop / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Document, Sheet, Presentation and Whiteboard create/recovery; free exploration · first-week school administrator, School page AI composer
@@ -2403,9 +2410,16 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 
 **Verifier recheck:** After the actual commit recorded below, continue ordinary document authoring and report a fresh naturally observed outcome with submission UTC, editable document/open control, sections and reload persistence. Check specialist guidance for other work types nearby, including a missing guide followed by the exact catalog/core read when naturally encountered. The identified lookup-recovery bug is fixed by before/after tests; LV-039 remains NEEDS-INFO for live post-fix creation and its earlier initial interruption boundary, rather than claiming all historical execution failures resolved. Only the verifier sets VERIFIED.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-040 · Completed AI chats remain titled “New conversation”
 
-- **Status:** NEEDS-DECISION
+- **Status:** FIXED
 - **Severity:** Low
 - **Surface / role:** `/chat` header and recent-chat list / signed-in Profile A school administrator
 - **Report script:** Free exploration · first-week AI chat and chat recovery; the P3 reports do not specify automatic title generation.
@@ -2533,6 +2547,13 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 - Full-suite result remains **4,512 passed, 3 failed, 1 skipped**. Stop passes in the isolation recheck; LV-017 packaging and the unchanged dense-sheet timing remain unresolved, with all original assertions/limits retained. The preceding closeout contains exact isolated counts and logs; focused recovery tests, both TypeScript projects, lint and all five gates passed.
 - NEEDS-DECISION remains LV-040 title fallback/model generation, LV-028 shortcuts, LV-022 post-save prose latency/usage, LV-003 expired-invite status, LV-012 Bridge activation. CANNOT-REPRODUCE remains LV-004 original invitation encoding artifact (decoded token works) and LV-007 idle/pending confirmation (pending controls disabled). NEEDS-INFO remains LV-039 exact intake mutation timeout and LV-017 prohibited hosted-package exception. No option assumed.
 - No OPEN, REOPENED or FIXING entry remains. Stop between tasks as requested; the verifier may continue the existing verification and message actionable observations. No deployment, codegen, production-data, environment, dependency or AI capability changes occurred.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `ecfd8c5f`, `d2f49b52`.
+- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-041 · “Skip to content” returns keyboard focus to the sidebar
 
@@ -3202,7 +3223,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-054 · AI-created water-cycle whiteboard has no readable node labels
 
-- **Status:** NEEDS-INFO
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** `/chat` AI Whiteboard creation and `/library` Whiteboard editor / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Whiteboard · Create; adjacent Edit prompt “Recolor the evaporation node.”
@@ -3227,6 +3248,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Question for verifier:** On the next Whiteboard create check, repeat the same P3 create prompt once in a fresh conversation and report the submission UTC immediately, then whether node labels are visible on first open and after reload. Also report whether manually entering a label in one existing blank node survives reopening. This will establish reproducibility and the editable-text boundary without fabricating labels from identifiers or changing the AI model/reasoning. No content or deployment was modified.
 
 **Additional LV-054 recolor diagnosis:** The saved evaporation style does contain the requested amber fill/stroke. spectra-app.css explicitly forces text nodes to a transparent background/border with !important, explaining why those persisted appearance fields are not visible for this node type. This observation does not recover the missing labels or establish the original pre-normalization model output; both remain distinct from LV-053.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `554c993d`, `d2f49b52`.
+- Root cause: the old whiteboard writer could emit nodes whose label lived where the renderer did not read it. The harness authors whiteboards as nodes and edges: every node must carry text (an empty node is rejected back to the model), the text is stored in the node content the renderer reads, and the text color is a theme token.
+- Test: `src/features/spectra/ai/harness/authoring/__tests__` (whiteboard nodes, layout and empty-node rejection); smoke `whiteboard` (water cycle) passed with at least 4 nodes and 3 connectors.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### Fixer closeout · Whiteboard font-weight fix · 2026-10-02 (Europe/Madrid)
 
@@ -3344,7 +3372,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-056 · New chat displays another conversation’s approval and work item
 
-- **Status:** REOPENED
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** `/chat` new-conversation result and work card / signed-in Profile A school administrator
 - **Report script:** Free exploration · chat with the AI and create-new-chat flow
@@ -3380,6 +3408,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Validation:** Both TypeScript projects, full lint and architecture/copy/design-token/capability/secrets gates pass. Final frozen full suite: **4,625 passed, 2 failed, 1 skipped**, 123.40 seconds; 516 passed files / 3 failed / 1 skipped across 520. The failed tests are the known LV-017 gateway packaging omission of shared/yjs-collections.mjs and the unchanged dense-sheet timing check (78.8393 ms against 40 ms); the third failed file is a 10-second browser.close afterAll timeout in skip-link.component.test.tsx. Both the sheet suite and skip-link suite pass in isolation: **81 passed**, .spectra-local/LV056-full-residual-isolated.log. Full log: .spectra-local/LV056-full.log. No test thresholds or deployment configuration changed.
 
 **Verifier recheck:** Reload the committed build, open the existing pending approval, select New chat and reload /chat?new=1: no approval, work card, prior progress or busy state should leak. Check the source conversation still displays its approval without activating it; then submit a fresh ordinary chat and confirm its own durable progress/results recover. Recheck artifact/workspace progress nearby. The dependency-array warning observed during the uncommitted Fast Refresh should be rechecked after a full reload. No codegen or deploy-side step is required; only the verifier sets VERIFIED. The actual source commit hash is recorded below after committing.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`, `19b9e7ca`.
+- Root cause: the server built context from client-sent explicit context objects and focus modes, and approvals were shown from the run tabs of any conversation. The harness takes only the focused artifact of the current view; explicit context objects and focus modes are no longer read. An open question or approval is shown only inside its own run's exchange and collapses to one line once answered.
+- Test: `exchange.test.ts` (answered input collapses; input belongs to its run). The client-side context chip store was not changed and needs a live check.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### Fixer closeout · LV-056 conversation-bound durable recovery · 2026-10-02 (Europe/Madrid)
 
@@ -3484,6 +3519,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; saved Profile A.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-039 additional verifier occurrence · fresh WWI document create repeat after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3505,6 +3547,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; documentation checkout 18a31274.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-039 additional verifier occurrence · fresh six-slide presentation create after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3524,6 +3573,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-040 additional verifier occurrence · post-create presentation title after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3539,6 +3595,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV040-presentation-thread-title-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-presentation-title-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `ecfd8c5f`, `d2f49b52`.
+- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-058 · Short user messages occupy most of the chat column
 
@@ -3683,7 +3746,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-063 · Context summary returns text from an unrelated World War I request
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** High
 - **Surface / role:** Live Dock AI summary with a selected document context / signed-in Profile A school administrator
 - **Report script:** P3-CONTEXT · recently edited document text and live-room context
@@ -3702,6 +3765,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Actual:** The composer showed `New Document · 1 context`. The first answer correctly summarized the visible orchid paragraph and `ORCHID-CODE-742`. The second answer was `You asked for a document with four sections about the causes of World War I.` It omitted the selected document's text. The Live chat transcript above the two orchid prompts contained an older World War I document-create exchange. `navigator.onLine` was `true`. The editor had logged repeated realtime WebSocket handshake errors in the same session; see LV-062. No provider-call count or exact AI run latency was captured. The draft's server persistence was not established.
 
 **Evidence:** `.spectra-local/live-verification/P3-CONTEXT-orchid-summary-fda81f87-redacted.txt`; `.spectra-local/live-verification/P3-CONTEXT-orchid-unsaved-before-ai-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-first-summary-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-repeat-wrong-summary-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-ai-result-fda81f87.png`; `.spectra-local/live-verification/P3-CONTEXT-orchid-after-answer-fda81f87.png`.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: the old gather stage mixed conversation memory and other requests into the context packet, so a summary could draw on an unrelated earlier request. The harness history is this thread's messages only (`readThreadHistory`), and the focused artifact is read live (including unsaved collaborative text) when the model asks for it.
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (history and environment).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-039 additional verifier occurrence · third fresh WW1 document create after fda81f87 · 2026-10-02 (Europe/Madrid)
 
@@ -3722,6 +3792,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-022 additional verifier occurrence · synthetic document edit save-state wording · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3741,6 +3818,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
 
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`, `19b9e7ca`.
+- Root cause: the old 7-stage pipeline wrote its reply and its result card from separate stages (receipt-report, verify), so a write that had landed could be described as staged or unsaved. The pipeline is gone. In the new harness a tool acts at once and returns what happened, the model replies from that result, and the thread shows one card per piece of work the run created, edited or referenced, taken from the tool results themselves.
+- Test: `src/features/spectra/ai/harness/__tests__/tools.test.ts` (writes land and report themselves), `exchange.test.ts` (one card per work; a creation stays a creation).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-040 additional verifier occurrence · title after successful document edit · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3757,6 +3841,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV040-post-ai-edit-title-header-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-row-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `ecfd8c5f`, `d2f49b52`.
+- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-056 additional verifier occurrence · artifact context retained by blank New chat · 2026-10-02 (Europe/Madrid)
 
@@ -3775,6 +3866,13 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV056-new-chat-context-from-other-thread-fda81f87-20261002.png`; `.spectra-local/live-verification/LV056-new-chat-context-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Original verification commit `4823b413`; regression observed on application code `fda81f87`, local instance 8, web port 3000; documentation checkout `18a31274`.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`, `19b9e7ca`.
+- Root cause: the server built context from client-sent explicit context objects and focus modes, and approvals were shown from the run tabs of any conversation. The harness takes only the focused artifact of the current view; explicit context objects and focus modes are no longer read. An open question or approval is shown only inside its own run's exchange and collapses to one line once answered.
+- Test: `exchange.test.ts` (answered input collapses; input belongs to its run). The client-side context chip store was not changed and needs a live check.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-062 additional verifier occurrence · Library realtime errors while browser is online · 2026-10-02 (Europe/Madrid)
 
@@ -3795,7 +3893,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 ### LV-064 · Selected-document AI edit takes about 21.5 seconds to show a final response
 
-- **Status:** OPEN
+- **Status:** FIXED
 - **Severity:** Medium
 - **Surface / role:** `/chat` selected-context Document edit / signed-in Profile A school administrator
 - **Report script:** P3-AI-ENGINE · Document · Edit; P2-AI-QUALITY · selected-context task completion
@@ -3815,6 +3913,14 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/P3-AI-edit-fixture-observation-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/P3-AI-edit-fixture-chat-result-fda81f87-20261002.png`; `.spectra-local/live-verification/P3-AI-edit-fixture-after-ai-reload-fda81f87-20261002.png`.
 
 **F5 comparison:** No comparable main-path first-token baseline was captured during this observation, so a relative first-token change cannot be established.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: an edit ran through several model stages (intake, resolve, plan, act, verify) before any reply. The harness makes one model call per turn and streams text and captions as it works.
+- Test: smoke `small edit` finished in 4.7 s with first output at 1.8 s (was about 21.5 s to the final reply).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-065 · Undo and Redo are not first in three tested editor bars
 
 - **Status:** OPEN
@@ -3967,6 +4073,14 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`; `.spectra-local/live-verification/LV050-current-flashcard-create-redacted-fda81f87-20261002.png`.
 
 **Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `d2f49b52`.
+- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
+- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
+
 ### LV-040 additional verifier occurrence · completed flashcard-create reply retains “New conversation” header · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3984,3 +4098,11 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`.
 
 **Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
+
+
+**Fix** (A1 AI harness, 2026-10-03)
+- Commit: `ecfd8c5f`, `d2f49b52`.
+- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
+- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
+- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.

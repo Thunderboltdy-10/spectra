@@ -87,6 +87,12 @@ describe("whiteboard authoring", () => {
     expect(JSON.stringify(board)).toBe(before);
   });
 
+  it("puts every label where the renderer reads it and rejects a node without text (LV-054)", () => {
+    const board = whiteboardFromSpec(waterCycle, sequentialIdFactory());
+    expect(board.nodes.map((node) => whiteboardNodeText(node))).toEqual(waterCycle.nodes.map((node) => node.text));
+    expect(() => whiteboardFromSpec({ nodes: [{ key: "blank", text: "  " }] })).toThrow(/has no text/);
+  });
+
   it("flags placeholder nodes", () => {
     const board = whiteboardFromSpec({ nodes: [{ text: "Add a thought", type: "note" }, { text: "Real idea" }] });
     expect(whiteboardProblems(board).join(" ")).toMatch(/empty or placeholder/);

@@ -2,6 +2,13 @@
 
 This is the one entry point for engineers. It describes what Spectra is, how the code is laid out, how to run and test it, which cross-system contracts are binding, and which launch risks are still open. Everything else under `docs/` is either the live launch audit (`docs/spectra-launch-audit/`) or history (`docs/archive/`).
 
+Two specs are binding for all new work, ahead of anything older in this file:
+
+- [`docs/design/`](design/README.md): the design language, shell, island, motion and editors. Read it before building any UI.
+- [`docs/ai/HARNESS.md`](ai/HARNESS.md): how Spectra's AI works. Read it before touching the AI run, tools, skills or thread.
+
+The redesign is being carried out through the plan in [`docs/spectra-launch-audit/REDESIGN-PLAN.md`](spectra-launch-audit/REDESIGN-PLAN.md).
+
 ## What Spectra is
 
 Spectra is an AI-native school workspace. Students and teachers are peers: they keep their work (documents, spreadsheets, presentations, flashcard decks, quizzes, plans, timetables, whiteboards, code projects and agents) in workspaces and a library, and they edit it together in real time. They can also ask an AI to read and change that work. Schools are provisioned by a superadmin, invite their members, and can sync classes and resources from ManageBac.

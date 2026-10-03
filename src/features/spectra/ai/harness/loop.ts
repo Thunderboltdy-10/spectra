@@ -200,7 +200,11 @@ export function mergeArtifactTouches(
       title: touch.title || existing.title,
       action:
         rank[touch.action] > rank[existing.action] ? touch.action : existing.action,
-      change: touch.change ?? existing.change,
+      // A card for something made in this run says what it is, not its latest tweak.
+      change:
+        existing.action === "created" && touch.action !== "created"
+          ? (existing.change ?? touch.change)
+          : (touch.change ?? existing.change),
     });
   }
   return [...byId.values()];

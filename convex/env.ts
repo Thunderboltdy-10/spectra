@@ -12,6 +12,17 @@ export function getOpenRouterApiKey() {
   return hasOpenRouterKey ? openRouterKey : null;
 }
 
+/**
+ * The embedding model shared by memory and the semantic index. It is read per call, never at load,
+ * so a deployment can change it without a code change. `null` disables vectors: retrieval keeps
+ * serving full-text results and says so.
+ */
+export function getEmbeddingModelSetting(): { model: string; provider: string | null } | null {
+  const model = (process.env.SPECTRA_EMBEDDING_MODEL ?? "").trim();
+  const provider = (process.env.SPECTRA_EMBEDDING_PROVIDER ?? "").trim();
+  return model ? { model, provider: provider || null } : null;
+}
+
 export function getArtificialAnalysisApiKey() {
   return artificialAnalysisKey.length > 0 ? artificialAnalysisKey : null;
 }

@@ -7,11 +7,13 @@ import type { Id } from "./_generated/dataModel";
 import type { FunctionReturnType } from "convex/server";
 import type { QueryCtx } from "./_generated/server";
 import { contextForRunBase } from "./memory";
-import { MEMORY_EMBEDDING_VERSION, memoryEmbeddingPartition, memoryInputHash } from "./memoryEmbeddingPolicy";
+import { memoryEmbeddingPartition, memoryInputHash } from "./memoryEmbeddingPolicy";
+import { embeddingVersion } from "./embeddingProvider";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
-vi.mock("./env", () => ({ getOpenRouterApiKey: () => "synthetic-test" }));
+vi.mock("./env", async (importOriginal) => ({ ...await importOriginal<typeof import("./env")>(), getOpenRouterApiKey: () => "synthetic-test" }));
+const MEMORY_EMBEDDING_VERSION = embeddingVersion()!;
 const vector = Array.from({ length: 256 }, (_, index) => index === 0 ? 1 : 0);
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-25T12:00:00Z")); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -205,7 +207,10 @@ describe("bounded, currently authorized candidate retrieval", () => {
     expect(semantic.retrieval.status).toBe("semantic_and_literal");
     expect(semantic.selectedClaimIds).toEqual([claimId]);
     fetcher.mockImplementation(async () => new Response("not available", { status: 503 }));
-    const fallback = await f.reader.action(api.memory.contextForRun, { queryText: "heliostat material" }) as FunctionReturnType<typeof internal.memory.contextForRunBase>;
+    const pending = f.reader.action(api.memory.contextForRun, { queryText: "heliostat material" });
+    await vi.advanceTimersByTimeAsync(1_000); // the interactive query retries a 503 once after a short backoff
+    const fallback = await pending as FunctionReturnType<typeof internal.memory.contextForRunBase>;
+    expect(fetcher).toHaveBeenCalledTimes(3);
     expect(fallback.retrieval.status).toBe("provider_unavailable");
     expect(fallback.selectedClaimIds).toEqual([claimId]);
   });

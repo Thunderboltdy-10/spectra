@@ -7,6 +7,8 @@ Object.assign(process.env, {
   SPECTRA_REASONING_PROFILE: "xhigh",
   SPECTRA_MODEL_PROVIDER: "OpenAI",
   SPECTRA_FALLBACK_PROVIDERS: "OpenAI",
+  SPECTRA_EMBEDDING_MODEL: "openai/text-embedding-3-small",
+  SPECTRA_EMBEDDING_PROVIDER: "OpenAI",
 });
 
 type MediaListener = (event: MediaQueryListEvent) => unknown;

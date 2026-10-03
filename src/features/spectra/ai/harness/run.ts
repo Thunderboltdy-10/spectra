@@ -133,7 +133,12 @@ async function quietly<T>(work: () => Promise<T> | T): Promise<T | undefined> {
 export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResult> {
   const now = input.now ?? Date.now;
   const started = now();
-  const session = createSession({ backend: input.backend, prompt: input.prompt, workspaceId: input.workspaceId });
+  const session = createSession({
+    backend: input.backend,
+    prompt: input.prompt,
+    workspaceId: input.workspaceId,
+    agents: input.environment.agent ? [] : input.environment.agents,
+  });
   const tools = buildHarnessTools(session);
   const focused = input.environment.focused;
   // Labels name the focused artifact from the first step, without a read.

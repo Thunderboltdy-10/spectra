@@ -13,6 +13,7 @@ import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operat
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
+import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
 import { executeOperation, rows, type EffectContext } from "./effects";
 import { act, mutate, query, safeJson } from "./io";
@@ -563,6 +564,16 @@ export class ConvexHarnessBackend implements HarnessBackend {
       items.length > 120 ? "(More items exist; read a shorter range.)" : "",
     ];
     return clip(lines.filter(Boolean).join("\n\n"));
+  }
+
+  async useAgent(agentId: string): Promise<{ title: string; instructions: string } | null> {
+    const agent = await loadAgent(
+      { actorClerkId: this.actorClerkId, runId: this.input.runId, executionId: this.input.executionId },
+      agentId,
+      "automatic",
+      "Spectra handed the request to this agent",
+    );
+    return agent ? { title: agent.title, instructions: agent.instructions } : null;
   }
 
   async readSchoolData(input: { purpose: string; classId?: string }): Promise<string> {

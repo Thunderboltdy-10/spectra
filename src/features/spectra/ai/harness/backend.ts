@@ -113,6 +113,11 @@ export interface HarnessBackend {
    * binds to exactly this change. Optional: the in-memory backend needs none.
    */
   stageCommand?(request: CommandRequest, signal: AbortSignal): Promise<void>;
+  /**
+   * Hand the rest of this run to one of the user's agents: returns its
+   * instructions, or null when it is unavailable. Optional.
+   */
+  useAgent?(agentId: string, signal: AbortSignal): Promise<{ title: string; instructions: string } | null>;
   /** Record an edit that needs approval (removing everything) before asking. */
   stageArtifactUpdate?(
     input: { id: string; type: ArtifactTypeKey; title?: string; content: Record<string, unknown>; toolCallId: string },

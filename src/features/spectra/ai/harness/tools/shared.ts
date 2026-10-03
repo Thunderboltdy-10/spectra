@@ -11,6 +11,8 @@ export type HarnessSession = {
   /** Titles seen this run, so labels never show ids. */
   titles: Map<string, { title: string; type: string }>;
   todos: TodoItem[];
+  /** The user's agents, when they have any and none is active yet. */
+  agents: Array<{ id: string; title: string }>;
 };
 
 export function createSession(input: {
@@ -18,6 +20,7 @@ export function createSession(input: {
   prompt: string;
   workspaceId?: string;
   known?: Array<{ id: string; title: string; type: string }>;
+  agents?: Array<{ id: string; title: string }>;
 }): HarnessSession {
   return {
     backend: input.backend,
@@ -25,6 +28,7 @@ export function createSession(input: {
     workspaceId: input.workspaceId,
     titles: new Map((input.known ?? []).map((entry) => [entry.id, { title: entry.title, type: entry.type }])),
     todos: [],
+    agents: input.agents ?? [],
   };
 }
 

@@ -1152,7 +1152,8 @@ export const getSummary = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.threadId);
-    return { thread: compactThread(thread) };
+    // The agent this thread keeps using until the user clears it.
+    return { thread: compactThread(thread), retainedAgentId: thread.retainedAgentId };
   },
 });
 

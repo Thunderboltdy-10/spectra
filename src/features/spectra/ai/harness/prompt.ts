@@ -81,6 +81,8 @@ export type EnvironmentInput = {
   attachments?: string[];
   /** A custom agent the user chose for this conversation. */
   agent?: { title: string; instructions: string };
+  /** The user's agents the model may hand a request to with use_agent. */
+  agents?: Array<{ id: string; title: string; description: string }>;
 };
 
 function localTime(now: number, timeZone: string) {
@@ -130,8 +132,15 @@ export function environmentBlock(input: EnvironmentInput) {
   lines.push(`Permissions: ${input.permissions}`);
   if (input.agent)
     lines.push(
-      `The user chose their agent "${input.agent.title}" for this conversation. Follow its instructions where they fit the rules above:
+      `This conversation uses the user's agent "${input.agent.title}". Follow its instructions where they fit the rules above:
 ${input.agent.instructions.slice(0, 4_000)}`,
+    );
+  if (!input.agent && input.agents?.length)
+    lines.push(
+      `The user's agents (call use_agent when a request clearly matches one):
+${input.agents
+        .map((agent) => `- ${agent.title}${agent.description ? `: ${agent.description}` : ""} (id ${agent.id})`)
+        .join("\n")}`,
     );
   if (input.memory?.length)
     lines.push(`What you remember about the user:\n${input.memory.map((entry) => `- ${entry}`).join("\n")}`);

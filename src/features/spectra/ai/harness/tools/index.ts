@@ -3,7 +3,7 @@ import type { AnyHarnessTool } from "../types";
 import { appTools } from "./app";
 import { createArtifactTool, editArtifactTool, readArtifactTool } from "./artifacts";
 import { listLibraryTool, readCalendarTool, readThreadTool, schoolDataTool, searchTool, webSearchTool } from "./context";
-import { askUserTool, showWidgetTool, updateTodosTool } from "./interaction";
+import { askUserTool, showWidgetTool, updateTodosTool, agentHandoffTool } from "./interaction";
 import type { HarnessSession } from "./shared";
 
 export { createSession, type HarnessSession } from "./shared";
@@ -25,5 +25,7 @@ export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
     updateTodosTool(session),
     showWidgetTool(),
     ...appTools(session),
+    // Only offered when the user has agents to hand a request to.
+    ...(session.agents.length && session.backend.useAgent ? [agentHandoffTool(session)] : []),
   ] as AnyHarnessTool[];
 }

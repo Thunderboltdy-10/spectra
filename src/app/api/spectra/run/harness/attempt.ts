@@ -8,6 +8,7 @@ import { runLog, withSpectraRunLog } from "@/features/spectra/ai/run-log";
 import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-usage";
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import type { PreparedAttachment, ResultAction, Surface } from "./contract";
+import { loadAgent, readAgentIndex, readRetainedAgentId } from "./agents";
 import { ConvexHarnessBackend } from "./convex-backend";
 import { attachmentParts, buildEnvironment, readPermissions, readThreadHistory, validTimeZone } from "./environment";
 import { mutate, query } from "./io";
@@ -128,23 +129,26 @@ function answerLabel(pending: PendingInput | null | undefined, answer: InputAnsw
   return answer.text?.trim() || answer.choiceLabel || pending?.options?.find((option) => option.key === answer.choiceKey)?.label || "Answered";
 }
 
-/** The user's chosen agent: its instructions join the environment. */
-async function readAgent(actorClerkId: string, runId: string, executionId: string, agentId: string) {
-  const runtime = await query<unknown & object, { agentId: string; title: string; instructions?: string } | null>(
-    "spectraArtifacts:getAgentRuntime",
-    { actorClerkId, agentId },
-  ).catch(() => null);
-  if (!runtime) throw new Error("The selected agent is unavailable or no longer permitted.");
-  await mutate("spectraRuns:setAgentRouting", {
-    actorClerkId,
-    runId,
-    executionId,
-    agentId: runtime.agentId,
-    confidence: 1,
-    reason: "Selected by you",
-    source: "explicit",
-  }).catch(() => null);
-  return { title: runtime.title, instructions: runtime.instructions ?? "" };
+/**
+ * The agent for this run: the one the user chose, or the one this thread kept
+ * using. Otherwise the model sees the user's agents and may hand off itself.
+ */
+async function readAgents(params: AttemptParams) {
+  const routing = { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId };
+  if (params.agentId) {
+    const chosen = await loadAgent(routing, params.agentId, "explicit", "Selected by you");
+    if (!chosen) throw new Error("The selected agent is unavailable or no longer permitted.");
+    return { agent: chosen, agents: [] };
+  }
+  const [index, retainedId] = await Promise.all([
+    readAgentIndex(params.actorClerkId),
+    readRetainedAgentId(params.actorClerkId, params.threadId),
+  ]);
+  const retained =
+    retainedId && index.some((entry) => entry.id === retainedId)
+      ? await loadAgent(routing, retainedId, "continued", "Used earlier in this conversation")
+      : null;
+  return retained ? { agent: retained, agents: [] } : { agent: null, agents: index };
 }
 
 export function runHarnessAttempt(params: AttemptParams, emit: (event: unknown) => void) {
@@ -252,8 +256,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       toolOperations: sameAttempt ? loaded?.toolOperations : {},
       onUiEvent: (event) => publish({ type: "ui_event", runId, key: event.key, ...(event.payload ? { payload: event.payload } : {}) }),
     });
-    const [agent, permissions, built, history] = await Promise.all([
-      params.agentId ? readAgent(actorClerkId, runId, executionId, params.agentId) : Promise.resolve(null),
+    const [agents, permissions, built, history] = await Promise.all([
+      readAgents(params),
       readPermissions(actorClerkId),
       buildEnvironment({
         actorClerkId,
@@ -360,7 +364,12 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       prompt: params.prompt,
       attachments: attachmentParts(params.attachments),
       history,
-      environment: { ...built.environment, timeZone, ...(agent ? { agent } : {}) },
+      environment: {
+        ...built.environment,
+        timeZone,
+        ...(agents.agent ? { agent: { title: agents.agent.title, instructions: agents.agent.instructions } } : {}),
+        ...(agents.agents.length ? { agents: agents.agents } : {}),
+      },
       permissions,
       workspaceId: params.workspaceId,
       wantTitle: params.mode === "start" && Boolean(params.threadId),

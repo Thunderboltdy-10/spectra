@@ -149,3 +149,36 @@ export function showWidgetTool(): HarnessTool<WidgetArgs> {
     }),
   };
 }
+
+type AgentArgs = { agentId: string };
+
+export function agentHandoffTool(session: HarnessSession): HarnessTool<AgentArgs> {
+  const titleOf = (id: string) => session.agents.find((agent) => agent.id === id)?.title;
+  return {
+    name: "use_agent",
+    description:
+      "Hand this request to one of the user's own agents (listed in the environment) when it clearly matches what the agent is for. You receive the agent's instructions and follow them for the rest of the conversation. Do not use it for requests no agent is meant for.",
+    parameters: {
+      type: "object",
+      properties: { agentId: { type: "string", description: "The agent's id from the environment." } },
+      required: ["agentId"],
+      additionalProperties: false,
+    },
+    effect: "read",
+    label: (args) => `Calling on *${titleOf(args.agentId) ?? "your agent"}*`,
+    parse: (raw) => {
+      const agentId = requireString(raw, "agentId", 200);
+      if (!titleOf(agentId)) throw new ToolInputError("agentId must be one of the user's agents listed in the environment.");
+      return { agentId };
+    },
+    execute: async (args, ctx) => {
+      const agent = await session.backend.useAgent?.(args.agentId, ctx.signal);
+      if (!agent) return { ok: false, content: "That agent is unavailable or no longer shared with the user. Carry on as Spectra." };
+      return {
+        ok: true,
+        content: `You now work as the user's agent "${agent.title}". Follow its instructions where they fit your rules:\n${agent.instructions.slice(0, 4_000) || "(It has no extra instructions.)"}`,
+        doneLabel: `Working as *${agent.title}*`,
+      };
+    },
+  };
+}

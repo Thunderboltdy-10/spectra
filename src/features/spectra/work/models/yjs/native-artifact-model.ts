@@ -13,6 +13,7 @@ import {
 } from "../../../collaboration/artifact-yjs-model";
 import { documentContentToProseMirrorJson } from "../../../lenses/document-projection";
 import { workYjsAdapter } from "./registry";
+import { codeStructureKey, codeYjsAdapter } from "./code-adapter";
 import { plainToY, shareUnchanged, workMeta, workRoot, yToPlain } from "./shared";
 import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
@@ -352,6 +353,13 @@ export class NativeArtifactYjsModel {
     controller: ArtifactRegionController,
   ) {
     const current = this.snapshot.value;
+    // Code file text is bound natively, but creating, renaming, removing or
+    // reordering files and changing project settings are not keystrokes: they
+    // exist only in this value, so a metadata save must carry them.
+    const codeStructureChanged =
+      this.typeKey === "code" &&
+      current !== null &&
+      codeStructureKey(current.content) !== codeStructureKey(value.content);
     const claims = [
       ...(current?.title !== value.title
         ? [{ regionId: "metadata:title", overlapDomains: ["metadata:title"] }]
@@ -377,14 +385,28 @@ export class NativeArtifactYjsModel {
             },
           ]
         : []),
+      ...(codeStructureChanged
+        ? [
+            {
+              regionId: "artifact:structure",
+              overlapDomains: ["artifact:structure"],
+            },
+          ]
+        : []),
     ];
     if (!claims.length) {
       this.rebuildSnapshotImmediately();
       return { applied: true as const };
     }
-    const result = await controller.editMany(claims, () =>
-      this.writeMetadata(value),
-    );
+    const result = await controller.editMany(claims, () => {
+      if (codeStructureChanged)
+        codeYjsAdapter.applyStructure(
+          this.transport.document,
+          value.content as Parameters<typeof codeYjsAdapter.applyStructure>[1],
+          workYjsOrigins(this.actor).localHuman,
+        );
+      this.writeMetadata(value);
+    });
     this.rebuildSnapshotImmediately();
     return result;
   }

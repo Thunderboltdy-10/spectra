@@ -136,6 +136,7 @@ import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
+import { replaceYText } from "../work/models/yjs/shared";
 import {
   artifactBlobSha256,
   downloadDocumentBlob,
@@ -894,9 +895,15 @@ export function CodeStudio({
 
   function updateActiveSource(source: string) {
     if (activeSharedText) {
-      // yCollab already wrote this edit to the file's Y.Text. Keep only the
+      // yCollab already wrote a typed edit to the file's Y.Text. Keep only the
       // local runtime/preview projection current; emitting the whole project
       // through onChange would overwrite concurrent files on every keystroke.
+      // A change made outside the editor (Format) is not in the Y.Text yet,
+      // and a metadata save never replays file text, so write it here.
+      if (activeSharedText.toString() !== source)
+        activeSharedText.doc?.transact(() =>
+          replaceYText(activeSharedText, source),
+        );
       setWorkbook((current) => {
         const next = structuredClone(current);
         const file = next.files.find(

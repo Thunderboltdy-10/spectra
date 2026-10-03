@@ -76,6 +76,41 @@ function projectFile(map: Y.Map<unknown>): CodeFile {
   };
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`,
+      )
+      .join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+
+function fileStructure(file: CodeFile) {
+  return {
+    id: file.id,
+    path: file.path,
+    language: file.language,
+    mediaType: file.mediaType ?? "text/plain",
+    generated: file.generated === true,
+  };
+}
+
+/**
+ * The project without file bodies: which files exist, their order, each
+ * file's path, language and kind, and every project setting. A file's text
+ * lives in its own Y.Text, written by the editor binding, so it is not part of
+ * the structure.
+ */
+export function codeStructureKey(value: unknown) {
+  const { files, ...project } = normalizeCodeContent(value);
+  return stableJson({ ...project, files: files.map(fileStructure) });
+}
+
 function rollbackUpdate(snapshot: LegacyWorkSnapshot<CodeContent>) {
   const rollback = new Y.Doc();
   const map = rollback.getMap<unknown>(CODE_ROLLBACK_MAP);
@@ -119,6 +154,41 @@ export class CodeYjsAdapter implements WorkYjsAdapter<CodeContent> {
       const root = workRoot(doc);
       const { files: _files, ...project } = content;
       root.set("project", plainToY(project));
+      setWorkModelMetadata(doc, this.workType, this.modelVersion);
+    }, origin);
+  }
+
+  /**
+   * Write the project's structure (files added, removed, reordered or
+   * renamed, and project settings) without touching the text of a file that
+   * already exists. That text is bound to the editor and is always at least as
+   * new as any React snapshot of it, so replaying the snapshot would undo
+   * keystrokes and a collaborator's typing.
+   */
+  applyStructure(doc: Y.Doc, model: CodeContent, origin: WorkTransactionOrigin) {
+    const content = normalizeCodeContent(model);
+    doc.transact(() => {
+      const files = codeFiles(doc);
+      const order = codeFileOrder(doc);
+      const nextIds = new Set(content.files.map((file) => file.id));
+      for (const fileId of [...files.keys()]) if (!nextIds.has(fileId)) files.delete(fileId);
+      for (const file of content.files) {
+        const existing = files.get(file.id);
+        if (!existing || !(existing.get("source") instanceof Y.Text)) {
+          const map = new Y.Map<unknown>();
+          files.set(file.id, map);
+          writeFile(map, file);
+          continue;
+        }
+        for (const [key, value] of Object.entries(fileStructure(file)))
+          if (existing.get(key) !== value) existing.set(key, value);
+      }
+      const ids = content.files.map((file) => file.id);
+      if (stableJson(order.toArray()) !== stableJson(ids)) replaceYArray(order, ids);
+      const root = workRoot(doc);
+      const { files: _files, ...project } = content;
+      if (stableJson(yToPlain(root.get("project"))) !== stableJson(project))
+        root.set("project", plainToY(project));
       setWorkModelMetadata(doc, this.workType, this.modelVersion);
     }, origin);
   }

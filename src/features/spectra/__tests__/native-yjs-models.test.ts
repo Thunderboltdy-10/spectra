@@ -1006,6 +1006,88 @@ describe("native fine-grained Yjs models", () => {
     ydoc.destroy();
   });
 
+  it("carries Code file creation and rename through a metadata-only save without replaying file text", async () => {
+    const ydoc = codeYjsAdapter.createDocument({
+      runtime: "none",
+      files: [{ id: "file-1", path: "index.html", source: "<main></main>" }],
+      entryFileId: "file-1",
+    } as never);
+    const liveMeta = ydoc.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Code");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const model = new NativeArtifactYjsModel("code", {
+      clientId: "code-structure-client",
+      document: ydoc,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    const before = model.getSnapshot().value?.content as {
+      files: Array<Record<string, unknown>>;
+    };
+    // The editor binding typed after React's snapshot was taken.
+    codeFileText(ydoc, "file-1")!.insert(13, "<!-- typed -->");
+    const editMany = vi.fn(
+      async (
+        _regions: Array<{ regionId: string; overlapDomains: string[] }>,
+        change: () => void,
+      ) => {
+        ydoc.transact(change);
+        return { applied: true as const, claims: [] };
+      },
+    );
+
+    await model.replaceMetadataSnapshot(
+      {
+        title: "Code",
+        tags: [],
+        content: {
+          ...before,
+          files: [
+            { ...before.files[0], path: "src/app.html" },
+            {
+              id: "file-2",
+              path: "src/util.js",
+              language: "javascript",
+              source: "export const x = 1;",
+            },
+          ],
+        },
+      },
+      { editMany } as unknown as Parameters<
+        typeof model.replaceMetadataSnapshot
+      >[1],
+    );
+
+    expect(editMany.mock.calls[0]![0].map((claim) => claim.regionId)).toEqual(
+      ["artifact:structure"],
+    );
+    const after = model.getSnapshot().value?.content as {
+      files: Array<{ id: string; path: string; source: string }>;
+    };
+    expect(after.files.map(({ id, path, source }) => ({ id, path, source }))).toEqual([
+      { id: "file-1", path: "src/app.html", source: "<main></main><!-- typed -->" },
+      { id: "file-2", path: "src/util.js", source: "export const x = 1;" },
+    ]);
+
+    editMany.mockClear();
+    await model.replaceMetadataSnapshot(
+      { title: "Code", tags: [], content: model.getSnapshot().value?.content },
+      { editMany } as unknown as Parameters<
+        typeof model.replaceMetadataSnapshot
+      >[1],
+    );
+    expect(editMany).not.toHaveBeenCalled();
+    model.destroy();
+    ydoc.destroy();
+  });
+
   it("projects a dense live model once and reuses its semantic descriptor index", () => {
     const adapter = workYjsAdapter("sheets");
     const document = adapter.createDocument(denseWorkbook());

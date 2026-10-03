@@ -1106,7 +1106,7 @@ No-artifact messages should not show the bottom “Saved progress and results”
 **Fix** (A1 AI harness, 2026-10-03)
 - Commit: `d2f49b52`, `19b9e7ca`.
 - Root cause: the old 7-stage pipeline wrote its reply and its result card from separate stages (receipt-report, verify), so a write that had landed could be described as staged or unsaved. The pipeline is gone. In the new harness a tool acts at once and returns what happened, the model replies from that result, and the thread shows one card per piece of work the run created, edited or referenced, taken from the tool results themselves.
-- Test: `src/features/spectra/ai/harness/__tests__/tools.test.ts` (writes land and report themselves), `exchange.test.ts` (one card per work; a creation stays a creation).
+- Test: `src/features/spectra/ai/harness/__tests__/tools.test.ts` (writes land and report themselves) and `exchange.test.ts` (one card per work; a creation stays a creation).
 - Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
 - Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
@@ -2551,7 +2551,7 @@ The scheduled dispatch arguments match this run and execution exactly. Its job s
 **Fix** (A1 AI harness, 2026-10-03)
 - Commit: `ecfd8c5f`, `d2f49b52`.
 - Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
-- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (“still names the thread”, even for a run under two seconds).
 - Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
 - Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
@@ -3412,7 +3412,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Fix** (A1 AI harness, 2026-10-03)
 - Commit: `d2f49b52`, `19b9e7ca`.
 - Root cause: the server built context from client-sent explicit context objects and focus modes, and approvals were shown from the run tabs of any conversation. The harness takes only the focused artifact of the current view; explicit context objects and focus modes are no longer read. An open question or approval is shown only inside its own run's exchange and collapses to one line once answered.
-- Test: `exchange.test.ts` (answered input collapses; input belongs to its run). The client-side context chip store was not changed and needs a live check.
+- Test: `src/features/spectra/ai/harness/__tests__/exchange.test.ts` (an answered question or approval collapses to one line). The client-side context chip store was not changed and needs a live check.
 - Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
 - Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
@@ -3519,13 +3519,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; saved Profile A.
 
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`.
-- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
-- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-039 additional verifier occurrence · fresh WWI document create repeat after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3547,13 +3540,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code fda81f87; local web app on port 3000; documentation checkout 18a31274.
 
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`.
-- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
-- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-039 additional verifier occurrence · fresh six-slide presentation create after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3573,13 +3559,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
 
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`.
-- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
-- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-040 additional verifier occurrence · post-create presentation title after fda81f87 · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3595,13 +3574,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV040-presentation-thread-title-after-reload-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-presentation-title-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Application code `fda81f87`; local web app on port 3000; documentation checkout `18a31274`.
-
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `ecfd8c5f`, `d2f49b52`.
-- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
-- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-058 · Short user messages occupy most of the chat column
 
@@ -3769,7 +3741,7 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Fix** (A1 AI harness, 2026-10-03)
 - Commit: `d2f49b52`.
 - Root cause: the old gather stage mixed conversation memory and other requests into the context packet, so a summary could draw on an unrelated earlier request. The harness history is this thread's messages only (`readThreadHistory`), and the focused artifact is read live (including unsaved collaborative text) when the model asks for it.
-- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (history and environment).
+- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (“binds history to this thread and puts the new message last”).
 - Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
 - Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
@@ -3792,13 +3764,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
 
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`.
-- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
-- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-022 additional verifier occurrence · synthetic document edit save-state wording · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3818,13 +3783,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
 
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`, `19b9e7ca`.
-- Root cause: the old 7-stage pipeline wrote its reply and its result card from separate stages (receipt-report, verify), so a write that had landed could be described as staged or unsaved. The pipeline is gone. In the new harness a tool acts at once and returns what happened, the model replies from that result, and the thread shows one card per piece of work the run created, edited or referenced, taken from the tool results themselves.
-- Test: `src/features/spectra/ai/harness/__tests__/tools.test.ts` (writes land and report themselves), `exchange.test.ts` (one card per work; a creation stays a creation).
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-040 additional verifier occurrence · title after successful document edit · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -3841,13 +3799,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV040-post-ai-edit-title-header-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-row-fda81f87-20261002.png`; `.spectra-local/live-verification/LV040-post-ai-edit-title-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Application code `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
-
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `ecfd8c5f`, `d2f49b52`.
-- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
-- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-056 additional verifier occurrence · artifact context retained by blank New chat · 2026-10-02 (Europe/Madrid)
 
@@ -3866,13 +3817,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV056-new-chat-context-from-other-thread-fda81f87-20261002.png`; `.spectra-local/live-verification/LV056-new-chat-context-fda81f87-20261002-redacted.txt`.
 
 **Commit tested:** Original verification commit `4823b413`; regression observed on application code `fda81f87`, local instance 8, web port 3000; documentation checkout `18a31274`.
-
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`, `19b9e7ca`.
-- Root cause: the server built context from client-sent explicit context objects and focus modes, and approvals were shown from the run tabs of any conversation. The harness takes only the focused artifact of the current view; explicit context objects and focus modes are no longer read. An open question or approval is shown only inside its own run's exchange and collapses to one line once answered.
-- Test: `exchange.test.ts` (answered input collapses; input belongs to its run). The client-side context chip store was not changed and needs a live check.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
 
 ### LV-062 additional verifier occurrence · Library realtime errors while browser is online · 2026-10-02 (Europe/Madrid)
 
@@ -4073,14 +4017,6 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`; `.spectra-local/live-verification/LV050-current-flashcard-create-redacted-fda81f87-20261002.png`.
 
 **Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
-
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `d2f49b52`.
-- Root cause: requests passed intake, target resolution, discovery, planning, verification and completion stages, any of which could refuse or stall a create (the eight-card deck, the WW1 document, the six slides). One model-tools loop now does the work: create_artifact authors every type directly.
-- Test: smoke `flashcards` created an 8-card deck in 17.7 s, `document` in 14.1 s, `6-slide` in 22.5 s, `whiteboard` in 19.4 s (first output 1.5 to 2.4 s); all 10 smoke scenarios passed.
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.
-
 ### LV-040 additional verifier occurrence · completed flashcard-create reply retains “New conversation” header · 2026-10-02 (Europe/Madrid)
 
 **Steps**
@@ -4098,11 +4034,3 @@ The action and initiator of request #237 are absent from the evidence, so this d
 **Evidence:** `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002-redacted.txt`; `.spectra-local/live-verification/LV039-LV050-current-flashcard-create-fda81f87-20261002.png`.
 
 **Commit tested:** Application `fda81f87`; local instance 8, web port 3000; documentation checkout `18a31274`.
-
-
-**Fix** (A1 AI harness, 2026-10-03)
-- Commit: `ecfd8c5f`, `d2f49b52`.
-- Root cause: the title came from a separate post-run metadata step that did not run reliably. The caption writer (low reasoning) now also writes the thread title in the run's first caption call; the run applies it through `spectraThreads:applyGeneratedMetadata` and the client refreshes the thread list on `thread_title`.
-- Test: `src/features/spectra/ai/harness/__tests__/run.test.ts` (title produced once for a new thread).
-- Live recheck: not run in this lane (the lane does not start Next, Convex or the gateway); `npm run smoke:ai` ran the same harness against the real model.
-- Superseded by the new harness. Status FIXED; only the verifier sets VERIFIED.

@@ -32,7 +32,7 @@ import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
 import { TrashPurgeDialog } from "../components/shell-dialogs";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
-import { presentSync } from "../bridge/status";
+import { presentSync, replicaHasNativeLock } from "../bridge/status";
 import { useProductOnline } from "../bridge/use-product-online";
 import type { StatusTone } from "@/components/ui/badge";
 import {
@@ -190,7 +190,28 @@ type MenuState = {
   nodeIds: string[];
 };
 
-function ReplicaPresentationLoader({
+type ReplicaPresentationRow = {
+  replicas: Parameters<typeof presentSync>[0]["replicas"];
+  pendingCount: number;
+};
+
+/**
+ * A row still moving on its own: a write queued for a device, or Office
+ * holding the file. The device acknowledges these without any action in the
+ * browser, so a parked snapshot would keep "Waiting for Office" or "Syncing"
+ * on screen until the next focus or idle refresh, minutes later.
+ */
+export function replicaRowsInFlight(rows: ReadonlyArray<ReplicaPresentationRow>) {
+  return rows.some(
+    (row) =>
+      row.pendingCount > 0 ||
+      row.replicas.some(
+        (replica) => replica.state === "pending" || replicaHasNativeLock(replica),
+      ),
+  );
+}
+
+export function ReplicaPresentationLoader({
   onRows,
 }: {
   onRows: (
@@ -213,7 +234,9 @@ function ReplicaPresentationLoader({
   useEffect(() => {
     if (rows === undefined) return;
     onRows(rows);
-    setLive(false);
+    // Park only a settled answer; stay subscribed while a write is in flight
+    // so its acknowledgement replaces the waiting label as soon as it lands.
+    if (!replicaRowsInFlight(rows)) setLive(false);
   }, [onRows, rows]);
   useEffect(() => {
     const refresh = () => setLive(true);

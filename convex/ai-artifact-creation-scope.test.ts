@@ -94,6 +94,10 @@ describe("created artifact effect identity", () => {
     await f.bind();
     expect(await f.actor.action(prepare, { ...f.attempt, operationId: f.createId })).toEqual({ approvalReasons: [] });
     expect((await f.admitted(f.createId, createInput.content)).scope.kind).toBe("create");
+    // The harness stages a proposed edit on its own, so it can ask before it
+    // runs; an edit already executing is never prepared again.
+    expect((await f.actor.action(prepare, { ...f.attempt, operationId: f.followerId })).approvalReasons.length).toBeGreaterThan(0);
+    await f.activate(f.followerId);
     await expect(f.actor.action(prepare, { ...f.attempt, operationId: f.followerId })).rejects.toThrow("PREPARATION_CHANGED");
   });
 

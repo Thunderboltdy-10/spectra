@@ -413,7 +413,11 @@ export function BridgeSettings() {
                 disabled={busy}
                 onClick={() => void beginPairing()}
               >
-                {busy ? "Preparing…" : "Connect this device"}
+                {busy
+                  ? "Preparing…"
+                  : reachability === "not-set-up"
+                    ? "Connect Bridge"
+                    : "Connect this device"}
               </Button>
             ) : null}
           </div>

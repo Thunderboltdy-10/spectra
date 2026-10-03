@@ -59,10 +59,13 @@ export type BridgeConnectionState =
 export type BridgeDiscovery =
   | { kind: "running"; health: BridgeHealth }
   | { kind: "not-running" }
-  | { kind: "port-taken" };
+  | { kind: "port-taken" }
+  /** This device has never connected Bridge, so Spectra does not look for it. */
+  | { kind: "not-set-up" };
 /** What Files and devices may say. Session pairing is not the same as process liveness. */
 export type BridgeReachability =
   | "offline"
+  | "not-set-up"
   | "not-running"
   | "port-taken"
   | "update-required"
@@ -70,6 +73,70 @@ export type BridgeReachability =
   | "connected";
 export const BRIDGE_SESSION_STORAGE_KEY = "spectra.bridge.session";
 export const BRIDGE_STATUS_CACHE_KEY = "spectra.bridge.status";
+/**
+ * Set on this device the first time someone connects Bridge here. Until then
+ * Spectra never probes the local Bridge port: an installed Bridge that is not
+ * configured for this app answers without a CORS allowance, so every probe
+ * would be a failed browser request on a device that never asked for Bridge.
+ */
+export const BRIDGE_DISCOVERY_STORAGE_KEY = "spectra.bridge.discovery";
+
+function readStorage(storage: () => Storage, key: string) {
+  try {
+    return storage().getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Whether this device has connected Bridge before, so discovery may run. */
+export function bridgeDiscoveryEnabled() {
+  if (typeof window === "undefined") return false;
+  if (readStorage(() => window.localStorage, BRIDGE_DISCOVERY_STORAGE_KEY))
+    return true;
+  // A device that paired before this flag existed still holds its session.
+  const paired =
+    readStorage(() => window.localStorage, BRIDGE_SESSION_STORAGE_KEY) ??
+    readStorage(() => window.sessionStorage, BRIDGE_SESSION_STORAGE_KEY);
+  if (paired) enableBridgeDiscovery();
+  return Boolean(paired);
+}
+
+export function enableBridgeDiscovery() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
+  } catch {
+    /* Storage can be blocked; discovery then stays per page. */
+  }
+}
+
+/** The user disconnected this device on purpose: stop looking for Bridge. */
+export function disableBridgeDiscovery() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(BRIDGE_DISCOVERY_STORAGE_KEY);
+  } catch {
+    /* Nothing to forget when storage is blocked. */
+  }
+}
+
+/** First wait between automatic checks, and the longest wait after failures. */
+export const BRIDGE_DISCOVERY_INTERVAL_MS = 15_000;
+export const BRIDGE_DISCOVERY_MAX_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * How long to wait before the next automatic check. A running Bridge is
+ * checked at the base interval; each consecutive miss doubles the wait up to
+ * the cap, so an absent or misconfigured Bridge is not polled every 15 s.
+ */
+export function bridgeDiscoveryDelay(consecutiveMisses: number) {
+  const misses = Math.max(0, Math.floor(consecutiveMisses));
+  return Math.min(
+    BRIDGE_DISCOVERY_MAX_INTERVAL_MS,
+    BRIDGE_DISCOVERY_INTERVAL_MS * 2 ** Math.min(misses, 10),
+  );
+}
 
 export function protocolMajor(value: string) {
   const parsed = Number(value.split(".")[0]);
@@ -104,6 +171,7 @@ export function presentBridgeReachability(input: {
   sessionPaired: boolean;
 }): BridgeReachability {
   if (!input.online) return "offline";
+  if (input.discovery.kind === "not-set-up") return "not-set-up";
   if (input.discovery.kind === "not-running") return "not-running";
   if (input.discovery.kind === "port-taken") return "port-taken";
   if (
@@ -124,6 +192,13 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
       label: "Offline",
       detail:
         "This browser is offline. Spectra cannot check Spectra Bridge until you reconnect.",
+    };
+  }
+  if (kind === "not-set-up") {
+    return {
+      label: "Not connected",
+      detail:
+        "Connect Bridge to use files that live on this PC. Spectra looks for Bridge only on devices you have connected.",
     };
   }
   if (kind === "not-running") {
@@ -168,6 +243,9 @@ export function rememberedFolderDetail(kind: BridgeReachability): string {
   if (kind === "running") {
     return "This folder is remembered. Connect this device to use it.";
   }
+  if (kind === "not-set-up") {
+    return "This folder is remembered. Connect Bridge on this device to use it.";
+  }
   if (kind === "port-taken") {
     return "This folder is remembered. Spectra Bridge cannot use it until the connection is free.";
   }
@@ -181,7 +259,8 @@ export function folderChipLabel(input: {
   reachability: BridgeReachability;
 }): string {
   if (input.reachability === "offline") return "Offline";
-  if (input.reachability === "running") return "Not connected";
+  if (input.reachability === "running" || input.reachability === "not-set-up")
+    return "Not connected";
   if (input.reachability === "port-taken") return "Connection blocked";
   if (input.reachability === "update-required") return "Update required";
   if (input.discoveryFailed) return "Waiting for Spectra";
@@ -204,6 +283,9 @@ export function bridgeDiscoveryMessage(discovery: BridgeDiscovery): string {
   }
   if (discovery.kind === "port-taken") {
     return bridgeReachabilityCopy("port-taken").detail;
+  }
+  if (discovery.kind === "not-set-up") {
+    return bridgeReachabilityCopy("not-set-up").detail;
   }
   return "";
 }
@@ -273,6 +355,7 @@ export function loadBridgeSession() {
 }
 
 export function persistBridgeSession(token: string) {
+  enableBridgeDiscovery();
   window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, token);
   window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
 }

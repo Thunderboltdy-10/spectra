@@ -57,6 +57,9 @@ export const PLACEHOLDER_TEXT = new Set(
   ].map((entry) => entry.toLowerCase()),
 );
 
+const NUMBERED_PLACEHOLDER = /^(?:key idea|idea|slide|item|card|node|question) \d+$/i;
+
 export function isPlaceholder(value: unknown) {
-  return PLACEHOLDER_TEXT.has(text(value).trim().toLowerCase());
+  const trimmed = text(value).trim();
+  return PLACEHOLDER_TEXT.has(trimmed.toLowerCase()) || NUMBERED_PLACEHOLDER.test(trimmed);
 }

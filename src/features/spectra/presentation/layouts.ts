@@ -532,7 +532,7 @@ function hydrateGeneratedRoles(
   }
 }
 
-function fitGeneratedSlide(
+export function fitGeneratedSlide(
   deck: PresentationContent,
   slide: PresentationSlide,
   authoredHeights: ReadonlySet<string>,

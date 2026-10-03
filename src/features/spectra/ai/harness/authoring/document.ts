@@ -101,7 +101,7 @@ export function documentFromMarkdown(
     nodes.push({ ...parsed, attrs: { ...(parsed.attrs ?? {}), blockId: id } });
   }
   if (!nodes.length) nodes.push({ type: "paragraph", attrs: { blockId: ids("block") } });
-  const doc: PmNode = { type: "doc", content: nodes };
+  const doc: PmNode & { content: PmNode[] } = { type: "doc", content: nodes };
   const base = record(previous);
   const { tiptap: _tiptap, blocks: _blocks, outline: _outline, ...rest } = base;
   return {

@@ -15,6 +15,7 @@ import { permissionDecision, permissionSummary, type PermissionPrefs } from "./p
 import { buildSystemPrompt, type EnvironmentInput } from "./prompt";
 import { SUMMARY_INSTRUCTIONS } from "./compaction";
 import { buildHarnessTools, createSession } from "./tools";
+import { rememberTitle } from "./tools/shared";
 import type {
   ArtifactTouch,
   HarnessContentPart,
@@ -132,6 +133,9 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   const started = now();
   const session = createSession({ backend: input.backend, prompt: input.prompt, workspaceId: input.workspaceId });
   const tools = buildHarnessTools(session);
+  const focused = input.environment.focused;
+  // Labels name the focused artifact from the first step, without a read.
+  if (focused) rememberTitle(session, focused.id, focused.title, focused.type);
   const systemPrompt = buildSystemPrompt({
     ...input.environment,
     timeZone: input.environment.timeZone ?? input.backend.timeZone,

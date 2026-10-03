@@ -188,7 +188,7 @@ export const SMOKE_SCENARIOS: SmokeScenario[] = [
   {
     name: "compaction",
     prompt: "What did I say my dog is called, and which essay topic did we settle on?",
-    contextWindow: 9_000,
+    contextWindow: 6_000,
     history: [
       { role: "user", content: "Quick context: my dog is called Biscuit and I am in Year 11." },
       { role: "assistant", content: "Got it, Biscuit it is. What are you working on?" },

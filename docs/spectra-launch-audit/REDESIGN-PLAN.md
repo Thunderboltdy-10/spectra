@@ -127,3 +127,4 @@ compat shims, and say so in the commit.
 | A1 | `lane/ai-harness` · `<local-workspace>` | Running |
 | R1 | `main` · primary checkout | Running |
 | Visual spec | — | In progress (orchestrator) |
+| Prism (user's agent) | `lane/prism` · `<local-workspace>` | Ready to run with `docs/brand/PRISM-RUNTIME-PROMPT.md` |

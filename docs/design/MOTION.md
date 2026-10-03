@@ -183,20 +183,60 @@ extracted parts light up as they are found.
 - `pressed`: rebound;
 - `drag` and `settle`.
 
-**Sources.** These come from the user's Blender exports in `<local-workspace>`. They are
-copied into `public/brand/prism/` and include:
+**The prism.**
 
-- hero PNGs;
-- icon sizes;
-- WebM and PNG-sequence loops;
-- `prism.glb`;
-- vector references.
+- It is dark, opaque ink with real blue-violet depth, not glass.
+- Its prism effect is light: spectral edges whose colours slide with the view angle, one soft refracted band and a
+  clean key highlight.
+- It has the asymmetric, chunky, softly bevelled shape of the code-built landing prism.
+- It is built to [`docs/brand/PRISM-RUNTIME-PROMPT.md`](../brand/PRISM-RUNTIME-PROMPT.md) in
+  `src/features/spectra/brand/prism/`.
+- The Blender glass master is an experiment. Only its motion curves are reused.
 
 **Which source at which size.**
 
-- **48 px and below:** a redrawn vector mark, plus the PNG sequences or sprite sheets for loops.
-- **The island:** the GLB through `@react-three/fiber`, or high-quality video loops, whichever holds 60 fps with the
-  least memory. Measure before choosing.
-- **Hero moments:** the GLB.
+- **48 px and below:** a hand-tuned SVG mark (three ink tones and one spectral edge). Press is a CSS transform.
+- **49–160 px and the island:** shared WebP sprite atlases baked from the live shader and played with CSS. Drag tilt
+  maps to turntable frames.
+- **Large hero moments only:** `LivePrism`. It is one lazy WebGL canvas with a single-pass shader, renders on demand,
+  and falls back to a poster.
 
-The current `spectra-mark.tsx` drawing is replaced.
+`SpectraMark` never creates a WebGL context. The current `spectra-mark.tsx` drawing is replaced.
+
+## Performance
+
+Spectra is gaining a great deal of life, and it must not get slower. These budgets apply to every lane, from the first
+commit.
+
+**WebGL.**
+
+- At most one WebGL context on a page, and only while it is doing something visible.
+- Repeated elements (marks, icons, cursors, status cues) are SVG, CSS or shared images, never per-instance canvases.
+
+**Heavy libraries.**
+
+- `three` and `@react-three/*` load only on the routes that show a live 3D moment.
+- Other heavy libraries (editors, charts, code runtimes) load when the user first needs them.
+
+**Ambient effects.**
+
+- Ambient effects (the dot field, the idle prism, AI light) cost nothing at rest: CSS or a stopped canvas.
+- When running, they stay under about 2 ms of main-thread time per frame.
+- They pause when the tab is hidden or the element is offscreen.
+
+**What to animate.**
+
+- Animate `transform`, `opacity` and `filter` only.
+- No layout-driven animation loops.
+- Long lists are virtualised.
+
+**Weak devices.**
+
+- Every effect has a cheaper tier, and the tier is chosen once from device signals and early frame times.
+- Reduced motion is its own designed tier, not a broken one.
+
+**Targets on a mid-range laptop.**
+
+- INP under 200 ms.
+- No long tasks over 50 ms during interaction.
+- Route JS growth justified in each lane's report.

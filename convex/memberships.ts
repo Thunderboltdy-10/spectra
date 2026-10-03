@@ -155,6 +155,25 @@ export const acceptInvitation = mutation({
   },
 });
 
+/**
+ * Why an invitation link cannot be used. A preview of an unknown, revoked or
+ * expired link is an ordinary answer, not a failed request: the join page
+ * shows it as final. Only authentication and transport failures are errors.
+ */
+const UNAVAILABLE_INVITATION = {
+  invalid: "This invitation is unavailable.",
+  expired: "This invitation has expired.",
+  school_unavailable: "The school is unavailable.",
+} as const;
+
+function unavailableInvitation(reason: keyof typeof UNAVAILABLE_INVITATION) {
+  return {
+    outcome: "unavailable" as const,
+    reason,
+    message: UNAVAILABLE_INVITATION[reason],
+  };
+}
+
 export const previewInvitation = query({
   args: { tokenHash: v.string() },
   handler: async (ctx, args) => {
@@ -165,21 +184,18 @@ export const previewInvitation = query({
       .query("membershipInvitations")
       .withIndex("by_token_hash", (q) => q.eq("tokenHash", args.tokenHash))
       .unique();
-    if (!invitation)
-      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    if (!invitation) return unavailableInvitation("invalid");
     const school = await ctx.db.get(invitation.schoolId);
     if (!school || school.status !== "active")
-      throw new Error(
-        "INVITATION_SCHOOL_UNAVAILABLE: The school is unavailable.",
-      );
+      return unavailableInvitation("school_unavailable");
     const now = Date.now();
-    if (invitation.status === "revoked")
-      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    if (invitation.status === "revoked") return unavailableInvitation("invalid");
     if (invitation.status === "expired" || invitation.expiresAt <= now)
-      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
+      return unavailableInvitation("expired");
     const emailMatches = normalizeEmail(invitation.email) === account.email;
     const existing = await getActiveMembership(ctx, account._id);
     return {
+      outcome: "available" as const,
       schoolName: school.name,
       role: invitation.role,
       emailMatches,

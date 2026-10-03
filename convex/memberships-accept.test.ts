@@ -112,6 +112,7 @@ describe("school invitation accept is idempotent", () => {
       tokenHash: "preview-hash",
     });
     expect(preview).toMatchObject({
+      outcome: "available",
       schoolName: "The Global College",
       role: "school_admin",
       emailMatches: true,
@@ -124,6 +125,72 @@ describe("school invitation accept is idempotent", () => {
         .unique(),
     );
     expect(invitation?.status).toBe("pending");
+  });
+
+  it("answers an unknown, revoked or expired link with an unavailable outcome instead of an error", async () => {
+    const t = convexTest(schema, modules);
+    const identity = {
+      subject: "clerk_lv003_preview",
+      email: "lv003-preview@example.test",
+      emailVerified: true,
+    };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "LV-003 School",
+        slug: `lv003-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: identity.subject,
+        email: identity.email,
+        emailVerified: true,
+        name: "LV-003 Invitee",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      for (const [tokenHash, status, expiresAt] of [
+        ["lv003-revoked", "revoked", now + 86_400_000],
+        ["lv003-expired", "pending", now - 1],
+      ] as const)
+        await ctx.db.insert("membershipInvitations", {
+          schoolId,
+          email: identity.email,
+          role: "student",
+          tokenHash,
+          status,
+          invitedByAccountId: accountId,
+          expiresAt,
+          createdAt: now,
+          updatedAt: now,
+        });
+    });
+    const asUser = t.withIdentity(identity);
+    const preview = (tokenHash: string) =>
+      asUser.query(api.memberships.previewInvitation, { tokenHash });
+    await expect(preview("lv003-unknown")).resolves.toEqual({
+      outcome: "unavailable",
+      reason: "invalid",
+      message: "This invitation is unavailable.",
+    });
+    await expect(preview("lv003-revoked")).resolves.toMatchObject({
+      outcome: "unavailable",
+      reason: "invalid",
+    });
+    await expect(preview("lv003-expired")).resolves.toEqual({
+      outcome: "unavailable",
+      reason: "expired",
+      message: "This invitation has expired.",
+    });
+    await expect(
+      t.query(api.memberships.previewInvitation, { tokenHash: "lv003-unknown" }),
+    ).rejects.toThrow("AUTH_NOT_SIGNED_IN");
   });
 
   it("previews a mismatch but refuses acceptance for the wrong account", async () => {

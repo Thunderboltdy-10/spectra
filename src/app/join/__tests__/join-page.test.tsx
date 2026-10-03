@@ -14,6 +14,10 @@ vi.mock("@/features/spectra/field/surface-field", () => ({
 const clerk = vi.hoisted(() => ({ signOut: vi.fn(async () => {}) }));
 vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerk }));
 
+function routeResult(body: unknown) {
+  return { ok: true, status: 200, json: async () => body };
+}
+
 function routeFailure(code: string, message: string, status: number) {
   return {
     ok: false,
@@ -46,13 +50,15 @@ describe("join page", () => {
     ).toBe("/request-access");
   });
 
-  it("does not offer a retry for an expired invitation and never shows the machine code", async () => {
+  it("treats an expired invitation as a final answer: no retry, no machine code", async () => {
     navigation.search = "token=expired-token";
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        routeFailure("INVITATION_EXPIRED", "This invitation has expired.", 410),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      routeResult({
+        outcome: "unavailable",
+        reason: "expired",
+        message: "This invitation has expired.",
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     render(<JoinSchoolPage />);
     const alert = await screen.findByRole("alert");
@@ -60,6 +66,29 @@ describe("join page", () => {
     expect(alert.textContent).not.toContain("INVITATION_EXPIRED");
     expect(screen.queryByRole("button", { name: "Retry invitation check" })).toBeNull();
     expect(document.cookie).not.toContain("expired-token");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an unknown link as unavailable from a successful check", async () => {
+    navigation.search = "token=unknown-token";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        routeResult({
+          outcome: "unavailable",
+          reason: "invalid",
+          message: "This invitation is unavailable.",
+        }),
+      ),
+    );
+    render(<JoinSchoolPage />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This invitation is unavailable.");
+    expect(screen.queryByRole("button", { name: "Retry invitation check" })).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Join school" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(document.cookie).not.toContain("unknown-token");
   });
 
   it("still offers a retry when the check failed for a transient reason", async () => {
@@ -94,6 +123,7 @@ describe("join page", () => {
         ok: true,
         status: 200,
         json: async () => ({
+          outcome: "available",
           schoolName: "Riverside School",
           role: "student",
           emailMatches: false,

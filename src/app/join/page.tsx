@@ -30,10 +30,18 @@ function invitationSentence(raw: string) {
 }
 
 type InvitationPreview = {
+  outcome?: "available";
   schoolName: string;
   role: "student" | "teacher" | "school_admin";
   emailMatches: boolean;
   alreadyMember: boolean;
+};
+
+/** An unknown, revoked or expired link: a final answer, never retried. */
+type UnavailableInvitation = {
+  outcome: "unavailable";
+  reason: "invalid" | "expired" | "school_unavailable";
+  message: string;
 };
 
 function JoinSchoolContent() {
@@ -64,9 +72,20 @@ function JoinSchoolContent() {
     let active = true;
     setPreviewState("loading");
     setPreviewRetryable(false);
-    void mutateAdministration<InvitationPreview>("previewInvitation", { token })
+    void mutateAdministration<InvitationPreview | UnavailableInvitation>(
+      "previewInvitation",
+      { token },
+    )
       .then((next) => {
         if (!active) return;
+        if (next.outcome === "unavailable") {
+          clearJoinTokenCookie(document);
+          setPreview(null);
+          setPreviewState("error");
+          setStatus("error");
+          setError(next.message);
+          return;
+        }
         setPreview(next);
         setPreviewState("ready");
       })

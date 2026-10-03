@@ -125,6 +125,7 @@ compat shims, and say so in the commit.
 | Lane | Branch / worktree | State |
 | --- | --- | --- |
 | A1 | `lane/ai-harness` · `<local-workspace>` | Running |
-| R1 | `main` · primary checkout | Running |
-| Visual spec | — | In progress (orchestrator) |
+| R1 | `main` · primary checkout | Done: 13 issues fixed, build green ([report](reports/R-R1-RELIABILITY.md)). Left for a paired Bridge: LV-046 native check, LV-061 first open. For D3: Calendar block notes show raw `<p>` HTML. |
+| Visual spec | — | Awaiting approval: https://claude.ai/artifact/56MkPBViV6HKgCz9CM8uvV |
+| A2a · Semantic layer | `lane/semantic` · `<local-workspace>` | Running (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2) |
 | Prism (user's agent) | `lane/prism` · `<local-workspace>` | Ready to run with `docs/brand/PRISM-RUNTIME-PROMPT.md` |

@@ -10,6 +10,7 @@ import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
 import { SpectraMotionConfig } from "@/features/spectra/motion/motion-primitives";
+import { LifeField } from "@/features/spectra/life/life-field";
 import { AccountStorageBoundary } from "./account-storage-boundary";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,13 @@ const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
 function LiveDataProvider({ children }: { children: React.ReactNode }) {
   if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");
   return <ConvexProviderWithClerk client={convexClient} useAuth={useRecoverableClerkAuth}><AccountStorageBoundary>{children}</AccountStorageBoundary></ConvexProviderWithClerk>;
+}
+
+/** The life field under and over every page, except the landing page, which has its own. */
+function AppLifeField() {
+  const pathname = usePathname();
+  if (pathname === "/" || pathname?.startsWith("/landing")) return null;
+  return <LifeField />;
 }
 
 function PathScopedErrorBoundary({ children }: { children: ReactNode }) {
@@ -34,7 +42,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <PathScopedErrorBoundary>
       <ThemeProvider>
-        <SpectraMotionConfig>{content}</SpectraMotionConfig>
+        <SpectraMotionConfig>
+          {content}
+          <AppLifeField />
+        </SpectraMotionConfig>
         <DynamicFavicon />
         <LocalComputeCacheController />
         <CookieConsentManager />

@@ -752,7 +752,7 @@ export function SuperadminShell() {
   })();
 
   return (
-    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
+    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh pb-24">
       <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
         <ProductPageHeader
           className="mb-5"

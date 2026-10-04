@@ -1,22 +1,17 @@
 // @vitest-environment jsdom
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { act, render, renderHook } from "@testing-library/react";
+import { render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SurfaceField,
   fieldStateFor,
   useActivityField,
 } from "../field/surface-field";
-import {
-  fieldForSyncState,
-  useSyncCompletionField,
-} from "../components/studio-presence-layer";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { choosePrismClaim } from "@/app/landing/prism/prism-slot";
 import { ArtifactCard } from "../components/artifact-card";
-import type { StudioPresentationState } from "../bridge/status";
 import type { InteractionState } from "../collaboration/interaction-model";
 
 /**
@@ -96,73 +91,6 @@ describe("fieldStateFor", () => {
   it("falls back to active for everything else", () => {
     expect(fieldStateFor(interactionState("active", "hover"))).toBe("active");
     expect(fieldStateFor(interactionState("settled", "select"))).toBe("active");
-  });
-});
-
-describe("useSyncCompletionField", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it("fires one transient success wake when a save lands", () => {
-    const { result, rerender } = renderHook(
-      ({ state }: { state: StudioPresentationState }) =>
-        useSyncCompletionField(state),
-      { initialProps: { state: "saving" as StudioPresentationState } },
-    );
-    expect(result.current).toEqual([]);
-    rerender({ state: "saved" as const });
-    expect(result.current).toHaveLength(1);
-    expect(result.current[0]).toMatchObject({ state: "success" });
-    /* The wake leaves on its own — no influence may linger. */
-    act(() => void vi.advanceTimersByTime(1400));
-    expect(result.current).toEqual([]);
-  });
-
-  it("does not fire for non-working transitions or repeated saved states", () => {
-    const { result, rerender } = renderHook(
-      ({ state }: { state: StudioPresentationState }) =>
-        useSyncCompletionField(state),
-      { initialProps: { state: "saved" as StudioPresentationState } },
-    );
-    rerender({ state: "live" as const });
-    expect(result.current).toEqual([]);
-    rerender({ state: "offline" as const });
-    rerender({ state: "saved" as const });
-    expect(result.current).toEqual([]);
-  });
-
-  it("gives back-to-back saves fresh influence ids so each converges", () => {
-    const { result, rerender } = renderHook(
-      ({ state }: { state: StudioPresentationState }) =>
-        useSyncCompletionField(state),
-      { initialProps: { state: "saving" as StudioPresentationState } },
-    );
-    rerender({ state: "saved" as const });
-    const first = result.current[0]!.id;
-    rerender({ state: "saving" as const });
-    rerender({ state: "saved" as const });
-    const second = result.current[0]!.id;
-    expect(second).not.toBe(first);
-  });
-
-  it("never fires on failure — an error is not a completion", () => {
-    const { result, rerender } = renderHook(
-      ({ state }: { state: StudioPresentationState }) =>
-        useSyncCompletionField(state),
-      { initialProps: { state: "saving" as StudioPresentationState } },
-    );
-    rerender({ state: "error" as const });
-    expect(result.current).toEqual([]);
-  });
-});
-
-describe("fieldForSyncState", () => {
-  it("shows truthful in-flight, offline, and failure states", () => {
-    expect(fieldForSyncState("saving")).toMatchObject({ state: "waiting" });
-    expect(fieldForSyncState("pending")).toMatchObject({ state: "waiting" });
-    expect(fieldForSyncState("offline")).toMatchObject({ state: "waiting" });
-    expect(fieldForSyncState("error")).toMatchObject({ state: "failure" });
-    expect(fieldForSyncState("saved")).toBeNull();
   });
 });
 

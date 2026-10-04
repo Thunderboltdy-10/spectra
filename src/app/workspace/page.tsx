@@ -8,7 +8,7 @@ export default function WorkspacePage() {
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
       <Suspense
-        fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}
+        fallback={<div className="h-full min-h-0" />}
       >
         <SpectraShell surface="workspace" />
       </Suspense>

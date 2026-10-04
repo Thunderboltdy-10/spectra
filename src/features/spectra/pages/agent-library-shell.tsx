@@ -816,7 +816,7 @@ export function AgentLibraryShell({
   }
 
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-y-auto pb-32">
         <main className="mx-auto w-full max-w-[1460px] px-5 py-6 sm:px-8 lg:px-10">
           <ProductPageHeader

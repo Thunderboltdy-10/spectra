@@ -812,7 +812,7 @@ export function ManageBacIntegrationShell() {
 
   if (loading)
     return (
-      <div className="grid h-full min-h-[70vh] place-items-center bg-[var(--bg-primary)]">
+      <div className="grid h-full min-h-[70vh] place-items-center">
         <div className="flex items-center gap-2 text-caption text-[var(--text-tertiary)]">
           <LoaderCircle className="animate-spin" size={15} />
           Loading school data integration
@@ -821,7 +821,7 @@ export function ManageBacIntegrationShell() {
     );
 
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
           {error ? (

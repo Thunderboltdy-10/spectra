@@ -126,7 +126,7 @@ export function AnalyticsShell() {
     : [];
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+    <div className="flex h-full min-h-0 flex-col">
       <header className="px-6 py-5 lg:px-9">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>

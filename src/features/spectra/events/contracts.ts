@@ -154,4 +154,6 @@ export type SpectraEvents = {
 export type SpectraQueries = {
   "work.active": { workId: string | null };
   "run.active": { runIds: string[] };
+  /* The island prism's status dot, so still copies (the favicon, the tray) say the same. */
+  "prism.status": { status: import("../life/prism").PrismStatus | null };
 };

@@ -19,7 +19,6 @@ import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
-import { SurfaceField } from "../../field/surface-field";
 import { COMMAND_TABS } from "../../commands";
 import { BridgeSettings } from "../../bridge/bridge-settings";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
@@ -312,8 +311,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,
   };
   return (
-    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]" data-spectra-app-surface="true">
-      <SurfaceField scale="stage" behind />
+    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto" data-spectra-app-surface="true">
       <div className="w-full px-4 pb-36 pt-6 sm:px-6 lg:px-8 lg:pt-8">
         <ProductPageHeader
           eyebrow="Preferences"

@@ -243,7 +243,6 @@ import {
 } from "./artifact-content-model";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
-  StudioActivityField,
   StudioInteractionLayer,
   StudioLegacyCursorLayer,
   StudioPresenceIndicator,
@@ -6268,14 +6267,6 @@ function ArtifactStudioEditor({
             scroll viewport instead of scrolling away with the content. It must
             stay the first child of the scroll container. */}
         <StudioInteractionLayer transport={live.transport} />
-        {/* The surface field sits behind the work (the section isolates) and
-            wakes only for real events: a collaborator's or run's published
-            activity, and the one-shot completion of a save. */}
-        <StudioActivityField
-          transport={live.transport}
-          surfaceRef={presenceSurfaceRef}
-          syncState={presentation.state}
-        />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             <StudioViewportContext.Provider value={viewportContext}>

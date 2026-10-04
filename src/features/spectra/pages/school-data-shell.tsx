@@ -424,7 +424,7 @@ export function SchoolDataShell() {
     : ({ kind: "refreshing" } as CapabilityState);
 
   return (
-    <main className="spectra-wave-y h-full min-h-0 overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <main className="spectra-wave-y h-full min-h-0 overflow-y-auto text-[var(--text-primary)]">
       <div className="w-full px-4 py-6 pb-36 sm:px-6 lg:px-8 xl:px-10">
         <ProductPageHeader
           title="School"

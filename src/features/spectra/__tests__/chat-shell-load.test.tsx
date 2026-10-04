@@ -186,10 +186,6 @@ vi.mock("../components/composer-artifact-dock", () => ({
   ComposerArtifactDock: () => null,
 }));
 
-vi.mock("../components/shell-activity-field", () => ({
-  ShellActivityField: () => null,
-}));
-
 vi.mock("../components/artifact-studio-shell", () => ({
   StudioSplitPlaceholder: () => null,
   useArtifactStudioState: () => ({

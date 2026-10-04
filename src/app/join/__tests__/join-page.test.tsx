@@ -8,9 +8,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
-vi.mock("@/features/spectra/field/surface-field", () => ({
-  SurfaceField: () => null,
-}));
 const clerk = vi.hoisted(() => ({ signOut: vi.fn(async () => {}) }));
 vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerk }));
 

@@ -666,7 +666,7 @@ export function PublicShareShell() {
   }
 
   return (
-    <main className="spectra-wave-y min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <main className="spectra-wave-y min-h-screen text-[var(--text-primary)]">
       <nav className="sticky top-0 z-chrome border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] px-5 py-3.5 backdrop-blur-xl sm:px-8">
         <div className="mx-auto flex max-w-[1120px] items-center justify-between gap-4">
           <a

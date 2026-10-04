@@ -125,7 +125,7 @@ body {
 }
 
 .spectra-global-stage {
-  background: var(--bg-primary);
+  background: transparent;
   min-width: 0;
   width: 100%;
 }
@@ -138,8 +138,9 @@ body {
   font-family: var(--font-serif);
 }
 
+/* The paper is the body: pages stay transparent so the life field shows in open paper. */
 .spectra-wave-y {
-  background: var(--bg-primary) !important;
+  background: transparent !important;
 }
 
 .spectra-wave-y :where(button, input, select, textarea) {
@@ -12085,11 +12086,12 @@ body {
 }
 
 .spectra-global-stage {
-  background: var(--bg-primary);
+  background: transparent;
 }
 
+/* The paper is the body: pages stay transparent so the life field shows in open paper. */
 .spectra-wave-y {
-  background: var(--bg-primary) !important;
+  background: transparent !important;
 }
 
 .spectra-wave-y :where(.font-display, h1, h2, h3) {

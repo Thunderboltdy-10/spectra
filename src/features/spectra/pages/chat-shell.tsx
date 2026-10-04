@@ -37,7 +37,6 @@ import { createApplicationCommandDispatcher } from "../commands/application-disp
 import { ConversationSurface } from "../components/conversation-surface";
 import { ProductErrorState } from "../components/product-state";
 import { CommandBar } from "../components/command-bar";
-import { ShellActivityField } from "../components/shell-activity-field";
 import { CrossfadeText } from "../motion";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import { GlobalSearch } from "../components/context-controls";
@@ -745,8 +744,7 @@ export function ChatShell() {
   );
 
   return (
-    <div className="spectra-wave-y relative isolate flex h-full min-h-0 bg-[var(--bg-primary)]">
-      <ShellActivityField liveExchange={runEngine.liveExchange} />
+    <div className="spectra-wave-y relative isolate flex h-full min-h-0">
       <section
         className={
           studio.mode === "tab" ? "hidden" : "flex min-w-0 flex-1 flex-col"

@@ -43,12 +43,16 @@ export function LifeField() {
     const layer = (z: string) => {
       const canvas = document.createElement("canvas");
       canvas.setAttribute("aria-hidden", "true");
-      canvas.className = `pointer-events-none fixed inset-0 h-full w-full ${z}`;
+      canvas.className = "pointer-events-none fixed inset-0 h-full w-full";
+      canvas.style.zIndex = z;
       host.append(canvas);
       return canvas;
     };
-    const back = layer("z-0");
-    const front = layer("z-[60]");
+    // Under everything, over only the body's paper: opaque surfaces cover it.
+    const back = layer("-1");
+    // Over everything but toasts, the island included: formations hand over to
+    // the element they become, wherever it sits.
+    const front = layer("calc(var(--z-toast) - 1)");
     const detach = life.attach(back, front, chooseTier());
 
     const resize = () => life.resize(window.innerWidth, window.innerHeight, Math.min(2, window.devicePixelRatio || 1));

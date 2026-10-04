@@ -1,85 +1,12 @@
 "use client";
 
 import { useEffect } from "react";
-import { MARK, REFRACTIONS, SpectraMark } from "@/components/spectra-mark";
+import { SpectraMark } from "@/components/spectra-mark";
+import { MARK_POSE, PRISM_PALETTES, STATUS_COLOURS, prismSvg, type PrismStatus } from "@/features/spectra/life/prism";
 import { spectraBus } from "@/features/spectra/events";
 
-// ── Canvas rendering (favicon) ───────────────────────────────────────────────
-// Mirrors the SVG geometry in spectra-mark.tsx exactly (viewBox 0 0 64 64).
-function drawMark(ctx: CanvasRenderingContext2D, S: number, active = false) {
-  const k = S / 64;
-  const gradient = (x1: number, y1: number, x2: number, y2: number) =>
-    ctx.createLinearGradient(x1 * k, y1 * k, x2 * k, y2 * k);
-  const polygon = (points: ReadonlyArray<readonly [number, number]>) => {
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point[0] * k, point[1] * k);
-      else ctx.lineTo(point[0] * k, point[1] * k);
-    });
-    ctx.closePath();
-  };
-
-  const top = gradient(17, 13, 58, 47);
-  top.addColorStop(0, "rgba(201,187,244,.72)");
-  top.addColorStop(1, "rgba(113,85,218,.9)");
-  polygon([MARK.A1, MARK.C1, MARK.C2, MARK.A2]);
-  ctx.fillStyle = top;
-  ctx.fill();
-  const left = gradient(9, 18, 34, 52);
-  left.addColorStop(0, "rgba(245,241,255,.82)");
-  left.addColorStop(1, "rgba(183,166,238,.74)");
-  polygon([MARK.A1, MARK.B1, MARK.B2, MARK.A2]);
-  ctx.fillStyle = left;
-  ctx.fill();
-  const front = gradient(35, 8, 43, 55);
-  front.addColorStop(0, "rgba(251,249,255,.96)");
-  front.addColorStop(0.45, "rgba(216,205,248,.92)");
-  front.addColorStop(1, "rgba(128,104,222,.92)");
-  polygon([MARK.A1, MARK.B1, MARK.C1]);
-  ctx.fillStyle = front;
-  ctx.fill();
-
-  ctx.save();
-  polygon([MARK.A1, MARK.C1, MARK.B1, MARK.B2, MARK.A2]);
-  ctx.clip();
-  ctx.lineCap = "round";
-  ctx.lineWidth = (active ? 1.3 : 0.95) * k;
-  for (const ray of REFRACTIONS) {
-    ctx.strokeStyle = ray.color;
-    ctx.beginPath();
-    ctx.moveTo(ray.from[0] * k, ray.from[1] * k);
-    ctx.lineTo(ray.to[0] * k, ray.to[1] * k);
-    ctx.stroke();
-  }
-  const pool = ctx.createRadialGradient(
-    MARK.GLOW.cx * k,
-    MARK.GLOW.cy * k,
-    0,
-    MARK.GLOW.cx * k,
-    MARK.GLOW.cy * k,
-    MARK.GLOW.r * k,
-  );
-  pool.addColorStop(0, active ? "rgba(164,143,251,0.95)" : "rgba(164,143,251,0.62)");
-  pool.addColorStop(0.6, active ? "rgba(154,124,255,0.4)" : "rgba(154,124,255,0.22)");
-  pool.addColorStop(1, "rgba(154,124,255,0)");
-  ctx.fillStyle = pool;
-  ctx.fillRect(0, 0, S, S);
-  ctx.restore();
-
-  // Glass edges preserve the three-quarter volume at 16px.
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = "rgba(76,52,186,0.30)";
-  ctx.lineWidth = 1.05 * k;
-  polygon([MARK.A1, MARK.B1, MARK.C1]);
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(255,255,255,0.85)";
-  ctx.lineWidth = 1.05 * k;
-  ctx.beginPath();
-  ctx.moveTo(MARK.B1[0] * k, MARK.B1[1] * k);
-  ctx.lineTo(MARK.A1[0] * k, MARK.A1[1] * k);
-  ctx.lineTo(MARK.C1[0] * k, MARK.C1[1] * k);
-  ctx.stroke();
-}
+/** The working dot in a still icon: the spectrum's violet. */
+const WORKING_RGB: [number, number, number] = [139, 108, 246];
 
 // ── SpectraLogo ──────────────────────────────────────────────────────────────
 /** The prism mark. Kept API-compatible with the previous ribbon logo. */
@@ -106,33 +33,63 @@ export function SpectraLogo({
 }
 
 // ── DynamicFavicon ───────────────────────────────────────────────────────────
-/* While a run is live the tab prism's internal light strengthens. */
+/**
+ * The tab icon is the prism at rest, with its status dot: whatever the island
+ * publishes as `prism.status`, else working while a run is live and yellow
+ * while a run waits on the user. Drawn from the same display list as the live
+ * prism (`prismSvg`), so the favicon is never a different object.
+ */
 export function DynamicFavicon() {
   useEffect(() => {
-    const render = (active: boolean) => {
-      const S = 64;
-      const canvas = document.createElement("canvas");
-      canvas.width = S;
-      canvas.height = S;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      drawMark(ctx, S, active);
-
-      const url = canvas.toDataURL("image/png");
-      let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    const needs = new Set<string>();
+    const dark = window.matchMedia("(prefers-color-scheme: dark)");
+    let shown = "";
+    const status = (): PrismStatus | null => {
+      const published = spectraBus.getQuery("prism.status");
+      if (published) return published.status;
+      if (needs.size) return "needs";
+      return (spectraBus.getQuery("run.active")?.runIds.length ?? 0) > 0 ? "working" : null;
+    };
+    const render = () => {
+      const current = status();
+      const palette = dark.matches ? PRISM_PALETTES.dark : PRISM_PALETTES.light;
+      const rgb = current === "working" ? WORKING_RGB : current ? STATUS_COLOURS[current] : null;
+      const pose = rgb ? { ...MARK_POSE, status: { rgb, size: 1, from: 0 } } : MARK_POSE;
+      const svg = prismSvg(pose, { size: 64, palette, detail: "mark" });
+      if (svg === shown) return;
+      shown = svg;
+      let link = document.querySelector<HTMLLinkElement>('link[rel="icon"][data-spectra]');
       if (!link) {
+        for (const old of document.querySelectorAll('link[rel="icon"]')) old.remove();
         link = document.createElement("link");
         link.rel = "icon";
+        link.dataset.spectra = "true";
         document.head.appendChild(link);
       }
-      link.type = "image/png";
-      link.href = url;
+      link.type = "image/svg+xml";
+      link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
     };
 
-    render((spectraBus.getQuery("run.active")?.runIds.length ?? 0) > 0);
-    return spectraBus.subscribe("run.active", (value) => {
-      render(value.runIds.length > 0);
-    });
+    render();
+    const offs = [
+      spectraBus.subscribe("prism.status", render),
+      spectraBus.subscribe("run.active", (value) => {
+        for (const id of needs) if (!value.runIds.includes(id)) needs.delete(id);
+        render();
+      }),
+      spectraBus.on("run.requiredInput", ({ runId }) => {
+        needs.add(runId);
+        render();
+      }),
+      spectraBus.on("run.changed", ({ runId }) => {
+        if (needs.delete(runId)) render();
+      }),
+    ];
+    dark.addEventListener("change", render);
+    return () => {
+      for (const off of offs) off();
+      dark.removeEventListener("change", render);
+    };
   }, []);
 
   return null;

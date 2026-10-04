@@ -80,7 +80,6 @@ import {
 } from "../components/command-bar";
 import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
-import { ShellActivityField } from "../components/shell-activity-field";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
@@ -4111,7 +4110,7 @@ export function SpectraShell({
     !studio.activeArtifact;
 
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0">
       <ClassShelfOnboarding
         open={showClassOnboarding}
         onCompleted={() => void loadOverview(selectedWorkspaceId, true)}
@@ -4455,9 +4454,6 @@ export function SpectraShell({
                        toolbar with a second search and a second type filter above
                        the board; that row is gone. */
                         <main className="spectra-workspace-content relative isolate z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
-                          <ShellActivityField
-                            liveExchange={runEngine.liveExchange}
-                          />
                           <LibraryOrganizer
                             key={`${scopeNodeId ?? "root"}:${boardFolderNodeId ?? ""}`}
                             scope={

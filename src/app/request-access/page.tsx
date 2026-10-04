@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export default function RequestAccessPage() {
   return (
-    <main className="grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-10">
+    <main className="grid min-h-screen place-items-center px-4 py-10">
       <div className="w-full max-w-2xl rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-soft)]">
         <p className="text-micro font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
           Spectra access

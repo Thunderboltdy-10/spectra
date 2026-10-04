@@ -654,7 +654,7 @@ export function SchoolAdminShell() {
   if (!overview) return null;
 
   return (
-    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
+    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh pb-24">
       {overview.operatorSession ? (
         <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
           <span className="flex items-center gap-2">

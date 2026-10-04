@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useRef } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
-import { SurfaceField, type FieldInfluence } from "../field/surface-field";
+import { useLifeGlow } from "../life/use-life";
 
 export type SpectraCardVariant =
   | "artifact"
@@ -42,37 +42,8 @@ export function spectraCardClass(variant: SpectraCardVariant, className?: string
   return cn("spectra-card", `spectra-card--${variant}`, className);
 }
 
-/**
- * Which card states wake the surface field, and how.
- *
- * A card is not made colourful because it is selected. Its field changes
- * structure in the lower right, where the card's own weight sits, and takes
- * the colour of whatever is actually happening to it.
- */
-const CARD_FIELD: Partial<
-  Record<
-    SpectraCardState,
-    { state: FieldInfluence["state"]; hue: string; strength?: number }
-  >
-> = {
-  selected: { state: "active", hue: "var(--brand-primary)", strength: 0.2 },
-  active: { state: "active", hue: "var(--brand-primary)", strength: 0.26 },
-  focused: { state: "active", hue: "var(--accent-cyan)", strength: 0.22 },
-  context: { state: "active", hue: "var(--brand-primary)", strength: 0.16 },
-  "multi-selected": {
-    state: "active",
-    hue: "var(--brand-primary)",
-    strength: 0.24,
-  },
-  creating: { state: "typing", hue: "var(--brand-primary)" },
-  updating: { state: "typing", hue: "var(--accent-cyan)" },
-  edited: { state: "success", hue: "var(--success)" },
-  completed: { state: "success", hue: "var(--success)" },
-  failed: { state: "failure", hue: "var(--danger)" },
-  confirmation: { state: "waiting", hue: "var(--warning)" },
-  "drag-preview": { state: "drag", hue: "var(--accent-cyan)" },
-  "drop-target": { state: "waiting", hue: "var(--accent-cyan)" },
-};
+/** States in which Spectra is working on the card, so the field glows around it (LIFE.md, glow). */
+const CARD_WORKING: ReadonlySet<SpectraCardState> = new Set(["creating", "updating"]);
 
 export function SpectraCard({
   variant,
@@ -88,35 +59,18 @@ export function SpectraCard({
   accent?: string;
   children: ReactNode;
 }) {
-  const wake = CARD_FIELD[state];
-  const influences = useMemo<FieldInfluence[]>(
-    () =>
-      wake
-        ? [
-            {
-              id: "card",
-              x: 0.72,
-              y: 0.74,
-              radius: 0.78,
-              strength:
-                wake.strength ?? (wake.state === "typing" ? 0.8 : 0.62),
-              hue: wake.hue,
-              state: wake.state,
-            },
-          ]
-        : [],
-    [wake],
-  );
+  const ref = useRef<HTMLElement>(null);
+  useLifeGlow(ref, CARD_WORKING.has(state));
 
   return (
     <article
       {...props}
+      ref={ref}
       className={spectraCardClass(variant, className)}
       data-spectra-card={variant}
       data-card-state={state}
       style={{ ...style, ...(accent ? { "--card-accent": accent } : {}) } as CSSProperties}
     >
-      <SurfaceField influences={influences} scale="card" grain="wave" behind />
       {children}
     </article>
   );

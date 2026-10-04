@@ -1111,7 +1111,7 @@ export function CalendarApplication() {
   }
 
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
       <div className="spectra-calendar-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0 px-5 pb-4 pt-6 sm:px-8 lg:px-10">
         <ProductPageHeader

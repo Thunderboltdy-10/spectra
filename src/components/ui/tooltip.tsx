@@ -9,12 +9,21 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+/* Tooltips wait about 500 ms the first time, then show at once while the
+   pointer moves between controls (MOTION.md). */
+const FIRST_DELAY_MS = 500;
+const WARM_FOR_MS = 700;
+let warmUntil = 0;
+
 export function Tooltip({
   label,
+  shortcut,
   children,
   side = "top",
 }: {
   label: string;
+  /** Shown beside the name, e.g. "⌘K". */
+  shortcut?: string;
   children: ReactElement;
   side?: "top" | "bottom";
 }) {
@@ -32,14 +41,22 @@ export function Tooltip({
   }, [side]);
   const show = useCallback(() => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      update();
-      setOpen(true);
-    }, 260);
+    timerRef.current = window.setTimeout(
+      () => {
+        update();
+        setOpen(true);
+      },
+      Date.now() < warmUntil ? 0 : FIRST_DELAY_MS,
+    );
   }, [update]);
   const hide = useCallback(() => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => setOpen(false), 140);
+    timerRef.current = window.setTimeout(() => {
+      setOpen((wasOpen) => {
+        if (wasOpen) warmUntil = Date.now() + WARM_FOR_MS;
+        return false;
+      });
+    }, 140);
   }, []);
   useEffect(
     () => () => {
@@ -89,6 +106,9 @@ export function Tooltip({
               }}
             >
               {label}
+              {shortcut ? (
+                <kbd className="ml-2 font-sans text-micro font-medium opacity-60">{shortcut}</kbd>
+              ) : null}
             </div>,
             document.body,
           )

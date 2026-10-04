@@ -58,6 +58,16 @@ export class FieldLattice {
   readonly lr: Float32Array;
   readonly lg: Float32Array;
   readonly lb: Float32Array;
+  /** A node whose dot has lifted out of the field (0..1); it refills over a moment. */
+  readonly taken: Float32Array;
+  /** Light from something travelling through the field: it shows above content too, briefly. */
+  readonly lift: Float32Array;
+  /**
+   * How much of the field shows at a node (0..1). At rest the field is all
+   * but invisible; wherever something moves through it, it surfaces around
+   * that, so matter is seen to travel through a medium, then fades back.
+   */
+  readonly presence: Float32Array;
   private readonly scratch: Float32Array;
   /** The active window, in grid cells, inclusive. Empty when i0 > i1. */
   i0 = 1;
@@ -85,6 +95,9 @@ export class FieldLattice {
     this.lr = make();
     this.lg = make();
     this.lb = make();
+    this.taken = make();
+    this.lift = make();
+    this.presence = make();
     this.scratch = new Float32Array(this.count * 3);
   }
 
@@ -144,6 +157,61 @@ export class FieldLattice {
         visit(index, d, d > 1e-3 ? px / d : 0, d > 1e-3 ? py / d : 0);
       }
     }
+  }
+
+  /** The node whose home is nearest a point. */
+  nearest(x: number, y: number): number {
+    const j = Math.max(0, Math.min(this.rows - 1, Math.round(y / this.rowHeight) + 1));
+    const offset = j & 1 ? this.spacing / 2 : 0;
+    const i = Math.max(0, Math.min(this.cols - 1, Math.round((x - offset) / this.spacing) + 1));
+    return j * this.cols + i;
+  }
+
+  /** Where a node is now, CSS px. */
+  positionOf(index: number): [number, number] {
+    const j = Math.floor(index / this.cols);
+    const i = index - j * this.cols;
+    return [this.homeX(i, j) + this.dx[index], this.homeY(j) + this.dy[index]];
+  }
+
+  /** A dot lifts out of the field at a node: the node goes dark and the light around it rises. */
+  lend(index: number, r: number, g: number, b: number, amount: number) {
+    const [x, y] = this.positionOf(index);
+    this.taken[index] = 1;
+    this.addLight(x, y, this.spacing * 1.3, r, g, b, amount);
+  }
+
+  /** A dot sinks back into the field at a node, bringing its light. */
+  receive(index: number, r: number, g: number, b: number, amount: number, kick = 0) {
+    const [x, y] = this.positionOf(index);
+    this.taken[index] = 0;
+    this.addLight(x, y, this.spacing * 1.2, r, g, b, amount);
+    if (kick > 0) this.impulse(x, y, this.spacing * 1.6, kick);
+  }
+
+  /** Pulls nearby nodes toward a point: the field gathering around something passing through it. */
+  attract(x: number, y: number, radius: number, strength: number) {
+    this.forEachNear(x, y, radius, (index, d, ux, uy) => {
+      const k = strength * (1 - d / radius) * Math.min(1, d / (radius * 0.25));
+      this.fx[index] -= ux * k;
+      this.fy[index] -= uy * k;
+    });
+  }
+
+  /** Surfaces the field around a point: something is moving through it here. */
+  show(x: number, y: number, radius: number, amount: number) {
+    this.forEachNear(x, y, radius, (index, d) => {
+      const k = 1 - d / radius;
+      const v = amount * k * k * (3 - 2 * k);
+      if (v > this.presence[index]) this.presence[index] = v;
+    });
+  }
+
+  /** Marks light that should show above content (it is passing through). */
+  raise(x: number, y: number, radius: number, amount: number) {
+    this.forEachNear(x, y, radius, (index, d) => {
+      this.lift[index] = Math.min(1, this.lift[index] + amount * (1 - d / radius));
+    });
   }
 
   /** A radial kick: the start of a ripple. */
@@ -283,6 +351,17 @@ export class FieldLattice {
 
     // Light: spread to neighbours, then fade.
     this.diffuseLight(dt * diffusion, Math.exp(-decay * dt));
+    const refill = Math.exp(-1.6 * dt);
+    const lower = Math.exp(-2.4 * dt);
+    const recede = Math.exp(-1.3 * dt);
+    for (let j = j0; j <= j1; j += 1) {
+      for (let i = i0; i <= i1; i += 1) {
+        const index = j * cols + i;
+        this.taken[index] *= refill;
+        this.lift[index] *= lower;
+        this.presence[index] *= recede;
+      }
+    }
 
     // Shrink the window to what still carries energy, with room to spread.
     let ni0 = Infinity;
@@ -296,7 +375,7 @@ export class FieldLattice {
         fy[index] = 0;
         const energy = vx[index] * vx[index] + vy[index] * vy[index] + (dx[index] * dx[index] + dy[index] * dy[index]) * 40;
         const light = this.lr[index] + this.lg[index] + this.lb[index];
-        if (energy > SLEEP_ENERGY || light > SLEEP_LIGHT) {
+        if (energy > SLEEP_ENERGY || light > SLEEP_LIGHT || this.taken[index] > 0.02 || this.presence[index] > 0.03) {
           if (i < ni0) ni0 = i;
           if (i > ni1) ni1 = i;
           if (j < nj0) nj0 = j;
@@ -309,6 +388,9 @@ export class FieldLattice {
           this.lr[index] = 0;
           this.lg[index] = 0;
           this.lb[index] = 0;
+          this.taken[index] = 0;
+          this.lift[index] = 0;
+          this.presence[index] = 0;
         }
       }
     }

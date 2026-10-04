@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { LifeEngine, type LifeEvent, type LifeSurface } from "./engine";
+import { FieldLattice } from "./field-sim";
+import { combine, outlineFigure, resample, rowsFigure } from "./figure";
+import { Formation } from "./formation";
 import { Particles } from "./particles";
 import { PRISM_PALETTES, PrismBody, prismOps, prismSvg, REST_POSE, type Quat } from "./prism";
-import { sampleOutline, sampleRows } from "./shapes";
 import { spectrumAt } from "./spectrum";
 
 const TURN_Z = (k: number): Quat => [Math.cos((k * Math.PI) / 3), 0, 0, Math.sin((k * Math.PI) / 3)];
@@ -87,6 +90,23 @@ describe("prism drawing", () => {
     for (const op of ops) for (const [x, y] of op.points) expect(Math.hypot(x - 50, y - 50)).toBeLessThan(50);
   });
 
+  it("shows the status as a dot in the top right corner, also in icons", () => {
+    const body = new PrismBody();
+    body.setStatus("done");
+    run(body, 1);
+    const pose = body.pose();
+    expect(pose.status).toBeDefined();
+    const ops = prismOps(pose, { x: 50, y: 50, size: 80, palette: PRISM_PALETTES.light });
+    const dot = ops.find((op) => op.kind === "dot");
+    expect(dot).toBeDefined();
+    expect(dot!.points[0][0]).toBeGreaterThan(50);
+    expect(dot!.points[0][1]).toBeLessThan(50);
+    expect(prismSvg(pose, { size: 32, palette: PRISM_PALETTES.dark, detail: "mark" })).toContain("<circle");
+    body.markSeen();
+    run(body, 1.5);
+    expect(body.pose().status).toBeUndefined();
+  });
+
   it("renders a standalone SVG for icons", () => {
     const svg = prismSvg(REST_POSE, { size: 32, palette: PRISM_PALETTES.dark, detail: "mark" });
     expect(svg.startsWith("<svg")).toBe(true);
@@ -95,26 +115,158 @@ describe("prism drawing", () => {
   });
 });
 
-describe("shapes", () => {
-  it("puts outline dots on the rectangle's edge", () => {
-    const rect = { x: 10, y: 20, width: 200, height: 80 };
-    const points = sampleOutline(rect, { radius: 0, spacing: 4 });
-    expect(points.length % 6).toBe(0);
-    for (let i = 0; i < points.length; i += 6) {
-      const x = points[i];
-      const y = points[i + 1];
-      const onEdge =
-        Math.abs(x - rect.x) < 0.01 ||
-        Math.abs(x - rect.x - rect.width) < 0.01 ||
-        Math.abs(y - rect.y) < 0.01 ||
-        Math.abs(y - rect.y - rect.height) < 0.01;
+describe("figures", () => {
+  it("puts a card's outline on its edge", () => {
+    const [stroke] = outlineFigure({ x: 10, y: 20, width: 200, height: 80 }, { radius: 0 }).strokes;
+    expect(stroke.closed).toBe(true);
+    for (let i = 0; i < stroke.points.length; i += 2) {
+      const x = stroke.points[i];
+      const y = stroke.points[i + 1];
+      const onEdge = Math.abs(x - 10) < 0.01 || Math.abs(x - 210) < 0.01 || Math.abs(y - 20) < 0.01 || Math.abs(y - 100) < 0.01;
       expect(onEdge).toBe(true);
     }
   });
 
   it("lays rows inside their area", () => {
-    const points = sampleRows({ x: 0, y: 0, width: 100, height: 40 }, [1, 0.5, 0.8, 0.9, 1]);
-    for (let i = 0; i < points.length; i += 6) expect(points[i + 1]).toBeLessThanOrEqual(40);
+    const { strokes } = rowsFigure({ x: 0, y: 0, width: 100, height: 40 }, [1, 0.5, 0.8, 0.9, 1]);
+    expect(strokes.length).toBeGreaterThan(0);
+    for (const stroke of strokes) expect(stroke.points[1]).toBeLessThanOrEqual(40);
+  });
+
+  it("resamples a line at an even spacing", () => {
+    const points = resample([0, 0, 100, 0], false, 4);
+    expect(points.length / 2).toBe(26);
+    for (let i = 2; i < points.length; i += 2) expect(points[i] - points[i - 2]).toBeCloseTo(4, 5);
+  });
+});
+
+function settle(formation: Formation, lattice: FieldLattice, seconds: number) {
+  let time = 0;
+  for (; time < seconds && !formation.done && formation.phase !== "formed"; time += 1 / 60) {
+    formation.step(1 / 60, time, lattice);
+    lattice.step(1 / 60);
+  }
+  return time;
+}
+
+describe("formations", () => {
+  const card = () => outlineFigure({ x: 100, y: 100, width: 160, height: 90 }, { radius: 12, fill: [255, 255, 255] });
+
+  it("rises out of the field and fuses into its figure", () => {
+    const lattice = new FieldLattice(600, 400);
+    const formation = new Formation(1, card());
+    formation.riseFrom(lattice, 100, 100, [20, 19, 24]);
+    const took = settle(formation, lattice, 3);
+    expect(formation.phase).toBe("formed");
+    expect(took).toBeLessThan(1.6);
+    expect(formation.wholeness()).toBeGreaterThan(0.99);
+    for (let i = 0; i < formation.n; i += 1) {
+      expect(Math.hypot(formation.x[i] - formation.tx[i], formation.y[i] - formation.ty[i])).toBeLessThan(0.01);
+    }
+  });
+
+  it("breaks into dots that sink into the field", () => {
+    const lattice = new FieldLattice(600, 400);
+    const formation = new Formation(1, card());
+    formation.showWhole();
+    formation.breakUp(lattice, { kind: "field" }, 100, 100);
+    let sunk = 0;
+    for (let t = 0; t < 3 && !formation.done; t += 1 / 60) sunk += formation.step(1 / 60, t, lattice);
+    expect(formation.done).toBe(true);
+    expect(sunk).toBe(formation.n);
+  });
+
+  it("morphs by taking the dots of the shape before it", () => {
+    const lattice = new FieldLattice(600, 400);
+    const before = new Formation(1, combine(card(), rowsFigure({ x: 100, y: 100, width: 160, height: 90 }, [0.8])));
+    before.showWhole();
+    const after = new Formation(2, outlineFigure({ x: 60, y: 60, width: 300, height: 60 }, { radius: 18 }));
+    const used = after.takeFrom(before);
+    // The outline takes the outline; the row is left to sink.
+    expect([...used]).toEqual([0]);
+    const old = before.strokes[0];
+    for (let i = 0; i < after.n; i += 1) {
+      let nearest = Infinity;
+      for (let k = 0; k < old.count; k += 1) {
+        const j = old.start + k;
+        nearest = Math.min(nearest, Math.hypot(after.x[i] - before.x[j], after.y[i] - before.y[j]));
+      }
+      expect(nearest).toBeLessThan(1);
+    }
+    expect(settle(after, lattice, 3)).toBeLessThan(1.6);
+    expect(after.phase).toBe("formed");
+  });
+});
+
+function fakeSurface(): LifeSurface {
+  const context = new Proxy({} as Record<string | symbol, unknown>, {
+    get: (target, key) => (key in target ? target[key] : key === "createLinearGradient" ? () => ({ addColorStop() {} }) : () => undefined),
+    set: (target, key, value) => {
+      target[key] = value;
+      return true;
+    },
+  });
+  return { canvas: { width: 1, height: 1 }, context } as unknown as LifeSurface;
+}
+
+describe("life engine", () => {
+  function engine() {
+    const events: LifeEvent[] = [];
+    let pending: ((now: number) => void) | null = null;
+    let now = 0;
+    const life = new LifeEngine(
+      fakeSurface(),
+      fakeSurface(),
+      "full",
+      (event) => events.push(event),
+      (frame) => {
+        pending = frame;
+      },
+      () => now,
+    );
+    life.handle({ type: "resize", width: 800, height: 600, ratio: 1 });
+    const run = (seconds: number) => {
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        now += 1000 / 60;
+        const frame = pending;
+        pending = null;
+        frame?.(now);
+      }
+    };
+    const of = (id: number) => events.filter((e) => "id" in e && e.id === id).map((e) => e.type);
+    return { life, events, run, of };
+  }
+
+  it("carries a figure through the field to a far place and forms it there", () => {
+    const { life, run, of } = engine();
+    const from = outlineFigure({ x: 40, y: 480, width: 120, height: 60 });
+    const to = outlineFigure({ x: 560, y: 60, width: 160, height: 90 });
+    life.handle({ type: "travel", id: 7, from, to, colour: "spectrum", hold: false });
+    run(3);
+    expect(of(7)).toContain("formed");
+  });
+
+  it("pours something close by straight into what takes it in", () => {
+    const { life, run, of } = engine();
+    const words = { strokes: [{ points: [300, 500, 420, 500], closed: false, width: 5, colour: [20, 19, 24] as [number, number, number], alpha: 0.2 }] };
+    life.handle({ type: "travel", id: 9, from: words, absorb: { x: 380, y: 520, width: 34, height: 34 }, colour: "spectrum", hold: false });
+    run(1.5);
+    expect(of(9)).toContain("arrived");
+    expect(of(9)).toContain("gone");
+  });
+
+  it("travels from a point, as light leaving the prism", () => {
+    const { life, run, of } = engine();
+    life.handle({ type: "travel", id: 3, from: [400, 560], to: outlineFigure({ x: 300, y: 200, width: 200, height: 100 }), colour: [246, 190, 64], hold: false });
+    run(3);
+    expect(of(3)).toContain("formed");
+  });
+
+  it("falls asleep when nothing moves", () => {
+    const { life, events, run } = engine();
+    life.handle({ type: "pulse", x: 200, y: 200, strength: 1 });
+    run(8);
+    expect(events.at(-1)?.type).toBe("asleep");
   });
 });
 

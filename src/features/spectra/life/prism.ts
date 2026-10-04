@@ -294,6 +294,13 @@ export type PrismPose = {
   muted: number;
   /** A brief brightening of every edge, 0..1. */
   glint: number;
+  /**
+   * The status dot beside the prism's top-right corner, so the state stays
+   * readable after its animation: its colour, its size (0 hidden, 1 full,
+   * springs past 1 as it pops) and how far it still is from its seat (1 is
+   * at the corner it comes out of).
+   */
+  status?: { rgb: Rgb; size: number; from: number };
 };
 
 /** The resting pose: turned a little so one side and the upper face show. */
@@ -332,7 +339,8 @@ type Fill = { rgb: Rgb; a: number } | { from: Vec2; to: Vec2; stops: Stop[] };
 
 export type PrismOp =
   | { kind: "fill"; points: Vec2[]; fill: Fill }
-  | { kind: "stroke"; points: Vec2[]; closed: boolean; paint: Fill; width: number };
+  | { kind: "stroke"; points: Vec2[]; closed: boolean; paint: Fill; width: number }
+  | { kind: "dot"; points: [Vec2]; radius: number; rgb: Rgb; a: number };
 
 const PERSPECTIVE = 7;
 const LIGHT: Vec3 = [-2.6, 3.4, 4.2];
@@ -576,6 +584,22 @@ export function prismOps(pose: PrismPose, options: PrismDrawOptions): PrismOp[] 
     paint: { rgb: palette.line, a: palette.lineAlpha },
     width: width(detail === "mark" ? 0.7 : 0.5),
   });
+  const status = pose.status;
+  if (status && status.size > 0.01) {
+    // Seated in the free space right of the apex, never touching the solid.
+    const seat: Vec2 = [options.x + options.size * 0.37, options.y - options.size * 0.33];
+    let corner = screen[0];
+    for (const p of screen) if (p[0] - p[1] > corner[0] - corner[1]) corner = p;
+    const t = clamp01(status.from);
+    const radius = options.size * (detail === "mark" ? 0.13 : 0.085) * Math.max(0, status.size);
+    ops.push({
+      kind: "dot",
+      points: [[seat[0] + (corner[0] - seat[0]) * t, seat[1] + (corner[1] - seat[1]) * t]],
+      radius,
+      rgb: status.rgb,
+      a: Math.min(1, status.size * 1.4),
+    });
+  }
   return ops;
 }
 
@@ -590,6 +614,13 @@ export function drawPrism(
   ctx.save();
   ctx.lineJoin = "round";
   for (const op of prismOps(pose, options)) {
+    if (op.kind === "dot") {
+      ctx.beginPath();
+      ctx.arc(op.points[0][0], op.points[0][1], op.radius, 0, Math.PI * 2);
+      ctx.fillStyle = css(op.rgb, op.a);
+      ctx.fill();
+      continue;
+    }
     ctx.beginPath();
     ctx.lineCap = "round";
     ctx.moveTo(op.points[0][0], op.points[0][1]);
@@ -625,6 +656,10 @@ export function prismSvg(pose: PrismPose, options: Omit<PrismDrawOptions, "x" | 
   const defs: string[] = [];
   const body: string[] = [];
   ops.forEach((op, index) => {
+    if (op.kind === "dot") {
+      body.push(`<circle cx="${n(op.points[0][0])}" cy="${n(op.points[0][1])}" r="${n(op.radius)}" fill="${rgb(op.rgb)}" fill-opacity="${n(op.a)}"/>`);
+      return;
+    }
     const paint = op.kind === "fill" ? op.fill : op.paint;
     let colour: string;
     let opacity = "";
@@ -653,6 +688,26 @@ export function prismSvg(pose: PrismPose, options: Omit<PrismDrawOptions, "x" | 
 /* ---------------------------------------------------------------- motion */
 
 export type PrismMode = "rest" | "thinking" | "working" | "needs" | "done" | "problem";
+
+/** What the status dot says. Modes set it; hosts can also set it directly. */
+export type PrismStatus = "working" | "needs" | "warning" | "done" | "problem" | "info" | "offline";
+
+export const STATUS_COLOURS: Record<Exclude<PrismStatus, "working">, Rgb> = {
+  needs: [246, 190, 64],
+  warning: [246, 190, 64],
+  done: [64, 196, 142],
+  problem: [240, 84, 104],
+  info: [79, 159, 230],
+  offline: [148, 146, 160],
+};
+
+const STATUS_FOR_MODE: Partial<Record<PrismMode, PrismStatus>> = {
+  thinking: "working",
+  working: "working",
+  needs: "needs",
+  done: "done",
+  problem: "problem",
+};
 
 /** The prism's rotational symmetries: three turns about its axis, each with or without a half-turn flip. */
 const SYMMETRIES: Quat[] = [0, 1, 2].flatMap((k) => {
@@ -707,6 +762,11 @@ export class PrismBody {
   private glint = 0;
   private nextNod = 0;
   private settled = true;
+  private status: PrismStatus | null = null;
+  private statusSize = 0;
+  private statusV = 0;
+  private statusFrom = 0;
+  private statusRgb: Rgb = [0, 0, 0];
   /** Reduced motion: no spins or springs; colour still changes. */
   still = false;
 
@@ -716,6 +776,9 @@ export class PrismBody {
     this.mode = mode;
     this.modeTime = 0;
     this.settled = false;
+    const status = STATUS_FOR_MODE[mode] ?? null;
+    // Done and needs-you stay marked until seen; other states clear with the mode.
+    if (status || this.status === "working") this.setStatus(status);
     if (this.still) return;
     if (mode === "done") {
       // Two quick turns and a flash along the edges.
@@ -737,6 +800,26 @@ export class PrismBody {
   /** The user saw the done or needs-you state. */
   markSeen() {
     if (this.mode === "done" || this.mode === "needs") this.setMode("rest");
+    if (this.status === "done" || this.status === "needs" || this.status === "info") this.setStatus(null);
+  }
+
+  /** Sets the status dot. It comes out of the nearest corner and pops into place. */
+  setStatus(status: PrismStatus | null) {
+    if (status === this.status) return;
+    const appearing = this.status === null && status !== null;
+    this.status = status;
+    this.settled = false;
+    if (status && status !== "working") {
+      if (appearing) this.statusRgb = STATUS_COLOURS[status];
+    } else if (status === "working" && appearing) this.statusRgb = spectrumAt(this.hue * 2);
+    if (appearing) {
+      this.statusFrom = 1;
+      this.statusSize = Math.max(this.statusSize, 0.05);
+    }
+  }
+
+  getStatus() {
+    return this.status;
   }
 
   /** Where the pointer is relative to the prism, in prism radii (about -1..1). */
@@ -832,7 +915,30 @@ export class PrismBody {
     this.warm += (warmGoal - this.warm) * ease(4);
     this.muted += (mutedGoal - this.muted) * ease(4);
     this.glint *= Math.exp(-2.4 * dt);
+    // The status dot: colour eases, size springs (a pop), it slides out from the corner.
+    const statusGoal = this.status ? (this.status === "needs" ? 1 + Math.sin(this.modeTime * 3.4) * 0.12 : 1) : 0;
+    const goalRgb: Rgb = this.status
+      ? this.status === "working"
+        ? spectrumAt(this.hue * 2 + this.modeTime * 0.25)
+        : STATUS_COLOURS[this.status]
+      : this.statusRgb;
+    this.statusRgb = mix(this.statusRgb, goalRgb, ease(8));
+    if (this.still) {
+      this.statusSize = statusGoal;
+      this.statusFrom = 0;
+    } else {
+      this.statusV += ((statusGoal - this.statusSize) * 260 - this.statusV * 2 * 0.42 * Math.sqrt(260)) * dt;
+      this.statusSize = Math.max(0, this.statusSize + this.statusV * dt);
+      this.statusFrom += (0 - this.statusFrom) * ease(9);
+    }
+    const statusSettled =
+      (this.status === null || this.status !== "working") &&
+      this.status !== "needs" &&
+      Math.abs(this.statusSize - statusGoal) < 0.002 &&
+      Math.abs(this.statusV) < 0.01 &&
+      this.statusFrom < 0.002;
     const colourSettled =
+      statusSettled &&
       hueSpeed === 0 &&
       Math.abs(this.spectrum - spectrumGoal) < 0.005 &&
       Math.abs(this.warm - warmGoal) < 0.005 &&
@@ -911,6 +1017,7 @@ export class PrismBody {
       warm: this.warm,
       muted: this.muted,
       glint: this.glint,
+      status: this.statusSize > 0.01 ? { rgb: this.statusRgb, size: this.statusSize, from: this.statusFrom } : undefined,
     };
   }
 }

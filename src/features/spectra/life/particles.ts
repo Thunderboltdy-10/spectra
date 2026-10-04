@@ -13,6 +13,8 @@ export const Mode = {
   Seek: 2,
   /** Travelling along a curve to a destination. */
   Stream: 3,
+  /** Drawn into a target and taken in at its edge (`life` holds the radius). */
+  Absorb: 4,
 } as const;
 
 export type ParticleColour = readonly [number, number, number];
@@ -65,6 +67,8 @@ export class Particles {
   onReturn: Landing | null = null;
   /** Called when a streaming particle arrives. */
   onArrive: ((group: number, x: number, y: number) => void) | null = null;
+  /** Called when a particle is taken in by its target. */
+  onAbsorb: ((group: number, x: number, y: number) => void) | null = null;
 
   constructor(capacity: number) {
     this.capacity = capacity;
@@ -190,6 +194,19 @@ export class Particles {
         const damping = 2 * 0.82 * Math.sqrt(stiffness);
         this.vx[i] += (ddx * stiffness - this.vx[i] * damping + nx * 90 * wander) * dt;
         this.vy[i] += (ddy * stiffness - this.vy[i] * damping + ny * 90 * wander) * dt;
+      } else if (mode === Mode.Absorb) {
+        const ddx = this.tx[i] - this.x[i];
+        const ddy = this.ty[i] - this.y[i];
+        const distance = Math.hypot(ddx, ddy);
+        if (distance < this.life[i]) {
+          this.onAbsorb?.(this.group[i], this.x[i], this.y[i]);
+          this.kill(i);
+          continue;
+        }
+        // Accelerates inward, like falling in.
+        const pull = 900 + 26000 / (distance + 20);
+        this.vx[i] += ((ddx / distance) * pull - this.vx[i] * 4 + nx * 40) * dt;
+        this.vy[i] += ((ddy / distance) * pull - this.vy[i] * 4 + ny * 40) * dt;
       } else if (mode === Mode.Stream) {
         const duration = this.duration[i];
         const p = Math.min(1, this.progress[i] + dt / duration);
@@ -244,6 +261,15 @@ export class Particles {
     this.duration[index] = duration;
     this.delay[index] = delay;
     this.mode[index] = Mode.Stream;
+  }
+
+  /** Draws a particle into a point; it is taken in once within `radius`. */
+  absorbInto(index: number, tx: number, ty: number, radius: number, delay = 0) {
+    this.tx[index] = tx;
+    this.ty[index] = ty;
+    this.life[index] = radius;
+    this.delay[index] = delay;
+    this.mode[index] = Mode.Absorb;
   }
 
   seek(index: number, tx: number, ty: number, alpha: number, delay = 0) {

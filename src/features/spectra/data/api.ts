@@ -8,6 +8,7 @@ import { spectraBus } from "../events";
 import { coalesceInFlight } from "@/lib/coalesce-inflight";
 import { createCatalogPageCache, type CatalogPage } from "./catalog-page-cache";
 import { requestSpectra } from "./request";
+import type { SchoolSyncKind } from "../../../../shared/school-sync";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
@@ -1286,28 +1287,63 @@ export async function importSpectraManageBacReference(input: {
 export async function resolveSpectraManageBacIdentity() {
   return postManageBac<Record<string, unknown>>({
     action: "resolveIdentity",
-    bootstrap: true,
+    syncClasses: true,
   });
 }
 
-/** Requests one sync may take to finish a large school's pass. */
-const MANAGEBAC_SYNC_REQUESTS = 12;
+/** One job of a student's "Sync now": one kind of School data. */
+export type SpectraSchoolSyncJob = {
+  kind: SchoolSyncKind;
+  syncRunId?: string;
+  summaries?: Array<{ capabilityId: string; name: string; pages: number; records: number; skipped?: string }>;
+  completion?: unknown;
+  /** The request's time budget ran out; the job continues in the background. */
+  suspended?: true;
+  errorCode?: string;
+  errorSummary?: string;
+};
 
-export async function syncSpectraManageBac(
-  kind: "manual" | "bootstrap" | "reconciliation" = "manual",
-) {
+/**
+ * Syncs the student's School data now: one kind, or every kind that isn't
+ * Off. Kinds the request had no time for are queued and run in the
+ * background (`queued`). See convex/school.README.md.
+ */
+export async function syncSpectraManageBac(kind?: SchoolSyncKind) {
+  return postManageBac<{ jobs: SpectraSchoolSyncJob[]; queued: SchoolSyncKind[] }>({
+    action: "sync",
+    ...(kind ? { kind } : {}),
+  });
+}
+
+/** Requests one school reconciliation may take to finish a large school's pass. */
+const MANAGEBAC_RECONCILIATION_REQUESTS = 12;
+
+/** The school-wide reconciliation of shared routes (administrators only). */
+export async function reconcileSpectraManageBacSchool() {
   // Each request stops at the route's time budget and leaves the pass saved;
   // the next request continues it, so a large school finishes in a few.
-  let result = await postManageBac<Record<string, unknown>>({ action: "sync", kind });
+  let result = await postManageBac<Record<string, unknown>>({ action: "sync", kind: "reconciliation" });
   for (
     let request = 1;
-    request < MANAGEBAC_SYNC_REQUESTS &&
+    request < MANAGEBAC_RECONCILIATION_REQUESTS &&
     result.suspended === true &&
     result.errorCode === "INTEGRATION_SYNC_TIME_BUDGET";
     request += 1
   )
-    result = await postManageBac<Record<string, unknown>>({ action: "sync", kind });
+    result = await postManageBac<Record<string, unknown>>({ action: "sync", kind: "reconciliation" });
   return result;
+}
+
+/**
+ * Opens a file the student handed in: the first call downloads it from
+ * ManageBac into the student's storage; read it with `api.school.fileUrl`.
+ */
+export async function fetchSpectraSchoolFile(input: { submissionRecordId: string; providerFileId: string }) {
+  return postManageBac<{
+    status: "cached" | "fetched";
+    schoolFileId: string;
+    deduplicated?: boolean;
+  }>({ action: "fetchSchoolFile", ...input });
 }
 
 export async function selectSpectraManageBacClasses(input: {

@@ -3783,6 +3783,13 @@ export const PURGE_SCHOOL_TABLES = [
   "schoolIntegrations",
   "integrationCapabilities",
   "externalIdentityMappings",
+  // School data each student keeps beside the records (files hold storage).
+  "schoolFiles",
+  "casReflections",
+  "casOutcomeTags",
+  "schoolSyncStates",
+  "schoolSyncClassOverrides",
+  "schoolSyncPreferences",
   "externalRecordRelations",
   "externalRecordOverlays",
   "externalSyncConflicts",
@@ -3873,6 +3880,12 @@ export const PURGE_SCHOOL_INDEXES: Partial<
   schoolIntegrations: "by_school_provider",
   integrationCapabilities: "by_school_status",
   externalIdentityMappings: "by_school_status",
+  schoolFiles: "by_school",
+  casReflections: "by_school",
+  casOutcomeTags: "by_school",
+  schoolSyncStates: "by_school",
+  schoolSyncClassOverrides: "by_school",
+  schoolSyncPreferences: "by_school",
   externalRecordOverlays: "by_school",
   externalRecords: "by_school_updated",
   externalSyncRuns: "by_school_created",
@@ -4099,10 +4112,10 @@ async function purgeSchoolRows(
     const storageId = (row as unknown as { storageId?: Id<"_storage"> })
       .storageId;
     if (
-      table === "spectraRuntimeBuilds" &&
+      (table === "spectraRuntimeBuilds" || table === "schoolFiles") &&
       storageId &&
       (await deleteStorageIfNoOtherBinding(ctx, storageId, {
-        table: "spectraRuntimeBuilds",
+        table,
         id: String(row._id),
       }))
     )

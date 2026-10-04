@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 
 const DEFAULT_TOKEN = "spectra-managebac-fixture-token";
+const SUBMITTED_TEXT = "Sequences essay. An arithmetic sequence adds the same difference each step.\n";
 
 function json(value) {
   return JSON.stringify(value);
@@ -47,6 +48,13 @@ function taskPayload(classId, revision) {
         title: changed ? "Functions problem set — updated" : "Functions problem set",
         description: "Fixture task for selected-class polling.",
         due_at: changed ? "2026-09-19T16:30:00Z" : "2026-09-18T16:00:00Z",
+        updated_at: revision,
+      },
+      {
+        id: 3003,
+        title: "Sequences essay",
+        description: "A task already due, with a grade and a handed-in file.",
+        due_at: "2026-09-10T16:00:00Z",
         updated_at: revision,
       },
     ],
@@ -140,9 +148,17 @@ export function createManageBacProviderFixture({
   }
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
-    requests.push({ method: request.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    const authenticated = request.headers["x-api-key"] === token || request.headers["auth-token"] === token;
+    requests.push({ method: request.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams), authenticated });
     if (Number.isFinite(currentDelayMs) && currentDelayMs > 0)
       await new Promise((resolve) => setTimeout(resolve, currentDelayMs));
+    // Short-lived file storage a download redirects to. It never needs, and
+    // must never receive, the school's API key.
+    if (url.pathname === "/signed/8801") {
+      if (request.headers["x-api-key"] || request.headers["auth-token"])
+        return send(response, 400, { error: "fixture storage received an API key" });
+      return sendBytes(response, 200, Buffer.from(SUBMITTED_TEXT, "utf8"), "text/plain");
+    }
     if (
       request.headers["x-api-key"] !== token &&
       request.headers["auth-token"] !== token
@@ -165,14 +181,51 @@ export function createManageBacProviderFixture({
               },
             ],
       });
-    if (url.pathname === "/v2p2/memberships")
+    if (url.pathname === "/v2p2/students/9001/memberships")
       return send(response, 200, {
         memberships: [
-          { id: 1001, user_id: 9001, class_id: 101, class_name: "Mathematics HL", user_email: "student@example.test" },
-          { id: 1002, user_id: 9001, class_id: 202, class_name: "History HL", user_email: "student@example.test" },
+          { id: 1001, user_id: 9001, class_id: 101, class_name: "Mathematics HL", archived: false },
+          { id: 1002, user_id: 9001, class_id: 202, class_name: "History HL", archived: false },
+          // Another student's row never reaches Spectra.
+          { id: 1003, user_id: 9002, class_id: 303, class_name: "Someone else's class", archived: false },
         ],
         meta: { next_page: null },
       });
+    const resultMatch = url.pathname.match(/^\/v2p2\/classes\/(\d+)\/tasks\/(\d+)\/students$/);
+    if (resultMatch)
+      return send(response, 200, {
+        students: [
+          { id: 9001, grade: "6", score: 18, max_score: 24, comments: "Clear argument; cite the sources.", updated_at: revision },
+          // Answered even when the request named one student: dropped by Spectra.
+          { id: 9002, grade: "3", comments: "Not yours." },
+        ].filter((row) => resultMatch[2] === "3003" || row.id === 0),
+      });
+    const submissionMatch = url.pathname.match(/^\/v2p2\/classes\/(\d+)\/tasks\/(\d+)\/submissions\/(\d+)$/);
+    if (submissionMatch) {
+      if (submissionMatch[2] !== "3003" || submissionMatch[3] !== "9001")
+        return send(response, 404, { error: "no submission" });
+      return send(response, 200, {
+        submission: {
+          id: 7703,
+          student_id: 9001,
+          status: "submitted",
+          submitted_at: "2026-09-10T15:00:00Z",
+          files: [
+            {
+              id: 8801,
+              filename: "sequences-essay.txt",
+              file_size: Buffer.byteLength(SUBMITTED_TEXT, "utf8"),
+              content_type: "text/plain",
+              download_path: "/v2p2/files/8801/download",
+            },
+          ],
+        },
+      });
+    }
+    if (url.pathname === "/v2p2/files/8801/download") {
+      response.writeHead(302, { location: "/signed/8801" });
+      return response.end();
+    }
     const downloadMatch = url.pathname.match(/^\/v2p2\/classes\/(\d+)\/resources\/(\d+)\/download$/);
     if (downloadMatch) {
       if (currentRedirectResource) {
@@ -199,7 +252,14 @@ export function createManageBacProviderFixture({
       return send(response, 200, classPayload(classId, revision));
     }
     if (url.pathname.includes("/cas/experiences/students"))
-      return send(response, 200, { students: [{ id: 9001, experiences: [] }], meta: { next_page: null } });
+      return send(response, 200, {
+        students: [
+          { id: 9001, experiences: [{ id: 6601, name: "Beach clean-up", status: "approved", service: true, updated_at: revision }] },
+          // Asked for one student, answered with two: the other's are dropped.
+          { id: 9002, experiences: [{ id: 6602, name: "Someone else's experience" }] },
+        ],
+        meta: { next_page: null },
+      });
     return send(response, 404, { error: "fixture route not found" });
   });
 

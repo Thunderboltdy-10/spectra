@@ -583,7 +583,7 @@ export function CalendarApplication() {
   useEffect(() => {
     if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
     staleSyncRef.current = true;
-    void syncSpectraManageBac("manual")
+    void syncSpectraManageBac()
       .then(() => load("merge", visibleRange.from, visibleRange.to))
       .catch(() => {
         staleSyncRef.current = false;

@@ -121,3 +121,84 @@ it("pauses a scheduled sync at its time budget so the next request continues it"
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ worked: true, suspended: true });
 });
+
+it("works through due student jobs, each reading only its kind and its targeted classes", async () => {
+  vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey);
+  vi.stubEnv("SPECTRA_MANAGEBAC_TEST_FIXTURE_ORIGIN", "http://127.0.0.1:4010");
+  const student = {
+    clerkId: "student", accountId: "account-student", email: "student@school.test", name: "Student",
+    schoolId: "school-1", schoolRole: "student", membershipId: "membership-student",
+  };
+  const route = (id: string, name: string, recordType: string, path: string, syncKind: string) => ({
+    _id: id, category: "school", name, recordType, path, purpose: name, scope: "personal",
+    minimumRole: "student", pagination: "none", changeStrategy: "full_reconciliation", contractVersion: "v2p2",
+    normalization: {
+      syncKind, fanOutParameter: "class_id", classIdFromRouteParameter: "class_id",
+      recordsPath: "items", idPath: "id", classification: "personal", audienceScope: "mapped_user", fields: { title: "title" },
+    },
+  });
+  const context = {
+    integration: {
+      _id: "integration-1", schoolId: "school-1", baseUrl: "http://127.0.0.1:4010",
+      authHeaderName: "auth-token", authScheme: "raw", requestBudgetPerMinute: 180,
+      bootstrapVersion: 1, status: "connected",
+    },
+    capabilities: [
+      route("capability-tasks", "Tasks", "assignment", "/v2p2/classes/{class_id}/tasks", "current_tasks"),
+      route("capability-resources", "Resources", "class_resource", "/v2p2/classes/{class_id}/resources", "task_resources"),
+    ],
+    mapping: { status: "verified", providerUserId: "9001" },
+    // The student follows 101 and 202, but the job's mode admits only 101.
+    selection: { revision: 1, selectedClassIds: ["101", "202"] },
+    actor: { accountId: student.accountId, email: student.email, schoolRole: student.schoolRole },
+  };
+  const claims = [
+    {
+      integrationId: "integration-1", syncRunId: "job-resources", schoolId: "school-1",
+      serviceSubject: student.clerkId, leaseToken: "lease-resources", selectionRevision: 1, actor: student,
+      pass: { requests: 1, completedCapabilityIds: [], syncKind: "task_resources", targeted: true, classIds: ["101"], yearGroupIds: [], tasks: [] },
+    },
+    {
+      integrationId: "integration-1", syncRunId: "job-tasks", schoolId: "school-1",
+      serviceSubject: student.clerkId, leaseToken: "lease-tasks", selectionRevision: 1, actor: student,
+      pass: { requests: 1, completedCapabilityIds: [], syncKind: "current_tasks", targeted: true, classIds: ["202"], yearGroupIds: [], tasks: [] },
+    },
+  ];
+  const commits: Array<{ name: string; args: Record<string, unknown> }> = [];
+  vi.doMock("@/lib/convex-server", () => ({
+    convexPublicMutation: vi.fn(async (name: string, args: Record<string, unknown>) => {
+      commits.push({ name, args });
+      if (name === "managebac:claimScheduledSync") return claims.shift() ?? null;
+      if (name === "managebac:connectorContext") return context;
+      return {};
+    }),
+    convexMutation: vi.fn(async (name: string) => { throw new Error(`Unexpected mutation ${name}`); }),
+    convexQuery: vi.fn(async (name: string) => { throw new Error(`Unexpected query ${name}`); }),
+  }));
+  vi.doMock("@/lib/server-secrets", () => ({
+    loadSchoolSecretForConnector: vi.fn(async () => ({ value: "school-token-1234567890" })),
+    revokeSchoolSecret: vi.fn(),
+    storeSchoolSecret: vi.fn(),
+  }));
+  vi.doMock("@/lib/auth-server", () => ({ requireActor: vi.fn() }));
+  const requested: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+    requested.push(new URL(String(input)).pathname);
+    return Response.json({ items: [{ id: requested.length, title: "Row" }] });
+  }));
+  const routeModule = await import("@/app/api/spectra/managebac/route");
+
+  const response = await routeModule.POST(workerRequest({ action: "internal_scheduled_work", workerId: "convex:integration-1:2" }));
+
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.jobs.map((job: { syncRunId: string; syncKind: string }) => [job.syncRunId, job.syncKind])).toEqual([
+    ["job-resources", "task_resources"],
+    ["job-tasks", "current_tasks"],
+  ]);
+  expect(requested).toEqual(["/v2p2/classes/101/resources", "/v2p2/classes/202/tasks"]);
+  expect(commits.filter((commit) => commit.name === "managebac:completeSync").map((commit) => commit.args.syncRunId))
+    .toEqual(["job-resources", "job-tasks"]);
+  // Two jobs claimed, then nothing more was due.
+  expect(commits.filter((commit) => commit.name === "managebac:claimScheduledSync")).toHaveLength(3);
+});

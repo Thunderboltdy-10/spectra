@@ -28,6 +28,16 @@ import {
   addProviderWork, applyPlannerProviderUpdate, inlinePlannerProjections, recordProviderConflict, scheduleProviderFanout,
   settleProviderWork, syncRunOutcome, PROVIDER_INLINE_PLANNERS,
 } from "./managebacProjectionJobs";
+import { vSchoolSyncKind } from "./schoolSyncSchema";
+import {
+  CLASS_IDENTITY_TYPES, hiddenByPreferences, isArchived, loadSyncPreferences, nextAutoRunAt, queueSyncJob, syncStateFor,
+  syncTargets, writeSyncState, type SyncPreferences, type SyncTargets, type SyncTrigger,
+} from "./schoolSyncShared";
+import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
+import {
+  SCHOOL_FILE_MAX_BYTES, SCHOOL_FILE_TEXT_MAX_CHARS, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_KIND_INFO, capabilitySyncKinds, recordSyncKind,
+  type SchoolSyncKind,
+} from "../shared/school-sync";
 
 const EMPTY_COUNTS = {
   fetched: 0,
@@ -160,10 +170,16 @@ function classFollowPolicy(ctx: Ctx, integrationId: Id<"schoolIntegrations">) {
   };
 }
 
+/**
+ * The run that owns one scope now: one student's job for one kind of data, or the school-wide
+ * reconciliation (no account, no kind). Each kind is its own scope, so a slow kind never blocks
+ * another.
+ */
 async function activeRunForScope(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
   accountId: Id<"accounts"> | undefined,
+  syncKind: SchoolSyncKind | undefined,
   now: number,
 ) {
   const rows = (
@@ -171,8 +187,8 @@ async function activeRunForScope(
       (["queued", "leased", "running"] as const).map((status) =>
         ctx.db
           .query("externalSyncRuns")
-          .withIndex("by_integration_account_status", (q) =>
-            q.eq("integrationId", integrationId).eq("accountId", accountId).eq("status", status),
+          .withIndex("by_integration_account_kind_status", (q) =>
+            q.eq("integrationId", integrationId).eq("accountId", accountId).eq("syncKind", syncKind).eq("status", status),
           )
           .collect(),
       ),
@@ -267,14 +283,19 @@ type SyncPass = {
   version: 1;
   startedAt: number;
   requests: number;
-  personalOnly: boolean;
-  /** What must not change for a pass to continue: the fan-out selection,
-   * the connection and the capability manifest it started with. */
+  /** The student's kind of data this pass syncs; none for a school reconciliation. */
+  syncKind?: SchoolSyncKind;
+  /** What must not change for a pass to continue: what it targets (the
+   * followed classes and the student's modes), the connection and the
+   * capability manifest it started with. */
   selectionDigest: string;
   connectionKey: string;
   manifestVersion: number;
   completedCapabilityIds: string[];
   position?: PassPosition;
+  /** A student's job reads exactly these, computed by Convex when it starts.
+   * A school reconciliation learns its class and year-group ids as it reads. */
+  targets?: SyncTargets;
   classIds: string[];
   yearGroupIds: string[];
   reconcile?: PassReconcile;
@@ -282,8 +303,8 @@ type SyncPass = {
 
 type PassIdentity = Pick<
   SyncPass,
-  "personalOnly" | "selectionDigest" | "connectionKey" | "manifestVersion"
->;
+  "syncKind" | "selectionDigest" | "connectionKey" | "manifestVersion"
+> & { targets?: SyncTargets };
 
 const vPassProgress = v.object({
   binding: v.string(),
@@ -304,12 +325,14 @@ async function passIdentity(
   ctx: Ctx,
   integration: Doc<"schoolIntegrations">,
   selectionAccountId: Id<"accounts">,
-  personalOnly: boolean,
+  syncKind: SchoolSyncKind | undefined,
+  targets?: SyncTargets,
 ): Promise<PassIdentity> {
   const selection = await selectionSnapshot(ctx, integration._id, selectionAccountId);
   return {
-    personalOnly,
-    selectionDigest: await exactDigest([...selection.selectedClassIds].sort()),
+    ...(syncKind ? { syncKind } : {}),
+    ...(targets ? { targets } : {}),
+    selectionDigest: await exactDigest(targets ?? [...selection.selectedClassIds].sort()),
     connectionKey: await exactDigest([
       integration.baseUrl,
       integration.authHeaderName,
@@ -327,19 +350,23 @@ function newPass(identity: PassIdentity, now: number): SyncPass {
     requests: 1,
     ...identity,
     completedCapabilityIds: [],
-    classIds: [],
-    yearGroupIds: [],
+    classIds: identity.targets?.classIds ?? [],
+    yearGroupIds: identity.targets?.yearGroupIds ?? [],
   };
 }
 
-/** What the route needs to continue a pass where the last request stopped. */
+/** What the route needs to continue a pass where the last request stopped,
+ * and, for a student's job, exactly which classes, year groups and tasks it reads. */
 function passForRoute(pass: SyncPass) {
   return {
     requests: pass.requests,
     completedCapabilityIds: pass.completedCapabilityIds,
     ...(pass.position ? { position: pass.position } : {}),
-    classIds: pass.classIds,
-    yearGroupIds: pass.yearGroupIds,
+    ...(pass.syncKind ? { syncKind: pass.syncKind } : {}),
+    targeted: Boolean(pass.targets),
+    classIds: pass.targets?.classIds ?? pass.classIds,
+    yearGroupIds: pass.targets?.yearGroupIds ?? pass.yearGroupIds,
+    tasks: pass.targets?.tasks ?? [],
   };
 }
 
@@ -348,11 +375,12 @@ async function suspendedPass(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
   accountId: Id<"accounts"> | undefined,
+  syncKind: SchoolSyncKind | undefined,
 ) {
   const latest = await ctx.db
     .query("externalSyncRuns")
-    .withIndex("by_integration_account_status", (q) =>
-      q.eq("integrationId", integrationId).eq("accountId", accountId).eq("status", "partial"),
+    .withIndex("by_integration_account_kind_status", (q) =>
+      q.eq("integrationId", integrationId).eq("accountId", accountId).eq("syncKind", syncKind).eq("status", "partial"),
     )
     .order("desc")
     .first();
@@ -369,7 +397,7 @@ function passRestartReason(
   now: number,
   selectionRevision?: number,
 ) {
-  if (pass.personalOnly !== identity.personalOnly)
+  if (pass.syncKind !== identity.syncKind)
     return "A different kind of sync was requested.";
   if (pass.connectionKey !== identity.connectionKey)
     return "The ManageBac connection changed.";
@@ -378,7 +406,7 @@ function passRestartReason(
     return "The readable ManageBac routes changed.";
   if (pass.selectionDigest !== identity.selectionDigest ||
       (selectionRevision !== undefined && run.selectionRevision !== selectionRevision))
-    return "The followed classes changed.";
+    return "The followed classes or sync settings changed.";
   if (now - pass.startedAt >= MAX_PASS_AGE_MS || pass.requests >= MAX_PASS_REQUESTS)
     return "The earlier sync could not finish in time.";
   return null;
@@ -464,7 +492,6 @@ async function recordPassPage(
 ) {
   // Runs created before passes existed start theirs at their first page.
   const pass = syncPass(syncRun) ?? newPass({
-    personalOnly: false,
     selectionDigest: "",
     connectionKey: "",
     manifestVersion: integration.manifestVersion,
@@ -494,8 +521,9 @@ async function recordPassPage(
       ...(progress.cursor ? { cursor: text(progress.cursor, 1_000) } : {}),
       bindingDone: progress.bindingDone,
     },
-    classIds: merge(pass.classIds, progress.classIds),
-    yearGroupIds: merge(pass.yearGroupIds, progress.yearGroupIds),
+    // A student's job reads fixed targets; only a school pass learns ids.
+    classIds: pass.targets ? pass.classIds : merge(pass.classIds, progress.classIds),
+    yearGroupIds: pass.targets ? pass.yearGroupIds : merge(pass.yearGroupIds, progress.yearGroupIds),
   } satisfies SyncPass;
 }
 
@@ -513,37 +541,67 @@ function scheduleSync(
 
 export const scheduleExisting = internalMutation({
   args: {
-    status: v.optional(v.union(v.literal("connected"), v.literal("degraded"))),
+    /** Connected, then degraded school connections (their school-wide
+     * reconciliation), then every student's queued job. */
+    stream: v.optional(v.union(v.literal("connected"), v.literal("degraded"), v.literal("students"))),
     cursor: v.optional(v.union(v.string(), v.null())),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const status = args.status ?? "connected";
+    const stream = args.stream ?? "connected";
     const limit = Math.min(100, Math.max(1, Math.floor(args.limit ?? 100)));
     // A repair can cover many schools. Resume one indexed stream at a time
-    // rather than loading every integration and queuing every job at once.
-    const page = await ctx.db
-      .query("schoolIntegrations")
-      .withIndex("by_status_next_sync", (q) => q.eq("status", status))
-      .paginate({ cursor: args.cursor ?? null, numItems: limit, maximumBytesRead: 1_000_000 });
+    // rather than loading every row and queuing every job at once.
     let scheduled = 0;
-    for (const integration of page.page) {
-      if (
-        typeof integration.nextSyncAt !== "number" ||
-        integration.blockedReason
-      )
-        continue;
-      await scheduleSync(ctx, integration._id, integration.nextSyncAt);
-      scheduled += 1;
+    let scanned = 0;
+    let isDone = true;
+    let continueCursor: string | null = null;
+    if (stream === "students") {
+      const page = await ctx.db
+        .query("schoolSyncStates")
+        .withIndex("by_due", (q) => q.gte("dueAt", 0))
+        .paginate({ cursor: args.cursor ?? null, numItems: limit, maximumBytesRead: 1_000_000 });
+      // Students of one school due at the same moment share one worker wake-up.
+      const wakeUps = new Set<string>();
+      for (const state of page.page) {
+        if (typeof state.dueAt !== "number") continue;
+        const key = `${state.integrationId}|${state.dueAt}`;
+        if (wakeUps.has(key)) continue;
+        wakeUps.add(key);
+        await scheduleSync(ctx, state.integrationId, state.dueAt);
+        scheduled += 1;
+      }
+      scanned = page.page.length;
+      isDone = page.isDone;
+      continueCursor = page.continueCursor;
+    } else {
+      const page = await ctx.db
+        .query("schoolIntegrations")
+        .withIndex("by_status_next_sync", (q) => q.eq("status", stream))
+        .paginate({ cursor: args.cursor ?? null, numItems: limit, maximumBytesRead: 1_000_000 });
+      for (const integration of page.page) {
+        if (
+          typeof integration.nextSyncAt !== "number" ||
+          integration.blockedReason
+        )
+          continue;
+        await scheduleSync(ctx, integration._id, integration.nextSyncAt);
+        scheduled += 1;
+      }
+      scanned = page.page.length;
+      isDone = page.isDone;
+      continueCursor = page.continueCursor;
     }
-    const next = !page.isDone
-      ? { status, cursor: page.continueCursor, limit }
-      : status === "connected"
-        ? { status: "degraded" as const, cursor: null, limit }
-        : null;
+    const next = !isDone
+      ? { stream, cursor: continueCursor, limit }
+      : stream === "connected"
+        ? { stream: "degraded" as const, cursor: null, limit }
+        : stream === "degraded"
+          ? { stream: "students" as const, cursor: null, limit }
+          : null;
     if (next)
       await ctx.scheduler.runAfter(0, internal.managebac.scheduleExisting, next);
-    return { scheduled, scanned: page.page.length, done: next === null };
+    return { scheduled, scanned, done: next === null };
   },
 });
 
@@ -1660,6 +1718,243 @@ export const myOverview = query({
   },
 });
 
+/** At most this many student jobs read one school's ManageBac at once, so per-student syncs
+ * share the school's API budget instead of multiplying it. */
+const MAX_RUNNING_STUDENT_JOBS = 2;
+/** A claimed job is due again after this if nothing finishes, fails or suspends it first. */
+const JOB_WATCHDOG_MS = SYNC_LEASE_MS + 60_000;
+
+async function runningStudentJobs(ctx: MutationCtx, integrationId: Id<"schoolIntegrations">, now: number) {
+  const rows = (
+    await Promise.all(
+      (["leased", "running"] as const).map((status) =>
+        ctx.db
+          .query("externalSyncRuns")
+          .withIndex("by_integration_status", (q) => q.eq("integrationId", integrationId).eq("status", status))
+          .take(50),
+      ),
+    )
+  ).flat();
+  return rows.filter((row) =>
+    row.accountId !== undefined && row.syncKind !== undefined && !row.projectionIngestionComplete &&
+    (row.leaseExpiresAt ?? 0) > now).length;
+}
+
+function runTrigger(trigger: SyncTrigger) {
+  return trigger === "schedule" ? ("schedule" as const) : trigger === "ai" ? ("ai" as const) : ("user" as const);
+}
+
+function triggerOfRun(run: Doc<"externalSyncRuns">): SyncTrigger {
+  return run.trigger === "schedule" ? "schedule" : run.trigger === "ai" ? "ai" : "user";
+}
+
+function stateScope(run: { accountId?: Id<"accounts">; schoolId: Id<"schools">; integrationId: Id<"schoolIntegrations">; syncKind?: SchoolSyncKind }) {
+  return run.accountId && run.syncKind
+    ? { accountId: run.accountId, schoolId: run.schoolId, integrationId: run.integrationId, kind: run.syncKind }
+    : null;
+}
+
+/**
+ * Starts (or continues) one student's job for one kind of data. The job reads only what the
+ * student's modes admit for its trigger, computed here: the route never chooses targets.
+ */
+async function startStudentJob(
+  ctx: MutationCtx,
+  input: {
+    integration: Doc<"schoolIntegrations">;
+    actor: Actor;
+    mapping: Doc<"externalIdentityMappings"> | null;
+    syncKind: SchoolSyncKind;
+    trigger: SyncTrigger;
+    leaseOwner: string;
+    now: number;
+  },
+) {
+  const { integration, actor, syncKind, trigger, now } = input;
+  const label = SCHOOL_SYNC_KIND_INFO[syncKind].label;
+  const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+  if (!preferences.hasAny(syncKind))
+    throw new Error(`SCHOOL_SYNC_KIND_OFF: ${label} is turned off.`);
+  const capabilities = await ctx.db
+    .query("integrationCapabilities")
+    .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
+    .collect();
+  const readable = capabilities.filter(
+    (item) =>
+      item.permissionState === "read_only" &&
+      item.verificationStatus === "verified" &&
+      (item.scope === "personal" || Boolean(item.personalIdParameter)) &&
+      capabilitySyncKinds(item).includes(syncKind),
+  );
+  if (readable.length === 0)
+    throw new Error(`INTEGRATION_ENDPOINT_UNAVAILABLE: ManageBac has no readable route for ${label.toLowerCase()}.`);
+  if (await activeRunForScope(ctx, integration._id, actor.accountId, syncKind, now))
+    throw new Error(`INTEGRATION_SYNC_BUSY: ${label} is already syncing.`);
+  const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
+  const targets = await syncTargets(ctx, {
+    integration, accountId: actor.accountId, kind: syncKind, trigger, preferences, mapping: input.mapping,
+  });
+  const identity = await passIdentity(ctx, integration, actor.accountId, syncKind, targets);
+  const scope = { accountId: actor.accountId, schoolId: integration.schoolId, integrationId: integration._id, kind: syncKind };
+  const running = (syncRunId: Id<"externalSyncRuns">) => writeSyncState(ctx, scope, {
+    state: "running",
+    dueAt: now + JOB_WATCHDOG_MS,
+    dueTrigger: trigger,
+    lastRunAt: now,
+    lastSyncRunId: syncRunId,
+    errorCode: undefined,
+    errorSummary: undefined,
+  });
+  // A newer request continues a pass that stopped part-way, unless what
+  // the pass depends on changed; then that pass is dropped unreconciled.
+  const suspended = await suspendedPass(ctx, integration._id, actor.accountId, syncKind);
+  const restartReason = suspended
+    ? passRestartReason(suspended.run, suspended.pass, identity, readable.map((item) => item._id), now, selection.revision)
+    : null;
+  if (suspended && !restartReason) {
+    const resumed = await resumePass(ctx, suspended.run, suspended.pass, input.leaseOwner, now);
+    await running(suspended.run._id);
+    return {
+      syncRunId: suspended.run._id,
+      integrationId: integration._id,
+      leaseToken: resumed.leaseToken,
+      selectionRevision: suspended.run.selectionRevision ?? 0,
+      syncKind,
+      pass: passForRoute(resumed.pass),
+    };
+  }
+  if (suspended && restartReason)
+    await abandonPass(ctx, suspended.run, restartReason, now);
+  const pass = newPass(identity, now);
+  const leaseToken = crypto.randomUUID();
+  const syncRunId = await ctx.db.insert("externalSyncRuns", {
+    integrationId: integration._id,
+    schoolId: integration.schoolId,
+    accountId: actor.accountId,
+    kind: trigger === "schedule" ? "scheduled" : "manual",
+    status: "leased",
+    trigger: runTrigger(trigger),
+    stage: "claimed",
+    capabilityIds: readable.map((item) => item._id),
+    cursorState: pass,
+    counts: EMPTY_COUNTS,
+    leaseOwner: input.leaseOwner,
+    leaseToken,
+    leaseExpiresAt: now + SYNC_LEASE_MS,
+    selectionRevision: selection.revision,
+    syncKind,
+    attemptCount: 1,
+    nextAttemptAt: now,
+    startedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  for (const capability of readable)
+    await ctx.db.insert("externalSyncCapabilityRuns", {
+      syncRunId,
+      integrationId: integration._id,
+      capabilityId: capability._id,
+      status: "queued",
+      pageCount: 0,
+      recordCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  await running(syncRunId);
+  return {
+    syncRunId,
+    integrationId: integration._id,
+    leaseToken,
+    selectionRevision: selection.revision,
+    syncKind,
+    pass: passForRoute(pass),
+  };
+}
+
+function connectorActor(actor: Actor) {
+  return {
+    clerkId: actor.clerkId,
+    accountId: actor.accountId,
+    email: actor.email,
+    name: actor.name,
+    schoolId: actor.schoolId,
+    schoolRole: actor.schoolRole,
+    membershipId: actor.membershipId,
+  };
+}
+
+/** The next student job that is due, claimed as that student. */
+async function claimStudentJob(
+  ctx: MutationCtx,
+  workerId: string,
+  now: number,
+  verify: (actor: Actor) => Promise<void>,
+) {
+  const due = await ctx.db
+    .query("schoolSyncStates")
+    .withIndex("by_due", (q) => q.gte("dueAt", 0).lte("dueAt", now))
+    .take(20);
+  const busy = new Map<string, number>();
+  for (const state of due) {
+    const actor = await getActorForAccountId(ctx, state.accountId);
+    if (!actor) continue;
+    // Nothing is written before the worker's signature is checked.
+    await verify(actor);
+    const scope = { accountId: state.accountId, schoolId: state.schoolId, integrationId: state.integrationId, kind: state.kind };
+    const integration = await ctx.db.get(state.integrationId);
+    if (!integration || integration.schoolId !== state.schoolId || actor.schoolId !== state.schoolId ||
+        !["connected", "degraded"].includes(integration.status)) {
+      await writeSyncState(ctx, scope, {
+        state: "blocked", dueAt: undefined, dueTrigger: undefined,
+        errorCode: "INTEGRATION_NOT_READY", errorSummary: "ManageBac isn't connected for this school.",
+      });
+      continue;
+    }
+    const mapping = await ctx.db
+      .query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) => q.eq("integrationId", integration._id).eq("accountId", state.accountId))
+      .unique();
+    if (!mapping || mapping.status !== "verified") {
+      await writeSyncState(ctx, scope, {
+        state: "blocked", dueAt: undefined, dueTrigger: undefined,
+        errorCode: "INTEGRATION_IDENTITY_REQUIRED", errorSummary: "Spectra hasn't matched this student to ManageBac yet.",
+      });
+      continue;
+    }
+    const trigger = state.dueTrigger ?? "schedule";
+    const preferences = await loadSyncPreferences(ctx, state.accountId, integration._id);
+    if (!preferences.hasAny(state.kind) || (trigger === "schedule" && !preferences.hasAuto(state.kind))) {
+      await writeSyncState(ctx, scope, { state: "idle", dueAt: undefined, dueTrigger: undefined });
+      continue;
+    }
+    const running = busy.get(integration._id) ?? (await runningStudentJobs(ctx, integration._id, now));
+    busy.set(integration._id, running);
+    if (running >= MAX_RUNNING_STUDENT_JOBS) continue;
+    if (await activeRunForScope(ctx, integration._id, state.accountId, state.kind, now)) continue;
+    try {
+      const started = await startStudentJob(ctx, {
+        integration, actor, mapping, syncKind: state.kind, trigger, leaseOwner: workerId, now,
+      });
+      return {
+        ...started,
+        schoolId: integration.schoolId,
+        serviceSubject: actor.clerkId,
+        actor: connectorActor(actor),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const code = message.match(/^([A-Z0-9_]+)/)?.[1] ?? "SCHOOL_SYNC_FAILED";
+      await writeSyncState(ctx, scope, {
+        state: code === "SCHOOL_SYNC_KIND_OFF" ? "idle" : "blocked",
+        dueAt: undefined,
+        dueTrigger: undefined,
+        ...(code === "SCHOOL_SYNC_KIND_OFF" ? {} : { errorCode: code, errorSummary: message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500) }),
+      });
+    }
+  }
+  return null;
+}
+
 export const claimScheduledSync = mutation({
   args: {
     workerId: v.string(),
@@ -1670,6 +1965,21 @@ export const claimScheduledSync = mutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const workerId = text(args.workerId, 200);
+    if ((await exactDigest({ workerId })) !== args.payloadDigest)
+      throw new Error(
+        "INTEGRATION_PAYLOAD_INVALID: Scheduled claim payload changed.",
+      );
+    let verified = false;
+    const verify = async (actor: Actor) => {
+      if (verified) return;
+      await verifyScheduledClaim(ctx, actor, args);
+      verified = true;
+    };
+    // Students' own jobs first: each kind of data on its own schedule.
+    const studentJob = await claimStudentJob(ctx, workerId, now, verify);
+    if (studentJob) return studentJob;
+    // Then the school-wide reconciliation of shared (non-personal) routes.
     const due = (
       await Promise.all(
         (["connected", "degraded"] as const).map((status) =>
@@ -1691,8 +2001,6 @@ export const claimScheduledSync = mutation({
         (a, b) => (a.nextSyncAt ?? a.createdAt) - (b.nextSyncAt ?? b.createdAt),
     );
     for (const integration of due) {
-      if (await activeRunForScope(ctx, integration._id, undefined, now))
-        continue;
       const admins = await ctx.db
         .query("schoolMemberships")
         .withIndex("by_school_role", (q) =>
@@ -1704,25 +2012,11 @@ export const claimScheduledSync = mutation({
         activeAdmins.find(
           (item) => item.accountId === integration.createdByAccountId,
         ) ?? activeAdmins[0];
-      if (!preferred) {
-        await ctx.db.patch(integration._id, {
-          status: "degraded",
-          blockedReason:
-            "Scheduled synchronization needs an active school administrator.",
-          updatedAt: now,
-        });
-        continue;
-      }
-      const actor = await getActorForAccountId(ctx, preferred.accountId);
+      const actor = preferred ? await getActorForAccountId(ctx, preferred.accountId) : null;
       if (!actor) continue;
-      const expectedDigest = await exactDigest({
-        workerId: text(args.workerId, 200),
-      });
-      if (expectedDigest !== args.payloadDigest)
-        throw new Error(
-          "INTEGRATION_PAYLOAD_INVALID: Scheduled claim payload changed.",
-        );
-      await verifyScheduledClaim(ctx, actor, args);
+      await verify(actor);
+      if (await activeRunForScope(ctx, integration._id, undefined, undefined, now))
+        continue;
       const capabilities = await ctx.db
         .query("integrationCapabilities")
         .withIndex("by_integration", (q) =>
@@ -1736,63 +2030,12 @@ export const claimScheduledSync = mutation({
           item.scope !== "personal",
       );
       if (readable.length === 0) {
-        await ctx.db.patch(integration._id, {
-          status: "degraded",
-          blockedReason:
-            "No verified school- or class-scoped read-only route is available for scheduled sync.",
-          updatedAt: now,
-        });
-        return null;
+        // Personal routes are read by each student's own jobs; with no
+        // shared route there is no school-wide reconciliation to run.
+        await ctx.db.patch(integration._id, { nextSyncAt: undefined, updatedAt: now });
+        continue;
       }
-      const workerId = text(args.workerId, 200);
-      const identity = await passIdentity(ctx, integration, actor.accountId, false);
-      // A school pass that stopped at its time budget continues here.
-      const suspended = await suspendedPass(ctx, integration._id, undefined);
-      const restartReason = suspended
-        ? passRestartReason(suspended.run, suspended.pass, identity, readable.map((item) => item._id), now)
-        : null;
-      if (suspended && restartReason)
-        await abandonPass(ctx, suspended.run, restartReason, now);
-      let syncRunId: Id<"externalSyncRuns">;
-      let leaseToken: string;
-      let pass: SyncPass;
-      if (suspended && !restartReason) {
-        syncRunId = suspended.run._id;
-        ({ leaseToken, pass } = await resumePass(ctx, suspended.run, suspended.pass, workerId, now));
-      } else {
-        leaseToken = crypto.randomUUID();
-        pass = newPass(identity, now);
-        syncRunId = await ctx.db.insert("externalSyncRuns", {
-          integrationId: integration._id,
-          schoolId: integration.schoolId,
-          kind: "scheduled",
-          status: "leased",
-          trigger: "schedule",
-          stage: "claimed",
-          capabilityIds: readable.map((item) => item._id),
-          cursorState: pass,
-          counts: EMPTY_COUNTS,
-          leaseOwner: workerId,
-          leaseToken,
-          leaseExpiresAt: now + SYNC_LEASE_MS,
-          attemptCount: 1,
-          nextAttemptAt: now,
-          startedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        });
-        for (const capability of readable)
-          await ctx.db.insert("externalSyncCapabilityRuns", {
-            syncRunId,
-            integrationId: integration._id,
-            capabilityId: capability._id,
-            status: "queued",
-            pageCount: 0,
-            recordCount: 0,
-            createdAt: now,
-            updatedAt: now,
-          });
-      }
+      const started = await startSchoolReconciliation(ctx, integration, actor, readable, workerId, "schedule", now);
       const nextSyncAt =
         now + integration.syncPolicy.frequencyMinutes * 60_000;
       await ctx.db.patch(integration._id, {
@@ -1802,27 +2045,84 @@ export const claimScheduledSync = mutation({
       });
       await scheduleSync(ctx, integration._id, nextSyncAt);
       return {
-        integrationId: integration._id,
-        syncRunId,
-        leaseToken,
-        selectionRevision: 0,
-        pass: passForRoute(pass),
+        ...started,
         schoolId: integration.schoolId,
         serviceSubject: actor.clerkId,
-        actor: {
-          clerkId: actor.clerkId,
-          accountId: actor.accountId,
-          email: actor.email,
-          name: actor.name,
-          schoolId: actor.schoolId,
-          schoolRole: actor.schoolRole,
-          membershipId: actor.membershipId,
-        },
+        actor: connectorActor(actor),
       };
     }
     return null;
   },
 });
+
+/** Starts (or continues) the school-wide reconciliation of shared routes. */
+async function startSchoolReconciliation(
+  ctx: MutationCtx,
+  integration: Doc<"schoolIntegrations">,
+  actor: Actor,
+  readable: Array<Doc<"integrationCapabilities">>,
+  leaseOwner: string,
+  trigger: "schedule" | "school_admin",
+  now: number,
+) {
+  const identity = await passIdentity(ctx, integration, actor.accountId, undefined);
+  // A school pass that stopped at its time budget continues here.
+  const suspended = await suspendedPass(ctx, integration._id, undefined, undefined);
+  const restartReason = suspended
+    ? passRestartReason(suspended.run, suspended.pass, identity, readable.map((item) => item._id), now)
+    : null;
+  if (suspended && !restartReason) {
+    const resumed = await resumePass(ctx, suspended.run, suspended.pass, leaseOwner, now);
+    return {
+      integrationId: integration._id,
+      syncRunId: suspended.run._id,
+      leaseToken: resumed.leaseToken,
+      selectionRevision: 0,
+      pass: passForRoute(resumed.pass),
+    };
+  }
+  if (suspended && restartReason)
+    await abandonPass(ctx, suspended.run, restartReason, now);
+  const leaseToken = crypto.randomUUID();
+  const pass = newPass(identity, now);
+  const syncRunId = await ctx.db.insert("externalSyncRuns", {
+    integrationId: integration._id,
+    schoolId: integration.schoolId,
+    kind: trigger === "schedule" ? "scheduled" : "reconciliation",
+    status: "leased",
+    trigger,
+    stage: "claimed",
+    capabilityIds: readable.map((item) => item._id),
+    cursorState: pass,
+    counts: EMPTY_COUNTS,
+    leaseOwner,
+    leaseToken,
+    leaseExpiresAt: now + SYNC_LEASE_MS,
+    attemptCount: 1,
+    nextAttemptAt: now,
+    startedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  for (const capability of readable)
+    await ctx.db.insert("externalSyncCapabilityRuns", {
+      syncRunId,
+      integrationId: integration._id,
+      capabilityId: capability._id,
+      status: "queued",
+      pageCount: 0,
+      recordCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  return {
+    integrationId: integration._id,
+    syncRunId,
+    leaseToken,
+    selectionRevision: 0,
+    pass: passForRoute(pass),
+  };
+}
 
 export const connectorContext = mutation({
   args: {
@@ -1917,12 +2217,14 @@ export const connectorContext = mutation({
 
 export const beginSync = mutation({
   args: {
+    /** identity: resolve the student; manual: one student job for `syncKind`;
+     * reconciliation: the school-wide pass over shared routes (administrators). */
     kind: v.union(
       v.literal("identity"),
-      v.literal("bootstrap"),
       v.literal("manual"),
       v.literal("reconciliation"),
     ),
+    syncKind: v.optional(vSchoolSyncKind),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -1934,20 +2236,7 @@ export const beginSync = mutation({
       throw new Error(
         "INTEGRATION_NOT_READY: ManageBac must be connected with verified readable capabilities.",
       );
-    if (args.kind !== "identity" && actor.schoolRole !== "school_admin") {
-      const mapping = await ctx.db
-        .query("externalIdentityMappings")
-        .withIndex("by_integration_account", (q) =>
-          q
-            .eq("integrationId", integration._id)
-            .eq("accountId", actor.accountId),
-        )
-        .unique();
-      if (!mapping || mapping.status !== "verified")
-        throw new Error(
-          "INTEGRATION_IDENTITY_REQUIRED: Resolve your school identity first.",
-        );
-    }
+    const now = Date.now();
     const capabilities = await ctx.db
       .query("integrationCapabilities")
       .withIndex("by_integration", (q) =>
@@ -1961,112 +2250,88 @@ export const beginSync = mutation({
     );
     if (readable.length === 0)
       throw new Error("INTEGRATION_CAPABILITY_REQUIRED: No route is verified.");
-    const now = Date.now();
-    const accountId =
-      args.kind === "reconciliation" && actor.schoolRole === "school_admin"
-        ? undefined
-        : actor.accountId;
-    const active = await activeRunForScope(
-      ctx,
-      integration._id,
-      accountId,
-      now,
-    );
-    if (active)
-      throw new Error(
-        "INTEGRATION_SYNC_BUSY: A sync for this account and connection is already running.",
-      );
-    const selection = accountId
-      ? await selectionSnapshot(ctx, integration._id, accountId)
-      : undefined;
-    const identity = await passIdentity(ctx, integration, actor.accountId, args.kind === "bootstrap");
-    if (args.kind !== "identity") {
-      // A newer request continues a pass that stopped part-way, unless what
-      // the pass depends on changed; then that pass is dropped unreconciled.
-      const suspended = await suspendedPass(ctx, integration._id, accountId);
-      const readableIds = readable
-        .filter((item) => accountId !== undefined || item.scope !== "personal")
-        .map((item) => item._id);
-      const restartReason = suspended
-        ? passRestartReason(suspended.run, suspended.pass, identity, readableIds, now, selection?.revision)
-        : null;
-      if (suspended && !restartReason) {
-        const resumed = await resumePass(ctx, suspended.run, suspended.pass, actor.clerkId, now);
-        return {
-          syncRunId: suspended.run._id,
-          integrationId: integration._id,
-          leaseToken: resumed.leaseToken,
-          selectionRevision: suspended.run.selectionRevision ?? 0,
-          pass: passForRoute(resumed.pass),
-        };
-      }
-      if (suspended && restartReason)
-        await abandonPass(ctx, suspended.run, restartReason, now);
+    if (args.kind === "reconciliation") {
+      if (actor.schoolRole !== "school_admin")
+        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+      const shared = readable.filter((item) => item.scope !== "personal");
+      if (shared.length === 0)
+        throw new Error("INTEGRATION_CAPABILITY_REQUIRED: No shared school route is verified.");
+      if (await activeRunForScope(ctx, integration._id, undefined, undefined, now))
+        throw new Error("INTEGRATION_SYNC_BUSY: The school reconciliation is already running.");
+      return startSchoolReconciliation(ctx, integration, actor, shared, actor.clerkId, "school_admin", now);
     }
-    const pass = args.kind === "identity" ? undefined : newPass(identity, now);
-    const leaseToken = crypto.randomUUID();
-    const syncRunId = await ctx.db.insert("externalSyncRuns", {
-      integrationId: integration._id,
-      schoolId: actor.schoolId,
-      accountId,
-      kind: args.kind,
-      status: "queued",
-      trigger:
-        args.kind === "bootstrap"
-          ? "bootstrap"
-          : actor.schoolRole === "school_admin"
-            ? "school_admin"
-            : "user",
-      bootstrapVersion:
-        args.kind === "bootstrap" ? integration.bootstrapVersion : undefined,
-      stage: args.kind === "identity" ? "resolving_identity" : "queued",
-      capabilityIds:
-        args.kind === "identity"
-          ? readable
-              .filter(
-                (item) =>
-                  item.recordType === "person" ||
-                  item.recordType === "membership",
-              )
-              .map((item) => item._id)
-          : readable.map((item) => item._id),
-      cursorState: pass,
-      counts: EMPTY_COUNTS,
-      leaseOwner: actor.clerkId,
-      leaseToken,
-      leaseExpiresAt: now + SYNC_LEASE_MS,
-      selectionRevision: selection?.revision,
-      attemptCount: 0,
-      nextAttemptAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-    for (const capabilityId of (await ctx.db.get(syncRunId))!.capabilityIds)
-      await ctx.db.insert("externalSyncCapabilityRuns", {
-        syncRunId,
+    if (args.kind === "identity") {
+      if (await activeRunForScope(ctx, integration._id, actor.accountId, undefined, now))
+        throw new Error(
+          "INTEGRATION_SYNC_BUSY: A sync for this account and connection is already running.",
+        );
+      const leaseToken = crypto.randomUUID();
+      const capabilityIds = readable
+        .filter((item) => item.recordType === "person" || item.recordType === "membership")
+        .map((item) => item._id);
+      const syncRunId = await ctx.db.insert("externalSyncRuns", {
         integrationId: integration._id,
-        capabilityId,
+        schoolId: actor.schoolId,
+        accountId: actor.accountId,
+        kind: "identity",
         status: "queued",
-        pageCount: 0,
-        recordCount: 0,
+        trigger: actor.schoolRole === "school_admin" ? "school_admin" : "user",
+        stage: "resolving_identity",
+        capabilityIds,
+        counts: EMPTY_COUNTS,
+        leaseOwner: actor.clerkId,
+        leaseToken,
+        leaseExpiresAt: now + SYNC_LEASE_MS,
+        attemptCount: 0,
+        nextAttemptAt: now,
         createdAt: now,
         updatedAt: now,
       });
-    return {
-      syncRunId,
-      integrationId: integration._id,
-      leaseToken,
-      selectionRevision: selection?.revision ?? 0,
-      ...(pass ? { pass: passForRoute(pass) } : {}),
-    };
+      for (const capabilityId of capabilityIds)
+        await ctx.db.insert("externalSyncCapabilityRuns", {
+          syncRunId,
+          integrationId: integration._id,
+          capabilityId,
+          status: "queued",
+          pageCount: 0,
+          recordCount: 0,
+          createdAt: now,
+          updatedAt: now,
+        });
+      // Identity runs read fixed routes; there is no pass to continue.
+      return { syncRunId, integrationId: integration._id, leaseToken, selectionRevision: 0, pass: undefined };
+    }
+    if (!args.syncKind)
+      throw new Error("SCHOOL_SYNC_KIND_REQUIRED: Choose which kind of School data to sync.");
+    const mapping = await ctx.db
+      .query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) =>
+        q.eq("integrationId", integration._id).eq("accountId", actor.accountId),
+      )
+      .unique();
+    if (!mapping || mapping.status !== "verified")
+      throw new Error(
+        "INTEGRATION_IDENTITY_REQUIRED: Resolve your school identity first.",
+      );
+    return startStudentJob(ctx, {
+      integration, actor, mapping, syncKind: args.syncKind, trigger: "user", leaseOwner: actor.clerkId, now,
+    });
   },
 });
 
-/** AI-triggered refresh with anti-thrash cooldown (~15 minutes). */
+/** How soon the AI may ask for School data again, so it never thrashes ManageBac. */
+const AI_REFRESH_COOLDOWN_MS = 15 * 60_000;
+
+/**
+ * AI-triggered refresh: queues this student's jobs (every kind not Off) for the background
+ * worker. The AI harness reads the result shape below; keep it.
+ */
 export const requestAiRefresh = mutation({
   args: {
     reason: v.optional(v.string()),
     force: v.optional(v.boolean()),
+    /** The kinds the AI needs fresher; every kind not Off when omitted. */
+    kinds: v.optional(v.array(vSchoolSyncKind)),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -2077,23 +2342,6 @@ export const requestAiRefresh = mutation({
         skipped: true,
         reason: "not_connected" as const,
       };
-    const now = Date.now();
-    const cooldownMs = args.force ? 2 * 60_000 : 15 * 60_000;
-    if (integration.lastSyncAt && now - integration.lastSyncAt < cooldownMs)
-      return {
-        started: false,
-        skipped: true,
-        reason: "fresh" as const,
-        lastSyncAt: integration.lastSyncAt,
-        nextEligibleAt: integration.lastSyncAt + cooldownMs,
-      };
-    if (await activeRunForScope(ctx, integration._id, undefined, now))
-      return {
-        started: false,
-        skipped: true,
-        reason: "already_running" as const,
-        lastSyncAt: integration.lastSyncAt,
-      };
     const mapping = await ctx.db
       .query("externalIdentityMappings")
       .withIndex("by_integration_account", (q) =>
@@ -2102,21 +2350,43 @@ export const requestAiRefresh = mutation({
           .eq("accountId", actor.accountId),
       )
       .unique();
-    if (
-      actor.schoolRole !== "school_admin" &&
-      (!mapping || mapping.status !== "verified")
-    )
+    if (!mapping || mapping.status !== "verified")
       return {
         started: false,
         skipped: true,
         reason: "identity_required" as const,
       };
-    // Pull the scheduled worker forward instead of orphaning a queued run.
-    await ctx.db.patch(integration._id, {
-      nextSyncAt: now,
-      updatedAt: now,
-    });
-    await scheduleSync(ctx, integration._id, now);
+    const now = Date.now();
+    const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+    const kinds = SCHOOL_SYNC_KINDS.filter(
+      (kind) => preferences.hasAny(kind) && (!args.kinds || args.kinds.includes(kind)),
+    );
+    const states = (
+      await Promise.all(kinds.map((kind) => syncStateFor(ctx, actor.accountId, integration._id, kind)))
+    ).filter((state): state is Doc<"schoolSyncStates"> => Boolean(state));
+    const lastSyncAt = states.reduce<number | undefined>(
+      (latest, state) => (state.lastSuccessAt !== undefined && (latest === undefined || state.lastSuccessAt > latest) ? state.lastSuccessAt : latest),
+      undefined,
+    );
+    const lastRunAt = states.reduce((latest, state) => Math.max(latest, state.lastRunAt ?? 0), 0);
+    const cooldownMs = args.force ? 2 * 60_000 : AI_REFRESH_COOLDOWN_MS;
+    if (lastRunAt && now - lastRunAt < cooldownMs)
+      return {
+        started: false,
+        skipped: true,
+        reason: "fresh" as const,
+        lastSyncAt,
+        nextEligibleAt: lastRunAt + cooldownMs,
+      };
+    if (states.some((state) => state.state === "running" && (state.dueAt ?? 0) > now))
+      return {
+        started: false,
+        skipped: true,
+        reason: "already_running" as const,
+        lastSyncAt,
+      };
+    for (const kind of kinds)
+      await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "ai", now);
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -2125,14 +2395,15 @@ export const requestAiRefresh = mutation({
       targetId: integration._id,
       metadata: {
         reason: (args.reason ?? "stale_school_data").slice(0, 240),
+        kinds: kinds.join(","),
         nextSyncAt: now,
       },
       retentionClass: "operational",
     });
     return {
-      started: true,
-      skipped: false,
-      lastSyncAt: integration.lastSyncAt,
+      started: kinds.length > 0,
+      skipped: kinds.length === 0,
+      lastSyncAt,
       nextSyncAt: now,
     };
   },
@@ -2147,6 +2418,8 @@ export const commitIdentityResolution = mutation({
     providerUserIdHash: v.optional(v.string()),
     verifiedEmailHash: v.string(),
     evidenceCapabilityId: v.optional(v.id("integrationCapabilities")),
+    /** The student's year group, which CAS is read through. */
+    providerYearGroupId: v.optional(v.string()),
     leaseToken: v.optional(v.string()),
     payloadDigest: v.string(),
     timestamp: v.number(),
@@ -2179,6 +2452,7 @@ export const commitIdentityResolution = mutation({
       ...(args.evidenceCapabilityId
         ? { evidenceCapabilityId: args.evidenceCapabilityId }
         : {}),
+      ...(args.providerYearGroupId ? { providerYearGroupId: args.providerYearGroupId } : {}),
       ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
     });
     if (expectedDigest !== args.payloadDigest)
@@ -2215,6 +2489,10 @@ export const commitIdentityResolution = mutation({
       verifiedEmailHash: args.verifiedEmailHash.slice(0, 180),
       status,
       evidenceCapabilityId: args.evidenceCapabilityId,
+      providerYearGroupId:
+        status === "verified" && args.providerYearGroupId && /^\d{1,20}$/.test(args.providerYearGroupId.trim())
+          ? args.providerYearGroupId.trim()
+          : undefined,
       matchCount,
       resolvedAt: status === "verified" ? now : undefined,
       revokedAt: undefined,
@@ -2236,6 +2514,14 @@ export const commitIdentityResolution = mutation({
       counts: { ...syncRun.counts, fetched: matchCount },
       updatedAt: now,
     });
+    // A newly matched student's Auto kinds start in the background. The
+    // class list comes first, in the request that resolved the identity.
+    if (status === "verified" && existing?.status !== "verified") {
+      const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+      for (const kind of SCHOOL_SYNC_KINDS)
+        if (kind !== "classes" && preferences.hasAuto(kind))
+          await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "schedule", now);
+    }
     return { status };
   },
 });
@@ -3090,6 +3376,230 @@ async function projectRecord(
   return { projected: false, created: false };
 }
 
+/** Errors no retry fixes: someone has to change something first (see describeSchoolSyncProblem). */
+const BLOCKING_SYNC_ERRORS = new Set([
+  "INTEGRATION_PERMISSION_DENIED",
+  "INTEGRATION_CREDENTIAL_REJECTED",
+  "INTEGRATION_TOKEN_REQUIRED",
+  "INTEGRATION_IDENTITY_REQUIRED",
+  "INTEGRATION_ENDPOINT_UNAVAILABLE",
+]);
+
+/**
+ * The kind each record of one route belongs to, and the student's modes, read once per page.
+ * A route that serves one kind decides it; a tasks route splits current from past by due date
+ * and by whether the class is archived.
+ */
+function recordKindPolicy(
+  ctx: MutationCtx,
+  integrationId: Id<"schoolIntegrations">,
+  capability: Doc<"integrationCapabilities">,
+  now: number,
+) {
+  const capabilityKinds = capabilitySyncKinds(capability);
+  const archived = new Map<string, Promise<boolean>>();
+  const preferences = new Map<string, Promise<SyncPreferences>>();
+  const classArchived = (accountId: Id<"accounts">, providerClassId: string | undefined) => {
+    if (!providerClassId) return Promise.resolve(false);
+    const key = `${accountId}|${providerClassId}`;
+    let pending = archived.get(key);
+    if (!pending) {
+      pending = ctx.db
+        .query("externalRecords")
+        .withIndex("by_account_kind_class", (q) =>
+          q.eq("mappedAccountId", accountId).eq("syncKind", "classes").eq("providerClassId", providerClassId),
+        )
+        .take(10)
+        .then((rows) => rows.some((row) =>
+          row.integrationId === integrationId && !row.tombstone &&
+          CLASS_IDENTITY_TYPES.has(row.recordType) && isArchived(row.normalized)));
+      archived.set(key, pending);
+    }
+    return pending;
+  };
+  const kindOf = async (
+    accountId: Id<"accounts">,
+    input: { normalized: unknown; providerClassId?: string },
+  ): Promise<SchoolSyncKind | undefined> => {
+    if (capabilityKinds.length === 1) return capabilityKinds[0];
+    return recordSyncKind(capability.recordType, input.normalized, {
+      classArchived: await classArchived(accountId, input.providerClassId),
+      now,
+    });
+  };
+  return Object.assign(kindOf, {
+    preferences: (accountId: Id<"accounts">) => {
+      let pending = preferences.get(accountId);
+      if (!pending) {
+        pending = loadSyncPreferences(ctx, accountId, integrationId);
+        preferences.set(accountId, pending);
+      }
+      return pending;
+    },
+  });
+}
+
+/**
+ * Whether one personal record of a page is stored. A job stores only its own kind, in the
+ * classes whose mode admits its trigger. A record the job owned that now belongs to another
+ * kind (a task that became past) follows that kind's mode. Off removes what was kept.
+ */
+async function admitPersonalRecord(
+  _ctx: MutationCtx,
+  input: {
+    preferences: SyncPreferences;
+    runKind: SchoolSyncKind | undefined;
+    trigger: SyncTrigger;
+    recordType: string;
+    syncKind: SchoolSyncKind | undefined;
+    providerClassId: string | undefined;
+    existing: Doc<"externalRecords"> | undefined;
+  },
+): Promise<"store" | "skip" | "purge"> {
+  const { preferences, runKind, syncKind, existing } = input;
+  // The class list is how a student chooses classes at all.
+  if (CLASS_IDENTITY_TYPES.has(input.recordType))
+    return !runKind || runKind === "classes" ? "store" : "skip";
+  if (!syncKind) return runKind ? "skip" : "store";
+  const mode = preferences.modeFor(syncKind, input.providerClassId);
+  if (mode === "off") return existing ? "purge" : "skip";
+  if (!runKind) return "store";
+  if (syncKind === runKind) return preferences.admits(syncKind, input.trigger, input.providerClassId) ? "store" : "skip";
+  return existing?.syncKind === runKind ? "store" : "skip";
+}
+
+/** Whether a stored record is one this job reads, so its reconciliation may remove it. */
+function inJobTargets(
+  runKind: SchoolSyncKind | undefined,
+  targets: SyncTargets | undefined,
+  source: Doc<"externalRecords">,
+) {
+  if (!runKind) return true;
+  if (source.syncKind !== runKind) return false;
+  if (!targets) return true;
+  if (
+    SCHOOL_SYNC_KIND_INFO[runKind].classScoped &&
+    !CLASS_IDENTITY_TYPES.has(source.recordType) &&
+    !(source.providerClassId && targets.classIds.includes(source.providerClassId))
+  )
+    return false;
+  if (runKind === "grades" || runKind === "dropbox_files") {
+    const taskId = String(record(source.normalized).taskId ?? "");
+    return targets.tasks.some((task) => task.taskId === taskId);
+  }
+  return true;
+}
+
+/**
+ * Removes one student's record and what Spectra keeps only because of it: overlays, links,
+ * open conflicts, fetched files, CAS reflections and outcomes, import receipts and its
+ * projections. Work the student made from it (a planner plan, a Library copy) stays theirs;
+ * an official deadline or lesson it put on the Calendar is marked removed. The class list is
+ * never purged.
+ */
+export async function purgeSchoolRecord(
+  ctx: MutationCtx,
+  source: Doc<"externalRecords">,
+  now = Date.now(),
+) {
+  const owner = source.mappedAccountId;
+  if (!owner || CLASS_IDENTITY_TYPES.has(source.recordType)) return false;
+  const [overlays, outgoing, incoming, projections, receipts, files, reflections, outcomes, conflicts, calendar, migrations] =
+    await Promise.all([
+      ctx.db.query("externalRecordOverlays").withIndex("by_record_account", (q) => q.eq("recordId", source._id)).take(50),
+      ctx.db.query("externalRecordRelations").withIndex("by_source", (q) => q.eq("sourceRecordId", source._id)).take(200),
+      ctx.db.query("externalRecordRelations").withIndex("by_target", (q) => q.eq("targetRecordId", source._id)).take(200),
+      ctx.db.query("externalProjections").withIndex("by_account_record", (q) => q.eq("accountId", owner).eq("recordId", source._id)).take(50),
+      ctx.db.query("managebacResourceImports").withIndex("by_account_source_record", (q) => q.eq("accountId", owner).eq("sourceRecordId", source._id)).take(50),
+      ctx.db.query("schoolFiles").withIndex("by_account_source", (q) => q.eq("accountId", owner).eq("sourceRecordId", source._id)).take(100),
+      ctx.db.query("casReflections").withIndex("by_account_experience", (q) => q.eq("accountId", owner).eq("experienceRecordId", source._id)).take(200),
+      ctx.db.query("casOutcomeTags").withIndex("by_account_experience", (q) => q.eq("accountId", owner).eq("experienceRecordId", source._id)).take(5),
+      ctx.db.query("externalSyncConflicts").withIndex("by_account_status", (q) => q.eq("accountId", owner).eq("status", "open")).take(500),
+      ctx.db.query("calendarItems").withIndex("by_source_record", (q) => q.eq("sourceRecordId", source._id)).take(50),
+      ctx.db.query("externalRecordIdentityMigrations").withIndex("by_legacy_record", (q) => q.eq("legacyRecordId", source._id)).take(10),
+    ]);
+  for (const projection of projections) {
+    if (projection.projectionType === "timetable_event") await markProjectionSourceRemoved(ctx, projection);
+    await ctx.db.delete(projection._id);
+  }
+  for (const item of calendar)
+    if (item.ownerAccountId === owner && item.sourceLocked && item.status !== "removed")
+      await ctx.db.patch(item._id, {
+        status: "removed",
+        sourceCapabilityState: "unavailable",
+        revision: item.revision + 1,
+        updatedAt: now,
+      });
+  for (const row of [...overlays, ...outgoing, ...incoming, ...receipts, ...reflections, ...outcomes, ...migrations])
+    await ctx.db.delete(row._id);
+  for (const conflict of conflicts)
+    if (conflict.recordId === source._id) await ctx.db.delete(conflict._id);
+  for (const file of files) {
+    await ctx.db.delete(file._id);
+    if (file.storageId)
+      await deleteStorageIfNoOtherBinding(ctx, file.storageId, { table: "schoolFiles", id: String(file._id) });
+  }
+  await ctx.db.delete(source._id);
+  return true;
+}
+
+/** Records one student keeps of one kind (in one class, when given). */
+function recordsOfKind(
+  ctx: MutationCtx,
+  scope: { accountId: Id<"accounts">; kind: SchoolSyncKind; providerClassId?: string },
+) {
+  return ctx.db.query("externalRecords").withIndex("by_account_kind_class", (q) => {
+    const kind = q.eq("mappedAccountId", scope.accountId).eq("syncKind", scope.kind);
+    return scope.providerClassId === undefined ? kind : kind.eq("providerClassId", scope.providerClassId);
+  });
+}
+
+const PURGE_BATCH = 100;
+
+/**
+ * Removes one page of what a student turned Off, then continues in the background. Each page
+ * re-reads the modes, so turning a kind back on stops the purge.
+ */
+export async function purgeSyncKindPage(
+  ctx: MutationCtx,
+  scope: {
+    accountId: Id<"accounts">;
+    integrationId: Id<"schoolIntegrations">;
+    kind: SchoolSyncKind;
+    providerClassId?: string;
+    cursor: string | null;
+  },
+) {
+  const preferences = await loadSyncPreferences(ctx, scope.accountId, scope.integrationId);
+  const page = await recordsOfKind(ctx, scope).paginate({ cursor: scope.cursor, numItems: PURGE_BATCH });
+  const now = Date.now();
+  let purged = 0;
+  for (const row of page.page)
+    if (row.integrationId === scope.integrationId && preferences.modeFor(scope.kind, row.providerClassId) === "off" &&
+        await purgeSchoolRecord(ctx, row, now))
+      purged += 1;
+  if (!page.isDone)
+    await ctx.scheduler.runAfter(0, internal.managebac.purgeSyncKindData, {
+      accountId: scope.accountId,
+      integrationId: scope.integrationId,
+      kind: scope.kind,
+      ...(scope.providerClassId !== undefined ? { providerClassId: scope.providerClassId } : {}),
+      cursor: page.continueCursor,
+    });
+  return { purged, done: page.isDone };
+}
+
+export const purgeSyncKindData = internalMutation({
+  args: {
+    accountId: v.id("accounts"),
+    integrationId: v.id("schoolIntegrations"),
+    kind: vSchoolSyncKind,
+    providerClassId: v.optional(v.string()),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: (ctx, args) => purgeSyncKindPage(ctx, args),
+});
+
 export const commitNormalizedPage = mutation({
   args: {
     integrationId: v.id("schoolIntegrations"),
@@ -3174,6 +3684,8 @@ export const commitNormalizedPage = mutation({
     const counts = { ...syncRun.counts };
     counts.fetched += args.records.length;
     const followsClass = classFollowPolicy(ctx, integration._id);
+    const kindOf = recordKindPolicy(ctx, integration._id, capability, now);
+    const runTrigger = triggerOfRun(syncRun);
     const seenKeys: Array<{ sourceIdentityKey: string; providerRecordKey: string }> = [];
     for (const input of args.records) {
       const mappedAccountId =
@@ -3223,10 +3735,30 @@ export const commitNormalizedPage = mutation({
             canonicalAcademicPeriodKey(item.academicPeriodKey) ===
               canonicalAcademicPeriodKey(input.academicPeriodKey),
         );
+      // The student's modes decide what a personal record may become, on
+      // every page: Off never stores, and a job stores only its own kind.
+      const syncKind = mappedAccountId ? await kindOf(mappedAccountId, input) : undefined;
+      if (mappedAccountId) {
+        const admission = await admitPersonalRecord(ctx, {
+          preferences: await kindOf.preferences(mappedAccountId),
+          runKind: syncRun.syncKind,
+          trigger: runTrigger,
+          recordType: capability.recordType,
+          syncKind,
+          providerClassId: input.providerClassId,
+          existing,
+        });
+        if (admission === "purge" && existing) await purgeSchoolRecord(ctx, existing, now);
+        if (admission !== "store") {
+          counts.skipped += 1;
+          continue;
+        }
+      }
       let source: Doc<"externalRecords">;
       if (existing?.sourceHash === input.sourceHash && !existing.tombstone) {
         counts.unchanged += 1;
         await ctx.db.patch(existing._id, {
+          syncKind,
           sourceIdentityKey: canonicalKey,
           sourceState: "available",
           sourceStateAt: now,
@@ -3251,6 +3783,7 @@ export const commitNormalizedPage = mutation({
           provenanceUrl: input.provenanceUrl?.slice(0, 2_000),
           tombstone: false,
           tombstonedAt: undefined,
+          syncKind,
           sourceIdentityKey: canonicalKey,
           sourceState:
             existing.sourceHash === input.sourceHash ? "available" : "changed",
@@ -3326,6 +3859,7 @@ export const commitNormalizedPage = mutation({
           sourceModifiedAt: input.sourceModifiedAt,
           provenanceUrl: input.provenanceUrl?.slice(0, 2_000),
           tombstone: false,
+          syncKind,
           sourceIdentityKey: canonicalKey,
           sourceState: "available",
           sourceStateAt: now,
@@ -3559,11 +4093,20 @@ export const failSync = mutation({
         syncRun.counts.updated +
         syncRun.counts.unchanged >
       0;
+    const jobScope = stateScope(syncRun);
     if (!selectionChanged) {
-      const sources = await ctx.db
-        .query("externalRecords")
-        .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
-        .take(5_000);
+      // A student's job marks only its own kind unavailable.
+      const sources = jobScope
+        ? await ctx.db
+            .query("externalRecords")
+            .withIndex("by_account_kind_class", (q) =>
+              q.eq("mappedAccountId", jobScope.accountId).eq("syncKind", jobScope.kind),
+            )
+            .take(5_000)
+        : await ctx.db
+            .query("externalRecords")
+            .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+            .take(5_000);
       const scopedSources = sources.filter(
         (item) =>
           item.integrationId === integration._id &&
@@ -3606,7 +4149,31 @@ export const failSync = mutation({
       completedAt: now,
       updatedAt: now,
     });
-    if (!selectionChanged) {
+    if (jobScope && !selectionChanged) {
+      // One student's job failing says nothing about the school's connection,
+      // except that ManageBac rejected the school's credential.
+      const blocked = BLOCKING_SYNC_ERRORS.has(args.errorCode);
+      const preferences = await loadSyncPreferences(ctx, jobScope.accountId, jobScope.integrationId);
+      await writeSyncState(ctx, jobScope, {
+        state: blocked ? "blocked" : "failed",
+        dueAt: blocked
+          ? preferences.hasAuto(jobScope.kind) ? now + 24 * 60 * 60_000 : undefined
+          : retryAt,
+        dueTrigger: blocked ? (preferences.hasAuto(jobScope.kind) ? "schedule" : undefined) : triggerOfRun(syncRun),
+        errorCode: text(args.errorCode, 200),
+        errorSummary: text(args.errorSummary, 500),
+      });
+      if (args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED")
+        await ctx.db.patch(integration._id, {
+          status: "blocked",
+          blockedReason: "The stored read-only credential was rejected by ManageBac.",
+          nextSyncAt: undefined,
+          updatedAt: now,
+        });
+    } else if (jobScope && selectionChanged) {
+      // The classes changed under the job: it runs again with the new targets.
+      await writeSyncState(ctx, jobScope, { state: "queued", dueAt: now, dueTrigger: triggerOfRun(syncRun) });
+    } else if (!selectionChanged && !syncRun.accountId) {
       await ctx.db.patch(integration._id, {
         status:
           args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
@@ -3694,7 +4261,7 @@ export const suspendSync = mutation({
       status: "partial",
       stage: "suspended",
       cursorState: syncPass(syncRun) ?? newPass(
-        await passIdentity(ctx, integration, actor.accountId, syncRun.kind === "bootstrap"),
+        await passIdentity(ctx, integration, actor.accountId, syncRun.syncKind),
         syncRun.startedAt ?? now,
       ),
       errorCode: text(args.errorCode, 200),
@@ -3703,9 +4270,18 @@ export const suspendSync = mutation({
       leaseExpiresAt: undefined,
       updatedAt: now,
     });
-    // A school pass continues through the scheduled worker; a personal pass
-    // continues on that person's next sync.
-    if (!syncRun.accountId) {
+    // A student's job and a school pass both continue through the scheduled
+    // worker; an identity pass continues on that person's next sync.
+    const jobScope = stateScope(syncRun);
+    if (jobScope)
+      await writeSyncState(ctx, jobScope, {
+        state: "queued",
+        dueAt: resumeAt,
+        dueTrigger: triggerOfRun(syncRun),
+        errorCode: text(args.errorCode, 200),
+        errorSummary: text(args.errorSummary, 500),
+      });
+    else if (!syncRun.accountId) {
       await ctx.db.patch(integration._id, { nextSyncAt: resumeAt, updatedAt: now });
       await scheduleSync(ctx, integration._id, resumeAt);
     }
@@ -3771,7 +4347,6 @@ export const completeSync = mutation({
     // The route calls this only after every route of the pass was read, so
     // the pass's own record of finished routes decides what is reconciled.
     const pass = syncPass(syncRun) ?? newPass({
-      personalOnly: false,
       selectionDigest: "",
       connectionKey: "",
       manifestVersion: integration.manifestVersion,
@@ -3890,7 +4465,8 @@ async function reconcileSyncPass(
     budget -= rows.length;
     for (const source of rows) {
       const inScope = current.scope === "personal"
-        ? source.integrationId === integration._id && source.schoolId === integration.schoolId
+        ? source.integrationId === integration._id && source.schoolId === integration.schoolId &&
+          inJobTargets(syncRun.syncKind, pass.targets, source)
         : !source.mappedAccountId;
       if (inScope && await removeUnseenSource(ctx, integration, syncRun, pass, state.importerAccountId, source, followsClass, now))
         tombstoned += 1;
@@ -3932,6 +4508,32 @@ async function reconcileSyncPass(
     updatedAt: now,
   });
   await closePass(ctx, syncRun._id);
+  const jobScope = stateScope(syncRun);
+  if (jobScope) {
+    // The job is done: Auto runs it again on its own schedule.
+    const preferences = await loadSyncPreferences(ctx, jobScope.accountId, jobScope.integrationId);
+    const dueAt = nextAutoRunAt(preferences, jobScope.kind, now, now);
+    await writeSyncState(ctx, jobScope, {
+      state: "idle",
+      lastSuccessAt: now,
+      dueAt,
+      dueTrigger: dueAt === undefined ? undefined : "schedule",
+      errorCode: undefined,
+      errorSummary: undefined,
+    });
+    await ctx.db.patch(integration._id, {
+      lastSyncAt: now,
+      ...(integration.status === "degraded" && !integration.blockedReason && syncRun.counts.errors === 0
+        ? { status: "connected" as const }
+        : {}),
+      updatedAt: now,
+    });
+    return { status, counts };
+  }
+  if (syncRun.accountId) {
+    await ctx.db.patch(integration._id, { lastSyncAt: now, updatedAt: now });
+    return { status, counts };
+  }
   const nextSyncAt =
     now + integration.syncPolicy.frequencyMinutes * 60_000;
   await ctx.db.patch(integration._id, {
@@ -4430,6 +5032,28 @@ export const recordsForPurpose = query({
           purpose: args.purpose,
         },
       };
+    // A kind the student turned Off shows nothing, here as everywhere.
+    const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+    const purposeKind = ({
+      upcoming_deadlines: "current_tasks",
+      class_resources: "task_resources",
+      timetable: "classes",
+      classes: undefined,
+      cas: "cas",
+    } as const)[args.purpose];
+    if (purposeKind && !preferences.hasAny(purposeKind))
+      return {
+        connected: true,
+        records: [],
+        stale: false,
+        unavailableReason: "sync_off",
+        provenance: {
+          provider: "ManageBac",
+          lastSyncAt: integration.lastSyncAt,
+          purpose: args.purpose,
+        },
+      };
+    const now = Date.now();
     const typeMap = {
       upcoming_deadlines: ["assignment", "deadline", "assessment"],
       class_resources: [
@@ -4555,6 +5179,7 @@ export const recordsForPurpose = query({
     );
     const limited = [...deduped.values()]
       .filter((item) => !item.tombstone)
+      .filter((item) => !item.mappedAccountId || !hiddenByPreferences(preferences, item, now))
       .filter(
         (item) =>
           args.purpose === "classes" ||
@@ -4946,6 +5571,205 @@ export const failResourceImport = mutation({
   },
 });
 
+/** sha256 as Convex storage reports it (base64) to hex. */
+function base64ToHex(value: string) {
+  return [...decodeBase64Url(value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+type SubmissionFile = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  bytes?: number;
+  downloadPath?: string;
+};
+
+/** The files a submission lists, as the route normalized them. */
+export function submissionFiles(normalized: unknown): SubmissionFile[] {
+  const files = record(normalized).files;
+  if (!Array.isArray(files)) return [];
+  return files.flatMap((raw) => {
+    const file = record(raw);
+    const id = String(file.id ?? "").trim();
+    if (!id) return [];
+    const bytes = Number(file.bytes ?? file.fileSize ?? file.file_size);
+    return [{
+      id,
+      filename: text(file.filename ?? file.name, 240, "File"),
+      mimeType: text(file.mimeType ?? file.contentType ?? file.content_type, 160, "application/octet-stream"),
+      ...(Number.isFinite(bytes) && bytes >= 0 ? { bytes } : {}),
+      ...(typeof (file.downloadPath ?? file.download_path) === "string"
+        ? { downloadPath: String(file.downloadPath ?? file.download_path).slice(0, 2_000) }
+        : {}),
+    }];
+  });
+}
+
+/** The student's own submission, or nothing: another student's work is never found. */
+async function ownSubmission(ctx: MutationCtx, actor: Actor, submissionRecordId: Id<"externalRecords">) {
+  const integration = await integrationForSchool(ctx, actor.schoolId);
+  const source = await ctx.db.get(submissionRecordId);
+  if (
+    !integration ||
+    !source ||
+    source.integrationId !== integration._id ||
+    source.schoolId !== actor.schoolId ||
+    source.mappedAccountId !== actor.accountId ||
+    source.tombstone ||
+    recordSyncKind(source.recordType, source.normalized, { classArchived: false, now: 0 }) !== "dropbox_files"
+  )
+    throw new Error("SCHOOL_RECORD_NOT_FOUND: That submission isn't in your School data.");
+  const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+  if (preferences.modeFor("dropbox_files", source.providerClassId) === "off")
+    throw new Error("SCHOOL_RECORD_NOT_FOUND: That submission isn't in your School data.");
+  return { integration, source };
+}
+
+/**
+ * Starts fetching one submitted file into the student's storage. A file already cached, or
+ * the same bytes kept for another submission, is returned without reading ManageBac again.
+ */
+export const beginSchoolFileFetch = mutation({
+  args: {
+    submissionRecordId: v.id("externalRecords"),
+    providerFileId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const { integration, source } = await ownSubmission(ctx, actor, args.submissionRecordId);
+    const file = submissionFiles(source.normalized).find((item) => item.id === args.providerFileId);
+    if (!file)
+      throw new Error("SCHOOL_RECORD_NOT_FOUND: That file isn't part of this submission.");
+    if (file.bytes !== undefined && file.bytes > SCHOOL_FILE_MAX_BYTES)
+      throw new Error("SCHOOL_FILE_TOO_LARGE: This file is larger than Spectra keeps (50 MB).");
+    const now = Date.now();
+    const rows = await ctx.db
+      .query("schoolFiles")
+      .withIndex("by_account_source", (q) => q.eq("accountId", actor.accountId).eq("sourceRecordId", source._id))
+      .take(100);
+    const existing = rows.find((row) => row.providerFileId === file.id);
+    if (existing?.state === "cached" && existing.storageId)
+      return { status: "cached" as const, schoolFileId: existing._id };
+    const schoolFileId = existing?._id ?? await ctx.db.insert("schoolFiles", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      integrationId: integration._id,
+      sourceRecordId: source._id,
+      origin: "dropbox",
+      providerFileId: file.id,
+      filename: file.filename,
+      mimeType: file.mimeType,
+      state: "fetching",
+      ...(file.bytes !== undefined ? { bytes: file.bytes } : {}),
+      createdAt: now,
+      updatedAt: now,
+    });
+    if (existing)
+      await ctx.db.patch(existing._id, { state: "fetching", errorCode: undefined, errorSummary: undefined, updatedAt: now });
+    return {
+      status: "fetch" as const,
+      schoolFileId,
+      integrationId: integration._id,
+      providerClassId: source.providerClassId,
+      taskId: String(record(source.normalized).taskId ?? ""),
+      file,
+      uploadUrl: await ctx.storage.generateUploadUrl(),
+    };
+  },
+});
+
+/**
+ * Keeps the fetched bytes. The upload must match the hash and size the route measured; the
+ * same bytes the student already keeps are stored once.
+ */
+export const attachSchoolFile = mutation({
+  args: {
+    schoolFileId: v.id("schoolFiles"),
+    storageId: v.id("_storage"),
+    contentHash: v.string(),
+    bytes: v.number(),
+    mimeType: v.string(),
+    extractedText: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.schoolFileId);
+    const stored = await ctx.db.system.get(args.storageId);
+    const discard = async () => {
+      if (stored && !(await storageHasOtherBinding(ctx, args.storageId, { table: "schoolFiles", id: String(args.schoolFileId) })))
+        await ctx.storage.delete(args.storageId);
+    };
+    if (!row || row.accountId !== actor.accountId || row.schoolId !== actor.schoolId) {
+      await discard();
+      throw new Error("SCHOOL_RECORD_NOT_FOUND: That file isn't in your School data.");
+    }
+    const contentHash = args.contentHash.toLowerCase();
+    // Only a fresh upload is adopted: bytes something else keeps are never re-bound.
+    if (stored && await storageHasOtherBinding(ctx, args.storageId, { table: "schoolFiles", id: String(args.schoolFileId) }))
+      throw new Error("SCHOOL_RECORD_NOT_FOUND: That file isn't in your School data.");
+    if (!stored || stored.size !== args.bytes || base64ToHex(stored.sha256) !== contentHash || !/^[0-9a-f]{64}$/.test(contentHash)) {
+      await discard();
+      throw new Error("SCHOOL_FILE_INTEGRITY: The fetched file didn't match what was uploaded.");
+    }
+    if (args.bytes > SCHOOL_FILE_MAX_BYTES) {
+      await discard();
+      throw new Error("SCHOOL_FILE_TOO_LARGE: This file is larger than Spectra keeps (50 MB).");
+    }
+    const twin = (
+      await ctx.db
+        .query("schoolFiles")
+        .withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("contentHash", contentHash))
+        .take(5)
+    ).find((item) => item._id !== row._id && item.storageId);
+    let storageId = args.storageId;
+    if (twin?.storageId && twin.storageId !== args.storageId) {
+      await ctx.storage.delete(args.storageId);
+      storageId = twin.storageId;
+    }
+    const previous = row.storageId;
+    const now = Date.now();
+    await ctx.db.patch(row._id, {
+      state: "cached",
+      storageId,
+      contentHash,
+      bytes: args.bytes,
+      mimeType: text(args.mimeType, 160, row.mimeType),
+      extractedText: args.extractedText ? args.extractedText.slice(0, SCHOOL_FILE_TEXT_MAX_CHARS) : undefined,
+      errorCode: undefined,
+      errorSummary: undefined,
+      fetchedAt: now,
+      updatedAt: now,
+    });
+    if (previous && previous !== storageId)
+      await deleteStorageIfNoOtherBinding(ctx, previous, { table: "schoolFiles", id: String(row._id) });
+    return { schoolFileId: row._id, storageId, deduplicated: storageId !== args.storageId };
+  },
+});
+
+export const failSchoolFileFetch = mutation({
+  args: {
+    schoolFileId: v.id("schoolFiles"),
+    errorCode: v.string(),
+    errorSummary: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.schoolFileId);
+    if (!row || row.accountId !== actor.accountId || row.schoolId !== actor.schoolId)
+      throw new Error("SCHOOL_RECORD_NOT_FOUND: That file isn't in your School data.");
+    if (row.state !== "cached")
+      await ctx.db.patch(row._id, {
+        state: "failed",
+        errorCode: text(args.errorCode, 120),
+        errorSummary: text(args.errorSummary, 500),
+        updatedAt: Date.now(),
+      });
+    return { schoolFileId: row._id, state: row.state === "cached" ? "cached" as const : "failed" as const };
+  },
+});
+
 export const setSelectedClasses = mutation({
   args: {
     recordIds: v.array(v.id("externalRecords")),
@@ -5127,6 +5951,11 @@ export const setSelectedClasses = mutation({
       },
       retentionClass: "operational",
     });
+    // Newly followed classes fill in soon: every class-scoped kind on Auto runs again.
+    const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+    for (const kind of SCHOOL_SYNC_KINDS)
+      if (kind !== "classes" && SCHOOL_SYNC_KIND_INFO[kind].classScoped && preferences.hasAuto(kind))
+        await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "schedule", now);
     return {
       selectionRevision: revision,
       selectedClassIds: [...selectedKeys],

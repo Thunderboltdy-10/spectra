@@ -30,6 +30,15 @@ import {
 import { badRequest, ok } from "@/lib/http";
 import { isNonPublicAddress } from "@/lib/network-egress";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { prepareAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
+import {
+  capabilitySyncKinds,
+  isSchoolSyncKind,
+  SCHOOL_FILE_MAX_BYTES,
+  SCHOOL_FILE_TEXT_MAX_CHARS,
+  SCHOOL_SYNC_KINDS,
+  type SchoolSyncKind,
+} from "../../../../../shared/school-sync";
 
 /**
  * A sync runs inside this request. Pinning the duration keeps the hosting
@@ -190,9 +199,12 @@ function officialPersonalCapabilities() {
       category: "Classes",
       name: "My class memberships",
       recordType: "class",
-      path: "/v2p2/memberships?user_ids={student_id}",
+      // Archived classes are included: their tasks are the student's archive
+      // (past tasks). The response is either membership rows naming a
+      // class_id, or the classes themselves; both normalize to one class row.
+      path: "/v2p2/students/{student_id}/memberships?archived=true",
       purpose:
-        "Retrieve only the class memberships belonging to the resolved signed-in student.",
+        "Retrieve only the resolved signed-in student's own classes, archived ones included.",
       personalIdParameter: "student_id",
       pagination: "page" as const,
       changeStrategy: "full_reconciliation",
@@ -200,32 +212,33 @@ function officialPersonalCapabilities() {
         memberships: [
           {
             id: "number",
-            user_id: "number",
             class_id: "number",
-            user_email: "string",
+            archived: "boolean",
           },
         ],
       }),
       normalization: {
-        recordsPath: "memberships",
+        syncKind: "classes",
+        recordsPath: ["memberships.classes", "memberships", "classes"],
         idPath: "id",
-        classIdPath: "class_id",
+        classIdPath: ["class_id", "class.id", "id"],
+        ownerIdPath: ["user_id", "student_id"],
         modifiedAtPath: "updated_at",
         pageParameter: "page",
         nextCursorPath: "meta.next_page",
         cursorParameter: "page",
-        requiredPaths: ["id", "class_id", "user_id"],
-        recordKeyTemplate: "class:{class_id}",
+        requiredPaths: ["id"],
+        recordKeyTemplate: "class:{$classId}",
         classification: "personal",
         audienceScope: "mapped_user",
         fields: {
-          name: ["class_name", "name", "uniq_class_id"],
-          title: ["class_name", "name", "uniq_class_id"],
+          name: ["class_name", "class.name", "name", "uniq_class_id"],
+          title: ["class_name", "class.name", "name", "uniq_class_id"],
           role: "role",
-          level: "level",
-          userEmail: "user_email",
-          userId: "user_id",
-          classId: "class_id",
+          level: ["level", "class.level"],
+          archived: ["archived", "class.archived"],
+          classId: ["class_id", "class.id", "id"],
+          yearGroupId: ["year_group_id", "class.year_group_id", "year_group.id"],
           updatedAt: "updated_at",
         },
       },
@@ -242,6 +255,7 @@ function officialPersonalCapabilities() {
       changeStrategy: "full_reconciliation",
       responseSchemaHash: digest({ class: { id: "number" } }),
       normalization: {
+        syncKind: "classes",
         fanOutParameter: "class_id",
         classIdFromRouteParameter: "class_id",
         recordsPath: ["class", "$"],
@@ -270,6 +284,7 @@ function officialPersonalCapabilities() {
           grade: ["grade.name", "year_group.name", "grade", "year"],
           level: ["level.name", "level"],
           classId: ["uniq_class_id", "class_id", "id"],
+          archived: "archived",
           yearGroupId: [
             "year_group.id",
             "year_group_id",
@@ -334,6 +349,7 @@ function officialPersonalCapabilities() {
         timetable: { academic_years: [{ id: "number", slots: [] }] },
       }),
       normalization: {
+        syncKind: "classes",
         fanOutParameter: "class_id",
         classIdFromRouteParameter: "class_id",
         transform: "managebac_timetable",
@@ -356,6 +372,7 @@ function officialPersonalCapabilities() {
       changeStrategy: "full_reconciliation",
       responseSchemaHash: digest({ resources: [{ id: "number" }] }),
       normalization: {
+        syncKind: "task_resources",
         fanOutParameter: "class_id",
         classIdFromRouteParameter: "class_id",
         recordsPath: ["resources", "files", "items", "documents"],
@@ -392,9 +409,16 @@ function officialPersonalCapabilities() {
         students: [{ id: "number", experiences: [{ id: "number" }] }],
       }),
       normalization: {
+        syncKind: "cas",
         fanOutParameter: "year_group_id",
         fanOutSource: "year_group",
-        recordsPath: ["students", "experiences", "cas_experiences", "items"],
+        // Experiences sit under each student; only this student's are kept.
+        flatten: {
+          parentPath: "students",
+          itemsPaths: ["experiences", "cas_experiences", "component.items", "items"],
+          ownerIdPath: ["id", "student_id"],
+        },
+        recordsPath: ["experiences", "cas_experiences", "items"],
         idPath: "id",
         modifiedAtPath: "updated_at",
         pageParameter: "page",
@@ -416,6 +440,80 @@ function officialPersonalCapabilities() {
           creativityHours: "creativity_hours",
           activityHours: "activity_hours",
           serviceHours: "service_hours",
+          learningOutcomes: ["learning_outcomes", "outcomes"],
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Grades",
+      name: "My result for a task",
+      recordType: "task_result",
+      path: "/v2p2/classes/{class_id}/tasks/{task_id}/students?student_ids={student_id}",
+      purpose:
+        "Read only the signed-in student's own grade and feedback for a task in a class they follow.",
+      personalIdParameter: "student_id",
+      pagination: "none" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({ students: [{ id: "number" }] }),
+      normalization: {
+        syncKind: "grades",
+        fanOutSource: "task",
+        classIdFromRouteParameter: "class_id",
+        taskIdFromRouteParameter: "task_id",
+        recordsPath: ["students", "task_results", "results"],
+        idPath: "id",
+        idFromRouteParameter: "task_id",
+        ownerIdPath: ["id", "student_id", "student.id", "user_id"],
+        singleRecord: true,
+        recordKeyTemplate: "task_result:{$route.task_id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          grade: ["grade", "result.grade", "mark"],
+          score: ["score", "points", "result.score"],
+          maxScore: ["max_score", "out_of", "max_points"],
+          feedback: ["comments", "feedback", "teacher_comment", "result.comments"],
+          criteria: ["criteria", "assessment_criteria", "rubric"],
+          status: ["status", "state"],
+          gradedAt: ["graded_at", "assessed_at", "updated_at"],
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Dropbox",
+      name: "My submission for a task",
+      recordType: "submission",
+      path: "/v2p2/classes/{class_id}/tasks/{task_id}/submissions/{student_id}",
+      purpose:
+        "List the files the signed-in student handed in for a task. Bytes download only when the student opens one.",
+      personalIdParameter: "student_id",
+      pagination: "none" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({ submission: { files: [{ id: "number" }] } }),
+      normalization: {
+        syncKind: "dropbox_files",
+        fanOutSource: "task",
+        classIdFromRouteParameter: "class_id",
+        taskIdFromRouteParameter: "task_id",
+        // A task the student never submitted to answers 404.
+        notFoundIsEmpty: true,
+        recordsPath: ["submission", "dropbox", "$"],
+        idPath: "id",
+        idFromRouteParameter: "task_id",
+        ownerIdPath: ["student_id", "student.id", "user_id"],
+        singleRecord: true,
+        recordKeyTemplate: "submission:{$route.task_id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          status: ["status", "state"],
+          submittedAt: ["submitted_at", "created_at"],
+          files: ["files", "attachments"],
+          comment: ["comment", "notes"],
           updatedAt: "updated_at",
         },
       },
@@ -549,27 +647,32 @@ async function ensureOfficialPersonalCapabilityManifest(
   context: ConnectorContext,
 ) {
   const official = officialPersonalCapabilities();
-  const requiredPaths = new Set(official.map((item) => item.path));
+  // Current when every official route is present with today's path and
+  // normalization; a route Spectra moved or re-normalized is replaced.
   if (
-    [...requiredPaths].every((path) =>
-      context.capabilities.some((item) => item.path === path),
+    official.every((route) =>
+      context.capabilities.some(
+        (item) =>
+          item.name === route.name &&
+          item.path === route.path &&
+          digest(item.normalization) === digest(route.normalization),
+      ),
     )
   )
     return context;
   if (actor.schoolRole !== "school_admin") return context;
-  const existing = context.capabilities.map(
-    ({ _id: _capabilityId, ...item }) => ({
+  const officialNames = new Set(official.map((item) => item.name));
+  const officialPaths = new Set(official.map((item) => item.path));
+  const existing = context.capabilities
+    .filter((item) => !officialNames.has(item.name) && !officialPaths.has(item.path))
+    .map(({ _id: _capabilityId, ...item }) => ({
       ...item,
       freshnessSlaMinutes: 120,
       permissionState: "read_only" as const,
       verificationStatus: "verified" as const,
       routeSource: "tenant_reference" as const,
-    }),
-  );
-  const merged = new Map(
-    [...existing, ...official].map((item) => [item.path, item] as const),
-  );
-  const capabilities = [...merged.values()];
+    }));
+  const capabilities = [...existing, ...official];
   await convexMutation("managebac:replaceCapabilityManifest", {
     integrationId,
     sourceHash: digest({
@@ -734,10 +837,39 @@ function capabilitiesFromOpenApi(document: unknown) {
   return { providerVersion, capabilities };
 }
 
-function interpolate(template: string, row: unknown) {
-  return template.replace(/\{([^}]+)}/g, (_, path: string) =>
-    encodeURIComponent(String(atPath(row, path) ?? "")),
+/**
+ * Fills a record key. `{path}` reads the provider row, `{$route.name}` a
+ * route parameter the request was bound to, and `{$classId}` the class the
+ * row resolved to.
+ */
+function interpolate(
+  template: string,
+  row: unknown,
+  bound: { routeParameters?: Record<string, string>; classId?: string } = {},
+) {
+  return template.replace(/\{([^}]+)}/g, (_, path: string) => {
+    if (path === "$classId") return encodeURIComponent(bound.classId ?? "");
+    if (path.startsWith("$route."))
+      return encodeURIComponent(bound.routeParameters?.[path.slice(7)] ?? "");
+    return encodeURIComponent(String(atPath(row, path) ?? ""));
+  });
+}
+
+function stringPaths(value: unknown) {
+  return (Array.isArray(value) ? value : [value]).filter(
+    (item): item is string => typeof item === "string" && item.length > 0,
   );
+}
+
+/**
+ * Whether a row belongs to someone other than the mapped student. A row that
+ * names no owner is the route's own answer for the student it was asked about.
+ */
+function ownedByAnother(raw: unknown, ownerIdPath: unknown, providerUserId: string | undefined) {
+  const paths = stringPaths(ownerIdPath);
+  if (!paths.length) return false;
+  const owner = identifier(atFirstPath(raw, paths), 500);
+  return Boolean(owner) && owner !== providerUserId;
 }
 
 function normalizeProviderPage(
@@ -745,13 +877,25 @@ function normalizeProviderPage(
   capability: ConnectorContext["capabilities"][number],
   accountId: string | undefined,
   routeParameters: Record<string, string> = {},
+  providerUserId?: string,
 ) {
   const config = object(capability.normalization);
   const recordsPath = Array.isArray(config.recordsPath)
     ? config.recordsPath
     : string(config.recordsPath, 300) || "$";
+  const flatten = object(config.flatten);
+  const flattenParents = flatten.parentPath
+    ? atPath(payload, string(flatten.parentPath, 300))
+    : undefined;
   const rawRecordsValue =
-    config.transform === "managebac_timetable"
+    Array.isArray(flattenParents)
+      ? flattenParents.flatMap((parent) => {
+          // Rows nested under people: only the mapped student's are read.
+          if (ownedByAnother(parent, flatten.ownerIdPath, providerUserId)) return [];
+          const items = atFirstPath(parent, stringPaths(flatten.itemsPaths));
+          return Array.isArray(items) ? items : [];
+        })
+      : config.transform === "managebac_timetable"
       ? (() => {
           const years = atPath(payload, "timetable.academic_years");
           if (!Array.isArray(years)) return [];
@@ -804,11 +948,32 @@ function normalizeProviderPage(
           return rows.slice(0, 500);
         })()
       : atFirstPath(payload, recordsPath);
-  const rawRecords = Array.isArray(rawRecordsValue)
-    ? rawRecordsValue
-    : rawRecordsValue && typeof rawRecordsValue === "object"
-      ? [rawRecordsValue]
-      : [];
+  const fieldMap = object(config.fields);
+  const idFromRoute = identifier(
+    routeParameters[string(config.idFromRouteParameter, 120)],
+    500,
+  );
+  const rawRecords = (
+    Array.isArray(rawRecordsValue)
+      ? rawRecordsValue
+      : rawRecordsValue && typeof rawRecordsValue === "object"
+        ? [rawRecordsValue]
+        : []
+  ).filter(
+    (raw) =>
+      !ownedByAnother(raw, config.ownerIdPath, providerUserId) &&
+      // A row named by its route (one per task) must carry some data; an
+      // empty answer is no record.
+      (!idFromRoute ||
+        Object.values(fieldMap).some((path) => {
+          const value = atFirstPath(raw, path);
+          return value !== undefined && !(Array.isArray(value) && value.length === 0);
+        })),
+  );
+  if (config.singleRecord === true && rawRecords.length > 1)
+    throw new Error(
+      `INTEGRATION_ROUTE_BROAD: ${capability.name} answered with more than this student's record, so none were kept.`,
+    );
   const requiredPaths = Array.isArray(config.requiredPaths)
     ? config.requiredPaths.filter(
         (item): item is string => typeof item === "string",
@@ -819,14 +984,18 @@ function normalizeProviderPage(
     throw new Error(
       `INTEGRATION_CONTRACT_INVALID: ${capability.name} has no idPath.`,
     );
-  const fieldMap = object(config.fields);
+  const taskIdFromRoute = identifier(
+    routeParameters[string(config.taskIdFromRouteParameter, 120)],
+    500,
+  );
   const result = rawRecords.slice(0, 500).map((raw, index) => {
     for (const path of requiredPaths)
       if (atPath(raw, path) === undefined)
         throw new Error(
           `INTEGRATION_SCHEMA_DRIFT: ${capability.name} record ${index + 1} is missing ${path}.`,
         );
-    const providerRecordId = String(atPath(raw, idPath) ?? "").trim();
+    const providerRecordId =
+      idFromRoute || String(atPath(raw, idPath) ?? "").trim();
     if (!providerRecordId)
       throw new Error(
         `INTEGRATION_SCHEMA_DRIFT: ${capability.name} returned a record without its verified id.`,
@@ -836,6 +1005,8 @@ function normalizeProviderPage(
       const value = atFirstPath(raw, path);
       if (value !== undefined) normalized[key] = normalizedScalar(value);
     }
+    // Grades and submissions name the task they belong to.
+    if (taskIdFromRoute) normalized.taskId = taskIdFromRoute;
     const keyTemplate =
       string(config.recordKeyTemplate, 500) ||
       `${capability.recordType}:{${idPath}}`;
@@ -844,7 +1015,7 @@ function normalizeProviderPage(
       120,
     );
     const providerClassId =
-      identifier(atPath(raw, string(config.classIdPath, 300)), 500) ||
+      identifier(atFirstPath(raw, stringPaths(config.classIdPath)), 500) ||
       identifier(routeParameters[classIdFromRouteParameter], 500);
     const academicPeriodKey =
       string(atPath(raw, string(config.academicPeriodPath, 300)), 300) ||
@@ -877,7 +1048,10 @@ function normalizeProviderPage(
         : "mapped_user";
     return {
       providerRecordId: providerRecordId.slice(0, 500),
-      providerRecordKey: interpolate(keyTemplate, raw).slice(0, 700),
+      providerRecordKey: interpolate(keyTemplate, raw, {
+        routeParameters,
+        classId: providerClassId,
+      }).slice(0, 700),
       classification,
       audienceScope,
       ...(providerClassId ? { providerClassId } : {}),
@@ -994,10 +1168,21 @@ async function providerFetch(
         `INTEGRATION_RATE_LIMITED: ManageBac requested a retry${retryAfter ? ` after ${retryAfter}` : ""}.`,
       );
     }
-    if (response.status === 401 || response.status === 403)
+    // 401: the key itself is refused. 403: the key works but the school's
+    // ManageBac administrator did not grant it this endpoint.
+    if (response.status === 401)
       throw new Error(
-        `INTEGRATION_CREDENTIAL_REJECTED: ${capability.name} is not readable with this token.`,
+        `INTEGRATION_CREDENTIAL_REJECTED: ManageBac refused the school's API key for ${capability.name}.`,
       );
+    if (response.status === 403)
+      throw new Error(
+        `INTEGRATION_PERMISSION_DENIED: The school's ManageBac API key doesn't allow ${capability.name}.`,
+      );
+    if (
+      response.status === 404 &&
+      object(capability.normalization).notFoundIsEmpty === true
+    )
+      return null;
     if (!response.ok)
       throw new Error(
         `INTEGRATION_ROUTE_FAILED: ${capability.name} returned ${response.status}.`,
@@ -1085,8 +1270,10 @@ async function providerFetchResourceBytes(
       cache: "no-store",
       signal: controller.signal,
     });
-    if (response.status === 401 || response.status === 403)
-      throw new Error("INTEGRATION_CREDENTIAL_REJECTED: The resource is not readable with this token.");
+    if (response.status === 401)
+      throw new Error("INTEGRATION_CREDENTIAL_REJECTED: ManageBac refused the school's API key.");
+    if (response.status === 403)
+      throw new Error("INTEGRATION_PERMISSION_DENIED: The school's ManageBac API key doesn't allow downloading this resource.");
     if (response.status === 404)
       throw new Error("INTEGRATION_RESOURCE_UNAVAILABLE: The provider no longer exposes this resource.");
     if (!response.ok)
@@ -1341,10 +1528,19 @@ async function resolveIdentity(
     const providerUserIdHash = providerUserId
       ? createHash("sha256").update(providerUserId).digest("base64url")
       : undefined;
+    // CAS is read through the student's year group.
+    const providerYearGroupId =
+      matches.length === 1
+        ? identifier(
+            atFirstPath(matches[0], ["year_group_id", "year_group.id", "grade_id"]),
+            40,
+          )
+        : "";
     const body = {
       matchCount: matches.length,
       ...(providerUserId ? { providerUserId } : {}),
       ...(providerUserIdHash ? { providerUserIdHash } : {}),
+      ...(/^\d{1,20}$/.test(providerYearGroupId) ? { providerYearGroupId } : {}),
       verifiedEmailHash: createHash("sha256")
         .update(actor.email.toLowerCase())
         .digest("base64url"),
@@ -1384,9 +1580,14 @@ async function resolveIdentity(
   }
 }
 
+/**
+ * One pass over ManageBac. A student's pass is one job: one kind of School
+ * data (`syncKind`), reading only the classes, year groups or tasks Convex
+ * targeted for it. The school reconciliation reads the shared routes.
+ */
 async function runSync(
   actor: ConnectorActor,
-  kind: "bootstrap" | "manual" | "reconciliation",
+  kind: "manual" | "reconciliation",
   context: ConnectorContext,
   token: string,
   scheduled?: {
@@ -1397,7 +1598,7 @@ async function runSync(
     selectionRevision?: number;
     pass?: unknown;
   },
-  options: { personalOnly?: boolean } = {},
+  options: { syncKind?: SchoolSyncKind; deadline?: number } = {},
 ) {
   if (
     context.mapping.status !== "verified" &&
@@ -1411,11 +1612,24 @@ async function runSync(
     (await convexMutation<
       Record<string, unknown>,
       { syncRunId: string; integrationId: string }
-     >("managebac:beginSync", { kind }));
+     >(
+      "managebac:beginSync",
+      kind === "manual" ? { kind, syncKind: options.syncKind } : { kind },
+    ));
   const startedRecord = object(started);
   // A pass that an earlier request left part-way continues from its last
   // committed page; what that request learned about classes is restored.
   const pass = object(startedRecord.pass);
+  const jobKind = isSchoolSyncKind(pass.syncKind) ? pass.syncKind : undefined;
+  const targeted = pass.targeted === true;
+  const targetTasks = Array.isArray(pass.tasks)
+    ? pass.tasks.flatMap((item) => {
+        const task = object(item);
+        const classId = identifier(task.classId, 500);
+        const taskId = identifier(task.taskId, 500);
+        return classId && taskId ? [{ classId, taskId }] : [];
+      })
+    : [];
   const completedCapabilityIds = new Set(
     Array.isArray(pass.completedCapabilityIds)
       ? pass.completedCapabilityIds.map(String)
@@ -1437,7 +1651,15 @@ async function runSync(
     records: number;
     skipped?: string;
   }> = [];
-  const ordered = [...context.capabilities].sort((a, b) => {
+  // A job reads only the routes that serve its kind, and only personal ones.
+  const routes = jobKind
+    ? context.capabilities.filter(
+        (item) =>
+          item.scope === "personal" &&
+          capabilitySyncKinds(item).includes(jobKind),
+      )
+    : context.capabilities;
+  const ordered = [...routes].sort((a, b) => {
     const priority = (item: typeof a) => {
       const config = object(item.normalization);
       return config.identityOnly === true
@@ -1455,7 +1677,7 @@ async function runSync(
       Math.max(1, Math.min(180, context.integration.requestBudgetPerMinute)),
   );
   let lastProviderRequestAt = 0;
-  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
+  const deadline = options.deadline ?? Date.now() + SYNC_TIME_BUDGET_MS;
   const selectedClassIds = new Set(context.selection?.selectedClassIds ?? []);
   const accessibleClassIds = new Set<string>(
     Array.isArray(pass.classIds) ? pass.classIds.map(String) : [],
@@ -1463,6 +1685,10 @@ async function runSync(
   const accessibleYearGroupIds = new Set<string>(
     Array.isArray(pass.yearGroupIds) ? pass.yearGroupIds.map(String) : [],
   );
+  // A targeted job's reach is fixed when it starts; classes a membership page
+  // reveals during the job are not read until the student selects them.
+  const targetClassIds = new Set(accessibleClassIds);
+  const targetYearGroupIds = new Set(accessibleYearGroupIds);
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -1494,8 +1720,7 @@ async function runSync(
       }
       if (
         capabilityConfig.identityOnly === true ||
-        capabilityConfig.onDemand === true ||
-        (options.personalOnly && capability.scope !== "personal")
+        capabilityConfig.onDemand === true
       ) {
         summaries.push({
           capabilityId: capability._id,
@@ -1505,9 +1730,7 @@ async function runSync(
           skipped:
             capabilityConfig.identityOnly === true
               ? "Identity lookup already completed for this account."
-              : capabilityConfig.onDemand === true
-                ? "Bytes are fetched only for an explicit resource import."
-              : "Personal refresh leaves school-wide catalog routes untouched.",
+              : "Bytes are fetched only when the student opens or imports one file.",
         });
         continue;
       }
@@ -1559,23 +1782,39 @@ async function runSync(
         120,
       );
       const fanOutSource = string(capabilityConfig.fanOutSource, 120);
+      const fannedOut = Boolean(fanOutParameter) || fanOutSource === "task";
+      // A student's job reads exactly what Convex targeted: the selected
+      // classes its mode admits, the student's year groups, or the stored
+      // tasks of those classes. The school reconciliation reads what this
+      // pass discovered.
       const fanOutIds =
         fanOutSource === "year_group"
-          ? accessibleYearGroupIds
-          : new Set(
-              [...selectedClassIds].filter((classId) =>
-                accessibleClassIds.has(classId),
-              ),
-            );
+          ? targeted
+            ? targetYearGroupIds
+            : accessibleYearGroupIds
+          : targeted
+            ? targetClassIds
+            : new Set(
+                [...selectedClassIds].filter((classId) =>
+                  accessibleClassIds.has(classId),
+                ),
+              );
       // A fixed order lets a later request skip the bindings already read.
-      const bindingValues = fanOutParameter ? [...fanOutIds].sort() : [""];
-      const routeBindings = bindingValues.map((binding) => ({
-        binding,
-        routeParameters: (fanOutParameter
-          ? { [fanOutParameter]: binding }
-          : {}) as Record<string, string>,
-      }));
-      if (fanOutParameter && routeBindings.length === 0) {
+      const routeBindings =
+        fanOutSource === "task"
+          ? targetTasks
+              .map(({ classId, taskId }) => ({
+                binding: `${classId}/${taskId}`,
+                routeParameters: { class_id: classId, task_id: taskId } as Record<string, string>,
+              }))
+              .sort((a, b) => (a.binding < b.binding ? -1 : a.binding > b.binding ? 1 : 0))
+          : (fanOutParameter ? [...fanOutIds].sort() : [""]).map((binding) => ({
+              binding,
+              routeParameters: (fanOutParameter
+                ? { [fanOutParameter]: binding }
+                : {}) as Record<string, string>,
+            }));
+      if (fannedOut && routeBindings.length === 0) {
         summaries.push({
           capabilityId: capability._id,
           name: capability.name,
@@ -1584,9 +1823,11 @@ async function runSync(
           skipped:
             fanOutSource === "year_group"
               ? "No verified year group targets this route yet."
-              : selectedClassIds.size === 0
-                ? "No classes selected yet. Choose classes to follow before class-scoped school updates can run."
-                : "No verified class membership targets this route.",
+              : fanOutSource === "task"
+                ? "No stored tasks in the classes this job reads."
+                : selectedClassIds.size === 0
+                  ? "No classes selected yet. Choose classes to follow before class-scoped school updates can run."
+                  : "No verified class membership targets this route.",
         });
         continue;
       }
@@ -1629,6 +1870,7 @@ async function runSync(
               capability,
               capability.scope === "personal" ? actor.accountId : undefined,
               routeParameters,
+              context.mapping.providerUserId,
             );
             const pageClassIds = new Set<string>();
             const pageYearGroupIds = new Set<string>();
@@ -1710,6 +1952,7 @@ async function runSync(
         // hide a school-wide cause behind a single route.
         if (
           message.startsWith("INTEGRATION_CREDENTIAL_REJECTED") ||
+          message.startsWith("INTEGRATION_PERMISSION_DENIED") ||
           message.startsWith("INTEGRATION_RATE_LIMITED") ||
           message.startsWith("INTEGRATION_SYNC_TIME_BUDGET")
         )
@@ -1765,7 +2008,12 @@ async function runSync(
       mutation: "managebac:completeSync",
       serviceSubject: scheduled?.serviceSubject,
     });
-    return { syncRunId: started.syncRunId, summaries, completion };
+    return {
+      syncRunId: started.syncRunId,
+      ...(jobKind ? { syncKind: jobKind } : {}),
+      summaries,
+      completion,
+    };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "INTEGRATION_SYNC_FAILED";
@@ -1795,6 +2043,7 @@ async function runSync(
       });
       return {
         syncRunId: started.syncRunId,
+        ...(jobKind ? { syncKind: jobKind } : {}),
         summaries,
         suspended: true as const,
         errorCode,
@@ -1811,6 +2060,274 @@ async function runSync(
       },
       mutation: "managebac:failSync",
       serviceSubject: scheduled?.serviceSubject,
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
+type StudentSyncJob = {
+  kind: SchoolSyncKind;
+  syncRunId?: string;
+  summaries?: Array<Record<string, unknown>>;
+  completion?: unknown;
+  suspended?: true;
+  errorCode?: string;
+  errorSummary?: string;
+};
+
+function errorParts(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  return {
+    errorCode: message.match(/^([A-Z0-9_]+)/)?.[1] ?? fallback,
+    errorSummary: message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500),
+  };
+}
+
+/** Errors after which no other kind can be read in this request either. */
+const STOPS_EVERY_JOB = new Set([
+  "INTEGRATION_CREDENTIAL_REJECTED",
+  "INTEGRATION_TOKEN_REQUIRED",
+  "INTEGRATION_IDENTITY_REQUIRED",
+  "INTEGRATION_RATE_LIMITED",
+]);
+
+/**
+ * "Sync now" for one student: one kind, or every kind that isn't Off, in the
+ * order classes come first. Each kind is its own job. Whatever the request's
+ * time budget doesn't reach is queued for the worker, which picks it up
+ * within minutes; a job the budget interrupts continues there too.
+ */
+async function runStudentSync(
+  actor: ConnectorActor,
+  context: ConnectorContext,
+  token: string,
+  only?: SchoolSyncKind,
+) {
+  const preferences = (await convexQuery("school:preferences", {})) as {
+    kinds: Array<{ kind: SchoolSyncKind; mode: string; available: boolean }>;
+    classOverrides: Array<{ kind: SchoolSyncKind; mode: string }>;
+  };
+  const enabled = (kind: SchoolSyncKind) => {
+    const row = preferences.kinds.find((item) => item.kind === kind);
+    return Boolean(
+      row?.available &&
+        (row.mode !== "off" ||
+          preferences.classOverrides.some((item) => item.kind === kind && item.mode !== "off")),
+    );
+  };
+  const kinds = only ? [only] : SCHOOL_SYNC_KINDS.filter(enabled);
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
+  const jobs: StudentSyncJob[] = [];
+  const queued: SchoolSyncKind[] = [];
+  let stopped = false;
+  for (const kind of kinds) {
+    if (stopped) break;
+    // Too little time left to start another job: the worker runs it.
+    if (Date.now() >= deadline - 15_000) {
+      queued.push(kind);
+      continue;
+    }
+    try {
+      const result = await runSync(actor, "manual", context, token, undefined, {
+        syncKind: kind,
+        deadline,
+      });
+      jobs.push({
+        kind,
+        syncRunId: result.syncRunId,
+        summaries: result.summaries,
+        ...("completion" in result
+          ? { completion: result.completion }
+          : { suspended: true as const, errorCode: result.errorCode }),
+      });
+      if ("suspended" in result && result.errorCode === "INTEGRATION_RATE_LIMITED") stopped = true;
+    } catch (error) {
+      const parts = errorParts(error, "INTEGRATION_SYNC_FAILED");
+      jobs.push({ kind, ...parts });
+      if (STOPS_EVERY_JOB.has(parts.errorCode)) stopped = true;
+    }
+  }
+  for (const kind of queued)
+    await convexMutation("school:syncNow", { kind }).catch(() => undefined);
+  return { jobs, queued };
+}
+
+/** Reads a response body, refusing more than `maximum` bytes. */
+async function readBounded(response: Response, maximum: number, code: string) {
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (declared > maximum) throw new Error(code);
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximum) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(code);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Downloads one submitted file. ManageBac lists a download path per file; it
+ * answers with a redirect to short-lived storage, which is followed once,
+ * without the school's API key, and only to a public HTTPS host.
+ */
+async function providerFetchSchoolFileBytes(
+  context: ConnectorContext,
+  token: string,
+  downloadPath: string,
+) {
+  if (!downloadPath)
+    throw new Error(
+      "INTEGRATION_ENDPOINT_UNAVAILABLE: ManageBac lists no download for this file.",
+    );
+  const base = new URL(context.integration.baseUrl);
+  const url = new URL(downloadPath, `${base.toString().replace(/\/+$/, "")}/`);
+  if (url.origin !== base.origin)
+    throw new Error("INTEGRATION_EGRESS_BLOCKED: The file download left the ManageBac API host.");
+  await assertPublicApiHost(url.origin);
+  const tooLarge = "SCHOOL_FILE_TOO_LARGE: This file is larger than Spectra keeps (50 MB).";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const tokenValue =
+      context.integration.authScheme === "bearer" ? `Bearer ${token}` : token;
+    let response = await fetch(url, {
+      method: "GET",
+      headers: { [context.integration.authHeaderName]: tokenValue },
+      redirect: "manual",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (!location)
+        throw new Error("INTEGRATION_RESOURCE_DOWNLOAD_FAILED: ManageBac's download had nowhere to go.");
+      const target = new URL(location, url);
+      await assertPublicApiHost(target.origin);
+      response = await fetch(target, {
+        method: "GET",
+        redirect: "error",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    }
+    if (response.status === 401)
+      throw new Error("INTEGRATION_CREDENTIAL_REJECTED: ManageBac refused the school's API key.");
+    if (response.status === 403)
+      throw new Error("INTEGRATION_PERMISSION_DENIED: The school's ManageBac API key doesn't allow downloading dropbox files.");
+    if (response.status === 404)
+      throw new Error("INTEGRATION_RESOURCE_UNAVAILABLE: ManageBac no longer has this file.");
+    if (!response.ok)
+      throw new Error(`INTEGRATION_RESOURCE_DOWNLOAD_FAILED: ManageBac returned ${response.status}.`);
+    const bytes = await readBounded(response, SCHOOL_FILE_MAX_BYTES, tooLarge);
+    if (!bytes.length) throw new Error("INTEGRATION_RESOURCE_EMPTY: ManageBac returned an empty file.");
+    const mimeType = (response.headers.get("content-type") || "application/octet-stream")
+      .split(";", 1)[0]!
+      .trim()
+      .slice(0, 160);
+    return { bytes, mimeType };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Text kept from a fetched file so search can find it. Best effort. */
+async function schoolFileText(bytes: Buffer, mimeType: string, filename: string) {
+  const extension = filename.includes(".") ? filename.split(".").pop()!.toLowerCase() : "";
+  const handling =
+    mimeType === "application/pdf" || extension === "pdf"
+      ? ("pdf" as const)
+      : extension === "docx" || mimeType.includes("wordprocessingml")
+        ? ("docx" as const)
+        : extension === "pptx" || mimeType.includes("presentationml")
+          ? ("pptx" as const)
+          : extension === "xlsx" || mimeType.includes("spreadsheetml")
+            ? ("xlsx" as const)
+            : mimeType.startsWith("text/") || ["txt", "md", "csv"].includes(extension)
+              ? ("text" as const)
+              : undefined;
+  if (!handling) return undefined;
+  try {
+    const declared = handling === "pdf" ? "application/pdf" : mimeType;
+    const [prepared] = await prepareAttachments([
+      {
+        name: filename,
+        mimeType: declared,
+        size: bytes.byteLength,
+        handling,
+        data:
+          handling === "text"
+            ? bytes.toString("utf8")
+            : `data:${declared};base64,${bytes.toString("base64")}`,
+      },
+    ]);
+    const text = prepared?.extractedText?.trim();
+    return text ? text.slice(0, SCHOOL_FILE_TEXT_MAX_CHARS) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Opens one file the student handed in. The first open downloads it into
+ * the student's own storage; later opens, and the same bytes handed in for
+ * another task, use what is kept.
+ */
+async function fetchSchoolFile(
+  context: ConnectorContext,
+  token: string,
+  input: { submissionRecordId: string; providerFileId: string },
+) {
+  if (context.mapping.status !== "verified")
+    throw new Error("INTEGRATION_IDENTITY_REQUIRED: Resolve your identity first.");
+  const begun = object(await convexMutation("managebac:beginSchoolFileFetch", input));
+  const schoolFileId = string(begun.schoolFileId, 200);
+  if (begun.status === "cached") return { status: "cached" as const, schoolFileId };
+  const file = object(begun.file);
+  const uploadUrl = string(begun.uploadUrl, 4_000);
+  try {
+    const downloaded = await providerFetchSchoolFileBytes(
+      context,
+      token,
+      string(file.downloadPath, 2_000),
+    );
+    const mimeType =
+      downloaded.mimeType === "application/octet-stream"
+        ? string(file.mimeType, 160) || downloaded.mimeType
+        : downloaded.mimeType;
+    const uploaded = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": mimeType },
+      body: new Uint8Array(downloaded.bytes) as unknown as BodyInit,
+    });
+    const stored = (await uploaded.json().catch(() => null)) as { storageId?: string } | null;
+    if (!uploaded.ok || !stored?.storageId)
+      throw new Error("SCHOOL_FILE_UPLOAD_FAILED: Spectra couldn't keep this file.");
+    const extractedText = await schoolFileText(
+      downloaded.bytes,
+      mimeType,
+      string(file.filename, 240) || "file",
+    );
+    const attached = await convexMutation("managebac:attachSchoolFile", {
+      schoolFileId,
+      storageId: stored.storageId,
+      contentHash: createHash("sha256").update(downloaded.bytes).digest("hex"),
+      bytes: downloaded.bytes.byteLength,
+      mimeType,
+      ...(extractedText ? { extractedText } : {}),
+    });
+    return { status: "fetched" as const, ...object(attached) };
+  } catch (error) {
+    await convexMutation("managebac:failSchoolFileFetch", {
+      schoolFileId,
+      ...errorParts(error, "SCHOOL_FILE_FETCH_FAILED"),
     }).catch(() => undefined);
     throw error;
   }
@@ -1853,7 +2370,32 @@ function verifyWorkerRequest(request: NextRequest, rawBody: string) {
     );
 }
 
+/** Most jobs one worker request takes on; each runs until the shared budget. */
+const MAX_SCHEDULED_JOBS = 8;
+
+/**
+ * The scheduled worker. One request claims due jobs (students' own jobs
+ * first, then the school reconciliation) until none is due or its time
+ * budget is spent; a job the budget interrupts is suspended and continues in
+ * a later request.
+ */
 async function runScheduledSync(workerId: string) {
+  const deadline = Date.now() + SYNC_TIME_BUDGET_MS;
+  const jobs: Array<Record<string, unknown>> = [];
+  while (jobs.length < MAX_SCHEDULED_JOBS && Date.now() < deadline - 10_000) {
+    const job: Record<string, unknown> = await runOneScheduledSync(workerId, deadline);
+    if (!job.worked) break;
+    jobs.push(job);
+    if (job.suspended) break;
+  }
+  return {
+    worked: jobs.length > 0,
+    jobs,
+    ...(jobs.some((job) => job.suspended) ? { suspended: true } : {}),
+  };
+}
+
+async function runOneScheduledSync(workerId: string, deadline: number) {
   const payload = { workerId: workerId.slice(0, 200) };
   const payloadDigest = exactDigest(payload);
   const timestamp = Date.now();
@@ -1901,9 +2443,10 @@ async function runScheduledSync(workerId: string) {
       throw new Error(
         "INTEGRATION_TOKEN_REQUIRED: The school connector token is missing.",
       );
+    const studentJob = isSchoolSyncKind(object(claimed.pass).syncKind);
     const result = await runSync(
       claimed.actor,
-      "reconciliation",
+      studentJob ? "manual" : "reconciliation",
       context,
       secret.value,
       {
@@ -1918,11 +2461,13 @@ async function runScheduledSync(workerId: string) {
             : undefined,
         pass: claimed.pass,
       },
+      { deadline },
     );
     return {
       worked: true,
       integrationId: claimed.integrationId,
       syncRunId: claimed.syncRunId,
+      ...(result.syncKind ? { syncKind: result.syncKind } : {}),
       summaries: result.summaries,
       ..."completion" in result
         ? { completion: result.completion }
@@ -1949,7 +2494,15 @@ async function runScheduledSync(workerId: string) {
       mutation: "managebac:failSync",
       serviceSubject: claimed.serviceSubject,
     }).catch(() => undefined);
-    throw error;
+    // The failure is recorded on the job, which retries on its own schedule;
+    // the worker moves on to the next due job.
+    return {
+      worked: true,
+      integrationId: claimed.integrationId,
+      syncRunId: claimed.syncRunId,
+      failed: true,
+      errorCode: message.match(/^([A-Z0-9_]+)/)?.[1] ?? "INTEGRATION_SYNC_FAILED",
+    };
   }
 }
 
@@ -2253,32 +2806,47 @@ export async function POST(request: NextRequest) {
         context,
         secret.value,
       );
+      // A newly matched student's class list comes in the same request, so
+      // they can choose classes straight away. Their other Auto kinds were
+      // queued by the match and run in the background.
       if (
         object(identity.result).status === "verified" &&
-        body.bootstrap !== false
+        body.syncClasses === true
       ) {
         const refreshed = await connectorContext(actor, integrationId);
-        const bootstrap = await runSync(
-          actor,
-          "bootstrap",
-          refreshed,
-          secret.value,
-          undefined,
-          { personalOnly: true },
-        );
-        return ok({ identity, bootstrap });
+        const classes = await runStudentSync(actor, refreshed, secret.value, "classes");
+        return ok({ identity, classes });
       }
       return ok({ identity });
     }
 
     if (action === "sync") {
-      const kind =
-        body.kind === "reconciliation"
-          ? "reconciliation"
-          : body.kind === "bootstrap"
-            ? "bootstrap"
-            : "manual";
-      return ok(await runSync(actor, kind, context, secret.value));
+      // The school-wide reconciliation of shared routes (administrators).
+      if (body.kind === "reconciliation")
+        return ok(await runSync(actor, "reconciliation", context, secret.value));
+      if (body.kind !== undefined && !isSchoolSyncKind(body.kind))
+        return badRequest("Choose a kind of School data to sync.");
+      return ok(
+        await runStudentSync(
+          actor,
+          context,
+          secret.value,
+          isSchoolSyncKind(body.kind) ? body.kind : undefined,
+        ),
+      );
+    }
+
+    if (action === "fetchSchoolFile") {
+      const submissionRecordId = string(body.submissionRecordId, 200);
+      const providerFileId = string(body.providerFileId, 500);
+      if (!submissionRecordId || !providerFileId)
+        return badRequest("Choose a file from one of your submissions.");
+      return ok(
+        await fetchSchoolFile(context, secret.value, {
+          submissionRecordId,
+          providerFileId,
+        }),
+      );
     }
 
     if (action === "resolveConflict") {

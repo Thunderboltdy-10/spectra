@@ -147,7 +147,7 @@ export function ClassShelfEditor({
     setResolvingIdentity(true);
     setSubmitError("");
     try {
-      await manageBacPost({ action: "resolveIdentity", bootstrap: true });
+      await manageBacPost({ action: "resolveIdentity", syncClasses: true });
       apply(await fetchMyClassCandidates());
     } catch (error) {
       setSubmitError(

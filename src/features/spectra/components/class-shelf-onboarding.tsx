@@ -102,7 +102,7 @@ export function ClassShelfOnboarding({
     setResolvingIdentity(true);
     setSubmitError("");
     try {
-      await manageBacPost({ action: "resolveIdentity", bootstrap: true });
+      await manageBacPost({ action: "resolveIdentity", syncClasses: true });
       await load();
     } catch (error) {
       setSubmitError(
@@ -119,7 +119,7 @@ export function ClassShelfOnboarding({
     setSyncError("");
     setSyncing(true);
     try {
-      await manageBacPost({ action: "sync", kind: "manual" });
+      await manageBacPost({ action: "sync" });
       return true;
     } catch (error) {
       setSyncError(

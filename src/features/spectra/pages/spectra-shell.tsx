@@ -2055,7 +2055,7 @@ export function SpectraShell({
       }
     });
     const removeManageBac = spectraBus.handle("managebac.sync", async () => {
-      await syncSpectraManageBac("manual");
+      await syncSpectraManageBac();
     });
     const removeManageBacSelection = spectraBus.handle(
       "managebac.selectClasses",

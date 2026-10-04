@@ -1031,7 +1031,7 @@ export function ManageBacIntegrationShell() {
                     selectionRevision={classCollection?.selectionRevision}
                     classLoadError={classLoadError}
                     onSaved={() =>
-                      runAction("sync", () => syncSpectraManageBac("manual"))
+                      runAction("sync", () => syncSpectraManageBac())
                     }
                   />
                 </div>

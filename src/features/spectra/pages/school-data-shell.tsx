@@ -564,7 +564,7 @@ export function SchoolDataShell() {
                     selectionRevision={payload.selectionRevision}
                     classLoadError={payload.classLoadError}
                     onSaved={async () => {
-                      await run("sync", () => syncSpectraManageBac("manual"));
+                      await run("sync", () => syncSpectraManageBac());
                     }}
                   />
                 ) : active === "sync" ? (

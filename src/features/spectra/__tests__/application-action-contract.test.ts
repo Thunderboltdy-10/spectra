@@ -39,7 +39,6 @@ describe("tool titles students see in run steps", () => {
     const titles = spectraToolRegistry.list().map((tool) => tool.title);
     expect(titles.length).toBeGreaterThan(10);
     expect(titles.filter((title) => /artifact/i.test(title))).toEqual([]);
-    expect(spectraToolRegistry.require("read_artifact_skill").title).toBe("Read work guidance");
     expect(spectraToolRegistry.require("add_comment").title).toBe("Add comment");
   });
 });

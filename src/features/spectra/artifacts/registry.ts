@@ -7,7 +7,6 @@ import {
 } from "../sheets/model";
 import {
   ARTIFACT_TYPE_KEYS,
-  type ArtifactSkill,
   type ArtifactTypeKey,
   type ArtifactTypeManifest,
   type SemanticRegion,
@@ -1234,41 +1233,6 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
   ],
 };
 
-function loadSkill(typeKey: ArtifactTypeKey): Promise<ArtifactSkill> {
-  switch (typeKey) {
-    case "document":
-      return import("./skills/document").then((module) => module.documentSkill);
-    case "flashcard_deck":
-      return import("./skills/flashcard-deck").then(
-        (module) => module.flashcardDeckSkill,
-      );
-    case "quiz":
-      return import("./skills/quiz").then((module) => module.quizSkill);
-    case "planner_task":
-      return import("./skills/planner-task").then(
-        (module) => module.plannerTaskSkill,
-      );
-    case "agent":
-      return import("./skills/agent").then((module) => module.agentSkill);
-    case "timetable":
-      return import("./skills/timetable").then(
-        (module) => module.timetableSkill,
-      );
-    case "presentation":
-      return import("./skills/presentation").then(
-        (module) => module.presentationSkill,
-      );
-    case "sheets":
-      return import("./skills/sheets").then((module) => module.sheetsSkill);
-    case "code":
-      return import("./skills/code").then((module) => module.codeSkill);
-    case "whiteboard":
-      return import("./skills/whiteboard").then(
-        (module) => module.whiteboardSkill,
-      );
-  }
-}
-
 function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
   const [displayName, description, category, icon] = identity[typeKey];
   const collaborativePartition =
@@ -1328,7 +1292,6 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
       (operation) => `${typeKey}.${operation.replaceAll("_", ".")}`,
     ),
     regions: regionAdapters[typeKey],
-    loadSkill: () => loadSkill(typeKey),
     collaboration: {
       roomPartition: collaborativePartition,
       commentAnchors:
@@ -1482,10 +1445,6 @@ export function describeSheetsCellRegion(
 
 function escapeRegionToken(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export async function loadArtifactSkill(typeKey: string) {
-  return requireArtifactTypeManifest(typeKey).loadSkill();
 }
 
 export const artifactTypeKeySchema = z.enum(ARTIFACT_TYPE_KEYS);

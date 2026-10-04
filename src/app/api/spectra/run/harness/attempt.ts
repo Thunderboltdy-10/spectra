@@ -517,6 +517,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           executionId,
           content: reply,
           affected: backend.affected,
+          widgets: result.state.widgets,
         }).catch(() => null);
       return;
     }
@@ -587,6 +588,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       affected: backend.affected,
       artifacts: touches,
       caption: finalCaption,
+      widgets: result.state.widgets,
       model: getSpectraModelId(),
     }).catch(() => null);
     if (params.mode === "start")

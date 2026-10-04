@@ -1,4 +1,5 @@
 import { ToolInputError, type HarnessTool, type InputOption, type TodoItem } from "../types";
+import { WIDGET_LIMITS, WidgetLimitError, checkWidgetHtml } from "../../../widgets/widget-document";
 import { requireString, type HarnessSession } from "./shared";
 
 /*
@@ -130,20 +131,32 @@ type WidgetArgs = { title: string; html: string };
 export function showWidgetTool(): HarnessTool<WidgetArgs> {
   return {
     name: "show_widget",
-    description:
-      "Show a small interactive widget inline in the conversation: a self-contained HTML snippet with inline CSS and JS (no network access), such as a quick calculator, a slider demo or a small chart. Use CSS variables like var(--text-primary) and var(--bg-elevated) so it matches the theme. For anything the user will keep, create an artifact instead.",
+    description: `Show an interactive HTML or SVG visual inline in the conversation: a slider demo, a small simulation, a calculator, a chart, a labelled diagram. Write a fragment (no <html> or <head>) with inline <style> and <script>. It runs sandboxed with no network: no external scripts, styles, fonts, images or fetch. Colour it with the theme variables (var(--paper-0), var(--ink-1), var(--blue), var(--blue-tint), var(--font-ui) and the rest in the frontend-design skill); they follow light and dark mode. Limits: ${WIDGET_LIMITS.maxHtmlChars.toLocaleString("en")} characters, ${WIDGET_LIMITS.maxScripts} script blocks, height up to ${WIDGET_LIMITS.maxHeight}px. The user can save it as work; for something they asked to keep, create a code artifact instead.`,
     parameters: {
       type: "object",
-      properties: { title: { type: "string" }, html: { type: "string" } },
+      properties: {
+        title: { type: "string", description: "A short name, shown above the visual." },
+        html: { type: "string", description: "The widget's HTML fragment." },
+      },
       required: ["title", "html"],
       additionalProperties: false,
     },
     effect: "read",
     label: (args) => `Drawing *${args.title}*`,
-    parse: (raw) => ({ title: requireString(raw, "title", 120), html: requireString(raw, "html", 60_000) }),
+    parse: (raw) => {
+      const title = requireString(raw, "title", WIDGET_LIMITS.maxTitleChars);
+      if (typeof raw.html !== "string") throw new ToolInputError("html is required.");
+      try {
+        checkWidgetHtml(raw.html);
+      } catch (error) {
+        if (error instanceof WidgetLimitError) throw new ToolInputError(error.message);
+        throw error;
+      }
+      return { title, html: raw.html.trim() };
+    },
     execute: async (args) => ({
       ok: true,
-      content: `Showed the widget "${args.title}" to the user.`,
+      content: `Showed the widget "${args.title}" to the user. They can save it as work.`,
       widget: { title: args.title, html: args.html },
       doneLabel: `Showed *${args.title}*`,
     }),

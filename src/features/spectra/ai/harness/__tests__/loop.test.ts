@@ -620,4 +620,22 @@ describe("runHarnessLoop", () => {
     expect(outcome.status).toBe("paused");
     expect(executions).toBe(1);
   });
+
+  it("keeps the last four widgets in the state, so the saved reply shows them again", async () => {
+    const draw = tool({
+      name: "show_widget",
+      execute: async (args: { title: string }) => ({ ok: true, content: "shown", widget: { title: args.title, html: "<p>" + args.title + "</p>" } }),
+    });
+    const shown: string[] = [];
+    const model = scripted([
+      { text: "", toolCalls: ["1", "2", "3", "4", "5"].map((n) => call("w" + n, "show_widget", { title: "W" + n })) },
+      { text: "Here they are.", toolCalls: [] },
+    ]);
+    const outcome = await runHarnessLoop(
+      emptyLoopState([user("draw")]),
+      deps({ callModel: model.caller, tools: [draw], hooks: { onWidget: (widget) => shown.push(widget.title) } }),
+    );
+    expect(shown).toEqual(["W1", "W2", "W3", "W4", "W5"]);
+    expect(outcome.state.widgets).toEqual(["2", "3", "4", "5"].map((n) => ({ id: "w" + n, title: "W" + n, html: "<p>W" + n + "</p>" })));
+  });
 });

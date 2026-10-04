@@ -80,6 +80,9 @@ export type TodoItem = {
 
 export type WidgetOutput = { title: string; html: string };
 
+/** A widget the run showed, kept so the saved reply can show it again. */
+export type ShownWidget = WidgetOutput & { id: string };
+
 /** What a tool returns. `content` is the only part the model sees. */
 export type ToolOutcome = {
   ok: boolean;

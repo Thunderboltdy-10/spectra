@@ -18,7 +18,7 @@ import {
   type SpectraRunTab,
 } from "../data/api";
 import { requestSpectra, spectraFailureMessage } from "../data/request";
-import type { CommandAttachment } from "../components/command-bar";
+import type { CommandAttachment } from "../components/command-attachments";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 import { noteAiLocation } from "../collaboration/follow-ai";
 import {

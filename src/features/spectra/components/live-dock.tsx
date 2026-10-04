@@ -42,34 +42,27 @@ import type { ResultCardStreamView } from "../ai/stream-events";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import type { CommandAttachment } from "./command-bar";
 import { ProgressTrace } from "./progress-trace";
+import { postSpectra, type SpectraRunTab } from "../data/api";
 import {
-  getSpectraRunTabs,
-  invalidateSpectraRunTabsCache,
-  postSpectra,
-  type SpectraRunTab,
-} from "../data/api";
+  beginRunTabsPolling as beginPolling,
+  getRunTabs,
+  isActiveRunStatus,
+  refreshRunTabs,
+  runTabCard as streamCard,
+  runTabSource as tabSource,
+  subscribeRunTabs,
+} from "../island/run-tabs";
 import {
   closePreservesRunningJob,
   deriveLiveDockTab,
   liveDockStateCopy,
   selectExpandedInputRun,
-  type LiveDockTabSource,
-  type LiveDockTruthState,
+    type LiveDockTruthState,
 } from "../runs/live-dock";
 import { CrossfadeText, transitionFor, useSpectraMotion } from "../motion";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
-import {
-  SYNC_RETRY_POLICY,
-  syncRetryDelayMs,
-} from "../../../../shared/sync-retry-policy";
 
-const activeStatuses = new Set([
-  "queued",
-  "running",
-  "awaiting_confirmation",
-  "awaiting_resolution",
-]);
 function displayChoiceTitle(value: string) {
   const limit = 160;
   if (value.length <= limit) return value;
@@ -78,156 +71,6 @@ function displayChoiceTitle(value: string) {
   return `${value.slice(0, prefixLength)}…${value.slice(-suffixLength)}`;
 }
 
-let sharedTabs: SpectraRunTab[] = [];
-let sharedRefresh: Promise<void> | null = null;
-let refreshGeneration = 0;
-let appliedRefreshGeneration = 0;
-let pollTimer: number | null = null;
-let pollConsumers = 0;
-let activePollAttempt = 0;
-let activePollSignature = "";
-const optimisticPollDemands = new Map<string, number>();
-const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
-
-/* A saved run whose file on the computer has not confirmed yet is watched
-   briefly, so Bridge read-back shows up without a reload. Later refreshes
-   (focus, a new run) still pick it up after the watch ends. */
-const NATIVE_CONFIRM_WATCH_MS = 10 * 60_000;
-
-function getActivePollSignature() {
-  const now = Date.now();
-  const activeRuns = sharedTabs
-    .filter((tab) => activeStatuses.has(tab.run.status) ||
-      (tab.run.status === "completed" && tab.run.outcome === "native_pending" &&
-        now - tab.run.updatedAt < NATIVE_CONFIRM_WATCH_MS))
-    .map((tab) => `${tab.runId}:${tab.run.status}:${tab.run.outcome ?? ""}`)
-  return [...activeRuns, ...optimisticPollDemands.keys()].sort().join("|");
-}
-
-function clearRunTabsPoll() {
-  if (pollTimer !== null) window.clearTimeout(pollTimer);
-  pollTimer = null;
-}
-
-function scheduleRunTabsPoll() {
-  const shouldPoll =
-    pollConsumers > 0 && document.visibilityState === "visible";
-  const signature = getActivePollSignature();
-  if (!shouldPoll || !signature) {
-    clearRunTabsPoll();
-    activePollAttempt = 0;
-    activePollSignature = signature;
-    return;
-  }
-  if (signature !== activePollSignature) {
-    clearRunTabsPoll();
-    activePollAttempt = 0;
-    activePollSignature = signature;
-  }
-  if (pollTimer !== null) return;
-
-  activePollAttempt += 1;
-  const delay = syncRetryDelayMs(
-    activePollAttempt,
-    `live-dock:${signature}`,
-    SYNC_RETRY_POLICY.activeRunPollMaxDelayMs,
-  );
-  pollTimer = window.setTimeout(() => {
-    pollTimer = null;
-    void refreshRunTabs();
-  }, delay);
-}
-
-/** The dock already knows which run belongs to an open thread. Follow AI in
- * the thread panel must lock that actor, not a leftover location from another
- * run. */
-export function runIdForLiveThread(threadId: string): string | null {
-  const id = threadId.trim();
-  if (!id) return null;
-  return sharedTabs.find((tab) => tab.threadId === id)?.runId ?? null;
-}
-
-function syncPollingVisibility() {
-  const shouldPoll =
-    pollConsumers > 0 && document.visibilityState === "visible";
-  if (!shouldPoll) {
-    clearRunTabsPoll();
-    return;
-  }
-  void refreshRunTabs();
-}
-
-function refreshRunTabs(force = false) {
-  if (sharedRefresh && !force) return sharedRefresh;
-  if (force) {
-    invalidateSpectraRunTabsCache();
-    sharedRefresh = null;
-  }
-  const generation = ++refreshGeneration;
-  const pending = getSpectraRunTabs({ limit: 120, force })
-    .then((result) => {
-      if (generation < appliedRefreshGeneration) return;
-      appliedRefreshGeneration = generation;
-      sharedTabs = result.runTabs;
-      listeners.forEach((listener) => listener(sharedTabs));
-    })
-    .catch(() => undefined)
-    .finally(() => {
-      if (sharedRefresh === pending) sharedRefresh = null;
-      scheduleRunTabsPoll();
-    });
-  sharedRefresh = pending;
-  return pending;
-}
-
-function beginPolling(demand?: string) {
-  pollConsumers += 1;
-  if (demand)
-    optimisticPollDemands.set(demand, (optimisticPollDemands.get(demand) ?? 0) + 1);
-  if (pollConsumers === 1)
-    document.addEventListener("visibilitychange", syncPollingVisibility);
-  syncPollingVisibility();
-  return () => {
-    pollConsumers = Math.max(0, pollConsumers - 1);
-    if (demand) {
-      const remaining = (optimisticPollDemands.get(demand) ?? 1) - 1;
-      if (remaining > 0) optimisticPollDemands.set(demand, remaining);
-      else optimisticPollDemands.delete(demand);
-    }
-    if (pollConsumers === 0) {
-      document.removeEventListener("visibilitychange", syncPollingVisibility);
-      syncPollingVisibility();
-    }
-  };
-}
-
-function tabSource(tab: SpectraRunTab): LiveDockTabSource {
-  return {
-    runId: tab.runId,
-    threadId: tab.threadId,
-    threadTitle: tab.thread.title,
-    run: tab.run,
-    card: tab.card,
-    checkpointSummary: tab.checkpointSummary,
-    recentSteps: tab.recentSteps,
-    inputRequest: tab.inputRequest,
-  };
-}
-
-function streamCard(tab: SpectraRunTab): ResultCardStreamView | null {
-  if (!tab.card) return null;
-  return {
-    id: tab.card._id,
-    runId: tab.card.runId,
-    status: tab.card.status,
-    title: tab.card.title,
-    summary: tab.card.summary,
-    variant: tab.card.variant,
-    actions: tab.card.actions,
-    provenance: tab.card.provenance,
-    updatedAt: tab.card.updatedAt,
-  };
-}
 
 function asDockTraceSteps(
   runId: string,
@@ -510,7 +353,7 @@ export function LiveDock({
   openChat,
   storyTabs,
 }: LiveDockProps) {
-  const [fetchedTabs, setFetchedTabs] = useState(sharedTabs);
+  const [fetchedTabs, setFetchedTabs] = useState(getRunTabs);
   /* Story mode is a state source, not a second dock. */
   const story = storyTabs !== undefined;
   const tabs = storyTabs ?? fetchedTabs;
@@ -552,14 +395,14 @@ export function LiveDock({
 
   useEffect(() => {
     if (story) return;
-    listeners.add(setFetchedTabs);
+    const unsubscribe = subscribeRunTabs(setFetchedTabs);
     void refresh();
     const changed = () => void refresh(true);
     const runChanged = () => void refresh();
     const removeChanged = spectraBus.on("threads.changed", changed);
     const removeRunChanged = spectraBus.on("run.changed", runChanged);
     return () => {
-      listeners.delete(setFetchedTabs);
+      unsubscribe();
       removeChanged();
       removeRunChanged();
     };
@@ -609,7 +452,7 @@ export function LiveDock({
     return tabs
       .filter((tab) => !respondingInputRuns.has(tab.runId))
       .filter((tab) => {
-        if (activeStatuses.has(tab.run.status)) return true;
+        if (isActiveRunStatus(tab.run.status)) return true;
         if (continuation?.id === tab.threadId || openThreadId === tab.threadId)
           return true;
         if (!preferences.ai.retainCompletedRunTabs) return false;
@@ -629,7 +472,7 @@ export function LiveDock({
         if (sameThread.length <= 1) return true;
         const preferred =
           sameThread.find((candidate) =>
-            activeStatuses.has(candidate.run.status),
+            isActiveRunStatus(candidate.run.status),
           ) ??
           sameThread.find(
             (candidate) => candidate.runId === continuation?.runId,
@@ -640,8 +483,8 @@ export function LiveDock({
         return preferred?.runId === tab.runId;
       })
       .sort((a, b) => {
-        const aSending = activeStatuses.has(a.run.status);
-        const bSending = activeStatuses.has(b.run.status);
+        const aSending = isActiveRunStatus(a.run.status);
+        const bSending = isActiveRunStatus(b.run.status);
         if (aSending !== bSending) return aSending ? -1 : 1;
         return b.updatedAt - a.updatedAt;
       });
@@ -673,7 +516,7 @@ export function LiveDock({
     [selectedInputRunId],
   );
 
-  const hasActive = visible.some((tab) => activeStatuses.has(tab.run.status));
+  const hasActive = visible.some((tab) => isActiveRunStatus(tab.run.status));
   useEffect(
     () => (hasActive && !story ? beginPolling() : undefined),
     [hasActive, story],
@@ -1060,7 +903,7 @@ export function LiveDock({
                       <RotateCcw className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
-                  {activeStatuses.has(tab.run.status) && onStop ? (
+                  {isActiveRunStatus(tab.run.status) && onStop ? (
                     <button
                       type="button"
                       disabled={stopping.has(tab.runId)}
@@ -1209,7 +1052,7 @@ export function LiveDock({
                           <Undo2 className="h-3 w-3" /> Undo this run
                         </button>
                       ) : null}
-                      {activeStatuses.has(tab.run.status) && onStop ? (
+                      {isActiveRunStatus(tab.run.status) && onStop ? (
                         <button
                           type="button"
                           disabled={stopping.has(tab.runId)}
@@ -1519,3 +1362,4 @@ export function LiveDock({
     </section>
   );
 }
+

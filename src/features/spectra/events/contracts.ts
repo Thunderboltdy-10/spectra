@@ -156,4 +156,6 @@ export type SpectraQueries = {
   "run.active": { runIds: string[] };
   /* The island prism's status dot, so still copies (the favicon, the tray) say the same. */
   "prism.status": { status: import("../life/prism").PrismStatus | null };
+  /* The thread open in the route's Side: the island replies to it. */
+  "side.thread": { threadId: string; title: string } | null;
 };

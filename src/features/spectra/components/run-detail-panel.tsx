@@ -254,7 +254,6 @@ export function RunDetailPanel({
             <ThreadConversation
               threadId={detail.run.threadId}
               compact
-              showComposer={false}
             />
           ) : conversation ? (
             <ConversationSurface detail={conversation} compact />

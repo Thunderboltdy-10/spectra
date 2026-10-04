@@ -24,6 +24,8 @@ const aiSchema = z.object({
   continueCurrentConversation: z.boolean().default(true),
   openConversationAfterSend: z.boolean().default(false),
   showLiveDockProgress: z.boolean().default(true),
+  /** The island at rest: the prism (default), or nothing until the pointer reaches the bottom edge. */
+  islandWake: z.enum(["prism", "edge"]).default("prism"),
   autoRouteSpecialists: z.boolean().default(true),
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),

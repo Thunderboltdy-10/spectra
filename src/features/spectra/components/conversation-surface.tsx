@@ -62,7 +62,6 @@ import { useAuthedArgs } from "../data/use-authed-args";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { useWorkspaceCatalog } from "../data/use-catalog-pages";
 import { CatalogProgress } from "./catalog-progress";
-import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
 import { ArtifactEmbedList } from "./artifact-embed-host";
@@ -1617,7 +1616,6 @@ export function ConversationSurface({
   loading = false,
   loadError,
   empty,
-  composer,
   activeCards,
   onCardOpen,
   onCardAction,
@@ -1637,7 +1635,6 @@ export function ConversationSurface({
   /** A retryable refresh notice that must remain visible beside old messages. */
   loadError?: ReactNode;
   empty?: ReactNode;
-  composer?: ReactNode;
   activeCards?: Parameters<typeof ResultCardStack>[0]["cards"];
   onCardOpen?: Parameters<typeof ResultCardStack>[0]["onOpen"];
   onCardAction?: Parameters<typeof ResultCardStack>[0]["onAction"];
@@ -2429,18 +2426,6 @@ export function ConversationSurface({
           Latest
         </button>
       ) : null}
-      {composer ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8">
-          <div
-            className={cn(
-              "pointer-events-auto mx-auto",
-              compact ? "max-w-[760px]" : "max-w-[820px]",
-            )}
-          >
-            {composer}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -2448,14 +2433,12 @@ export function ConversationSurface({
 export function ThreadConversation({
   threadId,
   compact = false,
-  showComposer = true,
   liveExchange: parentLiveExchange = null,
   onOpenArtifact,
   onOpenWorkspace,
 }: {
   threadId: string;
   compact?: boolean;
-  showComposer?: boolean;
   liveExchange?: SpectraLiveExchange | null;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
@@ -2525,17 +2508,6 @@ export function ThreadConversation({
     // tabs so this panel can still recover live progress after a refresh.
     observeDurableRuns: !parentLiveExchange,
   });
-  const activeRunId =
-    parentLiveExchange?.runId ??
-    detail?.activeExecution?.run._id ??
-    detail?.traces.find((trace) =>
-      [
-        "queued",
-        "running",
-        "awaiting_confirmation",
-        "awaiting_resolution",
-      ].includes(trace.run.status),
-    )?.run._id;
   return (
     <ConversationSurface
       detail={detail}
@@ -2580,25 +2552,6 @@ export function ThreadConversation({
         void runEngine.onCardAction(card, action, target)
       }
       onRetryRun={runEngine.retry}
-      composer={
-        showComposer ? (
-          <CommandBar
-            placeholder="Continue this thread…"
-            busy={runEngine.submitting}
-            allowAttachments
-            onStop={runEngine.stop}
-            activeRunId={activeRunId}
-            onSteer={runEngine.steer}
-            onSubmit={(value, attachments) => runEngine.run(value, attachments)}
-            context={
-              <span className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]">
-                <MessageSquare className="h-3.5 w-3.5" />
-                Thread
-              </span>
-            }
-          />
-        ) : undefined
-      }
     />
   );
 }

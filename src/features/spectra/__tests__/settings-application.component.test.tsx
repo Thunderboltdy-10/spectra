@@ -37,7 +37,7 @@ describe("Settings application accessibility contract", () => {
     ).toBeTruthy();
     expect(
       screen.getByRole("heading", {
-        name: "Conversations and Live Dock",
+        name: "Conversations and the island",
         level: 2,
       }),
     ).toBeTruthy();

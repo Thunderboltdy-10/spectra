@@ -2735,7 +2735,6 @@ export function ArtifactStudio({
             <ThreadConversation
               threadId={threadId}
               compact
-              showComposer={false}
             />
           ) : (
             <ThreadReferenceStudio content={artifact.content} />
@@ -6881,7 +6880,6 @@ function ThreadReferenceStudio({ content }: { content: unknown }) {
         <ThreadConversation
           threadId={threadId.trim()}
           compact
-          showComposer={false}
         />
       </div>
     );

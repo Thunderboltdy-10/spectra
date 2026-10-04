@@ -1,0 +1,58 @@
+/*
+ * The island (docs/design/ISLAND.md). Its shapes are carried between states by
+ * the life field; these are the small CSS motions inside them: content that
+ * cross-fades with a slight blur, and the tabs' status cues.
+ */
+
+@keyframes island-content-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+.island-content-in {
+  animation: island-content-in 200ms var(--ease-standard, ease-out) both;
+}
+
+/* The working light: the spectrum turning in a small ring. */
+@keyframes island-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.island-working-light {
+  background: conic-gradient(from 0deg, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+  -webkit-mask: radial-gradient(circle, transparent 38%, #000 42%);
+  mask: radial-gradient(circle, transparent 38%, #000 42%);
+  animation: island-turn 1.4s linear infinite;
+}
+
+/* The needs-you glint: a warm dot that breathes. */
+@keyframes island-glint {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--warning) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--warning) 0%, transparent);
+  }
+}
+
+.island-needs-glint {
+  background: var(--warning);
+  animation: island-glint 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-content-in,
+  .island-working-light,
+  .island-needs-glint {
+    animation: none;
+  }
+}

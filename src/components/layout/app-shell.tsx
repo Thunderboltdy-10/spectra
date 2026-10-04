@@ -81,7 +81,7 @@ import {
 } from "@/components/keyboard-shortcuts";
 import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
 import { ViewportReferencePicker } from "@/features/spectra/components/viewport-reference-picker";
-import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
+import { IslandHost } from "@/features/spectra/island/island-host";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
@@ -1199,11 +1199,11 @@ function AppShellContent({
         >
           <div className="relative min-h-0 min-w-0 flex-1" data-spectra-app-surface="true">
             {children}
-            <GlobalRouteWorkbench />
           </div>
           <RouteSidePanelHost />
           <ViewportReferencePicker />
         </div>
+        <IslandHost />
       </main>
     </div>
   );

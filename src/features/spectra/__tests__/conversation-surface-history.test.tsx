@@ -267,7 +267,7 @@ describe("ConversationSurface history and saved results", () => {
   });
   it("renders the thread without waiting for workspace discovery", async () => {
     mocks.getThread.mockResolvedValue(detail("thread-a", "The thread is ready"));
-    render(<ThreadConversation threadId="thread-a" showComposer={false} />);
+    render(<ThreadConversation threadId="thread-a" />);
     expect(await screen.findByText("The thread is ready")).toBeTruthy();
     expect(mocks.workspaceCatalog.status).toBe("loading");
   });

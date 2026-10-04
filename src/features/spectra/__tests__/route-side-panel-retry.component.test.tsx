@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Toaster, toast } from "sonner";
 import { spectraBus } from "../events";
 import { DEFAULT_SPECTRA_PREFERENCES } from "../settings/schema";
-import { GlobalRouteWorkbench } from "../components/global-route-workbench";
 import { RouteSidePanelHost } from "../components/route-side-panel-host";
 
 const session = vi.hoisted(() => ({ authenticated: true, account: { accountId: "account-A" } as { accountId: string } | undefined }));
@@ -30,14 +29,20 @@ vi.mock("../components/artifact-studio-shell", () => {
   return { useArtifactStudioState: () => studio, StudioSplitPlaceholder: () => null };
 });
 
-vi.mock("../ai/use-spectra-run", () => ({ useSpectraRun: () => ({}) }));
-vi.mock("../components/command-bar", () => ({ CommandBar: () => null }));
-vi.mock("../pages/workbench-live-stack", () => ({ WorkbenchLiveStack: ({ children }: { children: import("react").ReactNode }) => children }));
-vi.mock("../components/live-dock", () => ({
-  LiveDock: ({ onOpen }: { onOpen: (runId: string, threadId: string, title: string, artifactId: string) => void }) => (
-    <button onClick={() => onOpen("run-a", "conversation-a", "Temporary conversation", "work-a")}>Open chat for Temporary conversation</button>
-  ),
-}));
+/* What the island does when the user opens a thread that touched some work:
+   the conversation and the work open in the route's Side, independently. */
+function OpenFromIsland() {
+  return (
+    <button
+      onClick={() => {
+        void spectraBus.command("run.openConversation", { runId: "run-a", threadId: "conversation-a" });
+        void spectraBus.command("work.open", { workId: "work-a", surface: "panel" });
+      }}
+    >
+      Open chat for Temporary conversation
+    </button>
+  );
+}
 
 let offline = true;
 const fetchRequest = vi.fn(async (input: RequestInfo | URL) => {
@@ -195,7 +200,7 @@ it("keeps the original recovery action across a long offline hold with the produ
 });
 
 it.each(["conversation", "work"] as const)("recovers the Dock's associated conversation and work independently, %s first", async (first) => {
-  render(<><main>School context</main><GlobalRouteWorkbench /><RouteSidePanelHost /><Toaster expand /></>);
+  render(<><main>School context</main><OpenFromIsland /><RouteSidePanelHost /><Toaster expand /></>);
   fireEvent.click(screen.getByRole("button", { name: "Open chat for Temporary conversation" }));
   await screen.findByText("This conversation could not be opened. Check your connection, then try again.");
   await screen.findByText("This work could not be opened. Check your connection, then try again.");

@@ -36,7 +36,7 @@ import type { SpectraCommandOutcome } from "../events/contracts";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { ConversationSurface } from "../components/conversation-surface";
 import { ProductErrorState } from "../components/product-state";
-import { CommandBar } from "../components/command-bar";
+import { useProvideIslandEngine } from "../island/engine";
 import { CrossfadeText } from "../motion";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import { GlobalSearch } from "../components/context-controls";
@@ -561,9 +561,6 @@ export function ChatShell() {
     setVisibleArtifactIds(focusedArtifact ? [focusedArtifact._id] : []);
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
-  // Continuation is independent from additive artifact/workspace context.
-  // Starting a new thread is an explicit thread action, not a side effect of focus.
-  const continuingThread = Boolean(composerThread);
 
   const runEngine = useSpectraRun({
     surface: "chat",
@@ -682,65 +679,19 @@ export function ChatShell() {
     [activeWorkspace, setActiveWorkspaceContext],
   );
   const activeCards = useMemo(() => runEngine.cards, [runEngine.cards]);
-  const pageComposer = (
-    <CommandBar
-      placeholder={
-        continuingThread
-          ? `Continue ${title}…`
-          : activeWorkspace
-              ? `Ask with ${activeWorkspace.title} context…`
-              : focusedArtifact
-                ? `Ask about ${focusedArtifact.title}…`
-                : "Ask Spectra anything…"
-      }
-      busy={runEngine.submitting}
-      allowConcurrent={!continuingThread}
-      allowAttachments
-      onStop={runEngine.stop}
-      activeRunId={
-        runEngine.liveExchange?.runId ??
-        detail?.traces.find((trace) =>
-          [
-            "queued",
-            "running",
-            "awaiting_confirmation",
-            "awaiting_resolution",
-          ].includes(trace.run.status),
-        )?.run._id
-      }
-      onSteer={runEngine.steer}
-      onStartNewThread={() => selectThread(null)}
-      onSubmit={(value, attachments) => runEngine.run(value, attachments)}
-      menu={
-        <>
-          <button
-            type="button"
-            onClick={() => selectThread(null)}
-            className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-          >
-            <Plus className="h-4 w-4" />
-            New conversation
-          </button>
-          <div className="my-1 h-px bg-[var(--border-subtle)]" />
-          {workspaces.slice(0, 6).map((workspace) => (
-            <button
-              key={workspace._id}
-              type="button"
-              onClick={() => selectWorkspaceContext(workspace._id)}
-              className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            >
-              <FolderPlus className="h-4 w-4" />
-              <span className="min-w-0 flex-1 truncate">
-                Use {workspace.title}
-              </span>
-              {activeWorkspace?._id === workspace._id ? (
-                <Check className="h-3.5 w-3.5 text-[var(--success)]" />
-              ) : null}
-            </button>
-          ))}
-        </>
-      }
-    />
+  // The island is this page's composer: it rests as the reply bar for the open thread.
+  useProvideIslandEngine(
+    useMemo(
+      () => ({
+        engine: runEngine,
+        focus: composerThread ? { threadId: composerThread.id, title } : null,
+        bindsThread: true,
+        restAsComposer: true,
+        startNewThread: () => selectThread(null),
+        openThread: (_runId: string, id: string) => selectThread(id),
+      }),
+      [composerThread, runEngine, selectThread, title],
+    ),
   );
 
   return (
@@ -1070,7 +1021,7 @@ export function ChatShell() {
           executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-modal bg-transparent px-5 pb-5 pt-2 sm:px-8">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-chrome bg-transparent px-5 pb-24 pt-2 sm:px-8">
         <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
           <ComposerArtifactDock
             artifacts={artifacts}
@@ -1078,7 +1029,6 @@ export function ChatShell() {
             threadId={composerThread?.id ?? threadId ?? undefined}
             onOpen={openArtifact}
           />
-          {pageComposer}
         </div>
       </div>
 

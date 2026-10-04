@@ -102,7 +102,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "change_settings",
       description:
-        "Change the user's Spectra settings. patch uses the real sections: appearance {theme: light|dark|system, density: comfortable|compact, editorTextScale, contrast, reducedMotion}, general {startPage, dateFormat, timeFormat, locale}, ai {researchDepth, showLiveDockProgress, autoRouteSpecialists}, writing {smartCompletion, sensitivity}, notifications, privacy, accessibility. AI permissions are not settable here: only the user changes those, in Settings. The user approves each change unless they allowed settings changes.",
+        "Change the user's Spectra settings. patch uses the real sections: appearance {theme: light|dark|system, density: comfortable|compact, editorTextScale, contrast, reducedMotion}, general {startPage, dateFormat, timeFormat, locale}, ai {researchDepth, islandWake: prism|edge, autoRouteSpecialists}, writing {smartCompletion, sensitivity}, notifications, privacy, accessibility. AI permissions are not settable here: only the user changes those, in Settings. The user approves each change unless they allowed settings changes.",
       parameters: {
         type: "object",
         properties: { patch: { type: "object", additionalProperties: true } },

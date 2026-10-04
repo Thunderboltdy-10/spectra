@@ -22,7 +22,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import {
   useCallback,
   useEffect,
@@ -46,7 +45,6 @@ import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
-import { CommandBar } from "../components/command-bar";
 import { ShareDialog } from "../components/share-dialog";
 import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -63,7 +61,7 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { formatRelativeTime } from "../components/spectra-view-model";
-import { WorkbenchLiveStack } from "./workbench-live-stack";
+import { useProvideIslandEngine } from "../island/engine";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 import { useAgentCatalog, useWorkspaceCatalog } from "../data/use-catalog-pages";
@@ -390,7 +388,6 @@ function LibrarySectionBlock({
 export function AgentLibraryShell({
   initialAgentId,
 }: { initialAgentId?: string } = {}) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedAgentId = initialAgentId ?? searchParams.get("agentId");
   const agentCatalog = useAgentCatalog();
@@ -506,10 +503,10 @@ export function AgentLibraryShell({
     artifactId: activeAgentArtifactId,
     open: openAgentPointers,
     currentView: activeAgentArtifact ? "agent-editor" : "agent-library",
-    onThreadReady: (threadId) => {
-      router.push(`/chat?threadId=${encodeURIComponent(threadId)}`);
-    },
   });
+  // The island writes through this page's engine, so an open agent is what
+  // Spectra is asked about; the run arrives as a tab, and the page stays.
+  useProvideIslandEngine(useMemo(() => ({ engine: runEngine }), [runEngine]));
 
   const load = useCallback(async (quiet = false) => {
     if (!catalogKey) { setPublicLoading(false); return; }
@@ -779,16 +776,6 @@ export function AgentLibraryShell({
       onPrimary={() => primaryAction(card)}
     />
   );
-  const artifactQuickChat = activeAgentArtifact ? (
-    <CommandBar
-          className="w-full"
-          placeholder={`Ask Spectra anything about ${activeAgentArtifact.title}…`}
-          allowAttachments
-          busy={runEngine.submitting}
-          onStop={runEngine.stop}
-          onSubmit={(prompt, attachments) => runEngine.run(prompt, attachments)}
-    />
-  ) : null;
 
   if (studio.mode === "tab" && studio.activeArtifact) {
     return (
@@ -808,9 +795,6 @@ export function AgentLibraryShell({
           onShare={(artifact) => setShareTarget(artifact)}
           onDirtyChange={studio.setDirty}
         />
-        <WorkbenchLiveStack>
-          {artifactQuickChat}
-        </WorkbenchLiveStack>
       </div>
     );
   }
@@ -979,37 +963,6 @@ export function AgentLibraryShell({
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      {studio.mode === "split" ? (
-        <WorkbenchLiveStack>
-          {artifactQuickChat}
-        </WorkbenchLiveStack>
-      ) : null}
-
-      {!studio.activeArtifact ? (
-        <WorkbenchLiveStack>
-            <CommandBar
-              className="w-full"
-              placeholder="Ask Spectra anything about agents…"
-              allowAttachments
-              busy={runEngine.submitting}
-              onStop={runEngine.stop}
-              onSubmit={(prompt, attachments) =>
-                runEngine.run(prompt, attachments)
-              }
-              menu={
-                <button
-                  type="button"
-                  onClick={() => void createAgent()}
-                  className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  <Plus className="h-4 w-4" />
-                  New agent
-                </button>
-              }
-            />
-        </WorkbenchLiveStack>
-      ) : null}
-
       <Dialog
         open={Boolean(placementTarget)}
         onOpenChange={(next) => {

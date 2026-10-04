@@ -6,7 +6,7 @@ import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio-shell";
-import { runIdForLiveThread } from "./live-dock";
+import { runIdForLiveThread } from "../island/run-tabs";
 import { acknowledgeViewportReady } from "../viewport-readiness";
 
 export function LiveThreadPanel({
@@ -163,7 +163,6 @@ export function LiveThreadPanel({
           <ThreadConversation
             threadId={threadId}
             compact
-            showComposer={false}
             liveExchange={liveExchange}
             onOpenArtifact={onOpenArtifact}
             onOpenWorkspace={onOpenWorkspace}

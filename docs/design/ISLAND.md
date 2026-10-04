@@ -258,3 +258,24 @@ Every transition is a morph of one continuous container, carried by the field:
 - **Interruption.** Every transition can be interrupted from its current state, and nothing snaps.
 
 [LIFE.md](LIFE.md) defines the field, its verbs and choreographies, and the prism. [MOTION.md](MOTION.md) holds the timings.
+
+## Implementation
+
+The island lives in `src/features/spectra/island/`.
+
+- **One island, lent engines.** `IslandHost` (mounted by the app shell) renders `<Island />` with a general run
+  engine. A page that owns a run engine lends it with `useProvideIslandEngine` (`engine.ts`), and the latest lender
+  wins:
+  - the chat page lends its engine bound to the open thread, and the island rests as its reply bar;
+  - the Workspace and Library shell lends its engine with the continued thread as focus, resting as the reply bar
+    while that thread is open in its panel;
+  - the Agents page lends its engine, so an open agent is what Spectra is asked about;
+  - elsewhere, the thread open in the route's Side (the `side.thread` bus query) is the focus.
+- **No page has its own composer.** `CommandBar` remains only on the landing page.
+- **Sending never opens anything.** The run arrives as a tab; the user opens it from the thread view.
+- **Tabs** come from one shared store (`run-tabs.ts`); `island-model.ts` arranges them and ranks the one status.
+  Which threads the user has seen is kept per browser (`seen.ts`).
+- **Questions** (`questions.ts`) merge the live harness question with saved runs waiting on the user, and each
+  answers through the right path (harness answer, card action, choice continuation or a new turn).
+- **Safe area.** The island's resting row registers as the composer band, so pages keep their last lines clear of
+  it through `--spectra-composer-safe-area`.

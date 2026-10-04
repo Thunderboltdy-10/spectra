@@ -264,6 +264,14 @@ export function RouteSidePanelHost() {
     };
   }, [eligible, fullscreen, loadThread, loadWork]);
 
+  // The island rests as the reply bar of the thread open here.
+  const sideThreadId = eligible ? thread?._id ?? null : null;
+  const sideThreadTitle = thread?.title ?? "";
+  useEffect(() => {
+    spectraBus.setQuery("side.thread", sideThreadId ? { threadId: sideThreadId, title: sideThreadTitle } : null);
+    return () => spectraBus.setQuery("side.thread", null);
+  }, [sideThreadId, sideThreadTitle]);
+
   function closeWork() {
     workLoad.cancel();
     closeStudio();

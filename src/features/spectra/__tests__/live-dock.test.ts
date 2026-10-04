@@ -209,34 +209,37 @@ describe("Live Dock V2", () => {
       "src/features/spectra/components/conversation-surface.tsx",
     );
     expect(surface).toContain("export function ThreadConversation");
-    expect(surface).toContain("onSteer={runEngine.steer}");
     expect(surface).toContain('from "./progress-trace"');
+    // The island is the only composer: thread surfaces render no field of their own.
+    expect(surface).not.toContain("CommandBar");
+    const island = read("src/features/spectra/island/island.tsx");
+    expect(island).toContain("engine.steer(engine.activeRunId, message.text, message.attachments)");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("ThreadConversation");
   });
 
   it("keeps explicit New thread and touch/keyboard disclosure paths", () => {
-    const dock = read("src/features/spectra/components/live-dock.tsx");
-    expect(dock).toContain('aria-label="Start a new chat"');
-    expect(dock).toContain("> Respond");
-    expect(dock).toContain("visible.length === 0 && !openChat) return null");
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(shell).toContain("function startFreshComposerThread() ");
     expect(shell).toContain(
       "skipAutoContinueThreadIdRef.current = liveThread.id",
     );
-    expect(shell).toContain("threadId: composerThread?.id ?? null");
+    // The workspace lends the island its engine; the island writes into the
+    // thread in focus, or a new one once the user lets go of it.
+    expect(shell).toContain("useProvideIslandEngine(");
+    expect(shell).toContain("startNewThread: () => islandHandlers.current.startNew()");
+    const island = read("src/features/spectra/island/island.tsx");
+    expect(island).toContain("threadId: focus?.threadId ?? null");
+    expect(island).toContain("onLetGo={slot?.startNewThread}");
     // The thread panel's width state is its intent; the row allocator turns
     // intents into actual widths (`allocateWorkbenchPanes`).
     expect(shell).toContain("width={paneWidths.thread ?? liveThreadPanelWidth}");
     expect(shell).toContain('notePaneIntent("thread", next)');
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("options?.threadId === null");
-    expect(dock).toContain("dock-tab-identity min-w-0 flex-1 py-1 text-left");
-    expect(dock).toContain("onPointerEnter={() => openTabHover(tab.runId)}");
-    expect(dock).toContain("persistKey={tab.runId}");
-    expect(dock).toContain("max-sm:fixed");
-    expect(dock).toContain("data-mobile-sheet");
+    // Tabs open their thread on hover and on Enter, and Delete dismisses a done one.
+    expect(island).toContain("openView(tab.runId, true)");
+    expect(island).toContain('event.key === "Delete"');
   });
 
   it("marks only the continued thread tab with a blue left-edge affordance", () => {
@@ -253,21 +256,23 @@ describe("Live Dock V2", () => {
     expect(css).toContain("inset 3px 0 var(--accent-cyan)");
   });
 
-  it("keeps Live Dock tabs off /chat and on the work surfaces", () => {
-    // /chat is the conversation, so a floating rail of running conversations
-    // would restate the page. Library and Workspace are one shell now, and it
-    // mounts the dock through WorkbenchDockShell; the routes that own no
-    // workbench of their own get it from GlobalRouteWorkbench instead.
+  it("puts the island on every signed-in page and nothing else at the bottom", () => {
+    // One composer for the app: the island. The chat page and the workspace
+    // lend it their engines; every other route gets the host's.
     const chat = read("src/features/spectra/pages/chat-shell.tsx");
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
-    const global = read(
-      "src/features/spectra/components/global-route-workbench.tsx",
-    );
-    expect(chat).not.toContain("LiveDock");
-    expect(shell).toContain("<WorkbenchDockShell");
-    expect(global).toContain("<LiveDock");
-    expect(global).toContain('"/library"');
-    expect(global).toContain('"/workspace"');
+    const agents = read("src/features/spectra/pages/agent-library-shell.tsx");
+    const app = read("src/components/layout/app-shell.tsx");
+    for (const page of [chat, shell, agents]) {
+      expect(page).not.toContain("LiveDock");
+      expect(page).not.toContain("<CommandBar");
+      expect(page).toContain("useProvideIslandEngine(");
+    }
+    expect(app).toContain("<IslandHost />");
+    expect(fs.existsSync(path.join(root, "src/features/spectra/components/global-route-workbench.tsx"))).toBe(false);
+    expect(fs.existsSync(path.join(root, "src/features/spectra/pages/workbench-dock-shell.tsx"))).toBe(false);
+    const host = read("src/features/spectra/island/island-host.tsx");
+    expect(host).toContain('"/chat", "/workspace", "/library", "/agents"');
   });
 
   it("keeps conversation and Stop immediate, with Follow Undo and Close in the shared overflow", () => {
@@ -296,17 +301,16 @@ describe("Live Dock V2", () => {
   });
 
   it("polls active run tabs promptly without making idle surfaces noisy", () => {
-    const dock = read("src/features/spectra/components/live-dock.tsx");
-    expect(dock).toContain("SYNC_RETRY_POLICY.activeRunPollMaxDelayMs");
-    expect(dock).toContain("syncRetryDelayMs(");
-    expect(dock).toContain("window.setTimeout(");
-    expect(dock).not.toContain("window.setInterval(");
-    expect(dock).toContain("activePollSignature");
-    expect(dock).toContain("const runChanged = () => void refresh();");
-    expect(dock).toContain('spectraBus.on("run.changed", runChanged)');
-    expect(dock).toContain("let refreshGeneration = 0;");
-    expect(dock).toContain("if (generation < appliedRefreshGeneration) return;");
-    expect(dock).not.toContain("refreshRunTabs(), 180_000");
+    const tabs = read("src/features/spectra/island/run-tabs.ts");
+    expect(tabs).toContain("SYNC_RETRY_POLICY.activeRunPollMaxDelayMs");
+    expect(tabs).toContain("syncRetryDelayMs(");
+    expect(tabs).toContain("window.setTimeout(");
+    expect(tabs).not.toContain("window.setInterval(");
+    expect(tabs).toContain("activePollSignature");
+    expect(tabs).toContain('spectraBus.on("run.changed", () => void refreshRunTabs())');
+    expect(tabs).toContain("let refreshGeneration = 0;");
+    expect(tabs).toContain("if (generation < appliedRefreshGeneration) return;");
+    expect(tabs).not.toContain("refreshRunTabs(), 180_000");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("Date.now() - tabsFetchedAt >=");
     expect(runHook).toContain("180_000");

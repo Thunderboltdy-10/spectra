@@ -33,6 +33,11 @@ const SECTIONS = [
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
 
+const ISLAND_WAKE_OPTIONS = [
+  { value: "prism", label: "Show the prism" },
+  { value: "edge", label: "Wake from the edge" },
+];
+
 const RETENTION_OPTIONS = [
   { value: "15", label: "15 minutes" },
   { value: "30", label: "30 minutes" },
@@ -87,9 +92,9 @@ type SectionProps<K extends PreferenceSection> = {
 
 function ConversationSettings({ p, update }: SectionProps<"ai">) {
   return (
-    <SettingGroup title="Conversations and Live Dock" description="These controls change how new messages continue and how completed work stays visible.">
+    <SettingGroup title="Conversations and the island" description="How new messages continue, and how the island at the bottom of every page waits for you.">
       <ToggleRow label="Continue the current conversation" description="When off, an unassigned send begins a new conversation. Explicitly selected conversations still continue." checked={p.continueCurrentConversation} onCheckedChange={(continueCurrentConversation) => update({ continueCurrentConversation })} />
-      <ToggleRow label="Show progress in Live Dock" checked={p.showLiveDockProgress} onCheckedChange={(showLiveDockProgress) => update({ showLiveDockProgress })} />
+      <SettingRow label="The island at rest" description="Wake from the edge hides the prism until the pointer reaches the bottom of the screen, or you press Ctrl+J. Questions still wake it." control={<SelectField ariaLabel="The island at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} triggerClassName="min-w-[168px]" />} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} triggerClassName="min-w-[144px]" />} /> : null}

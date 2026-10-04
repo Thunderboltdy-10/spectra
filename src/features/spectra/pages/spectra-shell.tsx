@@ -15,7 +15,6 @@ import {
   Home,
   Library,
   Loader2,
-  MessageSquare,
   PencilLine,
   Plus,
   School,
@@ -54,7 +53,13 @@ import {
 } from "@/features/spectra/components/product-state";
 import { ClassShelfOnboarding } from "../components/class-shelf-onboarding";
 import Link from "next/link";
-import { OverflowMenu } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  OverflowMenu,
+} from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
@@ -73,18 +78,13 @@ import { useShellArtifactOpen } from "../components/use-shell-artifact-open";
 import { useShellArtifactContent } from "../components/use-shell-artifact-content";
 import { mergeShellArtifactContent } from "../components/shell-artifact-content";
 import { createShellArtifactAccess } from "../components/shell-artifact-access";
-import {
-  CommandBar,
-  CommandBarMenuItem,
-  CommandBarSubmenu,
-} from "../components/command-bar";
 import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ChatBrowserButton, ChatBrowserPanel } from "../components/chat-browser-panel";
-import { WorkbenchDockShell } from "./workbench-dock-shell";
+import { useProvideIslandEngine } from "../island/engine";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { applyPreferencePatch } from "../settings/schema";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -666,6 +666,46 @@ function SelectObjectsButton({
   );
 }
 
+/** New work of any type, opened in the studio here. */
+function NewWorkButton({
+  busyKey,
+  onCreate,
+}: {
+  busyKey: string | null;
+  onCreate: (type: ArtifactTypeKey) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="secondary" size="sm">
+          <Plus className="size-3.5" />
+          New
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[13rem]">
+        {createTypes.map((type) => {
+          const TypeIcon = type.icon;
+          const busy = busyKey === `artifact:${type.key}`;
+          return (
+            <DropdownMenuItem
+              key={type.key}
+              disabled={busy}
+              onSelect={() => onCreate(type.key)}
+            >
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <TypeIcon className="size-4" />
+              )}
+              {type.label}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function WorkspaceContentSkeleton() {
   return (
     <div className="px-1 pt-2" aria-label="Loading workspace">
@@ -1142,9 +1182,6 @@ export function SpectraShell({
   >();
   const [selection, setSelection] = useState<Selection>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [attachmentsHost, setAttachmentsHost] = useState<HTMLDivElement | null>(
-    null,
-  );
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   /* Two boards, two memories. The root board answers "which workspace holds
      what" and the hub board answers "what kind of work is in here" — so a
@@ -4089,6 +4126,7 @@ export function SpectraShell({
    */
   const surfaceActions = (
     <>
+      <NewWorkButton busyKey={busyKey} onCreate={openCreateArtifact} />
       <SelectObjectsButton
         selectionMode={multiSelectMode}
         onToggle={() => setMultiSelectMode((value) => !value)}
@@ -4108,6 +4146,41 @@ export function SpectraShell({
     preferences.integrations.classShelvesStatus === "pending" &&
     atRoot &&
     !studio.activeArtifact;
+
+  // The island is this page's composer: it writes into the thread in focus,
+  // and threads open here, in the thread panel, instead of the Side.
+  const islandHandlers = useRef({
+    startNew: startFreshComposerThread,
+    open: (threadId: string, title: string) => {
+      setActiveRunPanelId(null);
+      setLiveThread({ id: threadId, title });
+    },
+  });
+  islandHandlers.current = {
+    startNew: startFreshComposerThread,
+    open: (threadId, title) => {
+      setActiveRunPanelId(null);
+      setLiveThread({ id: threadId, title });
+    },
+  };
+  const islandFocusId = composerThread?.id ?? null;
+  const islandFocusTitle = composerThread?.title ?? "";
+  const islandReplying = Boolean(liveThread && islandFocusId === liveThread.id);
+  useProvideIslandEngine(
+    useMemo(
+      () => ({
+        engine: runEngine,
+        focus: islandFocusId
+          ? { threadId: islandFocusId, title: islandFocusTitle }
+          : null,
+        restAsComposer: islandReplying,
+        startNewThread: () => islandHandlers.current.startNew(),
+        openThread: (_runId: string, threadId: string, title: string) =>
+          islandHandlers.current.open(threadId, title),
+      }),
+      [islandFocusId, islandFocusTitle, islandReplying, runEngine],
+    ),
+  );
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0">
@@ -4624,49 +4697,9 @@ export function SpectraShell({
                 </section>
               )}
             </div>
-            <WorkbenchDockShell
-              attachmentsHostRef={setAttachmentsHost}
-              dock={{
-                workspaceId: selectedWorkspaceId,
-                optimistic: runEngine.liveExchange,
-                openThreadId: liveThread?.id,
-                openChat: liveThread ? { id: liveThread.id, title: liveThread.title } : undefined,
-                onStartNewThread: startFreshComposerThread,
-                onOpen: (_runId, threadId, title, artifactId) => {
-                  setActiveRunPanelId(null);
-                  setLiveThread({ id: threadId, title });
-                  if (artifactId) {
-                    const artifact = allArtifacts.find(
-                      (item) => item._id === artifactId,
-                    );
-                    if (artifact) openArtifactPanel(artifact);
-                  }
-                },
-                onContinue: (_runId, threadId, title) => {
-                  skipAutoContinueThreadIdRef.current = null;
-                  setComposerThread({
-                    id: threadId,
-                    title,
-                    runId: _runId,
-                    workspaceId: selectedWorkspaceId,
-                  });
-                },
-                onDeselect: () => {
-                  if (liveThread)
-                    skipAutoContinueThreadIdRef.current = liveThread.id;
-                  setComposerThread(null);
-                },
-                onStop: (runId) => runEngine.stop(runId),
-                onRetry: (runId) => void runEngine.retry(runId),
-                onAction: (card, action) =>
-                  void runEngine.onCardAction(card, action, card.runId),
-                onRevise: (card, revision) =>
-                  void runEngine.revise(card, revision),
-                onInput: (threadId, response, attachments, continuation) =>
-                  runEngine.run(response, attachments ?? [], { threadId, ...continuation }),
-              }}
-              selection={
-                multiSelectMode ? (
+            {multiSelectMode ? (
+              <div className="pointer-events-none absolute inset-x-0 bottom-[var(--spectra-composer-safe-area,84px)] z-composer-dock flex justify-center px-4">
+                <div className="pointer-events-auto spectra-float">
                   <SelectionActionBar
                     count={selectionCount}
                     onClear={clearSelection}
@@ -4680,81 +4713,9 @@ export function SpectraShell({
                         : undefined
                     }
                   />
-                ) : undefined
-              }
-              composer={
-                <div className="flex items-center gap-1">
-                  <CommandBar
-                    className="min-w-0 flex-1"
-                    allowAttachments
-                    attachmentsPortalTarget={attachmentsHost}
-                    placeholder={
-                      composerThread
-                        ? `Continue ${composerThread.title}...`
-                        : commandFocusArtifact
-                          ? `Ask Spectra about ${commandFocusArtifact.title}`
-                          : workspace
-                            ? `Ask Spectra anything about this workspace...`
-                            : "Ask Spectra anything..."
-                    }
-                    onSubmit={(prompt, attachments) =>
-                      runEngine.run(prompt, attachments, {
-                        threadId: composerThread?.id ?? null,
-                      })
-                    }
-                    busy={runEngine.submitting}
-                    allowConcurrent={!composerThread}
-                    onStop={runEngine.stop}
-                    activeRunId={runEngine.activeRunId}
-                    onSteer={runEngine.steer}
-                    onStartNewThread={startFreshComposerThread}
-                    menu={
-                      <div>
-                        <CommandBarMenuItem onClick={startFreshComposerThread}>
-                          <MessageSquare className="h-4 w-4" />
-                          New chat
-                        </CommandBarMenuItem>
-                        <CommandBarSubmenu label="New work" icon={Plus}>
-                          {createTypes.map((type) => {
-                            const Icon = type.icon;
-                            return (
-                              <CommandBarMenuItem
-                                key={type.key}
-                                disabled={busyKey === `artifact:${type.key}`}
-                                onClick={() => openCreateArtifact(type.key)}
-                              >
-                                {busyKey === `artifact:${type.key}` ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Icon className="h-4 w-4" />
-                                )}
-                                {type.label}
-                              </CommandBarMenuItem>
-                            );
-                          })}
-                        </CommandBarSubmenu>
-                        <CommandBarMenuItem
-                          onClick={() => {
-                            setMultiSelectMode(true);
-                          }}
-                        >
-                          <Files className="h-4 w-4" />
-                          Select objects
-                        </CommandBarMenuItem>
-                        {!selectedWorkspaceId ? (
-                          <CommandBarMenuItem
-                            onClick={() => setWorkspaceCreateOpen(true)}
-                          >
-                            <Plus className="h-4 w-4" />
-                            New workspace
-                          </CommandBarMenuItem>
-                        ) : null}
-                      </div>
-                    }
-                  />
                 </div>
-              }
-            />
+              </div>
+            ) : null}
             {liveThread ? (
               <LiveThreadPanel
                 threadId={liveThread.id}

@@ -174,4 +174,5 @@ compat shims, and say so in the commit.
 | Design core | `main` · primary checkout (orchestrator) | Done. Life engine v2 `4076255a` and its choreography map `0c818c81`; the field app-wide with the favicon prism and `/dev/life` `a66ff039`; the glyph set and `/dev/icons` `9f85828b`; the kit (AdaptiveBar `pinned`, SplitButton, IconButton, Row, Tooltip shortcuts) `7075674e`. Pages adopt glyphs and the kit in D2 and D3. |
 | Prism (user's agent) | `lane/prism` · `<local-workspace>` | Retired: the orchestrator builds the prism in code |
 | A2b · AI reach | `lane/ai-reach` · `<local-workspace>` | Running |
-| F1 · School | `lane/school` · `<local-workspace>` | Running (backend first) |
+| F1 · School | `lane/school` · `<local-workspace>` | Merged into main as `07a35120` ([report](reports/R-F1-SCHOOL.md)); live checks listed there. Follow-up for A2b: the AI refresh names its kinds. |
+| D2 · Island core | `main` · primary checkout (orchestrator) | The island replaces the live dock and every page composer (chat, Workspace and Library, Agents, thread surfaces); questions, thread view, composer with agent switch and @ references; tests and build pass. Left for D2: the three-region shell, the rail with Devices, the threads view, tab drag between sides, history. |

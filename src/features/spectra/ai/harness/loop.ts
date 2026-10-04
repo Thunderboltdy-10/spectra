@@ -1,3 +1,4 @@
+import { deniedResult } from "./permissions";
 import {
   ProviderUnavailableError,
   providerToolSpec,
@@ -86,7 +87,7 @@ export type ModelCaller = (input: {
   onRetry: () => void;
 }) => Promise<ModelTurn>;
 
-export type PermissionDecision = "allow" | "ask";
+export type PermissionDecision = "allow" | "ask" | "deny";
 
 export type ToolStepInfo = {
   call: HarnessToolCall;
@@ -419,6 +420,11 @@ export async function runHarnessLoop(
       outcome = { ok: false, content: prepared.error ?? "This call could not run." };
     } else if (deps.signal.aborted) {
       outcome = { ok: false, content: STOPPED_RESULT };
+    } else if (
+      (prepared.effect === "irreversible" || prepared.effect === "settings") &&
+      deps.policy(prepared.effect, prepared.category) === "deny"
+    ) {
+      outcome = { ok: false, content: deniedResult(prepared.category) };
     } else {
       try {
         const run = (granted: boolean) =>
@@ -438,6 +444,8 @@ export async function runHarnessLoop(
               ok: false,
               content: `${prepared.tool.name} asked for approval again after it was given. Nothing more was done for this step.`,
             };
+          else if (deps.policy("irreversible", outcome.pause.category) === "deny")
+            outcome = { ok: false, content: deniedResult(outcome.pause.category) };
           else if (deps.policy("irreversible", outcome.pause.category) === "allow")
             outcome = await run(true);
         }

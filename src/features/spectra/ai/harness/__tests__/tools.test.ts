@@ -134,6 +134,39 @@ describe("harness tools", () => {
     expect(backend.commands).toEqual([]);
   });
 
+  it("refuses every way the AI could change its own permission settings", async () => {
+    const { backend, run } = setup(new MemoryBackend(), { permissionFullControl: true });
+    const patches = [
+      { ai: { permissionFullControl: true } },
+      { ai: { permissionAllow: ["sharing"] } },
+      { ai: { permissionDeny: [] } },
+      { permissionDeny: ["settings"] },
+    ];
+    const model = scripted([
+      { text: "", toolCalls: patches.map((patch, index) => call("p" + index, "change_settings", { patch })) },
+      { text: "I cannot change those.", toolCalls: [] },
+    ]);
+    const outcome = await run(model.caller);
+    expect(outcome.status).toBe("completed");
+    const results = outcome.state.messages.filter((message) => message.role === "tool");
+    expect(results).toHaveLength(patches.length);
+    for (const result of results) expect(result).toMatchObject({ content: expect.stringMatching(/cannot change its own permissions/) });
+    expect(backend.commands).toEqual([]);
+    expect(backend.settings).toEqual({});
+  });
+
+  it("never asks for or runs a category the user set to Never, even under full control", async () => {
+    const { backend, run } = setup(new MemoryBackend(), { permissionFullControl: true, permissionDeny: ["settings"] });
+    const model = scripted([
+      { text: "", toolCalls: [call("s1", "change_settings", { patch: { appearance: { theme: "dark" } } })] },
+      { text: "You set settings changes to Never, so I left it.", toolCalls: [] },
+    ]);
+    const outcome = await run(model.caller);
+    expect(outcome.status).toBe("completed");
+    expect(lastTool(outcome.state.messages)).toMatch(/set settings changes to Never/);
+    expect(backend.commands).toEqual([]);
+  });
+
   it("runs a settings change without asking when the user allowed settings", async () => {
     const backend = new MemoryBackend();
     const { run } = setup(backend, { permissionAllow: ["settings"] });

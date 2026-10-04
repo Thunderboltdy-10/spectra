@@ -119,6 +119,9 @@ The prism mark comes from the prism renderer (see [LIFE.md](LIFE.md#the-prism)).
 - **The component.** Import `<Icon name="document" />` from `src/components/icons`. It sets the size, the stroke
   width and the accent from props (`size`, `accent`, `animate`).
 - **Names.** The set is typed, so an unknown name is a type error.
+- **Artifact types.** `workTypeMeta[type].glyph` names each type's glyph, beside its hue (`color`).
+- **Adoption.** The set and the lab landed with the design core. Pages move from lucide to glyphs as D2 and D3
+  rebuild them; the lint ban below is switched on when the last page has moved.
 - **Enforcement.** `check:design-tokens` bans `lucide-react` imports outside editor workbar code and
   `src/components/icons/`.
 - **New glyphs** follow this document and are added to the icon lab page (`/dev/icons`). It shows every glyph at 16

@@ -1,0 +1,177 @@
+/* Spectra glyphs: their one micro animation each (docs/design/ICONS.md).
+   A glyph plays it when the control it sits in is hovered, or when the icon
+   has data-animate (state changes and running states). Reduced motion stops
+   it through the global motion rules. */
+
+.spectra-icon {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.spectra-icon :where([class^="sg-"]) {
+  transform-box: fill-box;
+  transition: transform 260ms cubic-bezier(0.34, 1.4, 0.64, 1), opacity 200ms ease;
+}
+
+/* A page corner lifts. */
+.spectra-icon .sg-fold {
+  transform-origin: 0% 100%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-fold,
+.spectra-icon[data-animate] .sg-fold {
+  transform: translate(-0.6px, 0.6px) scale(1.12);
+}
+
+/* What peeks out from behind comes forward a little. */
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-peek,
+.spectra-icon[data-animate] .sg-peek {
+  transform: translate(0.6px, -0.8px);
+}
+
+/* Today's mark slides along the week and back. */
+@keyframes sg-today {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(-2.8px); }
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-today,
+.spectra-icon[data-animate] .sg-today {
+  animation: sg-today 620ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sync arrows turn, continuously while syncing. */
+@keyframes sg-spin {
+  to { transform: rotate(360deg); }
+}
+.spectra-icon .sg-spin {
+  transform-origin: 50% 50%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-spin {
+  animation: sg-spin 900ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.spectra-icon[data-animate] .sg-spin {
+  animation: sg-spin 1400ms linear infinite;
+}
+
+/* A shackle closes. */
+.spectra-icon .sg-shackle {
+  transform: translateY(-1px);
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-shackle,
+.spectra-icon[data-animate] .sg-shackle {
+  transform: translateY(0);
+}
+
+/* The cloud fills from the bottom, continuously while saving. */
+@keyframes sg-rise {
+  0% { transform: translateY(5px); }
+  70%, 100% { transform: translateY(-6px); }
+}
+.spectra-icon[data-animate] .sg-rise {
+  animation: sg-rise 1500ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* The caret blinks. */
+@keyframes sg-blink {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-caret,
+.spectra-icon[data-animate] .sg-caret {
+  animation: sg-blink 1s step-end infinite;
+}
+
+/* A tick draws itself. */
+@keyframes sg-draw {
+  from { stroke-dashoffset: 12; }
+  to { stroke-dashoffset: 0; }
+}
+.spectra-icon[data-animate] .sg-tick {
+  stroke-dasharray: 12;
+  animation: sg-draw 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* Someone is typing. */
+@keyframes sg-typing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.spectra-icon[data-animate] .sg-typing circle {
+  animation: sg-typing 1100ms ease-in-out infinite;
+}
+.spectra-icon[data-animate] .sg-typing circle:nth-child(2) { animation-delay: 160ms; }
+.spectra-icon[data-animate] .sg-typing circle:nth-child(3) { animation-delay: 320ms; }
+
+/* Small lifts and nudges for actions. */
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-lift,
+.spectra-icon[data-animate] .sg-lift {
+  transform: translateY(-1px);
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-nudge,
+.spectra-icon[data-animate] .sg-nudge {
+  transform: translateX(1px);
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-nudge-up,
+.spectra-icon[data-animate] .sg-nudge-up {
+  transform: translate(0.8px, -0.8px);
+}
+.spectra-icon .sg-lid {
+  transform-origin: 100% 100%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-lid,
+.spectra-icon[data-animate] .sg-lid {
+  transform: rotate(12deg) translateY(-0.6px);
+}
+@keyframes sg-ring {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(12deg); }
+  45% { transform: rotate(-9deg); }
+  70% { transform: rotate(5deg); }
+}
+.spectra-icon .sg-ring {
+  transform-origin: 50% 0%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-ring,
+.spectra-icon[data-animate] .sg-ring {
+  animation: sg-ring 700ms ease-out;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-window,
+.spectra-icon[data-animate] .sg-window {
+  opacity: 0.55;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-lean,
+.spectra-icon[data-animate] .sg-lean {
+  transform: rotate(-6deg);
+}
+.spectra-icon .sg-lean {
+  transform-origin: 0% 100%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-knob-a,
+.spectra-icon[data-animate] .sg-knob-a {
+  transform: translateX(3px);
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-knob-b,
+.spectra-icon[data-animate] .sg-knob-b {
+  transform: translateX(-3px);
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-knob-c,
+.spectra-icon[data-animate] .sg-knob-c {
+  transform: translateX(2px);
+}
+@keyframes sg-wave {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(0.7); }
+}
+.spectra-icon .sg-flag {
+  transform-origin: 0% 50%;
+}
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-flag,
+.spectra-icon[data-animate] .sg-flag {
+  animation: sg-wave 600ms ease-in-out;
+}
+@keyframes sg-visor {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
+}
+.spectra-icon[data-animate] .sg-visor {
+  animation: sg-visor 2.4s linear infinite;
+}

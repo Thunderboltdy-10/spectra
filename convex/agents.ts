@@ -1091,6 +1091,21 @@ export async function recordAgentInvocation(
     });
 }
 
+/** One more use of this agent by this person (once per run). */
+export async function recordAgentUserUse(
+  ctx: MutationCtx,
+  accountId: Id<"accounts">,
+  agentId: Id<"spectraArtifacts">,
+  now: number,
+) {
+  const existing = await ctx.db
+    .query("agentUserUsage")
+    .withIndex("by_account_agent", (q) => q.eq("accountId", accountId).eq("agentId", agentId))
+    .unique();
+  if (existing) await ctx.db.patch(existing._id, { uses: existing.uses + 1, lastUsedAt: now });
+  else await ctx.db.insert("agentUserUsage", { accountId, agentId, uses: 1, lastUsedAt: now });
+}
+
 export async function settleAgentInvocation(
   ctx: MutationCtx,
   run: Doc<"spectraAiRuns">,

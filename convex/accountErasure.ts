@@ -466,6 +466,7 @@ const ACCOUNT_TABLES: TableStep[] = [
   drain((ctx, id, n) => ctx.db.query("accountPreferences").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("artifactUserStates").withIndex("by_account_updated", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("agentFollows").withIndex("by_account_status", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("agentUserUsage").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("artifactCommentNotifications").withIndex("by_recipient_created", (q) => q.eq("recipientAccountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("schoolAnnouncementDeliveries").withIndex("by_account_status", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("schoolGroupMembers").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),

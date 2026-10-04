@@ -1521,8 +1521,6 @@ function LibraryOrganizerContent({
           nodes={menuNodes}
           location={location}
           canShare={Boolean(onShareWork)}
-          canContext={Boolean(onToggleContext)}
-          contextIds={contextIds}
           onClose={() => setMenu(null)}
           onOpen={openNode}
           onRename={(nodeId) => setRenamingId(nodeId)}
@@ -1546,7 +1544,6 @@ function LibraryOrganizerContent({
           }
           onPurge={(nodes) => requestPurge(nodes)}
           onShare={onShareWork}
-          onToggleContext={onToggleContext}
           onNewFolder={createFolderHere}
           onNewWork={createWorkHere}
           onReveal={(node) => {
@@ -1681,8 +1678,6 @@ function NodeMenu({
   nodes,
   location,
   canShare,
-  canContext,
-  contextIds,
   onClose,
   onOpen,
   onRename,
@@ -1691,7 +1686,6 @@ function NodeMenu({
   onRestore,
   onPurge,
   onShare,
-  onToggleContext,
   onNewFolder,
   onNewWork,
   onReveal,
@@ -1700,8 +1694,6 @@ function NodeMenu({
   nodes: TreeNode[];
   location: OrganizerLocation;
   canShare: boolean;
-  canContext: boolean;
-  contextIds?: ReadonlySet<string>;
   onClose: () => void;
   onOpen: (node: TreeNode) => void;
   onRename: (nodeId: string) => void;
@@ -1710,7 +1702,6 @@ function NodeMenu({
   onRestore: (nodeIds: string[]) => void;
   onPurge: (nodes: TreeNode[]) => void;
   onShare?: (artifactId: string) => void;
-  onToggleContext?: (artifactId: string) => void;
   onNewFolder: () => void;
   onNewWork: (key: Parameters<typeof createDefaultArtifactPayload>[0]) => void;
   onReveal: (node: TreeNode) => void;
@@ -1818,16 +1809,6 @@ function NodeMenu({
                 ? "Remove from Favorites"
                 : "Add to Favorites"}
             </DropdownMenuItem>
-            {work && canContext && work.sourceId ? (
-              <DropdownMenuItem
-                onSelect={() => onToggleContext?.(work.sourceId as string)}
-              >
-                <Sparkles className="size-3.5 text-[var(--text-tertiary)]" />
-                {contextIds?.has(work.sourceId)
-                  ? "Remove from AI context"
-                  : "Add to AI context"}
-              </DropdownMenuItem>
-            ) : null}
             {work && canShare && work.source?.owned && work.sourceId ? (
               <DropdownMenuItem
                 onSelect={() => onShare?.(work.sourceId as string)}

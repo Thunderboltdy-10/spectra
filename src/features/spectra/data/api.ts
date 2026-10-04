@@ -672,7 +672,6 @@ export type SpectraResultCard = {
     workspaceId?: string;
     workspaceTitle?: string;
     attachmentNames?: string[];
-    focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
     agentId?: string;
     agentVersionId?: string;
     agentTitle?: string;

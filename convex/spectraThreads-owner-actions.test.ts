@@ -109,6 +109,39 @@ describe("renaming a chat", () => {
   });
 });
 
+describe("a generated chat title", () => {
+  it("is written once, even from a paused run, and never replaced by a later one", async () => {
+    const t = setupTest();
+    const { threadId, runId } = await seedThread(t, 1);
+    const owner = t.withIdentity(identity);
+    expect((await owner.query(api.spectraThreads.getSummary, { threadId })).needsTitle).toBe(true);
+    await t.run((ctx) => ctx.db.patch(runId, { status: "awaiting_resolution" }));
+    const first = await owner.mutation(api.spectraThreads.applyGeneratedMetadata, {
+      threadId, runId, executionId: "attempt-1", title: "Light reactions in the chloroplast",
+    });
+    expect(first.titled).toBe(true);
+    expect((await t.run((ctx) => ctx.db.get(threadId)))?.title).toBe("Light reactions in the chloroplast");
+    expect((await owner.query(api.spectraThreads.getSummary, { threadId })).needsTitle).toBe(false);
+    await t.run((ctx) => ctx.db.patch(runId, { status: "running", executionId: "attempt-2" }));
+    const later = await owner.mutation(api.spectraThreads.applyGeneratedMetadata, {
+      threadId, runId, executionId: "attempt-2", title: "Biology question",
+    });
+    expect(later.titled).toBe(false);
+    expect((await t.run((ctx) => ctx.db.get(threadId)))?.title).toBe("Light reactions in the chloroplast");
+    await expect(
+      owner.mutation(api.spectraThreads.applyGeneratedMetadata, { threadId, runId, executionId: "attempt-1", title: "Stale" }),
+    ).rejects.toThrow(/older run attempt/);
+  });
+
+  it("reports no title needed once the owner named the chat", async () => {
+    const t = setupTest();
+    const { threadId } = await seedThread(t, 1);
+    const owner = t.withIdentity(identity);
+    await owner.mutation(api.spectraThreads.update, { threadId, title: "Biology revision" });
+    expect((await owner.query(api.spectraThreads.getSummary, { threadId })).needsTitle).toBe(false);
+  });
+});
+
 describe("a chat moved to the Library Trash", () => {
   it("leaves the chat list until it is restored", async () => {
     const t = setupTest();

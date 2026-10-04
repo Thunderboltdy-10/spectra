@@ -300,14 +300,6 @@ const APP_SPECS: readonly AppSpec[] = [
     exposed: true,
   },
   {
-    id: "app.context.begin-picking",
-    description: "Begin semantic context picking from visible Spectra surfaces.",
-    risk: "safe",
-    availability: "editable",
-    choreography: { target: "context-picker" },
-    exposed: true,
-  },
-  {
     id: "app.settings.change",
     description:
       "Change account-synced settings through the same preference path as the human UI.",

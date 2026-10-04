@@ -300,11 +300,6 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (typeof params.hostWorkId !== "string" || !params.hostWorkId.trim()) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.reference.begin-picking requires hostWorkId");
         return dispatchSemantic(commandId, "select", "reference.beginPicking", { hostWorkId: params.hostWorkId }, "Reference picking started.");
       }
-      case "app.context.begin-picking": {
-        return dispatchSemantic(commandId, "select", "context.beginPicking", {
-          source: params.source === "composer" ? "composer" : "quick_chat",
-        }, "Context picking started.");
-      }
       case "app.settings.change":
       case "app.settings.manageAccount": {
         const dispatched = await spectraBus.commandAsyncResults("settings.change", {

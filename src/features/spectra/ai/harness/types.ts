@@ -41,6 +41,9 @@ export type HarnessMessage =
     }
   | { role: "tool"; tool_call_id: string; content: string };
 
+/** A message the user sent while the run worked or waited, with any files. */
+export type Steer = { text: string; parts?: HarnessContentPart[] };
+
 /** An artifact a tool created, edited or explicitly pointed the user to. */
 export type ArtifactTouch = {
   id: string;
@@ -118,6 +121,11 @@ export type HarnessTool<A = Record<string, unknown>> = {
   category?: (args: A) => PermissionCategory | undefined;
   /** A short human phrase, present tense, no ids: "Creating *Photosynthesis*". */
   label: (args: A) => string;
+  /**
+   * Harness plumbing with nothing true to tell the user (loading a skill): no
+   * step in the trace and nothing for the captions to describe.
+   */
+  quiet?: boolean;
   /** The approval question, in plain words, when the effect asks. */
   question?: (args: A) => string;
   /**

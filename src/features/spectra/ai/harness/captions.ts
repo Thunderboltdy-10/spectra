@@ -49,7 +49,7 @@ const CAPTION_SYSTEM = `You write the one-line progress caption Spectra shows wh
 Reply with JSON only: {"caption": "...", "detail": "...", "thread_title": "..."}.
 - caption: at most 60 characters, sentence case, no full stop, no ids, no tool names, no quotes. Say what is happening for the user in plain words, naming the subject ("Drafting six slides on photosynthesis"). Use the present tense while working. When told the run is finished, use the past tense and say what was done ("Made a six-slide deck on photosynthesis"). Do not repeat a previous caption.
 - detail: optional, one to three short lines, only when there is something more worth knowing (what was found, what changed). Usually omit it.
-- thread_title: only when asked. A 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Otherwise omit it.`;
+- thread_title: only when asked. A 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Give it only once the conversation has a clear subject; for a greeting or small talk, omit it and a later message names it. Otherwise omit it.`;
 
 function describe(request: CaptionRequest) {
   const steps = request.steps
@@ -283,10 +283,30 @@ export class CaptionScheduler {
     }
   }
 
-  cancel() {
+  /**
+   * The run paused or handed off: no more captions, since it is not done, but
+   * a thread that still needs a name gets one (a run that asks a question in
+   * its first turn would otherwise never be named).
+   */
+  async suspend() {
+    if (this.timer) {
+      this.timers.clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.finished = true;
-    if (this.timer) this.timers.clearTimeout(this.timer);
-    this.timer = null;
-    this.controller.abort();
+    if (this.inFlight) await this.inFlight.catch(() => undefined);
+    if (this.titled) return;
+    try {
+      const result = await this.options.write(
+        { prompt: this.options.prompt, steps: [...this.steps.values()], reply: this.reply, final: false, wantTitle: true },
+        AbortSignal.any([this.controller.signal, AbortSignal.timeout(20_000)]),
+      );
+      if (result.title && !this.titled) {
+        this.titled = true;
+        this.options.onTitle?.(result.title);
+      }
+    } catch {
+      // A later run names the thread.
+    }
   }
 }

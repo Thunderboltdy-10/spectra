@@ -1,22 +1,28 @@
-import type { ArtifactSnapshot } from "@/features/spectra/ai/harness/backend";
-import { isAuthoredType, readAuthored } from "@/features/spectra/ai/harness/authoring";
 import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
-import type { EnvironmentInput } from "@/features/spectra/ai/harness/prompt";
+import type { EnvironmentInput, EnvironmentPointer } from "@/features/spectra/ai/harness/prompt";
 import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
-import type { PreparedAttachment } from "./contract";
+import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
-import { act, query } from "./io";
+import { query } from "./io";
 
 /*
  * What Spectra knows at the start of a run: who the user is, where they are,
- * the focused artifact with its outline, their permission choices, what they
- * asked Spectra to remember, and this thread's earlier turns. Every read is
- * best effort: missing context never fails a run.
+ * what is open and what they pointed at (ids, types and titles only), their
+ * Bridge and permission choices, a short index of what they asked Spectra to
+ * remember, and this thread's earlier turns. Nothing about the content on
+ * screen is injected: the model searches and reads. Every read is best
+ * effort and they all run in parallel: missing context never fails a run.
  */
 
 const HISTORY_MESSAGES = 80;
 const HISTORY_MESSAGE_CHARS = 8_000;
 const ATTACHMENT_TEXT_CHARS = 60_000;
+const MEMORY_INDEX_ENTRIES = 12;
+const MEMORY_ENTRY_CHARS = 200;
+const POINTERS = 12;
+const SELECTION_CHARS = 1_000;
+/** A Bridge seen this recently is treated as online. */
+const BRIDGE_ONLINE_MS = 5 * 60_000;
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
@@ -28,6 +34,56 @@ export function validTimeZone(value: unknown) {
   } catch {
     return undefined;
   }
+}
+
+function pointer(value: unknown): EnvironmentPointer | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = text(row.id).trim().slice(0, 160);
+  const type = text(row.type).trim().slice(0, 40);
+  if (!id || !type) return null;
+  return { id, type, title: text(row.title).replace(/\s+/g, " ").trim().slice(0, 160) || "Untitled" };
+}
+
+function pointers(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: EnvironmentPointer[] = [];
+  for (const entry of value) {
+    const item = pointer(entry);
+    if (!item || seen.has(item.id)) continue;
+    seen.add(item.id);
+    result.push(item);
+    if (result.length >= POINTERS) break;
+  }
+  return result;
+}
+
+/**
+ * The client's pointers, bounded and normalised. They are labels, never
+ * permissions: every read and write still checks access on the server.
+ */
+export function normalizePointers(value: unknown): RunPointers {
+  const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const open = pointers(source.open);
+  const references = pointers(source.references);
+  const selectionRow = source.selection && typeof source.selection === "object" ? (source.selection as Record<string, unknown>) : null;
+  const selectionText = text(selectionRow?.text).trim();
+  const selectionIn = pointer(selectionRow?.in);
+  const currentView = text(source.currentView).trim().slice(0, 200);
+  return {
+    ...(currentView ? { currentView } : {}),
+    ...(open.length ? { open } : {}),
+    ...(references.length ? { references } : {}),
+    ...(selectionText
+      ? {
+          selection: {
+            text: selectionText.length > SELECTION_CHARS ? `${selectionText.slice(0, SELECTION_CHARS)}…` : selectionText,
+            ...(selectionIn ? { in: selectionIn } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 export async function readPermissions(actorClerkId: string): Promise<PermissionPrefs> {
@@ -84,67 +140,60 @@ export function attachmentParts(attachments: PreparedAttachment[] | undefined): 
   return parts;
 }
 
-export type EnvironmentRequest = {
+/** A short, query-free index of what the user asked Spectra to remember. */
+export async function readMemoryIndex(actorClerkId: string) {
+  const listed = await query<unknown & object, { preferences?: { enabled?: boolean }; claims?: unknown } | null>("memory:listMine", {
+    actorClerkId,
+    status: "active",
+    limit: MEMORY_INDEX_ENTRIES,
+  }).catch(() => null);
+  if (!listed || listed.preferences?.enabled === false) return [];
+  return rows(listed.claims)
+    .map((claim) => text(claim.proposition).replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, MEMORY_INDEX_ENTRIES)
+    .map((entry) => (entry.length > MEMORY_ENTRY_CHARS ? `${entry.slice(0, MEMORY_ENTRY_CHARS)}…` : entry));
+}
+
+export async function readBridgeStatus(actorClerkId: string, now: number) {
+  const devices = await query<unknown & object, unknown>("bridge:devices", { actorClerkId }).catch(() => null);
+  if (!Array.isArray(devices)) return undefined;
+  const paired = rows(devices);
+  if (!paired.length) return "not set up";
+  const online = paired.filter((device) => typeof device.lastSeenAt === "number" && now - device.lastSeenAt < BRIDGE_ONLINE_MS);
+  const names = (online.length ? online : paired).map((device) => text(device.name).trim() || "a computer").slice(0, 3);
+  return `${online.length ? "online" : "offline"} (${names.join(", ")})`;
+}
+
+export type EnvironmentRequest = RunPointers & {
   actorClerkId: string;
-  prompt: string;
-  workspaceId?: string;
-  artifactId?: string;
-  currentView?: string;
   surface?: string;
   attachments?: PreparedAttachment[];
-  readArtifact: (id: string) => Promise<ArtifactSnapshot | null>;
+  now?: number;
 };
 
-export async function buildEnvironment(
-  request: EnvironmentRequest,
-): Promise<{ environment: Omit<EnvironmentInput, "permissions" | "timeZone">; focused: ArtifactSnapshot | null }> {
-  const [me, focused, memory] = await Promise.all([
+export async function buildEnvironment(request: EnvironmentRequest): Promise<Omit<EnvironmentInput, "permissions" | "timeZone">> {
+  const now = request.now ?? Date.now();
+  const [me, memory, bridge] = await Promise.all([
     query<unknown & object, { name?: string; schoolRole?: string } | null>("identity:me", {
       actorClerkId: request.actorClerkId,
     }).catch(() => null),
-    request.artifactId ? request.readArtifact(request.artifactId).catch(() => null) : Promise.resolve(null),
-    act<unknown & object, { text?: string } | null>("memory:contextForRun", {
-      actorClerkId: request.actorClerkId,
-      queryText: request.prompt.slice(0, 2_000),
-      ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
-      ...(request.artifactId ? { artifactId: request.artifactId } : {}),
-      targetTokens: 800,
-    }).catch(() => null),
+    readMemoryIndex(request.actorClerkId),
+    readBridgeStatus(request.actorClerkId, now),
   ]);
-  const memoryText = text(memory?.text).trim();
+  const first = request.open?.[0];
   const page =
     text(request.currentView).trim().slice(0, 200) ||
-    (focused ? `Editing ${focused.type} "${focused.title}"` : request.surface === "workspace" ? "Workspace" : "Chat");
+    (first ? `Editing ${first.type} "${first.title}"` : request.surface === "workspace" ? "Workspace" : "Chat");
   return {
-    focused,
-    environment: {
-      now: Date.now(),
-      ...(me ? { user: { ...(me.name ? { name: me.name } : {}), ...(me.schoolRole ? { role: me.schoolRole } : {}) } } : {}),
-      page,
-      ...(focused
-        ? {
-            focused: {
-              id: focused.id,
-              type: focused.type,
-              title: focused.title,
-              canEdit: focused.canEdit,
-              ...(isAuthoredType(focused.type)
-                ? { outline: safeOutline(() => readAuthored(focused.type as never, focused.content)) }
-                : {}),
-            },
-          }
-        : {}),
-      ...(memoryText ? { memory: [memoryText.slice(0, 2_000)] } : {}),
-      ...(request.attachments?.length ? { attachments: request.attachments.map((attachment) => attachment.name) } : {}),
-    },
+    now,
+    ...(me ? { user: { ...(me.name ? { name: me.name } : {}), ...(me.schoolRole ? { role: me.schoolRole } : {}) } } : {}),
+    page,
+    ...(request.open?.length ? { open: request.open } : {}),
+    ...(request.selection ? { selection: request.selection } : {}),
+    ...(request.references?.length ? { references: request.references } : {}),
+    ...(bridge ? { bridge } : {}),
+    ...(memory.length ? { memory } : {}),
+    ...(request.attachments?.length ? { attachments: request.attachments.map((attachment) => attachment.name) } : {}),
   };
-}
-
-function safeOutline(read: () => string) {
-  try {
-    const outline = read();
-    return outline.length > 1_500 ? `${outline.slice(0, 1_500)}\n… (read_artifact for the rest)` : outline;
-  } catch {
-    return undefined;
-  }
 }

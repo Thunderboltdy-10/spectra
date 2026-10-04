@@ -2616,11 +2616,6 @@ export function ArtifactStudio({
       type: `${definition.userFacingName} root`,
       workspaceId: artifact.placements?.[0]?.workspaceId,
       permissions: "allowed" as const,
-      contextSummary: async () => ({
-        title: artifact.title,
-        text: summary,
-        provenance: [`work:${artifact._id}`],
-      }),
     };
   }, [
     artifact._id,

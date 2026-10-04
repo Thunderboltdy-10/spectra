@@ -19,7 +19,6 @@ import {
 } from "../data/api";
 import { requestSpectra, spectraFailureMessage } from "../data/request";
 import type { CommandAttachment } from "../components/command-bar";
-import { mergeContinuationAttachments } from "./continuation-context";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 import { noteAiLocation } from "../collaboration/follow-ai";
 import {
@@ -40,6 +39,9 @@ import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collabora
 const runFeedArtifacts = new Map<string, Set<string>>();
 const RUN_FEED_SOURCE = "run-feed";
 const RUN_BEGIN_TIMEOUT_MS = 90_000;
+
+/** An item named by id, type and title only: what the run's environment block lists. Never content. */
+export type SpectraRunPointer = { id: string; type: string; title: string };
 
 function clearRunFeedActivity(runId: string): void {
   const artifactIds = runFeedArtifacts.get(runId);
@@ -361,9 +363,8 @@ export function useSpectraRun({
   onThreadReady,
   onFinal,
   onContinuationConflict,
-  focusMode,
-  selectedArtifactIds = [],
-  explicitContextObjects = [],
+  open,
+  selection,
   currentView,
   observeDurableRuns = true,
 }: {
@@ -386,17 +387,10 @@ export function useSpectraRun({
     prompt: string;
   }) => Promise<unknown> | unknown;
   onContinuationConflict?: () => void;
-  focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
-  selectedArtifactIds?: string[];
-  explicitContextObjects?: Array<{
-    type: "artifact" | "workspace" | "thread";
-    id: string;
-    label?: string;
-    workspaceId?: string;
-    semanticTargetId?: string;
-    semanticAnchor?: Record<string, unknown>;
-    contextSummary?: string;
-  }>;
+  /** What is open on screen, named for the run (never its content). */
+  open?: SpectraRunPointer[];
+  /** The user's current selection, only when there is one. */
+  selection?: { text: string; in?: SpectraRunPointer };
   currentView?: string;
   observeDurableRuns?: boolean;
 }) {
@@ -419,9 +413,6 @@ export function useSpectraRun({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
   const streamCoveredRuns = useRef(new Set<string>());
-  const attachmentsByThreadId = useRef(
-    new Map<string, CommandAttachment[]>(),
-  );
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(
     new Map<AbortController, { runId: string | null; exchangeId?: string }>(),
@@ -465,8 +456,7 @@ export function useSpectraRun({
   // reducer until the terminal full refresh.
   const artifactPatchQueues = useRef(new Map<string, Promise<unknown>>());
   const durableThreadId = useRef(threadId);
-  const selectedKey = selectedArtifactIds.join(",");
-  const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}:${focusMode ?? ""}:${selectedKey}`;
+  const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}`;
   const previousScopeKey = useRef(scopeKey);
 
   useEffect(() => {
@@ -883,6 +873,7 @@ export function useSpectraRun({
       optimisticCardId?: string,
       liveExchangeId?: string,
       onAcknowledged?: (runId: string) => void,
+      joinedRun?: (runId: string, prompt: string) => void,
     ) => {
       const controller = new AbortController();
       let requestRunId: string | null = null;
@@ -960,20 +951,24 @@ export function useSpectraRun({
           }
           if (event.type === "thread_ready") {
             durableThreadId.current = event.threadId;
-            const submittedAttachments = Array.isArray(body.attachments)
-              ? (body.attachments as CommandAttachment[])
-              : [];
-            if (submittedAttachments.length)
-              attachmentsByThreadId.current.set(
-                event.threadId,
-                submittedAttachments,
-              );
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
                 ? { ...current, threadId: event.threadId }
                 : current,
             );
             void onThreadReady?.(event.threadId);
+          }
+          if (event.type === "steer_queued") {
+            // The message joined a run that is working; it reads it at its
+            // next turn. Nothing new starts here: the optimistic card goes
+            // and the joined run stays the live exchange.
+            if (optimisticCardId)
+              setCards((current) =>
+                current.filter((card) => card.id !== optimisticCardId),
+              );
+            joinedRun?.(event.runId, typeof body.prompt === "string" ? body.prompt : "");
+            onAcknowledged?.(event.runId);
+            spectraBus.emit("threads.changed", {});
           }
           if (isExchangeEvent(event))
             setLiveExchange((current) =>
@@ -1229,6 +1224,16 @@ export function useSpectraRun({
       attachments: CommandAttachment[] = [],
       options?: {
         threadId?: string | null;
+        /** The run this message joins; by default the thread's active run. */
+        steerRunId?: string;
+        /** Items the user referenced with @ in this message. */
+        references?: SpectraRunPointer[];
+        /**
+         * The agent for this message: a string chooses it (and keeps it for
+         * the thread), null switches back to Auto, omitted keeps the thread's
+         * choice.
+         */
+        agentId?: string | null;
         clarificationId?: string;
         choiceKey?: string;
         choiceMessageId?: string;
@@ -1249,8 +1254,6 @@ export function useSpectraRun({
             (preferences.ai.continueCurrentConversation
               ? durableThreadId.current
               : undefined));
-      if (continuedThreadId && attachments.length)
-        attachmentsByThreadId.current.set(continuedThreadId, attachments);
       toast.dismiss();
       return new Promise<boolean>((resolve) => {
         const exchangeId = crypto.randomUUID();
@@ -1263,6 +1266,8 @@ export function useSpectraRun({
         };
         setStopSuppressed(false);
         setActiveRequestCount((count) => count + 1);
+        // A message that joins a working run keeps that run's exchange.
+        const previousExchange = liveExchangeRef.current;
         setLiveExchange({
           id: exchangeId,
           threadId: continuedThreadId,
@@ -1327,9 +1332,11 @@ export function useSpectraRun({
             choiceMessageId: options?.choiceMessageId,
             executionId: options?.executionId,
             batchSelections: options?.batchSelections,
-            focusMode,
-            selectedArtifactIds,
-            explicitContextObjects,
+            ...(options?.steerRunId ? { steerRunId: options.steerRunId } : {}),
+            ...(options?.agentId !== undefined ? { agentId: options.agentId } : {}),
+            ...(open?.length ? { open } : {}),
+            ...(selection?.text.trim() ? { selection } : {}),
+            ...(options?.references?.length ? { references: options.references } : {}),
             currentView,
             timeZone: userTimeZone(),
             attachments,
@@ -1340,6 +1347,14 @@ export function useSpectraRun({
             window.clearTimeout(beginTimeout);
             settleBegin(true);
           },
+          (joinedRunId, joinedPrompt) =>
+            setLiveExchange((current) => {
+              if (current?.id !== exchangeId) return current;
+              const step = { id: `steer:${uniqueToken()}`, title: "Noted your message", summary: joinedPrompt, status: "done" as const, createdAt: Date.now() };
+              return previousExchange?.runId === joinedRunId
+                ? { ...previousExchange, steps: [...previousExchange.steps, step].slice(-12) }
+                : null;
+            }),
         )
           .catch((error) => {
             window.clearTimeout(beginTimeout);
@@ -1379,10 +1394,9 @@ export function useSpectraRun({
       artifactId,
       consume,
       currentView,
-      explicitContextObjects,
-      focusMode,
       onContinuationConflict,
-      selectedArtifactIds,
+      open,
+      selection,
       surface,
       upsert,
       preferences.ai.continueCurrentConversation,
@@ -1392,186 +1406,71 @@ export function useSpectraRun({
   );
 
   const queuedSteering = useRef(new Set<string>());
+  /**
+   * A message (and files) typed while a run works. It joins that run's next
+   * turn. A run that is waiting on a question or approval, or has finished,
+   * answers 409; the message then goes to the run as a new turn, where the
+   * server lets it answer the question or starts the next run in the thread.
+   */
   const steer = useCallback(
     async (
       runId: string,
-      mode:
-        | "refine_current_goal"
-        | "redirect_next_step"
-        | "replace_goal"
-        | "cancel_current_action",
       text: string,
       nextAttachments: CommandAttachment[] = [],
     ) => {
       const clean = text.trim();
-      if (!clean || queuedSteering.current.has(runId)) return false;
+      if ((!clean && !nextAttachments.length) || queuedSteering.current.has(runId)) return false;
       queuedSteering.current.add(runId);
       try {
-        const target = displayedRunTabs.current.get(runId);
-        if (mode === "cancel_current_action") {
-          const version = await resolveDisplayedRunVersion(runId, true);
-          const response = await requestSpectra("/api/spectra/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "stop",
-              runId,
-              executionId: version.executionId,
-              attemptId: version.attemptId,
-            }),
-          });
-          if (!response.ok && response.status !== 409)
-            throw new Error(
-              await spectraFailureMessage(response, STOP_FAILURE_COPY),
-            );
-          spectraBus.emit("threads.changed", {});
-          queuedSteering.current.delete(runId);
-          return true;
-        }
-        // A steer joins the working run's next turn. Only a steer with new
-        // files, or one the run finished before reading, starts a new turn.
-        let notWorking = false;
-        if (nextAttachments.length === 0) {
-          const version = await resolveDisplayedRunVersion(runId, true);
-          const queued = await requestSpectra("/api/spectra/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "steer", runId, executionId: version.executionId, text: clean }),
-          });
-          if (queued.ok) {
-            queuedSteering.current.delete(runId);
-            setLiveExchange((current) =>
-              current?.runId === runId
-                ? {
-                    ...current,
-                    steps: [
-                      ...current.steps,
-                      { id: `steer:${uniqueToken()}`, title: "Noted your message", summary: clean, status: "done" as const, createdAt: Date.now() },
-                    ].slice(-12),
-                  }
-                : current,
-            );
-            return true;
-          }
-          // 409: the run is paused on a question or approval, or finished.
-          if (queued.status === 409) notWorking = true;
-          else
-            throw new Error(
-              await spectraFailureMessage(queued, {
-                fallback: "Spectra could not take that message just now. Try again.",
-                signedOut: "Sign in again to message Spectra.",
-              }),
-            );
-        }
-        let targetThreadId = target?.threadId;
-        if (!targetThreadId) {
-          const detail = await getSpectraRunDetail(runId);
-          targetThreadId = detail.run.threadId;
-        }
-        if (!targetThreadId?.trim())
-          throw new Error(
-            "This response is not attached to a saved conversation, so it cannot be continued in a new chat. Open the conversation and continue there.",
-          );
-        // A run that is not working has nothing to stop: the message goes to
-        // its thread, where it answers an open question or approval (the
-        // server routes it) or starts the next turn.
-        if (notWorking) {
-          queuedSteering.current.delete(runId);
-          return await run(clean, [], { threadId: targetThreadId });
-        }
-        // Steering is a stop-then-continue transaction. The tab projection can
-        // lag the run detail by a heartbeat, and the old worker can still be
-        // unwinding while the stop response reaches the browser. Resolve a
-        // fresh execution identity, stop it, and wait for the terminal state
-        // before starting the continuation. Starting immediately made the
-        // continuation race `beginRun` and surface a misleading 409.
-        let version = await resolveDisplayedRunVersion(runId, true);
-        let stopResponse = await requestSpectra("/api/spectra/run", {
+        const version = await resolveDisplayedRunVersion(runId, true);
+        const queued = await requestSpectra("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: "stop",
+            action: "steer",
             runId,
             executionId: version.executionId,
-            attemptId: version.attemptId,
+            text: clean,
+            submissionKey: crypto.randomUUID(),
+            ...(nextAttachments.length ? { attachments: nextAttachments } : {}),
           }),
         });
-        if (!stopResponse.ok && stopResponse.status === 409) {
-          // A 409 is safe only when the run is already terminal. Otherwise
-          // refresh once and retry against the current attempt; this covers a
-          // retry/heartbeat rollover without ever cancelling a newer run.
-          const current = await getSpectraRunDetail(runId);
-          const currentStatus = current.run.status;
-          const active =
-            currentStatus === "queued" ||
-            currentStatus === "running" ||
-            currentStatus === "awaiting_confirmation" ||
-            currentStatus === "awaiting_resolution";
-          if (active) {
-            version = await resolveDisplayedRunVersion(runId, true);
-            stopResponse = await requestSpectra("/api/spectra/run", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "stop",
-                runId,
-                executionId: version.executionId,
-                attemptId: version.attemptId,
-              }),
-            });
-          }
+        if (queued.ok) {
+          setLiveExchange((current) =>
+            current?.runId === runId
+              ? {
+                  ...current,
+                  steps: [
+                    ...current.steps,
+                    { id: `steer:${uniqueToken()}`, title: "Noted your message", summary: clean || nextAttachments.map((file) => file.name).join(", "), status: "done" as const, createdAt: Date.now() },
+                  ].slice(-12),
+                }
+              : current,
+          );
+          return true;
         }
-        if (!stopResponse.ok && stopResponse.status !== 409)
+        if (queued.status !== 409)
           throw new Error(
-            await spectraFailureMessage(stopResponse, {
-              fallback: "This run could not be redirected safely.",
-              signedOut: "Sign in again to redirect this run.",
+            await spectraFailureMessage(queued, {
+              fallback: "Spectra could not take that message just now. Try again.",
+              signedOut: "Sign in again to message Spectra.",
             }),
           );
-        let settled = false;
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          const current = await getSpectraRunDetail(runId);
-          const currentStatus = current.run.status;
-          const active =
-            currentStatus === "queued" ||
-            currentStatus === "running" ||
-            currentStatus === "awaiting_confirmation" ||
-            currentStatus === "awaiting_resolution";
-          if (!active) {
-            settled = true;
-            break;
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, 200));
-        }
-        if (!settled)
+        const threadOfRun =
+          displayedRunTabs.current.get(runId)?.threadId ??
+          (await getSpectraRunDetail(runId)).run.threadId;
+        if (!threadOfRun?.trim())
           throw new Error(
-            "Spectra is still closing the previous step. Try steering again in a moment.",
+            "This response is not attached to a saved conversation, so it cannot be continued here. Open the conversation and continue there.",
           );
-        spectraBus.emit("threads.changed", {});
-        const steerPrompt =
-          mode === "replace_goal"
-            ? clean
-            : mode === "redirect_next_step"
-              ? `Change the next step: ${clean}`
-              : `Refine the current goal: ${clean}`;
-        const retainedAttachments = attachmentsByThreadId.current.get(targetThreadId) ?? [];
-        const continuationAttachments = mergeContinuationAttachments(
-          retainedAttachments,
-          nextAttachments,
-        );
-        const accepted = await run(steerPrompt, continuationAttachments, {
-          threadId: targetThreadId,
-        });
-        queuedSteering.current.delete(runId);
-        if (accepted)
-          toast.message("Continuing this conversation with your update.");
-        return accepted;
+        return await run(clean, nextAttachments, { threadId: threadOfRun, steerRunId: runId });
       } catch (error) {
-        queuedSteering.current.delete(runId);
         toast.error(
-          error instanceof Error ? error.message : "Could not queue steering.",
+          error instanceof Error ? error.message : "Spectra could not take that message just now. Try again.",
         );
         return false;
+      } finally {
+        queuedSteering.current.delete(runId);
       }
     },
     [resolveDisplayedRunVersion, run],

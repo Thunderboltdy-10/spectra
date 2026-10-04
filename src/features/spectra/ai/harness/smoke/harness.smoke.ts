@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { isAuthoredType, readAuthored } from "../authoring";
 import { modelCaptionWriter } from "../captions";
 import { createCompactor } from "../compaction";
 import { MemoryBackend } from "../memory-backend";
@@ -48,17 +47,7 @@ async function play(scenario: SmokeScenario): Promise<Row> {
       now: Date.now(),
       user: { name: "Alex", role: "student", school: "an IB school", subjects: ["Biology HL", "History SL", "French B"] },
       page: focused ? `Editing ${focused.type} "${focused.title}"` : "Chat",
-      ...(focused && isAuthoredType(focused.type)
-        ? {
-            focused: {
-              id: focused.id,
-              type: focused.type,
-              title: focused.title,
-              canEdit: true,
-              outline: readAuthored(focused.type, focused.content).slice(0, 1_500),
-            },
-          }
-        : {}),
+      ...(focused ? { open: [{ id: focused.id, type: focused.type, title: focused.title }] } : {}),
     },
     captionWriter: modelCaptionWriter,
     compactor: createCompactor({

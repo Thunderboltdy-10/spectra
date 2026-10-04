@@ -22,6 +22,7 @@ import type {
   HarnessMessage,
   InputAnswer,
   PendingInput,
+  Steer,
   TodoItem,
   ToolEffect,
   WidgetOutput,
@@ -60,7 +61,7 @@ export type HarnessSink = {
    * The durable checkpoint at a tool boundary (about one write per tool
    * call). Returns user messages sent while the run worked.
    */
-  checkpoint: (checkpoint: RunCheckpoint) => Promise<{ steers?: string[] } | void>;
+  checkpoint: (checkpoint: RunCheckpoint) => Promise<{ steers?: Steer[] } | void>;
   /** The streamed reply, flushed about every 250 ms. */
   flushText?: (text: string) => Promise<void>;
 };
@@ -95,7 +96,15 @@ export type HarnessRunInput = {
   shouldYield?: () => boolean;
 };
 
-export type HarnessRunResult = LoopOutcome & { durationMs: number };
+export type HarnessRunResult = LoopOutcome & {
+  durationMs: number;
+  /**
+   * A run that paused or handed off still names a thread that needs it; the
+   * title is written after the run has durably paused, so the question is not
+   * held back. Await it before the worker ends.
+   */
+  titling: Promise<void>;
+};
 
 function userMessage(prompt: string, attachments?: HarnessContentPart[]): HarnessMessage {
   if (!attachments?.length) return { role: "user", content: prompt };
@@ -140,9 +149,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     agents: input.environment.agent ? [] : input.environment.agents,
   });
   const tools = buildHarnessTools(session);
-  const focused = input.environment.focused;
-  // Labels name the focused artifact from the first step, without a read.
-  if (focused) rememberTitle(session, focused.id, focused.title, focused.type);
+  // Labels name what the user pointed at from the first step, without a read.
+  const environment = input.environment;
+  for (const item of [...(environment.open ?? []), ...(environment.references ?? []), ...(environment.selection?.in ? [environment.selection.in] : [])])
+    rememberTitle(session, item.id, item.title, item.type);
   const systemPrompt = buildSystemPrompt({
     ...input.environment,
     timeZone: input.environment.timeZone ?? input.backend.timeZone,
@@ -214,10 +224,12 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           scheduleFlush();
         },
         onToolStart: (step) => {
+          if (step.tool?.quiet) return;
           emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect });
           captions?.stepStarted({ id: step.call.id, label: step.label });
         },
         onToolEnd: (step) => {
+          if (step.tool?.quiet) return;
           const label = step.outcome.doneLabel ?? step.label;
           emit({ type: "step_end", id: step.call.id, ok: step.outcome.ok, label, durationMs: step.durationMs });
           captions?.stepEnded({ id: step.call.id, ok: step.outcome.ok, doneLabel: step.outcome.doneLabel });
@@ -254,8 +266,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
 
   const status: RunCheckpoint["status"] =
     outcome.status === "paused" ? "paused" : outcome.status;
-  if (outcome.status === "paused" || outcome.status === "yielded") captions?.cancel();
+  let titling: Promise<void> = Promise.resolve();
+  if (outcome.status === "paused" || outcome.status === "yielded")
+    titling = captions ? captions.suspend().catch(() => undefined) : titling;
   else await quietly(() => captions?.finish({ stopped: outcome.status !== "completed" }));
   await quietly(() => input.sink.checkpoint({ state: outcome.state, status }));
-  return { ...outcome, durationMs: now() - started };
+  return { ...outcome, durationMs: now() - started, titling };
 }

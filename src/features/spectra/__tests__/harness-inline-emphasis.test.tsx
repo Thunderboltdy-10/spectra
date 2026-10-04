@@ -60,3 +60,14 @@ describe("inline emphasis", () => {
     expect(screen.getByLabelText("Your answers").querySelector("em")?.textContent).toBe("Revision plan");
   });
 });
+
+describe("the progress trace before anything is known", () => {
+  it("shows only that Spectra is thinking, with no placeholder step to open", () => {
+    render(<ProgressTrace active steps={[]} />);
+    const header = screen.getByRole("button", { name: "Thinking" });
+    expect(header.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(header);
+    expect(document.body.textContent).not.toContain("Getting ready");
+    expect(header.getAttribute("aria-expanded")).toBeNull();
+  });
+});

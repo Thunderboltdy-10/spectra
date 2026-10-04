@@ -112,7 +112,10 @@ export const saveCheckpoint = mutation({
         ownerAccountId: actor._id,
         ...patch,
       });
-    return { steers: steers.map((steer) => steer.text), active: ACTIVE.has(run.status) };
+    return {
+      steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
+      active: ACTIVE.has(run.status),
+    };
   },
 });
 
@@ -145,23 +148,84 @@ export const recordToolOperations = mutation({
   },
 });
 
-/** A message the user sent while the run works. It joins the next turn. */
+/**
+ * A message the user sent while the run works or waits, with any files they
+ * attached (already stored as this attempt's run attachments). It joins the
+ * next turn.
+ */
 export const queueSteer = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), text: v.string() },
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    text: v.string(),
+    attachmentIds: v.optional(v.array(v.id("spectraRunAttachments"))),
+  },
   handler: async (ctx, args) => {
-    const { run } = await ownedRun(ctx, args.runId);
+    const { actor, run } = await ownedRun(ctx, args.runId);
     const text = args.text.trim().slice(0, 8_000);
-    if (!text) throw new Error("HARNESS_STEER_EMPTY: Write a message first.");
+    const attachmentIds = [...new Set(args.attachmentIds ?? [])].slice(0, 4);
+    if (!text && !attachmentIds.length) throw new Error("HARNESS_STEER_EMPTY: Write a message first.");
+    for (const id of attachmentIds) {
+      const attachment = await ctx.db.get(id);
+      if (!attachment || attachment.runId !== run._id || attachment.executionId !== args.executionId || attachment.ownerAccountId !== actor._id)
+        throw new Error("HARNESS_STEER_ATTACHMENT_INVALID: That file belongs to another request. Attach it again.");
+    }
     if (run.executionId !== args.executionId || (run.status !== "running" && run.status !== "queued"))
       throw new Error("HARNESS_RUN_NOT_ACTIVE: This response has already finished. Send it as a new message.");
     const row = await stateRow(ctx, args.runId);
     if (!row || row.executionId !== args.executionId)
       throw new Error("HARNESS_RUN_NOT_ACTIVE: This response has already finished. Send it as a new message.");
     await ctx.db.patch(row._id, {
-      steers: [...(row.steers ?? []), { text, createdAt: Date.now() }].slice(-10),
+      steers: [...(row.steers ?? []), { text, ...(attachmentIds.length ? { attachmentIds } : {}), createdAt: Date.now() }].slice(-10),
       updatedAt: Date.now(),
     });
     return { queued: true, threadId: run.threadId ?? null };
+  },
+});
+
+/**
+ * The run a new message joins instead of starting another: the named run, or
+ * the thread's most recent active run. A paused run reports its open
+ * question or approval, so the message can answer it. One read, so joining
+ * costs no more than the check it replaces.
+ */
+export const joinableRun = query({
+  args: { runId: v.optional(v.id("spectraAiRuns")), threadId: v.optional(v.id("spectraThreads")) },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) return null;
+    let run: Doc<"spectraAiRuns"> | null = null;
+    if (args.runId) {
+      run = await ctx.db.get(args.runId);
+    } else if (args.threadId) {
+      const threadId = args.threadId;
+      run =
+        (
+          await ctx.db
+            .query("spectraAiRuns")
+            .withIndex("by_thread", (q) => q.eq("threadId", threadId))
+            .order("desc")
+            .take(20)
+        )
+          .filter((candidate) => ACTIVE.has(candidate.status))
+          .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+    }
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) return null;
+    if (!ACTIVE.has(run.status) || !run.executionId) return null;
+    const row = await stateRow(ctx, run._id);
+    const pending = row && row.executionId === run.executionId && !row.answer ? record(row.pending) : {};
+    const waiting = run.status === "awaiting_resolution" || run.status === "awaiting_confirmation";
+    // A waiting run without its open question cannot take an answer here.
+    if (waiting && typeof pending.toolCallId !== "string") return null;
+    return {
+      runId: run._id,
+      executionId: run.executionId,
+      threadId: run.threadId ?? null,
+      status: run.status,
+      pending: waiting
+        ? { toolCallId: String(pending.toolCallId), kind: pending.kind === "approval" ? ("approval" as const) : ("question" as const) }
+        : null,
+    };
   },
 });
 

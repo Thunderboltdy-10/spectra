@@ -218,7 +218,6 @@ function compactProvenance(value: unknown) {
     attachmentNames: Array.isArray(source.attachmentNames)
       ? source.attachmentNames.filter((name): name is string => typeof name === "string").slice(0, 24).map((name) => name.slice(0, 160))
       : undefined,
-    focusMode: bounded(source.focusMode, 40),
     agentId: bounded(source.agentId, 160),
     agentVersionId: bounded(source.agentVersionId, 160),
     agentTitle: bounded(source.agentTitle, 240),

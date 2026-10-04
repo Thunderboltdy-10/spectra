@@ -4,7 +4,7 @@ import { SUMMARY_MARKER, compactionCut, createCompactor, estimateTokens } from "
 import type { ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
 import { DEFAULT_PERMISSION_PREFS } from "../permissions";
-import { SPECTRA_SYSTEM_PROMPT, buildSystemPrompt } from "../prompt";
+import { SPECTRA_SYSTEM_PROMPT, buildSystemPrompt, environmentBlock } from "../prompt";
 import { runHarness, type HarnessEvent, type RunCheckpoint } from "../run";
 import type { HarnessMessage, ModelTurn } from "../types";
 
@@ -65,6 +65,34 @@ describe("captions", () => {
     expect(captions[1]!.stepIds).toEqual(["b"]);
     await scheduler.finish();
     expect(captions.at(-1)).toMatchObject({ text: "Made a deck", final: true });
+  });
+
+  it("names the thread when the run pauses, and writes no caption after", async () => {
+    const timers = fakeTimers();
+    const captions: CaptionEvent[] = [];
+    const titles: string[] = [];
+    const write = vi.fn(async (request: { wantTitle: boolean }) => ({
+      caption: "Asking which unit",
+      ...(request.wantTitle ? { title: "Biology unit plan" } : {}),
+    }));
+    const scheduler = new CaptionScheduler({ prompt: "Plan my unit", write, wantTitle: true, timers, onCaption: (c) => captions.push(c), onTitle: (t) => titles.push(t) });
+    scheduler.stepStarted({ id: "q", label: "Asking you" });
+    await scheduler.suspend();
+    await timers.advance(5_000);
+    expect(titles).toEqual(["Biology unit plan"]);
+    expect(captions).toEqual([]);
+    await scheduler.suspend();
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a thread unnamed when the writer finds no clear subject yet", async () => {
+    const titles: string[] = [];
+    const scheduler = new CaptionScheduler({
+      prompt: "hi", write: async () => ({ caption: "Saying hello" }), wantTitle: true, timers: fakeTimers(),
+      onCaption: () => undefined, onTitle: (t) => titles.push(t),
+    });
+    await scheduler.finish();
+    expect(titles).toEqual([]);
   });
 
   it("falls back to the step label when the caption call fails", async () => {
@@ -136,13 +164,43 @@ describe("system prompt", () => {
       now: Date.UTC(2026, 9, 3, 10),
       timeZone: "Europe/Madrid",
       user: { name: "Ana", role: "student", subjects: ["Biology HL"] },
-      focused: { id: "wx1", type: "document", title: "Cells", canEdit: true, outline: "# Cells" },
+      page: "Editing document \"Cells\"",
+      open: [{ id: "wx1", type: "document", title: "Cells" }],
+      selection: { text: "mitochondria", in: { id: "wx1", type: "document", title: "Cells" } },
+      references: [{ id: "th1", type: "thread", title: "Exam plan" }],
+      bridge: "online (Ana's laptop)",
       permissions: "Changes that cannot be undone and settings changes ask the user first.",
     });
     expect(prompt).toMatch(/- presentation: Slide decks/);
-    expect(prompt).toMatch(/Focused artifact: document "Cells" \(id wx1\)/);
     expect(prompt).toMatch(/Saturday, 3 October 2026/);
     expect(prompt).not.toMatch(/propose_operation|submit_plan/);
+  });
+
+  it("names what is open and pointed at with ids, types and titles only", () => {
+    const block = environmentBlock({
+      now: Date.UTC(2026, 9, 3, 10),
+      timeZone: "Europe/Madrid",
+      page: "Editing document \"Cells\"",
+      open: [
+        { id: "wx1", type: "document", title: "Cells" },
+        { id: "wx2", type: "presentation", title: "Mitosis" },
+      ],
+      selection: { text: "the inner membrane", in: { id: "wx1", type: "document", title: "Cells" } },
+      references: [{ id: "th1", type: "thread", title: "Exam plan" }],
+      bridge: "online (Ana's laptop)",
+      permissions: "Ask first.",
+    });
+    expect(block).toContain('Open: document "Cells" (id wx1); presentation "Mitosis" (id wx2)');
+    expect(block).toContain('Selection in document "Cells" (id wx1): "the inner membrane"');
+    expect(block).toContain('Referenced with @: thread "Exam plan" (id th1)');
+    expect(block).toContain("Spectra Bridge: online (Ana's laptop)");
+    expect(block).not.toMatch(/Outline|Focused/);
+  });
+
+  it("tells the model to search and read instead of expecting content", () => {
+    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/never its content/);
+    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/search for what a request is about and read it/);
+    expect(SPECTRA_SYSTEM_PROMPT).not.toMatch(/focused artifact with its outline/);
   });
 });
 
@@ -194,6 +252,55 @@ describe("runHarness", () => {
     expect(events[2]).toMatchObject({ type: "artifact", artifact: { title: "Mitosis", action: "created" } });
     expect(checkpoints.at(-1)).toBe("completed");
     expect([...backend.artifacts.values()]).toHaveLength(1);
+  });
+
+  it("never shows loading a skill as a step or gives it to the captions", async () => {
+    const events: HarnessEvent[] = [];
+    const captionRequests: unknown[] = [];
+    const result = await runHarness({
+      runId: "r-skill",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Make a deck on cells",
+      environment: { now: 0 },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      captionWriter: async (request) => {
+        captionRequests.push(request);
+        return { caption: "Drafting a deck on cells" };
+      },
+      compactor: null,
+      callModel: model([
+        { text: "", toolCalls: [{ id: "s1", name: "load_skill", arguments: JSON.stringify({ name: "presentation" }) }] },
+        { text: "Here is the plan.", toolCalls: [] },
+      ]),
+      sink: { emit: (event) => events.push(event), checkpoint: async () => undefined },
+    });
+    expect(result.status).toBe("completed");
+    expect(events.map((event) => event.type)).toEqual(["text"]);
+    expect(JSON.stringify(events)).not.toMatch(/Getting ready|skill/i);
+    expect(captionRequests).toEqual([]);
+  });
+
+  it("names the thread of a run that asks a question in its first turn", async () => {
+    const events: HarnessEvent[] = [];
+    const result = await runHarness({
+      runId: "r-ask",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Plan my biology unit",
+      environment: { now: 0 },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      wantTitle: true,
+      captionWriter: async (request) => ({ caption: "Asking", ...(request.wantTitle ? { title: "Biology unit plan" } : {}) }),
+      compactor: null,
+      callModel: model([
+        { text: "", toolCalls: [{ id: "q1", name: "ask_user", arguments: JSON.stringify({ question: "Which unit?" }) }] },
+      ]),
+      sink: { emit: (event) => events.push(event), checkpoint: async () => undefined },
+    });
+    expect(result.status).toBe("paused");
+    await result.titling;
+    expect(events.filter((event) => event.type === "thread_title")).toEqual([{ type: "thread_title", title: "Biology unit plan" }]);
   });
 
   it("binds history to this thread and puts the new message last", async () => {

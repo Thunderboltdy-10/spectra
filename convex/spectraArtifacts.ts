@@ -1614,67 +1614,86 @@ export const agentResourceHealth = query({
   },
 });
 
+/**
+ * The agents this person may use: owned or granted, active, in their school,
+ * with a release they can run. Each comes with its release's state.
+ */
+async function usableAgents(ctx: Parameters<typeof requireSpectraActor>[0], actor: Awaited<ReturnType<typeof requireSpectraActor>>) {
+  const owned = await ctx.db
+    .query("spectraArtifacts")
+    .withIndex("by_account_blueprint", (q) =>
+      q.eq("ownerAccountId", actor._id).eq("blueprintKey", "agent"),
+    )
+    .collect();
+  const grantedIds = await listDirectlyGrantedResourceIds(
+    ctx,
+    actor,
+    "agent",
+  );
+  const granted = (
+    await Promise.all(
+      grantedIds.map(async (resourceId) => {
+        const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
+        return id ? ctx.db.get(id) : null;
+      }),
+    )
+  ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
+    Boolean(artifact),
+  );
+  const candidates = [
+    ...new Map(
+      [...owned, ...granted].map((artifact) => [artifact._id, artifact]),
+    ).values(),
+  ];
+  const usable = [];
+  for (const artifact of candidates) {
+    if (
+      artifact.schoolId !== actor.schoolId ||
+      artifact.status !== "active" ||
+      artifact.blueprintKey !== "agent"
+    )
+      continue;
+    const decision = await evaluateAccess(ctx, "agent", artifact._id);
+    if (!decision.allowed || !decision.capabilities.includes("use")) continue;
+    const release = await latestPublishedAgentRelease(
+      ctx,
+      artifact._id,
+      artifact.ownerAccountId === actor.accountId
+        ? ["internal_test", "limited", "published"]
+        : ["limited", "published"],
+    );
+    if (!release) continue;
+    const version = await ctx.db.get(release.versionId);
+    if (!version || version.artifactId !== artifact._id || version.schoolId !== artifact.schoolId) continue;
+    const snapshot = await loadVersionAfter(ctx, version);
+    const releaseState =
+      snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+        ? (snapshot as Record<string, unknown>)
+        : {};
+    const content =
+      releaseState.content &&
+      typeof releaseState.content === "object" &&
+      !Array.isArray(releaseState.content)
+        ? (releaseState.content as Record<string, unknown>)
+        : {};
+    usable.push({
+      artifact,
+      release,
+      version,
+      content,
+      title: typeof releaseState.title === "string" ? releaseState.title : artifact.title,
+      summary: typeof releaseState.summary === "string" ? releaseState.summary : artifact.summary,
+    });
+  }
+  return usable;
+}
+
 export const listAgentRoutingDescriptors = query({
   args: {},
   handler: async (ctx) => {
     const actor = await requireSpectraActor(ctx);
-    const owned = await ctx.db
-      .query("spectraArtifacts")
-      .withIndex("by_account_blueprint", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("blueprintKey", "agent"),
-      )
-      .collect();
-    const grantedIds = await listDirectlyGrantedResourceIds(
-      ctx,
-      actor,
-      "agent",
-    );
-    const granted = (
-      await Promise.all(
-        grantedIds.map(async (resourceId) => {
-          const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
-          return id ? ctx.db.get(id) : null;
-        }),
-      )
-    ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
-      Boolean(artifact),
-    );
-    const candidates = [
-      ...new Map(
-        [...owned, ...granted].map((artifact) => [artifact._id, artifact]),
-      ).values(),
-    ];
     const descriptors = [];
-    for (const artifact of candidates) {
-      if (
-        artifact.schoolId !== actor.schoolId ||
-        artifact.status !== "active" ||
-        artifact.blueprintKey !== "agent"
-      )
-        continue;
-      const decision = await evaluateAccess(ctx, "agent", artifact._id);
-      if (!decision.allowed || !decision.capabilities.includes("use")) continue;
-      const release = await latestPublishedAgentRelease(
-        ctx,
-        artifact._id,
-        artifact.ownerAccountId === actor.accountId
-          ? ["internal_test", "limited", "published"]
-          : ["limited", "published"],
-      );
-      if (!release) continue;
-      const version = await ctx.db.get(release.versionId);
-      if (!version || version.artifactId !== artifact._id || version.schoolId !== artifact.schoolId) continue;
-      const snapshot = await loadVersionAfter(ctx, version);
-      const releaseState =
-        snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
-          ? (snapshot as Record<string, unknown>)
-          : {};
-      const content =
-        releaseState.content &&
-        typeof releaseState.content === "object" &&
-        !Array.isArray(releaseState.content)
-          ? (releaseState.content as Record<string, unknown>)
-          : {};
+    for (const { artifact, release, version, content, title, summary } of await usableAgents(ctx, actor)) {
       const routing =
         content.routing &&
         typeof content.routing === "object" &&
@@ -1685,14 +1704,8 @@ export const listAgentRoutingDescriptors = query({
       descriptors.push({
         agentId: artifact._id,
         versionId: release.versionId,
-        title:
-          typeof releaseState.title === "string"
-            ? releaseState.title
-            : artifact.title,
-        summary:
-          typeof releaseState.summary === "string"
-            ? releaseState.summary
-            : artifact.summary,
+        title,
+        summary,
         description:
           typeof routing.description === "string"
             ? routing.description.slice(0, 2_000)
@@ -1717,6 +1730,41 @@ export const listAgentRoutingDescriptors = query({
     }
     return descriptors
       .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, 100);
+  },
+});
+
+/**
+ * The agents for the island's agent switch: every agent this person can
+ * choose, the ones they use most first (then the most recently used, then by
+ * title). Choosing one sends its id with the message; see HARNESS.md, Agents.
+ */
+export const listAgentsForSwitch = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireSpectraActor(ctx);
+    const usage = new Map(
+      (
+        await ctx.db
+          .query("agentUserUsage")
+          .withIndex("by_account", (q) => q.eq("accountId", actor._id))
+          .take(500)
+      ).map((row) => [row.agentId, row]),
+    );
+    return (await usableAgents(ctx, actor))
+      .map(({ artifact, title, summary }) => ({
+        agentId: artifact._id,
+        title,
+        summary: summary ?? "",
+        uses: usage.get(artifact._id)?.uses ?? 0,
+        lastUsedAt: usage.get(artifact._id)?.lastUsedAt ?? null,
+      }))
+      .sort(
+        (left, right) =>
+          right.uses - left.uses ||
+          (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0) ||
+          left.title.localeCompare(right.title),
+      )
       .slice(0, 100);
   },
 });

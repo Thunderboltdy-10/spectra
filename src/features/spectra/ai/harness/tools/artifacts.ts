@@ -49,7 +49,7 @@ function checkWrite(type: ArtifactTypeKey, authored: AuthoredContent, prompt: st
 
 function problemsNote(authored: AuthoredContent) {
   return authored.problems.length
-    ? "\nFix the problems listed above with edit_artifact before you finish, unless the user asked for them."
+    ? "\nIf a problem above matters, fix them all together in one edit_artifact call."
     : "";
 }
 
@@ -59,10 +59,10 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
   return {
     name: "create_artifact",
     description: [
-      "Create a new piece of work in the user's library and fill it in one call. Write complete, finished content, never placeholders.",
+      "Create a new piece of work in the user's library, whole, in this one call: a deck with its theme, every slide and the speaker notes; a document with every section; a workbook with every sheet. Write complete, finished content, never placeholders, and never build it up with edits afterwards.",
       "`content` uses the type's authoring format:",
       formatCheatSheet("create"),
-      "Load the type's skill first (load_skill) for anything beyond a simple item. The result reads back what was saved and lists any problems.",
+      "Load the type's skill first (load_skill) for anything beyond a simple item. The result reads back what was saved and lists any problems; edit_artifact is for changes after that.",
     ].join("\n"),
     parameters: {
       type: "object",

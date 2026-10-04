@@ -12,6 +12,7 @@ import {
   type PendingInput,
   type PermissionCategory,
   type ProviderToolSpec,
+  type Steer,
   type TodoItem,
   type ToolEffect,
   type ToolOutcome,
@@ -113,7 +114,7 @@ export type LoopHooks = {
    */
   checkpoint?: (
     state: LoopState,
-  ) => Promise<{ steers?: string[] } | void> | { steers?: string[] } | void;
+  ) => Promise<{ steers?: Steer[] } | void> | { steers?: Steer[] } | void;
 };
 
 export type Compactor = (input: {
@@ -346,10 +347,12 @@ export async function runHarnessLoop(
     }
   };
 
-  const appendSteers = (steers: string[]) => {
+  const appendSteers = (steers: Steer[]) => {
     for (const steer of steers) {
-      const text = steer.trim();
-      if (text) state.messages.push({ role: "user", content: text });
+      const text = steer.text.trim();
+      if (steer.parts?.length)
+        state.messages.push({ role: "user", content: [{ type: "text", text: text || "Files I attached:" }, ...steer.parts] });
+      else if (text) state.messages.push({ role: "user", content: text });
     }
   };
 

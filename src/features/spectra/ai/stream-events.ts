@@ -36,9 +36,6 @@ export const resultCardStreamViewSchema = z
         workspaceId: z.string().optional(),
         workspaceTitle: z.string().optional(),
         attachmentNames: z.array(z.string()).optional(),
-        focusMode: z
-          .enum(["global", "workspace", "artifact", "selection", "thread"])
-          .optional(),
         agentId: z.string().optional(),
         agentVersionId: z.string().optional(),
         agentTitle: z.string().optional(),
@@ -209,21 +206,6 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
-      type: z.literal("steer_queued"),
-      runId: z.string(),
-      steerId: z.string(),
-      mode: z.enum([
-        "refine_current_goal",
-        "redirect_next_step",
-        "replace_goal",
-        "cancel_current_action",
-      ]),
-      text: z.string(),
-      message: z.string(),
-    })
-    .strict(),
-  z
-    .object({
       type: z.literal("operation_commit"),
       runId: z.string(),
       operationId: z.string(),
@@ -334,6 +316,10 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
     .object({ type: z.literal("compacted"), runId: z.string() })
     .strict(),
   z
+    // The message joined a working run; it reads it at its next turn.
+    .object({ type: z.literal("steer_queued"), runId: z.string(), threadId: z.string().optional() })
+    .strict(),
+  z
     .object({ type: z.literal("thread_title"), runId: z.string(), title: z.string() })
     .strict(),
   z
@@ -349,6 +335,8 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
       type: z.literal("error"),
       runId: z.string().optional(),
       message: z.string(),
+      /** A typed failure the UI acts on, e.g. AI_AGENT_UNAVAILABLE. */
+      code: z.string().optional(),
       card: resultCardStreamViewSchema.optional(),
     })
     .strict(),

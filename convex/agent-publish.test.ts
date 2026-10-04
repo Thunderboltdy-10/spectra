@@ -268,3 +268,42 @@ describe("published evaluation for routing invokers", () => {
     await expect(reader.query(api.spectraArtifacts.getAgentRuntime, { agentId: f.agentId })).rejects.toThrow();
   });
 });
+
+describe("the agent switch", () => {
+  it("lists every agent the user can choose, most used first, counting one use per run", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seedFixture(t);
+    const owner = t.withIdentity(f.owner);
+    const quietAgentId = await t.run(async (ctx) => {
+      const now = Date.now();
+      return ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: f.ownerAccountId, schoolId: f.schoolId, blueprintKey: "agent", title: "Lab report coach",
+        summary: "Never routed automatically.",
+        content: { instructions: { text: "Coach lab reports step by step with clear, specific feedback for students." },
+          routing: { enabled: false, description: "", examples: [], negativeExamples: [] }, tools: [], resources: [] },
+        schemaVersion: 1, tags: [], status: "active", createdAt: now, updatedAt: now,
+      });
+    });
+    await owner.mutation(api.spectraArtifacts.publishAgent, { agentId: f.agentId, rollout: "internal_test" });
+    await owner.mutation(api.spectraArtifacts.publishAgent, { agentId: quietAgentId, rollout: "internal_test" });
+    expect((await owner.query(api.spectraArtifacts.listAgentsForSwitch, {})).map((agent) => agent.title)).toEqual([
+      "Lab report coach", "Study guide agent",
+    ]);
+    const run = async (agentId: Id<"spectraArtifacts">, times: number) => {
+      const runId = await t.run((ctx) => ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: f.ownerAccountId, schoolId: f.schoolId, sourceSurface: "chat", userPrompt: "Help",
+        status: "running", phase: "planning", executionId: "exec", createdAt: Date.now(), updatedAt: Date.now(),
+      }));
+      for (let index = 0; index < times; index += 1)
+        await owner.mutation(api.spectraRuns.setAgentRouting, {
+          runId, executionId: "exec", agentId, confidence: 1, reason: "Selected by you", source: "explicit",
+        });
+    };
+    await run(f.agentId, 3);
+    await run(f.agentId, 1);
+    await run(quietAgentId, 1);
+    const listed = await owner.query(api.spectraArtifacts.listAgentsForSwitch, {});
+    expect(listed.map(({ title, uses }) => [title, uses])).toEqual([["Study guide agent", 2], ["Lab report coach", 1]]);
+    expect(listed[0]).toMatchObject({ agentId: f.agentId, summary: "A publishable study guide agent." });
+  });
+});

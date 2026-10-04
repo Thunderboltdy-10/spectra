@@ -151,7 +151,10 @@ export function ProgressTrace({
     });
   }
 
-  const showTraceToggle = thinking || steps.length > 0;
+  // A step shows only once a caption or a tool has something true to say;
+  // until then the header alone says Spectra is thinking.
+  const expandable = steps.length > 0;
+  const showTraceToggle = thinking || expandable;
   // The header says what Spectra is doing now, then what it did.
   const runningStep = [...steps].reverse().find((step) => step.status === "running");
   const headline = finished
@@ -166,6 +169,7 @@ export function ProgressTrace({
       {showTraceToggle ? (
         <button
           type="button"
+          disabled={!expandable}
           onClick={() =>
             setGroupOpen((open) => {
               const next = !open;
@@ -174,7 +178,7 @@ export function ProgressTrace({
             })
           }
           className="mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left"
-          aria-expanded={groupOpen}
+          aria-expanded={expandable ? groupOpen : undefined}
         >
           <span
             className={cn(
@@ -184,16 +188,18 @@ export function ProgressTrace({
           >
             {headline}
           </span>
-          <ChevronDown
-            className={cn(
-              "h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70 transition-transform duration-[var(--motion-base)] ease-standard",
-              groupOpen ? "rotate-180" : "rotate-0",
-            )}
-          />
+          {expandable ? (
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70 transition-transform duration-[var(--motion-base)] ease-standard",
+                groupOpen ? "rotate-180" : "rotate-0",
+              )}
+            />
+          ) : null}
         </button>
       ) : null}
       <AnimatePresence initial={false}>
-        {groupOpen && showTraceToggle ? (
+        {groupOpen && expandable ? (
           <motion.div
             key="thinking-children"
             initial={reduceMotion ? false : { height: 0, opacity: 0 }}
@@ -202,117 +208,110 @@ export function ProgressTrace({
             transition={morphTransition}
             className="overflow-hidden"
           >
-            {orderedSteps.length === 0 && thinking ? (
-              <div className="flex items-center gap-2 py-1 text-caption text-[var(--text-tertiary)]">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-                <span className="thinking-wave opacity-80">Getting ready</span>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "relative space-y-1.5",
-                  compact && "spectra-live-dock-progress max-h-40 overflow-y-auto pr-1",
-                )}
-              >
-                <AnimatePresence initial={false}>
-                  {orderedSteps.map((step) => {
-                    const open = openIds.has(step.id);
-                    const hasDetail = Boolean(
-                      step.summary?.trim() &&
-                      step.summary.trim().toLocaleLowerCase() !==
-                        step.title.trim().toLocaleLowerCase(),
-                    );
-                    return (
-                      <motion.div
-                        key={step.id}
-                        layout={!reduceMotion}
-                        initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
-                        transition={{
-                          layout: morphTransition,
-                          opacity: revealTransition,
-                          y: revealTransition,
-                        }}
-                        className="py-1.5"
-                      >
-                        <div className="flex w-full items-center gap-2 text-left">
-                          {step.status === "running" ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-                          ) : step.status === "error" ? (
-                            <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
-                          ) : (
-                            <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+            <div
+              className={cn(
+                "relative space-y-1.5",
+                compact && "spectra-live-dock-progress max-h-40 overflow-y-auto pr-1",
+              )}
+            >
+              <AnimatePresence initial={false}>
+                {orderedSteps.map((step) => {
+                  const open = openIds.has(step.id);
+                  const hasDetail = Boolean(
+                    step.summary?.trim() &&
+                    step.summary.trim().toLocaleLowerCase() !==
+                      step.title.trim().toLocaleLowerCase(),
+                  );
+                  return (
+                    <motion.div
+                      key={step.id}
+                      layout={!reduceMotion}
+                      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+                      transition={{
+                        layout: morphTransition,
+                        opacity: revealTransition,
+                        y: revealTransition,
+                      }}
+                      className="py-1.5"
+                    >
+                      <div className="flex w-full items-center gap-2 text-left">
+                        {step.status === "running" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+                        ) : step.status === "error" ? (
+                          <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+                        )}
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]",
+                            step.status === "running" && "thinking-wave",
                           )}
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]",
-                              step.status === "running" && "thinking-wave",
-                            )}
+                        >
+                          {pastTenseProgressTitle(
+                            step.title,
+                            step.status !== "running",
+                          )}
+                        </span>
+                        {hasDetail ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleStep(step.id)}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-chip hover:bg-[var(--bg-hover)]"
+                            aria-expanded={open}
+                            aria-label={`${open ? "Hide" : "Show"} details for ${step.title}`}
                           >
-                            {pastTenseProgressTitle(
-                              step.title,
-                              step.status !== "running",
-                            )}
-                          </span>
-                          {hasDetail ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleStep(step.id)}
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-chip hover:bg-[var(--bg-hover)]"
-                              aria-expanded={open}
-                              aria-label={`${open ? "Hide" : "Show"} details for ${step.title}`}
-                            >
-                              <ChevronDown
-                                className={cn(
-                                  "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-[var(--motion-base)] ease-standard",
-                                  open ? "rotate-180" : "rotate-0",
-                                )}
-                              />
-                            </button>
-                          ) : null}
-                        </div>
-                        <AnimatePresence initial={false}>
-                          {open && hasDetail && step.summary ? (
-                            <motion.p
-                              key={`${step.id}:summary`}
-                              initial={
-                                reduceMotion ? false : { height: 0, opacity: 0 }
-                              }
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={
-                                reduceMotion
-                                  ? undefined
-                                  : { height: 0, opacity: 0 }
-                              }
-                              transition={revealTransition}
-                              className="overflow-hidden"
-                            >
-                              {/* One line per step behind the caption, never run together. */}
-                              {step.summary
-                                .split("\n")
-                                .map((line) => pastTenseProgressTitle(line, step.status !== "running"))
-                                .filter(Boolean)
-                                .map((line, index) => (
-                                  <span
-                                    key={index}
-                                    className={cn(
-                                      "ml-5 block text-micro leading-4 text-[var(--text-tertiary)]",
-                                      index === 0 && "mt-1",
-                                    )}
-                                  >
-                                    {line}
-                                  </span>
-                                ))}
-                            </motion.p>
-                          ) : null}
-                        </AnimatePresence>
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
-            )}
+                            <ChevronDown
+                              className={cn(
+                                "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-[var(--motion-base)] ease-standard",
+                                open ? "rotate-180" : "rotate-0",
+                              )}
+                            />
+                          </button>
+                        ) : null}
+                      </div>
+                      <AnimatePresence initial={false}>
+                        {open && hasDetail && step.summary ? (
+                          <motion.p
+                            key={`${step.id}:summary`}
+                            initial={
+                              reduceMotion ? false : { height: 0, opacity: 0 }
+                            }
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={
+                              reduceMotion
+                                ? undefined
+                                : { height: 0, opacity: 0 }
+                            }
+                            transition={revealTransition}
+                            className="overflow-hidden"
+                          >
+                            {/* One line per step behind the caption, never run together. */}
+                            {step.summary
+                              .split("\n")
+                              .map((line) => pastTenseProgressTitle(line, step.status !== "running"))
+                              .filter(Boolean)
+                              .map((line, index) => (
+                                <span
+                                  key={index}
+                                  className={cn(
+                                    "ml-5 block text-micro leading-4 text-[var(--text-tertiary)]",
+                                    index === 0 && "mt-1",
+                                  )}
+                                >
+                                  {line}
+                                </span>
+                              ))}
+                          </motion.p>
+                        ) : null}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>

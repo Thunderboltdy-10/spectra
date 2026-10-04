@@ -164,7 +164,7 @@ describe("Phase 7 semantic identity contracts", () => {
 describe("Phase 7 context and semantic index", () => {
   it("registers only permitted targets and resolves the deepest eligible nested target", () => {
     const registry = new ContextSourceRegistry();
-    const base = { type: "Document", contextSummary: async () => ({ title: "T", text: "S" }) };
+    const base = { type: "Document" };
     const disposeRoot = registry.register({ ...base, id: "root", anchor: rootAnchor("document"), label: "Root", permissions: "allowed" });
     registry.register({ ...base, id: "child", parentId: "root", anchor: { ...rootAnchor("document"), kind: "block", path: ["document", "blocks", "b1"] }, label: "Child", permissions: "allowed" });
     registry.register({ ...base, id: "secret", anchor: { ...rootAnchor("document"), path: ["blocks", "secret", "line"] }, label: "Secret", permissions: "denied" });

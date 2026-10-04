@@ -4,22 +4,19 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type SetStateAction,
 } from "react";
 import { toast } from "sonner";
 import {
-  activeArtifactContext,
   useSpectraContextStore,
   type SpectraContextObject,
   type SpectraContinuation,
 } from "@/stores/spectra-context-store";
+import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import {
-  getSpectraArtifact,
   getSpectraThread,
   getSpectraThreads,
-  getSpectraWorkspace,
   postSpectra,
   type SpectraArtifact,
   type SpectraThread,
@@ -33,16 +30,11 @@ export function useSpectraContext(
 ) {
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [threadsLoaded, setThreadsLoaded] = useState(false);
-  const availabilityChecks = useRef(new Map<string, number>());
   const continuation = useSpectraContextStore((state) => state.continuation);
   const selectionDraft = useSpectraContextStore(
     (state) => state.selectionDraft,
   );
-  const explicit = useSpectraContextStore((state) => state.explicit);
   const visible = useSpectraContextStore((state) => state.visible);
-  const excludedVisibleKeys = useSpectraContextStore(
-    (state) => state.excludedVisibleKeys,
-  );
   const setContinuation = useSpectraContextStore(
     (state) => state.setContinuation,
   );
@@ -52,24 +44,13 @@ export function useSpectraContext(
   const toggleSelection = useSpectraContextStore(
     (state) => state.toggleSelection,
   );
-  const commitSelection = useSpectraContextStore(
-    (state) => state.commitSelection,
-  );
   const clearSelection = useSpectraContextStore(
     (state) => state.clearSelection,
-  );
-  const clearExplicit = useSpectraContextStore((state) => state.clearExplicit);
-  const addExplicit = useSpectraContextStore((state) => state.addExplicit);
-  const removeExplicit = useSpectraContextStore(
-    (state) => state.removeExplicit,
   );
   const setVisible = useSpectraContextStore((state) => state.setVisible);
   const reconcile = useSpectraContextStore((state) => state.reconcile);
   const setActiveWorkspace = useSpectraContextStore(
     (state) => state.setActiveWorkspace,
-  );
-  const setObjectAvailability = useSpectraContextStore(
-    (state) => state.setObjectAvailability,
   );
 
   const artifactById = useMemo(
@@ -80,42 +61,32 @@ export function useSpectraContext(
     () =>
       new Set(
         selectionDraft
-          .filter((row) => row.type === "artifact" && !row.stale)
+          .filter((row) => row.type === "artifact")
           .map((row) => row.id),
       ),
     [selectionDraft],
   );
   const selectedObjectKeys = useMemo(
     () =>
-      new Set(
-        selectionDraft
-          .filter((row) => !row.stale)
-          .map((row) => `${row.type}:${row.id}`),
-      ),
+      new Set(selectionDraft.map((row) => `${row.type}:${row.id}`)),
     [selectionDraft],
   );
-  const explicitContextIds = useMemo(
-    () =>
-      new Set(
-        explicit
-          .filter((row) => row.type === "artifact" && !row.stale)
-          .map((row) => row.id),
-      ),
-    [explicit],
-  );
-  const explicitContextObjectKeys = useMemo(
-    () =>
-      new Set(
-        explicit
-          .filter((row) => !row.stale)
-          .map((row) => `${row.type}:${row.id}`),
-      ),
-    [explicit],
-  );
-  const contextArtifactIds = useMemo(
-    () => activeArtifactContext({ explicit, visible, excludedVisibleKeys }),
-    [excludedVisibleKeys, explicit, visible],
-  );
+
+  /*
+   * What is open on screen, as pointers for the run's environment block: id,
+   * type and title only. The continued conversation is the run's own thread,
+   * so it is not listed again.
+   */
+  const open = useMemo<SpectraRunPointer[]>(() => {
+    const seen = new Set<string>();
+    return visible.flatMap((item) => {
+      const key = `${item.type}:${item.id}`;
+      if (seen.has(key) || (item.type === "thread" && item.id === continuation?.id)) return [];
+      seen.add(key);
+      const type = item.type === "artifact" ? (artifactById.get(item.id)?.blueprintKey ?? "artifact") : item.type;
+      return [{ id: item.id, type, title: item.label }];
+    });
+  }, [artifactById, continuation?.id, visible]);
 
   const setSelectedContextIds = useCallback(
     (action: SetStateAction<Set<string>>) => {
@@ -197,35 +168,6 @@ export function useSpectraContext(
     (object: SpectraContextObject, cap = 24) =>
       toggleSelection({ ...object, source: "selected" }, cap),
     [toggleSelection],
-  );
-
-  const toggleExplicitObject = useCallback(
-    (object: SpectraContextObject) => {
-      if (
-        explicit.some((row) => row.type === object.type && row.id === object.id)
-      )
-        removeExplicit(object.type, object.id);
-      else addExplicit({ ...object, source: "explicit" });
-    },
-    [addExplicit, explicit, removeExplicit],
-  );
-
-  const toggleExplicitArtifact = useCallback(
-    (artifact: SpectraArtifact) => {
-      if (explicitContextIds.has(artifact._id))
-        removeExplicit("artifact", artifact._id);
-      else
-        addExplicit({
-          type: "artifact",
-          id: artifact._id,
-          label: artifact.title,
-          workspaceId: artifact.placements?.[0]?.workspaceId,
-          source: "explicit",
-          capability:
-            artifact.blueprintKey === "thread_reference" ? "context" : "tile",
-        });
-    },
-    [addExplicit, explicitContextIds, removeExplicit],
   );
 
   useEffect(() => {
@@ -325,111 +267,16 @@ export function useSpectraContext(
     workspaces,
   ]);
 
-  useEffect(() => {
-    if (!threadsLoaded) return;
-    const artifactIds = new Set(artifacts.map((artifact) => artifact._id));
-    const workspaceIds = new Set(workspaces.map((workspace) => workspace._id));
-    const threadIds = new Set(threads.map((thread) => thread._id));
-    const now = Date.now();
-    const missing = explicit.filter((item) => {
-      // A confirmed-missing explicit item remains visible as stale context so
-      // the user can understand and remove it. Do not keep hammering the
-      // canonical endpoint after that determination has been made.
-      if (item.stale) return false;
-      const absent =
-        item.type === "artifact"
-          ? !artifactIds.has(item.id)
-          : item.type === "workspace"
-            ? !workspaceIds.has(item.id)
-            : !threadIds.has(item.id);
-      return (
-        absent &&
-        now - (availabilityChecks.current.get(`${item.type}:${item.id}`) ?? 0) >
-          30_000
-      );
-    });
-    if (missing.length === 0) return;
-    let disposed = false;
-    void Promise.all(
-      missing.map(async (item) => {
-        availabilityChecks.current.set(`${item.type}:${item.id}`, Date.now());
-        try {
-          if (item.type === "artifact") {
-            const { artifact } = await getSpectraArtifact(item.id);
-            if (!disposed)
-              setObjectAvailability("artifact", item.id, {
-                label: artifact.title,
-                workspaceId: artifact.placements?.[0]?.workspaceId,
-              });
-          } else if (item.type === "workspace") {
-            const detail = await getSpectraWorkspace(item.id, true);
-            if (!detail.workspace) throw new Error("Workspace unavailable");
-            if (!disposed)
-              setObjectAvailability("workspace", item.id, {
-                label: detail.workspace.workspace.title,
-              });
-          } else {
-            const detail = await getSpectraThread(item.id);
-            if (!disposed)
-              setObjectAvailability("thread", item.id, {
-                label: detail.thread.title,
-                workspaceId: detail.thread.workspaceId,
-              });
-          }
-        } catch {
-          if (!disposed) setObjectAvailability(item.type, item.id);
-        }
-      }),
-    );
-    return () => {
-      disposed = true;
-    };
-  }, [
-    artifacts,
-    explicit,
-    setObjectAvailability,
-    threads,
-    threadsLoaded,
-    workspaces,
-  ]);
-
   return {
     composerThread: continuation,
     setComposerThread,
     selectedContextIds,
     selectedObjectKeys,
     selectionCount: selectionDraft.length,
-    explicitContextIds,
-    explicitContextObjectKeys,
-    explicitContextObjects: explicit
-      .filter((object) => !object.stale)
-      .map(
-        ({
-          type,
-          id,
-          label,
-          workspaceId,
-          semanticTargetId,
-          semanticAnchor,
-          contextSummary,
-        }) => ({
-          type,
-          id,
-          label,
-          workspaceId,
-          semanticTargetId,
-          semanticAnchor,
-          contextSummary,
-        }),
-      ),
-    contextArtifactIds,
+    open,
     setSelectedContextIds,
     toggleSelectedObject,
-    commitSelection,
     clearDraftSelection: clearSelection,
-    clearExplicitContext: clearExplicit,
-    toggleExplicitArtifact,
-    toggleExplicitObject,
     setVisibleArtifactIds,
     setVisibleObjects,
     setActiveWorkspaceContext: setActiveWorkspace,

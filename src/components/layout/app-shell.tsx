@@ -80,7 +80,7 @@ import {
   ShortcutsButton,
 } from "@/components/keyboard-shortcuts";
 import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
-import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
+import { ViewportReferencePicker } from "@/features/spectra/components/viewport-reference-picker";
 import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
@@ -1202,7 +1202,7 @@ function AppShellContent({
             <GlobalRouteWorkbench />
           </div>
           <RouteSidePanelHost />
-          <ViewportContextPicker />
+          <ViewportReferencePicker />
         </div>
       </main>
     </div>

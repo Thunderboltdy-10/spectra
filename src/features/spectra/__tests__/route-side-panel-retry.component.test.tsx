@@ -32,7 +32,6 @@ vi.mock("../components/artifact-studio-shell", () => {
 
 vi.mock("../ai/use-spectra-run", () => ({ useSpectraRun: () => ({}) }));
 vi.mock("../components/command-bar", () => ({ CommandBar: () => null }));
-vi.mock("../components/context-controls", () => ({ ContextFocusControl: () => null }));
 vi.mock("../pages/workbench-live-stack", () => ({ WorkbenchLiveStack: ({ children }: { children: import("react").ReactNode }) => children }));
 vi.mock("../components/live-dock", () => ({
   LiveDock: ({ onOpen }: { onOpen: (runId: string, threadId: string, title: string, artifactId: string) => void }) => (

@@ -10,10 +10,6 @@ import {
   CommandBar,
   type CommandAttachment,
 } from "./command-bar";
-import {
-  ContextFocusControl,
-  type ComposerFocusMode,
-} from "./context-controls";
 import { LiveDock } from "./live-dock";
 
 const ROUTES_WITH_LOCAL_WORKBENCH = [
@@ -36,7 +32,6 @@ function ownsWorkbench(pathname: string) {
  */
 export function GlobalRouteWorkbench() {
   const pathname = usePathname();
-  const [focusMode, setFocusMode] = useState<ComposerFocusMode>("global");
   const [continuedThread, setContinuedThread] = useState<{
     id: string;
     title: string;
@@ -46,7 +41,6 @@ export function GlobalRouteWorkbench() {
   const eligible = !ownsWorkbench(pathname);
   const runEngine = useSpectraRun({
     surface: "chat",
-    focusMode,
     currentView: pathname,
     observeDurableRuns: eligible,
     onOpenArtifact: async (workId) => {
@@ -135,9 +129,6 @@ export function GlobalRouteWorkbench() {
         onSteer={runEngine.steer}
         onSubmit={(prompt, attachments) =>
           run(prompt, attachments, continuedThread?.id)
-        }
-        context={
-          <ContextFocusControl mode={focusMode} onModeChange={setFocusMode} />
         }
       />
     </WorkbenchLiveStack>

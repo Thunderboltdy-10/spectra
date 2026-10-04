@@ -165,6 +165,49 @@ describe("harness tools", () => {
     expect(resumed.state.messages.find((message) => message.role === "tool")).toMatchObject({ content: "The user answered: Unit 2" });
   });
 
+  it("creates a whole deck with its theme and notes in one call and reads every slide back", async () => {
+    const { tools, run, backend } = setup();
+    const create = tools.find((tool) => tool.name === "create_artifact")!;
+    expect(create.description).toMatch(/whole, in this one call/);
+    expect(create.description).toMatch(/every slide and the speaker notes/);
+    const slides = Array.from({ length: 12 }, (_, index) => ({
+      title: `Stage ${index + 1} of the cell cycle`,
+      body: `- What happens in stage ${index + 1}\n- Why it matters`,
+      notes: `Presenter note ${index + 1}`,
+    }));
+    const model = scripted([
+      { text: "", toolCalls: [call("c1", "create_artifact", { type: "presentation", title: "Cell cycle", content: { theme: { accent: "#2f7d6d" }, slides } })] },
+      { text: "Made the deck.", toolCalls: [] },
+    ]);
+    const outcome = await run(model.caller);
+    expect(outcome.status).toBe("completed");
+    const readback = lastTool(model.seen[1]!);
+    expect(readback).toMatch(/12 slides/);
+    expect(readback).toMatch(/12\. \[[a-z-]+\] Stage 12 of the cell cycle/);
+    expect(readback).toMatch(/notes: Presenter note 12/);
+    expect(readback).not.toMatch(/edit_artifact/);
+    expect([...backend.artifacts.values()]).toHaveLength(1);
+  });
+
+  it("asks for listed problems to be fixed together, once", async () => {
+    const { tools } = setup();
+    const create = tools.find((tool) => tool.name === "create_artifact")!;
+    const result = await create.execute(
+      { type: "presentation", title: "Data", content: { slides: [{ title: "Results", layout: "title-visual-text" }] } },
+      { signal: new AbortController().signal, runId: "r", toolCallId: "t" },
+    );
+    expect(result.content).toMatch(/Problems:/);
+    expect(result.content).toMatch(/fix them all together in one edit_artifact call/);
+  });
+
+  it("gives the presentation skill in the authoring format's terms, not internal fields", async () => {
+    const { tools } = setup();
+    const skill = tools.find((tool) => tool.name === "load_skill")!;
+    const result = await skill.execute({ name: "presentation" }, { signal: new AbortController().signal, runId: "r", toolCallId: "t" });
+    expect(result.content).toMatch(/whole deck in one create_artifact call/);
+    expect(result.content).not.toMatch(/readingOrder|sourceRefs|object geometry|server-issued evidence handles/);
+  });
+
   it("loads a skill with the authoring format", async () => {
     const { tools } = setup();
     const skill = tools.find((tool) => tool.name === "load_skill")!;

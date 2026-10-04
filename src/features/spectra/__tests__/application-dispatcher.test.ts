@@ -138,7 +138,6 @@ describe("application command dispatcher", () => {
   it("routes semantic picking and mounted-surface commands through the bus", async () => {
     const calls: string[] = [];
     const removers = [
-      spectraBus.handle("context.beginPicking", () => { calls.push("context"); }),
       spectraBus.handle("reference.beginPicking", () => { calls.push("reference"); }),
       spectraBus.handle("work.revealAnchor", () => { calls.push("reveal"); }),
       spectraBus.handle("run.openConversation", () => { calls.push("run"); }),
@@ -151,12 +150,11 @@ describe("application command dispatcher", () => {
         replacePreferences: vi.fn(),
         preferences: DEFAULT_SPECTRA_PREFERENCES,
       });
-      await dispatch("app.context.begin-picking", { source: "composer" });
       await dispatch("app.reference.begin-picking", { hostWorkId: "work-1" });
       await dispatch("app.work.reveal-anchor", { anchor: { workId: "work-1" } });
       await dispatch("app.run.open-conversation", { runId: "run-1" });
       await dispatch("app.settings.clear-compute-cache", {});
-      expect(calls).toEqual(["context", "reference", "reveal", "run", "cache"]);
+      expect(calls).toEqual(["reference", "reveal", "run", "cache"]);
     } finally {
       for (const remove of removers) remove();
     }

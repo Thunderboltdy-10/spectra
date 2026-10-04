@@ -3226,6 +3226,16 @@ export default defineSchema({
     .index("by_agent_version_day", ["agentId", "agentVersionId", "day"])
     .index("by_school_day", ["schoolId", "day"]),
 
+  /** How often each person used each agent: the agent switch lists the most used first. */
+  agentUserUsage: defineTable({
+    accountId: v.id("accounts"),
+    agentId: v.id("spectraArtifacts"),
+    uses: v.number(),
+    lastUsedAt: v.number(),
+  })
+    .index("by_account_agent", ["accountId", "agentId"])
+    .index("by_account", ["accountId"]),
+
   agentImprovementProposals: defineTable({
     agentId: v.id("spectraArtifacts"),
     schoolId: v.id("schools"),
@@ -4202,6 +4212,8 @@ export default defineSchema({
     title: v.string(),
     /** The owner named this chat; generated titles never replace it. */
     titleSetByOwner: v.optional(v.boolean()),
+    /** When the generated title was written. It is written once, never replaced. */
+    titleGeneratedAt: v.optional(v.number()),
     summaryShort: v.optional(v.string()),
     summaryLong: v.optional(v.string()),
     origin: v.union(
@@ -4808,7 +4820,14 @@ export default defineSchema({
     pending: v.optional(v.any()),
     answer: v.optional(v.any()),
     steers: v.optional(
-      v.array(v.object({ text: v.string(), createdAt: v.number() })),
+      v.array(
+        v.object({
+          text: v.string(),
+          // Files sent with the message, stored as this attempt's run attachments.
+          attachmentIds: v.optional(v.array(v.id("spectraRunAttachments"))),
+          createdAt: v.number(),
+        }),
+      ),
     ),
     updatedAt: v.number(),
   }).index("by_run", ["runId"]),

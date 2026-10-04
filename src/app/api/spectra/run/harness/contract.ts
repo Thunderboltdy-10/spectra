@@ -1,4 +1,4 @@
-import type { ModelOperation, SpectraPlan } from "@/features/spectra/operations/schema";
+import type { SpectraPlan } from "@/features/spectra/operations/schema";
 
 export type Surface = "chat" | "workspace" | "artifacts" | "artifact";
 
@@ -13,12 +13,19 @@ export type RestoredClarification = {
   candidatesOmitted: boolean;
 };
 
-/** One staged position of a clarifying run, in its stable index space. */
-export type ParkedCandidate = {
-  operation: ModelOperation;
-  disposition: StagedCandidateDisposition;
-  /** Unchanged restored candidate: keeps its original source evidence. */
-  carried?: boolean;
+/** An item named by id, type and title only. Never content. */
+export type RunPointer = { id: string; type: string; title: string };
+
+/**
+ * The minimal pointers the environment block needs: the page, what is open,
+ * the selection and the items the user referenced with @. They are labels;
+ * every read still checks access on the server.
+ */
+export type RunPointers = {
+  currentView?: string;
+  open?: RunPointer[];
+  selection?: { text: string; in?: RunPointer };
+  references?: RunPointer[];
 };
 
 export type HarnessAnswerInput =
@@ -57,9 +64,27 @@ export type Body = {
   /** The user's IANA time zone, for dates and the calendar. */
   timeZone?: string;
   attachments?: AttachmentInput[];
+  /** The page the user is on, in words ("Calendar, week view"). */
   currentView?: string;
+  /** What is open on screen: ids, types and titles only. */
+  open?: RunPointer[];
+  /** The user's current selection, only when there is one. */
+  selection?: { text: string; in?: RunPointer };
+  /** Items the user referenced with @ in this message. */
+  references?: RunPointer[];
   submissionKey?: string;
-  agentId?: string;
+  /**
+   * The agent for this message. A string chooses that agent from the start
+   * and keeps it for the thread; null switches the thread back to Auto;
+   * omitted keeps the thread's current choice.
+   */
+  agentId?: string | null;
+  /**
+   * The run this message joins. A message (with or without attachments) sent
+   * while a run waits or works joins that run instead of starting a new one.
+   * Without it, the thread's active run is joined.
+   */
+  steerRunId?: string;
   actorClerkId?: string;
   resultCardId?: string;
   payload?: Record<string, unknown>;
@@ -171,11 +196,9 @@ export type RunState = {
     source: "automatic" | "continued" | "explicit";
     reversible: boolean;
   };
-  contextSnapshot?: {
+  /** The pointers sent with the request, kept so a resumed attempt sees the same environment. */
+  contextSnapshot?: RunPointers & {
     scopeNodeId?: string;
-    currentView?: string;
-    requestedAgentId?: string;
-    disableAgentRouting?: boolean;
     researchEvidence?: unknown;
     qualityRequirements?: { numericSourceRequired: boolean };
   };

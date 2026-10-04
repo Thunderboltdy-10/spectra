@@ -2,11 +2,6 @@ import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import { applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
 import { withSpectraRequestLog } from "@/features/spectra/ai/run-log";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
-import {
-  attachmentBytesAsInput,
-  attachmentInputBytes,
-  attachmentSha256,
-} from "@/features/spectra/compute/files/attachment-retention";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
 import { withWorkerConvexToken } from "@/lib/convex-worker-context";
@@ -15,16 +10,20 @@ import { createClerkClient } from "@clerk/backend";
 import { NextRequest } from "next/server";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { runHarnessAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
+import { AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE } from "./harness/agents";
+import { loadRunAttachments, persistRunAttachments } from "./harness/attachments";
 import type {
   AttachmentInput,
   Body,
+  Card,
   PreparedAttachment,
   RetryReset,
   RunDetail,
   RunState,
   Surface,
 } from "./harness/contract";
-import { act, mutate, query } from "./harness/io";
+import { normalizePointers } from "./harness/environment";
+import { mutate, query } from "./harness/io";
 import { latestCard, publicError, streamCard } from "./harness/report";
 import { handleUiObserverRequest, uiObserverSchema } from "./harness/ui-observer-request";
 
@@ -43,23 +42,6 @@ const scheduledExecution = () =>
   process.env.SPECTRA_TEST_INLINE_RUNS !== "1" && Boolean(process.env.SPECTRA_APP_URL?.trim());
 
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
-
-async function inferWorkspaceForRun(actorClerkId: string, body: Body) {
-  if (body.workspaceId) return body.workspaceId;
-  if (!body.artifactId) return undefined;
-  try {
-    const artifact = await query<unknown & object, { placements?: Array<{ workspaceId?: string }> }>("spectraArtifacts:get", {
-      actorClerkId,
-      artifactId: body.artifactId,
-    });
-    const workspaceIds = [
-      ...new Set((artifact.placements ?? []).flatMap((placement) => (typeof placement.workspaceId === "string" ? [placement.workspaceId] : []))),
-    ];
-    return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function surfaceFromRun(run: RunState): Surface {
   if (run.sourceSurface === "artifact") return run.artifactId ? "artifact" : "artifacts";
@@ -80,106 +62,36 @@ function verifyScheduledCallback(request: NextRequest, rawBody: string) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-async function persistRunAttachments(
-  runId: string,
-  executionId: string,
-  input: AttachmentInput[] | undefined,
-  prepared: PreparedAttachment[],
-) {
-  const rows = Array.isArray(input) ? input.slice(0, 4) : [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index]!;
-    const preparedRow = prepared[index];
-    if (!preparedRow || !row.handling) throw new Error("ATTACHMENT_SERIALIZATION_INVALID");
-    const bytes = attachmentInputBytes(row);
-    const beginning = await mutate<
-      Record<string, unknown>,
-      { runAttachmentId: string; reused: boolean; uploadReceipt?: string; uploadUrl?: string }
-    >("spectraRuns:beginRunAttachmentUpload", {
-      runId,
-      executionId,
-      originalFileId: preparedRow.id ?? row.assetId ?? row.importId ?? `file:${preparedRow.name}:${bytes.byteLength}`,
-      name: preparedRow.name,
-      mimeType: preparedRow.mimeType,
-      size: bytes.byteLength,
-      handling: row.handling,
-      sha256: attachmentSha256(bytes),
-      sourceMap: preparedRow.sourceMap,
-      provenance: { ...preparedRow.provenance, ...(row.sourceRef ? { sourceRef: row.sourceRef } : {}) },
-    });
-    if (beginning.reused) continue;
-    if (!beginning.uploadUrl || !beginning.uploadReceipt) throw new Error("ATTACHMENT_UPLOAD_INTENT_MISSING");
-    const uploaded = await fetch(beginning.uploadUrl, {
-      method: "POST",
-      headers: { "Content-Type": preparedRow.mimeType, "Content-Length": String(bytes.byteLength) },
-      body: bytes,
-    });
-    if (!uploaded.ok) throw new Error("ATTACHMENT_STORAGE_UPLOAD_FAILED");
-    const payload = (await uploaded.json()) as { storageId?: string };
-    if (!payload.storageId) throw new Error("ATTACHMENT_STORAGE_ID_MISSING");
-    const stored = await act<
-      { runAttachmentId: string; storageId: string; uploadReceipt: string },
-      { status?: string; errorCode?: string }
-    >("artifactIntakeActions:verifyUploadedRunAttachment", {
-      runAttachmentId: beginning.runAttachmentId,
-      storageId: payload.storageId,
-      uploadReceipt: beginning.uploadReceipt,
-    });
-    if (stored.status !== "active") throw new Error(stored.errorCode ?? "ATTACHMENT_UPLOAD_INTEGRITY_FAILED");
-  }
-}
-
-async function loadPersistedRunAttachments(runId: string, executionId: string) {
-  const rows = await query<
-    { runId: string; executionId: string },
-    Array<{
-      runAttachmentId: string;
-      originalFileId?: string;
-      name: string;
-      mimeType: string;
-      size: number;
-      handling: PreparedAttachment["handling"];
-      sourceMap?: PreparedAttachment["sourceMap"];
-      provenance?: PreparedAttachment["provenance"];
-      url: string | null;
-    }>
-  >("spectraRuns:listRunAttachments", { runId, executionId });
-  const raw = await Promise.all(
-    rows.map(async (row) => {
-      if (!row.url) throw new Error("ATTACHMENT_STORAGE_URL_EXPIRED");
-      const response = await fetch(row.url);
-      if (!response.ok) throw new Error("ATTACHMENT_STORAGE_READ_FAILED");
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return {
-        row,
-        input: attachmentBytesAsInput(bytes, {
-          id: row.originalFileId ?? row.runAttachmentId,
-          name: row.name,
-          mimeType: row.mimeType,
-          handling: row.handling,
-        }),
-      };
-    }),
-  );
-  const prepared = await prepareRunAttachments(raw.map(({ input }) => input));
-  return prepared.map((attachment, index) => ({
-    ...attachment,
-    id: raw[index]!.row.originalFileId ?? raw[index]!.row.runAttachmentId,
-    sourceMap: raw[index]!.row.sourceMap ?? attachment.sourceMap,
-    provenance: raw[index]!.row.provenance ?? attachment.provenance,
-  }));
-}
-
 /** Scheduled workers act as the owner, with a short-lived session token. */
-async function asOwner<T>(actorClerkId: string, task: () => Promise<T>) {
-  const secretKey = process.env.CLERK_SECRET_KEY;
-  if (!secretKey) throw new Error("Scheduled execution authentication is unavailable.");
-  const clerk = createClerkClient({ secretKey });
+/*
+ * The owner's session, remembered per worker process. A worker still asks
+ * Clerk for a fresh token every time (Clerk refuses one for a session that
+ * ended), so remembering the session only skips the lookup: one round trip
+ * less before a resumed or follow-up run starts.
+ */
+const ownerSessions = new Map<string, string>();
+
+async function ownerToken(clerk: ReturnType<typeof createClerkClient>, actorClerkId: string) {
+  const known = ownerSessions.get(actorClerkId);
+  if (known) {
+    const token = await clerk.sessions.getToken(known, "convex", 1_800).catch(() => null);
+    if (token?.jwt) return token.jwt;
+    ownerSessions.delete(actorClerkId);
+  }
   const sessions = await clerk.sessions.getSessionList({ userId: actorClerkId, status: "active", limit: 10 });
   const session = sessions.data.sort((left, right) => right.lastActiveAt - left.lastActiveAt)[0];
   if (!session) throw new Error("The owner has no active session for this scheduled run.");
   const token = await clerk.sessions.getToken(session.id, "convex", 1_800);
-  return withWorkerConvexToken(token.jwt, task);
+  ownerSessions.set(actorClerkId, session.id);
+  if (ownerSessions.size > 500) ownerSessions.delete(ownerSessions.keys().next().value!);
+  return token.jwt;
+}
+
+async function asOwner<T>(actorClerkId: string, task: () => Promise<T>) {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) throw new Error("Scheduled execution authentication is unavailable.");
+  const clerk = createClerkClient({ secretKey });
+  return withWorkerConvexToken(await ownerToken(clerk, actorClerkId), task);
 }
 
 type RunPayload = Omit<AttemptParams, "actorClerkId" | "runId" | "resultCardId" | "executionId" | "workerId" | "signal" | "scheduled">;
@@ -196,7 +108,7 @@ function payloadFrom(value: unknown): RunPayload {
     workspaceId: text(payload.workspaceId),
     scopeNodeId: text(payload.scopeNodeId),
     artifactId: text(payload.artifactId),
-    currentView: text(payload.currentView),
+    ...normalizePointers(payload),
     timeZone: text(payload.timeZone),
     agentId: text(payload.agentId),
   };
@@ -212,9 +124,9 @@ function payloadForRun(run: RunState, mode: AttemptMode, timeZone?: string): Run
     workspaceId: run.workspaceId,
     scopeNodeId: run.scopeNodeId ?? run.contextSnapshot?.scopeNodeId,
     artifactId: run.artifactId,
-    currentView: run.contextSnapshot?.currentView,
+    ...normalizePointers(run.contextSnapshot),
     timeZone,
-    agentId: run.selectedAgentId ?? run.contextSnapshot?.requestedAgentId,
+    agentId: run.selectedAgentId,
   };
 }
 
@@ -231,7 +143,9 @@ async function executeScheduledRun(body: Body) {
   const payload = payloadFrom(body.payload);
   await asOwner(actorClerkId, async () => {
     try {
-      const attachments = payload.mode === "resume" ? [] : await loadPersistedRunAttachments(runId, executionId);
+      // A start that came without files skips the read.
+      const withoutFiles = payload.mode === "resume" || (body.payload as Record<string, unknown> | undefined)?.withAttachments === false;
+      const attachments = withoutFiles ? [] : await loadRunAttachments(runId, executionId);
       await runHarnessAttempt(
         {
           ...payload,
@@ -293,7 +207,7 @@ async function dispatch(input: {
       runId: input.runId,
       resultCardId: input.resultCardId,
       executionId: input.executionId,
-      payload: input.payload,
+      payload: { ...input.payload, ...(input.attachments ? { withAttachments: input.attachments.length > 0 } : {}) },
     });
     return ndjson(async (emit) => input.prelude(emit));
   }
@@ -316,9 +230,64 @@ async function dispatch(input: {
 
 type HarnessAnswer = NonNullable<Body["answer"]>;
 
+/** A message (and files) that joins a run instead of starting one. */
+type JoiningMessage = {
+  text: string;
+  attachments?: { input: AttachmentInput[] | undefined; prepared: PreparedAttachment[] };
+};
+
+/**
+ * Queues a message for the run's next turn. Files are stored first as this
+ * attempt's run attachments, so whichever worker runs the turn can read them.
+ */
+async function queueSteer(actorClerkId: string, runId: string, executionId: string, message: JoiningMessage) {
+  const attachmentIds = message.attachments?.prepared.length
+    ? await persistRunAttachments(runId, executionId, message.attachments.input, message.attachments.prepared, { steer: true })
+    : [];
+  const text = message.text.trim().slice(0, 8_000);
+  if (!text && !attachmentIds.length) return null;
+  return mutate<unknown & object, { queued: boolean; threadId: string | null }>("spectraHarness:queueSteer", {
+    actorClerkId,
+    runId,
+    executionId,
+    text,
+    ...(attachmentIds.length ? { attachmentIds } : {}),
+  });
+}
+
+/** Keeps a joining message in its thread, so it is there after a reload. */
+async function keepJoiningMessage(input: {
+  actorClerkId: string;
+  threadId?: string | null;
+  runId: string;
+  executionId: string;
+  text: string;
+  submissionKey?: string;
+  prepared: PreparedAttachment[];
+  metadata: Record<string, unknown>;
+}) {
+  if (!input.threadId) return;
+  await mutate("spectraThreads:appendMessage", {
+    actorClerkId: input.actorClerkId,
+    threadId: input.threadId,
+    role: "user",
+    content: input.text,
+    runId: input.runId,
+    executionId: input.executionId,
+    ...(input.submissionKey?.trim() ? { clientMessageId: input.submissionKey.trim() } : {}),
+    metadata: {
+      ...input.metadata,
+      ...(input.prepared.length
+        ? { attachments: input.prepared.map(({ name, mimeType, size, handling }) => ({ name, mimeType, size, handling })) }
+        : {}),
+    },
+  }).catch(() => null);
+}
+
 /**
  * Records the answer to a paused run's open question or approval and resumes
- * it. Feedback given with the answer ("not like that: ...") joins the next turn.
+ * it. A message given with the answer ("not like that: ...") and any files
+ * join the next turn.
  */
 async function answerAndResume(input: {
   actorClerkId: string;
@@ -326,7 +295,7 @@ async function answerAndResume(input: {
   executionId: string;
   toolCallId: string;
   answer: HarnessAnswer;
-  feedback?: string;
+  message?: JoiningMessage;
   uiObserver?: unknown;
   timeZone?: string;
   /** The reply was typed in the composer: the stream opens like a new run. */
@@ -347,10 +316,13 @@ async function answerAndResume(input: {
     return new Response(publicError(error), { status: 409 });
   }
   if (answered.alreadyAnswered) return new Response("This was already answered in another view.", { status: 409 });
-  const feedback = input.feedback?.trim();
-  if (feedback)
-    await mutate("spectraHarness:queueSteer", { actorClerkId, runId, executionId, text: feedback.slice(0, 8_000) }).catch(() => null);
-  const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId, runId });
+  // The answer re-queued the run, so the message and its files can join it.
+  const [, detail] = await Promise.all([
+    input.message
+      ? queueSteer(actorClerkId, runId, executionId, input.message).catch(() => null)
+      : Promise.resolve(null),
+    query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId, runId }),
+  ]);
   const card = detail.cards[0];
   if (!card) return new Response("Result card not found", { status: 409 });
   return dispatch({
@@ -368,27 +340,96 @@ async function answerAndResume(input: {
   });
 }
 
+type JoinableRun = {
+  runId: string;
+  executionId: string;
+  threadId: string | null;
+  status: string;
+  pending: { toolCallId: string; kind: "question" | "approval" } | null;
+};
+
 /**
- * A thread whose last run is paused on a question or approval. A message typed
- * there answers it, as in Claude Code, instead of starting a separate run that
- * would lose the paused work: the text answers a question, and turns down an
- * approval with the text as what to do instead.
+ * The run a new message joins, as in Claude Code: the run it names, or the
+ * thread's active run. A waiting run takes the message as its answer; a
+ * working run reads it at its next turn. Files go with the message either way.
  */
-async function pausedRunInThread(actorClerkId: string, threadId: string | undefined) {
-  if (!threadId) return null;
-  const active = await query<unknown & object, { run?: { _id: string; executionId?: string; status: string } } | null>(
-    "spectraThreads:getActiveExecution",
-    { actorClerkId, threadId },
-  ).catch(() => null);
-  const run = active?.run;
-  if (!run?.executionId || (run.status !== "awaiting_resolution" && run.status !== "awaiting_confirmation")) return null;
-  const loaded = await query<unknown & object, { executionId?: string; pending?: { toolCallId?: string; kind?: string } | null } | null>(
-    "spectraHarness:load",
-    { actorClerkId, runId: run._id },
-  ).catch(() => null);
-  const pending = loaded?.pending;
-  if (!pending?.toolCallId || loaded?.executionId !== run.executionId) return null;
-  return { runId: run._id, executionId: run.executionId, toolCallId: pending.toolCallId, kind: pending.kind === "approval" ? "approval" : "question" } as const;
+async function joinableRun(actorClerkId: string, threadId: string | undefined, steerRunId: string | undefined) {
+  if (!threadId && !steerRunId) return null;
+  return query<unknown & object, JoinableRun | null>("spectraHarness:joinableRun", {
+    actorClerkId,
+    ...(steerRunId ? { runId: steerRunId } : { threadId }),
+  }).catch(() => null);
+}
+
+async function joinRun(input: {
+  actorClerkId: string;
+  run: JoinableRun;
+  prompt: string;
+  submissionKey?: string;
+  timeZone?: string;
+  attachments: { input: AttachmentInput[] | undefined; prepared: PreparedAttachment[] };
+}) {
+  const { actorClerkId, run, prompt } = input;
+  const files = input.attachments.prepared.length ? input.attachments : undefined;
+  if (run.pending) {
+    await keepJoiningMessage({
+      actorClerkId,
+      threadId: run.threadId,
+      runId: run.runId,
+      executionId: run.executionId,
+      text: prompt,
+      submissionKey: input.submissionKey,
+      prepared: input.attachments.prepared,
+      metadata: { answersInput: run.pending.toolCallId },
+    });
+    // The text answers a question; for an approval it says what to do instead.
+    const approval = run.pending.kind === "approval";
+    return answerAndResume({
+      actorClerkId,
+      runId: run.runId,
+      executionId: run.executionId,
+      toolCallId: run.pending.toolCallId,
+      answer: approval ? { kind: "approval", allowed: false } : { kind: "question", text: prompt },
+      ...(approval || files ? { message: { text: approval ? prompt : "", ...(files ? { attachments: files } : {}) } } : {}),
+      timeZone: input.timeZone,
+      asNewTurn: true,
+    });
+  }
+  try {
+    await queueSteer(actorClerkId, run.runId, run.executionId, { text: prompt, ...(files ? { attachments: files } : {}) });
+  } catch (error) {
+    return new Response(publicError(error), { status: 409 });
+  }
+  await keepJoiningMessage({
+    actorClerkId,
+    threadId: run.threadId,
+    runId: run.runId,
+    executionId: run.executionId,
+    text: prompt,
+    submissionKey: input.submissionKey,
+    prepared: input.attachments.prepared,
+    metadata: { steer: true },
+  });
+  return ndjson(async (emit) => {
+    emit({ type: "steer_queued", runId: run.runId, ...(run.threadId ? { threadId: run.threadId } : {}) });
+  });
+}
+
+/** Whether the user may still use this agent (it exists, is shared with them and has a published release). */
+async function agentIsAvailable(actorClerkId: string, agentId: string) {
+  const runtime = await query<unknown & object, { agentId?: unknown } | null>("spectraArtifacts:getAgentRuntime", {
+    actorClerkId,
+    agentId,
+  }).catch(() => null);
+  return typeof runtime?.agentId === "string";
+}
+
+/** A chosen agent that cannot run: a clear typed error, never a silent fallback to Auto. */
+function agentUnavailable() {
+  return new Response(AGENT_UNAVAILABLE_MESSAGE, {
+    status: 409,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "X-Spectra-Error": AGENT_UNAVAILABLE },
+  });
 }
 
 export function handleSpectraRunRequest(request: NextRequest) {
@@ -439,50 +480,52 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     const surface = body.surface;
     if (!prompt) return new Response("Invalid prompt", { status: 400 });
     if (!surface || !["chat", "workspace", "artifacts", "artifact"].includes(surface)) return new Response("Invalid surface", { status: 400 });
-    let attachments: PreparedAttachment[];
-    try {
-      attachments = await prepareRunAttachments(body.attachments);
-    } catch (error) {
-      return new Response(publicError(error), { status: 400 });
-    }
-    if (attachments.length === 0) {
-      const paused = await pausedRunInThread(actor.clerkId, body.threadId?.trim() || undefined);
-      if (paused) {
-        if (body.threadId)
-          await mutate("spectraThreads:appendMessage", {
-            actorClerkId: actor.clerkId,
-            threadId: body.threadId.trim(),
-            role: "user",
-            content: prompt,
-            runId: paused.runId,
-            executionId: paused.executionId,
-            ...(body.submissionKey?.trim() ? { clientMessageId: body.submissionKey.trim() } : {}),
-            metadata: { answersInput: paused.toolCallId },
-          }).catch(() => null);
-        return answerAndResume({
-          actorClerkId: actor.clerkId,
-          runId: paused.runId,
-          executionId: paused.executionId,
-          toolCallId: paused.toolCallId,
-          answer: paused.kind === "approval" ? { kind: "approval", allowed: false } : { kind: "question", text: prompt },
-          ...(paused.kind === "approval" ? { feedback: prompt } : {}),
-          timeZone: body.timeZone,
-          asNewTurn: true,
-        });
-      }
-    }
-    const workspaceId = await inferWorkspaceForRun(actor.clerkId, body);
-    let created: { runId: string; resultCardId: string; threadId: string; executionId: string; created: boolean };
+    const threadId = body.threadId?.trim() || undefined;
+    const pointers = normalizePointers(body);
+    // A string chooses an agent; null switches the thread back to Auto.
+    const chosenAgentId = typeof body.agentId === "string" && body.agentId.trim() ? body.agentId.trim() : undefined;
+    // Independent checks run together: they sit before the first token.
+    const [prepared, joinable, agentAvailable] = await Promise.all([
+      prepareRunAttachments(body.attachments).then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      ),
+      joinableRun(actor.clerkId, threadId, body.steerRunId?.trim() || undefined),
+      chosenAgentId ? agentIsAvailable(actor.clerkId, chosenAgentId) : Promise.resolve(true),
+    ]);
+    if (!prepared.ok) return new Response(publicError(prepared.error), { status: 400 });
+    const attachments = prepared.value;
+    if (joinable)
+      return joinRun({
+        actorClerkId: actor.clerkId,
+        run: joinable,
+        prompt,
+        submissionKey: body.submissionKey,
+        timeZone: body.timeZone,
+        attachments: { input: body.attachments, prepared: attachments },
+      });
+    if (!agentAvailable) return agentUnavailable();
+    let created: {
+      runId: string;
+      resultCardId: string;
+      card: Card | null;
+      threadId: string;
+      executionId: string;
+      workspaceId?: string;
+      created: boolean;
+    };
     try {
       created = await mutate<unknown & object, typeof created>("spectraRuns:beginRun", {
         actorClerkId: actor.clerkId,
         sourceSurface: surface === "artifacts" ? "artifact" : surface,
         userPrompt: prompt,
         submissionKey: body.submissionKey?.trim() || crypto.randomUUID(),
-        threadId: body.threadId?.trim() || undefined,
-        workspaceId,
+        threadId,
+        workspaceId: body.workspaceId,
         artifactId: body.artifactId,
         modelUsed: getSpectraModelId(),
+        ...(Object.keys(pointers).length ? { pointers } : {}),
+        ...(body.agentId === null ? { clearRetainedAgent: true } : {}),
         messageMetadata: {
           attachments: attachments.map(({ name, mimeType, size, handling }) => ({ name, mimeType, size, handling })),
         },
@@ -497,7 +540,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         return new Response(publicError(error), { status: 409 });
       }
     }
-    const initialCard = await latestCard(actor.clerkId, created.runId);
+    const initialCard = created.card ?? (await latestCard(actor.clerkId, created.runId));
     const prelude = (emit: (event: unknown) => void) => {
       emit({ type: "run_created", runId: created.runId, card: streamCard(initialCard) });
       emit({ type: "thread_ready", runId: created.runId, threadId: created.threadId });
@@ -514,12 +557,12 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         prompt,
         surface,
         threadId: created.threadId,
-        workspaceId,
+        workspaceId: created.workspaceId ?? body.workspaceId,
         scopeNodeId: body.scopeNodeId,
         artifactId: body.artifactId,
-        currentView: body.currentView,
+        ...pointers,
         timeZone: body.timeZone,
-        agentId: body.agentId,
+        ...(chosenAgentId ? { agentId: chosenAgentId } : {}),
       },
       attachments,
       prelude,
@@ -561,15 +604,36 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
   }
 
   if (action === "steer") {
-    const steer = body.text?.trim();
-    if (!steer) return new Response("Write a message first.", { status: 400 });
+    const steer = body.text?.trim() ?? "";
+    let prepared: PreparedAttachment[];
     try {
-      await mutate("spectraHarness:queueSteer", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, text: steer.slice(0, 8_000) });
-      return Response.json({ queued: true });
+      prepared = await prepareRunAttachments(body.attachments);
     } catch (error) {
-      // The run already finished: the client sends the message as a new turn.
+      return new Response(publicError(error), { status: 400 });
+    }
+    if (!steer && !prepared.length) return new Response("Write a message first.", { status: 400 });
+    let queued: { threadId: string | null } | null;
+    try {
+      queued = await queueSteer(actor.clerkId, runId, expectedExecutionId, {
+        text: steer,
+        ...(prepared.length ? { attachments: { input: body.attachments, prepared } } : {}),
+      });
+    } catch (error) {
+      // The run is waiting or finished: the client sends the message as a new
+      // turn, which answers a waiting run or starts the next one.
       return new Response(publicError(error), { status: 409 });
     }
+    await keepJoiningMessage({
+      actorClerkId: actor.clerkId,
+      threadId: queued?.threadId,
+      runId,
+      executionId: expectedExecutionId,
+      text: steer,
+      submissionKey: body.submissionKey,
+      prepared,
+      metadata: { steer: true },
+    });
+    return Response.json({ queued: true });
   }
 
   if (action === "answer" || action === "confirm" || action === "cancel") {
@@ -590,7 +654,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       executionId: expectedExecutionId,
       toolCallId,
       answer,
-      feedback: body.text,
+      ...(body.text?.trim() ? { message: { text: body.text } } : {}),
       uiObserver: body.uiObserver,
       timeZone: body.timeZone,
     });
@@ -626,7 +690,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
       resultCardId: reset.resultCardId,
       executionId: reset.executionId,
       payload: payloadForRun({ ...current.run, userPrompt: reset.prompt }, "retry", body.timeZone),
-      attachments: scheduledExecution() ? undefined : await loadPersistedRunAttachments(runId, reset.executionId).catch(() => []),
+      attachments: scheduledExecution() ? undefined : await loadRunAttachments(runId, reset.executionId).catch(() => []),
       prelude,
     });
   }

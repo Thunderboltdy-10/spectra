@@ -121,6 +121,11 @@ export type HarnessTool<A = Record<string, unknown>> = {
   category?: (args: A) => PermissionCategory | undefined;
   /** A short human phrase, present tense, no ids: "Creating *Photosynthesis*". */
   label: (args: A) => string;
+  /**
+   * Harness plumbing with nothing true to tell the user (loading a skill): no
+   * step in the trace and nothing for the captions to describe.
+   */
+  quiet?: boolean;
   /** The approval question, in plain words, when the effect asks. */
   question?: (args: A) => string;
   /**

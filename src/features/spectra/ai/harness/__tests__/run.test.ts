@@ -226,6 +226,33 @@ describe("runHarness", () => {
     expect([...backend.artifacts.values()]).toHaveLength(1);
   });
 
+  it("never shows loading a skill as a step or gives it to the captions", async () => {
+    const events: HarnessEvent[] = [];
+    const captionRequests: unknown[] = [];
+    const result = await runHarness({
+      runId: "r-skill",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Make a deck on cells",
+      environment: { now: 0 },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      captionWriter: async (request) => {
+        captionRequests.push(request);
+        return { caption: "Drafting a deck on cells" };
+      },
+      compactor: null,
+      callModel: model([
+        { text: "", toolCalls: [{ id: "s1", name: "load_skill", arguments: JSON.stringify({ name: "presentation" }) }] },
+        { text: "Here is the plan.", toolCalls: [] },
+      ]),
+      sink: { emit: (event) => events.push(event), checkpoint: async () => undefined },
+    });
+    expect(result.status).toBe("completed");
+    expect(events.map((event) => event.type)).toEqual(["text"]);
+    expect(JSON.stringify(events)).not.toMatch(/Getting ready|skill/i);
+    expect(captionRequests).toEqual([]);
+  });
+
   it("binds history to this thread and puts the new message last", async () => {
     let seen: HarnessMessage[] = [];
     await runHarness({

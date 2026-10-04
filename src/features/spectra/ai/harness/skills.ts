@@ -74,12 +74,13 @@ export function loadSkillTool(): HarnessTool<{ name: string }> {
       additionalProperties: false,
     },
     effect: "read",
-    label: () => "Getting ready",
+    label: (args) => `Loading the ${args.name} skill`,
+    quiet: true,
     parse: (raw) => {
       if (typeof raw.name !== "string" || !SKILL_INDEX.some((entry) => entry.name === raw.name))
         throw new ToolInputError(`name must be one of ${SKILL_INDEX.map((entry) => entry.name).join(", ")}.`);
       return { name: raw.name };
     },
-    execute: async (args) => ({ ok: true, content: await loadSkillText(args.name), doneLabel: "Got ready" }),
+    execute: async (args) => ({ ok: true, content: await loadSkillText(args.name) }),
   };
 }

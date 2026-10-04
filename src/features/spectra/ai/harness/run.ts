@@ -216,10 +216,12 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           scheduleFlush();
         },
         onToolStart: (step) => {
+          if (step.tool?.quiet) return;
           emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect });
           captions?.stepStarted({ id: step.call.id, label: step.label });
         },
         onToolEnd: (step) => {
+          if (step.tool?.quiet) return;
           const label = step.outcome.doneLabel ?? step.label;
           emit({ type: "step_end", id: step.call.id, ok: step.outcome.ok, label, durationMs: step.durationMs });
           captions?.stepEnded({ id: step.call.id, ok: step.outcome.ok, doneLabel: step.outcome.doneLabel });

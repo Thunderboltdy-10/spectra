@@ -38,8 +38,8 @@ Settings → Spectra → Island offers:
 - **Show the prism** (default): the prism rests at the bottom centre.
 - **Wake from the edge:**
   - Nothing is shown at rest.
-  - Moving the pointer into a 28 px band along the bottom centre (about 360 px wide) wakes the island. The field
-    gathers out of the paper and condenses into the prism, which opens straight into the hover structure.
+  - Moving the pointer into a 28 px band along the bottom centre (about 360 px wide) wakes the island. The prism
+    forms out of the field and morphs straight into the hover structure.
   - Ctrl/Cmd + J also wakes it.
   - A "needs you" event still wakes it on its own.
 
@@ -187,8 +187,9 @@ The agent switch is at the left end of the field.
 
 ### Sending
 
-- The text condenses into particles, which stream into a new tab sliding out to the left of the +.
-- The pill then returns to rest, unless the pointer is on it.
+- The words part into dots that travel into a new tab sliding out to the left of the +.
+- The pill then folds back into the prism, unless the pointer is on it. The prism breathes as it takes the run in,
+  and its status dot shows working.
 
 ### Cancelling
 
@@ -196,8 +197,9 @@ Esc, or moving away with an empty field, cancels. Unsent text is kept as a draft
 
 ## Questions and approvals
 
-When a run calls `ask_user` or needs permission (see [HARNESS.md](../ai/HARNESS.md#permissions)), the prism dissolves
-and its particles re-form as a question card. Neither the composer nor the tabs open.
+When a run calls `ask_user` or needs permission (see [HARNESS.md](../ai/HARNESS.md#permissions)), the prism breathes
+out, light leaves its apex and travels up through the field, and the question card forms where it lands. The prism's
+status dot turns yellow. Neither the composer nor the tabs open.
 
 **The card.**
 
@@ -214,14 +216,15 @@ and its particles re-form as a question card. Neither the composer nor the tabs 
 - **When the pill is already open,** the question grows from its tab instead.
 - **Typing in the reply field** answers a question or declines an approval, with the text as what to do instead. The
   run resumes where it stopped.
-- **Answering** folds the card back into particles that re-form as the prism, and the working light resumes.
+- **Answering** sends the card back: it parts into dots that pour into the prism, which breathes, turns, and shows
+  the working dot again.
 
 ## Arriving threads
 
 When a thread is opened from the threads view or started elsewhere (for example "Ask about this" on an artifact):
 
-1. Its row or button sheds particles that stream along a curve to the island.
-2. The pill opens to catch them as a tab.
+1. Its row or button travels to the island: its lines part, and light crosses the field.
+2. The pill opens, and the tab forms where the light lands.
 3. It settles after about 1.2 s.
 
 ## Keyboard and access
@@ -237,7 +240,7 @@ When a thread is opened from the threads view or started elsewhere (for example 
 
 - Finished threads and new questions are announced politely to screen readers.
 - With reduced motion:
-  - particles are replaced by cross-fades;
+  - morphs and travels are replaced by cross-fades;
   - size changes are instant;
   - the prism stays still and changes only its light.
 
@@ -247,8 +250,11 @@ Every transition is a morph of one continuous container, carried by the field:
 
 - **The container** is measured and animated with springs.
 - **The content** cross-fades with a slight blur.
-- **The prism never vanishes.** It dissolves into particles and the particles become the next thing: the +, the
-  question card's outline, the agent glyph. Reversing a transition re-forms the prism.
+- **The prism never vanishes.** It is made of the field's dots like everything else. Its lines part into dots,
+  which flow into the next thing (the composer's outline, the question card, the agent glyph) and fuse into its
+  lines. Lines the next thing doesn't need sink into the field. Reversing a transition forms the prism again.
+- **The status dot** by the prism's top right corner keeps the state visible after each short moment (see
+  [LIFE.md](LIFE.md#status-dot)).
 - **Interruption.** Every transition can be interrupted from its current state, and nothing snaps.
 
-[LIFE.md](LIFE.md) defines the particles, the physics and the prism. [MOTION.md](MOTION.md) holds the timings.
+[LIFE.md](LIFE.md) defines the field, its verbs and choreographies, and the prism. [MOTION.md](MOTION.md) holds the timings.

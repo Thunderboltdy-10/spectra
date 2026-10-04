@@ -1,5 +1,5 @@
-import { getSpectraThreads, searchSpectra, type SpectraThread } from "../data/api";
-import type { SpectraArtifact, SpectraWorkspace } from "../data/api";
+import { searchSpectra, type SpectraWorkspace } from "../data/api";
+import type { SemanticKind, SemanticResult } from "../semantic/types";
 import { spectraBus } from "../events";
 import { APP_COMMANDS } from "./app-registry";
 import { commandForBinding } from "./registry";
@@ -34,6 +34,8 @@ export type KBarSearchResult = {
   title: string;
   subtitle?: string;
   params: Record<string, unknown>;
+  /** Position in a ranked (semantic) answer: 0 is the best match. */
+  rank?: number;
 };
 
 const CONTEXT_BOOSTS: Record<string, Partial<Record<"settings" | "artifact" | "chat" | "library" | "workspace", number>>> = {
@@ -234,7 +236,8 @@ function resultEntry(result: KBarSearchResult, command: Command<unknown>, query:
     description: result.subtitle ?? `Open ${result.kind} through the authorized Spectra path.`,
     params: result.params,
     contextLabel: result.kind[0]!.toUpperCase() + result.kind.slice(1),
-    score: 100 + textScore(`${result.title} ${result.subtitle ?? ""}`, query),
+    // Ranked results keep their order; a title match still lifts a result above commands.
+    score: 100 + Math.max(0, textScore(result.title, query)) - (result.rank ?? 0) * 0.5,
   };
 }
 
@@ -263,16 +266,6 @@ export function buildKBarEntries(
     .slice(0, 36);
 }
 
-function artifactResult(artifact: SpectraArtifact): KBarSearchResult {
-  return {
-    id: artifact._id,
-    kind: "artifact",
-    title: artifact.title,
-    subtitle: artifact.summary ?? artifact.blueprintKey,
-    params: { workId: artifact._id, surface: "panel" },
-  };
-}
-
 function workspaceResult(workspace: SpectraWorkspace): KBarSearchResult {
   return {
     id: workspace._id,
@@ -283,56 +276,51 @@ function workspaceResult(workspace: SpectraWorkspace): KBarSearchResult {
   };
 }
 
-function threadResult(thread: SpectraThread): KBarSearchResult {
-  return {
-    id: thread._id,
-    kind: "thread",
-    title: thread.title || "Untitled conversation",
-    subtitle: thread.summaryShort ?? thread.previewText ?? "Conversation",
-    params: { threadId: thread._id },
-  };
+/** The semantic layer finds work and chats; the bar opens them through registered commands. */
+export const KBAR_SEMANTIC_KINDS = ["artifact", "thread"] as const satisfies readonly SemanticKind[];
+
+/** Semantic results as command-bar results, in the layer's ranking order. */
+export function semanticKBarResults(results: readonly SemanticResult[]): KBarSearchResult[] {
+  return results.flatMap((result, index): KBarSearchResult[] => {
+    if (result.kind === "artifact")
+      return [{
+        id: result.itemId,
+        kind: "artifact",
+        title: result.title || "Untitled",
+        subtitle: [result.typeLabel, result.location ?? result.snippet].filter(Boolean).join(" · "),
+        params: { workId: result.itemId, surface: "panel" },
+        rank: index,
+      }];
+    if (result.kind === "thread")
+      return [{
+        id: result.itemId,
+        kind: "thread",
+        title: result.title || "Untitled conversation",
+        subtitle: result.snippet || "Conversation",
+        params: { threadId: result.itemId },
+        rank: index,
+      }];
+    return [];
+  });
 }
 
-function dedupeResults(results: KBarSearchResult[]) {
+/** Workspaces have no semantic kind; the bar finds them by name through the authorized index. */
+export async function searchKBarWorkspaces(query: string, signal?: AbortSignal): Promise<KBarSearchResult[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const search = await searchSpectra(trimmed, { signal });
+  return search.workspaces.map(workspaceResult);
+}
+
+/** One list without duplicates: semantic results first, then workspaces. */
+export function mergeKBarResults(...lists: ReadonlyArray<readonly KBarSearchResult[]>): KBarSearchResult[] {
   const seen = new Set<string>();
-  return results.filter((result) => {
+  return lists.flat().filter((result) => {
     const key = `${result.kind}:${result.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-}
-
-/**
- * Search only compact, authorized indexes. This deliberately never calls a
- * thread/artifact detail endpoint: selecting a result is what mounts content.
- */
-export async function searchAuthorizedKBar(query: string, signal?: AbortSignal): Promise<KBarSearchResult[]> {
-  const trimmed = query.trim();
-  if (!trimmed) return [];
-  const [search, firstThreads] = await Promise.all([
-    searchSpectra(trimmed, { signal }),
-    getSpectraThreads({ limit: 40, force: true, signal }),
-  ]);
-  const threads = [...firstThreads.threads];
-  let cursor = firstThreads.nextCursor;
-  let pages = 1;
-  while (firstThreads.hasMore && cursor && pages < 8) {
-    const page = await getSpectraThreads({ limit: 40, cursor, force: true, signal });
-    threads.push(...page.threads);
-    cursor = page.nextCursor;
-    pages += 1;
-    if (!page.hasMore) break;
-  }
-  const queryLower = trimmed.toLocaleLowerCase();
-  const matchingThreads = threads.filter((thread) =>
-    `${thread.title} ${thread.summaryShort ?? ""} ${thread.previewText ?? ""}`.toLocaleLowerCase().includes(queryLower),
-  );
-  return dedupeResults([
-    ...search.artifacts.map(artifactResult),
-    ...search.workspaces.map(workspaceResult),
-    ...matchingThreads.map(threadResult),
-  ]);
 }
 
 export function commandContextForKBar(context: KBarContext, dispatch: CommandContext["executeApplicationCommand"]): CommandContext {

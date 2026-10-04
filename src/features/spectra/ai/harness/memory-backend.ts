@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import { artifactTypeLabel } from "../../../../../shared/semantic-chunks";
 import { resolveArtifactWriteInput } from "../../operations/artifact-write-content";
 import type {
   ArtifactSnapshot,
@@ -7,6 +8,10 @@ import type {
   HarnessBackend,
   LibraryItem,
   SearchHit,
+  SearchKind,
+  SearchRequest,
+  SearchResponse,
+  ThreadReadRequest,
   WebResult,
 } from "./backend";
 
@@ -25,6 +30,11 @@ export type MemoryBackendOptions = {
   thread?: Array<{ id: string; role: "user" | "assistant"; content: string }>;
   calendar?: Array<{ id: string; title: string; start: number; end?: number; kind: string }>;
   webSearch?: (query: string) => Promise<WebResult[]>;
+  /** Simulate the semantic layer answering with words only, or with a degraded index. */
+  searchMode?: SearchResponse["mode"];
+  searchDegraded?: SearchResponse["degraded"];
+  /** The id of the conversation in `thread`. */
+  threadId?: string;
 };
 
 export class MemoryBackend implements HarnessBackend {
@@ -35,10 +45,12 @@ export class MemoryBackend implements HarnessBackend {
   readonly memories: string[] = [];
   private sequence = 0;
   private readonly prompt: string;
+  private readonly threadId: string;
 
   constructor(private readonly options: MemoryBackendOptions = {}) {
     this.timeZone = options.timeZone ?? "Europe/Madrid";
     this.prompt = options.prompt ?? "";
+    this.threadId = options.threadId ?? "thread-1";
     for (const seed of options.artifacts ?? []) {
       const id = seed.id ?? this.nextId();
       this.artifacts.set(id, {
@@ -99,25 +111,54 @@ export class MemoryBackend implements HarnessBackend {
       .map((artifact) => ({ id: artifact.id, artifactId: artifact.id, kind: "work", type: artifact.type, title: artifact.title, location: artifact.location }));
   }
 
-  async search(input: { query: string; limit: number }): Promise<SearchHit[]> {
+  async search(input: SearchRequest): Promise<SearchResponse> {
     const words = input.query.toLowerCase().split(/\s+/).filter(Boolean);
+    const wanted = (kind: SearchKind) => !input.kinds?.length || input.kinds.includes(kind);
     const hits: SearchHit[] = [];
-    for (const artifact of this.artifacts.values()) {
-      const haystack = `${artifact.title} ${JSON.stringify(artifact.content)}`.toLowerCase();
-      if (words.some((word) => haystack.includes(word)))
-        hits.push({ kind: "artifact", id: artifact.id, title: artifact.title, type: artifact.type });
-    }
-    for (const message of this.options.thread ?? [])
-      if (words.some((word) => message.content.toLowerCase().includes(word)))
-        hits.push({ kind: "message", id: message.id, title: message.content.slice(0, 60), snippet: message.content.slice(0, 200) });
-    return hits.slice(0, input.limit);
+    if (wanted("artifact"))
+      for (const artifact of this.artifacts.values()) {
+        const haystack = `${artifact.title} ${JSON.stringify(artifact.content)}`.toLowerCase();
+        if (words.some((word) => haystack.includes(word)))
+          hits.push({ kind: "artifact", id: artifact.id, title: artifact.title, typeLabel: artifactTypeLabel(artifact.type), subtype: artifact.type });
+      }
+    if (wanted("thread"))
+      for (const message of this.options.thread ?? [])
+        if (words.some((word) => message.content.toLowerCase().includes(word)))
+          hits.push({
+            kind: "thread",
+            id: this.threadId,
+            title: "This conversation",
+            typeLabel: "Chat",
+            messageId: message.id,
+            snippet: message.content.slice(0, 200),
+          });
+    if (wanted("event"))
+      for (const item of this.options.calendar ?? [])
+        if (words.some((word) => item.title.toLowerCase().includes(word)))
+          hits.push({ kind: "event", id: item.id, title: item.title, typeLabel: "Calendar event", subtype: item.kind, timeAt: item.start });
+    if (wanted("memory"))
+      this.memories.forEach((memory, index) => {
+        if (words.some((word) => memory.toLowerCase().includes(word)))
+          hits.push({ kind: "memory", id: `memory-${index + 1}`, title: memory.slice(0, 60), typeLabel: "Memory", snippet: memory });
+      });
+    return {
+      hits: hits.slice(0, input.limit),
+      mode: this.options.searchMode ?? "hybrid",
+      ...(this.options.searchDegraded ? { degraded: this.options.searchDegraded } : {}),
+    };
   }
 
-  async readThread(input: { query?: string; limit?: number }) {
-    const messages = (this.options.thread ?? []).filter(
-      (message) => !input.query || message.content.toLowerCase().includes(input.query.toLowerCase()),
-    );
-    if (!messages.length) return "No earlier messages.";
+  async readThread(input: ThreadReadRequest) {
+    const thread = this.options.thread ?? [];
+    if (input.messageId) {
+      const message = thread.find((entry) => entry.id === input.messageId);
+      return message ? `[${message.id}] ${message.role}: ${message.content}` : "That message is not in this conversation.";
+    }
+    const end = input.before ? thread.findIndex((entry) => entry.id === input.before) : thread.length;
+    const messages = thread
+      .slice(0, end < 0 ? thread.length : end)
+      .filter((message) => !input.query || message.content.toLowerCase().includes(input.query.toLowerCase()));
+    if (!messages.length) return input.query ? `Nothing in this conversation matches "${input.query}".` : "No earlier messages.";
     return messages
       .slice(-(input.limit ?? 20))
       .map((message) => `[${message.id}] ${message.role}: ${message.content}`)

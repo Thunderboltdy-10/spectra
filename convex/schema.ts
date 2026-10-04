@@ -4250,11 +4250,7 @@ export default defineSchema({
     ])
     .index("by_school_status", ["schoolId", "status", "updatedAt"])
     .index("by_workspace", ["workspaceId"])
-    .index("by_artifact", ["artifactId"])
-    .searchIndex("search_title", {
-      searchField: "title",
-      filterFields: ["ownerAccountId", "schoolId", "status", "workspaceId"],
-    }),
+    .index("by_artifact", ["artifactId"]),
 
   spectraMessages: defineTable({
     threadId: v.id("spectraThreads"),
@@ -4277,11 +4273,7 @@ export default defineSchema({
     .index("by_thread_created", ["threadId", "createdAt"])
     .index("by_thread_ordinal", ["threadId", "ordinal"])
     .index("by_thread_client", ["threadId", "clientMessageId"])
-    .index("by_run", ["runId"])
-    .searchIndex("search_content", {
-      searchField: "content",
-      filterFields: ["threadId"],
-    }),
+    .index("by_run", ["runId"]),
 
   spectraAiRuns: defineTable({
     ownerAccountId: v.id("accounts"),

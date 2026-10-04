@@ -44,25 +44,6 @@ export type SemanticRegion = {
   readableText?: string;
 };
 
-export type ArtifactSkill = {
-  typeKey: ArtifactTypeKey;
-  purpose: string;
-  createWhen: readonly string[];
-  inspect: readonly string[];
-  regions: readonly string[];
-  operations: readonly string[];
-  preservationRules: readonly string[];
-  validation: readonly string[];
-  approvals: readonly string[];
-  connections: readonly string[];
-  workingEffects: readonly string[];
-  specialistGuides?: readonly {
-    id: string;
-    trigger: string;
-    instructions: readonly string[];
-  }[];
-};
-
 export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
   identity: {
     typeKey: ArtifactTypeKey;
@@ -93,7 +74,6 @@ export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
   };
   operations: readonly string[];
   regions: (content: z.infer<TSchema>) => SemanticRegion[];
-  loadSkill: () => Promise<ArtifactSkill>;
   collaboration: {
     roomPartition: "artifact" | "sheet" | "slide" | "file" | "viewport";
     commentAnchors: readonly string[];
@@ -119,7 +99,3 @@ export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
     primaryAccessibilityModel: string;
   };
 };
-
-export function defineArtifactSkill(skill: ArtifactSkill) {
-  return Object.freeze(skill);
-}

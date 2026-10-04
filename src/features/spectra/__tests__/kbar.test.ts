@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { APP_COMMANDS, buildKBarEntries, commandContextForKBar, rankKBarCommand, searchAuthorizedKBar, type KBarContext } from "../commands";
+import { APP_COMMANDS, buildKBarEntries, commandContextForKBar, mergeKBarResults, rankKBarCommand, searchKBarWorkspaces, semanticKBarResults, type KBarContext } from "../commands";
 import { spectraBus } from "../events";
 import * as spectraApi from "../data/api";
 
@@ -65,21 +65,31 @@ describe("contextual K-bar registry", () => {
     expect(entries.find((entry) => entry.id === "thread:thread-1")?.command.id).toBe("app.thread.open");
   });
 
-  it("pages the conversation index instead of treating the first page as global search", async () => {
-    const search = vi.spyOn(spectraApi, "searchSpectra").mockResolvedValue({ artifacts: [], workspaces: [] });
-    const threads = vi.spyOn(spectraApi, "getSpectraThreads").mockImplementation(async (params) =>
-      params?.cursor
-        ? { threads: [{ _id: "thread-2", title: "Older biology review", origin: "chat", status: "active", createdAt: 1, updatedAt: 2 }], hasMore: false, nextCursor: undefined }
-        : { threads: [], hasMore: true, nextCursor: "cursor-2" },
-    );
-    const signal = new AbortController().signal;
-    await expect(searchAuthorizedKBar("biology", signal)).resolves.toEqual([
-      expect.objectContaining({ id: "thread-2", kind: "thread" }),
+  it("opens semantic work and chat results through registered commands, in the layer's order", () => {
+    const results = semanticKBarResults([
+      { kind: "artifact", itemId: "work-2", title: "Cell respiration", typeLabel: "Slides", subtype: "presentation", snippet: "ATP", location: "Slide 3: Krebs", anchor: { kind: "artifact", artifactId: "work-2" }, score: 0.9, matchedBy: ["meaning"], ownership: "mine" },
+      { kind: "thread", itemId: "thread-2", title: "Biology review", typeLabel: "Chat", snippet: "We covered mitosis", anchor: { kind: "thread", threadId: "thread-2", messageId: "m-1" }, score: 0.5, matchedBy: ["words"], ownership: "mine" },
+      { kind: "event", itemId: "event-1", title: "Biology test", typeLabel: "Calendar event", snippet: "", anchor: { kind: "event", calendarItemId: "event-1" }, score: 0.4, matchedBy: ["words"], ownership: "mine" },
     ]);
+    expect(results).toEqual([
+      expect.objectContaining({ id: "work-2", kind: "artifact", subtitle: "Slides · Slide 3: Krebs", params: { workId: "work-2", surface: "panel" }, rank: 0 }),
+      expect.objectContaining({ id: "thread-2", kind: "thread", params: { threadId: "thread-2" }, rank: 1 }),
+    ]);
+    // Neither title contains the query: the semantic order still holds, above the commands.
+    const entries = buildKBarEntries(APP_COMMANDS, context(), "energy in cells", results);
+    expect(entries.slice(0, 2).map((entry) => entry.id)).toEqual(["artifact:work-2", "thread:thread-2"]);
+    expect(entries[0]?.command.id).toBe("app.work.open");
+  });
+
+  it("finds workspaces by name and merges them without duplicates", async () => {
+    const search = vi.spyOn(spectraApi, "searchSpectra").mockResolvedValue({ artifacts: [], workspaces: [{ _id: "ws-1", title: "Biology" } as never] });
+    const signal = new AbortController().signal;
+    const workspaces = await searchKBarWorkspaces(" biology ", signal);
     expect(search).toHaveBeenCalledWith("biology", { signal });
-    expect(threads).toHaveBeenCalledWith(expect.objectContaining({ cursor: "cursor-2", force: true }));
+    expect(workspaces).toEqual([expect.objectContaining({ id: "ws-1", kind: "workspace", params: { destination: "workspace", targetId: "ws-1" } })]);
+    expect(mergeKBarResults(workspaces, workspaces)).toHaveLength(1);
+    await expect(searchKBarWorkspaces("  ")).resolves.toEqual([]);
     search.mockRestore();
-    threads.mockRestore();
   });
 
   it("seeds the active artifact and asks only for comment text", () => {

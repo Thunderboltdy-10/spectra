@@ -38,9 +38,10 @@ const aiSchema = z.object({
   expandRequiredInput: z.boolean().default(true),
   newThreadShortcut: z.enum(["modifier_enter", "shift_enter", "menu_only"]).default("modifier_enter"),
   showProviderDiagnostics: z.boolean().default(false),
-  // Set only by the user: Settings, or "Always allow" on an approval.
+  // Set only by the user: Settings, or "Always allow" on an approval. Deny wins.
   permissionFullControl: z.boolean().default(false),
   permissionAllow: z.array(z.enum(PERMISSION_CATEGORIES)).max(PERMISSION_CATEGORIES.length).default([]),
+  permissionDeny: z.array(z.enum(PERMISSION_CATEGORIES)).max(PERMISSION_CATEGORIES.length).default([]),
 });
 
 const writingSchema = z.object({

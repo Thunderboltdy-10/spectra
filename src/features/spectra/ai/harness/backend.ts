@@ -3,7 +3,7 @@ import type { ToolOutcome } from "./types";
 
 /*
  * The harness talks to Spectra only through this port. The run runtime binds
- * it to Convex and the collaboration rooms; the smoke run and tests bind it to
+ * it to Convex and the collaboration rooms; the evals and tests bind it to
  * an in-memory store. Every method is scoped to one user and one run.
  */
 
@@ -32,13 +32,47 @@ export type LibraryItem = {
   updatedAt?: number;
 };
 
+/** What a search hit is: a piece of work, a chat, a calendar item, a school record or a memory. */
+export type SearchKind = "artifact" | "thread" | "event" | "school" | "memory";
+
 export type SearchHit = {
-  kind: "artifact" | "thread" | "message" | "memory";
+  kind: SearchKind;
+  /** The item id: an artifact id, thread id, calendar item id, school record id or memory id. */
   id: string;
   title: string;
-  type?: string;
+  /** "Slides", "Document", "Chat", "Calendar event", "School assignment", "Memory". */
+  typeLabel: string;
+  /** Artifact type (document, presentation, ...), calendar kind or school record type. */
+  subtype?: string;
+  /** The best matching passage. */
   snippet?: string;
-  threadId?: string;
+  /** Where the passage is: "Slide 3: Results", "Heading: Methods", "Sheet1 A1:D20". */
+  location?: string;
+  /** The block, slide, range or card the passage is in. */
+  regionId?: string;
+  /** Chats: the best matching message. */
+  messageId?: string;
+  /** The workspace the item lives in, when the user can open it. */
+  workspace?: string;
+  ownership?: "mine" | "shared" | "school";
+  updatedAt?: number;
+  /** When it happens: an event start or a due date. */
+  timeAt?: number;
+};
+
+export type SearchRequest = {
+  query: string;
+  /** Leave out to search everything, memory included. */
+  kinds?: SearchKind[];
+  limit: number;
+};
+
+export type SearchResponse = {
+  hits: SearchHit[];
+  /** words_only: the query could not be embedded, so only matching words were found. */
+  mode: "hybrid" | "words_only";
+  /** Why the results may be incomplete. */
+  degraded?: "embeddings_not_configured" | "embeddings_unavailable" | "query_too_large" | "index_partial";
 };
 
 export type WebResult = { title: string; url: string; snippet: string; publishedAt?: string };
@@ -64,6 +98,8 @@ export type CommandResult = {
 export type ThreadReadRequest = {
   threadId?: string;
   query?: string;
+  /** Read one whole message (from a search hit). */
+  messageId?: string;
   /** Read messages older than this message id. */
   before?: string;
   limit?: number;
@@ -99,10 +135,8 @@ export interface HarnessBackend {
     input: { query?: string; type?: string; folderId?: string; limit: number },
     signal: AbortSignal,
   ): Promise<LibraryItem[]>;
-  search(
-    input: { query: string; scope: "library" | "conversations" | "memory" | "all"; limit: number },
-    signal: AbortSignal,
-  ): Promise<SearchHit[]>;
+  /** Search by meaning and words across everything the user can open. */
+  search(input: SearchRequest, signal: AbortSignal): Promise<SearchResponse>;
   readThread(input: ThreadReadRequest, signal: AbortSignal): Promise<string>;
   webSearch(input: { query: string; deep?: boolean }, signal: AbortSignal): Promise<WebResult[]>;
   readCalendar(input: { from: number; to: number; title?: string }, signal: AbortSignal): Promise<string>;

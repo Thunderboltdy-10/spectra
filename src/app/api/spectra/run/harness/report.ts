@@ -153,6 +153,8 @@ export async function saveAssistantMessage(params: {
   artifacts?: Array<{ id: string; type: string; title: string; action: string; change?: string }>;
   /** The past-tense caption naming what the run did. */
   caption?: string;
+  /** Widgets the run showed, so the saved reply shows them again. */
+  widgets?: Array<{ id: string; title: string; html: string }>;
 }) {
   if (!params.threadId || !params.content.trim()) return;
   await mutate("spectraThreads:appendMessage", {
@@ -173,6 +175,7 @@ export async function saveAssistantMessage(params: {
       choices: params.choices ?? null,
       ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
       ...(params.caption ? { caption: params.caption } : {}),
+      ...(params.widgets?.length ? { widgets: params.widgets } : {}),
     },
   });
 }

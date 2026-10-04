@@ -1,3 +1,4 @@
+import { deniedResult } from "./permissions";
 import {
   ProviderUnavailableError,
   providerToolSpec,
@@ -16,6 +17,7 @@ import {
   type TodoItem,
   type ToolEffect,
   type ToolOutcome,
+  type ShownWidget,
   type WidgetOutput,
 } from "./types";
 
@@ -39,6 +41,9 @@ export const DEFAULT_LOOP_BUDGETS = {
 
 export type LoopBudgets = { wallClockMs: number; maxTurns: number };
 
+/** Widgets a reply keeps; older ones stay in the transcript only. */
+const MAX_WIDGETS = 4;
+
 export type RepeatRecord = { resultHash: string; count: number };
 
 /** Everything needed to resume a run after a pause, a reload or a restart. */
@@ -51,6 +56,8 @@ export type LoopState = {
   text: string;
   artifacts: ArtifactTouch[];
   todos?: TodoItem[];
+  /** The last widgets shown, newest last; the saved reply shows them again. */
+  widgets?: ShownWidget[];
   /** Calls still waiting for the user; the first is the open question. */
   pendingCalls: HarnessToolCall[];
   pending?: PendingInput;
@@ -80,7 +87,7 @@ export type ModelCaller = (input: {
   onRetry: () => void;
 }) => Promise<ModelTurn>;
 
-export type PermissionDecision = "allow" | "ask";
+export type PermissionDecision = "allow" | "ask" | "deny";
 
 export type ToolStepInfo = {
   call: HarnessToolCall;
@@ -385,7 +392,10 @@ export async function runHarnessLoop(
       state.todos = outcome.todos;
       hooks.onTodos?.(outcome.todos);
     }
-    if (outcome.widget) hooks.onWidget?.(outcome.widget, step);
+    if (outcome.widget) {
+      state.widgets = [...(state.widgets ?? []).filter((widget) => widget.id !== prepared.call.id), { id: prepared.call.id, ...outcome.widget }].slice(-MAX_WIDGETS);
+      hooks.onWidget?.(outcome.widget, step);
+    }
     if (outcome.uiEvents?.length) hooks.onUiEvents?.(outcome.uiEvents, step);
     hooks.onToolEnd?.({ ...step, outcome, durationMs: now() - startedAt });
   };
@@ -410,6 +420,11 @@ export async function runHarnessLoop(
       outcome = { ok: false, content: prepared.error ?? "This call could not run." };
     } else if (deps.signal.aborted) {
       outcome = { ok: false, content: STOPPED_RESULT };
+    } else if (
+      (prepared.effect === "irreversible" || prepared.effect === "settings") &&
+      deps.policy(prepared.effect, prepared.category) === "deny"
+    ) {
+      outcome = { ok: false, content: deniedResult(prepared.category) };
     } else {
       try {
         const run = (granted: boolean) =>
@@ -429,6 +444,8 @@ export async function runHarnessLoop(
               ok: false,
               content: `${prepared.tool.name} asked for approval again after it was given. Nothing more was done for this step.`,
             };
+          else if (deps.policy("irreversible", outcome.pause.category) === "deny")
+            outcome = { ok: false, content: deniedResult(outcome.pause.category) };
           else if (deps.policy("irreversible", outcome.pause.category) === "allow")
             outcome = await run(true);
         }

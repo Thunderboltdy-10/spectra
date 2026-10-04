@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ExternalLink, FileText, Loader2, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { workTypeMeta } from "../artifacts/presentation";
-import type { HarnessAnswerValue, LiveWidget } from "../ai/harness-exchange";
+import type { HarnessAnswerValue } from "../ai/harness-exchange";
 import { mergeTouch } from "../ai/harness-exchange";
 import { InlineEmphasis } from "./inline-emphasis";
 import type { HarnessArtifactTouchView, HarnessInputView } from "../ai/stream-events";
@@ -12,7 +12,7 @@ import type { HarnessArtifactTouchView, HarnessInputView } from "../ai/stream-ev
 /*
  * The parts of a harness run the thread shows besides its text: the open
  * question or approval, the work it created, edited or referenced (one card
- * each), and any small interactive widget it drew.
+ * each). Widgets it drew render in thread-widget.tsx.
  */
 
 export function HarnessInputPanel({
@@ -228,22 +228,6 @@ export function WorkTouchCards({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-/** A small interactive view the run drew, isolated from the app. */
-export function HarnessWidgets({ widgets }: { widgets: readonly LiveWidget[] | undefined }) {
-  if (!widgets?.length) return null;
-  return (
-    <div className="mt-4 space-y-3">
-      {widgets.map((widget) => (
-        <figure key={widget.id} data-spectra-card="result" data-card-state="normal" className="overflow-hidden">
-          <figcaption className="px-3.5 pt-2.5 text-micro font-semibold text-[var(--text-secondary)]">{widget.title}</figcaption>
-          {/* No same-origin access: the widget cannot reach the app, cookies or storage. */}
-          <iframe title={widget.title} sandbox="allow-scripts" srcDoc={widget.html} className="h-80 w-full border-0 bg-[var(--bg-primary)]" />
-        </figure>
-      ))}
     </div>
   );
 }

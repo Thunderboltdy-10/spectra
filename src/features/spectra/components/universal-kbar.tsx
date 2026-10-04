@@ -26,11 +26,16 @@ import {
   APP_COMMANDS,
   buildKBarEntries,
   commandContextForKBar,
-  searchAuthorizedKBar,
+  KBAR_SEMANTIC_KINDS,
+  mergeKBarResults,
+  searchKBarWorkspaces,
+  semanticKBarResults,
+  type KBarSearchResult,
   type KBarContext,
   type KBarEntry,
 } from "../commands";
 import { postSpectra } from "../data/api";
+import { useSemanticSearch } from "../semantic/use-semantic";
 import { requestViewportAction, type ViewportView } from "../viewport-readiness";
 
 function routeTarget(href: string): { view: ViewportView; targetId: string } {
@@ -92,8 +97,8 @@ export function UniversalKBar() {
   const { preferences, replace: replacePreferences } = useSpectraPreferences();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Awaited<ReturnType<typeof searchAuthorizedKBar>>>([]);
-  const [searching, setSearching] = useState(false);
+  const [workspaceResults, setWorkspaceResults] = useState<KBarSearchResult[]>([]);
+  const [searchingWorkspaces, setSearchingWorkspaces] = useState(false);
   const [selected, setSelected] = useState(0);
   const [parametersFor, setParametersFor] = useState<KBarEntry | null>(null);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
@@ -187,26 +192,26 @@ export function UniversalKBar() {
     const timer = window.setTimeout(() => {
       const trimmed = query.trim();
       if (!trimmed) {
-        setResults([]);
-        setSearching(false);
+        setWorkspaceResults([]);
+        setSearchingWorkspaces(false);
         return;
       }
-      setSearching(true);
-      void searchAuthorizedKBar(trimmed, controller.signal)
+      setSearchingWorkspaces(true);
+      void searchKBarWorkspaces(trimmed, controller.signal)
         .then((next) => {
           if (!controller.signal.aborted) {
-            setResults(next);
+            setWorkspaceResults(next);
             setSelected(0);
           }
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {
-            setResults([]);
+            setWorkspaceResults([]);
             setResultMessage(error instanceof Error ? error.message : "Search could not be completed.");
           }
         })
         .finally(() => {
-          if (!controller.signal.aborted) setSearching(false);
+          if (!controller.signal.aborted) setSearchingWorkspaces(false);
         });
     }, 160);
     return () => {
@@ -215,6 +220,18 @@ export function UniversalKBar() {
     };
   }, [confirming, open, parametersFor, query]);
 
+  // Work and chats come from the semantic layer, by meaning and words; what is open ranks first.
+  const semantic = useSemanticSearch(query, {
+    kinds: [...KBAR_SEMANTIC_KINDS],
+    limit: 20,
+    enabled: open && !parametersFor && !confirming,
+    openItemIds: [context.activeArtifactId, context.activeThreadId].filter((id): id is string => Boolean(id)),
+  });
+  const results = useMemo(
+    () => mergeKBarResults(semanticKBarResults(semantic.results), workspaceResults),
+    [semantic.results, workspaceResults],
+  );
+  const searching = searchingWorkspaces || (semantic.status === "loading" && !semantic.results.length);
   const entries = useMemo(
     () => buildKBarEntries(APP_COMMANDS, context, query, results),
     [context, query, results],
@@ -484,6 +501,7 @@ export function UniversalKBar() {
           <>
             <div className="max-h-[min(60vh,520px)] overflow-y-auto p-2">
               {searching ? <p className="px-3 py-4 text-caption text-[var(--text-tertiary)]">Searching…</p> : null}
+              {semantic.degraded && semantic.degraded !== "index_partial" && query.trim() ? <p role="status" className="px-3 py-1 text-caption text-[var(--text-tertiary)]">Matching exact words only right now.</p> : null}
               {!searching && !entries.length ? <p className="px-3 py-8 text-center text-caption text-[var(--text-tertiary)]">Nothing matches “{query.trim()}”.</p> : null}
               {entries.map((entry, index) => (
                 <button

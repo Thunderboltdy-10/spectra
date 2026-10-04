@@ -33,7 +33,7 @@ type CommandTool<A> = {
   after?: (args: A, result: CommandResult) => Partial<ToolOutcome>;
 };
 
-function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): HarnessTool<A> {
+export function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): HarnessTool<A> {
   return {
     name: spec.name,
     description: spec.description,

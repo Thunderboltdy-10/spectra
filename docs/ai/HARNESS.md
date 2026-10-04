@@ -376,7 +376,8 @@ These are measured by the eval suite on the real model.
 ## Evaluation
 
 `npm run eval:ai` runs about 40 scenarios against the real model through OpenRouter. It is not part of CI, but it must
-pass before launch.
+pass before launch. `-- --only <names>` and `-- --group <area>` run a subset. The runner and the report are unit-tested
+with a scripted model (`src/features/spectra/ai/harness/evals`).
 
 **Each scenario:**
 
@@ -384,7 +385,8 @@ pass before launch.
 2. sends one or more prompts;
 3. checks the outcome: artifacts exist with real content, the right state changed, the reply is honest, there are no
    errors, and latency is within target;
-4. captures a screenshot of every touched artifact for human review;
+4. shows the text of every touched artifact for human review (screenshots need a browser, so they are taken in the
+   live check);
 5. produces a report at `.spectra-local/ai-evals/<date>/report.html`.
 
 **Coverage:**

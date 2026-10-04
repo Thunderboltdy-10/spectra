@@ -89,6 +89,17 @@ export function resumePayload(params: AttemptParams) {
 }
 
 /** Convex stores at most 1 MB per value. Trim old tool output and images. */
+/** What the user is looking at and pointed to, most important first: a search ranking hint. */
+export function openItemIds(params: Pick<AttemptParams, "artifactId" | "open" | "references" | "threadId">) {
+  const ids = [
+    params.artifactId,
+    ...(params.references ?? []).map((pointer) => pointer.id),
+    ...(params.open ?? []).map((pointer) => pointer.id),
+    params.threadId,
+  ].filter((id): id is string => typeof id === "string" && id.length > 0);
+  return [...new Set(ids)].slice(0, 12);
+}
+
 export function storableState(state: LoopState): LoopState {
   const plain = JSON.parse(JSON.stringify(state)) as LoopState;
   if (JSON.stringify(plain).length <= STATE_LIMIT_CHARS) return plain;
@@ -301,6 +312,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       prompt: params.prompt,
       timeZone,
       toolOperations: sameAttempt ? loaded?.toolOperations : {},
+      openItemIds: openItemIds(params),
       onUiEvent: (event) => publish({ type: "ui_event", runId, key: event.key, ...(event.payload ? { payload: event.payload } : {}) }),
     });
 
@@ -505,6 +517,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           executionId,
           content: reply,
           affected: backend.affected,
+          widgets: result.state.widgets,
         }).catch(() => null);
       return;
     }
@@ -575,6 +588,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       affected: backend.affected,
       artifacts: touches,
       caption: finalCaption,
+      widgets: result.state.widgets,
       model: getSpectraModelId(),
     }).catch(() => null);
     if (params.mode === "start")

@@ -1,7 +1,7 @@
 # R-A2A: semantic layer
 
-Lane A2a. Branch `lane/semantic`, based on main 9f371498. There are six commits from 7f47d7a4 to
-the tuning commit, and the branch merges cleanly into the current main (checked with `git merge-tree`).
+Lane A2a. Branch `lane/semantic` from main 9f371498, commits 7f47d7a4 through the report commits.
+It merges cleanly into the current main (checked with `git merge-tree`).
 
 ## What it is
 

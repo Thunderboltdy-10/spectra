@@ -8,6 +8,7 @@ import { internalMutation } from "./orgNodeMutation";
 import { purgeNode, purgeSourceNodes } from "./orgTreeShared";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { scheduleDeletion } from "./spectraArtifactDeletion";
+import { enqueueSemanticItem } from "./semanticQueue";
 
 /**
  * Erasure of one account after its identity was deleted at the IdP.
@@ -496,6 +497,14 @@ const ACCOUNT_TABLES: TableStep[] = [
       return NONE;
     },
   ),
+  // Search passages and Related caches built from the account's items. A work that stays
+  // (kept for others) is queued and indexed again from its source.
+  drain((ctx, id, n) => ctx.db.query("semanticChunks").withIndex("by_owner_kind", (q) => q.eq("ownerAccountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("semanticItems").withIndex("by_owner_kind", (q) => q.eq("ownerAccountId", id)).take(n), async (ctx, row) => {
+    await enqueueSemanticItem(ctx, row.itemKind, row.itemId, { schoolId: row.schoolId, immediate: true });
+    return NONE;
+  }),
+  drain((ctx, id, n) => ctx.db.query("semanticRelatedCache").withIndex("by_account_item", (q) => q.eq("accountId", id)).take(n)),
 ];
 
 async function accountRowsPage(ctx: MutationCtx, job: Job, account: Doc<"accounts">): Promise<Advance> {

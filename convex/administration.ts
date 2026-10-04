@@ -3847,6 +3847,11 @@ export const PURGE_SCHOOL_TABLES = [
   "artifactDeletionJobs",
   "workspaceDeletionJobs",
   "spectraArtifactRevisionFacts",
+  // Derived search rows last: deleting their sources above queues purges that land here.
+  "semanticIndexQueue",
+  "semanticChunks",
+  "semanticItems",
+  "semanticRelatedCache",
 ] as const;
 
 /** School-leading index for each purge table that has one. A table left out
@@ -3891,6 +3896,10 @@ export const PURGE_SCHOOL_INDEXES: Partial<
   spectraWorkspaces: "by_school_status",
   calendarPeriodMaps: "by_school_updated",
   managebacResourceImports: "by_school_updated",
+  semanticIndexQueue: "by_school",
+  semanticChunks: "by_school",
+  semanticItems: "by_school",
+  semanticRelatedCache: "by_school",
 };
 
 async function rowBelongsToPurgedSchool(

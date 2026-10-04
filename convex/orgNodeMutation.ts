@@ -45,6 +45,7 @@ import {
   upsertCalendarItemReadModel,
   deleteCalendarItemReadModel,
 } from "./calendarReadModels";
+import { applySemanticTrigger, SEMANTIC_TRIGGERS } from "./semanticSources";
 
 const triggers = new Triggers<DataModel>();
 for (const table of ["spectraArtifacts", "spectraArtifactVersions", "artifactSnapshotObjects", "artifactImportJobs", "changeGroups", "workReplicas", "bridgeWriteRequests", "syncConflicts", "collaborationUpdates", "collaborationSnapshots"] as const) {
@@ -276,6 +277,14 @@ triggers.register("artifactUserStates", async (ctx, change) => {
     },
   );
 });
+
+// Semantic index: saves of every registered source touch one debounced queue row
+// (convex/semanticSources.ts); embedding happens later in an action.
+for (const trigger of SEMANTIC_TRIGGERS) {
+  triggers.register(trigger.table, async (ctx, change) => {
+    await applySemanticTrigger({ db: ctx.innerDb, scheduler: ctx.scheduler }, trigger, change.oldDoc, change.newDoc);
+  });
+}
 
 export const mutation = customMutation(rawMutation, customCtx(triggers.wrapDB));
 

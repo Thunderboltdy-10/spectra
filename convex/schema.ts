@@ -2,6 +2,8 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSchema";
 import { providerProjectionIntent, providerProjectionReceipt } from "./managebacProjectionContract";
+import { EMBEDDING_DIMENSIONS } from "./embeddingProvider";
+import { vSemanticKind as semanticIndexedKind } from "./semanticKeys";
 import {
   artifactEmbedContainerTypeValidator,
   artifactEmbedContextPolicyValidator,
@@ -2725,7 +2727,7 @@ export default defineSchema({
     .index("by_school_status", ["schoolId", "status"])
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
-      dimensions: 256,
+      dimensions: EMBEDDING_DIMENSIONS,
       filterFields: ["accountId", "schoolId", "status", "embeddingPartition"],
     })
     .searchIndex("search_normalized_proposition", {
@@ -3864,6 +3866,137 @@ export default defineSchema({
     .index("by_uploader_created", ["uploadedByAccountId", "createdAt"])
     // School purge deletes one school's assets instead of scanning every tenant's.
     .index("by_school", ["schoolId"]),
+
+  // Semantic layer (src/features/spectra/semantic/README.md). One row per passage of an item
+  // declared in convex/semanticSources.ts (artifacts, threads, calendar items, school data). The `v*Key` fields are vector prefilter
+  // partitions that embed the vector version, so vectors from another model never match; the
+  // plain keys filter full-text search. Every read re-checks access on the source item.
+  semanticChunks: defineTable({
+    itemKind: semanticIndexedKind,
+    itemId: v.string(),
+    chunkKey: v.string(),
+    ordinal: v.number(),
+    schoolId: v.optional(v.id("schools")),
+    ownerAccountId: v.optional(v.id("accounts")),
+    title: v.string(),
+    label: v.optional(v.string()),
+    regionId: v.optional(v.string()),
+    messageId: v.optional(v.string()),
+    /** Only the owner may find this passage (quiz answers, private timetable details). */
+    ownerOnly: v.optional(v.boolean()),
+    text: v.string(),
+    searchText: v.string(),
+    contentHash: v.string(),
+    embedding: v.optional(v.array(v.float64())),
+    embeddingVersion: v.optional(v.string()),
+    workspaceKey: v.optional(v.string()),
+    audienceKey: v.optional(v.string()),
+    vOwnerKey: v.optional(v.string()),
+    vWorkspaceKey: v.optional(v.string()),
+    vWorkspaceKey2: v.optional(v.string()),
+    vItemKey: v.optional(v.string()),
+    vAudienceKey: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_item", ["itemKind", "itemId", "chunkKey"])
+    .index("by_owner_kind", ["ownerAccountId", "itemKind"])
+    .index("by_school", ["schoolId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["vOwnerKey", "vWorkspaceKey", "vWorkspaceKey2", "vItemKey", "vAudienceKey"],
+    })
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["itemKind", "ownerAccountId", "schoolId", "workspaceKey", "audienceKey"],
+    }),
+
+  // One row per indexed item: its centroid for Related, lineage for copy detection, and the
+  // source generation that makes re-indexing idempotent.
+  semanticItems: defineTable({
+    itemKind: semanticIndexedKind,
+    itemId: v.string(),
+    schoolId: v.optional(v.id("schools")),
+    ownerAccountId: v.optional(v.id("accounts")),
+    title: v.string(),
+    subtype: v.optional(v.string()),
+    contentDigest: v.string(),
+    lineageIds: v.array(v.string()),
+    /** Item key of the source this one mirrors (a calendar deadline of a school record). */
+    mirrors: v.optional(v.string()),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    /** Event start or due date. */
+    timeAt: v.optional(v.number()),
+    sourceUpdatedAt: v.number(),
+    indexedAt: v.number(),
+    chunkCount: v.number(),
+    embeddingVersion: v.optional(v.string()),
+    embeddingState: v.union(v.literal("complete"), v.literal("pending"), v.literal("disabled")),
+    centroid: v.optional(v.array(v.float64())),
+    vOwnerKey: v.optional(v.string()),
+    vWorkspaceKey: v.optional(v.string()),
+    vWorkspaceKey2: v.optional(v.string()),
+    vItemKey: v.optional(v.string()),
+    vAudienceKey: v.optional(v.string()),
+  })
+    .index("by_item", ["itemKind", "itemId"])
+    .index("by_owner_kind", ["ownerAccountId", "itemKind"])
+    .index("by_school", ["schoolId"])
+    .index("by_state", ["embeddingState", "indexedAt"])
+    .index("by_owner_updated", ["ownerAccountId", "sourceUpdatedAt"])
+    .vectorIndex("by_centroid", {
+      vectorField: "centroid",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["vOwnerKey", "vWorkspaceKey", "vWorkspaceKey2", "vItemKey", "vAudienceKey"],
+    }),
+
+  // Debounced re-index work. Saves only touch this row; embedding happens in actions.
+  semanticIndexQueue: defineTable({
+    itemKind: semanticIndexedKind,
+    itemId: v.string(),
+    schoolId: v.optional(v.id("schools")),
+    status: v.union(v.literal("waiting"), v.literal("running")),
+    dueAt: v.number(),
+    firstQueuedAt: v.number(),
+    lastTouchedAt: v.number(),
+    leaseOwner: v.optional(v.string()),
+    attempts: v.number(),
+    rerun: v.optional(v.boolean()),
+  })
+    .index("by_item", ["itemKind", "itemId"])
+    .index("by_status_due", ["status", "dueAt"])
+    .index("by_school", ["schoolId"]),
+
+  // Related neighbours per viewer and item. Candidate ids only: every read re-checks access, and
+  // a re-index of the item (new generation) or the TTL retires the row.
+  semanticRelatedCache: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    itemKind: semanticIndexedKind,
+    itemId: v.string(),
+    generation: v.number(),
+    embeddingVersion: v.string(),
+    neighbors: v.array(v.object({ itemKind: semanticIndexedKind, itemId: v.string(), similarity: v.number() })),
+    expiresAt: v.number(),
+  })
+    .index("by_account_item", ["accountId", "itemKind", "itemId"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_school", ["schoolId"]),
+
+  // Singleton: the earliest dispatch already scheduled, so dispatch chains collapse into one.
+  semanticDispatcher: defineTable({ scheduledFor: v.number() }),
+
+  semanticBackfills: defineTable({
+    /** A registered kind, then "sweep", "memory", "done" (convex/semanticIndex.ts). */
+    phase: v.string(),
+    cursor: v.optional(v.string()),
+    pageSize: v.number(),
+    scanned: v.number(),
+    enqueued: v.number(),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  }).index("by_started", ["startedAt"]),
 
   spectraArtifactLinks: defineTable({
     ownerAccountId: v.id("accounts"),

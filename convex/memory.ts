@@ -13,10 +13,10 @@ import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import {
-  MEMORY_EMBEDDING_VERSION, MEMORY_EMBEDDING_LEASE_MS, MEMORY_EMBEDDING_MAX_ATTEMPTS,
-  memoryInputHash, memoryEmbeddingPartition, memoryQueryFitsBytes, validMemoryVector,
-  type MemoryEmbeddingResult,
+  MEMORY_EMBEDDING_LEASE_MS, MEMORY_EMBEDDING_MAX_ATTEMPTS,
+  memoryInputHash, memoryEmbeddingPartition, memoryQueryFitsBytes,
 } from "./memoryEmbeddingPolicy";
+import { EMBEDDING_FAILURES, embedQuery, embeddingVersion, validEmbeddingVector } from "./embeddingProvider";
 import { createManagebacVisibilityReader } from "./managebacVisibility";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
@@ -25,7 +25,6 @@ const MAX_CLAIMS_PER_CONTEXT = 24;
 const MAX_LIST = 300;
 const EVIDENCE_WINDOW = 12;
 const embeddingGenerate = makeFunctionReference<"action", { jobId: Id<"memoryJobs">; leaseOwner: string }, void>("memoryEmbeddings:generate");
-const embeddingQuery = makeFunctionReference<"action", { accountId: Id<"accounts">; queryText: string }, MemoryEmbeddingResult>("memoryEmbeddings:queryVector");
 const AUTHORED_EVIDENCE_TYPES = [
   "user_statement",
   "correction",
@@ -572,18 +571,19 @@ async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
     await ctx.db.patch(capsule._id, { stale: true, updatedAt: now });
 }
 
-async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims">, retryFailed = false, wake = true): Promise<boolean> {
+export async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims">, retryFailed = false, wake = true): Promise<boolean> {
   if (!(await canEmbedClaim(ctx, claim))) return false;
+  const version = embeddingVersion();
+  const partition = memoryEmbeddingPartition(claim, version);
+  if (!version || !partition) return false;
   const inputHash = await memoryInputHash(claim.proposition);
-  const partition = memoryEmbeddingPartition(claim);
-  if (!partition) return false;
-  if (claim.embeddingVersion === MEMORY_EMBEDDING_VERSION && claim.embeddingInputHash === inputHash &&
-    validMemoryVector(claim.embedding)) {
+  if (claim.embeddingVersion === version && claim.embeddingInputHash === inputHash &&
+    validEmbeddingVector(claim.embedding)) {
     // Retention may have removed the completed job; the committed identity remains authoritative.
     if (claim.embeddingPartition !== partition) await ctx.db.patch(claim._id, { embeddingPartition: partition });
     return false;
   }
-  const idempotencyKey = `embed:${claim._id}:${MEMORY_EMBEDDING_VERSION}:${inputHash}`;
+  const idempotencyKey = `embed:${claim._id}:${version}:${inputHash}`;
   const existing = await ctx.db.query("memoryJobs")
     .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey)).unique();
   const now = Date.now();
@@ -592,11 +592,11 @@ async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims"
     await ctx.db.patch(existing._id, {
       status: "queued", attemptCount: 0, availableAt: now, updatedAt: now,
       leaseOwner: undefined, leaseExpiresAt: undefined, error: undefined,
-      payload: { claimId: claim._id, inputHash, embeddingVersion: MEMORY_EMBEDDING_VERSION, partition },
+      payload: { claimId: claim._id, inputHash, embeddingVersion: version, partition },
     });
   } else await ctx.db.insert("memoryJobs", {
     accountId: claim.accountId, schoolId: claim.schoolId, kind: "embed", idempotencyKey,
-    payload: { claimId: claim._id, inputHash, embeddingVersion: MEMORY_EMBEDDING_VERSION, partition },
+    payload: { claimId: claim._id, inputHash, embeddingVersion: version, partition },
     status: "queued", attemptCount: 0, availableAt: now, createdAt: now, updatedAt: now,
   });
   if (wake) await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
@@ -607,7 +607,7 @@ function embeddingJobPayload(ctx: MemoryCtx, job: Doc<"memoryJobs">) {
   const payload = job.payload as { claimId?: unknown; inputHash?: unknown; embeddingVersion?: unknown; partition?: unknown } | null;
   const claimId = typeof payload?.claimId === "string" ? ctx.db.normalizeId("memoryClaims", payload.claimId) : null;
   return claimId && typeof payload?.inputHash === "string" && typeof payload.partition === "string" &&
-    payload.embeddingVersion === MEMORY_EMBEDDING_VERSION
+    payload.embeddingVersion === embeddingVersion()
     ? { claimId, inputHash: payload.inputHash, partition: payload.partition } : null;
 }
 
@@ -687,10 +687,10 @@ export const completeEmbedding = internalMutation({
     if (!job || job.kind !== "embed" || job.status !== "leased" || job.leaseOwner !== args.leaseOwner ||
       (job.leaseExpiresAt ?? 0) <= now) return { committed: false };
     const claim = await permittedEmbeddingClaim(ctx, job);
-    if (claim && validMemoryVector(args.vector)) {
+    if (claim && validEmbeddingVector(args.vector)) {
       const payload = embeddingJobPayload(ctx, job)!;
       await ctx.db.patch(claim._id, {
-        embedding: args.vector, embeddingVersion: MEMORY_EMBEDDING_VERSION,
+        embedding: args.vector, embeddingVersion: embeddingVersion()!,
         embeddingInputHash: payload.inputHash, embeddingUpdatedAt: now, embeddingPartition: payload.partition,
       });
       await ctx.db.patch(job._id, { status: "completed", completedAt: now, updatedAt: now, error: undefined, leaseOwner: undefined, leaseExpiresAt: undefined });
@@ -700,8 +700,8 @@ export const completeEmbedding = internalMutation({
     const retry = Boolean(claim && args.retryable && job.attemptCount < MEMORY_EMBEDDING_MAX_ATTEMPTS);
     const delay = retry ? 2 ** (job.attemptCount - 1) * 5_000 : 0;
     // Persist only fixed status codes, never provider response text or input.
-    const codes = ["missing_key", "query_too_large", "timeout", "network", "rate_limited", "provider_unavailable", "provider_rejected", "invalid_response"];
-    const error = !claim ? "source_unavailable" : codes.includes(args.error ?? "") ? args.error : "invalid_response";
+    const error = !claim ? "source_unavailable" :
+      (EMBEDDING_FAILURES as readonly string[]).includes(args.error ?? "") ? args.error : "invalid_response";
     if (!claim) {
       const payload = embeddingJobPayload(ctx, job);
       const current = payload ? await ctx.db.get(payload.claimId) : null;
@@ -1379,13 +1379,13 @@ type RetrievalPartition = RetrievalDestination & { scope: Scope; accountId?: Id<
 async function authorizedMemoryPartitions(ctx: MemoryCtx, actor: Actor, destination: RetrievalDestination) {
   const partitions: RetrievalPartition[] = (["private_global", "private_school", "system"] as const).map((scope) => ({
     scope, accountId: actor.accountId, schoolId: scope === "private_school" ? actor.schoolId : undefined,
-    key: memoryEmbeddingPartition({ scope, accountId: actor.accountId, schoolId: actor.schoolId })!,
+    key: memoryEmbeddingPartition({ scope, accountId: actor.accountId, schoolId: actor.schoolId }) ?? "",
   }));
   if (destination.workspaceId) {
     const access = await evaluateAccessForActor(ctx, actor, "workspace", destination.workspaceId);
     if (access.allowed && access.capabilities.includes("read")) partitions.push({
       scope: "workspace", workspaceId: destination.workspaceId,
-      key: memoryEmbeddingPartition({ scope: "workspace", accountId: actor.accountId, schoolId: actor.schoolId, workspaceId: destination.workspaceId })!,
+      key: memoryEmbeddingPartition({ scope: "workspace", accountId: actor.accountId, schoolId: actor.schoolId, workspaceId: destination.workspaceId }) ?? "",
     });
   }
   if (destination.artifactId) {
@@ -1393,7 +1393,7 @@ async function authorizedMemoryPartitions(ctx: MemoryCtx, actor: Actor, destinat
     const access = await evaluateAccessForActor(ctx, actor, artifact?.blueprintKey === "agent" ? "agent" : "artifact", destination.artifactId);
     if (access.allowed && access.capabilities.includes("read")) partitions.push({
       scope: "shared_artifact", artifactId: destination.artifactId,
-      key: memoryEmbeddingPartition({ scope: "shared_artifact", accountId: actor.accountId, schoolId: actor.schoolId, artifactId: destination.artifactId })!,
+      key: memoryEmbeddingPartition({ scope: "shared_artifact", accountId: actor.accountId, schoolId: actor.schoolId, artifactId: destination.artifactId }) ?? "",
     });
   }
   return partitions;
@@ -1513,7 +1513,7 @@ export const contextForRunBase = internalQuery({
         continue;
       }
       const semanticValid = semanticScores.has(String(claim._id)) &&
-        claim.embeddingVersion === MEMORY_EMBEDDING_VERSION &&
+        claim.embeddingVersion === embeddingVersion() &&
         claim.embeddingPartition === memoryEmbeddingPartition(claim) &&
         partitions.some((partition) => partition.key === claim.embeddingPartition) &&
         claim.embeddingInputHash === await memoryInputHash(claim.proposition);
@@ -1651,7 +1651,7 @@ export const contextForRunBase = internalQuery({
       retrieval: {
         status: queryTooLarge ? "query_too_large" : args.retrievalStatus ?? "literal_only",
         literalUnavailable, truncated: truncated || exclusions.budget > 0, candidateEvidence: true,
-        guidance: queryTooLarge ? "Use a more specific complete query within 8192 UTF-8 bytes and 2048 tokens; the query was not shortened." :
+        guidance: queryTooLarge ? "Use a more specific complete query within 8000 UTF-8 bytes; the query was not shortened." :
           "These are candidate memories. Use only evidence relevant to the current request; none may be applicable.",
       },
     };
@@ -1673,7 +1673,7 @@ export const contextForRun = action({
     let semanticMatches: { claimId: Id<"memoryClaims">; score: number }[] = [];
     if (identity.enabled && retrievalStatus !== "query_too_large" && queryText.trim()) {
       try {
-        const result = await ctx.runAction(embeddingQuery, { accountId: identity.accountId, queryText });
+        const result = await embedQuery(identity.accountId, queryText);
         if (result.ok) {
           const matches = await ctx.vectorSearch("memoryClaims", "by_embedding", {
             vector: result.vector, limit: 80,

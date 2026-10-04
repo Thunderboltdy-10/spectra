@@ -30,10 +30,13 @@ const DELAYS: Record<string, number> = {
   "clerk:getSessionList": 150,
   "clerk:getToken": 150,
   "spectraRuns:listRunAttachments": 60,
+  "spectraHarness:joinableRun": 60,
 };
 const DEFAULT_QUERY_MS = 60;
 const DEFAULT_MUTATION_MS = 90;
 const MODEL_FIRST_TOKEN_MS = 700;
+// Auth, beginRun, then the claim and every read together.
+const MODEL_START_BUDGET_MS = 300;
 
 const calls: Array<{ name: string; at: number }> = [];
 let clockStart = 0;
@@ -47,7 +50,15 @@ function record(name: string) {
 function result(name: string, args: Record<string, unknown>): unknown {
   switch (name) {
     case "spectraRuns:beginRun":
-      return { runId: "run-1", resultCardId: "card-1", threadId: "thread-1", executionId: "exec-1", created: true, workspaceId: "ws-1" };
+      return {
+        runId: "run-1",
+        resultCardId: "card-1",
+        card: { _id: "card-1", runId: "run-1", status: "running", title: "Working", variant: "status", actions: [], updatedAt: 1 },
+        threadId: "thread-1",
+        executionId: "exec-1",
+        created: true,
+        workspaceId: "ws-1",
+      };
     case "spectraRuns:get":
       return {
         run: { status: "running", sourceSurface: "chat", userPrompt: "hello", threadId: "thread-1", executionId: "exec-1" },
@@ -69,7 +80,7 @@ function result(name: string, args: Record<string, unknown>): unknown {
     case "spectraThreads:getActiveExecution":
       return { run: null };
     case "spectraThreads:getSummary":
-      return { retainedAgentId: null };
+      return { needsTitle: false };
     case "accountPreferences:layers":
       return [];
     case "identity:me":
@@ -241,7 +252,9 @@ describe("first visible output for hello", () => {
   it("new chat", async () => {
     const measured = await firstOutputMs({ action: "run", prompt: "hello", surface: "chat", timeZone: "Europe/Madrid" });
     console.info("[latency] new chat", JSON.stringify({ firstText: measured.firstText, modelAt: measured.modelAt, calls: measured.calls }));
-    expect(measured.firstText).toBeLessThan(Number.POSITIVE_INFINITY);
+    // Budget: one admission write and one parallel round trip before the model (HARNESS.md, Latency targets).
+    expect(measured.modelAt).toBeLessThanOrEqual(MODEL_START_BUDGET_MS);
+    expect(measured.firstText).toBeLessThanOrEqual(MODEL_START_BUDGET_MS + MODEL_FIRST_TOKEN_MS);
   });
 
   it("existing thread with a document open", async () => {
@@ -256,13 +269,24 @@ describe("first visible output for hello", () => {
       timeZone: "Europe/Madrid",
     });
     console.info("[latency] thread + open document", JSON.stringify({ firstText: measured.firstText, modelAt: measured.modelAt, calls: measured.calls }));
-    expect(measured.firstText).toBeLessThan(Number.POSITIVE_INFINITY);
+    expect(measured.modelAt).toBeLessThanOrEqual(MODEL_START_BUDGET_MS + 60);
   });
 
   it("scheduled worker, new chat (from the scheduler's callback)", async () => {
-    const measured = await scheduledFirstOutputMs({ mode: "start", prompt: "hello", surface: "chat", threadId: "thread-1", timeZone: "Europe/Madrid" });
+    // The route marks a start sent without files, so the worker skips the attachment read.
+    const measured = await scheduledFirstOutputMs({ mode: "start", prompt: "hello", surface: "chat", threadId: "thread-1", timeZone: "Europe/Madrid", withAttachments: false });
     console.info("[latency] scheduled new chat", JSON.stringify({ firstText: measured.firstText, modelAt: measured.modelAt, calls: measured.calls }));
-    expect(measured.firstText).toBeLessThan(Number.POSITIVE_INFINITY);
+    // The scheduled hop adds Clerk; the first words are written to the log at once.
+    expect(measured.firstText).toBeLessThanOrEqual(1_300);
+  });
+
+  it("scheduled worker, resumed for the same user (a known session)", async () => {
+    await scheduledFirstOutputMs({ mode: "start", prompt: "hello", surface: "chat", threadId: "thread-1", timeZone: "Europe/Madrid", withAttachments: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const measured = await scheduledFirstOutputMs({ mode: "resume", prompt: "hello", surface: "chat", threadId: "thread-1", timeZone: "Europe/Madrid" });
+    console.info("[latency] scheduled resume, known session", JSON.stringify({ firstText: measured.firstText, modelAt: measured.modelAt, calls: measured.calls }));
+    expect(measured.calls.some((entry) => entry.name === "clerk:getSessionList")).toBe(false);
+    expect(measured.firstText).toBeLessThanOrEqual(1_150);
   });
 
   it("scheduled admission (request until the worker is scheduled)", async () => {

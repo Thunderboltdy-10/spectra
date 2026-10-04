@@ -161,9 +161,49 @@ export function runHarnessAttempt(params: AttemptParams, emit: (event: unknown) 
   );
 }
 
+type SavedHarnessState = {
+  executionId: string;
+  state: LoopState | null;
+  toolOperations: Record<string, string[]>;
+  pending: PendingInput | null;
+  answer: InputAnswer | null;
+};
+
+/**
+ * Everything the first model turn needs, read in parallel. These are reads
+ * (an explicit agent also records its routing, which checks the attempt), so
+ * they start before the claim instead of after it: the claim, the saved
+ * state and the environment together cost one round trip, not four.
+ */
+async function readBeforeFirstTurn(params: AttemptParams) {
+  const { actorClerkId, runId } = params;
+  const thread = readThreadSummary(actorClerkId, params.threadId);
+  const [loaded, agents, permissions, environment, history, threadSummary] = await Promise.all([
+    query<unknown & object, SavedHarnessState | null>("spectraHarness:load", { actorClerkId, runId }).catch(() => null),
+    readAgents(params, thread),
+    readPermissions(actorClerkId),
+    buildEnvironment({
+      actorClerkId,
+      currentView: params.currentView,
+      open: params.open,
+      selection: params.selection,
+      references: params.references,
+      surface: params.surface,
+      attachments: params.attachments,
+    }),
+    params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve([]),
+    thread,
+  ]);
+  return { loaded, agents, permissions, environment, history, threadSummary };
+}
+
 async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
   const started = Date.now();
   const { actorClerkId, runId, executionId } = params;
+  const reads = readBeforeFirstTurn(params);
+  // A lost claim ends the attempt before anything is written; the reads'
+  // own failures surface below, inside the run's error handling.
+  reads.catch(() => undefined);
   await mutate("spectraRuns:claimExecution", { actorClerkId, runId, executionId, workerId: params.workerId });
 
   // Live and durable events.
@@ -172,6 +212,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let eventWrite: Promise<unknown> = Promise.resolve();
   let persistenceFailed = false;
+  let wroteText = false;
   // Title writes finish before the worker ends, never before the reply.
   const titleWrites: Array<Promise<unknown>> = [];
   const persist = () => {
@@ -201,7 +242,11 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     }
     const type = String(event.type);
     queued.push({ type, payload: wire });
-    if (IMMEDIATE.has(type) || (type === "step" && event.status !== "running")) void persist();
+    // The first words reach a client that reads the durable log (a scheduled
+    // run) at once; later text is batched.
+    const firstText = type === "text_delta" && !wroteText;
+    if (firstText) wroteText = true;
+    if (firstText || IMMEDIATE.has(type) || (type === "step" && event.status !== "running")) void persist();
     else if (!flushTimer) flushTimer = setTimeout(() => void persist(), TEXT_FLUSH_MS);
   };
   const flushEvents = async () => {
@@ -243,16 +288,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
   }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
 
   try {
-    const loaded = await query<
-      unknown & object,
-      {
-        executionId: string;
-        state: LoopState | null;
-        toolOperations: Record<string, string[]>;
-        pending: PendingInput | null;
-        answer: InputAnswer | null;
-      } | null
-    >("spectraHarness:load", { actorClerkId, runId }).catch(() => null);
+    const { loaded, agents, permissions, environment, history, threadSummary } = await reads;
     const sameAttempt = loaded?.executionId === executionId;
     const timeZone = validTimeZone(params.timeZone) ?? "UTC";
     const backend = new ConvexHarnessBackend({
@@ -267,22 +303,6 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       toolOperations: sameAttempt ? loaded?.toolOperations : {},
       onUiEvent: (event) => publish({ type: "ui_event", runId, key: event.key, ...(event.payload ? { payload: event.payload } : {}) }),
     });
-    const thread = readThreadSummary(actorClerkId, params.threadId);
-    const [agents, permissions, environment, history, threadSummary] = await Promise.all([
-      readAgents(params, thread),
-      readPermissions(actorClerkId),
-      buildEnvironment({
-        actorClerkId,
-        currentView: params.currentView,
-        open: params.open,
-        selection: params.selection,
-        references: params.references,
-        surface: params.surface,
-        attachments: params.attachments,
-      }),
-      params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve([]),
-      thread,
-    ]);
 
     let resume: { state: LoopState; answer?: InputAnswer } | undefined;
     let restore: LoopState | undefined;

@@ -63,15 +63,35 @@ function verifyScheduledCallback(request: NextRequest, rawBody: string) {
 }
 
 /** Scheduled workers act as the owner, with a short-lived session token. */
-async function asOwner<T>(actorClerkId: string, task: () => Promise<T>) {
-  const secretKey = process.env.CLERK_SECRET_KEY;
-  if (!secretKey) throw new Error("Scheduled execution authentication is unavailable.");
-  const clerk = createClerkClient({ secretKey });
+/*
+ * The owner's session, remembered per worker process. A worker still asks
+ * Clerk for a fresh token every time (Clerk refuses one for a session that
+ * ended), so remembering the session only skips the lookup: one round trip
+ * less before a resumed or follow-up run starts.
+ */
+const ownerSessions = new Map<string, string>();
+
+async function ownerToken(clerk: ReturnType<typeof createClerkClient>, actorClerkId: string) {
+  const known = ownerSessions.get(actorClerkId);
+  if (known) {
+    const token = await clerk.sessions.getToken(known, "convex", 1_800).catch(() => null);
+    if (token?.jwt) return token.jwt;
+    ownerSessions.delete(actorClerkId);
+  }
   const sessions = await clerk.sessions.getSessionList({ userId: actorClerkId, status: "active", limit: 10 });
   const session = sessions.data.sort((left, right) => right.lastActiveAt - left.lastActiveAt)[0];
   if (!session) throw new Error("The owner has no active session for this scheduled run.");
   const token = await clerk.sessions.getToken(session.id, "convex", 1_800);
-  return withWorkerConvexToken(token.jwt, task);
+  ownerSessions.set(actorClerkId, session.id);
+  if (ownerSessions.size > 500) ownerSessions.delete(ownerSessions.keys().next().value!);
+  return token.jwt;
+}
+
+async function asOwner<T>(actorClerkId: string, task: () => Promise<T>) {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) throw new Error("Scheduled execution authentication is unavailable.");
+  const clerk = createClerkClient({ secretKey });
+  return withWorkerConvexToken(await ownerToken(clerk, actorClerkId), task);
 }
 
 type RunPayload = Omit<AttemptParams, "actorClerkId" | "runId" | "resultCardId" | "executionId" | "workerId" | "signal" | "scheduled">;

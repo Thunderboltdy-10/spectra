@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { CommandAvailability, CommandContext } from "../commands/types";
 import type { AuthorityRisk, CapabilityDefinition } from "./types";
+import { aiAuthorityForApp } from "../commands/ai-reach";
 
 const none = z.null();
 
@@ -16,7 +17,6 @@ type AppSpec = {
   risk: AuthorityRisk;
   availability: "readable" | "editable" | { reason: string };
   choreography: { target: string; region?: string };
-  exposed: boolean;
 };
 
 const APP_SPECS: readonly AppSpec[] = [
@@ -27,7 +27,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "application-route" },
-    exposed: true,
   },
   {
     id: "app.work.open",
@@ -35,7 +34,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "library-work" },
-    exposed: true,
   },
   {
     id: "app.work.reveal-anchor",
@@ -43,7 +41,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "artifact-anchor" },
-    exposed: true,
   },
   {
     id: "app.run.open-conversation",
@@ -52,7 +49,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.page.chat",
@@ -60,7 +56,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.page.workspace",
@@ -68,7 +63,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "workspace-route" },
-    exposed: true,
   },
   {
     id: "app.page.library",
@@ -76,7 +70,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "library-route" },
-    exposed: true,
   },
   {
     id: "app.page.calendar",
@@ -84,7 +77,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "calendar-route" },
-    exposed: true,
   },
   {
     id: "app.page.settings",
@@ -92,7 +84,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "settings-route" },
-    exposed: true,
   },
   {
     id: "app.page.agents",
@@ -100,7 +91,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "agents-route" },
-    exposed: true,
   },
   {
     id: "app.page.school",
@@ -108,7 +98,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "school-route" },
-    exposed: true,
   },
   {
     id: "app.page.analytics",
@@ -116,7 +105,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "analytics-route" },
-    exposed: true,
   },
   {
     id: "app.thread.open",
@@ -124,7 +112,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.chat.new",
@@ -132,7 +119,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.chat.continue",
@@ -140,7 +126,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.run.stop",
@@ -148,7 +133,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "confirm",
     availability: "readable",
     choreography: { target: "conversation-route" },
-    exposed: true,
   },
   {
     id: "app.follow.stop",
@@ -156,7 +140,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "application-route" },
-    exposed: true,
   },
   {
     id: "app.comments.open",
@@ -164,7 +147,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "artifact-comments" },
-    exposed: true,
   },
   {
     id: "app.comments.add",
@@ -172,7 +154,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "artifact-comments" },
-    exposed: true,
   },
   {
     id: "app.library.import",
@@ -180,7 +161,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "library-import" },
-    exposed: true,
   },
   {
     id: "app.workspace.import",
@@ -188,7 +168,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "workspace-import" },
-    exposed: true,
   },
   {
     id: "app.settings.toggle-continuation",
@@ -196,7 +175,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "settings-control", region: "continueCurrentConversation" },
-    exposed: true,
   },
   {
     id: "app.bridge.open-settings",
@@ -204,7 +182,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "settings-control", region: "devices" },
-    exposed: true,
   },
   {
     id: "app.library.delete",
@@ -212,7 +189,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "editable",
     choreography: { target: "library-tree" },
-    exposed: true,
   },
   {
     id: "app.library.organize",
@@ -221,7 +197,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "confirm",
     availability: "editable",
     choreography: { target: "library-tree" },
-    exposed: true,
   },
   {
     id: "app.sync.policy.change",
@@ -229,7 +204,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "editable",
     choreography: { target: "settings-control", region: "sync-policy" },
-    exposed: true,
   },
   {
     id: "app.memory.write",
@@ -237,7 +211,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "editable",
     choreography: { target: "settings-control", region: "memory" },
-    exposed: true,
   },
   {
     id: "app.sharing.change",
@@ -246,7 +219,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "editable",
     choreography: { target: "sharing-control" },
-    exposed: true,
   },
   {
     id: "app.managebac.sync",
@@ -254,7 +226,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "editable",
     choreography: { target: "settings-control", region: "managebac" },
-    exposed: true,
   },
   {
     id: "app.managebac.select-classes",
@@ -263,7 +234,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "confirm",
     availability: "editable",
     choreography: { target: "settings-control", region: "managebac" },
-    exposed: true,
   },
   {
     id: "app.managebac.import-resource",
@@ -271,7 +241,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "confirm",
     availability: "editable",
     choreography: { target: "school-resource-row" },
-    exposed: true,
   },
   {
     id: "app.managebac.mapping",
@@ -281,7 +250,6 @@ const APP_SPECS: readonly AppSpec[] = [
       reason: "ManageBac mapping changes use the dedicated human admin flow.",
     },
     choreography: { target: "settings-control", region: "managebac" },
-    exposed: false,
   },
   {
     id: "app.reference.insert",
@@ -289,7 +257,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "editable",
     choreography: { target: "workbar-command", region: "reference.insert" },
-    exposed: true,
   },
   {
     id: "app.reference.begin-picking",
@@ -297,7 +264,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "editable",
     choreography: { target: "workbar-command", region: "reference.beginPicking" },
-    exposed: true,
   },
   {
     id: "app.settings.change",
@@ -306,7 +272,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "editable",
     choreography: { target: "settings-control" },
-    exposed: true,
   },
   {
     id: "app.settings.manage-account",
@@ -314,7 +279,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "settings-control", region: "account" },
-    exposed: true,
   },
   {
     id: "app.settings.clear-compute-cache",
@@ -323,7 +287,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "confirm",
     availability: "editable",
     choreography: { target: "settings-control", region: "compute-cache" },
-    exposed: true,
   },
   {
     id: "app.calendar.open",
@@ -331,7 +294,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "calendar-route" },
-    exposed: true,
   },
   {
     id: "app.bridge.pair",
@@ -340,7 +302,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "readable",
     choreography: { target: "settings-security" },
-    exposed: false,
   },
   {
     id: "app.bridge.setup",
@@ -349,7 +310,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "settings-security", region: "bridge-setup" },
-    exposed: true,
   },
   {
     id: "app.bridge.policy.change",
@@ -358,7 +318,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: "readable",
     choreography: { target: "settings-control", region: "bridge-trust" },
-    exposed: false,
   },
   {
     id: "app.security.credentials",
@@ -366,7 +325,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "destructive",
     availability: { reason: "Credential changes are never AI-performable." },
     choreography: { target: "settings-security" },
-    exposed: false,
   },
   {
     id: "app.security.authority-mode",
@@ -374,7 +332,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "always-confirm",
     availability: { reason: "AI cannot change its own authority mode." },
     choreography: { target: "settings-security" },
-    exposed: false,
   },
   {
     id: "app.security.delete-account",
@@ -382,7 +339,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "destructive",
     availability: { reason: "Account deletion is never AI-performable." },
     choreography: { target: "settings-security" },
-    exposed: false,
   },
   {
     id: "app.providers.connect",
@@ -392,7 +348,6 @@ const APP_SPECS: readonly AppSpec[] = [
       reason: "Future provider connections are deferred until an adapter exists.",
     },
     choreography: { target: "settings-control", region: "providers" },
-    exposed: false,
   },
 ];
 
@@ -405,24 +360,24 @@ function availabilityForSpec(
   return () => ({ state: "disabled", reason });
 }
 
+/** Whether the AI reaches each one, and why not, comes from the command catalog. */
 export const APPLICATION_CAPABILITIES: readonly CapabilityDefinition<"app">[] =
-  APP_SPECS.map((spec) => ({
-    id: spec.id,
-    params: none,
-    scope: "application",
-    availability: availabilityForSpec(spec),
-    execute: { editor: spec.id },
-    ai: {
-      exposed: spec.exposed,
-      description: spec.exposed
-        ? spec.description
-        : spec.availability !== "readable" && spec.availability !== "editable"
-          ? spec.availability.reason
-          : spec.description,
-      riskClass: spec.risk,
-    },
-    choreography: spec.choreography,
-  }));
+  APP_SPECS.map((spec) => {
+    const authority = aiAuthorityForApp(spec.id);
+    return {
+      id: spec.id,
+      params: none,
+      scope: "application",
+      availability: availabilityForSpec(spec),
+      execute: { editor: spec.id },
+      ai: {
+        exposed: authority.aiAuthority === "allowed",
+        description: authority.aiAuthority === "allowed" ? spec.description : authority.prohibitionReason,
+        riskClass: spec.risk,
+      },
+      choreography: spec.choreography,
+    };
+  });
 
 export function applicationCapability(
   id: string,

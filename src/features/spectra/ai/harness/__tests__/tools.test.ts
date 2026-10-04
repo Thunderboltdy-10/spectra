@@ -52,7 +52,7 @@ describe("harness tools", () => {
     const { tools } = setup();
     const names = tools.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
-    for (const banned of ["propose_operation", "submit_plan", "revise_staged_operation", "read_artifact_skill", "find_commands", "run_command"])
+    for (const banned of ["propose_operation", "submit_plan", "revise_staged_operation", "read_artifact_skill"])
       expect(names).not.toContain(banned);
     for (const tool of tools) {
       expect(tool.description.length).toBeGreaterThan(40);

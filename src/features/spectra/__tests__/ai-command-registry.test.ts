@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  APP_COMMANDS,
-  APPLICATION_CAPABILITY_AUDIT,
-  APPLICATION_TOOL_COMMAND_MAP,
-  appCommandById,
-} from "../commands/app-registry";
+import { APP_COMMANDS, appCommandById } from "../commands/app-registry";
 
 describe("N8 app command registry", () => {
   it("contains one stable command record for navigation, organization, settings, calendar, and security", () => {
@@ -30,20 +25,6 @@ describe("N8 app command registry", () => {
     expect(
       APP_COMMANDS.every((command) => Boolean(command.choreography?.target)),
     ).toBe(true);
-  });
-
-  it("accounts for every bounded application tool explicitly", () => {
-    for (const [toolId, commandId] of Object.entries(APPLICATION_TOOL_COMMAND_MAP)) {
-      expect(APPLICATION_CAPABILITY_AUDIT).toContainEqual(
-        expect.objectContaining({ action: toolId, commandId }),
-      );
-      expect(appCommandById(commandId)).toBeTruthy();
-    }
-    expect(APPLICATION_CAPABILITY_AUDIT.filter((entry) => entry.status === "deferred"))
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ action: "mount_grant_or_revoke" }),
-        expect.objectContaining({ action: "create_or_pin_embed" }),
-      ]));
   });
 
   it("records prohibited security actions instead of omitting them", () => {

@@ -20,10 +20,7 @@ import {
   applyAiArtifactMutation,
   readLiveArtifactValue,
 } from "@/features/spectra/ai/yjs-artifact-operation";
-import {
-  appCommandById,
-  applicationCommandIdForTool,
-} from "@/features/spectra/commands/app-registry";
+import { catalogCommandForApplicationCommand } from "@/features/spectra/commands/ai-reach";
 import { materializeAiChangedPaths } from "@/features/spectra/components/ai-region-path";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
@@ -95,8 +92,7 @@ export async function executeApplicationCommand(
   const definition = spectraToolRegistry.get(command);
   if (!definition || definition.capability !== "operate_application")
     throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
-  const registeredCommandId = applicationCommandIdForTool(command);
-  if (!registeredCommandId || !appCommandById(registeredCommandId))
+  if (!catalogCommandForApplicationCommand(command))
     throw new Error(`APP_COMMAND_REGISTRY_DRIFT:${command}`);
   // Normalize model-friendly aliases before Zod strips unknown fields. The
   // settings schema intentionally accepts only persisted preference sections,

@@ -109,7 +109,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "application-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.chat",
@@ -123,7 +122,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     undo: "none(explain)",
     parameters: [],
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.workspace",
@@ -136,7 +134,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "workspace-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.library",
@@ -149,7 +146,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "library-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.calendar",
@@ -162,7 +158,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "calendar-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.settings",
@@ -175,7 +170,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "settings-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.agents",
@@ -188,7 +182,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "agents-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.school",
@@ -201,7 +194,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "school-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.page.analytics",
@@ -214,7 +206,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "analytics-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.thread.open",
@@ -229,7 +220,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.chat.new",
@@ -242,7 +232,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.chat.continue",
@@ -255,7 +244,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.run.stop",
@@ -268,7 +256,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "confirm",
     undo: "none(explain)",
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.follow.stop",
@@ -281,7 +268,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "application-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.comments.open",
@@ -294,7 +280,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "artifact-comments" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.comments.add",
@@ -309,7 +294,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "operation-inverse",
     choreography: { target: "artifact-comments" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.library.import",
@@ -322,7 +306,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "library-import" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.workspace.import",
@@ -335,7 +318,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "workspace-import" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.settings.toggle-continuation",
@@ -350,7 +332,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "operation-inverse",
     choreography: { target: "settings-control", region: "continueCurrentConversation" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.bridge.open-settings",
@@ -363,7 +344,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "settings-control", region: "devices" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.work.open",
@@ -385,7 +365,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "library-work" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.work.reveal-anchor",
@@ -398,7 +377,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "artifact-anchor" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.run.open-conversation",
@@ -411,7 +389,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "conversation-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.library.delete",
@@ -424,7 +401,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "always-confirm",
     undo: "operation-inverse",
     choreography: { target: "library-tree" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.library.organize",
@@ -458,7 +434,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "confirm",
     undo: "operation-inverse",
     choreography: { target: "library-tree" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.sync.policy.change",
@@ -474,7 +449,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "always-confirm",
     undo: "operation-inverse",
     choreography: { target: "settings-control", region: "sync-policy" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.memory.write",
@@ -487,7 +461,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "operation-inverse",
     choreography: { target: "settings-control", region: "memory" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.sharing.change",
@@ -504,7 +477,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "always-confirm",
     undo: "operation-inverse",
     choreography: { target: "sharing-control" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.managebac.sync",
@@ -516,7 +488,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "settings-control", region: "managebac" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.managebac.select-classes",
@@ -529,7 +500,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "confirm",
     undo: "operation-inverse",
     choreography: { target: "settings-control", region: "managebac" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.managebac.import-resource",
@@ -545,7 +515,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "confirm",
     undo: "none(explain)",
     choreography: { target: "school-resource-row" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.managebac.mapping",
@@ -558,8 +527,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     undo: "operation-inverse",
     availability: () => ({ state: "disabled", reason: "ManageBac mapping changes use the dedicated human admin flow." }),
     choreography: { target: "settings-control", region: "managebac" },
-    aiAuthority: "prohibited",
-    prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow.",
   }),
   appCommand({
     id: "app.reference.insert",
@@ -571,7 +538,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "operation-inverse",
     choreography: { target: "workbar-command", region: "reference.insert" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.reference.begin-picking",
@@ -583,7 +549,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "workbar-command", region: "reference.beginPicking" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.settings.change",
@@ -600,7 +565,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "always-confirm",
     undo: "operation-inverse",
     choreography: { target: "settings-control" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.settings.manage-account",
@@ -613,7 +577,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "settings-control", region: "account" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.settings.clear-compute-cache",
@@ -625,7 +588,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "confirm",
     undo: "none(explain)",
     choreography: { target: "settings-control", region: "compute-cache" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.calendar.open",
@@ -642,7 +604,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "calendar-route" },
-    aiAuthority: "allowed",
   }),
   appCommand({
     id: "app.bridge.pair",
@@ -662,8 +623,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Security", order: 0 },
     risk: "always-confirm",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
-    prohibitionReason: "Bridge pairing is never AI-performable.",
     choreography: { target: "settings-security" },
   }),
   appCommand({
@@ -699,8 +658,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Files & devices", order: 0 },
     risk: "always-confirm",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
-    prohibitionReason: "Bridge setup is a human browser action.",
     choreography: { target: "settings-security", region: "bridge-setup" },
   }),
   appCommand({
@@ -722,8 +679,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Files & devices", order: 2 },
     risk: "always-confirm",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
-    prohibitionReason: "Bridge trust changes require an explicit human confirmation.",
     choreography: { target: "settings-control", region: "bridge-trust" },
   }),
   appCommand({
@@ -743,9 +698,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Security", order: 1 },
     risk: "destructive",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
     visibility: "internal",
-    prohibitionReason: "Credential changes are never AI-performable.",
     choreography: { target: "settings-security" },
   }),
   appCommand({
@@ -758,9 +711,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Security", order: 2 },
     risk: "always-confirm",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
     visibility: "internal",
-    prohibitionReason: "AI cannot change its own authority mode.",
     choreography: { target: "settings-security" },
   }),
   appCommand({
@@ -773,9 +724,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Security", order: 3 },
     risk: "destructive",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
     visibility: "internal",
-    prohibitionReason: "Account deletion is never AI-performable.",
     choreography: { target: "settings-security" },
   }),
   appCommand({
@@ -788,8 +737,6 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     defaultPlacement: { tab: "Settings", group: "Integrations", order: 9 },
     risk: "always-confirm",
     undo: "none(explain)",
-    aiAuthority: "prohibited",
-    prohibitionReason: "Future provider connections are not available in this release.",
     choreography: { target: "settings-control", region: "providers" },
   }),
 ];
@@ -815,43 +762,6 @@ export function appCommandById(id: string) {
   return APP_COMMANDS.find((command) => command.id === id);
 }
 
-/** Stable convergence map between the bounded AI capability ids and the
- * human-facing application command namespace. Artifact operations already
- * have their own typed operation ids; this map is only for app surfaces. */
-export const APPLICATION_TOOL_COMMAND_MAP = {
-  navigate_spectra: "app.navigate",
-  reveal_work_anchor: "app.work.reveal-anchor",
-  open_run_conversation: "app.run.open-conversation",
-  organize_library: "app.library.organize",
-  delete_library_items: "app.library.delete",
-  change_spectra_settings: "app.settings.change",
-  change_sync_policy: "app.sync.policy.change",
-  write_memory: "app.memory.write",
-  change_sharing: "app.sharing.change",
-  trigger_managebac_sync: "app.managebac.sync",
-  select_managebac_classes: "app.managebac.select-classes",
-  import_managebac_resource: "app.managebac.import-resource",
-  change_managebac_mapping: "app.managebac.mapping",
-  insert_reference: "app.reference.insert",
-  add_comment: "app.comments.add",
-  begin_reference_picking: "app.reference.begin-picking",
-  manage_account: "app.settings.manage-account",
-  clear_local_compute_cache: "app.settings.clear-compute-cache",
-  pair_bridge: "app.bridge.pair",
-  setup_bridge: "app.bridge.setup",
-  change_bridge_trust: "app.bridge.policy.change",
-  change_credentials: "app.security.credentials",
-  change_ai_authority_mode: "app.security.authority-mode",
-  delete_account: "app.security.delete-account",
-  connect_future_provider: "app.providers.connect",
-} as const;
-
-export type ApplicationToolId = keyof typeof APPLICATION_TOOL_COMMAND_MAP;
-
-export function applicationCommandIdForTool(id: string): string | null {
-  return (APPLICATION_TOOL_COMMAND_MAP as Record<string, string>)[id] ?? null;
-}
-
 export type CapabilityAuditEntry = {
   domain: string;
   action: string;
@@ -859,18 +769,3 @@ export type CapabilityAuditEntry = {
   status: "registered" | "prohibited" | "deferred";
   reason?: string;
 };
-
-export const APPLICATION_CAPABILITY_AUDIT: readonly CapabilityAuditEntry[] = [
-  ...Object.entries(APPLICATION_TOOL_COMMAND_MAP).map(([action, commandId]) => {
-    const command = appCommandById(commandId);
-    return {
-      domain: commandId.split(".")[1] ?? "application",
-      action,
-      commandId,
-      status: command?.aiAuthority === "prohibited" ? "prohibited" as const : "registered" as const,
-      ...(command?.prohibitionReason ? { reason: command.prohibitionReason } : {}),
-    };
-  }),
-  { domain: "sync", action: "mount_grant_or_revoke", commandId: "app.bridge.mount-authority", status: "deferred", reason: "Native mount authority remains a deliberate human-only Bridge security action." },
-  { domain: "embeds", action: "create_or_pin_embed", commandId: "app.embeds.create", status: "deferred", reason: "Living embed creation belongs to N9; N8 only exposes read_embeds." },
-] as const;

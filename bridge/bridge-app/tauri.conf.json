@@ -3,11 +3,8 @@
   "productName": "Spectra Bridge",
   "version": "0.1.0",
   "identifier": "com.spectra.bridge",
-  "build": { "frontendDist": "ui" },
   "app": {
-    "withGlobalTauri": true,
-    "windows": [{ "label": "main", "title": "Spectra Bridge", "width": 420, "height": 460, "resizable": false, "visible": false, "skipTaskbar": true }],
-    "security": { "csp": "default-src 'self'; connect-src http://127.0.0.1:47615 ws://127.0.0.1:47615" }
+    "windows": []
   },
   "bundle": {
     "active": true,

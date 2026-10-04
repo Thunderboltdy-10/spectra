@@ -807,6 +807,15 @@ impl Journal {
         tx.commit()?;
         Ok(())
     }
+    /// Holds a queued change back without counting an attempt: its folder is
+    /// paused, so nothing failed.
+    pub fn defer_queue(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE queue SET available_at=? WHERE id=?",
+            params![unix_ms() + delay.as_millis() as i64, id],
+        )?;
+        Ok(())
+    }
     pub fn retry_queue(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
         self.connection.lock().unwrap().execute(
             "UPDATE queue SET attempts=attempts+1, available_at=? WHERE id=?",

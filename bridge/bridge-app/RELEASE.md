@@ -17,7 +17,7 @@ cd bridge/bridge-app
 export SPECTRA_CONVEX_URL='https://<the-authoritative-deployment>.convex.cloud'
 export SPECTRA_ORIGINS='https://<the-authoritative-browser-origin>'
 cargo install tauri-cli --version 2.11.5 --locked
-cargo tauri icon icons/tray-icon.svg
+cargo tauri icon icons/app-icon.png
 cargo tauri build --bundles app,dmg --config tauri.friend-test.conf.json
 ```
 
@@ -38,17 +38,19 @@ find "$HOME/Library/LaunchAgents" -maxdepth 1 -iname '*spectra*' -print
 ```
 
 Expected readback: the health response is protocol `1.0`, the process is
-paired only after the browser's Files and devices setup completes, the
+paired only after Connect this computer on the Devices page completes, the
 startup log records `interactive` or `autostart`, and a LaunchAgent entry is
-present after the first run. In the hosted browser, open Settings → Files and
-devices, pair this device, add a disposable folder, approve the Mac folder
+present after the first run. In the hosted browser, open Devices, press
+Connect this computer, confirm the matching code in the native dialog, add a
+disposable folder, approve the Mac folder
 permission prompt, and verify the mount reaches `Ready` with the expected file
 count. Use only copies of fixtures.
 
 Exercise a second launch, login launch, browser reload/session resume, folder
-remove/re-add, and a native-file save/readback on disposable files. Also check
-that closing the native window hides it without stopping the loopback service,
-and that the tray's Open logs action opens a diagnostic file. An unsigned app
+remove/re-add, pause/resume (tray and page), and a native-file save/readback
+on disposable files. Also check that the tray's Open Devices in Spectra opens
+the Devices page, its tooltip names the state, and Show logs on the page opens
+a diagnostic file. An unsigned app
 may be blocked by Gatekeeper; that is expected for this test artifact and is
 not a public launch result.
 

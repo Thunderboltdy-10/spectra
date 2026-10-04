@@ -33,6 +33,7 @@
     "check:copy": "node scripts/check-user-facing-copy.mjs",
     "check:design-tokens": "node scripts/check-design-tokens.mjs",
     "check:capabilities": "tsx scripts/check-capability-ir.ts",
+    "icons:bridge": "tsx scripts/generate-bridge-tray-icons.ts",
     "check:secrets": "node scripts/scan-secrets.mjs",
     "check:deploy-env": "node scripts/check-deploy-env.mjs",
     "smoke:ai": "vitest run --config vitest.smoke.config.ts",

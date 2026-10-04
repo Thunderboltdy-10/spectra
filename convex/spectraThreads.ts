@@ -210,6 +210,24 @@ function cleanTitle(value: string) {
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
+/**
+ * The caption writer's name for a thread (already 2-6 words, sentence case),
+ * tidied but not rewritten: stripping words would make it worse.
+ */
+function generatedTitle(value: string) {
+  const title = value
+    .replace(/[`*_#<>"“”]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!?,;:]+$/, "")
+    .split(" ")
+    .slice(0, 8)
+    .join(" ")
+    .slice(0, 80)
+    .trim();
+  return title ? title.charAt(0).toUpperCase() + title.slice(1) : "";
+}
+
 /** A name the owner typed: their words, tidied, never rewritten. */
 function ownerTitle(value: string) {
   const title = value
@@ -1152,8 +1170,13 @@ export const getSummary = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.threadId);
-    // The agent this thread keeps using until the user clears it.
-    return { thread: compactThread(thread), retainedAgentId: thread.retainedAgentId };
+    return {
+      thread: compactThread(thread),
+      // The agent this thread keeps using until the user clears it.
+      retainedAgentId: thread.retainedAgentId,
+      // Neither the owner nor an earlier run has named it yet.
+      needsTitle: !thread.titleSetByOwner && !thread.titleGeneratedAt,
+    };
   },
 });
 
@@ -1650,6 +1673,13 @@ export const update = mutation({
   },
 });
 
+/**
+ * The caption writer's title and summary for a thread. The title is written
+ * once, from the first exchange with a clear subject, and never replaces a
+ * name the owner gave or an earlier generated one: a resumed or later run
+ * cannot make it worse. Any state of the run's current attempt may write it
+ * (a run paused on a question still names its thread).
+ */
 export const applyGeneratedMetadata = mutation({
   args: {
     threadId: v.id("spectraThreads"),
@@ -1664,36 +1694,27 @@ export const applyGeneratedMetadata = mutation({
     if (
       !run ||
       run.threadId !== args.threadId ||
-      (run.status !== "running" && run.status !== "completed") ||
       run.executionId !== args.executionId
     )
       throw new Error("This title belongs to an older run attempt.");
-    const messageCount = thread.messageCount ?? 0;
-    const provisionalTitle =
-      thread.title === "New thread" || thread.title.split(/\s+/).length >= 8;
-    // Sparse title windows avoid sidebar instability while allowing a weak
-    // first-prompt title to improve once the purpose becomes clear.
-    const mayRetitle =
-      !thread.titleSetByOwner &&
-      (messageCount <= 2 ||
-      provisionalTitle ||
-      (messageCount >= 6 && messageCount <= 8) ||
-      (messageCount >= 16 && messageCount <= 18));
-    const title =
-      mayRetitle && args.title ? cleanTitle(args.title) : thread.title;
+    const generated = args.title ? generatedTitle(args.title) : "";
+    const writeTitle =
+      Boolean(generated) && !thread.titleSetByOwner && !thread.titleGeneratedAt;
+    const title = writeTitle ? generated : thread.title;
     const summary =
       args.summary?.replace(/\s+/g, " ").trim().slice(0, 320) ||
       thread.summaryShort;
     const now = Date.now();
     await ctx.db.patch(args.threadId, {
       title,
+      ...(writeTitle ? { titleGeneratedAt: now } : {}),
       summaryShort: summary,
       updatedAt: now,
       readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
     if (title !== thread.title)
       await syncSourceNodes(ctx, "thread", args.threadId, title);
-    return { threadId: args.threadId };
+    return { threadId: args.threadId, titled: writeTitle };
   },
 });
 

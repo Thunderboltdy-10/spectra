@@ -9,7 +9,7 @@ import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import { plainEmphasis } from "@/features/spectra/ai/inline-emphasis";
 import type { PreparedAttachment, ResultAction, RunPointers, Surface } from "./contract";
-import { AGENT_UNAVAILABLE, AgentUnavailableError, loadAgent, readAgentIndex, readRetainedAgentId } from "./agents";
+import { AGENT_UNAVAILABLE, AgentUnavailableError, loadAgent, readAgentIndex, readThreadSummary, type ThreadSummary } from "./agents";
 import { loadRunAttachments } from "./attachments";
 import { ConvexHarnessBackend } from "./convex-backend";
 import { attachmentParts, buildEnvironment, readPermissions, readThreadHistory, validTimeZone } from "./environment";
@@ -137,7 +137,7 @@ function answerLabel(pending: PendingInput | null | undefined, answer: InputAnsw
  * The agent for this run: the one the user chose, or the one this thread kept
  * using. Otherwise the model sees the user's agents and may hand off itself.
  */
-async function readAgents(params: AttemptParams) {
+async function readAgents(params: AttemptParams, thread: Promise<ThreadSummary | null>) {
   const routing = { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId };
   if (params.agentId) {
     const chosen = await loadAgent(routing, params.agentId, "explicit", "Selected by you");
@@ -146,7 +146,7 @@ async function readAgents(params: AttemptParams) {
   }
   const [index, retainedId] = await Promise.all([
     readAgentIndex(params.actorClerkId),
-    readRetainedAgentId(params.actorClerkId, params.threadId),
+    thread.then((summary) => summary?.retainedAgentId),
   ]);
   const retained =
     retainedId && index.some((entry) => entry.id === retainedId)
@@ -172,6 +172,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let eventWrite: Promise<unknown> = Promise.resolve();
   let persistenceFailed = false;
+  // Title writes finish before the worker ends, never before the reply.
+  const titleWrites: Array<Promise<unknown>> = [];
   const persist = () => {
     if (flushTimer) {
       clearTimeout(flushTimer);
@@ -207,6 +209,12 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     await eventWrite;
     if (persistenceFailed)
       await mutate("spectraRuns:markTraceDegraded", { actorClerkId, runId, executionId }).catch(() => null);
+  };
+  /** A paused or handed-off run names its thread after the pause is durable. */
+  const settleTitle = async (titling: Promise<void>) => {
+    await titling;
+    await Promise.all(titleWrites);
+    await flushEvents();
   };
 
   // The lease: renewed by a heartbeat; losing it (Stop, takeover) aborts.
@@ -259,8 +267,9 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       toolOperations: sameAttempt ? loaded?.toolOperations : {},
       onUiEvent: (event) => publish({ type: "ui_event", runId, key: event.key, ...(event.payload ? { payload: event.payload } : {}) }),
     });
-    const [agents, permissions, environment, history] = await Promise.all([
-      readAgents(params),
+    const thread = readThreadSummary(actorClerkId, params.threadId);
+    const [agents, permissions, environment, history, threadSummary] = await Promise.all([
+      readAgents(params, thread),
       readPermissions(actorClerkId),
       buildEnvironment({
         actorClerkId,
@@ -272,6 +281,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         attachments: params.attachments,
       }),
       params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve([]),
+      thread,
     ]);
 
     let resume: { state: LoopState; answer?: InputAnswer } | undefined;
@@ -356,13 +366,15 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           return;
         case "thread_title":
           if (params.threadId)
-            void mutate("spectraThreads:applyGeneratedMetadata", {
-              actorClerkId,
-              threadId: params.threadId,
-              runId,
-              executionId,
-              title: event.title,
-            }).catch(() => null);
+            titleWrites.push(
+              mutate("spectraThreads:applyGeneratedMetadata", {
+                actorClerkId,
+                threadId: params.threadId,
+                runId,
+                executionId,
+                title: event.title,
+              }).catch(() => null),
+            );
           publish({ type: "thread_title", runId, title: event.title });
           return;
         case "input_required":
@@ -386,7 +398,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       },
       permissions,
       workspaceId: params.workspaceId,
-      wantTitle: params.mode === "start" && Boolean(params.threadId),
+      // Any attempt names a thread that still needs it, resumed ones too.
+      wantTitle: Boolean(threadSummary?.needsTitle),
       ...(resume ? { resume } : restore ? { restore } : {}),
       textFlushMs: TEXT_FLUSH_MS,
       shouldYield: params.scheduled ? () => Date.now() - started > YIELD_AFTER_MS : undefined,
@@ -412,6 +425,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         resultCardId: params.resultCardId,
         payload: resumePayload(params),
       });
+      await settleTitle(result.titling);
       return;
     }
 
@@ -458,6 +472,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         card: streamCard(card),
       });
       await flushEvents();
+      await settleTitle(result.titling);
       return;
     }
 
@@ -589,6 +604,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     await flushEvents().catch(() => null);
   } finally {
     clearInterval(heartbeat);
+    await Promise.all(titleWrites);
     if (flushTimer) clearTimeout(flushTimer);
   }
 }

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
- * An agent the user chose that can no longer run fails the run with a typed
- * error the UI can act on (choose again or switch to Auto), never a silent
- * fallback to Auto and never a pointless "Try again".
+ * One attempt, with every store mocked: what it does with the user's chosen
+ * agent and with the thread's title.
  */
 
 const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 const modelCalls: unknown[] = [];
+let needsTitle = false;
 
 vi.mock("./io", async (importOriginal) => {
   const original = await importOriginal<typeof import("./io")>();
@@ -24,6 +24,8 @@ vi.mock("./io", async (importOriginal) => {
         };
       case "spectraThreads:listMessages":
         return { messages: [] };
+      case "spectraThreads:getSummary":
+        return { needsTitle };
       case "memory:listMine":
         return { claims: [] };
       case "bridge:devices":
@@ -44,16 +46,46 @@ vi.mock("@/features/spectra/ai/harness/model", async (importOriginal) => {
       modelCalls.push(1);
       return { text: "Hi", toolCalls: [] };
     },
-    callSpectraModel: async () => ({ text: "{}", toolCalls: [] }),
+    callSpectraModel: async () => ({ text: '{"caption":"Answered","thread_title":"Cell division"}', toolCalls: [] }),
     spectraModelContextWindow: async () => 200_000,
   };
 });
 
-describe("an explicit agent that cannot run", () => {
-  beforeEach(() => {
-    calls.length = 0;
-    modelCalls.length = 0;
+const params = {
+  actorClerkId: "user_1",
+  runId: "run-1",
+  resultCardId: "card-1",
+  executionId: "exec-1",
+  workerId: "test",
+  prompt: "Help",
+  surface: "chat" as const,
+  threadId: "thread-1",
+};
+
+beforeEach(() => {
+  calls.length = 0;
+  modelCalls.length = 0;
+  needsTitle = false;
+});
+
+describe("thread titles", () => {
+  it("names a thread that still needs it from a resumed attempt", async () => {
+    needsTitle = true;
+    const { runHarnessAttempt } = await import("./attempt");
+    await runHarnessAttempt({ ...params, mode: "resume" }, () => undefined);
+    expect(calls.find((call) => call.name === "spectraThreads:applyGeneratedMetadata")?.args).toMatchObject({
+      threadId: "thread-1", runId: "run-1", executionId: "exec-1", title: "Cell division",
+    });
   });
+
+  it("never asks for a title the thread already has", async () => {
+    const { runHarnessAttempt } = await import("./attempt");
+    await runHarnessAttempt({ ...params, mode: "start" }, () => undefined);
+    expect(calls.some((call) => call.name === "spectraThreads:applyGeneratedMetadata")).toBe(false);
+  });
+});
+
+describe("an explicit agent that cannot run", () => {
 
   it("fails the run with AI_AGENT_UNAVAILABLE and no retry", async () => {
     const { runHarnessAttempt } = await import("./attempt");

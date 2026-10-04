@@ -4079,6 +4079,8 @@ export default defineSchema({
     title: v.string(),
     /** The owner named this chat; generated titles never replace it. */
     titleSetByOwner: v.optional(v.boolean()),
+    /** When the generated title was written. It is written once, never replaced. */
+    titleGeneratedAt: v.optional(v.number()),
     summaryShort: v.optional(v.string()),
     summaryLong: v.optional(v.string()),
     origin: v.union(

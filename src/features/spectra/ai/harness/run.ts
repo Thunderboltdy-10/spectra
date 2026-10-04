@@ -96,7 +96,15 @@ export type HarnessRunInput = {
   shouldYield?: () => boolean;
 };
 
-export type HarnessRunResult = LoopOutcome & { durationMs: number };
+export type HarnessRunResult = LoopOutcome & {
+  durationMs: number;
+  /**
+   * A run that paused or handed off still names a thread that needs it; the
+   * title is written after the run has durably paused, so the question is not
+   * held back. Await it before the worker ends.
+   */
+  titling: Promise<void>;
+};
 
 function userMessage(prompt: string, attachments?: HarnessContentPart[]): HarnessMessage {
   if (!attachments?.length) return { role: "user", content: prompt };
@@ -258,8 +266,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
 
   const status: RunCheckpoint["status"] =
     outcome.status === "paused" ? "paused" : outcome.status;
-  if (outcome.status === "paused" || outcome.status === "yielded") captions?.cancel();
+  let titling: Promise<void> = Promise.resolve();
+  if (outcome.status === "paused" || outcome.status === "yielded")
+    titling = captions ? captions.suspend().catch(() => undefined) : titling;
   else await quietly(() => captions?.finish({ stopped: outcome.status !== "completed" }));
   await quietly(() => input.sink.checkpoint({ state: outcome.state, status }));
-  return { ...outcome, durationMs: now() - started };
+  return { ...outcome, durationMs: now() - started, titling };
 }

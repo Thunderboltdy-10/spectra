@@ -67,6 +67,34 @@ describe("captions", () => {
     expect(captions.at(-1)).toMatchObject({ text: "Made a deck", final: true });
   });
 
+  it("names the thread when the run pauses, and writes no caption after", async () => {
+    const timers = fakeTimers();
+    const captions: CaptionEvent[] = [];
+    const titles: string[] = [];
+    const write = vi.fn(async (request: { wantTitle: boolean }) => ({
+      caption: "Asking which unit",
+      ...(request.wantTitle ? { title: "Biology unit plan" } : {}),
+    }));
+    const scheduler = new CaptionScheduler({ prompt: "Plan my unit", write, wantTitle: true, timers, onCaption: (c) => captions.push(c), onTitle: (t) => titles.push(t) });
+    scheduler.stepStarted({ id: "q", label: "Asking you" });
+    await scheduler.suspend();
+    await timers.advance(5_000);
+    expect(titles).toEqual(["Biology unit plan"]);
+    expect(captions).toEqual([]);
+    await scheduler.suspend();
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a thread unnamed when the writer finds no clear subject yet", async () => {
+    const titles: string[] = [];
+    const scheduler = new CaptionScheduler({
+      prompt: "hi", write: async () => ({ caption: "Saying hello" }), wantTitle: true, timers: fakeTimers(),
+      onCaption: () => undefined, onTitle: (t) => titles.push(t),
+    });
+    await scheduler.finish();
+    expect(titles).toEqual([]);
+  });
+
   it("falls back to the step label when the caption call fails", async () => {
     const timers = fakeTimers();
     const captions: CaptionEvent[] = [];
@@ -251,6 +279,28 @@ describe("runHarness", () => {
     expect(events.map((event) => event.type)).toEqual(["text"]);
     expect(JSON.stringify(events)).not.toMatch(/Getting ready|skill/i);
     expect(captionRequests).toEqual([]);
+  });
+
+  it("names the thread of a run that asks a question in its first turn", async () => {
+    const events: HarnessEvent[] = [];
+    const result = await runHarness({
+      runId: "r-ask",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Plan my biology unit",
+      environment: { now: 0 },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      wantTitle: true,
+      captionWriter: async (request) => ({ caption: "Asking", ...(request.wantTitle ? { title: "Biology unit plan" } : {}) }),
+      compactor: null,
+      callModel: model([
+        { text: "", toolCalls: [{ id: "q1", name: "ask_user", arguments: JSON.stringify({ question: "Which unit?" }) }] },
+      ]),
+      sink: { emit: (event) => events.push(event), checkpoint: async () => undefined },
+    });
+    expect(result.status).toBe("paused");
+    await result.titling;
+    expect(events.filter((event) => event.type === "thread_title")).toEqual([{ type: "thread_title", title: "Biology unit plan" }]);
   });
 
   it("binds history to this thread and puts the new message last", async () => {

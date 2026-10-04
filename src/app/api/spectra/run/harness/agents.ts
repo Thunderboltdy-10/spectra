@@ -50,14 +50,23 @@ export async function readAgentIndex(actorClerkId: string): Promise<AgentIndexEn
     .slice(0, MAX_AGENTS);
 }
 
-/** The agent this thread used last, unless the user cleared it. */
-export async function readRetainedAgentId(actorClerkId: string, threadId: string | undefined) {
-  if (!threadId) return undefined;
-  const summary = await query<unknown & object, { retainedAgentId?: unknown } | null>("spectraThreads:getSummary", {
-    actorClerkId,
-    threadId,
-  }).catch(() => null);
-  return typeof summary?.retainedAgentId === "string" ? summary.retainedAgentId : undefined;
+export type ThreadSummary = { retainedAgentId?: string; needsTitle: boolean };
+
+/**
+ * What a run needs to know about its thread: the agent it used last (unless
+ * the user cleared it) and whether it still needs a generated title.
+ */
+export async function readThreadSummary(actorClerkId: string, threadId: string | undefined): Promise<ThreadSummary | null> {
+  if (!threadId) return null;
+  const summary = await query<unknown & object, { retainedAgentId?: unknown; needsTitle?: unknown } | null>(
+    "spectraThreads:getSummary",
+    { actorClerkId, threadId },
+  ).catch(() => null);
+  if (!summary) return null;
+  return {
+    ...(typeof summary.retainedAgentId === "string" ? { retainedAgentId: summary.retainedAgentId } : {}),
+    needsTitle: summary.needsTitle === true,
+  };
 }
 
 /**

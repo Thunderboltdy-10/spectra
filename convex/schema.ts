@@ -2199,6 +2199,19 @@ export default defineSchema({
       v.literal("revoked"),
       v.literal("lost"),
     ),
+    /**
+     * What the Bridge last said about itself (bridge:reportHealth), so the
+     * Devices page can show a computer it cannot reach locally. The problem
+     * is a stable code ("folder-unavailable", "folder-error"); Spectra words it.
+     */
+    health: v.optional(v.object({
+      paused: v.boolean(),
+      folders: v.number(),
+      problem: v.optional(v.string()),
+      problemFolder: v.optional(v.string()),
+      lastSyncAt: v.optional(v.number()),
+      reportedAt: v.number(),
+    })),
   })
     .index("by_account_installation", ["accountId", "installationId"])
     .index("by_account_state", ["accountId", "state"])

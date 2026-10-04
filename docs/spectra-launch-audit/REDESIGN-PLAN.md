@@ -171,7 +171,7 @@ compat shims, and say so in the commit.
 | Visual spec | — | Approved 2026-10-04: https://claude.ai/artifact/56MkPBViV6HKgCz9CM8uvV |
 | A2a · Semantic layer | `lane/semantic` (worktree removed) | Merged into main as `32e8240c` (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2b) |
 | A1b · Harness polish | `lane/harness-polish` (worktree removed) | Merged into main as `5ae76253`; build passes |
-| Design core | `main` · primary checkout (orchestrator) | Life engine v2 (one matter: lattice, formations, signals) `4076255a`, choreography map `0c818c81`; the field is mounted app-wide, the old per-surface fields are gone, and the favicon is the prism with its status dot. Next: `/dev/life` and `/dev/icons` labs, kit primitives with life hooks |
+| Design core | `main` · primary checkout (orchestrator) | Done. Life engine v2 `4076255a` and its choreography map `0c818c81`; the field app-wide with the favicon prism and `/dev/life` `a66ff039`; the glyph set and `/dev/icons` `9f85828b`; the kit (AdaptiveBar `pinned`, SplitButton, IconButton, Row, Tooltip shortcuts) `7075674e`. Pages adopt glyphs and the kit in D2 and D3. |
 | Prism (user's agent) | `lane/prism` · `<local-workspace>` | Retired: the orchestrator builds the prism in code |
 | A2b · AI reach | `lane/ai-reach` · `<local-workspace>` | Running |
 | F1 · School | `lane/school` · `<local-workspace>` | Running (backend first) |

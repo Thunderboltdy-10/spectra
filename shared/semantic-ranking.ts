@@ -12,8 +12,8 @@ import type { IndexedSemanticKind, SemanticMatch } from "./semantic-types";
  * sweep candidate values in its own process; the chosen values are recorded in the report.
  */
 export const SEMANTIC_TUNING = {
-  /** RRF constant. Smaller trusts the top of each list more. */
-  rrfK: 20,
+  /** RRF constant. Smaller trusts the top of each list more. Live eval 2026-10-04: k=10 MRR 0.982, k=20 0.964. */
+  rrfK: 10,
   /** Cosine similarity below which a vector hit is noise for this model and size. */
   minVectorSimilarity: 0.2,
   /**

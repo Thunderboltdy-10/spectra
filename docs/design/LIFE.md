@@ -80,7 +80,7 @@ The lattice is a membrane.
 | Loading | The field gathers into the outline of what is coming: dots forming rows, a page, a grid. It condenses into the real content when ready, so dot formations replace skeletons. A short load (under 300 ms) shows nothing. |
 | Empty state | The field gathers loosely into the glyph of what belongs there, then stays faint until the pointer comes near |
 | Spectra writing | Spectral light rises in the paper around the region being written and flows along with the writing front. A few particles drift off the caret. |
-| Spectra working (island) | A faint spectral fan of particles leaves the prism and drifts into the field |
+| Spectra working (island) | Faint spectral particles shed from the turning prism's edges and drift into the field |
 | Needs you | Warm orange light gathers around the island and leans toward the user |
 | Done | One clear ripple from the island across the bottom of the screen |
 | A thread joins the island | Its row sheds particles that stream along a curve into the new tab |
@@ -153,28 +153,43 @@ engine family. There is no 3D library, no WebGL and no image assets at runtime.
 
 ### Form
 
+The reference is the user's own code-made model (2026-10-03): a thin, clean, dark glass solid with crisp edges.
+
 - **Shape.**
-  - A triangular prism: an asymmetric, chunky triangle with softly bevelled edges, seen in three-quarter view.
-  - Its silhouette must read instantly at 16 px.
+  - A triangular prism: an equilateral triangle, apex up, with slightly softened corners.
+  - It is thin: the depth is about a quarter of a side. It is never chunky.
+  - A narrow bevel runs round both caps. The bevels are the prism's defined edges.
+  - At rest it is turned a little (yaw about −26°, pitch about 11°), so one side face and the upper face show. That is
+    also the static mark.
+  - Its silhouette must read instantly at 16 px. Marks (16–32 px) use a wider bevel so the edge still reads.
 - **Material.**
-  - A clear, clean, crafted object: faces in soft paper-and-ink tones that suit both themes, with crisp edges.
-  - Colour comes from light passing through it:
-    - a spectral band refracted inside;
-    - spectral edges where the bevels split the light;
-    - when it works, a fan of light leaving it.
-  - It must sit comfortably on paper beside text, never as a dark blot or a glossy orb.
+  - A deep indigo body, slightly dark and translucent: the page shows through the caps, and the far edges show
+    faintly through the body.
+  - A cap facing you is at its most see-through; turning edge-on makes it denser, like tinted glass.
+  - Each cap carries one soft band of reflected light. The band moves with the cap's angle, so turning the prism
+    sweeps it across the glass.
+  - The spectrum lives on the edges only:
+    - the bevels carry it, strongest where the key light catches them, and white at the peak;
+    - a fine spectral line runs where each cap meets its bevel, like the fringe a real edge throws;
+    - the hues slide along the edges as the solid turns.
+  - **No light passes through it.** There is no beam, no internal band, no fan, no glow around it and no shadow
+    under it.
+  - It must sit comfortably on paper beside text, never as a black blot or a glossy orb.
 - **Rendering.**
-  - Faces are projected and shaded analytically onto a 2D canvas: gradients per face from a key light, a soft
-    specular sweep, and spectral strokes on the bevels.
+  - `src/features/spectra/life/prism.ts` builds the mesh once, then rotates and projects it each frame.
+  - Faces are shaded analytically into a display list: a gradient per cap, a gradient along each bevel and side
+    strip, then lines.
+  - The display list paints on a 2D canvas, live, or as a static SVG via `prismSvg` (favicon, tray, app icons).
+  - It is convex, so there is no sorting: back faces first, then front faces, then lines.
   - It is crisp at every device pixel ratio.
 
 ### Sizes
 
 | Size | Where | How |
 | --- | --- | --- |
-| 16–24 px | Rail brand, tray and app icons, favicon | A static pose, rendered once. In the rail it leans slightly on hover. |
-| 28–40 px | The island and the agent switch | Live, rendered on demand while it moves |
-| 64–160 px | Empty states, sign-in, onboarding | Live, with more detail: a visible inner band and fine spectral edges |
+| 16–32 px | Rail brand, favicon, tray and app icons | The static mark: `prismSvg` or one canvas draw. In the rail it is live on hover. |
+| 28–40 px | The island and the agent switch | Live, drawn only while its body is moving |
+| 64–200 px | Empty states, sign-in, onboarding | Live, the full detail |
 
 **Where it appears.**
 
@@ -184,25 +199,33 @@ engine family. There is no 3D library, no WebGL and no image assets at runtime.
 
 ### Behaviour
 
-The prism has a body:
+The prism has a body (`PrismBody`):
 
-- an orientation;
+- a quaternion orientation;
 - an angular velocity;
 - a scale;
 - springs that pull it toward a target pose.
 
 Everything it does is a target change or an impulse, never a canned keyframe, so every motion blends into the next.
 
-| State | Body |
+The prism has six rotational symmetries. When a spin slows, a detent pulls it to the nearest symmetric copy of its
+target pose, predicted a moment ahead. A spin of any size therefore settles on whichever copy it reaches and never
+unwinds. At rest the body is settled and asks for no frames at all.
+
+| Input or state | Body |
 | --- | --- |
-| Rest | It breathes: a slow scale of 1.00 to 1.015 and a gentle drift of a few degrees over about 6 s. The inner light swells and ebbs with it. It leans toward a nearby pointer, up to about 12°, and springs back. |
-| Press | It squashes to about 0.9 and rebounds with overshoot. The field ripples from it. |
-| Drag | The pointer turns it directly. On release, it keeps its momentum and settles with a damped spring. |
-| Working | It turns continuously, about once every 5–7 s, with a slow wobble. The inner band cycles through the spectrum, and faint particles stream from its exit face into the field. |
-| Thinking (no tool yet) | Like working, at half speed, with no particles |
-| Needs you | It tilts toward the user and stops turning. Warm light pulses from within, and orange light gathers around it. |
-| Done | An angular impulse spins it once and a little more, then it settles back with overshoot. A ripple runs through the field, and a green glint stays until the thread is seen. |
-| Problem | Its light dims and desaturates, and it stills |
+| Rest | Still. There is no idle animation. |
+| Pointer near | It leans toward the pointer, up to about 18° across and 13° vertically. |
+| Hover | It spins round once about its vertical axis, turning away from the side the pointer came from, and grows to 1.06. |
+| Press | It squashes to about 0.88 and tips back. On release it rebounds with overshoot, and a click without a drag adds a half turn. The field ripples from it. |
+| Drag | The pointer turns it freely in 3D. On release it keeps its momentum, spins down with a little air drag, then catches in the detent. |
+| Thinking (no tool yet) | It turns steadily, about once every 7 s, on a slightly tilted axis. The edge spectrum drifts slowly round. |
+| Working | It turns about once every 2.6 s with a slow wobble. The edges carry the full spectrum, and the hues flow round them. |
+| Needs you | It turns to face the user and stops spinning. It breathes in scale and nods every 2.6 s. Its edges warm to orange. |
+| Done | Two quick turns, and a flash along every edge. Then it settles with overshoot, and its edges keep the full spectrum until the thread is seen. |
+| Problem | A short shake about its axis. Its edges drain to grey, and it tips back slightly. |
+
+Reduced motion sets the body to `still`: no spins, springs or leans, only colour changes.
 
 ### Morphs
 
@@ -229,5 +252,5 @@ The prism stays still. States are shown by its light (working, needs you, done, 
   are done, needs you and arriving.
 - **Causal.** Every effect starts at its cause and travels from there: the press point, the dragged thing, the
   writing front, the island.
-- **Never decorative.** No ambient particles, no drifting background and no idle animation except the prism's breath.
+- **Never decorative.** No ambient particles, no drifting background and no idle animation.
 - **Measure it.** Every lane that adds a moment keeps within the budgets above and says so in its report.

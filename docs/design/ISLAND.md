@@ -47,9 +47,9 @@ Settings → Spectra → Island offers:
 
 | State | What the user sees |
 | --- | --- |
-| **Rest** | The prism alone, about 30 px. It is alive but quiet: a slow breath of light through it, and a lean toward the pointer when it comes near. |
-| **Working** | The prism turns slowly in 3D. Light enters one face, and a faint spectral fan of particles leaves the other and drifts into the field. When more than one thread is working, a small count sits beside it. |
-| **Finished** | The prism spins once with momentum and settles. A short ripple runs through the field. A one-line notice unfolds from it ("*Photosynthesis deck* is ready"), and hovering holds the notice. After it folds away, a soft green glint stays on the prism until the thread has been seen. |
+| **Rest** | The prism alone, about 30 px. It is still until the pointer comes near; then it leans toward it, and on hover it spins round once. |
+| **Working** | The prism turns in 3D, and the spectrum flows round its edges. Faint spectral particles shed from it and drift into the field. When more than one thread is working, a small count sits beside it. |
+| **Finished** | The prism spins once with momentum and settles. A short ripple runs through the field. A one-line notice unfolds from it ("*Photosynthesis deck* is ready"), and hovering holds the notice. After it folds away, the prism keeps the full spectrum on its edges until the thread has been seen. |
 | **Needs you** | The prism dissolves into particles that re-form as the question card (below). A warm orange light leans out of it. |
 | **Hover** | The structure: tabs on both sides of the + (below) |
 | **Composing** | The + opens into the composer |

@@ -22,6 +22,7 @@ import type {
   HarnessMessage,
   InputAnswer,
   PendingInput,
+  Steer,
   TodoItem,
   ToolEffect,
   WidgetOutput,
@@ -60,7 +61,7 @@ export type HarnessSink = {
    * The durable checkpoint at a tool boundary (about one write per tool
    * call). Returns user messages sent while the run worked.
    */
-  checkpoint: (checkpoint: RunCheckpoint) => Promise<{ steers?: string[] } | void>;
+  checkpoint: (checkpoint: RunCheckpoint) => Promise<{ steers?: Steer[] } | void>;
   /** The streamed reply, flushed about every 250 ms. */
   flushText?: (text: string) => Promise<void>;
 };
@@ -140,9 +141,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     agents: input.environment.agent ? [] : input.environment.agents,
   });
   const tools = buildHarnessTools(session);
-  const focused = input.environment.focused;
-  // Labels name the focused artifact from the first step, without a read.
-  if (focused) rememberTitle(session, focused.id, focused.title, focused.type);
+  // Labels name what the user pointed at from the first step, without a read.
+  const environment = input.environment;
+  for (const item of [...(environment.open ?? []), ...(environment.references ?? []), ...(environment.selection?.in ? [environment.selection.in] : [])])
+    rememberTitle(session, item.id, item.title, item.type);
   const systemPrompt = buildSystemPrompt({
     ...input.environment,
     timeZone: input.environment.timeZone ?? input.backend.timeZone,

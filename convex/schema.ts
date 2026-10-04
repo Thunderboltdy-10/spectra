@@ -4675,7 +4675,14 @@ export default defineSchema({
     pending: v.optional(v.any()),
     answer: v.optional(v.any()),
     steers: v.optional(
-      v.array(v.object({ text: v.string(), createdAt: v.number() })),
+      v.array(
+        v.object({
+          text: v.string(),
+          // Files sent with the message, stored as this attempt's run attachments.
+          attachmentIds: v.optional(v.array(v.id("spectraRunAttachments"))),
+          createdAt: v.number(),
+        }),
+      ),
     ),
     updatedAt: v.number(),
   }).index("by_run", ["runId"]),

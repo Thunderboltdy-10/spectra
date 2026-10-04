@@ -1137,4 +1137,46 @@ describe("AI run create and recovery lifecycle", () => {
     );
     expect(events.map((event) => [event.sequence, event.type])).toEqual([[1, "text"], [2, "text"], [3, "final"]]);
   });
+  it("stores what the user pointed at, returns its card, and forgets the agent on Auto", async () => {
+    const t = convexTest(schema, modules);
+    aggregateTest.register(t, "orgNodeCountByType");
+    aggregateTest.register(t, "orgNodeCountByWorkspace");
+    aggregateTest.register(t, "orgNodeCountByParent");
+    const actor = await seedActor(t);
+    const { threadId } = await t.run(async (ctx) => {
+      const now = Date.now();
+      const agentId = await ctx.db.insert("spectraArtifacts", {
+        schoolId: actor.schoolId, ownerAccountId: actor.accountId, blueprintKey: "agent", title: "Essay coach",
+        content: {}, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now,
+      });
+      const threadId = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, title: "Agent thread", origin: "chat",
+        status: "active", retainedAgentId: agentId, createdAt: now, updatedAt: now,
+      });
+      return { threadId };
+    });
+    const user = t.withIdentity(identity);
+    const pointers = {
+      currentView: "Chat",
+      open: [{ id: "doc-1", type: "document", title: "Essay draft" }],
+      selection: { text: "the second paragraph", in: { id: "doc-1", type: "document", title: "Essay draft" } },
+      references: [{ id: "deck-1", type: "presentation", title: "Biology deck" }],
+    };
+    const created = await user.mutation(api.spectraRuns.beginRun, {
+      sourceSurface: "chat", userPrompt: "Tighten this", submissionKey: "pointers-1", threadId,
+      pointers, clearRetainedAgent: true,
+    });
+    expect(created.card?._id).toBe(created.resultCardId);
+    const stored = await t.run(async (ctx) => ({
+      run: await ctx.db.get(created.runId),
+      thread: await ctx.db.get(threadId),
+    }));
+    expect(stored.run?.contextSnapshot).toEqual(pointers);
+    expect(stored.thread?.retainedAgentId).toBeUndefined();
+    const again = await user.mutation(api.spectraRuns.beginRun, {
+      sourceSurface: "chat", userPrompt: "Tighten this", submissionKey: "pointers-1", threadId,
+    });
+    expect(again).toMatchObject({ runId: created.runId, created: false });
+    expect(again.card?._id).toBe(created.resultCardId);
+  });
 });

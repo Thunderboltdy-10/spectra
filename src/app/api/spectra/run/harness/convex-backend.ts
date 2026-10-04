@@ -44,7 +44,6 @@ export type ConvexBackendInput = {
   threadId?: string;
   workspaceId?: string;
   scopeNodeId?: string;
-  focusedArtifactId?: string;
   prompt: string;
   timeZone: string;
   /** Operations already recorded for tool calls (a resumed run). */

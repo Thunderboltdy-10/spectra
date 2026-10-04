@@ -4,7 +4,7 @@ import { SUMMARY_MARKER, compactionCut, createCompactor, estimateTokens } from "
 import type { ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
 import { DEFAULT_PERMISSION_PREFS } from "../permissions";
-import { SPECTRA_SYSTEM_PROMPT, buildSystemPrompt } from "../prompt";
+import { SPECTRA_SYSTEM_PROMPT, buildSystemPrompt, environmentBlock } from "../prompt";
 import { runHarness, type HarnessEvent, type RunCheckpoint } from "../run";
 import type { HarnessMessage, ModelTurn } from "../types";
 
@@ -136,13 +136,43 @@ describe("system prompt", () => {
       now: Date.UTC(2026, 9, 3, 10),
       timeZone: "Europe/Madrid",
       user: { name: "Ana", role: "student", subjects: ["Biology HL"] },
-      focused: { id: "wx1", type: "document", title: "Cells", canEdit: true, outline: "# Cells" },
+      page: "Editing document \"Cells\"",
+      open: [{ id: "wx1", type: "document", title: "Cells" }],
+      selection: { text: "mitochondria", in: { id: "wx1", type: "document", title: "Cells" } },
+      references: [{ id: "th1", type: "thread", title: "Exam plan" }],
+      bridge: "online (Ana's laptop)",
       permissions: "Changes that cannot be undone and settings changes ask the user first.",
     });
     expect(prompt).toMatch(/- presentation: Slide decks/);
-    expect(prompt).toMatch(/Focused artifact: document "Cells" \(id wx1\)/);
     expect(prompt).toMatch(/Saturday, 3 October 2026/);
     expect(prompt).not.toMatch(/propose_operation|submit_plan/);
+  });
+
+  it("names what is open and pointed at with ids, types and titles only", () => {
+    const block = environmentBlock({
+      now: Date.UTC(2026, 9, 3, 10),
+      timeZone: "Europe/Madrid",
+      page: "Editing document \"Cells\"",
+      open: [
+        { id: "wx1", type: "document", title: "Cells" },
+        { id: "wx2", type: "presentation", title: "Mitosis" },
+      ],
+      selection: { text: "the inner membrane", in: { id: "wx1", type: "document", title: "Cells" } },
+      references: [{ id: "th1", type: "thread", title: "Exam plan" }],
+      bridge: "online (Ana's laptop)",
+      permissions: "Ask first.",
+    });
+    expect(block).toContain('Open: document "Cells" (id wx1); presentation "Mitosis" (id wx2)');
+    expect(block).toContain('Selection in document "Cells" (id wx1): "the inner membrane"');
+    expect(block).toContain('Referenced with @: thread "Exam plan" (id th1)');
+    expect(block).toContain("Spectra Bridge: online (Ana's laptop)");
+    expect(block).not.toMatch(/Outline|Focused/);
+  });
+
+  it("tells the model to search and read instead of expecting content", () => {
+    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/never its content/);
+    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/search for what a request is about and read it/);
+    expect(SPECTRA_SYSTEM_PROMPT).not.toMatch(/focused artifact with its outline/);
   });
 });
 

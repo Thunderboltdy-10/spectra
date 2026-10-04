@@ -318,13 +318,42 @@ describe("runHarnessLoop", () => {
           checkpoint: () => {
             if (steered) return;
             steered = true;
-            return { steers: ["also add a summary"] };
+            return { steers: [{ text: "also add a summary" }] };
           },
         },
       }),
     );
     expect(outcome.status).toBe("completed");
     expect(model.count()).toBe(2);
+  });
+
+  it("joins files sent mid-run with their message, and files alone with a plain lead", async () => {
+    const look = tool({ name: "look" });
+    let steered = false;
+    const image = { type: "image_url" as const, image_url: { url: "data:image/png;base64,AAAA" } };
+    const model = scripted([
+      { text: "", toolCalls: [call("a", "look")] },
+      (messages) => {
+        expect(messages.at(-2)).toEqual({ role: "user", content: [{ type: "text", text: "use this photo" }, image] });
+        expect(messages.at(-1)).toEqual({ role: "user", content: [{ type: "text", text: "Files I attached:" }, image] });
+        return { text: "Used it.", toolCalls: [] };
+      },
+    ]);
+    const outcome = await runHarnessLoop(
+      emptyLoopState([user("go")]),
+      deps({
+        callModel: model.caller,
+        tools: [look],
+        hooks: {
+          checkpoint: () => {
+            if (steered) return;
+            steered = true;
+            return { steers: [{ text: "use this photo", parts: [image] }, { text: "", parts: [image] }] };
+          },
+        },
+      }),
+    );
+    expect(outcome.status).toBe("completed");
   });
 
   it("takes a message sent during the final text turn as one more turn", async () => {
@@ -338,7 +367,7 @@ describe("runHarnessLoop", () => {
       deps({
         callModel: model.caller,
         tools: [],
-        hooks: { checkpoint: () => (checks++ === 0 ? { steers: ["and then?"] } : undefined) },
+        hooks: { checkpoint: () => (checks++ === 0 ? { steers: [{ text: "and then?" }] } : undefined) },
       }),
     );
     expect(model.count()).toBe(2);

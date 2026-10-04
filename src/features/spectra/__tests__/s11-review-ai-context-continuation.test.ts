@@ -1,33 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildBoundedContextPacket } from "../ai/context-builder";
 import { runSpectraAgentLoop } from "../ai/agent-loop";
 import type { SpectraAgentMessage } from "../ai/agent-loop";
 
 describe("S11 independent review: lossless task state across bounded context", () => {
-  it("keeps a compatible requirement at the end of the unresolved original request", () => {
-    const tail = "Keep the official deadline unchanged and include the separate practice deck.";
-    const packet = buildBoundedContextPacket({
-      prompt: "Use the chemistry guide.", focusMode: "thread", artifacts: [],
-      activeGoal: {
-        request: `Revise the selected guide. ${"Detailed educational context. ".repeat(130)}${tail}`,
-        question: "Which guide should I use?", selectedChoice: "Chemistry guide",
-      },
-    });
-    // A bounded display excerpt is fine; the model must also receive a
-    // lossless current task record or a recoverable reference to its remainder.
-    expect(JSON.stringify(packet.activeGoal)).toContain(tail);
-  });
-
-  it("keeps the end of a typed clarification answer instead of silently narrowing its scope", () => {
-    const tail = "The approved change concerns guide-A only; guide-B must remain unchanged.";
-    const packet = buildBoundedContextPacket({
-      prompt: "Continue with my answer.", focusMode: "thread", artifacts: [],
-      activeGoal: { request: "Revise my guide after choosing the exact target.",
-        question: "Which guide?", userResponse: `${"Context for the choice. ".repeat(60)}${tail}` },
-    });
-    expect(JSON.stringify(packet.activeGoal)).toContain(tail);
-  });
-
   it("compacts one oversized context while preserving intent, scoped approval, sources and receipts", async () => {
     const stablePrompt = "Use typed tools, preserve task state, and never infer approval.";
     const originalRequest = "Revise guide-A and create one practice deck. Preserve the official deadline.";

@@ -19,7 +19,7 @@ Ask the user a question (ask_user) only when you genuinely cannot proceed: two d
 
 # Tools
 
-- Context first, but only as much as you need. The environment below names the open page and the focused artifact with its outline. A small edit to the focused artifact needs no extra reads. For anything else, find it: list_library, search, read_artifact, read_thread, read_calendar, read_school_data, web_search. Several independent reads can go in one turn.
+- Find, then read. The environment below names only what is open and what the user pointed at, never its content, so search for what a request is about and read it before you rely on it: search, read_artifact (it takes ranges), list_library, read_thread, read_calendar, read_school_data, web_search. Several independent reads can go in one turn.
 - create_artifact and edit_artifact are how work gets made. Write real, finished content in the authoring format for that type. Never leave placeholders, "TBD" or lorem ipsum. Edits are atomic: if one edit fails, none apply, and the error tells you which edit and field to fix. Read the result each tool gives back and fix any problem it reports before you reply.
 - load_skill gives you the detailed guide for a kind of work. Load it before your first create or substantial edit of that type in a conversation, and when the user asks for something you have not done here yet.
 - update_todos keeps a visible checklist for work with three or more steps. Keep it current.
@@ -55,6 +55,9 @@ Match the level to the person: a Year 7 student, an IB Diploma candidate and a h
 
 Respect the user's own work. When editing, change what was asked and keep everything else, including their wording and formatting. When a request is ambiguous between editing the open artifact and making a new one, edit the open one.`;
 
+/** An item named by id, type and title only. */
+export type EnvironmentPointer = { id: string; type: string; title: string };
+
 export type EnvironmentInput = {
   now: number;
   timeZone: string;
@@ -66,17 +69,15 @@ export type EnvironmentInput = {
     language?: string;
   };
   page?: string;
-  sidePanel?: string;
-  focused?: {
-    id: string;
-    type: string;
-    title: string;
-    canEdit: boolean;
-    outline?: string;
-    selection?: string;
-  };
+  /** What is open on screen. Never outlines or summaries. */
+  open?: EnvironmentPointer[];
+  /** The user's current selection, only when there is one. */
+  selection?: { text: string; in?: EnvironmentPointer };
+  /** Items the user referenced with @ in this message. */
+  references?: EnvironmentPointer[];
   bridge?: string;
   permissions: string;
+  /** A short index of what the user asked Spectra to remember. */
   memory?: string[];
   attachments?: string[];
   /** A custom agent the user chose for this conversation. */
@@ -84,6 +85,8 @@ export type EnvironmentInput = {
   /** The user's agents the model may hand a request to with use_agent. */
   agents?: Array<{ id: string; title: string; description: string }>;
 };
+
+const named = (item: EnvironmentPointer) => `${item.type} "${item.title}" (id ${item.id})`;
 
 function localTime(now: number, timeZone: string) {
   try {
@@ -118,15 +121,10 @@ export function environmentBlock(input: EnvironmentInput) {
     if (user.language) lines.push(`Preferred language: ${user.language}`);
   }
   if (input.page) lines.push(`Current page: ${input.page}`);
-  if (input.sidePanel) lines.push(`Side panel: ${input.sidePanel}`);
-  if (input.focused) {
-    const focused = input.focused;
-    lines.push(
-      `Focused artifact: ${focused.type} "${focused.title}" (id ${focused.id})${focused.canEdit ? "" : ", read-only for this user"}`,
-    );
-    if (focused.outline) lines.push(`Outline:\n${focused.outline}`);
-    if (focused.selection) lines.push(`Selection: ${focused.selection}`);
-  }
+  if (input.open?.length) lines.push(`Open: ${input.open.map(named).join("; ")}`);
+  if (input.selection)
+    lines.push(`Selection${input.selection.in ? ` in ${named(input.selection.in)}` : ""}: ${JSON.stringify(input.selection.text)}`);
+  if (input.references?.length) lines.push(`Referenced with @: ${input.references.map(named).join("; ")}`);
   if (input.attachments?.length) lines.push(`Attached to this message: ${input.attachments.join(", ")}`);
   if (input.bridge) lines.push(`Spectra Bridge: ${input.bridge}`);
   lines.push(`Permissions: ${input.permissions}`);

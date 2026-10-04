@@ -13,7 +13,6 @@ import {
 import { parseSpectraPlan } from "../operations/schema";
 import { validatePlanAgainstIntent } from "../operations/validate-plan";
 import { normalizeArtifactContent } from "../ai/content-normalization";
-import { buildBoundedContextPacket } from "../ai/context-builder";
 
 const sheetsContent = normalizeArtifactContent("sheets", {
   workbook: { activeSheetId: "sheet-1" },
@@ -75,42 +74,6 @@ describe("vague sheets create intent", () => {
     expect(promptLooksLikeFreshCreate("make the study guide clearer")).toBe(
       false,
     );
-  });
-
-  it("keeps an open sheets artifact focused even when focusMode is workspace", () => {
-    const packet = buildBoundedContextPacket({
-      prompt: VALIDATION_COLUMN_PROMPT,
-      focusMode: "workspace",
-      workspace: {
-        _id: "workspace-launch",
-        title: "Spectra Launch Studio",
-      },
-      focusedArtifact: {
-        _id: "sheet-enzyme",
-        title: "Enzyme Km & Vmax Comparison",
-        blueprintKey: "sheets",
-        summary: "Km and Vmax table",
-        content: sheetsContent,
-        tags: ["biology"],
-        placements: [
-          {
-            workspaceId: "workspace-launch",
-            workspaceTitle: "Spectra Launch Studio",
-            nodeId: "item-sheet",
-          },
-        ],
-        updatedAt: Date.now(),
-      },
-      artifacts: [],
-      currentView: "studio",
-    });
-    expect(packet.focusedArtifact?.id).toBe("sheet-enzyme");
-    expect(packet.focusedArtifact?.type).toBe("sheets");
-    expect(packet.profile).toBe("focused_mutation");
-    expect(
-      (packet.focusedArtifact as { structure?: { sheets?: unknown[] } } | null)
-        ?.structure?.sheets,
-    ).toBeTruthy();
   });
 
   it("does not promote a focused sheets contentPatch update into a create", () => {

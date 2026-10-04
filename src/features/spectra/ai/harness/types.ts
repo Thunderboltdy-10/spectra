@@ -41,6 +41,9 @@ export type HarnessMessage =
     }
   | { role: "tool"; tool_call_id: string; content: string };
 
+/** A message the user sent while the run worked or waited, with any files. */
+export type Steer = { text: string; parts?: HarnessContentPart[] };
+
 /** An artifact a tool created, edited or explicitly pointed the user to. */
 export type ArtifactTouch = {
   id: string;

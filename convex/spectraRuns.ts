@@ -640,8 +640,21 @@ async function assertRunAdmission(
     );
 }
 
+/** An item named by id, type and title only: a label for the model, never content. */
+const vRunPointer = v.object({ id: v.string(), type: v.string(), title: v.string() });
+const vRunPointers = v.object({
+  currentView: v.optional(v.string()),
+  open: v.optional(v.array(vRunPointer)),
+  selection: v.optional(v.object({ text: v.string(), in: v.optional(vRunPointer) })),
+  references: v.optional(v.array(vRunPointer)),
+});
+
 export const beginRun = mutation({
   args: {
+    /** Page, open items, selection and @ references, kept for resumed attempts. */
+    pointers: v.optional(vRunPointers),
+    /** The user switched this thread back to Auto: forget its agent. */
+    clearRetainedAgent: v.optional(v.boolean()),
     sourceSurface: vSurface,
     userPrompt: v.string(),
     submissionKey: v.string(),
@@ -687,6 +700,8 @@ export const beginRun = mutation({
       return {
         runId: existingRun._id,
         resultCardId: existingCard._id,
+        card: existingCard,
+        workspaceId: existingRun.workspaceId,
         threadId: existingRun.threadId,
         executionId: existingRun.executionId ?? "legacy",
         created: false,
@@ -954,6 +969,10 @@ export const beginRun = mutation({
     // Never fabricate a prompt-truncation title before the model responds.
     const title = "New conversation";
     const workspaceId = thread ? thread.workspaceId : requestedWorkspaceId;
+    if (thread && args.clearRetainedAgent && thread.retainedAgentId) {
+      await ctx.db.patch(thread._id, { retainedAgentId: undefined, retainedAgentVersionId: undefined, readSchemaVersion: 1 });
+      thread = { ...thread, retainedAgentId: undefined, retainedAgentVersionId: undefined };
+    }
     let threadId = thread?._id;
     if (!threadId) {
       threadId = await ctx.db.insert("spectraThreads", {
@@ -994,6 +1013,7 @@ export const beginRun = mutation({
       modelUsed: args.modelUsed,
       submissionKey: args.submissionKey,
       executionId,
+      ...(args.pointers ? { contextSnapshot: args.pointers } : {}),
       eventSequence: 1,
       leaseExpiresAt: now + SPECTRA_RUN_LEASE_DURATION_MS,
       phase: "created",
@@ -1070,11 +1090,6 @@ export const beginRun = mutation({
         threadId,
         workspaceId,
         artifactIds: effectiveArtifactId ? [effectiveArtifactId] : [],
-        focusMode: effectiveArtifactId
-          ? "artifact"
-          : workspaceId
-            ? "workspace"
-            : "global",
       },
       createdAt: now,
       updatedAt: now,
@@ -1198,11 +1213,14 @@ export const beginRun = mutation({
     return {
       runId,
       resultCardId,
+      // The stream opens with this card, so the route needs no second read.
+      card: await ctx.db.get(resultCardId),
       threadId,
       executionId,
       continuationRunId: continuationRun?._id,
       retainedAttachments: retainedAttachmentsCopied,
       nodeId,
+      workspaceId,
       created: true,
     };
   },
@@ -3708,7 +3726,16 @@ export const getRunAttachmentUploadIntent = query({
 });
 
 export const listRunAttachments = query({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    /**
+     * Only these attachments: files sent with a message that joined the run.
+     * Without it, the files sent with the run's own request (never those that
+     * arrived later with a steer).
+     */
+    runAttachmentIds: v.optional(v.array(v.id("spectraRunAttachments"))),
+  },
   handler: async (ctx, args) => {
     const { actor, run } = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId)
@@ -3726,7 +3753,10 @@ export const listRunAttachments = query({
             row.ownerAccountId === actor._id &&
             row.status !== "quarantined" &&
             row.status !== "uploading" &&
-            row.storageId,
+            row.storageId &&
+            (args.runAttachmentIds
+              ? args.runAttachmentIds.includes(row._id)
+              : !(row.provenance && typeof row.provenance === "object" && (row.provenance as Record<string, unknown>).steer === true)),
         )
         .map(async (row) => ({
           runAttachmentId: row._id,
@@ -3736,6 +3766,7 @@ export const listRunAttachments = query({
           size: row.size,
           handling: row.handling,
           sourceMap: row.sourceMap,
+          provenance: row.provenance,
           url: row.storageId ? await ctx.storage.getUrl(row.storageId) : null,
         })),
     );

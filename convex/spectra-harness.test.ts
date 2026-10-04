@@ -74,12 +74,70 @@ describe("AI harness durable state", () => {
     await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 1 } });
     await f.actor.mutation(api.spectraHarness.queueSteer, { runId: f.ids.runId, executionId: EXECUTION, text: "Make it shorter" });
     const first = await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 2 } });
-    expect(first.steers).toEqual(["Make it shorter"]);
+    expect(first.steers).toEqual([{ text: "Make it shorter" }]);
     const second = await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 3 } });
     expect(second.steers).toEqual([]);
     await expect(
       f.other.mutation(api.spectraHarness.queueSteer, { runId: f.ids.runId, executionId: EXECUTION, text: "hi" }),
     ).rejects.toThrow("AI run not found");
+  });
+
+  it("joins files sent mid-run to their message, and reads them only on request", async () => {
+    const f = await fixture();
+    await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 1 } });
+    const [own, steer, foreign] = await f.t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["notes"]));
+      const base = { runId: f.ids.runId, executionId: EXECUTION, ownerAccountId: f.ids.accountId, storageId, status: "active" as const,
+        mimeType: "text/plain", size: 5, handling: "text" as const, createdAt: Date.now() };
+      return [
+        await ctx.db.insert("spectraRunAttachments", { ...base, name: "brief.txt" }),
+        await ctx.db.insert("spectraRunAttachments", { ...base, name: "later.txt", provenance: { steer: true } }),
+        await ctx.db.insert("spectraRunAttachments", { ...base, executionId: "older-attempt", name: "old.txt" }),
+      ];
+    });
+    await expect(
+      f.actor.mutation(api.spectraHarness.queueSteer, { runId: f.ids.runId, executionId: EXECUTION, text: "", attachmentIds: [foreign] }),
+    ).rejects.toThrow("HARNESS_STEER_ATTACHMENT_INVALID");
+    await expect(
+      f.actor.mutation(api.spectraHarness.queueSteer, { runId: f.ids.runId, executionId: EXECUTION, text: "  " }),
+    ).rejects.toThrow("HARNESS_STEER_EMPTY");
+    await f.actor.mutation(api.spectraHarness.queueSteer, { runId: f.ids.runId, executionId: EXECUTION, text: "", attachmentIds: [steer, steer] });
+    const checkpoint = await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 2 } });
+    expect(checkpoint.steers).toEqual([{ text: "", attachmentIds: [steer] }]);
+    const request = await f.actor.query(api.spectraRuns.listRunAttachments, { runId: f.ids.runId, executionId: EXECUTION });
+    expect(request.map((row) => row.runAttachmentId)).toEqual([own]);
+    const joined = await f.actor.query(api.spectraRuns.listRunAttachments, { runId: f.ids.runId, executionId: EXECUTION, runAttachmentIds: [steer] });
+    expect(joined.map((row) => row.name)).toEqual(["later.txt"]);
+  });
+
+  it("finds the run a new message joins, with the open question when it waits", async () => {
+    const f = await fixture();
+    const working = await f.actor.query(api.spectraHarness.joinableRun, { runId: f.ids.runId });
+    expect(working).toMatchObject({ runId: f.ids.runId, executionId: EXECUTION, status: "running", pending: null });
+    expect(await f.other.query(api.spectraHarness.joinableRun, { runId: f.ids.runId })).toBeNull();
+    await f.pauseForApproval();
+    const waiting = await f.actor.query(api.spectraHarness.joinableRun, { runId: f.ids.runId });
+    expect(waiting?.pending).toEqual({ toolCallId: "call-1", kind: "approval" });
+    await f.actor.mutation(api.spectraHarness.answer, {
+      runId: f.ids.runId, executionId: EXECUTION, toolCallId: "call-1", answer: { kind: "approval", allowed: false },
+    });
+    await f.t.run((ctx) => ctx.db.patch(f.ids.runId, { status: "completed" }));
+    expect(await f.actor.query(api.spectraHarness.joinableRun, { runId: f.ids.runId })).toBeNull();
+  });
+
+  it("finds a thread's active run without a run id", async () => {
+    const f = await fixture();
+    const threadId = await f.t.run(async (ctx) => {
+      const run = await ctx.db.get(f.ids.runId);
+      const id = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: f.ids.accountId, schoolId: run!.schoolId, title: "Thread", origin: "chat", status: "active",
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await ctx.db.patch(f.ids.runId, { threadId: id });
+      return id;
+    });
+    const joined = await f.actor.query(api.spectraHarness.joinableRun, { threadId });
+    expect(joined).toMatchObject({ runId: f.ids.runId, threadId });
   });
 
   it("applies an approved settings change and stores Always allow", async () => {

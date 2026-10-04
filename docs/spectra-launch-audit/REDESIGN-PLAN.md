@@ -169,7 +169,9 @@ compat shims, and say so in the commit.
 | V1 · AI live check | — | Stopped by the user's decision (no live checks for now). Its inline-emphasis fix landed as `e458902d`; its other findings moved to A1b. |
 | R1 | `main` · primary checkout | Done: 13 issues fixed, build green ([report](reports/R-R1-RELIABILITY.md)). Left for a paired Bridge: LV-046 native check, LV-061 first open. For D3: Calendar block notes show raw `<p>` HTML. |
 | Visual spec | — | Approved 2026-10-04: https://claude.ai/artifact/56MkPBViV6HKgCz9CM8uvV |
-| A2a · Semantic layer | `lane/semantic` · `<local-workspace>` | Running (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2b) |
-| A1b · Harness polish | `lane/harness-polish` · `<local-workspace>` | Starting |
-| Design core | `main` · primary checkout (orchestrator) | Starting with the life and prism lab |
+| A2a · Semantic layer | `lane/semantic` (worktree removed) | Merged into main as `32e8240c` (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2b) |
+| A1b · Harness polish | `lane/harness-polish` (worktree removed) | Merged into main as `5ae76253`; build passes |
+| Design core | `main` · primary checkout (orchestrator) | Life engine v2 (one matter: lattice, formations, signals) `4076255a`, choreography map `0c818c81`; the field is mounted app-wide, the old per-surface fields are gone, and the favicon is the prism with its status dot. Next: `/dev/life` and `/dev/icons` labs, kit primitives with life hooks |
 | Prism (user's agent) | `lane/prism` · `<local-workspace>` | Retired: the orchestrator builds the prism in code |
+| A2b · AI reach | `lane/ai-reach` · `<local-workspace>` | Running |
+| F1 · School | `lane/school` · `<local-workspace>` | Running (backend first) |

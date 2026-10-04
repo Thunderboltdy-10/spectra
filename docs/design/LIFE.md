@@ -178,6 +178,23 @@ life.radiate(prismFigure, { colour, count, reach })
 life.absorb(rect, { colour })
 ```
 
+**Mounting.** One `LifeField` is mounted for the whole app in `Providers`, on every page except the landing page,
+which has its own field. The back layer sits at z-index −1, directly over the body's paper; the front layer sits just under toasts, over the island and modals. Pages are transparent
+(`.spectra-wave-y` and the stage have no background of their own), so the medium shows in open paper, and every
+surface with a background covers it.
+
+**Hooks** (`use-life.ts`), for components:
+
+- `useLifeGlow(ref, active, colour?)`: glow around an element while Spectra works on it; it follows the element
+  as it resizes and scrolls. Cards glow while `creating` or `updating`.
+- `useLifeEntrance(ref, { from?, bars? })`: the element forms out of the field where it appears, then takes over.
+- `unformElement(element, { from? })`: call just before something is removed.
+- `travelElement(from, to | { absorb })`: from an element or a point, to an element or into one.
+
+**The favicon** is `prismSvg` of the resting prism with its status dot. It reads the `prism.status` query that the
+island publishes. Until the island publishes one, the favicon shows working while a run is live, and yellow while
+a run waits on the user.
+
 **What uses it.**
 
 - Kit primitives (Button, IconButton, Row, Tab, Panel, drag handles) call the engine themselves, so pages get life

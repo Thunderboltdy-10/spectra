@@ -571,7 +571,7 @@ async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
     await ctx.db.patch(capsule._id, { stale: true, updatedAt: now });
 }
 
-async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims">, retryFailed = false, wake = true): Promise<boolean> {
+export async function enqueueClaimEmbedding(ctx: MutationCtx, claim: Doc<"memoryClaims">, retryFailed = false, wake = true): Promise<boolean> {
   if (!(await canEmbedClaim(ctx, claim))) return false;
   const version = embeddingVersion();
   const partition = memoryEmbeddingPartition(claim, version);

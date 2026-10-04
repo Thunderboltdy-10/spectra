@@ -81,4 +81,10 @@ crons.interval(
   internal.administration.processLifecycleExports,
   {},
 );
+crons.interval(
+  "maintain-semantic-index",
+  { minutes: 10 },
+  internal.semanticIndex.maintain,
+  {},
+);
 export default crons;

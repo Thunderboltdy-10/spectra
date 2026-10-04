@@ -25,8 +25,6 @@ function renderSearch(onOpenWorkspace = vi.fn()) {
       trigger="icon"
       onOpenArtifact={vi.fn()}
       onOpenWorkspace={onOpenWorkspace}
-      selectedIds={new Set()}
-      onToggleSelected={vi.fn()}
     />,
   );
   return onOpenWorkspace;

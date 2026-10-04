@@ -21,10 +21,8 @@ beforeEach(() => {
   storage.clear();
   contextStore.setState({
     continuation: null,
-    explicit: [],
     selectionDraft: [],
     visible: [],
-    excludedVisibleKeys: [],
     activeWorkspace: null,
     globalScope: true,
     openObjects: [],
@@ -37,17 +35,15 @@ beforeEach(() => {
 });
 
 describe("canonical Spectra client state", () => {
-  it("keeps one continuation target and keeps temporary selection separate from explicit context", () => {
+  it("keeps one continuation target and clears a temporary selection", () => {
     const state = contextStore.getState();
     state.setContinuation({ id: "thread-a", title: "First" });
     state.setContinuation({ id: "thread-b", title: "Second" });
-    state.addExplicit({ type: "artifact", id: "explicit-a", label: "Explicit", source: "explicit" });
     state.toggleSelection({ type: "artifact", id: "selected-b", label: "Selected", source: "selected" });
     state.clearSelection();
 
     expect(contextStore.getState().continuation?.id).toBe("thread-b");
     expect(contextStore.getState().selectionDraft).toEqual([]);
-    expect(contextStore.getState().explicit.map((row) => row.id)).toEqual(["explicit-a"]);
   });
 
   it("opens thread and run panels without stealing the active artifact surface", () => {
@@ -59,9 +55,9 @@ describe("canonical Spectra client state", () => {
     expect(contextStore.getState().activeOpenObjectKey).toBe("artifact:doc-a");
   });
 
-  it("prunes inaccessible open objects and orphaned tiles while retaining explicit context as stale", () => {
+  it("prunes inaccessible open objects, orphaned tiles and selections", () => {
     contextStore.setState({
-      explicit: [{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit" }],
+      selectionDraft: [{ type: "artifact", id: "gone", label: "Gone artifact", source: "selected" }],
       openObjects: [
         { type: "artifact", id: "gone", label: "Gone artifact", presentation: "tile" },
         { type: "artifact", id: "kept", label: "Old title", presentation: "split" },
@@ -80,7 +76,7 @@ describe("canonical Spectra client state", () => {
     expect(next.tileArtifactIds).toEqual([]);
     expect(next.tileSizes).toEqual({});
     expect(next.tilesIsolated).toBe(false);
-    expect(next.explicit).toEqual([{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit", stale: true }]);
+    expect(next.selectionDraft).toEqual([]);
   });
 
   it("does not discard an open artifact when a bounded overview omits it", () => {
@@ -143,13 +139,6 @@ describe("canonical Spectra client state", () => {
     expect(next.tileArtifactIds).toEqual([]);
     expect(next.tileSizes).toEqual({});
     expect(next.tilesIsolated).toBe(false);
-  });
-
-  it("forgets a visible-context exclusion when the object is no longer visible", () => {
-    contextStore.getState().setVisible([{ type: "artifact", id: "a", label: "A", source: "visible" }]);
-    contextStore.getState().toggleVisibleExclusion("artifact", "a");
-    contextStore.getState().setVisible([]);
-    expect(contextStore.getState().excludedVisibleKeys).toEqual([]);
   });
 
   it("keeps an artifact split open beside a thread panel and replaces only conflicting conversation panels", () => {

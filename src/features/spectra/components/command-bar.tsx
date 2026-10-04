@@ -38,13 +38,9 @@ type CommandBarProps = {
   allowConcurrent?: boolean;
   onStartNewThread?: () => void;
   activeRunId?: string;
+  /** A message (and files) sent while a run works joins that run. */
   onSteer?: (
     runId: string,
-    mode:
-      | "refine_current_goal"
-      | "redirect_next_step"
-      | "replace_goal"
-      | "cancel_current_action",
     text: string,
     attachments?: CommandAttachment[],
   ) => void | Promise<unknown>;
@@ -426,12 +422,7 @@ export function CommandBar({
         setAttachments([]);
         setMenuOpen(false);
         try {
-          const accepted = await onSteer(
-            activeRunId,
-            "refine_current_goal",
-            draft,
-            draftAttachments,
-          );
+          const accepted = await onSteer(activeRunId, draft, draftAttachments);
           if (accepted === false) {
             setValue(draft);
             setAttachments(draftAttachments);

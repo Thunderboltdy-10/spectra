@@ -47,10 +47,6 @@ import {
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
 import { CommandBar } from "../components/command-bar";
-import {
-  ContextFocusControl,
-  type ComposerFocusMode,
-} from "../components/context-controls";
 import { ShareDialog } from "../components/share-dialog";
 import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -498,23 +494,22 @@ export function AgentLibraryShell({
   }, [catalogKey, missingRestored]);
   const activeAgentArtifact = studio.activeArtifact;
   const activeAgentArtifactId = activeAgentArtifact?._id;
-  const [focusMode, setFocusMode] = useState<ComposerFocusMode>(
-    activeAgentArtifact ? "artifact" : "global",
+  const openAgentPointers = useMemo(
+    () =>
+      activeAgentArtifact
+        ? [{ id: activeAgentArtifact._id, type: activeAgentArtifact.blueprintKey, title: activeAgentArtifact.title }]
+        : undefined,
+    [activeAgentArtifact],
   );
   const runEngine = useSpectraRun({
     surface: activeAgentArtifact ? "artifact" : "chat",
     artifactId: activeAgentArtifactId,
-    focusMode,
-    selectedArtifactIds: activeAgentArtifact ? [activeAgentArtifact._id] : [],
+    open: openAgentPointers,
     currentView: activeAgentArtifact ? "agent-editor" : "agent-library",
     onThreadReady: (threadId) => {
       router.push(`/chat?threadId=${encodeURIComponent(threadId)}`);
     },
   });
-
-  useEffect(() => {
-    setFocusMode(activeAgentArtifactId ? "artifact" : "global");
-  }, [activeAgentArtifactId]);
 
   const load = useCallback(async (quiet = false) => {
     if (!catalogKey) { setPublicLoading(false); return; }
@@ -792,14 +787,6 @@ export function AgentLibraryShell({
           busy={runEngine.submitting}
           onStop={runEngine.stop}
           onSubmit={(prompt, attachments) => runEngine.run(prompt, attachments)}
-          context={
-            <ContextFocusControl
-              mode={focusMode}
-              onModeChange={setFocusMode}
-              artifact={activeAgentArtifact}
-              selectedCount={1}
-            />
-          }
     />
   ) : null;
 
@@ -1008,12 +995,6 @@ export function AgentLibraryShell({
               onStop={runEngine.stop}
               onSubmit={(prompt, attachments) =>
                 runEngine.run(prompt, attachments)
-              }
-              context={
-                <ContextFocusControl
-                  mode={focusMode}
-                  onModeChange={setFocusMode}
-                />
               }
               menu={
                 <button

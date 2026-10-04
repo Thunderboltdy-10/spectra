@@ -78,11 +78,7 @@ import {
   CommandBarMenuItem,
   CommandBarSubmenu,
 } from "../components/command-bar";
-import {
-  ContextFocusControl,
-  SelectionActionBar,
-  type ComposerFocusMode,
-} from "../components/context-controls";
+import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { ShellActivityField } from "../components/shell-activity-field";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
@@ -1150,8 +1146,6 @@ export function SpectraShell({
   const [attachmentsHost, setAttachmentsHost] = useState<HTMLDivElement | null>(
     null,
   );
-  const [focusModeOverride, setFocusModeOverride] =
-    useState<ComposerFocusMode | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   /* Two boards, two memories. The root board answers "which workspace holds
      what" and the hub board answers "what kind of work is in here" — so a
@@ -2198,10 +2192,8 @@ export function SpectraShell({
     selectedContextIds,
     selectedObjectKeys,
     selectionCount,
-    contextArtifactIds,
-    explicitContextObjects,
+    open: openPointers,
     setSelectedContextIds,
-    commitSelection,
     clearDraftSelection,
     setVisibleObjects,
     setActiveWorkspaceContext,
@@ -2217,16 +2209,6 @@ export function SpectraShell({
       })
       .catch(() => toast.error("That conversation is no longer available."));
   }, [requestedThreadId, setLiveThread]);
-  const contextualArtifactIds = useMemo(
-    () =>
-      [
-        ...new Set([
-          ...contextArtifactIds,
-          ...tiledArtifacts.map((artifact) => artifact._id),
-        ]),
-      ].slice(0, 24),
-    [contextArtifactIds, tiledArtifacts],
-  );
   const workspaceIndexEntry =
     workspaces.find((candidate) => candidate._id === selectedWorkspaceId) ??
     null;
@@ -2363,34 +2345,6 @@ export function SpectraShell({
     setVisibleObjects,
     tiledArtifacts,
   ]);
-  // Open studio artifact must beat workspace scope — otherwise QC thinks the
-  // workspace is focused while the sheet/doc editor is visibly open, and
-  // focused edits drift into create/other-type work (E-03 sheets regression).
-  const naturalFocusMode: ComposerFocusMode = composerThread
-    ? "thread"
-    : commandFocusArtifact
-      ? "artifact"
-      : contextualArtifactIds.length > 0
-        ? "selection"
-        : workspace
-          ? "workspace"
-          : "global";
-  const effectiveFocusMode =
-    // An open studio artifact always owns focus unless the user explicitly
-    // pinned selection/thread. Sticky workspace override was silencing sheets.
-    commandFocusArtifact &&
-    focusModeOverride !== "selection" &&
-    focusModeOverride !== "thread"
-      ? "artifact"
-      : focusModeOverride === "selection" && contextualArtifactIds.length === 0
-        ? naturalFocusMode
-        : focusModeOverride === "artifact" && !commandFocusArtifact
-          ? naturalFocusMode
-          : focusModeOverride === "workspace" && !workspace
-            ? naturalFocusMode
-            : focusModeOverride === "thread" && !composerThread
-              ? naturalFocusMode
-              : (focusModeOverride ?? naturalFocusMode);
   const initialResultCards = useMemo(
     () =>
       (overview?.resultCards ?? []).filter(
@@ -2771,9 +2725,7 @@ export function SpectraShell({
       undefined,
     artifactId: commandFocusArtifact?._id,
     threadId: composerThread?.id,
-    focusMode: effectiveFocusMode,
-    selectedArtifactIds: contextualArtifactIds,
-    explicitContextObjects,
+    open: openPointers,
     currentView: viewMode,
     initialCards: initialResultCards,
     onThreadReady: (threadId) => {
@@ -3027,16 +2979,9 @@ export function SpectraShell({
       if (next.has(artifact._id)) next.delete(artifact._id);
       else if (next.size < 24) next.add(artifact._id);
       else
-        toast.message(
-          "Context can include up to 24 explicitly selected work items.",
-        );
+        toast.message("You can select up to 24 work items at once.");
       return next;
     });
-    setFocusModeOverride("selection");
-  }
-
-  function restoreLatestSelection() {
-    if (selectionCount > 0) setFocusModeOverride("selection");
   }
 
   /**
@@ -3136,7 +3081,6 @@ export function SpectraShell({
 
   function clearSelection() {
     clearDraftSelection();
-    setFocusModeOverride(null);
   }
 
   function openSelectedArtifactsInTiles() {
@@ -3228,9 +3172,6 @@ export function SpectraShell({
         return;
       }
     }
-    // Prefer the open artifact over a sticky workspace focus override so QC
-    // focused edits target the studio surface the user is looking at.
-    setFocusModeOverride(null);
     openedDeepLinkRef.current = artifact._id;
     // Open beside existing work by default; expand to full-page via Maximize.
     studio.openSplit(artifact);
@@ -4151,14 +4092,7 @@ export function SpectraShell({
     <>
       <SelectObjectsButton
         selectionMode={multiSelectMode}
-        onToggle={() => {
-          setMultiSelectMode((value) => {
-            const next = !value;
-            if (next && selectionCount === 0) restoreLatestSelection();
-            return next;
-          });
-          if (selectionCount) setFocusModeOverride("selection");
-        }}
+        onToggle={() => setMultiSelectMode((value) => !value)}
       />
     </>
   );
@@ -4582,7 +4516,6 @@ export function SpectraShell({
                             onSelectWork={(ids) => {
                               setMultiSelectMode(true);
                               setSelectedContextIds(new Set(ids));
-                              setFocusModeOverride("selection");
                             }}
                           />
                         </main>
@@ -4745,15 +4678,6 @@ export function SpectraShell({
                       clearSelection();
                       setMultiSelectMode(false);
                     }}
-                    onAddToContext={() => {
-                      const count = selectionCount;
-                      commitSelection();
-                      setFocusModeOverride("selection");
-                      setMultiSelectMode(false);
-                      toast.success(
-                        `${count} object${count === 1 ? "" : "s"} added to context.`,
-                      );
-                    }}
                     onTile={
                       selectedContextIds.size
                         ? openSelectedArtifactsInTiles
@@ -4788,16 +4712,6 @@ export function SpectraShell({
                     activeRunId={runEngine.activeRunId}
                     onSteer={runEngine.steer}
                     onStartNewThread={startFreshComposerThread}
-                    context={
-                      <ContextFocusControl
-                        mode={effectiveFocusMode}
-                        onModeChange={setFocusModeOverride}
-                        workspace={workspace}
-                        artifact={commandFocusArtifact}
-                        selectedCount={contextualArtifactIds.length}
-                        threadTitle={composerThread?.title}
-                      />
-                    }
                     menu={
                       <div>
                         <CommandBarMenuItem onClick={startFreshComposerThread}>
@@ -4826,9 +4740,6 @@ export function SpectraShell({
                         <CommandBarMenuItem
                           onClick={() => {
                             setMultiSelectMode(true);
-                            if (selectionCount === 0) restoreLatestSelection();
-                            if (selectionCount)
-                              setFocusModeOverride("selection");
                           }}
                         >
                           <Files className="h-4 w-4" />

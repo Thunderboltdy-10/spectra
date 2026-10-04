@@ -40,11 +40,7 @@ import { CommandBar } from "../components/command-bar";
 import { ShellActivityField } from "../components/shell-activity-field";
 import { CrossfadeText } from "../motion";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
-import {
-  ContextFocusControl,
-  GlobalSearch,
-  type ComposerFocusMode,
-} from "../components/context-controls";
+import { GlobalSearch } from "../components/context-controls";
 import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
@@ -111,8 +107,6 @@ export function ChatShell() {
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [chatWorkspaceId, setChatWorkspaceId] = useState<string | null>(null);
-  const [focusModeOverride, setFocusModeOverride] =
-    useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
@@ -127,11 +121,7 @@ export function ChatShell() {
   const {
     composerThread,
     setComposerThread,
-    explicitContextIds: selectedContextIds,
-    contextArtifactIds,
-    explicitContextObjects,
-    clearExplicitContext,
-    toggleExplicitArtifact,
+    open: openPointers,
     setVisibleArtifactIds,
     setActiveWorkspaceContext,
   } = useSpectraContext(artifacts, workspaces);
@@ -572,45 +562,16 @@ export function ChatShell() {
     setVisibleArtifactIds(focusedArtifact ? [focusedArtifact._id] : []);
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
-  const naturalFocusMode: ComposerFocusMode = composerThread
-    ? "thread"
-    : focusedArtifact
-      ? "artifact"
-      : selectedContextIds.size > 0
-        ? "selection"
-        : scopedWorkspaceId
-          ? "workspace"
-          : "global";
-  const effectiveFocusMode =
-    focusModeOverride === "thread" && !composerThread
-      ? naturalFocusMode
-      : focusModeOverride === "artifact" && !focusedArtifact
-        ? naturalFocusMode
-        : focusModeOverride === "workspace" && !scopedWorkspaceId
-          ? naturalFocusMode
-          : focusModeOverride === "selection" && selectedContextIds.size === 0
-            ? naturalFocusMode
-            : (focusModeOverride ?? naturalFocusMode);
   // Continuation is independent from additive artifact/workspace context.
   // Starting a new thread is an explicit thread action, not a side effect of focus.
   const continuingThread = Boolean(composerThread);
-
-  const toggleContextArtifact = useCallback(
-    (artifact: SpectraArtifact) => {
-      toggleExplicitArtifact(artifact);
-      setFocusModeOverride("selection");
-    },
-    [toggleExplicitArtifact],
-  );
 
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
     artifactId: focusedArtifact?._id,
     threadId: composerThread?.id,
-    focusMode: effectiveFocusMode,
-    selectedArtifactIds: contextArtifactIds,
-    explicitContextObjects,
+    open: openPointers,
     currentView: "conversation",
     initialCards: [],
     onThreadReady: async (id) => {
@@ -727,9 +688,7 @@ export function ChatShell() {
       placeholder={
         continuingThread
           ? `Continue ${title}…`
-          : selectedContextIds.size
-            ? `Ask with ${selectedContextIds.size} selected work items…`
-            : activeWorkspace
+          : activeWorkspace
               ? `Ask with ${activeWorkspace.title} context…`
               : focusedArtifact
                 ? `Ask about ${focusedArtifact.title}…`
@@ -763,19 +722,6 @@ export function ChatShell() {
             <Plus className="h-4 w-4" />
             New conversation
           </button>
-          {selectedContextIds.size ? (
-            <button
-              type="button"
-              onClick={() => {
-                clearExplicitContext();
-                setFocusModeOverride(null);
-              }}
-              className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            >
-              <X className="h-4 w-4" />
-              Clear selected context
-            </button>
-          ) : null}
           <div className="my-1 h-px bg-[var(--border-subtle)]" />
           {workspaces.slice(0, 6).map((workspace) => (
             <button
@@ -794,16 +740,6 @@ export function ChatShell() {
             </button>
           ))}
         </>
-      }
-      context={
-        <ContextFocusControl
-          mode={effectiveFocusMode}
-          onModeChange={setFocusModeOverride}
-          workspace={activeWorkspace}
-          artifact={focusedArtifact}
-          selectedCount={contextArtifactIds.length}
-          threadTitle={threadId ? title : undefined}
-        />
       }
     />
   );
@@ -834,8 +770,6 @@ export function ChatShell() {
               onOpenWorkspace={(workspace) =>
                 selectWorkspaceContext(workspace._id)
               }
-              selectedIds={selectedContextIds}
-              onToggleSelected={toggleContextArtifact}
             />
             {threadId ? (
               <button
@@ -1143,7 +1077,6 @@ export function ChatShell() {
           <ComposerArtifactDock
             artifacts={artifacts}
             cards={runEngine.cards}
-            explicitIds={[...selectedContextIds]}
             threadId={composerThread?.id ?? threadId ?? undefined}
             onOpen={openArtifact}
           />

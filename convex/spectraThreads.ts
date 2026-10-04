@@ -359,8 +359,7 @@ function clarificationTargets(run: Doc<"spectraAiRuns">) {
   const snapshot = record(run.contextSnapshot);
   const ids = [
     run.artifactId ? String(run.artifactId) : undefined,
-    ...(Array.isArray(snapshot.selectedObjectIds) ? snapshot.selectedObjectIds : []),
-    ...((Array.isArray(snapshot.explicitContextObjects) ? snapshot.explicitContextObjects : []) as Array<Record<string, unknown>>).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
+    ...([...(Array.isArray(snapshot.open) ? snapshot.open : []), ...(Array.isArray(snapshot.references) ? snapshot.references : [])] as Array<Record<string, unknown>>).flatMap((item) => typeof item?.id === "string" ? [item.id] : []),
     ...((Array.isArray(snapshot.targetResolutions) ? snapshot.targetResolutions : []) as Array<Record<string, unknown>>).flatMap((item) => [
       ...(typeof item.resolvedArtifactId === "string" ? [item.resolvedArtifactId] : []),
       ...(Array.isArray(item.candidates)

@@ -54,7 +54,6 @@ export type SpectraCommands = {
   };
   "reference.remove": { hostWorkId: string; embedId: string };
   "reference.beginPicking": { hostWorkId: string };
-  "context.beginPicking": { source: "quick_chat" | "composer" };
   "settings.manageAccount": Record<string, never>;
   "settings.clearLocalComputeCache": Record<string, never>;
   "settings.change": { patch: Record<string, unknown>; section?: string };

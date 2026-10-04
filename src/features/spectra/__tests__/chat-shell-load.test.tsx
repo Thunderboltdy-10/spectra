@@ -101,11 +101,7 @@ vi.mock("../hooks/use-spectra-context", () => ({
   useSpectraContext: () => ({
     composerThread: null,
     setComposerThread: vi.fn(),
-    explicitContextIds: new Set<string>(),
-    contextArtifactIds: [],
-    explicitContextObjects: [],
-    clearExplicitContext: vi.fn(),
-    toggleExplicitArtifact: vi.fn(),
+    open: [],
     setVisibleArtifactIds: vi.fn(),
     setActiveWorkspaceContext: vi.fn(),
   }),
@@ -183,7 +179,6 @@ vi.mock("../components/command-bar", () => ({
 }));
 
 vi.mock("../components/context-controls", () => ({
-  ContextFocusControl: () => null,
   GlobalSearch: () => <button type="button">Search work</button>,
 }));
 

@@ -1,7 +1,6 @@
 import type { SemanticAnchor } from "../../anchors";
 
 export type ContextPermission = "allowed" | "denied" | "request_required";
-export type ContextSummary = { title: string; text: string; tokens?: number; provenance?: string[] };
 export type ContextSourceRegistration = {
   id: string;
   anchor: SemanticAnchor;
@@ -9,7 +8,6 @@ export type ContextSourceRegistration = {
   type: string;
   workspaceId?: string;
   parentId?: string;
-  contextSummary: () => Promise<ContextSummary>;
   permissions: ContextPermission;
   element?: () => HTMLElement | null;
 };

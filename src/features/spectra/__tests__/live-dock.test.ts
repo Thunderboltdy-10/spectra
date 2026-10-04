@@ -200,10 +200,11 @@ describe("Live Dock V2", () => {
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("displayedRunVersions");
     expect(runHook).not.toContain("force: true");
-    expect(runHook).toContain("let targetThreadId = target?.threadId");
-    expect(runHook).toContain("threadId: targetThreadId");
-    expect(runHook).toContain("mergeContinuationAttachments");
-    expect(runHook).toContain("attachmentsByThreadId.current.get(targetThreadId)");
+    // A message sent while a run works joins it, files included; a run that
+    // is waiting or finished takes it as a new turn in its thread.
+    expect(runHook).toContain('action: "steer"');
+    expect(runHook).toContain("attachments: nextAttachments");
+    expect(runHook).toContain("{ threadId: threadOfRun, steerRunId: runId }");
     const surface = read(
       "src/features/spectra/components/conversation-surface.tsx",
     );
@@ -316,10 +317,6 @@ describe("Live Dock V2", () => {
     expect(shell).not.toContain("}, 60_000);");
     const context = read("src/features/spectra/hooks/use-spectra-context.ts");
     expect(context).toContain("if (!next?.runId && !next?.id) return;");
-    const controls = read(
-      "src/features/spectra/components/context-controls.tsx",
-    );
-    expect(controls).toContain("if (next?.runId)");
     const bridge = read("src/features/spectra/bridge/use-bridge.ts");
     // Bridge checks start at 15 s and back off while Bridge is unreachable
     // (LV-012); a hidden page is never polled.

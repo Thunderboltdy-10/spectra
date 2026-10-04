@@ -459,15 +459,15 @@ describe("ManageBac account isolation", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t = setupTest();
     await seedFixture(t);
-    const killed = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" });
+    const killed = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" });
     vi.setSystemTime(Date.now() + 60_000);
     await expect(
-      t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" }),
+      t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" }),
     ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
     vi.setSystemTime(Date.now() + 6 * 60_000);
     // The killed request's pass is not thrown away: the next request takes
     // it over under a fresh lease and continues from its last saved page.
-    const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual" });
+    const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" });
     expect(replacement.syncRunId).toBe(killed.syncRunId);
     expect(replacement.leaseToken).not.toBe(killed.leaseToken);
     expect(await t.run((ctx) => ctx.db.get(killed.syncRunId as Id<"externalSyncRuns">))).toMatchObject({
@@ -494,6 +494,7 @@ describe("ManageBac account isolation", () => {
         leaseToken: "old-lease",
         leaseExpiresAt: now - 1,
         selectionRevision: 0,
+        syncKind: "task_resources",
         attemptCount: 1,
         nextAttemptAt: now,
         createdAt: now - 1_000,
@@ -514,7 +515,7 @@ describe("ManageBac account isolation", () => {
 
     const replacement = await t.withIdentity(alice).mutation(
       api.managebac.beginSync,
-      { kind: "manual" },
+      { kind: "manual", syncKind: "task_resources" },
     );
     expect(replacement.syncRunId).not.toBe(oldRun);
 

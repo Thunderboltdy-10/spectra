@@ -361,6 +361,31 @@ function schoolRecordScope(record: Doc<"externalRecords">): ItemScope {
 const schoolIndexable = (doc: Doc<"externalRecords">) => !doc.tombstone &&
   (doc.sourceState === undefined || doc.sourceState === "available" || doc.sourceState === "changed") && schoolRecordTypeIndexed(doc.recordType);
 
+/**
+ * A student's own record carries what they keep beside it: the text of fetched dropbox files
+ * and their CAS reflections. Both belong to the record's owner only, as the record does.
+ */
+async function schoolRecordWithOwnText(ctx: QueryCtx, record: Doc<"externalRecords">) {
+  const owner = record.mappedAccountId;
+  if (!owner) return record.normalized;
+  const [files, reflections] = await Promise.all([
+    ctx.db.query("schoolFiles")
+      .withIndex("by_account_source", (q) => q.eq("accountId", owner).eq("sourceRecordId", record._id)).take(20),
+    record.recordType === "cas_experience"
+      ? ctx.db.query("casReflections")
+          .withIndex("by_account_experience", (q) => q.eq("accountId", owner).eq("experienceRecordId", record._id)).take(50)
+      : Promise.resolve([]),
+  ]);
+  const fileText = files.filter((file) => file.extractedText).map((file) => `${file.filename}\n${file.extractedText}`);
+  if (!fileText.length && !reflections.length) return record.normalized;
+  const base = record.normalized && typeof record.normalized === "object" ? (record.normalized as Record<string, unknown>) : {};
+  return {
+    ...base,
+    ...(fileText.length ? { submittedFiles: fileText.join("\n\n") } : {}),
+    ...(reflections.length ? { reflections: reflections.map((row) => row.body).join("\n\n") } : {}),
+  };
+}
+
 const schoolSource = defineSource({
   kind: "school",
   table: "externalRecords",
@@ -369,12 +394,12 @@ const schoolSource = defineSource({
   indexable: schoolIndexable,
   updatedAt: (doc) => doc.sourceModifiedAt ?? doc.updatedAt,
   schoolId: (doc) => doc.schoolId,
-  async load(_ctx, record) {
+  async load(ctx, record) {
     return {
       title: schoolRecordTitle(record.normalized, record.recordType), subtype: record.recordType,
       sourceUpdatedAt: record.sourceModifiedAt ?? record.updatedAt, timeAt: schoolRecordTimeAt(record.normalized),
       lineageIds: [], scope: schoolRecordScope(record),
-      input: { builder: "school", recordType: record.recordType, normalized: record.normalized },
+      input: { builder: "school", recordType: record.recordType, normalized: await schoolRecordWithOwnText(ctx, record) },
     };
   },
   async viewer(ctx, { actor, workspaceId }) {
@@ -483,6 +508,24 @@ const DEPENDENT_TRIGGERS = [
       return { kind: "artifact", itemId: node.sourceId, immediate: previous?.deletedAt === undefined && next?.deletedAt !== undefined };
     },
   } satisfies TriggerSpec<"orgNodes">,
+  {
+    // A fetched dropbox file's text is searched as part of its submission.
+    table: "schoolFiles",
+    target: (previous, next) => {
+      const file = next ?? previous;
+      return file && changed(previous, next, ["extractedText", "filename", "sourceRecordId"]) ?
+        { kind: "school", itemId: String(file.sourceRecordId), schoolId: file.schoolId, immediate: false } : null;
+    },
+  } satisfies TriggerSpec<"schoolFiles">,
+  {
+    // A CAS reflection is searched as part of its experience.
+    table: "casReflections",
+    target: (previous, next) => {
+      const reflection = next ?? previous;
+      return reflection && changed(previous, next, ["body"]) ?
+        { kind: "school", itemId: String(reflection.experienceRecordId), schoolId: reflection.schoolId, immediate: false } : null;
+    },
+  } satisfies TriggerSpec<"casReflections">,
 ];
 
 export const SEMANTIC_TRIGGERS = [

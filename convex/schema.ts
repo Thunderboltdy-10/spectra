@@ -4,6 +4,7 @@ import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSche
 import { providerProjectionIntent, providerProjectionReceipt } from "./managebacProjectionContract";
 import { EMBEDDING_DIMENSIONS } from "./embeddingProvider";
 import { vSemanticKind as semanticIndexedKind } from "./semanticKeys";
+import { vSchoolSyncKind, vSchoolSyncMode, vSchoolSyncState, vSchoolSyncTrigger } from "./schoolSyncSchema";
 import {
   artifactEmbedContainerTypeValidator,
   artifactEmbedContextPolicyValidator,
@@ -948,6 +949,8 @@ export default defineSchema({
       v.literal("revoked"),
     ),
     evidenceCapabilityId: v.optional(v.id("integrationCapabilities")),
+    /** The student's year group from the identity lookup; CAS is read per year group. */
+    providerYearGroupId: v.optional(v.string()),
     matchCount: v.number(),
     resolvedAt: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
@@ -1020,6 +1023,9 @@ export default defineSchema({
     mappedAccountId: v.optional(v.id("accounts")),
     providerClassId: v.optional(v.string()),
     academicPeriodKey: v.optional(v.string()),
+    /** The student's kind of data this personal record belongs to (shared/school-sync.ts).
+     * Set at commit; preferences, purges and the School API read by it. */
+    syncKind: v.optional(vSchoolSyncKind),
     normalized: v.any(),
     payloadVersion: v.string(),
     sourceHash: v.string(),
@@ -1048,6 +1054,7 @@ export default defineSchema({
     .index("by_account_type", ["mappedAccountId", "recordType"])
     .index("by_visibility_membership", ["integrationId", "providerClassId", "academicPeriodKey", "mappedAccountId", "recordType"])
     .index("by_class_type", ["providerClassId", "recordType"])
+    .index("by_account_kind_class", ["mappedAccountId", "syncKind", "providerClassId"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),
 
   externalRecordRelations: defineTable({
@@ -1165,6 +1172,8 @@ export default defineSchema({
     leaseExpiresAt: v.optional(v.number()),
     /** Snapshot of the account's class selection at claim time. */
     selectionRevision: v.optional(v.number()),
+    /** The student's kind of data this job syncs. A school-wide reconciliation has none. */
+    syncKind: v.optional(vSchoolSyncKind),
     /** Optional class scope carried by class-specific sync runs. */
     providerClassId: v.optional(v.string()),
     academicPeriodKey: v.optional(v.string()),
@@ -1185,6 +1194,8 @@ export default defineSchema({
       "accountId",
       "status",
     ])
+    .index("by_integration_account_kind_status", ["integrationId", "accountId", "syncKind", "status"])
+    .index("by_integration_status", ["integrationId", "status"])
     .index("by_school_created", ["schoolId", "createdAt"]),
 
   externalSyncCapabilityRuns: defineTable({
@@ -1381,6 +1392,114 @@ export default defineSchema({
     .index("by_account_source_record", ["accountId", "sourceRecordId"])
     .index("by_account_request", ["accountId", "requestKey"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),
+
+  /**
+   * A student's mode for one kind of School data (docs/product/SCHOOL.md). No row means the
+   * kind's default. Background sync reads these; nothing syncs for Off.
+   */
+  schoolSyncPreferences: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    integrationId: v.id("schoolIntegrations"),
+    kind: vSchoolSyncKind,
+    mode: vSchoolSyncMode,
+    updatedAt: v.number(),
+  })
+    .index("by_account_integration_kind", ["accountId", "integrationId", "kind"])
+    .index("by_school", ["schoolId"]),
+
+  /** One class's mode for one kind, overriding the student's mode for that kind. */
+  schoolSyncClassOverrides: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    integrationId: v.id("schoolIntegrations"),
+    providerClassId: v.string(),
+    kind: vSchoolSyncKind,
+    mode: vSchoolSyncMode,
+    updatedAt: v.number(),
+  })
+    .index("by_account_integration_kind_class", ["accountId", "integrationId", "kind", "providerClassId"])
+    .index("by_school", ["schoolId"]),
+
+  /**
+   * Where one student's sync job for one kind stands: last and next run, and the last problem
+   * in plain words. `dueAt` is when the background worker should run it next.
+   */
+  schoolSyncStates: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    integrationId: v.id("schoolIntegrations"),
+    kind: vSchoolSyncKind,
+    state: vSchoolSyncState,
+    dueAt: v.optional(v.number()),
+    dueTrigger: v.optional(vSchoolSyncTrigger),
+    lastRunAt: v.optional(v.number()),
+    lastSuccessAt: v.optional(v.number()),
+    lastSyncRunId: v.optional(v.id("externalSyncRuns")),
+    errorCode: v.optional(v.string()),
+    errorSummary: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_account_integration_kind", ["accountId", "integrationId", "kind"])
+    .index("by_due", ["dueAt"])
+    .index("by_school", ["schoolId"]),
+
+  /**
+   * A file one student keeps from School: a dropbox submission fetched on demand, or CAS
+   * evidence they added. Readable only by that student. Bytes live in storage once per
+   * student and content hash.
+   */
+  schoolFiles: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    integrationId: v.id("schoolIntegrations"),
+    /** The submission or CAS experience it belongs to. */
+    sourceRecordId: v.id("externalRecords"),
+    origin: v.union(v.literal("dropbox"), v.literal("cas_evidence")),
+    providerFileId: v.optional(v.string()),
+    filename: v.string(),
+    mimeType: v.string(),
+    state: v.union(v.literal("listed"), v.literal("fetching"), v.literal("cached"), v.literal("failed")),
+    bytes: v.optional(v.number()),
+    /** SHA-256 of the bytes, hex. */
+    contentHash: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    /** Text extracted for search, bounded. */
+    extractedText: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    errorSummary: v.optional(v.string()),
+    fetchedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_source", ["accountId", "sourceRecordId"])
+    .index("by_account_hash", ["accountId", "contentHash"])
+    .index("by_account_updated", ["accountId", "updatedAt"])
+    .index("by_storage", ["storageId"])
+    .index("by_school", ["schoolId"]),
+
+  /** A CAS reflection written in Spectra. ManageBac's API can't store it (CAS_WRITE_BACK). */
+  casReflections: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    experienceRecordId: v.id("externalRecords"),
+    body: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_experience", ["accountId", "experienceRecordId"])
+    .index("by_school", ["schoolId"]),
+
+  /** Which of the seven CAS learning outcomes one experience meets, tagged by the student. */
+  casOutcomeTags: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    experienceRecordId: v.id("externalRecords"),
+    outcomes: v.array(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_account_experience", ["accountId", "experienceRecordId"])
+    .index("by_school", ["schoolId"]),
 
   calendarItems: defineTable({
     ownerAccountId: v.id("accounts"),

@@ -1,6 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getActorForAccountId } from "./identityShared";
+import { hiddenByPreferences, loadSyncPreferences, type SyncPreferences } from "./schoolSyncShared";
 
 type Ctx = QueryCtx | MutationCtx;
 type Actor = { accountId: Id<"accounts">; schoolId: Id<"schools"> };
@@ -42,6 +43,7 @@ function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
   let authority: ReturnType<typeof currentAuthority> | undefined;
   const memberships = new Map<string, Promise<boolean>>();
   const selections = new Map<string, Promise<boolean>>();
+  let preferences: Promise<SyncPreferences> | undefined;
   const canReadRecord = async (record: Doc<"externalRecords">): Promise<boolean> => {
     const current = await (authority ??= currentAuthority(ctx, actor));
     if (!current) return false;
@@ -59,6 +61,9 @@ function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
     if (classId !== undefined && !classId.trim()) return false;
     if (source.mappedAccountId !== undefined) {
       if (source.mappedAccountId !== currentActor.accountId || source.audienceScope !== "mapped_user") return false;
+      // A kind (or a class's kind) the student turned Off shows nothing, even a row a purge hasn't reached yet.
+      preferences ??= loadSyncPreferences(ctx, currentActor.accountId, integration._id);
+      if (hiddenByPreferences(await preferences, source, Date.now())) return false;
     } else if (source.audienceScope === "mapped_user") {
       return false;
     } else if (source.audienceScope === "authorized_staff") {

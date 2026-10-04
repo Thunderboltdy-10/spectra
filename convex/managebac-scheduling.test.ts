@@ -69,7 +69,7 @@ describe("bounded ManageBac scheduling repair", () => {
     expect(await t.mutation(internal.managebac.scheduleExisting, {}))
       .toEqual({ scanned: 0, scheduled: 0, done: false });
     await t.finishAllScheduledFunctions(vi.runAllTimers);
-    expect(await t.mutation(internal.managebac.scheduleExisting, { status: "degraded" }))
+    expect(await t.mutation(internal.managebac.scheduleExisting, { stream: "students" }))
       .toEqual({ scanned: 0, scheduled: 0, done: true });
   });
 });

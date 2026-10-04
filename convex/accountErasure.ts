@@ -392,6 +392,17 @@ const ACCOUNT_TABLES: TableStep[] = [
   drain((ctx, id, n) => ctx.db.query("externalRecordOverlays").withIndex("by_account_updated", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("managebacClassSelections").withIndex("by_account_integration", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("managebacResourceImports").withIndex("by_account_source", (q) => q.eq("accountId", id)).take(n)),
+  // School: kept files (their bytes too), CAS work and sync preferences.
+  drain(
+    (ctx, id, n) => ctx.db.query("schoolFiles").withIndex("by_account_updated", (q) => q.eq("accountId", id)).take(n),
+    undefined,
+    async (ctx, row) => row.storageId && await deleteStorageIfNoOtherBinding(ctx, row.storageId, { table: "schoolFiles", id: String(row._id) }) ? 1 : 0,
+  ),
+  drain((ctx, id, n) => ctx.db.query("casReflections").withIndex("by_account_experience", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("casOutcomeTags").withIndex("by_account_experience", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("schoolSyncStates").withIndex("by_account_integration_kind", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("schoolSyncClassOverrides").withIndex("by_account_integration_kind_class", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("schoolSyncPreferences").withIndex("by_account_integration_kind", (q) => q.eq("accountId", id)).take(n)),
   // A personal record is the account's own mirrored data; a class or school
   // record belongs to the school and only loses its link to the account.
   drain(

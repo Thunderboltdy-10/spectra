@@ -429,6 +429,7 @@ const SCHOOL_RECORD_LABELS: Record<string, string> = {
   grade: "Grade", feedback: "Feedback", announcement: "Announcement", discussion: "Discussion", message: "Message",
   timetable: "Timetable", timetable_event: "Lesson", lesson: "Lesson", class_event: "Class event", calendar_event: "School event",
   cas_experience: "CAS experience", cas_reflection: "CAS reflection", cas_evidence: "CAS evidence",
+  submission: "Submission", task_result: "Grade",
 };
 export function schoolRecordTypeLabel(recordType: string) {
   return SCHOOL_RECORD_LABELS[recordType] ?? (recordType.replaceAll("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()) || "School item");

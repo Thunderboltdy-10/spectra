@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import type { AnsweredInput } from "../ai/harness-exchange";
+import { InlineEmphasis } from "./inline-emphasis";
 import { pastTenseProgressTitle } from "./progress-title";
 
 const groupOpenByKey = new Map<string, boolean>();
@@ -287,12 +288,22 @@ export function ProgressTrace({
                               transition={revealTransition}
                               className="overflow-hidden"
                             >
-                              <span className="ml-5 mt-1 block text-micro leading-4 text-[var(--text-tertiary)]">
-                                {pastTenseProgressTitle(
-                                  step.summary,
-                                  step.status !== "running",
-                                )}
-                              </span>
+                              {/* One line per step behind the caption, never run together. */}
+                              {step.summary
+                                .split("\n")
+                                .map((line) => pastTenseProgressTitle(line, step.status !== "running"))
+                                .filter(Boolean)
+                                .map((line, index) => (
+                                  <span
+                                    key={index}
+                                    className={cn(
+                                      "ml-5 block text-micro leading-4 text-[var(--text-tertiary)]",
+                                      index === 0 && "mt-1",
+                                    )}
+                                  >
+                                    {line}
+                                  </span>
+                                ))}
                             </motion.p>
                           ) : null}
                         </AnimatePresence>
@@ -311,7 +322,11 @@ export function ProgressTrace({
             <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-micro text-[var(--text-secondary)]">
               <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
               <span className="min-w-0 truncate">
-                {answer.question ? <span className="text-[var(--text-tertiary)]">{answer.question} · </span> : null}
+                {answer.question ? (
+                  <span className="text-[var(--text-tertiary)]">
+                    <InlineEmphasis text={answer.question} /> ·{" "}
+                  </span>
+                ) : null}
                 <span className="font-semibold">{answer.label}</span>
               </span>
             </li>

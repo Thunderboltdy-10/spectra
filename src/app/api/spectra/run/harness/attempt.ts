@@ -7,6 +7,7 @@ import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lea
 import { runLog, withSpectraRunLog } from "@/features/spectra/ai/run-log";
 import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-usage";
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
+import { plainEmphasis } from "@/features/spectra/ai/inline-emphasis";
 import type { PreparedAttachment, ResultAction, Surface } from "./contract";
 import { loadAgent, readAgentIndex, readRetainedAgentId } from "./agents";
 import { ConvexHarnessBackend } from "./convex-backend";
@@ -411,9 +412,9 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         status: pending.kind === "approval" ? "awaiting_confirmation" : "awaiting_resolution",
         outcome: "awaiting_input",
         // "clarify" lets the Dock take a typed answer; the route sends it to this run.
-        ...(pending.kind === "approval" ? { approvalReasons: [pending.question.slice(0, 400)] } : { decision: "clarify" as const }),
+        ...(pending.kind === "approval" ? { approvalReasons: [plainEmphasis(pending.question).slice(0, 400)] } : { decision: "clarify" as const }),
         resultTitle: pending.kind === "approval" ? "Needs your OK" : "Needs your answer",
-        resultSummary: pending.question.slice(0, 600),
+        resultSummary: plainEmphasis(pending.question).slice(0, 600),
         resultVariant: "status",
         // The Dock answers an approval in place; a question is answered in the thread.
         resultActions:

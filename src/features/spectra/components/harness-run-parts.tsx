@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { workTypeMeta } from "../artifacts/presentation";
 import type { HarnessAnswerValue, LiveWidget } from "../ai/harness-exchange";
 import { mergeTouch } from "../ai/harness-exchange";
+import { InlineEmphasis } from "./inline-emphasis";
 import type { HarnessArtifactTouchView, HarnessInputView } from "../ai/stream-events";
 
 /*
@@ -44,7 +45,9 @@ export function HarnessInputPanel({
     >
       <div className="flex items-start gap-2.5">
         {approval ? <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" /> : null}
-        <p className="min-w-0 flex-1 whitespace-pre-wrap text-caption leading-5 text-[var(--text-primary)]">{input.question}</p>
+        <p className="min-w-0 flex-1 whitespace-pre-wrap text-caption leading-5 text-[var(--text-primary)]">
+          <InlineEmphasis text={input.question} />
+        </p>
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         {approval ? (
@@ -74,7 +77,7 @@ export function HarnessInputPanel({
               title={option.description}
               onClick={() => void send(option.key, { kind: "question", choiceKey: option.key })}
             >
-              {option.label}
+              <InlineEmphasis text={option.label} />
             </AnswerButton>
           ))
         )}

@@ -10,8 +10,8 @@
 
 ## Colour
 
-The values below are starting points. The visual spec locks the final ones in `src/styles/spectra-tokens.css`.
-Components only ever use tokens: no hex values, no Tailwind palette colours.
+The user approved the palette, the type and the shell on 2026-10-04. These values are final and live in
+`src/styles/spectra-tokens.css`. Components only ever use tokens: no hex values, no Tailwind palette colours.
 
 ### Neutrals
 
@@ -38,6 +38,13 @@ These are the prism's six wavelengths, in brand order:
 | green | `#48c997` |
 | blue | `#4f9fe6` |
 | violet | `#9176e8` |
+
+**The spectrum is continuous.**
+
+- A spectral gradient or sweep is interpolated in OKLab, so neighbouring hues blend without muddy or grey bands.
+- When it loops (a moving band, a turning prism, a working light), it passes through a joint between violet and red
+  (`#d070b8`), so the cycle has no seam.
+- The joint exists only inside gradients. It is never used as a hue of its own.
 
 Each hue also gets:
 
@@ -105,6 +112,9 @@ with motion built in. Its states are not added per page.
 **Actions.**
 
 - Button: primary (ink), secondary (paper), ghost, and danger (only inside a confirmation);
+- SplitButton:
+  - one rounded shape whose menu segment has its own rounded end and is never clipped;
+  - its menu items are short, with an optional quiet second line.
 - IconButton;
 - Toggle;
 - Segmented;
@@ -114,7 +124,7 @@ with motion built in. Its states are not added per page.
 
 - Menu;
 - Popover;
-- Tooltip, which always shows the shortcut when there is one;
+- Tooltip: on every icon-only control, showing the name and the shortcut when there is one;
 - Dialog and ConfirmDialog.
 
 **Inputs.**
@@ -139,7 +149,7 @@ with motion built in. Its states are not added per page.
 **Sizes.**
 
 - Control heights: 28 (compact), 32 (default) and 40 (large).
-- Icons: 16 and 20, from one icon set (`lucide-react`) with one stroke width.
+- Icons: 16 and 20. Spectra glyphs everywhere, and `lucide-react` only in editor workbars (see [ICONS.md](ICONS.md)).
 
 **Enforcement.** Lint and `check:design-tokens` ban all of these outside `src/components/ui/`:
 
@@ -162,7 +172,8 @@ covers page headers, panel headers, the library toolbar, row actions and dialogs
   - `labelPolicy`:
     - `always`: words carry the meaning;
     - `never`: a universal symbol such as undo, redo, close, more or add;
-    - `whenRoom`.
+    - `whenRoom`;
+  - `pinned`: never collapses, for state the user must always see, such as an artifact's status control.
 - **The collapse plan.** Each bar has an authored `collapsePlan`: an ordered list of steps such as `hideLabel(share)`,
   `hideLabel(filter)`, `toMenu(group:sort)`, `toMenu(export)`.
   - The bar applies the steps in order until it fits.
@@ -176,6 +187,16 @@ covers page headers, panel headers, the library toolbar, row actions and dialogs
 
 Editor workbars use the same engine, with one addition: the user can reorder commands (see
 [EDITORS.md](EDITORS.md)).
+
+## Spectra's mark
+
+The prism appears in the rail as the brand, in the island, and on surfaces that are about Spectra itself:
+
+- sign-in;
+- onboarding;
+- empty states that invite asking Spectra.
+
+It is not scattered through page headers, cards or buttons (see [LIFE.md](LIFE.md#the-prism)).
 
 ## Words
 

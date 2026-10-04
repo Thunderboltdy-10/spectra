@@ -9,9 +9,12 @@ them.
 | [LANGUAGE.md](LANGUAGE.md) | The core idea, colour, type, surfaces, the component kit, adaptive commands and words |
 | [SHELL.md](SHELL.md) | Regions, closable and collapsible panels, fullscreen, the companion, the threads view, the rail and page anatomy |
 | [ISLAND.md](ISLAND.md) | The Spectra island: states, tabs, questions, the thread hover view and morphs |
-| [MOTION.md](MOTION.md) | The motion system, AI light, the dot field, Bridge and Lens states, and the prism mark |
-| [EDITORS.md](EDITORS.md) | Editor workbars, shared rich content, embeds and per-artifact notes |
+| [LIFE.md](LIFE.md) | The field (the living dot lattice), its physics and events, and the prism drawn from it |
+| [MOTION.md](MOTION.md) | How interface elements move: tokens, controls, drag and drop, panels, AI light, captions |
+| [ICONS.md](ICONS.md) | Spectra's own glyphs, and the one place generic workbar symbols are allowed |
+| [EDITORS.md](EDITORS.md) | Editor workbars, the artifact status control, shared rich content, embeds and per-artifact notes |
 | [../ai/HARNESS.md](../ai/HARNESS.md) | How Spectra's AI works, which shapes the thread, the island and every AI-facing surface |
+| [../product/](../product/README.md) | Product specs for Devices (Bridge) and School (ManageBac) |
 
 ## The idea in one paragraph
 
@@ -23,10 +26,12 @@ answers, and the people and AI making them.
 - **Colour arrives as light, and only where something is alive:**
   - the AI writing;
   - a person editing;
-  - a file crossing the Bridge;
   - something waiting for the user.
+- **Life is made of one material.** A field of fine dots wakes where something happens: it ripples, flows, gathers
+  and condenses. It is invisible at rest.
 - **The light fades when the work is done.**
-- **The prism is the source of that light.** It is the mark, the loader and the AI's presence.
+- **The prism is the source of that light.** It is the mark and the AI's presence, and it is made of the same dots
+  as the field.
 
 ## Three questions for every piece of UI
 

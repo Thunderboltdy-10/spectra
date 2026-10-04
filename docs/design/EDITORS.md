@@ -29,6 +29,45 @@ The workbar is the command bar inside each artifact editor.
   - fullscreen with the companion open and closed;
   - in the Side at its default and minimum widths.
 
+## The status control
+
+Every artifact shows its state in one control in its header, so a glance tells the user whether their work is safe
+and where it is.
+
+**Where it sits.**
+
+- The control sits at the right end of the artifact header, before the workbar's More.
+- It is **pinned**: AdaptiveBar never collapses it, whatever the width.
+
+**What it shows.** Its glyph comes from the status set (see [ICONS.md](ICONS.md#status)). While something is
+happening, a short word or two appears beside it:
+
+| State | Glyph | Words while it happens |
+| --- | --- | --- |
+| Saved, nothing pending | The saved glyph, quiet in ink | None |
+| Saving | Saving (the cloud fills) | "Saving" |
+| Offline, kept on this device | Offline | "Offline" (it stays while offline) |
+| Sending to or from the desktop file | Syncing (arrows turn) | "Updating *Essay.docx*" |
+| Waiting for Office to release the file | Waiting for Office, in the needs-you hue | "Open in Word" |
+| Read only | Read only | "Read only" |
+| Two versions | Two versions, in the problem hue | "Two versions" |
+| Problem | Problem | One plain line, for example "Couldn't save. Retrying" |
+
+- **Hover** shows a sentence in a tooltip: "Saved 2 min ago, and on your laptop in *Documents › Biology*."
+- **Click** opens a small popover with the details and the actions that state allows:
+  - the last save;
+  - the desktop file and which device holds it;
+  - who has it locked in Office;
+  - Open in Word;
+  - Show in folder;
+  - Keep this version;
+  - Compare.
+
+**Movement.** Changes animate inside the glyph (see [MOTION.md](MOTION.md#artifact-status)), and the words slide out
+of it and back.
+
+**Words.** Nothing technical: no file system paths beyond a friendly folder trail, and no lock or replica jargon.
+
 ## Shared rich content
 
 Text looks and behaves the same in every artifact type:
@@ -86,3 +125,10 @@ Embedding one artifact inside another must be easy:
 
 - Empty, loading and problem states come from the kit.
 - AI writing shows as AI light (see [MOTION.md](MOTION.md#spectra-writing-ai-light)).
+- The field never covers content (see [LIFE.md](LIFE.md#in-editors)):
+  - elements condense and dissolve;
+  - drags leave wakes;
+  - the margins come alive.
+- Elements the user creates, moves or deletes behave as physical things:
+  - a slide shape lifts when picked up and settles when dropped;
+  - a deleted board node dissolves.

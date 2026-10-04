@@ -127,15 +127,19 @@ The environment block is added every turn. It is small and factual:
 
 - the date, time and timezone;
 - the user: name, role, school, subjects and preferred language;
-- the current page and what is open in the side panel;
-- the focused artifact:
-  - its id, type and title;
-  - a compact outline (headings, slide titles, sheet names, board frames);
-  - the current selection.
+- the current page;
+- one line naming what is open (each artifact's id, type and title), with no outlines and no summaries;
+- the user's current selection, only when there is one;
+- the items the user referenced with @ in this message, each with its id, type and title;
 - Bridge status;
 - a one-line summary of the permission settings.
 
-With the outline already in context, a small edit needs no extra reads.
+Nothing else is injected. Earlier versions put summaries of everything on screen into context, and it confused the
+model whenever the request was about something else. The model finds what the user means with `search` and reads it
+with `read_artifact`. Search is fast enough that this costs less than a wrong guess.
+
+The UI never shows which artifacts Spectra "focused". There are no context chips. The only explicit pointer is an @
+reference the user types.
 
 ### Thread history
 
@@ -156,6 +160,22 @@ Compaction works like Claude Code's:
 - The summary replaces older turns; recent turns stay verbatim.
 - The thread shows a quiet divider, "Earlier messages summarised", that expands to the summary.
 - Nothing is silently truncated.
+
+### Agents
+
+The user's own agents (built in the Agents editor) are listed for the model in a short index: id, title and a one-line
+description.
+
+- **Auto (the default).** The model decides. When a request clearly fits an agent, it calls `use_agent`, which loads
+  that agent's instructions for the rest of the run. A thread keeps the agent it last used.
+- **Chosen by the user.** The island's agent switch (see [ISLAND.md](../design/ISLAND.md#the-agent-switch)) sends an
+  explicit agent id with the message. The run loads that agent from the start and does not route elsewhere. The choice
+  stays with the thread until the user switches back to Auto.
+
+### Attachments
+
+Files attached to a message are uploaded first, then passed to the run as references. A message sent while a run is
+waiting or working, attachments included, joins that run instead of starting a new one.
 
 ### Memory
 

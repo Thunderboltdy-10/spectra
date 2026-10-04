@@ -4,16 +4,17 @@
 
 ```text
 ┌──────┬───────────────────────────────────────┬──────────────────┐
-│      │               ◆  (island)             │                  │
+│ ◆    │                                       │                  │
 │ Rail │                 Stage                 │      Side        │
 │      │                                       │  (one panel)     │
+│      │               ◆  (island)             │                  │
 └──────┴───────────────────────────────────────┴──────────────────┘
 ```
 
 - **Rail:** navigation on the left. It collapses to icons.
 - **Stage:** the page.
 - **Side:** one panel on the right. It may hold several tabs, but it is never a stack of columns.
-- **Island:** floats at the top centre of the stage. It has no rail or reserved band of its own (see
+- **Island:** floats at the bottom centre of the stage, on every page. It is Spectra's only composer (see
   [ISLAND.md](ISLAND.md)).
 
 **At most three columns are ever visible.** Page-internal columns count toward the three. When a page's own
@@ -112,28 +113,32 @@ The threads view is how the user finds any conversation.
 
 1. The thread opens in the Side.
 2. It joins the island's active threads.
-3. A ghost of the row glides along a curve into its new island tab (see [MOTION.md](MOTION.md)).
+3. The row sheds particles that stream into its new island tab (see [LIFE.md](LIFE.md)).
 
-**The chat page.** The full chat page still exists. It is the same thread component, on the stage.
+**The chat page.**
+
+- The full chat page still exists. It shows the same thread component, on the stage.
+- It has no composer of its own: the island rests there as a reply bar bound to the thread.
 
 ## The rail
 
-- **Top:** a compact workspace or school switcher.
+- **Top:** the Spectra prism as the brand mark, beside a compact workspace or school switcher.
 - **Navigation:**
   - Home;
   - Library;
   - Calendar;
   - Conversations;
   - School (ManageBac);
-  - Agents.
+  - Agents;
+  - Devices.
 - **Pinned:** a few pinned artifacts.
 - **Bottom: one 40 px account row.**
   - It shows the avatar and name.
   - It opens a menu with Settings, Theme (a quick switch), Help and Sign out.
   - Everything else currently in the bottom section is removed or moved to where it is actually used.
   - Notifications reach the user through the island. Their history sits in the account menu with an unread count.
-- **Collapsed:** at 56 px, only the icons remain. Hovering shows the label as a tooltip. The prism is not in the rail,
-  because it lives in the island.
+- **Collapsed:** at 56 px, only the icons remain. Hovering shows the label as a tooltip. The prism stays at the top
+  as the brand.
 
 ## Page anatomy
 
@@ -141,10 +146,12 @@ The threads view is how the user finds any conversation.
 
 - The page title sits on the left, in the display serif for top-level pages.
 - The page's AdaptiveBar sits on the right.
-- The centre stays clear for the island. Headers never place controls in the central 120 px.
 
-**Pages without a header.** On a fullscreen artifact, the island floats over the centre of the artifact's title row,
-so artifact headers follow the same rule.
+**The bottom centre belongs to the island.**
+
+- Pages never put fixed controls in the bottom 72 px of the central 480 px of the stage.
+- Scrolling content adds about 88 px of bottom padding, so it can scroll clear of the island.
+- The same rule applies on a fullscreen artifact.
 
 **Empty, loading and problem states** come from the kit (see [MOTION.md](MOTION.md) for how they live).
 
@@ -156,9 +163,10 @@ so artifact headers follow the same rule.
 | Library | Grid or list | Nothing | Folders are a breadcrumb plus a popover tree. The artifact can go fullscreen. |
 | Workspace | The artifact | The companion (collapsible) | |
 | Calendar | Week or month | **Plans**, collapsible | The grid opens on working hours (about 07:00), with a now line, quiet axes and type-coloured event markers |
-| School and ManageBac | List or detail | Details, collapsible | No beige |
+| School and ManageBac | Overview, Tasks (current and past, with their files), CAS, Classes, Sync | Details, collapsible | No beige. See [../product/SCHOOL.md](../product/SCHOOL.md). |
 | Settings | Sections | Nothing | The section list folds into a popover when the Side opens |
-| Chat | The thread | Nothing | The same component as the Side thread |
+| Chat | The thread | Nothing | The same component as the Side thread. The island is its composer. |
+| Devices | This computer and paired devices | Details, collapsible | Replaces the Bridge desktop window (see [../product/DEVICES.md](../product/DEVICES.md)) |
 
 **Opening an artifact or conversation on any page** opens it in the Side, closable, temporarily replacing any
 collapsible panel there.

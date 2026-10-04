@@ -9,7 +9,9 @@ launch:
 This plan fixes both without letting launch drift. The design and AI decisions it implements are in
 [`docs/design/`](../design/README.md) and [`docs/ai/HARNESS.md`](../ai/HARNESS.md).
 
-## User decisions (2026-10-03)
+## User decisions
+
+### 2026-10-03
 
 1. **AI edits land directly.** The AI asks only for actions that cannot be undone and for settings changes.
    - The Allow button carries an "Always allow" option.
@@ -22,42 +24,81 @@ This plan fixes both without letting launch drift. The design and AI decisions i
    - No fullscreen, except artifacts on Workspace and Library.
    - The threads view stays, with semantic search.
    - The rail's account section is reduced.
-5. **The dot field** returns as the paper's grain, polished and complete.
-6. **The AI harness** imitates Claude Code:
+5. **The AI harness** imitates Claude Code:
    - one loop with tools, skills and compaction;
    - inline widgets;
    - progress captions from a separate low-reasoning call;
    - artifact cards only when something happened;
    - no forced stages.
-7. **The island** sits at the top centre with no reserved band. At rest it is the 3D prism. Hovering reveals the tab
-   structure, and questions morph the prism.
-8. **The prism** is being made by the user in Blender, with rotation, press rebound and drag/settle animations. Its
-   assets arrive in `<local-workspace>`.
+
+### 2026-10-04 (after the visual spec)
+
+These decisions override any earlier ones they conflict with.
+
+1. **Approved as final:** the palette, the type and the shell.
+2. **The spectrum is continuous.** It interpolates in OKLab and passes through a violet–pink joint, so it has no
+   seam.
+3. **Spectra's own icons.** Every icon outside editor workbars is Spectra's own glyph (see
+   [ICONS.md](../design/ICONS.md)).
+4. **The prism.**
+   - The orchestrator builds it in code (2D canvas) as part of the life system. It is made of the field's dots, and it
+     dissolves and re-forms (see [LIFE.md](../design/LIFE.md)).
+   - It appears in the rail as the brand, in the island and in Spectra's own moments. It is not forced elsewhere.
+   - The Blender and runtime prism prompts are retired.
+5. **The field** is alive: a physical membrane, invisible at rest, faint, and strongest where something happens. It
+   carries presses, drags, appearing, deleting, loading, sending and arriving.
+6. **The island.**
+   - It sits at the bottom centre on every page, and it is the only composer: Shift + Enter, attachments and @
+     references.
+   - The hover tabs are the main interface. In play (working, needs you, finished but unseen) is on the left; done is
+     on the right. Both can be reordered and moved between sides.
+   - A setting lets the island wake from the bottom edge instead of showing the prism.
+   - The split-button "Always allow" is short and never clipped.
+7. **Agents** are picked automatically unless the user chooses one with the island's agent switch.
+8. **No exposed context.**
+   - Context chips are removed, and so is the injected screen summary. Spectra finds things with semantic search.
+   - Embeddings cover everything the user can see.
+9. **Bridge.**
+   - The Bridge animation is dropped. Each artifact has a pinned status control instead (see
+     [EDITORS.md](../design/EDITORS.md#the-status-control)).
+   - The Bridge desktop window is removed. Bridge is tray-only, with the prism as its icon, and is controlled from a
+     new Devices page (see [DEVICES.md](../product/DEVICES.md)).
+10. **ManageBac** gets per-student sync preferences, past tasks with dropbox files, and CAS (see
+    [SCHOOL.md](../product/SCHOOL.md)).
+11. **No backwards compatibility anywhere.** There are no users yet.
+12. **Process.**
+    - The orchestrator works without asking for approvals.
+    - There is no live checking until the user calls for it. Lanes verify with tests and non-live checks, and main is
+      pushed without live verification.
+    - The orchestrator builds the design system's core itself (life, prism, icons, tokens, kit), and orchestrates the
+      design lanes once that core exists.
 
 ## Waves
 
-Two lanes run at once (the user's own agents, such as the 3D work, don't count toward that). Each lane is a
-background agent with a brief. The orchestrator reviews and merges each lane, then starts the next.
+**How lanes run.**
+
+- Two of the orchestrator's lanes run at once. The user's own agents don't count toward that.
+- Each lane is a background agent with a brief.
+- The orchestrator reviews and merges each lane, then starts the next.
+- Alongside the lanes, the orchestrator builds the design core itself.
 
 | Wave | Lane | Scope | Depends on |
 | --- | --- | --- | --- |
-| 1 | **A1 · AI harness core** | One loop. Tools with authoring formats, atomic edits and readback. Permissions by effect. Progress captions. Compaction. Thread rendering rules. Light bookkeeping. Removing the seven-stage pipeline. A first system prompt. A live smoke script. | — |
-| 1 | **R1 · Reliability** | The open non-AI ledger issues: LV-062, 066, 067, 060, 069, 061, 068, 059 and 017, plus LV-056 and the small NEEDS-DECISION items (LV-003, 012, 028), using the orchestrator's decisions | — |
-| 1 | *Orchestrator* | The visual spec (tokens, type, kit, island and shell studies) for the user's approval | — |
-| 2 | **A2 · AI reach and quality** | The semantic layer (embeddings and hybrid search). Skills as folders, with craft rewrites, `spectra-design` and `frontend-design`. Command-registry parity with `find_commands` and `run_command`. `show_widget`. Permission settings UI. The full eval suite (about 40 scenarios) and latency tuning. | A1 |
-| 2 | **D1 · Design foundation** | Tokens, fonts and font settings, colour roles and their settings. Kit primitives with built-in motion. AdaptiveBar. `SpectraMark`, once the prism assets exist. Lint and token gates. Migrating the worst offenders. | R1, visual spec approved |
-| 3 | **D2 · Shell and island** | The three-region shell, closable and collapsible panels, the companion and its inner sheet, the threads view, the rail, the island (all states and morphs), and removing the live dock | D1, A1 |
-| 3 | **D3 · Pages** | Library, Calendar, ManageBac, School, Settings, Home and Chat moved onto the shell and kit, each AdaptiveBar plan authored, and copy with no ids | D1 (runs after or beside D2 by file ownership) |
-| 4 | **D4 · Editors** | Hand-authored workbar plans and user reordering, shared rich content, embeds, and the editor-specific defects | D1 |
-| 4 | **D5 · Life** | AI light and streaming, the dot field, Bridge and Lens states, shared-element transitions, prism integration, and the reduced-motion variants | D2, prism assets |
-| 5 | **L1 · Later** | Planner task simplification, and the testing and training bench for user-built agents | — |
-| 5 | **V · Live verification** | The verifier and fixer pair, with updated prompts, against everything above | All |
-
-The user's own agents run alongside: the 3D prism now. Later, if wanted:
-
-- artifact-type objects in the same glass, for empty states;
-- a Bridge object;
-- the landing page, which is the user's own.
+| 1 ✓ | **A1 · AI harness core** | One loop, tools, permissions, captions, compaction | — |
+| 1 ✓ | **R1 · Reliability** | Open non-AI ledger issues | — |
+| 1 ✓ | *Orchestrator · Visual spec* | Approved 2026-10-04 | — |
+| 2 | **A2a · Semantic layer** | Embeddings for everything the user can see, hybrid search, and the APIs | A1 |
+| 2 | **A1b · Harness polish** | Remove context injection and context chips. Accept an explicit agent id. Attachments resume the run. Thread-title robustness. "Getting ready" step label. Decks in one create call. First-output latency. | A1 |
+| 2 | *Orchestrator · Design core* | The life engine (worker, lattice physics, particles, API), the prism renderer, the icon set, tokens and fonts, the continuous spectrum, kit primitives with life hooks, SplitButton, Tooltip, AdaptiveBar `pinned`, and the `/dev/life` and `/dev/icons` labs | — |
+| 3 | **A2b · AI reach** | `search` on the semantic layer, skills as folders, command-registry parity, `show_widget`, the permission settings UI, evals | A2a, A1b |
+| 3 | **F1 · School** | [SCHOOL.md](../product/SCHOOL.md): API research, per-student sync preferences, past tasks and files, CAS (backend first) | — |
+| 3 | **F2 · Devices** | [DEVICES.md](../product/DEVICES.md): Bridge tray-only, the prism tray icon, local control for everything, the Devices page backend | Prism renderer |
+| 4 | **D2 · Shell and island** | The three-region shell, the rail with Devices, the bottom island (all states, hover tabs, composer, agent switch, questions), the threads view, removing the live dock | Design core, A1b |
+| 4 | **D3 · Pages** | Every page on the shell and kit, including the Devices and School page UIs, each AdaptiveBar plan, and copy with no ids | Design core, F1, F2 |
+| 5 | **D4 · Editors** | The status control, hand-authored workbar plans and reordering, shared rich content, embeds, physical elements and field moments in editors | Design core |
+| 5 | **D5 · Life everywhere** | A sweep of every surface for life moments, AI light and streaming, shared-element transitions, reduced motion, and performance budgets | D2–D4 |
+| 6 | **L1 · Later** | Planner task simplification, the agents bench | — |
+| — | **Live verification** | Only when the user calls for it | — |
 
 ## Protocol for every lane
 
@@ -125,8 +166,10 @@ compat shims, and say so in the commit.
 | Lane | Branch / worktree | State |
 | --- | --- | --- |
 | A1 | `lane/ai-harness` (worktree removed) | Merged into main as `91694702`; gates, 4366 tests and build pass ([report](reports/R-A1-AI-HARNESS.md)) |
-| V1 · AI live check | `main` · primary checkout | Running: browser check of the new harness, with fixes |
+| V1 · AI live check | — | Stopped by the user's decision (no live checks for now). Its inline-emphasis fix landed as `e458902d`; its other findings moved to A1b. |
 | R1 | `main` · primary checkout | Done: 13 issues fixed, build green ([report](reports/R-R1-RELIABILITY.md)). Left for a paired Bridge: LV-046 native check, LV-061 first open. For D3: Calendar block notes show raw `<p>` HTML. |
-| Visual spec | — | Awaiting approval: https://claude.ai/artifact/56MkPBViV6HKgCz9CM8uvV |
-| A2a · Semantic layer | `lane/semantic` · `<local-workspace>` | Running (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2) |
-| Prism (user's agent) | `lane/prism` · `<local-workspace>` | Ready to run with `docs/brand/PRISM-RUNTIME-PROMPT.md` |
+| Visual spec | — | Approved 2026-10-04: https://claude.ai/artifact/56MkPBViV6HKgCz9CM8uvV |
+| A2a · Semantic layer | `lane/semantic` · `<local-workspace>` | Running (backend only; UI surfaces go to D2–D4, the AI's `search` tool to A2b) |
+| A1b · Harness polish | `lane/harness-polish` · `<local-workspace>` | Starting |
+| Design core | `main` · primary checkout (orchestrator) | Starting with the life and prism lab |
+| Prism (user's agent) | `lane/prism` · `<local-workspace>` | Retired: the orchestrator builds the prism in code |

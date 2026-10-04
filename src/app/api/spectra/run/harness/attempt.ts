@@ -300,9 +300,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     const withFiles = async (steer: { text: string; attachmentIds?: string[] }): Promise<Steer> => {
       if (!steer.attachmentIds?.length) return { text: steer.text };
       const files = await loadRunAttachments(runId, executionId, steer.attachmentIds).catch(() => null);
-      if (!files) return { text: `${steer.text}
-
-(The files I attached could not be read.)`.trim() };
+      if (!files) return { text: `${steer.text}\n\n(The files I attached could not be read.)`.trim() };
       return { text: steer.text, parts: attachmentParts(files) };
     };
     let firstCheckpoint = true;

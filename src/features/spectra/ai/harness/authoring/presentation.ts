@@ -492,6 +492,6 @@ export function presentationReadback(content: unknown, previous?: unknown) {
         : "No slide content changed.",
     );
     if (removed > 0) lines.push(`${removed} slide${removed === 1 ? "" : "s"} removed.`);
-  } else lines.push(presentationOutline(deck, { max: 2_400 }));
+  } else lines.push(presentationOutline(deck, { max: 8_000 }));
   return lines.join("\n");
 }

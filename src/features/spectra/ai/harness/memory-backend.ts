@@ -16,7 +16,7 @@ import type {
 } from "./backend";
 
 /*
- * An in-memory Spectra for the smoke run and tests. Writes go through the same
+ * An in-memory Spectra for the evals and tests. Writes go through the same
  * normalisation and canonical projection as the real AI write path, so what a
  * test reads back is what a collaborator would see.
  */

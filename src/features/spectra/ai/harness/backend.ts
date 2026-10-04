@@ -3,7 +3,7 @@ import type { ToolOutcome } from "./types";
 
 /*
  * The harness talks to Spectra only through this port. The run runtime binds
- * it to Convex and the collaboration rooms; the smoke run and tests bind it to
+ * it to Convex and the collaboration rooms; the evals and tests bind it to
  * an in-memory store. Every method is scoped to one user and one run.
  */
 

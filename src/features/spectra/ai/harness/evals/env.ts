@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 /*
- * Loads the model credentials for the smoke run without printing them.
- * Order: SPECTRA_SMOKE_ENV_FILE, ./.env.local, then the main checkout's
+ * Loads the model credentials for the eval run without printing them.
+ * Order: SPECTRA_EVAL_ENV_FILE, ./.env.local, then the main checkout's
  * .env.local (a worktree has no env file of its own). Only key names are
  * ever reported.
  */
@@ -21,8 +21,8 @@ function mainCheckoutEnvFile() {
   }
 }
 
-export function loadSmokeEnv(): { source: string; missing: string[] } {
-  const candidates = [process.env.SPECTRA_SMOKE_ENV_FILE, path.resolve(".env.local"), mainCheckoutEnvFile()].filter(
+export function loadEvalEnv(): { source: string; missing: string[] } {
+  const candidates = [process.env.SPECTRA_EVAL_ENV_FILE, path.resolve(".env.local"), mainCheckoutEnvFile()].filter(
     (candidate): candidate is string => Boolean(candidate),
   );
   const file = candidates.find((candidate) => existsSync(candidate));

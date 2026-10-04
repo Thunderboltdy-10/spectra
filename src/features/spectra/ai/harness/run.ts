@@ -32,7 +32,7 @@ import type {
  * One Spectra run: the system prompt and environment, this thread's history,
  * the loop, captions, compaction and durable bookkeeping, wired together.
  * Storage and transport arrive as a sink, so the same driver serves the app
- * (Convex) and the smoke run (in memory).
+ * (Convex) and the evals (in memory).
  */
 
 export type HarnessEvent =

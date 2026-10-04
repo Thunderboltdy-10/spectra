@@ -98,6 +98,8 @@ export type SourceSpec<T extends TableNames, K extends IndexedSemanticKind = Ind
   watch: ReadonlyArray<keyof Doc<T> & string>;
   /** Whether a row belongs in the index. A row that stops qualifying is purged at once. */
   indexable(doc: Doc<T>): boolean;
+  /** Facts outside the row that take it out of the index (a work in Trash). Checked when indexing. */
+  present?(ctx: QueryCtx, doc: Doc<T>): Promise<boolean>;
   /** The source generation the backfill compares with the indexed one. */
   updatedAt(doc: Doc<T>): number;
   schoolId(doc: Doc<T>): Id<"schools"> | undefined;
@@ -146,6 +148,12 @@ async function artifactPlacements(ctx: QueryCtx, artifact: Doc<"spectraArtifacts
   return { workspaceKeys: [...new Set(keys)].sort().slice(0, 2), workspaceId };
 }
 
+/** A work is in Trash when every placement of it is: it is gone for search until restored. */
+async function artifactTrashed(ctx: QueryCtx, artifactId: Id<"spectraArtifacts">) {
+  const placements = await findNodesForSource(ctx, "work", artifactId);
+  return placements.length > 0 && placements.every((placement) => placement.deletedAt !== undefined);
+}
+
 const artifactSource = defineSource({
   kind: "artifact",
   table: "spectraArtifacts",
@@ -153,6 +161,7 @@ const artifactSource = defineSource({
   watch: ["title", "summary", "tags", "status", "updatedAt", "contentHash", "textIndex", "projectionPayloadDigest",
     "ownerAccountId", "schoolId", "blueprintKey", "resourceClass"],
   indexable: (doc) => doc.status !== "deleted" && doc.resourceClass !== "thread_reference" && doc.blueprintKey !== "thread_reference",
+  present: async (ctx, doc) => !(await artifactTrashed(ctx, doc._id)),
   updatedAt: (doc) => doc.updatedAt,
   schoolId: (doc) => doc.schoolId,
   async load(ctx, artifact) {
@@ -212,7 +221,8 @@ const artifactSource = defineSource({
       ? { title: projection.title, status: summary.status, blueprintKey: summary.blueprintKey, resourceClass: projection.resourceClass,
           updatedAt: summary.updatedAt, ownerAccountId: summary.ownerAccountId, schoolId: summary.schoolId }
       : await ctx.db.get(id);
-    if (!facts || facts.status === "deleted" || facts.resourceClass === "thread_reference" || facts.blueprintKey === "thread_reference") return null;
+    if (!facts || facts.status === "deleted" || facts.resourceClass === "thread_reference" || facts.blueprintKey === "thread_reference" ||
+      await artifactTrashed(ctx, id)) return null;
     const isOwner = ownedBy(facts, actor);
     return { kind: "artifact", itemId, title: facts.title, typeLabel: artifactTypeLabel(facts.blueprintKey), subtype: facts.blueprintKey,
       status: facts.status, updatedAt: facts.updatedAt, ownership: isOwner ? "mine" : "shared", isOwner };
@@ -446,6 +456,12 @@ function sourceTrigger<T extends TableNames>(source: SourceSpec<T>): TriggerSpec
   };
 }
 
+/** Whether a source row belongs in the index now. */
+export async function sourceIndexable(ctx: QueryCtx, kind: IndexedSemanticKind, doc: Doc<TableNames>) {
+  const source = sourceFor(kind);
+  return source.indexable(doc) && (!source.present || await source.present(ctx, doc));
+}
+
 /** Rows of other tables that change an indexed item. */
 const DEPENDENT_TRIGGERS = [
   {
@@ -461,8 +477,10 @@ const DEPENDENT_TRIGGERS = [
     table: "orgNodes",
     target: (previous, next) => {
       const node = next ?? previous;
-      return node?.kind === "work" && node.sourceId && changed(previous, next, ["workspaceContextId", "accessProjection", "deletedAt", "sourceId"]) ?
-        { kind: "artifact", itemId: node.sourceId, immediate: false } : null;
+      if (node?.kind !== "work" || !node.sourceId || !changed(previous, next, ["workspaceContextId", "accessProjection", "deletedAt", "sourceId"]))
+        return null;
+      // Moving to Trash leaves search at once; reads already exclude a trashed work.
+      return { kind: "artifact", itemId: node.sourceId, immediate: previous?.deletedAt === undefined && next?.deletedAt !== undefined };
     },
   } satisfies TriggerSpec<"orgNodes">,
 ];

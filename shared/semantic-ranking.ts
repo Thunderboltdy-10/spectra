@@ -4,15 +4,25 @@
  * scripts/semantic-eval (see docs/spectra-launch-audit/reports/R-A2A-SEMANTIC.md).
  */
 import { foldForSearch } from "./semantic-chunks";
-import { inWindow, matchesTypeCue, type QueryCues } from "./semantic-query";
+import { inWindow, isUpcoming, matchesTypeCue, type QueryCues } from "./semantic-query";
 import type { IndexedSemanticKind, SemanticMatch } from "./semantic-types";
 
-/** RRF constant. Smaller trusts the top of each list more. Tuned on the labelled fixture set. */
-export const RRF_K = 20;
-/** Cosine similarity below which a vector hit is noise for this model and size. */
-export const MIN_VECTOR_SIMILARITY = 0.2;
-/** Centroid similarity for Related. Tuned so unrelated fixture pairs stay out. */
-export const RELATED_MIN_SIMILARITY = 0.45;
+/**
+ * The tuned retrieval constants, read at call time. Only scripts/semantic-eval writes them, to
+ * sweep candidate values in its own process; the chosen values are recorded in the report.
+ */
+export const SEMANTIC_TUNING = {
+  /** RRF constant. Smaller trusts the top of each list more. */
+  rrfK: 20,
+  /** Cosine similarity below which a vector hit is noise for this model and size. */
+  minVectorSimilarity: 0.2,
+  /**
+   * Centroid similarity for Related and for admitting a hinted item by meaning. Live eval
+   * 2026-10-04: labelled related pairs 0.52-0.74, unrelated 0.04-0.21; 0.45 leaves margin below
+   * the weakest true pair.
+   */
+  relatedMinSimilarity: 0.45,
+};
 /** Near-identical vectors are copies, not related work. */
 export const COPY_SIMILARITY = 0.995;
 export const LINEAGE_COPY_SIMILARITY = 0.97;
@@ -30,6 +40,14 @@ const STOPWORDS = new Set([
 /** Folded, de-duplicated content words of a query. */
 export function queryTerms(query: string) {
   return [...new Set(foldForSearch(query).split(/[^\p{L}\p{N}]+/u).filter((term) => term.length >= 2 && !STOPWORDS.has(term)))];
+}
+
+/**
+ * The words full-text search looks for: the content words when the query has any, so type words
+ * ("notes", "deck") rank through the type cue instead of matching every title that says "Notes".
+ */
+export function lexicalText(cues: QueryCues) {
+  return cues.contentTerms.length ? cues.contentTerms.join(" ") : cues.text;
 }
 
 /** The folded query for a full-text index whose text was folded the same way. */
@@ -68,7 +86,7 @@ export function fuseAndGroup<C extends CandidateChunk>(input: {
   k?: number;
   minVectorSimilarity?: number;
 }): Array<FusedItem<C>> {
-  const k = input.k ?? RRF_K;
+  const k = input.k ?? SEMANTIC_TUNING.rrfK;
   const chunkScores = new Map<string, { score: number; lists: Set<RankedList>; similarity?: number }>();
   const add = (list: RankedList, chunkId: string, rank: number, similarity?: number) => {
     if (!input.chunks.has(chunkId)) return;
@@ -79,7 +97,7 @@ export function fuseAndGroup<C extends CandidateChunk>(input: {
     if (similarity !== undefined) entry.similarity = Math.max(entry.similarity ?? -1, similarity);
     chunkScores.set(chunkId, entry);
   };
-  const vector = input.vector.filter((hit) => hit.similarity >= (input.minVectorSimilarity ?? MIN_VECTOR_SIMILARITY))
+  const vector = input.vector.filter((hit) => hit.similarity >= (input.minVectorSimilarity ?? SEMANTIC_TUNING.minVectorSimilarity))
     .sort((a, b) => b.similarity - a.similarity);
   vector.forEach((hit, index) => add("vector", hit.chunkId, index + 1, hit.similarity));
   [...new Set(input.words)].forEach((chunkId, index) => add("words", chunkId, index + 1));
@@ -171,7 +189,7 @@ export function isCopy(input: { sameDigest: boolean; lineage: boolean; similarit
  * decide the order among candidates, which is what makes "my chemistry notes" or "the deck from
  * yesterday" land on the right item. Tuned by scripts/semantic-eval.
  */
-export const SIGNAL_WEIGHTS = { type: 0.25, when: 0.3, recency: 0.2, freshness: 0.05, open: 0.2, recent: 0.12 } as const;
+export const SIGNAL_WEIGHTS = { type: 0.25, when: 0.3, upcoming: 0.2, recency: 0.2, freshness: 0.05, open: 0.2, recent: 0.12 } as const;
 const FRESHNESS_HALF_LIFE_MS = 14 * 86_400_000;
 
 export type SignalCandidate = {
@@ -194,6 +212,7 @@ export function rankWithSignals<T extends SignalCandidate>(candidates: T[], cues
     let score = candidate.base;
     if (cues.types.length && matchesTypeCue(cues, candidate)) { score += SIGNAL_WEIGHTS.type; matchedBy.add("type"); }
     if (inWindow(cues, candidate)) { score += SIGNAL_WEIGHTS.when; matchedBy.add("when"); }
+    else if (isUpcoming(cues, candidate, hints.now)) { score += SIGNAL_WEIGHTS.upcoming; matchedBy.add("when"); }
     const changed = candidate.updatedAt;
     if (changed !== undefined) {
       const freshness = 0.5 ** (Math.max(0, hints.now - changed) / FRESHNESS_HALF_LIFE_MS);
@@ -210,13 +229,15 @@ export function rankWithSignals<T extends SignalCandidate>(candidates: T[], cues
 
 /**
  * Whether an item that retrieval did not return should still be considered because a hint or
- * the query's cues point at it: it must fit the query's type or time, or share its words or meaning.
+ * the query's cues point at it. A query with content words ("my chemistry notes") needs the
+ * item to share a word of its title or its meaning; a query of only type and time words ("the
+ * deck from yesterday") needs the item to fit that type or time.
  */
 export function hintedItemFits(cues: QueryCues, item: { kind: IndexedSemanticKind; subtype?: string; title: string;
   updatedAt?: number; timeAt?: number; similarity?: number }) {
-  if (cues.types.length && matchesTypeCue(cues, item)) return true;
-  if (cues.window && inWindow(cues, item)) return true;
-  const title = foldForSearch(item.title);
-  if (cues.contentTerms.some((term) => title.includes(term))) return true;
-  return (item.similarity ?? 0) >= RELATED_MIN_SIMILARITY;
+  if (cues.contentTerms.length) {
+    const title = foldForSearch(item.title);
+    return cues.contentTerms.some((term) => title.includes(term)) || (item.similarity ?? 0) >= SEMANTIC_TUNING.relatedMinSimilarity;
+  }
+  return (cues.types.length > 0 && matchesTypeCue(cues, item)) || (cues.window !== undefined && inWindow(cues, item));
 }

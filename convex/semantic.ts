@@ -19,7 +19,7 @@ import { itemKeyOf, vectorFilterGroups, vSemanticKind, type VectorTerm } from ".
 import { kindOfId, readableItems, sourceFor, viewerPartitions, workspaceReadable, type ReadableItem } from "./semanticSources";
 import { parseQueryCues, type QueryCues } from "../shared/semantic-query";
 import {
-  cosine, fuseAndGroup, hintedItemFits, isCopy, lexicalQuery, MIN_VECTOR_SIMILARITY, rankWithSignals, RELATED_MIN_SIMILARITY,
+  cosine, fuseAndGroup, hintedItemFits, isCopy, lexicalQuery, lexicalText as lexicalTextOf, rankWithSignals, SEMANTIC_TUNING,
   snippetFor, titleMatches, type CandidateChunk,
 } from "../shared/semantic-ranking";
 import {
@@ -158,7 +158,7 @@ async function hydrateSearch(ctx: QueryCtx, args: HydrateArgs): Promise<Semantic
   };
 
   // Full-text, one search per partition scope, interleaved so no scope crowds out the others.
-  const lexicalText = lexicalQuery(cues.text);
+  const lexicalText = lexicalQuery(lexicalTextOf(cues));
   const lexicalLists = lexicalText ? await Promise.all(args.lexical.map((scope) =>
     ctx.db.query("semanticChunks").withSearchIndex("search_text", (q) => {
       let search = q.search("searchText", lexicalText);
@@ -215,8 +215,8 @@ async function hydrateSearch(ctx: QueryCtx, args: HydrateArgs): Promise<Semantic
       .withIndex("by_item", (q) => q.eq("itemKind", ref.kind).eq("itemId", ref.itemId)).first();
     if (!admit(doc)) continue;
     const best = chunks.get(remember(doc))!;
-    const base = similarity === undefined ? 0.05 : Math.max(0.05, Math.min(0.3, (similarity - MIN_VECTOR_SIMILARITY) * 0.8));
-    candidates.set(key, { best, base, matchedBy: similarity !== undefined && similarity >= RELATED_MIN_SIMILARITY ? ["meaning"] : [] });
+    const base = similarity === undefined ? 0.05 : Math.max(0.05, Math.min(0.3, (similarity - SEMANTIC_TUNING.minVectorSimilarity) * 0.8));
+    candidates.set(key, { best, base, matchedBy: similarity !== undefined && similarity >= SEMANTIC_TUNING.relatedMinSimilarity ? ["meaning"] : [] });
   }
 
   // The mandatory read-time check on every candidate.
@@ -328,7 +328,7 @@ async function memoryResults(ctx: ActionCtx, query: string, embedded: QueryEmbed
       kind: "memory", itemId: String(claim.claimId), title: claim.proposition.slice(0, 120), typeLabel: "Memory",
       snippet: claim.proposition, anchor: { kind: "memory", claimId: String(claim.claimId) },
       // Memory is context about the user, not a work item: it ranks below a strong item match.
-      score: Math.round(0.85 * (similarity !== undefined ? Math.min(1, Math.max(0, (similarity - MIN_VECTOR_SIMILARITY) / 0.5))
+      score: Math.round(0.85 * (similarity !== undefined ? Math.min(1, Math.max(0, (similarity - SEMANTIC_TUNING.minVectorSimilarity) / 0.5))
         : 0.4 / (1 + index)) * 1_000) / 1_000,
       matchedBy: similarity !== undefined ? ["meaning"] : ["words"], ownership: "mine",
     };
@@ -408,7 +408,7 @@ export const relatedHydrate = internalQuery({
     const actor = await requireActor(ctx);
     const selfKey = itemKeyOf(args.item.kind, args.item.itemId);
     const self = await semanticItemRow(ctx, args.item.kind, args.item.itemId);
-    const similar = args.neighbors.filter((neighbor) => neighbor.similarity >= RELATED_MIN_SIMILARITY);
+    const similar = args.neighbors.filter((neighbor) => neighbor.similarity >= SEMANTIC_TUNING.relatedMinSimilarity);
     const refs = [...args.links.map((link) => ({ kind: link.kind, itemId: link.itemId })),
       ...similar.map((neighbor) => ({ kind: neighbor.itemKind, itemId: neighbor.itemId }))];
     const readable = await readableItems(ctx, actor, refs);

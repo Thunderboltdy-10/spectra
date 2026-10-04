@@ -14,7 +14,7 @@ import { embeddingConfig, embeddingVersion, requestEmbeddings, validEmbeddingVec
 import { enqueueClaimEmbedding } from "./memory";
 import { lexicalKeysFor, vectorKeysFor, vSemanticKind } from "./semanticKeys";
 import { enqueueSemanticItem } from "./semanticQueue";
-import { loadSourceDoc, sourceFor, type DurableContent, type LoadedSource } from "./semanticSources";
+import { loadSourceDoc, sourceFor, sourceIndexable, type DurableContent, type LoadedSource } from "./semanticSources";
 import { chunkDrafts, finalizeChunks, sha256Hex } from "../shared/semantic-chunks";
 import { centroid } from "../shared/semantic-ranking";
 import { INDEXED_SEMANTIC_KINDS, type IndexedSemanticKind } from "../shared/semantic-types";
@@ -28,6 +28,9 @@ const MAX_STORED_CHUNKS = 400;
 const BACKFILL_MAX_WAITING = 200;
 const BACKFILL_STEP_MS = 2_000;
 const BACKFILL_FULL_QUEUE_MS = 30_000;
+const RECOVER_PAGE = 25;
+const RECOVER_AFTER_MS = 30 * 60_000;
+const DISPATCH_SLACK_MS = 1_000;
 
 const vKind = vSemanticKind;
 
@@ -68,7 +71,10 @@ async function scheduleNext(ctx: MutationCtx, at: number | undefined) {
   if (at === undefined) return;
   const now = Date.now();
   const marker = await ctx.db.query("semanticDispatcher").first();
-  if (marker && marker.scheduledFor > now && marker.scheduledFor <= at) return;
+  // Trust the marker only for a dispatch clearly in the future: one due about now may be the
+  // dispatch that is running (scheduled functions can start a little before their clock time),
+  // and a duplicate dispatch is harmless because jobs are leased.
+  if (marker && marker.scheduledFor > now + DISPATCH_SLACK_MS && marker.scheduledFor <= at) return;
   if (marker) await ctx.db.patch(marker._id, { scheduledFor: at });
   else await ctx.db.insert("semanticDispatcher", { scheduledFor: at });
   await ctx.scheduler.runAfter(Math.max(0, at - now), internal.semanticIndex.dispatch, {});
@@ -101,7 +107,7 @@ export const loadSource = internalQuery({
   handler: async (ctx, { kind, itemId }): Promise<SourcePayload> => {
     const source = sourceFor(kind);
     const doc = await loadSourceDoc(ctx, kind, itemId);
-    if (!doc || !source.indexable(doc)) return { exists: false };
+    if (!doc || !(await sourceIndexable(ctx, kind, doc))) return { exists: false };
     const loaded = await source.load(ctx, doc);
     const existing = (await ctx.db.query("semanticChunks")
       .withIndex("by_item", (q) => q.eq("itemKind", kind).eq("itemId", itemId)).take(MAX_STORED_CHUNKS))
@@ -176,7 +182,8 @@ export const reindexItem = internalAction({
       title: source.title, subtype: source.subtype, scope: source.scope, lineageIds: source.lineageIds.slice(0, 50),
       workspaceId: source.workspaceId, timeAt: source.timeAt, mirrors: source.mirrors,
       sourceUpdatedAt: source.sourceUpdatedAt, keepKeys: chunks.map((chunk) => chunk.chunkKey),
-      contentDigest: (await sha256Hex(chunks.map((chunk) => chunk.contentHash).join(","))).slice(0, 32),
+      // The body without the title, so a renamed copy ("Notes (copy)") is still recognised as a copy.
+      contentDigest: (await sha256Hex(chunks.map((chunk) => `${chunk.label ?? ""}\n${chunk.text}`).join("\u0000"))).slice(0, 32),
       embeddingState: !config ? "disabled" : failure ? "pending" : "complete", failure });
     return { status: failure ? `embedding_${failure.code}` : "indexed" };
   },
@@ -344,7 +351,7 @@ export const backfillStep = internalMutation({
       for (const item of rows.page) {
         scanned += 1;
         const doc = await loadSourceDoc(ctx, item.itemKind, item.itemId);
-        if (!doc || !sourceFor(item.itemKind).indexable(doc)) {
+        if (!doc || !(await sourceIndexable(ctx, item.itemKind, doc))) {
           await enqueueSemanticItem(ctx, item.itemKind, item.itemId, { immediate: true });
           enqueued += 1;
         }
@@ -387,13 +394,24 @@ export const backfillStep = internalMutation({
 
 export const maintain = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ expiredRelated: number }> => {
+  handler: async (ctx): Promise<{ expiredRelated: number; recovered: number }> => {
     const now = Date.now();
     const expired = await ctx.db.query("semanticRelatedCache").withIndex("by_expires", (q) => q.lte("expiresAt", now)).take(256);
     for (const row of expired) await ctx.db.delete(row._id);
     const due = await ctx.db.query("semanticIndexQueue").withIndex("by_status_due", (q) => q.eq("status", "waiting").lte("dueAt", now)).first() ??
       await ctx.db.query("semanticIndexQueue").withIndex("by_status_due", (q) => q.eq("status", "running").lte("dueAt", now)).first();
     if (due) await ctx.scheduler.runAfter(0, internal.semanticIndex.dispatch, {});
-    return { expiredRelated: expired.length };
+    // Items whose vectors failed through every retry (a long outage) try again, a page at a time.
+    const stalled = await ctx.db.query("semanticItems")
+      .withIndex("by_state", (q) => q.eq("embeddingState", "pending").lte("indexedAt", now - RECOVER_AFTER_MS)).take(RECOVER_PAGE);
+    let recovered = 0;
+    for (const item of stalled) {
+      const queued = await ctx.db.query("semanticIndexQueue")
+        .withIndex("by_item", (q) => q.eq("itemKind", item.itemKind).eq("itemId", item.itemId)).unique();
+      if (queued) continue;
+      await enqueueSemanticItem(ctx, item.itemKind, item.itemId, { schoolId: item.schoolId });
+      recovered += 1;
+    }
+    return { expiredRelated: expired.length, recovered };
   },
 });

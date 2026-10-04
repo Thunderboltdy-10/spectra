@@ -24,7 +24,7 @@ const TYPE_WORDS: Array<[string[], TypeCue[]]> = [
   [["code", "script", "program", "app", "codigo", "programa"], [{ kind: "artifact", subtypes: ["code"] }]],
   [["agent", "agents", "agente", "agentes"], [{ kind: "artifact", subtypes: ["agent"] }]],
   [["timetable", "horario"], [{ kind: "artifact", subtypes: ["timetable"] }, { kind: "event" }]],
-  [["chat", "chats", "conversation", "conversations", "thread", "threads", "discussed", "talked", "asked",
+  [["chat", "chats", "conversation", "conversations", "thread", "threads", "discussed", "talked", "ask", "asked", "asking",
     "conversacion", "conversaciones", "hablamos", "pregunte"], [{ kind: "thread" }]],
   [["event", "events", "meeting", "lesson", "appointment", "calendar", "evento", "eventos", "reunion", "cita", "calendario"], [{ kind: "event" }]],
   [["class", "classes", "clase", "clases"], [{ kind: "event" }, { kind: "school", subtypes: ["class", "course"] }]],
@@ -44,6 +44,16 @@ const WINDOW_WORDS: Record<string, WindowWord> = {
 };
 const RECENCY_WORDS = new Set(["recent", "recently", "latest", "newest", "last", "lately", "just", "reciente", "recientes",
   "recientemente", "ultimo", "ultima", "ultimos", "ultimas", "nuevo", "nueva"]);
+/** Question and filler words: kept for meaning, but not content words for full-text or hint fit. */
+const QUESTION_WORDS = new Set(["what", "which", "who", "whom", "whose", "where", "how", "why", "did", "do", "does", "is", "are", "was",
+  "were", "be", "been", "have", "has", "had", "can", "could", "should", "would", "will", "me", "we", "you", "it", "its", "our", "your",
+  "any", "some", "all", "and", "or", "of", "to", "at", "by", "as", "we", "us", "they",
+  "cual", "cuales", "quien", "donde", "como", "por", "porque", "tengo", "tiene", "es", "son", "fue", "era", "y", "o", "los", "las",
+  "lo", "le", "se", "al", "su", "sus", "hay"]);
+
+/** "When is…", "due", "next": prefer items that happen soon. */
+const UPCOMING_WORDS = new Set(["when", "due", "deadline", "deadlines", "upcoming", "next", "soon", "cuando", "entrega", "entregas",
+  "proximo", "proxima", "pronto"]);
 const WEEKDAYS: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
   domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6,
@@ -61,6 +71,8 @@ export type QueryCues = {
   window?: { from: number; to: number; future: boolean };
   /** "latest", "recent", "last": prefer what changed most recently. */
   recency: boolean;
+  /** "when", "due", "next": prefer what happens soon (events, deadlines). */
+  upcoming: boolean;
   /** The query without the pure time and filler words, for embedding and full-text. Never empty. */
   text: string;
   /** Content words other than type words, for deciding whether a hinted item fits. */
@@ -76,6 +88,7 @@ export function parseQueryCues(query: string, options: { now?: number; timezoneO
   const types: TypeCue[] = [];
   let window: QueryCues["window"];
   let recency = false;
+  let upcoming = false;
   const kept: string[] = [];
   const contentTerms: string[] = [];
   for (let index = 0; index < words.length; index += 1) {
@@ -108,16 +121,22 @@ export function parseQueryCues(query: string, options: { now?: number; timezoneO
       window = { from: start, to: start + DAY, future };
     }
     if (RECENCY_WORDS.has(word) && !(word === "last" && (next === "week" || next === "month" || (next && next in WEEKDAYS)))) recency = true;
-    if (TIME_ONLY.has(word) || RECENCY_WORDS.has(word)) continue;
+    if (UPCOMING_WORDS.has(word)) upcoming = true;
+    if (TIME_ONLY.has(word) || RECENCY_WORDS.has(word) || word === "when" || word === "cuando") continue;
     kept.push(word);
-    if (!typeCues && word.length >= 2) contentTerms.push(word);
+    if (!typeCues && word.length >= 2 && !QUESTION_WORDS.has(word)) contentTerms.push(word);
   }
   const text = kept.join(" ").trim();
-  return { types, window, recency, text: text || query.trim(), contentTerms };
+  return { types, window, recency, upcoming: upcoming && !window, text: text || query.trim(), contentTerms };
 }
 
 export function matchesTypeCue(cues: QueryCues, item: { kind: IndexedSemanticKind; subtype?: string }) {
   return cues.types.some((cue) => cue.kind === item.kind && (!cue.subtypes || (item.subtype !== undefined && cue.subtypes.includes(item.subtype))));
+}
+
+/** Within the next two weeks: what "when is…" and "due" usually mean. */
+export function isUpcoming(cues: QueryCues, item: { timeAt?: number }, now: number) {
+  return cues.upcoming && item.timeAt !== undefined && item.timeAt >= now - 3_600_000 && item.timeAt < now + 14 * DAY;
 }
 
 export function inWindow(cues: QueryCues, item: { updatedAt?: number; timeAt?: number }) {

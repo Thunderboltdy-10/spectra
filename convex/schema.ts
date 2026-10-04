@@ -3224,6 +3224,16 @@ export default defineSchema({
     .index("by_agent_version_day", ["agentId", "agentVersionId", "day"])
     .index("by_school_day", ["schoolId", "day"]),
 
+  /** How often each person used each agent: the agent switch lists the most used first. */
+  agentUserUsage: defineTable({
+    accountId: v.id("accounts"),
+    agentId: v.id("spectraArtifacts"),
+    uses: v.number(),
+    lastUsedAt: v.number(),
+  })
+    .index("by_account_agent", ["accountId", "agentId"])
+    .index("by_account", ["accountId"]),
+
   agentImprovementProposals: defineTable({
     agentId: v.id("spectraArtifacts"),
     schoolId: v.id("schools"),

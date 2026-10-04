@@ -16,6 +16,19 @@ export type AgentRouting = {
 
 const MAX_AGENTS = 20;
 
+export const AGENT_UNAVAILABLE = "AI_AGENT_UNAVAILABLE";
+export const AGENT_UNAVAILABLE_MESSAGE =
+  "The agent you chose is no longer available to you. Choose another agent or switch back to Auto.";
+
+/** The agent the user chose cannot run: never a silent fallback to Auto. */
+export class AgentUnavailableError extends Error {
+  readonly code = AGENT_UNAVAILABLE;
+  constructor() {
+    super(AGENT_UNAVAILABLE_MESSAGE);
+    this.name = "AgentUnavailableError";
+  }
+}
+
 /** Agents the user owns or was granted that accept routed requests. */
 export async function readAgentIndex(actorClerkId: string): Promise<AgentIndexEntry[]> {
   const rows = await query<unknown & object, unknown>("spectraArtifacts:listAgentRoutingDescriptors", { actorClerkId }).catch(

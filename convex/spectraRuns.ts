@@ -30,7 +30,7 @@ import { releaseClaimsForRun } from "./regionClaims";
 import { runNativeSyncOutcome } from "./bridgeWriteOperations";
 import { readContinuation, transferClarificationContinuation } from "./spectraRunContinuations";
 import { incrementOperationalCounter } from "./operationalCounters";
-import { recordAgentInvocation, settleAgentInvocation } from "./agents";
+import { recordAgentInvocation, recordAgentUserUse, settleAgentInvocation } from "./agents";
 import { assertSchoolModelTokenCeiling, recordModelTokenUsage } from "./metering";
 import { writeAuditEvent } from "./auditShared";
 import {
@@ -3519,7 +3519,7 @@ export const setAgentRouting = mutation({
       agentRouting: routing,
       updatedAt: now,
     });
-    if (!run.agentUsageStartedAt)
+    if (!run.agentUsageStartedAt) {
       await recordAgentInvocation(
         ctx,
         run,
@@ -3527,6 +3527,8 @@ export const setAgentRouting = mutation({
         release.versionId,
         now,
       );
+      await recordAgentUserUse(ctx, run.ownerAccountId, artifact._id, now);
+    }
     if (run.threadId)
       await ctx.db.patch(run.threadId, {
         retainedAgentId: artifact._id,

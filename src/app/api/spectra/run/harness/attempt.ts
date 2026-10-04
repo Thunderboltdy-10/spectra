@@ -9,7 +9,7 @@ import { runUsageSnapshot, withRunUsageLedger } from "@/features/spectra/ai/run-
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import { plainEmphasis } from "@/features/spectra/ai/inline-emphasis";
 import type { PreparedAttachment, ResultAction, RunPointers, Surface } from "./contract";
-import { loadAgent, readAgentIndex, readRetainedAgentId } from "./agents";
+import { AGENT_UNAVAILABLE, AgentUnavailableError, loadAgent, readAgentIndex, readRetainedAgentId } from "./agents";
 import { loadRunAttachments } from "./attachments";
 import { ConvexHarnessBackend } from "./convex-backend";
 import { attachmentParts, buildEnvironment, readPermissions, readThreadHistory, validTimeZone } from "./environment";
@@ -141,7 +141,7 @@ async function readAgents(params: AttemptParams) {
   const routing = { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId };
   if (params.agentId) {
     const chosen = await loadAgent(routing, params.agentId, "explicit", "Selected by you");
-    if (!chosen) throw new Error("The selected agent is unavailable or no longer permitted.");
+    if (!chosen) throw new AgentUnavailableError();
     return { agent: chosen, agents: [] };
   }
   const [index, retainedId] = await Promise.all([
@@ -565,25 +565,27 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     runLog().error("spectra.harness.attempt", error instanceof Error ? error : new Error(String(error)));
     const current = await query<unknown & object, { run: { status: string } }>("spectraRuns:get", { actorClerkId, runId }).catch(() => null);
     if (current && current.run.status !== "running" && current.run.status !== "queued") return;
-    const message = publicError(error);
+    // The chosen agent went away: retrying cannot help, choosing again can.
+    const agentGone = error instanceof AgentUnavailableError;
+    const message = agentGone ? error.message : publicError(error);
     await flushEvents().catch(() => null);
     await mutate("spectraRuns:updateStatus", {
       actorClerkId,
       runId,
       executionId,
       status: "failed",
-      error: message,
+      error: agentGone ? `${AGENT_UNAVAILABLE}: ${message}` : message,
       finalSummary: message,
-      resultTitle: "Something went wrong",
+      resultTitle: agentGone ? "Agent unavailable" : "Something went wrong",
       resultSummary: message,
       resultVariant: "status",
-      resultActions: [{ key: "retry", label: "Try again", targetType: "run", targetId: runId }],
+      resultActions: agentGone ? [] : [{ key: "retry", label: "Try again", targetType: "run", targetId: runId }],
       recoveryState: "interrupted",
-      retryable: true,
+      retryable: !agentGone,
       preservedPartial: false,
     }).catch(() => null);
     const card = await latestCard(actorClerkId, runId).catch(() => null);
-    publish({ type: "error", runId, message, ...(card ? { card: streamCard(card) } : {}) });
+    publish({ type: "error", runId, message, ...(agentGone ? { code: AGENT_UNAVAILABLE } : {}), ...(card ? { card: streamCard(card) } : {}) });
     await flushEvents().catch(() => null);
   } finally {
     clearInterval(heartbeat);

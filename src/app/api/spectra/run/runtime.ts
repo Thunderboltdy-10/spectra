@@ -10,6 +10,7 @@ import { createClerkClient } from "@clerk/backend";
 import { NextRequest } from "next/server";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { runHarnessAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
+import { AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE } from "./harness/agents";
 import { loadRunAttachments, persistRunAttachments } from "./harness/attachments";
 import type {
   AttachmentInput,
@@ -405,9 +406,9 @@ async function agentIsAvailable(actorClerkId: string, agentId: string) {
 
 /** A chosen agent that cannot run: a clear typed error, never a silent fallback to Auto. */
 function agentUnavailable() {
-  return new Response("The agent you chose is no longer available to you. Choose another agent or switch back to Auto.", {
+  return new Response(AGENT_UNAVAILABLE_MESSAGE, {
     status: 409,
-    headers: { "Content-Type": "text/plain; charset=utf-8", "X-Spectra-Error": "AI_AGENT_UNAVAILABLE" },
+    headers: { "Content-Type": "text/plain; charset=utf-8", "X-Spectra-Error": AGENT_UNAVAILABLE },
   });
 }
 

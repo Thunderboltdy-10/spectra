@@ -316,4 +316,22 @@ describe("School isolation", () => {
     expect(prefs.classOverrides).toEqual([{ providerClassId: "101", kind: "current_tasks", mode: "off" }]);
     expect((await t.withIdentity(bob).query(api.school.preferences, {})).classOverrides).toEqual([]);
   });
+
+  it("queues only the kinds an AI refresh names, and only for that student", async () => {
+    const t = setup();
+    const f = await seed(t);
+    const refreshed = await t.withIdentity(alice).mutation(api.managebac.requestAiRefresh, { kinds: ["current_tasks", "cas"] });
+    expect(refreshed.started).toBe(true);
+    const queued = async (accountId: Id<"accounts">) => (await t.run((ctx) => ctx.db.query("schoolSyncStates").collect()))
+      .filter((row) => row.accountId === accountId && row.state === "queued");
+    const aliceQueued = await queued(f.aliceId);
+    expect(aliceQueued.map((row) => row.kind).sort()).toEqual(["cas", "current_tasks"]);
+    expect(aliceQueued.every((row) => row.dueTrigger === "ai")).toBe(true);
+    expect(await queued(f.bobId)).toEqual([]);
+    // A kind turned Off is never queued, even when named.
+    await t.withIdentity(bob).mutation(api.school.setMode, { kind: "cas", mode: "off" });
+    const off = await t.withIdentity(bob).mutation(api.managebac.requestAiRefresh, { kinds: ["cas"] });
+    expect(off.started).toBe(false);
+    expect(await queued(f.bobId)).toEqual([]);
+  });
 });

@@ -2330,6 +2330,8 @@ export const requestAiRefresh = mutation({
   args: {
     reason: v.optional(v.string()),
     force: v.optional(v.boolean()),
+    /** The kinds the AI needs fresher; every kind not Off when omitted. */
+    kinds: v.optional(v.array(vSchoolSyncKind)),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -2356,7 +2358,9 @@ export const requestAiRefresh = mutation({
       };
     const now = Date.now();
     const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
-    const kinds = SCHOOL_SYNC_KINDS.filter((kind) => preferences.hasAny(kind));
+    const kinds = SCHOOL_SYNC_KINDS.filter(
+      (kind) => preferences.hasAny(kind) && (!args.kinds || args.kinds.includes(kind)),
+    );
     const states = (
       await Promise.all(kinds.map((kind) => syncStateFor(ctx, actor.accountId, integration._id, kind)))
     ).filter((state): state is Doc<"schoolSyncStates"> => Boolean(state));

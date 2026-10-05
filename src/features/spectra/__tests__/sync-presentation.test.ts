@@ -195,7 +195,7 @@ describe("sync presentation (P1.I3)", () => {
       "utf8",
     );
     const bridgeSettings = fs.readFileSync(
-      path.join(root, "src/features/spectra/bridge/bridge-settings.tsx"),
+      path.join(root, "src/features/spectra/devices/devices-page.tsx"),
       "utf8",
     );
     const errorBoundary = fs.readFileSync(

@@ -451,6 +451,25 @@ const trash: Glyph = () => (
   </>
 );
 
+const pause: Glyph = () => (
+  <>
+    <Sheet d={box(5.25, 4.25, 3.25, 11.5, 1)} />
+    <Sheet d={box(11.5, 4.25, 3.25, 11.5, 1)} />
+  </>
+);
+
+const play: Glyph = () => <Sheet d="M6.25 4.6v10.8a.9.9 0 0 0 1.37.77l8.6-5.4a.9.9 0 0 0 0-1.54l-8.6-5.4a.9.9 0 0 0-1.37.77z" />;
+
+const download: Glyph = () => (
+  <>
+    <Sheet d="M3.5 12.75v1.75a1.75 1.75 0 0 0 1.75 1.75h9.5a1.75 1.75 0 0 0 1.75-1.75v-1.75" />
+    <g className="sg-nudge-up">
+      <path d="M10 2.75v9.5" />
+      <AccentLine d="M6.9 9.4 10 12.5l3.1-3.1" />
+    </g>
+  </>
+);
+
 const link: Glyph = () => (
   <>
     <path d="M8.6 11.4a3 3 0 0 0 4.25 0l2.6-2.6a3 3 0 0 0-4.25-4.25l-.9.9" />
@@ -591,6 +610,9 @@ export const GLYPHS = {
   chevronDown,
   chevronRight,
   trash,
+  pause,
+  play,
+  download,
   link,
   bell,
   people,
@@ -614,7 +636,7 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
   { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done"] },
   {
     family: "Actions",
-    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "link", "bell", "people", "image", "star", "sidebar", "mail"],
+    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "play", "download", "link", "bell", "people", "image", "star", "sidebar", "mail"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
 ];

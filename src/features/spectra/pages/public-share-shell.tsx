@@ -1,6 +1,11 @@
 "use client";
 
-import { ArrowRight, BookOpen, Code2, Loader2, Table2, CalendarDays, FileText, LockKeyhole, Presentation, Share2, ArrowLeft, CheckSquare2, Grid3X3, LayoutDashboard, LogIn, Bot } from "@/components/icons/glyph-icons";
+import { ArrowRight, LockKeyhole, ArrowLeft } from "@/components/icons/glyph-icons";
+import { Icon, type IconName } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-state";
+import { workTypeMeta } from "../artifacts/presentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
@@ -62,18 +67,9 @@ function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
-const ICONS: Record<string, typeof FileText> = {
-  document: FileText,
-  flashcard_deck: BookOpen,
-  quiz: CheckSquare2,
-  planner_task: CheckSquare2,
-  timetable: CalendarDays,
-  presentation: Presentation,
-  sheets: Table2,
-  code: Code2,
-  whiteboard: Grid3X3,
-  agent: Bot,
-};
+function typeOf(key: string) {
+  return (workTypeMeta as Record<string, { glyph: IconName; color: string; soft: string; label: string } | undefined>)[key];
+}
 
 function formatUpdated(value: number) {
   return new Intl.DateTimeFormat("en", {
@@ -118,7 +114,7 @@ function ArtifactCard({
   artifact: PublicArtifact;
   onOpen: () => void;
 }) {
-  const Icon = ICONS[artifact.blueprintKey] ?? FileText;
+  const type = typeOf(artifact.blueprintKey);
   return (
     <button
       type="button"
@@ -126,15 +122,18 @@ function ArtifactCard({
       className="group block w-full rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left transition-colors hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
     >
       <span className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
-          <Icon className="h-4 w-4" />
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card"
+          style={{ background: type?.soft ?? "var(--bg-secondary)" }}
+        >
+          <Icon name={type?.glyph ?? "document"} size={16} accent={type?.color} />
         </span>
         <span className="min-w-0">
           <span className="block truncate text-ui font-semibold text-[var(--text-primary)]">
             {artifact.title}
           </span>
           <span className="mt-1 line-clamp-2 block text-micro leading-5 text-[var(--text-secondary)]">
-            {artifact.summary || "Shared Spectra work"}
+            {artifact.summary || type?.label || "Shared work"}
           </span>
         </span>
       </span>
@@ -144,7 +143,7 @@ function ArtifactCard({
 
 function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
   const content = record(artifact.content);
-  const Icon = ICONS[artifact.blueprintKey] ?? FileText;
+  const type = typeOf(artifact.blueprintKey);
 
   const blocks = rows(content.blocks);
   const cards = rows(content.cards);
@@ -159,9 +158,9 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
   return (
     <article className="mx-auto w-full max-w-[920px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-soft">
       <header className="border-b border-[var(--border-subtle)] px-6 py-6 sm:px-10 sm:py-8">
-        <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          <Icon className="h-3.5 w-3.5" />
-          {artifact.blueprintKey.replaceAll("_", " ")}
+        <div className="flex items-center gap-2 text-caption text-[var(--text-secondary)]">
+          <Icon name={type?.glyph ?? "document"} size={14} accent={type?.color} />
+          {type?.label ?? "Shared work"}
         </div>
         <h1 className="mt-3 font-display text-display font-semibold leading-[1.08] text-[var(--text-primary)]">
           {artifact.title}
@@ -486,33 +485,20 @@ function SharedWorkspace({
   if (opened)
     return (
       <>
-        <button
-          type="button"
-          onClick={() => onOpen(null)}
-          className="mb-5 inline-flex items-center gap-1.5 rounded-control px-2 py-1.5 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
+        <Button variant="ghost" size="sm" className="mb-5" onClick={() => onOpen(null)}>
           <ArrowLeft className="h-4 w-4" />
           Back to {projection.workspace.title}
-        </button>
+        </Button>
         <ArtifactContent artifact={opened} />
       </>
     );
   return (
     <>
-      <header className="mb-7">
-        <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
-          <LayoutDashboard className="h-3.5 w-3.5" />
-          Shared workspace
-        </div>
-        <h1 className="mt-3 font-display text-display font-semibold leading-tight">
-          {projection.workspace.title}
-        </h1>
-        {projection.workspace.description ? (
-          <p className="mt-3 max-w-2xl text-ui leading-6 text-[var(--text-secondary)]">
-            {projection.workspace.description}
-          </p>
-        ) : null}
-      </header>
+      <PageHeader
+        className="mb-7"
+        title={projection.workspace.title}
+        description={projection.workspace.description || "A shared space. Open any piece to read it in full."}
+      />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {projection.artifacts.map((artifact) => (
           <ArtifactCard
@@ -522,9 +508,12 @@ function SharedWorkspace({
           />
         ))}
         {projection.artifacts.length === 0 ? (
-          <div className="col-span-full rounded-surface border border-dashed border-[var(--border-default)] py-16 text-center text-caption text-[var(--text-secondary)]">
-            No work has been included in this public workspace view.
-          </div>
+          <EmptyState
+            className="col-span-full"
+            icon="layers"
+            title="Nothing shared here yet"
+            detail="The owner hasn't added any work to this view. Check back later or ask them for a new link."
+          />
         ) : null}
       </div>
     </>
@@ -664,67 +653,52 @@ export function PublicShareShell() {
           </a>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)]">
             <LockKeyhole className="h-3 w-3" />
-            Read-only
+            View only
           </span>
         </div>
       </nav>
       <div className="mx-auto max-w-[1120px] px-4 py-8 sm:px-7 sm:py-12">
         {state === "loading" ? (
-          <div className="flex min-h-[55vh] flex-col items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
-            <p className="mt-4 text-caption text-[var(--text-secondary)]">
-              Opening the shared view…
-            </p>
-          </div>
+          <LoadingRows label="Opening the shared work" count={6} className="mx-auto max-w-[920px]" />
         ) : null}
         {state === "error" ? (
-          <section className="mx-auto mt-[12vh] max-w-[460px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-soft">
-            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-card bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
-              <Share2 className="h-5 w-5" />
-            </span>
-            <h1 className="mt-5 font-display text-metric font-semibold">
-              Shared view unavailable
-            </h1>
-            <p className="mt-2 text-caption leading-6 text-[var(--text-secondary)]">
-              {message}
-            </p>
-            {retryable ? (
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="mt-5 inline-flex items-center rounded-control border border-[var(--border-default)] px-4 py-2 text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-              >
-                Try again
-              </button>
-            ) : null}
-          </section>
+          <ProblemState
+            className="mt-[10vh]"
+            title="This shared work isn't available"
+            detail={message}
+            action={
+              retryable ? (
+                <Button variant="secondary" size="sm" onClick={() => void load()}>
+                  Try again
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => router.push("/landing")}>
+                  Go to Spectra
+                </Button>
+              )
+            }
+          />
         ) : null}
         {state === "auth-required" ? (
-          <section className="mx-auto mt-[12vh] max-w-[460px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-soft">
-            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-secondary))] text-[var(--brand-primary)]">
-              <LogIn className="h-5 w-5" />
-            </span>
-            <h1 className="mt-5 font-display text-metric font-semibold">
-              Sign in to open this view
-            </h1>
-            <p
-              className="mt-2 text-caption leading-6 text-[var(--text-secondary)]"
-              role="status"
-            >
-              {message}
-            </p>
-            <button
-              type="button"
-              className="mt-6 inline-flex items-center gap-2 rounded-control bg-[var(--brand-primary)] px-4 py-2.5 text-caption font-semibold text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2"
-              onClick={continueToSignIn}
-            >
-              Sign in to continue
-              <ArrowRight className="h-4 w-4" />
-            </button>
-            <p className="mt-4 text-micro text-[var(--text-tertiary)]">
-              You will return to this shared view after signing in.
-            </p>
-          </section>
+          <EmptyState
+            className="mt-[10vh]"
+            icon="signIn"
+            title="Sign in to open this"
+            detail={
+              <>
+                <span role="status">{message}</span>
+                <span className="mt-2 block text-micro text-[var(--text-tertiary)]">
+                  You’ll come straight back here after signing in.
+                </span>
+              </>
+            }
+            action={
+              <Button variant="primary" onClick={continueToSignIn}>
+                Sign in to continue
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            }
+          />
         ) : null}
         {state === "ready" && projection?.resourceType === "workspace" ? (
           <SharedWorkspace
@@ -740,7 +714,7 @@ export function PublicShareShell() {
         ) : null}
         {state === "ready" && expiry ? (
           <p className="mt-6 text-center text-micro text-[var(--text-tertiary)]">
-            This public access expires {expiry}.
+            This link stops working {expiry}.
           </p>
         ) : null}
       </div>

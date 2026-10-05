@@ -20,6 +20,7 @@ import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
 import { executeOperation, rows, type EffectContext } from "./effects";
 import { act, mutate, query, safeJson } from "./io";
+import { isSchoolApiPurpose, readSchoolApi } from "./school-read";
 import { executeThreadRead } from "./thread-read";
 
 const isArtifactTypeKey = (value: string): value is ArtifactTypeKey => (ARTIFACT_TYPE_KEYS as readonly string[]).includes(value);
@@ -37,6 +38,8 @@ const CONFIRMED_COMMANDS = new Set([
   "change_sharing",
   "trigger_managebac_sync",
   "select_managebac_classes",
+  "set_school_sync_mode",
+  "manage_class_workspaces",
   "pair_device",
   "remove_device",
 ]);
@@ -384,6 +387,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
 
   private async commandOperation(request: Pick<CommandRequest, "command" | "args">) {
     const args = { ...request.args };
+    // "This conversation" is the one the run belongs to.
+    if (request.command === "manage_conversation" && !args.threadId && this.input.threadId) args.threadId = this.input.threadId;
     let localFiles = 0;
     if (LOCAL_EFFECT_COMMANDS.has(request.command)) {
       const count = await localFileCountForApplicationCommand(this.actorClerkId, request.command, args);
@@ -545,9 +550,14 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const threadId = input.threadId ?? this.input.threadId;
     if (input.query) return this.findInThread(input.query, threadId);
     if (!threadId) return "There is no conversation to read. Find one with search (kinds: thread).";
+    const from = input.before ?? input.after;
     const result = (await executeThreadRead(this.actorClerkId, {
       threadId,
-      ...(input.messageId ? { messageId: input.messageId } : input.before ? { before: input.before } : {}),
+      ...(input.messageId
+        ? { messageId: input.messageId }
+        : from
+          ? { from, direction: input.after ? "newer" : "older" }
+          : {}),
       ...(input.limit ? { limit: input.limit } : {}),
     })) as Record<string, unknown>;
     if (result.ok === false) return `Could not read that conversation: ${text(result.message) || text(result.code)}`;
@@ -557,13 +567,21 @@ export class ConvexHarnessBackend implements HarnessBackend {
       return clip(`[${input.messageId}] ${role}: ${text(result.content)}${more}`);
     }
     const messages = rows(result.messages);
-    if (!messages.length) return "No earlier messages.";
+    if (!messages.length) return input.after ? "No later messages." : "No earlier messages.";
     const lines = messages.map((message) => {
       const role = text(message.role) === "assistant" ? "Spectra" : "User";
       return `[${String(message.messageId ?? "")}] ${role}: ${text(message.content).slice(0, 2_000)}`;
     });
-    const before = text(result.before);
-    return clip(`${lines.join("\n\n")}${before ? `\n\n(Older messages: read_thread with before "${before}")` : ""}`);
+    const thread = threadId === this.input.threadId ? "" : `threadId: "${threadId}", `;
+    const first = String(messages[0]!.messageId ?? "");
+    const last = String(messages[messages.length - 1]!.messageId ?? "");
+    // Paging on in the direction read, and back the way it came when it started from a message.
+    const more = result.more === true;
+    const pages = [
+      (input.after ? from : more) ? `older: read_thread {${thread}before: "${first}"}` : "",
+      (input.after ? more : Boolean(from)) ? `newer: read_thread {${thread}after: "${last}"}` : "",
+    ].filter(Boolean);
+    return clip(`${lines.join("\n\n")}${pages.length ? `\n\n(Read on: ${pages.join("; ")})` : ""}`);
   }
 
   /** Find a passage by meaning and words: in one conversation, or across them all. */
@@ -593,7 +611,9 @@ export class ConvexHarnessBackend implements HarnessBackend {
       [
         `Best match${threadId ? "" : `, in "${best.title}" (threadId ${bestThread})`}${messageId ? `, message ${messageId}` : ""}:`,
         passage,
-        messageId ? `(Read around it with read_thread {threadId: "${bestThread}", before: "${messageId}"}.)` : "",
+        messageId
+          ? `(Read on from it with read_thread {threadId: "${bestThread}", after: "${messageId}"}, or the messages before it with before: "${messageId}".)`
+          : "",
       ]
         .filter(Boolean)
         .join("\n") + others + note,
@@ -644,7 +664,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
     return agent ? { title: agent.title, instructions: agent.instructions } : null;
   }
 
-  async readSchoolData(input: { purpose: string; classId?: string }): Promise<string> {
+  async readSchoolData(input: { purpose: string; classId?: string; recordId?: string }): Promise<string> {
+    // Past tasks, grades, CAS and single records come from the School page's own queries.
+    if (input.recordId || isSchoolApiPurpose(input.purpose))
+      return clip(await readSchoolApi((name, args) => query(name, args), input, this.timeZone));
     const result = await query<unknown & object, Record<string, unknown> | null>("managebac:recordsForPurpose", {
       purpose: input.purpose,
       ...(input.classId ? { classId: input.classId } : {}),

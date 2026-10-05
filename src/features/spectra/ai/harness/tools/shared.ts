@@ -78,5 +78,5 @@ export function errorText(error: unknown) {
 }
 
 export function plural(count: number, noun: string) {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+  return `${count} ${noun}${count === 1 ? "" : /(s|x|ch|sh)$/.test(noun) ? "es" : "s"}`;
 }

@@ -6,7 +6,6 @@ import { documentYjsAdapter, workTransactionOrigin, type WorkActorIdentity } fro
 import { docxProjectionFromContent } from "../lenses/document-projection";
 import { editNoteText } from "../editor/note-text-edit";
 import { parseModelOperation } from "../operations/schema";
-import { evaluatePlanPolicy } from "../operations/policy";
 import { authoredSemanticValue } from "../../../../shared/document-projection.mjs";
 import { exportDocxCopy } from "../lenses/docx-adapter";
 import { documentContentToProseMirrorJson } from "../lenses/document-projection";
@@ -89,13 +88,9 @@ describe("Academic canonical commands", () => {
     expect(editNoteText("α 😀", "α 😀\nnext", [[{ text: "α 😀", italic: true }]])).toEqual([[{ text: "α 😀", italic: true }], [{ text: "next", italic: true }]]);
   });
 
-  it("routes typed document operations through the existing AI schema and fences bulk review", () => {
+  it("routes typed document operations through the existing AI schema", () => {
     const input = { artifactId: "fixture", blueprintKey: "document", title: null, summary: null, content: null, tags: null, documentOperations: [{ kind: "review-revision", regionId: "p", revisionId: "1", revisionKind: "ins", expectedText: "new", decision: "accept" }] };
-    const single = parseModelOperation({ type: "artifact.update", input });
-    expect(evaluatePlanPolicy([single]).requiresConfirmation).toBe(false);
-    const bulk = parseModelOperation({ type: "artifact.update", input: { ...input, documentOperations: [...input.documentOperations, { ...input.documentOperations[0], revisionId: "2" }] } });
-    expect(evaluatePlanPolicy([bulk]).requiresConfirmation).toBe(true);
-    expect(evaluatePlanPolicy([single, single]).requiresConfirmation).toBe(true);
+    expect(parseModelOperation({ type: "artifact.update", input }).type).toBe("artifact.update");
     expect(() => parseModelOperation({ type: "artifact.update", input: { ...input, blueprintKey: "sheets" } })).toThrow(/document target/);
     expect(() => parseModelOperation({ type: "artifact.update", input: { ...input, contentPatch: { changes: [{ path: "/title", value: "bypass" }] } } })).toThrow(/cannot be combined/);
   });

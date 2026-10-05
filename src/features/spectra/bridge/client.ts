@@ -494,6 +494,19 @@ export function openBridgeLogs() {
   return bridgeControl("/v1/logs/open", {}, "Connect this computer before opening its logs.");
 }
 
+/** A file in one of this computer's selected folders. */
+export type BridgeFile = { grantId: string; relativePath: string };
+
+/** Open a work's Office file on this computer, in its desktop app. */
+export function openBridgeFile(file: BridgeFile) {
+  return bridgeControl("/v1/file/open", file, "Connect this computer before opening its files.");
+}
+
+/** Show a work's file selected in its folder on this computer. */
+export function revealBridgeFile(file: BridgeFile) {
+  return bridgeControl("/v1/file/reveal", file, "Connect this computer before showing its files.");
+}
+
 /**
  * Tell the local Bridge to forget this pairing: its credential, folders and
  * session. Files on the computer stay. A Bridge that is not running learns

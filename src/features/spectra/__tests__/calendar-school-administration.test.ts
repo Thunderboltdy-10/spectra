@@ -17,7 +17,7 @@ import {
   type SchoolSourceAdapter,
 } from "../integrations/school/adapter";
 import { parseModelOperation } from "../operations/schema";
-import { spectraToolRegistry } from "../tools/registry";
+import { APPLICATION_COMMAND_NAMES } from "@/app/api/spectra/run/harness/application-commands";
 import {
   metricDefinition,
   SPECTRA_METRIC_REGISTRY,
@@ -44,11 +44,9 @@ describe("Calendar, School, and administration V2", () => {
         },
       }),
     ).toThrow();
-    const toolIds = spectraToolRegistry.list().map((tool) => tool.id);
-    expect(toolIds).not.toContain("create_timetable");
-    expect(toolIds).toEqual(
+    expect(APPLICATION_COMMAND_NAMES).not.toContain("create_timetable");
+    expect(APPLICATION_COMMAND_NAMES).toEqual(
       expect.arrayContaining([
-        "read_calendar",
         "schedule_calendar_task",
         "create_calendar_personal_event",
         "move_calendar_block",

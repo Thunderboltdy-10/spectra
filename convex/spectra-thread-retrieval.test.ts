@@ -60,3 +60,35 @@ describe("exact message chunks", () => {
     await expect(other.query(api.spectraThreads.readMessage, { threadId: f.threadId, messageId })).rejects.toThrow();
   });
 });
+
+describe("paging on from a message", () => {
+  it("reads the messages after and before one, in order, including ones written in the same millisecond", async () => {
+    const f = await fixture();
+    const ids: Id<"spectraMessages">[] = [];
+    // m2 and m3 share a timestamp; their insertion order decides which side of each other they sit.
+    for (const [content, offset] of [["m0", 0], ["m1", 1], ["m2", 2], ["m3", 2], ["m4", 3], ["m5", 4]] as const)
+      ids.push(await add(f, content, f.threadId, f.now + offset));
+    await add(f, "elsewhere", f.otherThreadId, f.now + 2);
+    const contents = (page: { messages: Array<{ content: string }> }) => page.messages.map((message) => message.content);
+
+    const newer = await f.actor.query(api.spectraThreads.listMessagesFrom, { threadId: f.threadId, messageId: ids[2]!, direction: "newer", limit: 2 });
+    expect(contents(newer)).toEqual(["m3", "m4"]);
+    expect(newer.more).toBe(true);
+    const rest = await f.actor.query(api.spectraThreads.listMessagesFrom, { threadId: f.threadId, messageId: ids[4]!, direction: "newer" });
+    expect(contents(rest)).toEqual(["m5"]);
+    expect(rest.more).toBe(false);
+
+    const older = await f.actor.query(api.spectraThreads.listMessagesFrom, { threadId: f.threadId, messageId: ids[3]!, direction: "older", limit: 2 });
+    expect(contents(older)).toEqual(["m1", "m2"]);
+    expect(older.more).toBe(true);
+  });
+
+  it("refuses a message from another conversation or another person", async () => {
+    const f = await fixture();
+    const elsewhere = await add(f, "elsewhere", f.otherThreadId);
+    await expect(f.actor.query(api.spectraThreads.listMessagesFrom, { threadId: f.threadId, messageId: elsewhere, direction: "newer" })).rejects.toThrow("Message not found");
+    const mine = await add(f, "mine");
+    const other = f.t.withIdentity({ subject: "another-person", email: "other@example.test" });
+    await expect(other.query(api.spectraThreads.listMessagesFrom, { threadId: f.threadId, messageId: mine, direction: "older" })).rejects.toThrow();
+  });
+});

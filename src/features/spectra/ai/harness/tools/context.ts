@@ -159,13 +159,13 @@ export function searchTool(session: HarnessSession): HarnessTool<SearchArgs> {
   };
 }
 
-type ThreadArgs = { threadId?: string; query?: string; messageId?: string; before?: string; limit?: number };
+type ThreadArgs = { threadId?: string; query?: string; messageId?: string; before?: string; after?: string; limit?: number };
 
 export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs> {
   return {
     name: "read_thread",
     description:
-      "Read earlier messages of this conversation (or another, by threadId) when the context above leaves them out: messageId reads one whole message (from a search result), before (a message id) reads older messages, and query finds the passage that best matches, by meaning and words.",
+      "Read earlier messages of this conversation (or another, by threadId) when the context above leaves them out: messageId reads one whole message (from a search result), before or after (a message id) read the messages older or newer than it, and query finds the passage that best matches, by meaning and words. Page on from any passage with before or after.",
     parameters: {
       type: "object",
       properties: {
@@ -173,6 +173,7 @@ export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs>
         query: { type: "string" },
         messageId: { type: "string", description: "Read this message in full." },
         before: { type: "string", description: "A message id; returns messages before it." },
+        after: { type: "string", description: "A message id; returns messages after it." },
         limit: { type: "number" },
       },
       additionalProperties: false,
@@ -185,10 +186,11 @@ export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs>
         query: optionalString(raw, "query", 300),
         messageId: optionalString(raw, "messageId", 200),
         before: optionalString(raw, "before", 200),
+        after: optionalString(raw, "after", 200),
         limit: optionalNumber(raw, "limit"),
       };
-      if ([args.query, args.messageId, args.before].filter(Boolean).length > 1)
-        throw new ToolInputError("Pass one of query, messageId or before.");
+      if ([args.query, args.messageId, args.before, args.after].filter(Boolean).length > 1)
+        throw new ToolInputError("Pass one of query, messageId, before or after.");
       return args;
     },
     execute: async (args, ctx) => ({
@@ -274,31 +276,46 @@ export function readCalendarTool(session: HarnessSession): HarnessTool<CalendarA
   };
 }
 
-const SCHOOL_PURPOSES = ["upcoming_deadlines", "class_resources", "timetable", "classes", "cas"] as const;
+const SCHOOL_PURPOSES = ["upcoming_deadlines", "class_resources", "timetable", "classes", "past_tasks", "grades", "cas"] as const;
 
-type SchoolArgs = { purpose: (typeof SCHOOL_PURPOSES)[number]; classId?: string };
+type SchoolArgs = { purpose: (typeof SCHOOL_PURPOSES)[number]; classId?: string; recordId?: string };
+
+const SCHOOL_LABELS: Record<SchoolArgs["purpose"], [string, string]> = {
+  upcoming_deadlines: ["Checking your deadlines", "Checked your deadlines"],
+  class_resources: ["Reading your class resources", "Read your class resources"],
+  timetable: ["Reading your timetable", "Read your timetable"],
+  classes: ["Reading your classes", "Read your classes"],
+  past_tasks: ["Reading your past tasks", "Read your past tasks"],
+  grades: ["Reading your grades", "Read your grades"],
+  cas: ["Reading your CAS", "Read your CAS"],
+};
 
 export function schoolDataTool(session: HarnessSession): HarnessTool<SchoolArgs> {
   return {
     name: "read_school_data",
     description:
-      "Read the user's school records synced from ManageBac: upcoming deadlines, class resources, the timetable, classes or CAS. Says when ManageBac is not connected or the data is stale.",
+      "Read the user's school records synced from ManageBac: upcoming deadlines, class resources, the timetable, classes, past tasks (the archive, by class and term), grades with feedback, or CAS (experiences, learning outcomes, reflections). recordId reads one task in full (brief, grade, criteria, feedback, submitted files) or, with purpose cas, one CAS experience. Says when ManageBac is not connected, a kind is turned off or the data has not synced.",
     parameters: {
       type: "object",
       properties: {
         purpose: { type: "string", enum: [...SCHOOL_PURPOSES] },
-        classId: { type: "string" },
+        classId: { type: "string", description: "Narrow to one class (its ManageBac class id)." },
+        recordId: { type: "string", description: "A task or CAS experience recordId from an earlier read." },
       },
       required: ["purpose"],
       additionalProperties: false,
     },
     effect: "read",
-    label: (args) => (args.purpose === "upcoming_deadlines" ? "Checking your deadlines" : "Reading your school records"),
-    parse: (raw) => ({ purpose: oneOf(raw, "purpose", SCHOOL_PURPOSES), classId: optionalString(raw, "classId", 200) }),
+    label: (args) => SCHOOL_LABELS[args.purpose]?.[0] ?? "Reading your school records",
+    parse: (raw) => ({
+      purpose: oneOf(raw, "purpose", SCHOOL_PURPOSES),
+      classId: optionalString(raw, "classId", 200),
+      recordId: optionalString(raw, "recordId", 200),
+    }),
     execute: async (args, ctx) => ({
       ok: true,
       content: await session.backend.readSchoolData(args, ctx.signal),
-      doneLabel: "Read your school records",
+      doneLabel: SCHOOL_LABELS[args.purpose]?.[1] ?? "Read your school records",
     }),
   };
 }

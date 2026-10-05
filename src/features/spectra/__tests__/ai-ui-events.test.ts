@@ -2,7 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   handleSpectraAiUiEvent,
   rememberCommittedArtifactResult,
@@ -17,6 +17,9 @@ import {
 } from "../collaboration/follow-ai";
 import { spectraBus } from "../events";
 import { AppChoreographyMount } from "../collaboration/app-choreography-host";
+
+const router = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 describe("AI UI events", () => {
   beforeEach(() => __resetFollowAi());
@@ -215,6 +218,8 @@ describe("AI UI events", () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
       });
       expect(routes).toEqual(["settings"]);
+      // The app-wide navigator moves the page with the client router.
+      expect(router.push).toHaveBeenCalledWith("/settings?section=appearance");
       expect(container.querySelector("[data-spectra-follow-ai-viewport='true']")?.textContent)
         .toContain("Changing the theme");
       const cursor = container.querySelector<SVGElement>("[data-spectra-follow-ai-cursor='true']");

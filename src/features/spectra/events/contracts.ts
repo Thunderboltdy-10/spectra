@@ -3,6 +3,7 @@ import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
 import type { AiSyncPurpose } from "../../../../shared/school-sync";
 import type { Figure } from "../life/figure";
+import type { NavigationShow } from "../collaboration/follow-navigation";
 
 export type SpectraCommandOutcome = {
   status: "completed" | "pending" | "needs-human" | "failed";
@@ -34,12 +35,7 @@ export type SpectraCommands = {
   "library.import": { kind: "file" | "workspace" };
   "run.stopRequested": { runId?: string };
   "follow.stopRequested": Record<string, never>;
-  "navigation.show": {
-    actorId?: string;
-    intent?: "explicit";
-    route: "library" | "calendar" | "settings" | "workspace" | "artifact" | "devices";
-    target?: string;
-  };
+  "navigation.show": NavigationShow;
   "navigation.home": Record<string, never>;
   "surface.share": Record<string, never>;
   "work.requestClose": { workId: string };

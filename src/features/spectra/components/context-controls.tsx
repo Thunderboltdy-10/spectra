@@ -2,15 +2,13 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
-import { BookOpen, Files, FolderPlus, Search, X } from "@/components/icons/glyph-icons";
+import { BookOpen, Files, Search, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { workTypeMeta } from "./artifact-card";
-import {
-  searchSpectra,
-  type SpectraArtifact,
-  type SpectraWorkspace,
-} from "../data/api";
+import { searchSpectra, type SpectraWorkspace } from "../data/api";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { SEMANTIC_DEBOUNCE_MS, useSemanticSearch } from "../semantic/use-semantic";
 import { toast } from "@/components/ui/toast";
 
 export function showContinuationConflict({
@@ -149,61 +147,74 @@ export function SelectionActionBar({
   );
 }
 
+/**
+ * Work comes from the semantic layer (meaning and words, what is open ranks
+ * first). Workspaces have no semantic kind, so they are found by name through
+ * the authorized index, as in the command bar.
+ */
 export function GlobalSearch({
   onOpenArtifact,
   onOpenWorkspace,
-  onPlaceArtifact,
-  placementLabel,
-  placementWorkspaceId,
+  openItemIds,
   trigger = "button",
 }: {
-  onOpenArtifact: (artifact: SpectraArtifact) => void;
+  onOpenArtifact: (artifactId: string) => void;
   onOpenWorkspace: (workspace: SpectraWorkspace) => void;
-  onPlaceArtifact?: (artifact: SpectraArtifact) => void;
-  placementLabel?: string;
-  placementWorkspaceId?: string;
+  /** Items open on screen, most important first. A ranking hint, never a filter. */
+  openItemIds?: string[];
   trigger?: "button" | "icon";
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState(false);
+  const [searchingWorkspaces, setSearchingWorkspaces] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState(false);
   const [searchRetry, setSearchRetry] = useState(0);
   const searchSequence = useRef(0);
   const fieldRef = useRef<HTMLInputElement | null>(null);
-  const [results, setResults] = useState<{
-    artifacts: SpectraArtifact[];
-    workspaces: SpectraWorkspace[];
-  }>({ artifacts: [], workspaces: [] });
+  const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
+  const ready = query.trim().length >= 2;
+  const work = useSemanticSearch(query, { kinds: ["artifact"], limit: 20, enabled: open, openItemIds });
+  const artifacts = ready ? work.results : [];
   useEffect(() => {
     if (!open || query.trim().length < 2) {
-      setResults({ artifacts: [], workspaces: [] });
-      setSearching(false);
-      setSearchError(false);
+      setWorkspaces([]);
+      setSearchingWorkspaces(false);
+      setWorkspaceError(false);
       return;
     }
     const sequence = ++searchSequence.current;
-    setSearching(true);
-    setSearchError(false);
+    const controller = new AbortController();
+    setSearchingWorkspaces(true);
+    setWorkspaceError(false);
     const timer = window.setTimeout(
       () =>
-        void searchSpectra(query)
+        void searchSpectra(query.trim(), { signal: controller.signal })
           .then((value) => {
-            if (searchSequence.current === sequence) setResults(value);
+            if (searchSequence.current === sequence) setWorkspaces(value.workspaces);
           })
           .catch(() => {
-            if (searchSequence.current === sequence) {
-              setResults({ artifacts: [], workspaces: [] });
-              setSearchError(true);
+            if (searchSequence.current === sequence && !controller.signal.aborted) {
+              setWorkspaces([]);
+              setWorkspaceError(true);
             }
           })
           .finally(() => {
-            if (searchSequence.current === sequence) setSearching(false);
+            if (searchSequence.current === sequence) setSearchingWorkspaces(false);
           }),
-      180,
+      SEMANTIC_DEBOUNCE_MS,
     );
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [open, query, searchRetry]);
+  const pending = work.status === "loading" || searchingWorkspaces;
+  const searching = ready && pending && !artifacts.length && !workspaces.length;
+  const failed = ready && !pending && (work.status === "error" || workspaceError) && !artifacts.length && !workspaces.length;
+  const retry = () => {
+    work.refresh();
+    setSearchRetry((current) => current + 1);
+  };
   return (
     <>
       <button
@@ -248,7 +259,7 @@ export function GlobalSearch({
               ref={fieldRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search titles, summaries, types, workspaces, and stored text…"
+              placeholder="Search your work by meaning or words, and workspaces by name…"
               className="h-14 min-w-0 flex-1 bg-transparent text-subhead text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
             />
             <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
@@ -263,7 +274,7 @@ export function GlobalSearch({
                 <div data-life-ghost className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:180ms]" />
               </div>
             ) : null}
-            {query.trim().length < 2 ? (
+            {!ready ? (
               <div className="px-3 py-10 text-center">
                 <Sparkles className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
                 <p className="mt-3 text-caption text-[var(--text-secondary)]">
@@ -271,12 +282,12 @@ export function GlobalSearch({
                 </p>
               </div>
             ) : null}
-            {results.workspaces.length ? (
+            {workspaces.length ? (
               <section>
                 <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
                   Workspaces
                 </div>
-                {results.workspaces.map((workspace) => (
+                {workspaces.map((workspace) => (
                   <button
                     key={workspace._id}
                     type="button"
@@ -299,78 +310,51 @@ export function GlobalSearch({
                 ))}
               </section>
             ) : null}
-            {results.artifacts.length ? (
+            {artifacts.length ? (
               <section className="mt-2">
                 <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
                   Work
                 </div>
-                {results.artifacts.map((artifact) => {
-                  const meta = workTypeMeta[artifact.blueprintKey];
-                  const Icon = meta.icon;
+                {artifacts.map((result) => {
+                  const meta = result.subtype && isArtifactTypeKey(result.subtype) ? workTypeMeta[result.subtype] : null;
+                  const Icon = meta?.icon ?? Files;
                   return (
-                    <div
-                      key={artifact._id}
-                      className="group flex items-center rounded-control hover:bg-[var(--bg-hover)]"
+                    <button
+                      key={result.itemId}
+                      type="button"
+                      onClick={() => {
+                        onOpenArtifact(result.itemId);
+                        setOpen(false);
+                      }}
+                      className="flex w-full min-w-0 items-center gap-3 rounded-control px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]"
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onOpenArtifact(artifact);
-                          setOpen(false);
-                        }}
-                        className="flex min-w-0 flex-1 items-center gap-3 px-2.5 py-2 text-left"
-                      >
-                        <Icon
-                          className="h-4 w-4 shrink-0"
-                          style={{ color: meta.color }}
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate text-caption font-medium text-[var(--text-primary)]">
-                            {artifact.title}
-                          </span>
-                          <span className="block truncate text-micro text-[var(--text-tertiary)]">
-                            {meta.label} · {artifact.summary}
-                          </span>
+                      <Icon className="h-4 w-4 shrink-0" style={meta ? { color: meta.color } : undefined} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-caption font-medium text-[var(--text-primary)]">
+                          {result.title || "Untitled"}
                         </span>
-                      </button>
-                      {onPlaceArtifact &&
-                      placementWorkspaceId &&
-                      !(artifact.placements ?? []).some(
-                        (placement) =>
-                          placement.workspaceId === placementWorkspaceId,
-                      ) ? (
-                        <button
-                          type="button"
-                          onClick={() => onPlaceArtifact(artifact)}
-                          className="flex h-8 w-8 items-center justify-center rounded-chip text-[var(--text-tertiary)] opacity-60 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
-                          title={`Place in ${placementLabel ?? "workspace"}`}
-                          aria-label={`Place ${artifact.title} in ${placementLabel ?? "workspace"}`}
-                        >
-                          <FolderPlus className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                    </div>
+                        <span className="block truncate text-micro text-[var(--text-tertiary)]">
+                          {[result.typeLabel, result.location ?? result.snippet].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </button>
                   );
                 })}
               </section>
             ) : null}
-            {!searching && query.trim().length >= 2 && searchError ? (
+            {failed ? (
               <div className="px-3 py-8 text-center" role="alert">
-                <p className="text-caption text-[var(--danger)]">Search failed.</p>
+                <p className="text-caption text-[var(--danger)]">{work.error ?? "Search failed."}</p>
                 <button
                   type="button"
                   className="mt-2 rounded-control px-3 py-1.5 text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                  onClick={() => setSearchRetry((current) => current + 1)}
+                  onClick={retry}
                 >
                   Retry search
                 </button>
               </div>
             ) : null}
-            {!searching &&
-            !searchError &&
-            query.trim().length >= 2 &&
-            !results.workspaces.length &&
-            !results.artifacts.length ? (
+            {ready && !pending && !failed && !workspaces.length && !artifacts.length ? (
               <p className="px-3 py-12 text-center text-caption text-[var(--text-secondary)]">
                 No matching workspaces or work.
               </p>

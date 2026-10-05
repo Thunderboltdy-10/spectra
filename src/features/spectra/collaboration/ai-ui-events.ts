@@ -1,4 +1,5 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
+import { isFollowRoute } from "./follow-navigation";
 import { spectraBus } from "../events";
 import { handleSettingsObservationEvent } from "./settings-observation-client";
 import { DEVICES_HREF } from "../bridge/client";
@@ -119,9 +120,8 @@ function rememberEvent(event: SpectraAiUiEvent): void {
         // starts pairing, whether or not they follow Spectra.
         devicePairing().want();
         if (window.location.pathname.startsWith(DEVICES_HREF)) return;
-        const shown = spectraBus.command("navigation.show", { route: "devices", intent: "explicit", target: "connect" });
-        // Pages without the workbench router load Devices; ?connect=1 carries the request.
-        if (!shown) window.location.assign(new URL(`${DEVICES_HREF}?connect=1`, window.location.origin));
+        // The app shell's navigator moves there with the client router.
+        spectraBus.command("navigation.show", { route: "devices", intent: "explicit", target: "connect" });
       },
     );
     return;
@@ -144,6 +144,28 @@ function rememberEvent(event: SpectraAiUiEvent): void {
         typeof event.payload?.note === "string"
           ? event.payload.note
           : "Updated ManageBac class selection",
+    });
+    return;
+  }
+  if (event.key === "managebac_sync_preferences" || event.key === "managebac_class_workspaces") {
+    // What syncs is set on the School page; class workspaces live in the library.
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: event.key === "managebac_sync_preferences" ? "school" : "library",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updating your school sync",
+    });
+    return;
+  }
+  if (event.key === "version_saved") {
+    const artifactId = event.payload?.targetId;
+    if (typeof artifactId !== "string" || !artifactId) return;
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Saved a version",
     });
     return;
   }
@@ -207,14 +229,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
-  if (
-    destination !== "library" &&
-    destination !== "calendar" &&
-    destination !== "settings" &&
-    destination !== "devices" &&
-    destination !== "workspace"
-  )
-    return;
+  if (!isFollowRoute(destination) || destination === "artifact") return;
   noteAiSurface({
     ...(event.runId ? { actorId: event.runId } : {}),
     route: destination,

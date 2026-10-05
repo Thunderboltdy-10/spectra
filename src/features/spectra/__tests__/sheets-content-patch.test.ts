@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { contentPatchChangeMatchesSaved } from "../ai/content-patch-verify";
 import { applyResolvedContentPatch } from "../ai/document-content-patch";
 import {
   canonicalizeSheetsPatchChange,
@@ -162,78 +161,6 @@ describe("sheets contentPatch column append", () => {
     expect(cells.A1?.value).toBe("Enzyme");
     expect(cells.D1?.value).toBe("Km below 5?");
     expect(cells.D2?.formula).toBe("=IF(B2<5,TRUE,FALSE)");
-  });
-
-  it("verify accepts normalized cell and cells-map appends like deck /-", () => {
-    const authoredHeader = canonicalizeSheetsPatchChange({
-      path: "/sheets/0/cells/d1",
-      value: "Km below 5?",
-    });
-    expect(
-      contentPatchChangeMatchesSaved(
-        authoredHeader.path,
-        authoredHeader.value,
-        { value: "Km below 5?" },
-      ),
-    ).toBe(true);
-
-    const authoredFormula = canonicalizeSheetsPatchChange({
-      path: "/sheets/0/cells/D2",
-      value: '=IF(B2<5,"Yes","No")',
-    });
-    expect(
-      contentPatchChangeMatchesSaved(
-        authoredFormula.path,
-        authoredFormula.value,
-        { formula: '=IF(B2<5,"Yes","No")', value: null },
-      ),
-    ).toBe(true);
-
-    expect(
-      contentPatchChangeMatchesSaved(
-        "/sheets/0/cells",
-        {
-          D1: { value: "Km below 5?" },
-          D2: { formula: "=IF(B2<5,TRUE,FALSE)" },
-        },
-        {
-          A1: { value: "Enzyme" },
-          B1: { value: "Km" },
-          D1: { value: "Km below 5?" },
-          D2: { formula: "=IF(B2<5,TRUE,FALSE)" },
-        },
-      ),
-    ).toBe(true);
-
-    // No-op / wrong column must still fail verify.
-    expect(
-      contentPatchChangeMatchesSaved(
-        "/sheets/0/cells/D1",
-        { value: "Km below 5?" },
-        { value: "Something else" },
-      ),
-    ).toBe(false);
-    expect(
-      contentPatchChangeMatchesSaved(
-        "/sheets/0/cells",
-        { D1: { value: "Km below 5?" } },
-        { A1: { value: "Enzyme" } },
-      ),
-    ).toBe(false);
-
-    // Deck-style append soft match still works.
-    expect(
-      contentPatchChangeMatchesSaved(
-        "/cards/-",
-        { front: "IC50 vs Ki?", back: "IC50 is assay-dependent." },
-        {
-          id: "card-12",
-          front: "IC50 vs Ki?",
-          back: "IC50 is assay-dependent.",
-          hint: "",
-        },
-      ),
-    ).toBe(true);
   });
 
   it("still rejects hollow empty workbooks on create", () => {

@@ -2,7 +2,7 @@ import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
-import { normalizeApplicationCommand } from "@/features/spectra/operations/application-command";
+import { normalizeApplicationCommand, parseApplicationCommand } from "./application-commands";
 import { executeReferenceInsertion } from "./reference-command";
 import { act, mutate, query } from "./io";
 import {
@@ -24,12 +24,12 @@ import { catalogCommandForApplicationCommand } from "@/features/spectra/commands
 import { materializeAiChangedPaths } from "@/features/spectra/components/ai-region-path";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
-import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
 import { smartCompletionValue, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
 import { waitForSettingsAction } from "./ui-observation";
 import { describeDevicesForAi, type CloudOverview } from "@/features/spectra/devices/devices-model";
+import { aiRefreshRequest } from "../../../../../../shared/school-sync";
 
 export function rows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -90,23 +90,9 @@ export async function executeApplicationCommand(
       signal,
       operationId,
     );
-  const definition = spectraToolRegistry.get(command);
-  if (!definition || definition.capability !== "operate_application")
-    throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
+  const { args: parsed, authority: authorityTarget } = parseApplicationCommand(command, args);
   if (!catalogCommandForApplicationCommand(command))
     throw new Error(`APP_COMMAND_REGISTRY_DRIFT:${command}`);
-  // Normalize model-friendly aliases before Zod strips unknown fields. The
-  // settings schema intentionally accepts only persisted preference sections,
-  // so doing this after parse would silently turn a valid natural-language
-  // request into an empty settings write.
-  const inputArgs =
-    command === "change_spectra_settings"
-      ? {
-          ...args,
-          patch: normalizeAiPreferencePatch(args.patch),
-        }
-      : args;
-  const parsed = definition.inputSchema.parse(inputArgs) as Record<string, unknown>;
   let uiObservation: UiObservationFence | undefined;
   const applyMutation: typeof mutate = async <TArgs extends object, TResult>(_name: string, _args: TArgs) => {
     throwIfAborted(signal);
@@ -116,16 +102,12 @@ export async function executeApplicationCommand(
       ...(uiObservation ? { uiObservation } : {}),
     });
   };
-  if (definition.aiAvailability === "prohibited")
-    throw new Error(
-      `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
-    );
-  if (definition.authorityTarget) {
+  if (authorityTarget) {
     const authority = await evaluateCommandAuthority({
       actorClerkId,
       command,
       args: parsed,
-      authorityTarget: definition.authorityTarget,
+      authorityTarget,
     });
     throwIfAborted(signal);
     await recordAuthorityDecision({
@@ -328,6 +310,25 @@ export async function executeApplicationCommand(
         },
       };
     }
+    if (action === "create_workspace") {
+      const name = String(parsed.name ?? "").trim();
+      const result = await applyMutation("spectraWorkspaces:create", {
+        title: name,
+        ...(destinationId ? { parentNodeId: destinationId } : {}),
+      });
+      // spectraWorkspaces:create returns the new workspace's id.
+      const workspaceId = typeof result === "string" ? result : "";
+      onUiEvent?.({
+        key: "organize_library",
+        payload: {
+          action,
+          targetId: workspaceId,
+          destinationId: destinationId ?? null,
+          note: `Created the workspace ${name}`,
+        },
+      });
+      return { workspaceId, name };
+    }
     if (action === "rename") {
       const result = await applyMutation("orgTree:rename", {
         actorClerkId,
@@ -383,6 +384,50 @@ export async function executeApplicationCommand(
       ? parsed.targetIds.filter((id): id is string => typeof id === "string")
       : [];
     return await applyMutation("orgTree:trash", { actorClerkId, nodeIds: targetIds });
+  }
+  if (command === "restore_library_items") {
+    const targetIds = (parsed.targetIds as string[]);
+    const result = await applyMutation("orgTree:restore", { nodeIds: targetIds });
+    onUiEvent?.({
+      key: "organize_library",
+      payload: {
+        action: "restore",
+        targetId: targetIds[0],
+        note: `Restored ${targetIds.length} item${targetIds.length === 1 ? "" : "s"} from the Trash`,
+      },
+    });
+    return result;
+  }
+  if (command === "pin_library_item") {
+    const targetId = String(parsed.targetId);
+    const result = await applyMutation("orgTree:setPinned", { nodeId: targetId, pinned: parsed.pinned === true });
+    onUiEvent?.({
+      key: "organize_library",
+      payload: { action: parsed.pinned ? "pin" : "unpin", targetId, note: parsed.pinned ? "Pinned in the library" : "Unpinned in the library" },
+    });
+    return result;
+  }
+  if (command === "manage_conversation") {
+    const result = await applyMutation("spectraThreads:update", parsed);
+    return result ?? { ok: true, threadId: parsed.threadId };
+  }
+  if (command === "save_version") {
+    const artifactId = String(parsed.artifactId);
+    const result = await applyMutation("changeGroups:createNamedCheckpoint", { artifactId, name: parsed.name });
+    onUiEvent?.({ key: "version_saved", payload: { targetId: artifactId, note: `Saved the version ${String(parsed.name)}` } });
+    return result;
+  }
+  if (command === "complete_calendar_block" || command === "remove_calendar_event") {
+    const itemId = String(parsed.itemId);
+    const result = await applyMutation(
+      command === "complete_calendar_block" ? "calendar:completeWorkBlock" : "calendar:removePersonalItem",
+      parsed,
+    );
+    onUiEvent?.({
+      key: "calendar_changed",
+      payload: { targetId: itemId, note: command === "complete_calendar_block" ? "Marked a work block done" : "Removed a Calendar event" },
+    });
+    return result;
   }
   if (command === "change_sync_policy") {
     const targetIds = Array.isArray(parsed.targetIds)
@@ -504,11 +549,7 @@ export async function executeApplicationCommand(
     throw new Error("SHARING_ACTION_INVALID");
   }
   if (command === "trigger_managebac_sync") {
-    const purpose = String(parsed.purpose ?? "upcoming_deadlines");
-    const result = await applyMutation("managebac:requestAiRefresh", {
-      reason: `ai_${purpose}`,
-      force: parsed.force !== false,
-    });
+    const result = await applyMutation("managebac:requestAiRefresh", aiRefreshRequest(parsed.purpose, parsed.force));
     onUiEvent?.({
       key: "managebac_sync_requested",
       payload: { targetId: "managebac", note: "Requested a ManageBac refresh" },
@@ -535,6 +576,31 @@ export async function executeApplicationCommand(
         targetId: "managebac",
         note: `Updated the ManageBac class selection (${recordIds.length} selected)`,
         selectedCount: recordIds.length,
+      },
+    });
+    return result;
+  }
+  if (command === "set_school_sync_mode") {
+    const result = await applyMutation(parsed.providerClassId ? "school:setClassOverride" : "school:setMode", parsed);
+    onUiEvent?.({
+      key: "managebac_sync_preferences",
+      payload: { targetId: "managebac", note: parsed.mode === null ? "This class follows your school sync choice again" : `School sync for ${String(parsed.kind).replace(/_/g, " ")} set to ${String(parsed.mode)}` },
+    });
+    return result;
+  }
+  if (command === "manage_class_workspaces") {
+    const recordIds = parsed.recordIds as string[];
+    const result = await applyMutation(
+      parsed.action === "release" ? "managebac:releaseClassWorkspaces" : "managebac:materializeClassWorkspaces",
+      parsed,
+    );
+    onUiEvent?.({
+      key: "managebac_class_workspaces",
+      payload: {
+        targetId: "managebac",
+        note: parsed.action === "release"
+          ? `Released ${recordIds.length} class workspace${recordIds.length === 1 ? "" : "s"}`
+          : `Made workspaces for ${recordIds.length} class${recordIds.length === 1 ? "" : "es"}`,
       },
     });
     return result;

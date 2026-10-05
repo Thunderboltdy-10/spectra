@@ -66,10 +66,12 @@ import { applyPreferencePatch } from "../settings/schema";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
   disengageFollowAi,
-  getFollowedAiActorId,
-  isFollowingAi,
   isProgrammaticOpen,
 } from "../collaboration/follow-ai";
+import {
+  registerInPageNavigation,
+  type NavigationShow,
+} from "../collaboration/follow-navigation";
 import {
   disengageFollow,
   isProgrammaticFollowOpen,
@@ -2858,31 +2860,13 @@ export function SpectraShell({
       // silent miss leaves Open source looking wired and doing nothing.
       openArtifactById(artifactId);
     }
-    function onAiNavigate(detail: {
-      actorId?: string;
-      intent?: "explicit";
-      route: "library" | "calendar" | "settings" | "workspace" | "artifact" | "devices";
-      target?: string;
-    }) {
-      if (detail.intent !== "explicit" && !isFollowingAi()) return;
-      const followed = getFollowedAiActorId();
-      if (detail.intent !== "explicit" && followed && detail?.actorId && detail.actorId !== followed) return;
-      if (detail.intent !== "explicit" && followed && !detail?.actorId) return;
-      if (!detail?.route) return;
-      if (detail.route === "library" || detail.route === "workspace") {
-        if (detail.target) goToWorkspaceHub(detail.target);
-        else goToHomeHub();
-      } else if (detail.route === "settings") {
-        router.push(
-          detail.target
-            ? `/settings?section=${encodeURIComponent(detail.target)}`
-            : "/settings",
-        );
-      } else if (detail.route === "calendar") {
-        router.push("/calendar");
-      } else if (detail.route === "devices") {
-        router.push(detail.target === "connect" ? "/devices?connect=1" : "/devices");
-      }
+    // The app shell's navigator handles navigation.show on every page; the
+    // workbench shows the library and workspaces in its own hub.
+    function onAiNavigate(detail: NavigationShow) {
+      if (detail.route !== "library" && detail.route !== "workspace") return false;
+      if (detail.target) goToWorkspaceHub(detail.target);
+      else goToHomeHub();
+      return true;
     }
     const refresh = () => {
       void loadOverview(selectedWorkspaceId, true);
@@ -2951,7 +2935,7 @@ export function SpectraShell({
         } satisfies SpectraCommandOutcome;
       },
     );
-    const removeAiNavigate = spectraBus.handle("navigation.show", onAiNavigate);
+    const removeAiNavigate = registerInPageNavigation(onAiNavigate);
     const removeLensActivated = spectraBus.on(
       "artifact.lensActivated",
       refreshActivatedArtifact,

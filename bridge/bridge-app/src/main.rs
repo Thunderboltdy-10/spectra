@@ -106,6 +106,9 @@ enum MountSyncOutcome {
     Completed,
     RetryScheduled,
     AlreadyRunning,
+    /// The folder is paused: nothing was scanned or sent. It is scanned again
+    /// once it resumes.
+    Paused,
 }
 
 fn retain_current_mounts(
@@ -246,6 +249,21 @@ impl LocalBridgeControl for SpectraLocalControl {
         open_logs_impl(&self.app, &self.journal)
     }
 
+    async fn open_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
+        let path = local_document(&self.grants, grant_id, relative_path)?;
+        if !opens_in_desktop_app(&path) {
+            return Err("Spectra opens Office documents on this computer, not other files.".into());
+        }
+        open_with_system(shell_path(&path).as_os_str())
+            .map_err(|error| format!("Could not open the file: {error}"))
+    }
+
+    async fn reveal_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
+        let path = local_document(&self.grants, grant_id, relative_path)?;
+        reveal_in_file_manager(&shell_path(&path))
+            .map_err(|error| format!("Could not show the file in its folder: {error}"))
+    }
+
     async fn unpair(&self) -> Result<(), String> {
         unpair_this_computer(&self.grants, &self.journal)?;
         self.state.forget_pairing();
@@ -298,6 +316,12 @@ fn paused_mounts(grants: &GrantRegistry, journal: &Journal) -> HashSet<String> {
         .map(|grant| grant.id)
         .filter(|grant_id| flag(journal, &mount_paused_key(grant_id)))
         .collect()
+}
+
+/// Whether this folder holds its changes: syncing is paused for every folder,
+/// or for this one.
+fn folder_paused(journal: &Journal, grant_id: &str) -> bool {
+    sync_paused(journal) || flag(journal, &mount_paused_key(grant_id))
 }
 
 fn set_mount_paused(
@@ -2603,6 +2627,7 @@ async fn drain_pending_payload_uploads(
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
+    paused_grants: &HashSet<String>,
 ) -> anyhow::Result<usize> {
     let mut uploaded = 0usize;
     for _ in 0..10 {
@@ -2613,6 +2638,11 @@ async fn drain_pending_payload_uploads(
             }
             break;
         };
+        if paused_grants.contains(&request.grant_id) {
+            // A paused folder sends nothing. Spectra asks for this file again
+            // on a later pass, after the folder resumes; other folders go on.
+            continue;
+        }
         if !finish_pending_payload_upload(grants, journal, deployment, credential, request).await? {
             break;
         }
@@ -2792,12 +2822,28 @@ async fn drain_structure_requests(
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
+    paused_grants: &HashSet<String>,
 ) -> anyhow::Result<usize> {
     let mut handled = 0;
     for _ in 0..20 {
         let Some(request) = claim_fs_request(deployment, credential).await? else {
             break;
         };
+        if paused_grants.contains(&request.grant_id) {
+            // A paused folder is not reorganized; Spectra offers this change
+            // again later, as it does a paused folder's writes.
+            complete_claimed_structure(
+                deployment,
+                credential,
+                journal,
+                &request,
+                "waiting",
+                None,
+                Some(("folder-paused", "This folder is paused on this computer.")),
+            )
+            .await?;
+            continue;
+        }
         let relative_source = std::path::Path::new(&request.source_relative_path);
         let target_candidate = request
             .target_relative_path
@@ -3441,6 +3487,11 @@ async fn sync_grant(
     else {
         return Ok(MountSyncOutcome::AlreadyRunning);
     };
+    // A scan registers files with Spectra and uploads their bytes, so a
+    // paused folder is not scanned: its watcher keeps changes in the journal.
+    if folder_paused(journal, &grant.id) {
+        return Ok(MountSyncOutcome::Paused);
+    }
     if !grant.is_available() {
         set_mount_status(
             journal,
@@ -3734,6 +3785,66 @@ fn open_with_system(path: &std::ffi::OsStr) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A file in a selected folder that a work page asks to open or show. The
+/// path must stay inside the folder (no `..`, no absolute path, no link out)
+/// and name a file that is there.
+fn local_document(
+    grants: &GrantRegistry,
+    grant_id: &str,
+    relative_path: &str,
+) -> Result<std::path::PathBuf, String> {
+    let path = grants
+        .resolve(grant_id, std::path::Path::new(relative_path))
+        .map_err(|_| "This file is not in a folder Spectra can reach on this computer.".to_string())?;
+    if !path.is_file() {
+        return Err("This file is no longer in its folder on this computer.".into());
+    }
+    Ok(path)
+}
+
+/// Only the Office documents Spectra keeps a desktop copy of open from a web
+/// page. A program or a script in the same folder is never launched.
+fn opens_in_desktop_app(path: &std::path::Path) -> bool {
+    let format = native_format(path);
+    format != "spectra-pkg" && carries_native_payload(&format)
+}
+
+/// Explorer does not understand the `\\?\` form a resolved Windows path has.
+fn shell_path(path: &std::path::Path) -> std::path::PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(share) = raw.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{share}"));
+    }
+    match raw.strip_prefix(r"\\?\") {
+        Some(local) => std::path::PathBuf::from(local),
+        None => path.to_path_buf(),
+    }
+}
+
+/// Shows a file selected in the system's file manager.
+fn reveal_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe")
+            .arg("/select,")
+            .arg(path)
+            .creation_flags(WINDOWS_CREATE_NO_WINDOW)
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg("-R").arg(path).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .spawn()?;
+    }
+    Ok(())
+}
+
 fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), String> {
     let directory = app
         .path()
@@ -3863,6 +3974,7 @@ async fn run_sync_iteration(
             Ok(MountSyncOutcome::AlreadyRunning) => {
                 restored_grants_reconciled.insert(grant.id);
             }
+            Ok(MountSyncOutcome::Paused) => {}
             Err(_) => failed = true,
         }
     }
@@ -3939,7 +4051,9 @@ async fn run_sync_iteration(
     }
 
     let structure_handled =
-        match drain_structure_requests(grants, journal, deployment, &credential).await {
+        match drain_structure_requests(grants, journal, deployment, &credential, &paused_grants)
+            .await
+        {
             Ok(handled) => {
                 cloud_request_succeeded = true;
                 let _ = journal.delete_config("structure_queue_error");
@@ -3952,7 +4066,9 @@ async fn run_sync_iteration(
             }
         };
     let payload_handled =
-        match drain_pending_payload_uploads(grants, journal, deployment, &credential).await {
+        match drain_pending_payload_uploads(grants, journal, deployment, &credential, &paused_grants)
+            .await
+        {
             Ok(handled) => {
                 cloud_request_succeeded = true;
                 let _ = journal.delete_config("payload_queue_error");
@@ -4389,6 +4505,76 @@ mod devices_tests {
         assert!(snapshot.mounts[0].paused);
         assert_eq!(snapshot.mounts[0].friendly_path.split(" \u{203a} ").last(), Some("Biology"));
         assert!(set_mount_paused(&grants, &journal, "grant_gone", true).is_err());
+    }
+
+    #[test]
+    fn a_work_page_reaches_only_documents_inside_a_selected_folder() {
+        let grants = GrantRegistry::default();
+        let root = temp_folder("Biology");
+        let grant = grants.add_native_selection("Biology".into(), &root).unwrap();
+        std::fs::create_dir_all(root.join("Essays")).unwrap();
+        std::fs::write(root.join("Essays").join("Cells.docx"), b"doc").unwrap();
+        std::fs::write(root.join("setup.exe"), b"exe").unwrap();
+        std::fs::write(root.parent().unwrap().join("outside.docx"), b"doc").unwrap();
+
+        let essay = local_document(&grants, &grant.id, "Essays/Cells.docx").unwrap();
+        assert!(essay.ends_with(std::path::Path::new("Essays").join("Cells.docx")));
+        assert!(opens_in_desktop_app(&essay));
+        // A program in the folder can be shown, never launched.
+        let program = local_document(&grants, &grant.id, "setup.exe").unwrap();
+        assert!(!opens_in_desktop_app(&program));
+        for refused in ["../outside.docx", "Essays/Missing.docx", "Essays", "C:/Windows/notepad.exe"] {
+            assert!(local_document(&grants, &grant.id, refused).is_err(), "{refused}");
+        }
+        assert!(local_document(&grants, "grant_gone", "Essays/Cells.docx").is_err());
+    }
+
+    #[test]
+    fn explorer_gets_a_plain_windows_path() {
+        assert_eq!(
+            shell_path(std::path::Path::new(r"\\?\C:\Users\Ana\Biology\Cells.docx")),
+            std::path::PathBuf::from(r"C:\Users\Ana\Biology\Cells.docx")
+        );
+        assert_eq!(
+            shell_path(std::path::Path::new(r"\\?\UNC\server\share\Cells.docx")),
+            std::path::PathBuf::from(r"\\server\share\Cells.docx")
+        );
+        assert_eq!(
+            shell_path(std::path::Path::new("/home/ana/Cells.docx")),
+            std::path::PathBuf::from("/home/ana/Cells.docx")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_paused_folder_is_never_scanned_to_spectra() {
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        let grants = GrantRegistry::default();
+        let biology = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        let maths = grants
+            .add_native_selection("Maths".into(), &temp_folder("Maths"))
+            .unwrap();
+        let active: ActiveMountSyncs = Arc::new(Mutex::new(HashSet::new()));
+
+        set_mount_paused(&grants, &journal, &biology.id, true).unwrap();
+        assert!(folder_paused(&journal, &biology.id));
+        assert!(!folder_paused(&journal, &maths.id));
+        // The scan returns before it reads the folder or calls Spectra, and
+        // leaves the folder's status as it was.
+        assert!(matches!(
+            sync_grant(&biology, &journal, &active).await,
+            Ok(MountSyncOutcome::Paused)
+        ));
+        assert!(active.lock().unwrap().is_empty());
+
+        // Pausing every folder holds the other one too.
+        set_sync_paused(&journal, true).unwrap();
+        assert!(folder_paused(&journal, &maths.id));
+        assert!(matches!(
+            sync_grant(&maths, &journal, &active).await,
+            Ok(MountSyncOutcome::Paused)
+        ));
     }
 
     #[test]

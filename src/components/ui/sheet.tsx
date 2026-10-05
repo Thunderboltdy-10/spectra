@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { Icon } from "@/components/icons";
+import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
 import { HostLayer, useFocusReturn } from "./layer-context";
@@ -34,6 +35,8 @@ const SheetContent = React.forwardRef<
     ref,
   ) => {
     const focusReturn = useFocusReturn(onOpenAutoFocus, onCloseAutoFocus);
+    const surface = useLifeSurface<HTMLDivElement>({ wait: true });
+    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
@@ -43,7 +46,7 @@ const SheetContent = React.forwardRef<
           )}
         />
         <DialogPrimitive.Content
-          ref={ref}
+          ref={contentRef}
           className={cn(
             "spectra-sheet fixed inset-y-0 right-0 flex h-dvh w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none xl:hidden",
             LAYER_CLASS[layer],
@@ -58,7 +61,7 @@ const SheetContent = React.forwardRef<
             aria-label="Close panel"
             className="absolute right-3 top-3 grid size-8 place-items-center rounded-control text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
           >
-            <X className="size-4" aria-hidden="true" />
+            <Icon name="close" size={16} aria-hidden="true" />
           </DialogPrimitive.Close>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

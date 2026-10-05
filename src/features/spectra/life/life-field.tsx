@@ -1,19 +1,28 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useSpectraMotion } from "../motion/motion-level";
 import type { LifeTier } from "./engine";
-import { life } from "./life";
+import { figureOf } from "./figure-dom";
+import { life, type Formed } from "./life";
+import { markNavigation } from "./use-life";
 
 /*
  * The field's two canvases, fixed to the viewport: the back layer under the
  * interface (the lattice, seen through open paper) and the front layer over
  * it (free particles). Mount once, in the app shell.
  *
- * It gives every press a ripple and every drag a wake by itself, so pages
- * only call `life` for their own moments. With reduced or no motion it
- * mounts nothing and every `life` call is a no-op.
+ * It gives every press a ripple and every drag a wake by itself (native
+ * drag and drop included), and turns every loading placeholder marked
+ * `data-life-ghost` into a ghost of the field, so pages only call `life` for
+ * their own moments. With reduced or no motion it mounts nothing and every
+ * `life` call is a no-op.
  */
+
+const GHOST = "[data-life-ghost]";
+/** Placeholders that are not drawn (hidden, collapsed) never become ghosts. */
+const MAX_GHOSTS = 16;
 
 const INK_LIGHT = [20, 19, 24] as const;
 const INK_DARK = [243, 241, 236] as const;
@@ -32,6 +41,9 @@ function isDark() {
 
 export function LifeField() {
   const motion = useSpectraMotion();
+  const pathname = usePathname();
+  // A new page settles as content; only what appears after it is an arrival.
+  useEffect(() => markNavigation(), [pathname]);
   const hostRef = useRef<HTMLDivElement>(null);
   const enabled = motion.level === "full";
 
@@ -93,11 +105,67 @@ export function LifeField() {
     };
     const leave = () => life.pointer(-1e4, -1e4, false);
 
+    // Native drag and drop stops pointer events: its moves still leave a wake, and a drop ripples.
+    let lastDrag = { x: 0, y: 0, t: 0 };
+    const dragOver = (event: DragEvent) => {
+      const now = event.timeStamp;
+      if (now - lastDrag.t < 16) return;
+      const dt = Math.max(8, now - lastDrag.t) / 1000;
+      if (lastDrag.t) life.wake(event.clientX, event.clientY, (event.clientX - lastDrag.x) / dt, (event.clientY - lastDrag.y) / dt);
+      lastDrag = { x: event.clientX, y: event.clientY, t: now };
+    };
+    const drop = (event: DragEvent) => {
+      lastDrag = { x: 0, y: 0, t: 0 };
+      life.pulse(event.clientX, event.clientY, 0.9);
+    };
+    const dragEnd = () => {
+      lastDrag = { x: 0, y: 0, t: 0 };
+    };
+
+    // Loading placeholders become ghosts while they are in the page, and release into what replaces them.
+    const ghosts = new Map<Element, Formed>();
+    const adopt = (element: Element) => {
+      if (ghosts.has(element) || ghosts.size >= MAX_GHOSTS) return;
+      const r = element.getBoundingClientRect();
+      if (r.width < 8 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight) return;
+      ghosts.set(element, life.ghost(figureOf(element, { bars: "[data-life-ghost-bar]", maxBars: 10 })));
+    };
+    const sweep = () => {
+      for (const [element, formed] of ghosts) {
+        if (element.isConnected && element.matches(GHOST)) continue;
+        ghosts.delete(element);
+        formed.release();
+      }
+    };
+    let scanFrame = 0;
+    const scan = () => {
+      scanFrame = 0;
+      sweep();
+      document.querySelectorAll(GHOST).forEach(adopt);
+    };
+    const ghostObserver = new MutationObserver(() => {
+      if (!scanFrame) scanFrame = requestAnimationFrame(scan);
+    });
+    ghostObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-life-ghost"] });
+    scan();
+    document.documentElement.dataset.life = "on";
+
     window.addEventListener("resize", resize);
     window.addEventListener("pointermove", move, { passive: true });
     window.addEventListener("pointerdown", down, { passive: true });
+    window.addEventListener("dragover", dragOver, { passive: true });
+    window.addEventListener("drop", drop, { passive: true, capture: true });
+    window.addEventListener("dragend", dragEnd, { passive: true });
     document.documentElement.addEventListener("pointerleave", leave);
     return () => {
+      cancelAnimationFrame(scanFrame);
+      ghostObserver.disconnect();
+      for (const formed of ghosts.values()) formed.release();
+      ghosts.clear();
+      delete document.documentElement.dataset.life;
+      window.removeEventListener("dragover", dragOver);
+      window.removeEventListener("drop", drop, { capture: true });
+      window.removeEventListener("dragend", dragEnd);
       cancelAnimationFrame(frame);
       themeObserver.disconnect();
       window.removeEventListener("resize", resize);

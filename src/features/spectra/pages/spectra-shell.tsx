@@ -709,10 +709,10 @@ function NewWorkButton({
 function WorkspaceContentSkeleton() {
   return (
     <div className="px-1 pt-2" aria-label="Loading workspace">
-      <div className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-card bg-[var(--bg-secondary)]" />
+      <div data-life-ghost className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-card bg-[var(--bg-secondary)]" />
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }, (_, index) => (
-          <div
+          <div data-life-ghost
             key={index}
             className="h-[116px] animate-pulse rounded-card bg-[linear-gradient(110deg,var(--bg-secondary),color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-secondary)),var(--bg-secondary))] [background-size:220%_100%]"
             style={{ animationDelay: `${index * 55}ms` }}
@@ -934,10 +934,10 @@ function WorkspaceHeaderSkeleton() {
       aria-label="Loading workspace overview"
     >
       <div className="flex items-start gap-4">
-        <div className="size-14 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
+        <div data-life-ghost className="size-14 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
         <div className="min-w-0 flex-1 pt-1">
-          <div className="h-7 w-52 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
-          <div className="mt-3 h-4 w-80 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+          <div data-life-ghost className="h-7 w-52 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+          <div data-life-ghost className="mt-3 h-4 w-80 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
         </div>
       </div>
     </div>

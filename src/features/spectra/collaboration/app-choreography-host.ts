@@ -1,6 +1,6 @@
 "use client";
 
-import { createElement, Fragment, useEffect, useState } from "react";
+import { createElement, Fragment, useEffect, useRef, useState } from "react";
 import {
   AppChoreographyCoordinator,
   appSurfaceFromPathname,
@@ -25,6 +25,8 @@ import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 import { getRunLedger } from "./run-ledger";
+import { life, type GlowHandle } from "../life/life";
+import { prismPoint } from "../life/use-life";
 import { startSettingsObservationClient } from "./settings-observation-client";
 
 let coordinator = new AppChoreographyCoordinator();
@@ -35,13 +37,42 @@ type ControlPresentation = { actorId: string; operationId: string; element: HTML
 const controlPresentations = new Map<string, ControlPresentation>();
 const controlPresentationListeners = new Set<() => void>();
 
+/* Spectra's body in the field (LIFE.md): where each actor's light last was, so
+   its next move crosses the field from there. The first move leaves the prism. */
+const sparkAt = new Map<string, [number, number]>();
+
+/** Light crosses the field to where Spectra acts next. */
+function moveSpark(actorId: string, to: [number, number]) {
+  const from = sparkAt.get(actorId) ?? prismPoint();
+  sparkAt.set(actorId, to);
+  if (!life.on || Math.hypot(to[0] - from[0], to[1] - from[1]) < 6) return;
+  life.send(from, to, { colour: "spectrum", strength: 0.7 });
+}
+
 /** A pointer is attached only while the registered control performs its action.
- * It cannot navigate, focus, mutate the control, or acknowledge a save. */
+ * It cannot navigate, focus, mutate the control, or acknowledge a save.
+ * In the field, Spectra's light travels to the control, holds a glow round it
+ * while it works it, and ripples when it lets go. */
 export function presentAppControl(actorId: string, operationId: string, element: HTMLElement): () => void {
   const presentation = { actorId, operationId, element };
   controlPresentations.set(actorId, presentation);
   for (const listener of controlPresentationListeners) listener();
+  let glow: GlowHandle | null = null;
+  if (life.on && element.isConnected) {
+    const r = element.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      moveSpark(actorId, [r.left + r.width / 2, r.top + r.height / 2]);
+      glow = life.glow({ x: r.x - 4, y: r.y - 4, width: r.width + 8, height: r.height + 8 }, "spectrum", 0.7);
+    }
+  }
   return () => {
+    if (glow) {
+      glow.stop();
+      if (element.isConnected) {
+        const r = element.getBoundingClientRect();
+        if (r.width > 0) life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.6, "spectrum");
+      }
+    }
     if (controlPresentations.get(actorId) !== presentation) return;
     controlPresentations.delete(actorId);
     for (const listener of controlPresentationListeners) listener();
@@ -487,6 +518,16 @@ export function AppChoreographyMount() {
     follow.location,
     follow.surfaceLocation,
   ]);
+  // The followed actor's light moves with its spark.
+  const followedActor = follow.followedActorId;
+  const lastCursor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!cursor || !followedActor) return;
+    const key = `${cursor.left}:${cursor.top}`;
+    if (lastCursor.current === key) return;
+    lastCursor.current = key;
+    moveSpark(followedActor, [cursor.left, cursor.top]);
+  }, [cursor, followedActor]);
   if (!follow.following && !controlPointers.length) return null;
   const activity = follow.location?.note ?? follow.surfaceLocation?.note ?? "Watching the current Spectra task";
   const surfaceName = follow.location
@@ -508,31 +549,21 @@ export function AppChoreographyMount() {
       createElement("span", null, `${surfaceName} · Spectra AI`),
       createElement("strong", null, activity),
     ) : null,
-    ...controlPointers.map((pointer) => createElement("svg", {
+    ...controlPointers.map((pointer) => createElement("span", {
       key: pointer.actorId,
       "aria-hidden": true,
-      className: "spectra-follow-ai-cursor",
+      className: "spectra-follow-ai-cursor spectra-ai-spark",
       "data-spectra-control-cursor": "true",
       "data-spectra-actor": pointer.actorId,
       style: { left: pointer.left, top: pointer.top },
-      viewBox: "0 0 24 30", width: 24, height: 30,
-    }, createElement("path", { d: "M2 1.8v21.1l5.8-5.4 4.1 9.4 3.8-1.7-4.2-9.1h8.1L2 1.8Z" }))),
+    })),
     follow.following && cursor && !controlPointers.some((pointer) => pointer.actorId === follow.followedActorId)
-      ? createElement(
-          "svg",
-          {
-            "aria-hidden": true,
-            className: "spectra-follow-ai-cursor",
-            "data-spectra-follow-ai-cursor": "true",
-            style: { left: cursor.left, top: cursor.top },
-            viewBox: "0 0 24 30",
-            width: 24,
-            height: 30,
-          },
-          createElement("path", {
-            d: "M2 1.8v21.1l5.8-5.4 4.1 9.4 3.8-1.7-4.2-9.1h8.1L2 1.8Z",
-          }),
-        )
+      ? createElement("span", {
+          "aria-hidden": true,
+          className: "spectra-follow-ai-cursor spectra-ai-spark",
+          "data-spectra-follow-ai-cursor": "true",
+          style: { left: cursor.left, top: cursor.top },
+        })
       : null,
   );
 }

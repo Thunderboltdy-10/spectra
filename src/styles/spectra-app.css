@@ -5192,19 +5192,42 @@ button:not(:disabled),
   white-space: nowrap;
 }
 
+/* Spectra's body when it acts in the interface: a spark of the prism's light.
+   It glides between controls while its light crosses the field (LIFE.md). */
 .spectra-follow-ai-cursor {
   position: fixed;
   z-index: calc(var(--z-panel) + 11);
-  overflow: visible;
-  fill: var(--accent-cyan);
-  filter: drop-shadow(0 1px 1px var(--bg-primary))
-    drop-shadow(
-      0 2px 5px color-mix(in oklab, var(--text-primary) 42%, transparent)
-    );
   pointer-events: none;
   transition:
-    left var(--motion-base) var(--ease-standard),
-    top var(--motion-base) var(--ease-standard);
+    left 420ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.spectra-ai-spark {
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 999px;
+  background: conic-gradient(#8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+  box-shadow:
+    0 0 0 2px var(--bg-primary),
+    0 0 14px 2px color-mix(in oklab, #8b6cf6 45%, transparent);
+  animation: spectra-spark-turn 2.6s linear infinite;
+}
+
+@keyframes spectra-spark-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-follow-ai-cursor {
+    transition: none;
+  }
+  .spectra-ai-spark {
+    animation: none;
+  }
 }
 
 @keyframes spectra-ai-activity-pulse {

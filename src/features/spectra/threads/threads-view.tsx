@@ -175,7 +175,7 @@ export function ThreadsView({ initialQuery = "", onClose }: { initialQuery?: str
         ) : !loaded ? (
           <div className="space-y-2 px-2 py-2" aria-label="Loading conversations">
             {Array.from({ length: 6 }, (_, index) => (
-              <div key={index} className="h-12 animate-pulse rounded-control bg-[var(--bg-secondary)]" style={{ animationDelay: `${index * 60}ms` }} />
+              <div data-life-ghost key={index} className="h-12 animate-pulse rounded-control bg-[var(--bg-secondary)]" style={{ animationDelay: `${index * 60}ms` }} />
             ))}
           </div>
         ) : shown.every((group) => !group.threads.length) ? (

@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { Icon } from "@/components/icons";
+import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { LAYERS, LAYER_CLASS, type SpectraLayer } from "./layers";
 import { HostLayer, useFocusReturn } from "./layer-context";
@@ -75,11 +76,14 @@ const DialogContent = React.forwardRef<
     ref,
   ) => {
     const focusReturn = useFocusReturn(onOpenAutoFocus, onCloseAutoFocus);
+    // A dialog forms from what opened it and parts where it was when it closes (LIFE.md).
+    const surface = useLifeSurface<HTMLDivElement>({ wait: true });
+    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <DialogPortal>
         <DialogOverlay layer={layer} className={overlayClassName} />
         <DialogPrimitive.Content
-          ref={ref}
+          ref={contentRef}
           className={cn(
             "spectra-float fixed left-1/2 top-1/2 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
             LAYER_CLASS[layer],
@@ -95,7 +99,7 @@ const DialogContent = React.forwardRef<
               aria-label="Close dialog"
               className="absolute right-4 top-4 grid size-8 place-items-center rounded-control text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
             >
-              <X aria-hidden="true" className="size-4" />
+              <Icon name="close" size={16} aria-hidden="true" />
             </DialogPrimitive.Close>
           )}
         </DialogPrimitive.Content>

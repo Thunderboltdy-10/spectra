@@ -820,3 +820,9 @@ html[data-spectra-sidebar-collapsed="true"]
 .code-editor-grid > section {
   min-height: 0 !important;
 }
+
+/* Loading placeholders: with the field on, the field draws them as ghosts, so their own pulse stops. */
+html[data-life="on"] [data-life-ghost],
+html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
+  animation: none;
+}

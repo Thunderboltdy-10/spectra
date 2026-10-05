@@ -2831,6 +2831,7 @@ export function toArtifactCardView(
       artifact.placementStatus ??
       (placements.length > 0 ? "workspace" : "inbox"),
     updatedAt: artifact.updatedAt,
+    createdAt: artifact.createdAt,
     aiStateExpiresAt: artifact.aiStateExpiresAt,
     shared: artifact.isShared,
     accessLevel: artifact.accessLevel ?? undefined,
@@ -2862,6 +2863,7 @@ export function workspaceItemToArtifactCardView(
     meta: "Workspace card",
     placement: "workspace",
     updatedAt: item.artifact.updatedAt,
+    createdAt: item.artifact.createdAt,
     aiStateExpiresAt: item.artifact.aiStateExpiresAt,
     shared: item.artifact.isShared,
     accessLevel: item.artifact.accessLevel ?? undefined,

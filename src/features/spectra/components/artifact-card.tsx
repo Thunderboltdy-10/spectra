@@ -52,6 +52,23 @@ function resolveCardAiState(
   return aiState;
 }
 
+/** How long after it was made a card still arrives, rather than simply being there. */
+const ARRIVAL_WINDOW_MS = 30_000;
+
+/**
+ * Who a card is arriving from, when it is new: Spectra's work travels from the
+ * prism; the user's own forms where they acted. Anything older is content.
+ */
+export function cardArrival(
+  artifact: Pick<ArtifactCardView, "createdAt">,
+  aiState: ArtifactCardView["aiState"] | undefined,
+  now: number,
+): "ai" | "human" | undefined {
+  if (aiState === "creating") return "ai";
+  if (!artifact.createdAt || now - artifact.createdAt > ARRIVAL_WINDOW_MS) return undefined;
+  return aiState === "generated" ? "ai" : "human";
+}
+
 export type ArtifactCardView = {
   id: string;
   title: string;
@@ -70,6 +87,8 @@ export type ArtifactCardView = {
   accessLevel?: "read" | "modify";
   accessExplanation?: string;
   updatedAt?: number;
+  /** When it came to be: a card new since the page opened forms in the field (LIFE.md). */
+  createdAt?: number;
   aiStateExpiresAt?: number;
   pinned?: boolean;
   variant?: string;
@@ -189,6 +208,8 @@ export function ArtifactCard({
                 ? "edited"
                 : "normal";
 
+  const arrival = cardArrival(artifact, liveAiState, aiClock);
+
   return (
     <SpectraCard
       variant={
@@ -199,6 +220,8 @@ export function ArtifactCard({
             : "artifact"
       }
       state={cardState}
+      lifeKey={arrival ? `artifact:${artifact.id}` : undefined}
+      arrival={arrival}
       accent={artifact.pinned ? "var(--card-pinned)" : meta.color}
       className={cn(
         "spectra-artifact-card min-w-0 overflow-hidden text-left",

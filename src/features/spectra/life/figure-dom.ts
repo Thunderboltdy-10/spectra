@@ -41,6 +41,8 @@ export type ElementFigureOptions = {
    * bar, so the content forms where it will be and the text replaces it.
    */
   bars?: string;
+  /** At most this many matched parts become bars (default 40): a long list forms its first rows. */
+  maxBars?: number;
   ink?: Rgb;
 };
 
@@ -67,7 +69,10 @@ export function figureOf(element: Element, options: ElementFigureOptions = {}): 
   if (options.rows) {
     strokes.push(...rowsFigure({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }, options.rows, { colour: ink }).strokes);
   }
-  if (options.bars) for (const part of element.querySelectorAll(options.bars)) strokes.push(...barsOf(part, ink));
+  if (options.bars) {
+    const parts = Array.from(element.querySelectorAll(options.bars)).slice(0, options.maxBars ?? 40);
+    for (const part of parts) strokes.push(...barsOf(part, ink));
+  }
   return { strokes, fill: figure.fill };
 }
 

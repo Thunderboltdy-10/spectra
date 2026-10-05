@@ -186,7 +186,7 @@ export function AnalyticsShell() {
           ))}
           {!payload
             ? Array.from({ length: 6 }, (_, index) => (
-                <div key={index} className="h-28 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
+                <div data-life-ghost key={index} className="h-28 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
               ))
             : null}
         </div>

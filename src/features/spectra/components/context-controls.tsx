@@ -257,9 +257,9 @@ export function GlobalSearch({
           <div className="max-h-[58vh] overflow-y-auto p-2">
             {searching ? (
               <div className="space-y-2 px-2 py-3" aria-label="Searching">
-                <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)]" />
-                <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:90ms]" />
-                <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:180ms]" />
+                <div data-life-ghost className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+                <div data-life-ghost className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:90ms]" />
+                <div data-life-ghost className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:180ms]" />
               </div>
             ) : null}
             {query.trim().length < 2 ? (

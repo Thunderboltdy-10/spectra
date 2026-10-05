@@ -190,6 +190,22 @@ surface with a background covers it.
 - `useLifeEntrance(ref, { from?, bars? })`: the element forms out of the field where it appears, then takes over.
 - `unformElement(element, { from? })`: call just before something is removed.
 - `travelElement(from, to | { absorb })`: from an element or a point, to an element or into one.
+- `useLifeSurface({ wait? })`: a callback ref for floating surfaces. Dialogs, sheets, popovers and menus form from
+  what opened them (the last press, or the focused control for Enter or Space) and part where they were when they
+  close. With `wait`, a dialog stays invisible until its dots have formed it; menus are usable at once while their
+  rows gather.
+- `useLifeArrival(ref, key, kind)`: something new forms the first time its key appears after the page has settled.
+  `"ai"` light leaves the prism, crosses the field and forms the element; `"human"` forms from the user's last
+  action. Whatever was there when the page opened is simply content, and a key forms only once per visit. Artifact
+  cards arrive while Spectra is creating them, or for 30 seconds after they were made (`cardArrival`).
+
+**Ghosts.** Every `Skeleton` is marked `data-life-ghost` (its lines `data-life-ghost-bar`). While the field is on
+(`html[data-life="on"]`), `LifeField` holds a ghost of each one in the field, at most 16 at a time, and the CSS pulse
+stops. When the content replaces it, the ghost is released and the dots hand over to the real lines.
+
+**Spectra's spark.** When Spectra drives the interface (the follow choreography), its cursor is a small turning spark
+of the spectrum, not an arrow. Each control it uses glows, and its light crosses the field from the last control, or
+from the prism, to the next one.
 
 **The favicon** is `prismSvg` of the resting prism with its status dot. It reads the `prism.status` query that the
 island publishes. Until the island publishes one, the favicon shows working while a run is live, and yellow while

@@ -45,7 +45,7 @@ export function ArtifactEmbedById({
 
   if (embed === undefined)
     return (
-      <div
+      <div data-life-ghost
         className={`min-h-24 animate-pulse rounded-card border border-[var(--border-subtle)] bg-[var(--bg-secondary)] motion-reduce:animate-none ${className ?? ""}`}
         aria-label="Loading live reference"
       />

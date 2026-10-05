@@ -114,6 +114,7 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
         : "Shared directly with you"
       : undefined,
     updatedAt: artifact.updatedAt,
+    createdAt: artifact.createdAt,
     metrics: meta.metrics,
     aiState:
       artifact.aiState === "edited" &&
@@ -147,6 +148,7 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
         : "Shared directly with you"
       : undefined,
     updatedAt: item.updatedAt,
+    createdAt: item.artifact.createdAt,
     aiStateExpiresAt: item.artifact.aiStateExpiresAt,
     pinned: item.pinned,
     metrics: meta.metrics,

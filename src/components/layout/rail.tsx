@@ -159,8 +159,27 @@ export function Rail() {
     };
   }, []);
 
-  const notifications = useShellNotifications(router);
+  const notifications = useShellNotifications();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const openNotification = useCallback(
+    (item: ShellNotification) => {
+      if (item.kind === "share") reviewShareInvitations(router);
+      else router.push(item.href ?? `/library/${encodeURIComponent(item.artifactId)}`);
+      void notifications.markRead(item);
+    },
+    [notifications, router],
+  );
+  // A notification opened from the island acts as it would from the list.
+  const chooseRef = useRef({ items: notifications.items, open: openNotification });
+  chooseRef.current = { items: notifications.items, open: openNotification };
+  useEffect(
+    () =>
+      spectraBus.on("notifications.choose", ({ id }) => {
+        const item = chooseRef.current.items.find((candidate) => candidate.id === id);
+        if (item) chooseRef.current.open(item);
+      }),
+    [],
+  );
   useEffect(() => setNotificationsOpen(false), [pathname]);
 
   /* The marker glides to whatever the pointer is over, and home again. */

@@ -272,6 +272,21 @@ export function RouteSidePanelHost() {
     return () => spectraBus.setQuery("side.thread", null);
   }, [sideThreadId, sideThreadTitle]);
 
+  // The island centres on what is left of the stage (ISLAND.md, "Placement").
+  const measureSide = useCallback((node: HTMLDivElement | null) => {
+    const root = document.documentElement;
+    if (!node || typeof ResizeObserver === "undefined") {
+      root.style.removeProperty("--spectra-side-width");
+      return;
+    }
+    const observer = new ResizeObserver(() => root.style.setProperty("--spectra-side-width", `${Math.round(node.getBoundingClientRect().width)}px`));
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--spectra-side-width");
+    };
+  }, []);
+
   function closeWork() {
     workLoad.cancel();
     closeStudio();
@@ -280,7 +295,7 @@ export function RouteSidePanelHost() {
 
   if (!eligible || (!work && !thread)) return null;
   return (
-    <div className="spectra-wave-y relative z-panel flex h-full max-w-[calc(100vw-76px)] shrink-0">
+    <div ref={measureSide} className="spectra-wave-y relative z-panel flex h-full max-w-[calc(100vw-76px)] shrink-0">
       {studio.mode === "split" && studio.activeArtifact ? (
         <ArtifactStudio
           mode="split"

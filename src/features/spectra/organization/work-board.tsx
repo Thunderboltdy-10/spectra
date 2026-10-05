@@ -407,7 +407,7 @@ function BoardColumnView({
         {page.loading ? (
           <div className="grid gap-2.5">
             {[0, 1, 2].map((index) => (
-              <div
+              <div data-life-ghost
                 key={index}
                 className="h-[74px] animate-pulse rounded-control bg-[var(--bg-secondary)]"
                 style={{ animationDelay: `${index * 70}ms` }}

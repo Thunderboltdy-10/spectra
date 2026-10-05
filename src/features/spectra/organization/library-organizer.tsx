@@ -1874,8 +1874,8 @@ function RowSkeleton() {
     <div className="flex flex-col gap-1 p-1" aria-hidden>
       {Array.from({ length: 10 }, (_, row) => (
         <div key={row} className="flex h-[30px] items-center gap-2">
-          <div className="size-[22px] shrink-0 animate-pulse rounded-chip bg-[var(--bg-tertiary)]" />
-          <div
+          <div data-life-ghost className="size-[22px] shrink-0 animate-pulse rounded-chip bg-[var(--bg-tertiary)]" />
+          <div data-life-ghost
             className="h-3 animate-pulse rounded-full bg-[var(--bg-tertiary)]"
             style={{ width: `${34 - (row % 4) * 6}%` }}
           />

@@ -5,7 +5,7 @@ import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } f
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
-import { useLifeGlow } from "../life/use-life";
+import { useLifeArrival, useLifeGlow, type ArrivalKind } from "../life/use-life";
 
 export type SpectraCardVariant =
   | "artifact"
@@ -49,6 +49,8 @@ export function SpectraCard({
   variant,
   state = "normal",
   accent,
+  lifeKey,
+  arrival,
   className,
   style,
   children,
@@ -57,10 +59,15 @@ export function SpectraCard({
   variant: SpectraCardVariant;
   state?: SpectraCardState;
   accent?: string;
+  /** Who it is, for the field: a card new since the page opened forms (LIFE.md). */
+  lifeKey?: string;
+  /** Who made it, when it is new: Spectra's light travels from the prism; the user's forms where they acted. */
+  arrival?: ArrivalKind;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
   useLifeGlow(ref, CARD_WORKING.has(state));
+  useLifeArrival(ref, lifeKey, arrival);
 
   return (
     <article

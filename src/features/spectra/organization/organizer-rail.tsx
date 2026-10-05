@@ -281,7 +281,7 @@ function RailSkeleton() {
   return (
     <div className="flex flex-col gap-1 py-1" aria-hidden>
       {[0, 1, 2, 3].map((row) => (
-        <div
+        <div data-life-ghost
           key={row}
           className="h-6 animate-pulse rounded-chip bg-[var(--bg-tertiary)]"
           style={{ width: `${88 - row * 9}%` }}

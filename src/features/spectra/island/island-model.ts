@@ -1,6 +1,7 @@
 import type { SpectraRunTab } from "../data/api";
 import type { PrismStatus } from "../life/prism";
 import { deriveLiveDockTab, type LiveDockTruthState } from "../runs/live-dock";
+import type { Arrangement } from "./arrange";
 import { runTabSource } from "./run-tabs";
 
 /*
@@ -21,6 +22,8 @@ export type IslandTab = {
   caption: string;
   status: PrismStatus | null;
   side: IslandSide;
+  /** Where the island would put it on its own; the user may have moved it. */
+  automaticSide: IslandSide;
   seen: boolean;
   updatedAt: number;
   source: SpectraRunTab;
@@ -47,16 +50,38 @@ export function sideFor(state: LiveDockTruthState, seen: boolean): IslandSide {
   return seen ? "done" : "play";
 }
 
+/** The side the user chose for a thread, while it still applies. */
+function chosenSide(arrangement: Arrangement | undefined, tab: SpectraRunTab, state: LiveDockTruthState): IslandSide | null {
+  const choice = arrangement?.sides[tab.threadId];
+  // A choice belongs to the run it was made on.
+  if (!choice || choice.runId !== tab.runId) return null;
+  // Put away or not, a question for the user always comes forward.
+  if (choice.side === "done" && state === "needs_input") return null;
+  return choice.side;
+}
+
+/** Nearest the + first: threads the user never placed, newest first, then the user's order. */
+function orderSide(tabs: IslandTab[], saved: readonly string[] | undefined) {
+  const newestFirst = (a: IslandTab, b: IslandTab) => b.updatedAt - a.updatedAt;
+  const rank = new Map((saved ?? []).map((threadId, index) => [threadId, index]));
+  const placed = tabs.filter((tab) => rank.has(tab.threadId)).sort((a, b) => rank.get(a.threadId)! - rank.get(b.threadId)!);
+  const unplaced = tabs.filter((tab) => !rank.has(tab.threadId)).sort(newestFirst);
+  return [...unplaced, ...placed];
+}
+
 /** The island's tabs, in display order on each side (left to right). */
 export function arrangeTabs(
   tabs: readonly SpectraRunTab[],
   {
     seen,
     held,
+    arrangement,
   }: {
     seen: ReadonlySet<string>;
     /** Sides frozen while the user is looking: a tab never moves under the pointer. */
     held?: ReadonlyMap<string, IslandSide>;
+    /** How the user arranged the tabs. */
+    arrangement?: Arrangement;
   },
 ) {
   const all: IslandTab[] = [];
@@ -70,6 +95,7 @@ export function arrangeTabs(
   for (const tab of byThread.values()) {
     const model = deriveLiveDockTab(runTabSource(tab));
     const isSeen = seen.has(tab.runId);
+    const automaticSide = sideFor(model.state, isSeen);
     all.push({
       runId: tab.runId,
       threadId: tab.threadId,
@@ -77,18 +103,54 @@ export function arrangeTabs(
       state: model.state,
       caption: model.state === "needs_input" ? model.inputRequest?.kind === "approval" ? "Needs your OK" : "Has a question" : model.semanticStep,
       status: tabStatus(model.state, isSeen),
-      side: held?.get(tab.runId) ?? sideFor(model.state, isSeen),
+      side: held?.get(tab.runId) ?? chosenSide(arrangement, tab, model.state) ?? automaticSide,
+      automaticSide,
       seen: isSeen,
       updatedAt: tab.run.updatedAt,
       source: tab,
     });
   }
-  const newestFirst = (a: IslandTab, b: IslandTab) => b.updatedAt - a.updatedAt;
-  // In play reads toward the +: oldest at the far left, newest beside it.
-  const play = all.filter((tab) => tab.side === "play").sort(newestFirst).slice(0, MAX_PLAY).reverse();
-  // Done reads away from the +: newest beside it.
-  const done = all.filter((tab) => tab.side === "done").sort(newestFirst).slice(0, MAX_DONE);
+  // In play reads toward the +, so its nearest tab is the rightmost.
+  const play = orderSide(all.filter((tab) => tab.side === "play"), arrangement?.order.play).slice(0, MAX_PLAY).reverse();
+  // Done reads away from the +.
+  const done = orderSide(all.filter((tab) => tab.side === "done"), arrangement?.order.done).slice(0, MAX_DONE);
   return { play, done };
+}
+
+/** The two sides with one tab moved: to `side`, at `index` in display order (left to right). */
+export function previewTabs(play: readonly IslandTab[], done: readonly IslandTab[], runId: string, side: IslandSide, index: number) {
+  const moving = play.find((tab) => tab.runId === runId) ?? done.find((tab) => tab.runId === runId);
+  if (!moving) return { play: [...play], done: [...done] };
+  const next = { play: play.filter((tab) => tab.runId !== runId), done: done.filter((tab) => tab.runId !== runId) };
+  const row = next[side];
+  row.splice(Math.max(0, Math.min(row.length, index)), 0, { ...moving, side });
+  return next;
+}
+
+/** Where a dropped tab lands: its side, and that side's threads nearest the + first, as the store keeps them. */
+export function dropTab(play: readonly IslandTab[], done: readonly IslandTab[], runId: string, side: IslandSide, index: number) {
+  const next = previewTabs(play, done, runId, side, index);
+  const nearestFirst = side === "play" ? [...next.play].reverse() : next.done;
+  return { side, order: nearestFirst.map((tab) => tab.threadId) };
+}
+
+/**
+ * One keyboard step (Alt + arrow): the tab swaps with its neighbour, and the
+ * last step before the + carries it across. Null when it is already at an end.
+ */
+export function stepTab(play: readonly IslandTab[], done: readonly IslandTab[], runId: string, delta: -1 | 1): { side: IslandSide; index: number } | null {
+  const playIndex = play.findIndex((tab) => tab.runId === runId);
+  if (playIndex >= 0) {
+    if (delta === 1 && playIndex === play.length - 1) return { side: "done", index: 0 };
+    const index = playIndex + delta;
+    return index < 0 ? null : { side: "play", index };
+  }
+  const doneIndex = done.findIndex((tab) => tab.runId === runId);
+  if (doneIndex < 0) return null;
+  // Across the +, it becomes the nearest tab in play: the rightmost.
+  if (delta === -1 && doneIndex === 0) return { side: "play", index: play.length };
+  const index = doneIndex + delta;
+  return index >= done.length ? null : { side: "done", index };
 }
 
 const STATUS_RANK: Record<PrismStatus, number> = { needs: 6, problem: 5, warning: 4, working: 3, done: 2, info: 1, offline: 0 };

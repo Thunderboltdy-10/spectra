@@ -277,5 +277,18 @@ The island lives in `src/features/spectra/island/`.
   Which threads the user has seen is kept per browser (`seen.ts`).
 - **Questions** (`questions.ts`) merge the live harness question with saved runs waiting on the user, and each
   answers through the right path (harness answer, card action, choice continuation or a new turn).
+- **Arranging.** `arrange.ts` keeps the user's order per side and the threads moved across the + (a choice
+  belongs to the run it was made on; a put-away thread still comes forward when it needs the user).
+  `use-tab-drag.ts` lifts a dragged tab into a ghost, moves its empty slot through the row (FLIP, so the others
+  part), ripples the + on crossing and throws a flicked done tab into history. Alt + ←/→ and the tab's context
+  menu do the same from the keyboard and the pointer's other button.
+- **History** (`history.tsx`) follows the done tabs behind the "›": it loads a page of threads at a time as its
+  end scrolls into view, and keeps at most 64 drawn.
+- **Arriving.** `island.arrive` (emitted by the threads view) opens the pill and forms the thread's tab from the
+  light of the row it left; with no tab yet, the + takes the light in.
+- **Notices** (`notice.tsx`) form out of the prism's light: finished or stopped threads, and every new
+  notification (`island.notify`, from the account's notifications; opening one emits `notifications.choose`).
+- **Placement.** The island spans the stage between `--spectra-rail-width` and `--spectra-side-width` (published
+  by the route's Side as it resizes) and glides when either changes.
 - **Safe area.** The island's resting row registers as the composer band, so pages keep their last lines clear of
   it through `--spectra-composer-safe-area`.

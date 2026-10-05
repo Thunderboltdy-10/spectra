@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { Check, Ellipsis, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Icon, type IconName } from "@/components/icons";
+import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
 import { useFloatingLayer } from "./layer-context";
@@ -40,10 +42,13 @@ const DropdownMenuContent = React.forwardRef<
     ref,
   ) => {
     const layer = useFloatingLayer(explicitLayer);
+    // Usable at once; its rows gather from what opened it.
+    const surface = useLifeSurface<HTMLDivElement>();
+    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content
-          ref={ref}
+          ref={contentRef}
           sideOffset={sideOffset}
           collisionPadding={collisionPadding}
           className={cn(
@@ -92,7 +97,7 @@ const DropdownMenuRadioItem = React.forwardRef<
   >
     {children}
     <DropdownMenuPrimitive.ItemIndicator className="absolute right-2 flex size-3.5 items-center justify-center">
-      <Check className="size-3.5 text-[var(--text-primary)]" />
+      <Icon name="check" size={14} className="text-[var(--text-primary)]" />
     </DropdownMenuPrimitive.ItemIndicator>
   </DropdownMenuPrimitive.RadioItem>
 ));
@@ -128,7 +133,7 @@ DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 export type OverflowItem<T extends string = string> = {
   key: T;
   label: string;
-  icon?: LucideIcon;
+  icon?: LucideIcon | IconName;
   disabled?: boolean;
   /** Shown right-aligned: a count, a shortcut, or a state word. */
   hint?: string;
@@ -153,7 +158,7 @@ export function OverflowMenu<T extends string>({
   avoidCollisions = true,
   active = false,
   size = 40,
-  icon: TriggerIcon = Ellipsis,
+  icon: TriggerIcon = "more",
   triggerClassName,
   contentClassName,
   followSafe = false,
@@ -174,7 +179,7 @@ export function OverflowMenu<T extends string>({
   size?: number;
   /** Three dots by default. Override only when the menu has a settled glyph
       of its own, e.g. a bell for notification delivery. */
-  icon?: LucideIcon;
+  icon?: LucideIcon | IconName;
   triggerClassName?: string;
   contentClassName?: string;
   /** Menu items count as Follow controls so choosing Follow AI does not
@@ -184,13 +189,13 @@ export function OverflowMenu<T extends string>({
   if (!items.length) return null;
 
   const body = items.map((item) => {
-    const Icon = item.icon;
+    const ItemIcon = item.icon;
     const content = (
       <>
         {/* Fixed icon column: the label edge is identical with or without an
             icon, so a mixed list never reads ragged. */}
         <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
-          {Icon ? <Icon className="size-3.5" /> : null}
+          {typeof ItemIcon === "string" ? <Icon name={ItemIcon} size={14} /> : ItemIcon ? <ItemIcon className="size-3.5" /> : null}
         </span>
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
         {item.hint ? (
@@ -235,10 +240,11 @@ export function OverflowMenu<T extends string>({
         )}
         style={{ width: size, height: size }}
       >
-        <TriggerIcon
-          aria-hidden="true"
-          className="pointer-events-none size-4"
-        />
+        {typeof TriggerIcon === "string" ? (
+          <Icon name={TriggerIcon} size={16} aria-hidden="true" className="pointer-events-none" />
+        ) : (
+          <TriggerIcon aria-hidden="true" className="pointer-events-none size-4" />
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align={align}

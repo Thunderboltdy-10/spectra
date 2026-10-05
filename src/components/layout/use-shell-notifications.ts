@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import {
   getSpectraNotificationCenter,
   markSpectraArtifactCommentNotificationsRead,
@@ -13,20 +12,23 @@ import {
   type SpectraTimetableReminderNotification,
 } from "@/features/spectra/data/api";
 import { spectraBus } from "@/features/spectra/events";
-import { buildShellNotifications, reviewShareInvitations, type ShellNotification } from "./shell-notifications";
+import { buildShellNotifications, type ShellNotification } from "./shell-notifications";
+
+const TONE: Record<ShellNotification["kind"], "needs" | "info"> = { share: "info", comment: "info", planner: "needs", timetable: "needs" };
 
 /**
  * The account's notifications: shares, comments, planner and timetable
  * reminders. Push events and focus cover the interactive path; the fallback
  * poll is sparse and never fetches in a hidden tab.
  */
-export function useShellNotifications(router: { push: (href: string) => void }) {
+export function useShellNotifications() {
   const [loading, setLoading] = useState(false);
   const [comments, setComments] = useState<SpectraArtifactCommentNotification[]>([]);
   const [planner, setPlanner] = useState<SpectraPlannerReminderNotification[]>([]);
   const [timetable, setTimetable] = useState<SpectraTimetableReminderNotification[]>([]);
   const [invitations, setInvitations] = useState<SpectraShareInvitation[]>([]);
-  const knownInvitationIds = useRef<Set<string> | null>(null);
+  // What the user already knew of; anything new after the first load reaches them through the island.
+  const known = useRef<Set<string> | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -35,24 +37,23 @@ export function useShellNotifications(router: { push: (href: string) => void }) 
       setComments(center.comments);
       setPlanner(center.planner);
       setTimetable(center.timetable);
-      const known = knownInvitationIds.current;
-      if (known) {
-        for (const invitation of center.invitations) {
-          if (known.has(invitation.invitationId)) continue;
-          toast.message(`${invitation.inviter?.name ?? "A collaborator"} shared ${invitation.resource.title}`, {
-            description: invitation.level === "modify" ? "You can collaborate and make changes." : "You have read-only access.",
-            action: { label: "Review", onClick: () => reviewShareInvitations(router) },
-          });
+      setInvitations(center.invitations);
+      const fresh = buildShellNotifications(center);
+      const before = known.current;
+      if (before) {
+        // Oldest first, so the newest is the one left showing.
+        for (const item of [...fresh].reverse()) {
+          if (before.has(item.id) || item.readAt) continue;
+          spectraBus.emit("island.notify", { id: item.id, title: item.title, detail: item.detail, tone: TONE[item.kind] });
         }
       }
-      knownInvitationIds.current = new Set(center.invitations.map((invitation) => invitation.invitationId));
-      setInvitations(center.invitations);
+      known.current = new Set(fresh.map((item) => item.id));
     } catch {
       // Navigation stays fully usable when the notification service is unavailable.
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     void refresh();

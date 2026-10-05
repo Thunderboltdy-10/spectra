@@ -9,6 +9,7 @@ const field = vi.hoisted(() => ({
   unform: vi.fn(() => Promise.resolve()),
   morph: vi.fn(() => ({ formed: Promise.resolve() })),
   pulse: vi.fn(),
+  send: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../life/life", () => ({
@@ -19,6 +20,7 @@ vi.mock("../life/life", () => ({
     unform: field.unform,
     morph: field.morph,
     pulse: field.pulse,
+    send: field.send,
   },
 }));
 
@@ -26,7 +28,7 @@ vi.mock("../life/figure-dom", () => ({
   figureOf: () => ({ strokes: [] }),
 }));
 
-import { markNavigation, useLifeArrival, useLifeDeparture, useLifeLanding } from "../life/use-life";
+import { markNavigation, sendInto, useLifeArrival, useLifeDeparture, useLifeLanding } from "../life/use-life";
 
 function Item({ id, kind }: { id: string; kind?: "ai" | "human" }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -73,6 +75,8 @@ afterEach(() => {
   field.travel.mockClear();
   field.unform.mockClear();
   field.morph.mockClear();
+  field.send.mockClear();
+  field.pulse.mockClear();
 });
 
 describe("arrivals", () => {
@@ -149,5 +153,47 @@ describe("landings", () => {
     render(<Landing id="work-3" />);
     act(flushFrames);
     expect(field.morph).not.toHaveBeenCalled();
+  });
+});
+
+describe("sends", () => {
+  const drop = (target: Element, taken: boolean) => {
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.assign(event, { clientX: 60, clientY: 30 });
+    if (taken) event.preventDefault();
+    target.dispatchEvent(event);
+  };
+
+  it("carries light from what was dragged into what took it", () => {
+    const row = document.createElement("div");
+    row.setAttribute("draggable", "true");
+    const folder = document.createElement("div");
+    folder.setAttribute("data-life-receive", "");
+    document.body.append(row, folder);
+    row.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    drop(folder, true);
+    expect(field.send).toHaveBeenCalledTimes(1);
+    expect(field.send).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ width: 100 }), expect.objectContaining({ absorb: true }));
+    row.remove();
+    folder.remove();
+  });
+
+  it("stays still when nothing took the drop", () => {
+    const row = document.createElement("div");
+    row.setAttribute("draggable", "true");
+    document.body.append(row);
+    row.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    drop(document.body, false);
+    expect(field.send).not.toHaveBeenCalled();
+    row.remove();
+  });
+
+  it("only pulses a target when there is nowhere the move came from", () => {
+    const list = document.createElement("div");
+    document.body.append(list);
+    sendInto(list, null);
+    expect(field.send).not.toHaveBeenCalled();
+    expect(field.pulse).toHaveBeenCalledWith(60, 30, 0.7);
+    list.remove();
   });
 });

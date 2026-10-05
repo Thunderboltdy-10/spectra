@@ -38,8 +38,15 @@ const mountSchema = z
     synced: z.number().optional().default(0),
     total: z.number().optional().default(0),
     doubleSyncRisk: z.boolean().optional().default(false),
+    /** "Documents › Biology": built on the computer, never sent to the cloud. */
+    friendlyPath: z.string().optional().default(""),
+    paused: z.boolean().optional().default(false),
+    lastSyncAt: z.number().nullable().optional(),
   })
   .passthrough();
+export type BridgeMount = z.infer<typeof mountSchema>;
+const officeFileSchema = z.object({ folder: z.string(), name: z.string() }).passthrough();
+export type BridgeOfficeFile = z.infer<typeof officeFileSchema>;
 const statusSchema = z
   .object({
     version: z.string(),
@@ -47,7 +54,13 @@ const statusSchema = z
     paired: z.boolean(),
     cloudConnected: z.boolean(),
     deviceId: z.string().nullable().optional(),
+    deviceName: z.string().optional().default(""),
+    /** Syncing is paused for every folder, from the tray or the Devices page. */
+    paused: z.boolean().optional().default(false),
+    lastSyncAt: z.number().nullable().optional(),
     mounts: z.array(mountSchema).optional().default([]),
+    /** Files Office holds open in a selected folder right now. */
+    officeFiles: z.array(officeFileSchema).optional().default([]),
   })
   .passthrough();
 export type BridgeStatus = z.infer<typeof statusSchema>;
@@ -457,6 +470,43 @@ export async function bridgeStatus(
   }
 }
 
+async function bridgeControl(path: string, body: unknown, missing: string) {
+  const response = await authorizedBridgeRequest(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!response) throw new Error(missing);
+}
+
+/** Pause or resume syncing for every folder on this computer. */
+export function pauseBridgeSync(paused: boolean) {
+  return bridgeControl("/v1/sync/pause", { paused }, "Connect this computer before pausing syncing.");
+}
+
+/** Pause or resume one folder on this computer. */
+export function pauseBridgeFolder(grantId: string, paused: boolean) {
+  return bridgeControl("/v1/mount/pause", { grantId, paused }, "Connect this computer before pausing a folder.");
+}
+
+/** Open Bridge's log file on this computer, in the system's own viewer. */
+export function openBridgeLogs() {
+  return bridgeControl("/v1/logs/open", {}, "Connect this computer before opening its logs.");
+}
+
+/**
+ * Tell the local Bridge to forget this pairing: its credential, folders and
+ * session. Files on the computer stay. A Bridge that is not running learns
+ * from Spectra the next time it starts, so this is best effort.
+ */
+export async function unpairBridge() {
+  try {
+    await bridgeControl("/v1/unpair", {}, "This computer is not connected.");
+  } catch {
+    /* Revoking in Spectra is what counts; the local Bridge catches up. */
+  }
+}
+
 export async function selectBridgeFolder() {
   const response = await authorizedBridgeRequest("/v1/mount/select", {
     method: "POST",
@@ -537,7 +587,12 @@ export async function pairingStatus(challenge: string) {
     });
     if (!response.ok) return null;
     return z
-      .object({ paired: z.boolean(), sessionToken: z.string().optional() })
+      .object({
+        paired: z.boolean(),
+        sessionToken: z.string().optional(),
+        /** Why pairing stopped on the computer, as a sentence (it was declined, or failed). */
+        failure: z.string().optional(),
+      })
       .passthrough()
       .parse(await response.json());
   } catch {
@@ -545,4 +600,26 @@ export async function pairingStatus(challenge: string) {
   }
 }
 
-export const BRIDGE_SETTINGS_HREF = "/settings?section=devices";
+/** The Devices page, where everything about Bridge happens. */
+export const DEVICES_HREF = "/devices";
+
+export type BridgePlatform = "windows" | "macos" | "other";
+
+/** Which Bridge this computer needs, from what the browser says it runs on. */
+export function bridgePlatform(nav: { userAgent?: string; platform?: string; userAgentData?: { platform?: string } } | undefined =
+  typeof navigator === "undefined" ? undefined : (navigator as Navigator & { userAgentData?: { platform?: string } })): BridgePlatform {
+  const hint = `${nav?.userAgentData?.platform ?? ""} ${nav?.platform ?? ""} ${nav?.userAgent ?? ""}`.toLowerCase();
+  if (/iphone|ipad|android/.test(hint)) return "other";
+  if (/win/.test(hint)) return "windows";
+  if (/mac/.test(hint)) return "macos";
+  return "other";
+}
+
+const BRIDGE_DOWNLOAD_BASE =
+  process.env.NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL || "https://updates.spectra.school/bridge/download";
+
+/** Where this computer downloads Bridge, or null when Bridge does not run on it. */
+export function bridgeDownloadUrl(platform: BridgePlatform): string | null {
+  if (platform === "other") return null;
+  return `${BRIDGE_DOWNLOAD_BASE.replace(/\/+$/, "")}/${platform}`;
+}

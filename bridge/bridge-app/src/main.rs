@@ -499,7 +499,9 @@ fn health_report(grants: &GrantRegistry, journal: &Journal, paused: bool) -> Dev
         paused,
         folders: mounts.len(),
         problem: problem.map(|(code, _)| code.to_owned()),
-        problem_folder: problem.map(|(_, mount)| mount.friendly_path.clone()),
+        // Only the folder's own name leaves the computer, as it already does
+        // when the folder is registered; its parents stay local.
+        problem_folder: problem.map(|(_, mount)| mount.label.clone()),
         last_sync_at: read_ms(journal, LAST_SYNC_KEY),
     }
 }
@@ -4517,7 +4519,7 @@ mod devices_tests {
         let report = health_report(&grants, &journal, false);
         assert_eq!(report.folders, 2);
         assert_eq!(report.problem.as_deref(), Some("folder-unavailable"));
-        assert!(report.problem_folder.unwrap().ends_with("Biology"));
+        assert_eq!(report.problem_folder.as_deref(), Some("Biology"));
     }
 }
 

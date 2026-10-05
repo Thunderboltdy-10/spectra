@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AI_SYNC_PURPOSES, type AiSyncPurpose } from "../../../../../shared/school-sync";
 import type {
   RegisteredToolDefinition,
   ToolExecutionContext,
@@ -304,7 +305,7 @@ export function registerApplicationTools() {
     if (value.action === "change_level" && (!value.invitationId || !value.level)) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "An accepted invitation and new level are required." });
     if (value.action === "revoke" && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A grant id is required." });
   }), risk: "high", approval: "always", authorityTarget: "sharing" });
-  define({ ...appActionDefaults, id: "trigger_managebac_sync", title: "Sync ManageBac", description: "Refresh permission-bound ManageBac data with visible freshness and capability status.", inputSchema: z.object({ purpose: z.enum(["upcoming_deadlines", "class_resources", "timetable", "classes", "cas"]), force: z.boolean().optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_sync" });
+  define({ ...appActionDefaults, id: "trigger_managebac_sync", title: "Sync ManageBac", description: "Refresh permission-bound ManageBac data with visible freshness and capability status.", inputSchema: z.object({ purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]), force: z.boolean().optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_sync" });
   define({ ...appActionDefaults, id: "select_managebac_classes", title: "Choose ManageBac classes", description: "Set the account-scoped ManageBac class selection with revision fencing; unselected class details and planning records remain outside the sync scope.", inputSchema: z.object({ recordIds: z.array(z.string().min(1)).max(100), expectedRevision: z.number().int().min(0).optional(), retention: z.enum(["keep_in_spectra", "archive_projection"]).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_selection" });
   define({ ...appActionDefaults, id: "import_managebac_resource", title: "Import school resource", description: "Open the selected ManageBac class shelf to import a permissioned resource into Library through the human school flow.", inputSchema: z.object({ sourceRecordId: z.string().min(1), refresh: z.boolean().optional(), requestKey: z.string().min(8).max(240).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_resource_import", aiAvailability: "prohibited", prohibitionReason: "AI resource import is unavailable. Open the selected ManageBac class shelf and use Import resource there; the school route verifies provider identity and saves an import receipt." });
   define({ ...appActionDefaults, id: "change_managebac_mapping", title: "Change ManageBac mapping", description: "ManageBac mapping changes use the dedicated human admin flow; AI mapping mutation is deferred until that typed path is exposed.", inputSchema: z.object({ mappingId: z.string(), patch: jsonObject }), risk: "high", approval: "always", authorityTarget: "managebac_mapping", aiAvailability: "prohibited", prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow." });
@@ -488,13 +489,7 @@ export function registerApplicationTools() {
     description:
       "Refresh permission-bound ManageBac data with visible freshness and capability status.",
     inputSchema: z.object({
-      purpose: z.enum([
-        "upcoming_deadlines",
-        "class_resources",
-        "timetable",
-        "classes",
-        "cas",
-      ]),
+      purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]),
       force: z.boolean().optional(),
     }),
     risk: "medium",

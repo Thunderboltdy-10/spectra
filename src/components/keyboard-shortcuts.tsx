@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Keyboard } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/icons";
 import {
   Dialog,
   DialogContent,
@@ -24,18 +23,15 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { keys: ["Mod", "K"], description: "Open command bar", context: "global" },
   {
     keys: ["Mod", "Shift", "F"],
-    description: "Focus sidebar search",
+    description: "Find a conversation",
     context: "global",
   },
-  { keys: ["Mod", "Shift", "N"], description: "New chat", context: "global" },
+  { keys: ["Mod", "Shift", "N"], description: "New conversation", context: "global" },
+  { keys: ["Mod", "J"], description: "Write to Spectra", context: "global" },
+  { keys: ["Mod", "."], description: "Hide or show the island", context: "global" },
   {
     keys: ["Mod", "Shift", "S"],
     description: "Open settings",
-    context: "global",
-  },
-  {
-    keys: ["Mod", "/"],
-    description: "Focus Spectra composer",
     context: "global",
   },
   { keys: ["?"], description: "Show keyboard shortcuts", context: "global" },
@@ -93,7 +89,7 @@ export function KeyboardShortcutsHelp() {
       <DialogContent className="max-w-[480px] gap-0 p-0">
         <DialogHeader className="border-b border-[var(--border-subtle)] px-5 py-4 pr-14">
           <DialogTitle className="flex items-center gap-2">
-            <Keyboard className="size-4" aria-hidden="true" />
+            <Icon name="keyboard" size={18} />
             Keyboard shortcuts
           </DialogTitle>
           <DialogDescription>
@@ -130,23 +126,6 @@ export function KeyboardShortcutsHelp() {
             </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-export function ShortcutsButton({ compact = false }: { compact?: boolean }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size={compact ? "icon" : "sm"}
-      aria-label="Keyboard shortcuts"
-      title="Keyboard shortcuts"
-      onClick={() => window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT))}
-      className={compact ? "size-8 border-0" : undefined}
-    >
-      <Keyboard className="size-4" aria-hidden="true" />
-      {compact ? null : "Shortcuts"}
-    </Button>
   );
 }
 

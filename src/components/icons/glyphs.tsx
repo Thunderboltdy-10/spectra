@@ -504,6 +504,38 @@ const mail: Glyph = () => (
   </>
 );
 
+const theme: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={6.25} />
+    <path d="M10 3.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor" fillOpacity={0.85} stroke="none" />
+    <AccentFill d="M6.1 7.4a.9.9 0 1 0 1.8 0 .9.9 0 1 0-1.8 0z" />
+  </>
+);
+
+const keyboard: Glyph = () => (
+  <>
+    <Sheet d={box(2.5, 5.25, 15, 9.5, 2)} />
+    <path d="M5.5 8.25h.01M8.5 8.25h.01M11.5 8.25h.01M14.5 8.25h.01M5.5 11h.01M14.5 11h.01" strokeWidth={1.75} />
+    <AccentLine d="M8 11.4h4" width={1.5} />
+  </>
+);
+
+const signOut: Glyph = () => (
+  <>
+    <Sheet d="M11.25 3.25H5.5a1.75 1.75 0 0 0-1.75 1.75v10a1.75 1.75 0 0 0 1.75 1.75h5.75" />
+    <AccentLine d="M8.75 10h8M14.25 7.25 17 10l-2.75 2.75" />
+  </>
+);
+
+const analytics: Glyph = () => (
+  <>
+    <path d="M3.25 16.25h13.5" />
+    <Sheet d={box(4.5, 10, 2.75, 5, 0.6)} />
+    <Sheet d={box(8.65, 6.5, 2.75, 8.5, 0.6)} />
+    <path d={box(12.8, 3.75, 2.75, 11.25, 0.6)} fill={ACCENT} fillOpacity={0.9} stroke={ACCENT} />
+  </>
+);
+
 export const GLYPHS = {
   // Artifact types
   document: page,
@@ -566,6 +598,11 @@ export const GLYPHS = {
   star,
   sidebar,
   mail,
+  // Account
+  theme,
+  keyboard,
+  signOut,
+  analytics,
 } satisfies Record<string, Glyph>;
 
 export type IconName = keyof typeof GLYPHS;
@@ -579,4 +616,5 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
     family: "Actions",
     names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "link", "bell", "people", "image", "star", "sidebar", "mail"],
   },
+  { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
 ];

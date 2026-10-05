@@ -173,6 +173,9 @@ compat shims, and say so in the commit.
 | A1b · Harness polish | `lane/harness-polish` (worktree removed) | Merged into main as `5ae76253`; build passes |
 | Design core | `main` · primary checkout (orchestrator) | Done. Life engine v2 `4076255a` and its choreography map `0c818c81`; the field app-wide with the favicon prism and `/dev/life` `a66ff039`; the glyph set and `/dev/icons` `9f85828b`; the kit (AdaptiveBar `pinned`, SplitButton, IconButton, Row, Tooltip shortcuts) `7075674e`. Pages adopt glyphs and the kit in D2 and D3. |
 | Prism (user's agent) | `lane/prism` · `<local-workspace>` | Retired: the orchestrator builds the prism in code |
-| A2b · AI reach | `lane/ai-reach` · `<local-workspace>` | Running |
+| A2b · AI reach | `lane/ai-reach` (worktree removed) | Merged into main as `401bc4d3` ([report](reports/R-A2b-AI-REACH.md)). The F1 follow-up landed with the merge: each AI sync purpose asks ManageBac only for its kinds. Left: `read_school_data` on the `api.school` queries. |
 | F1 · School | `lane/school` · `<local-workspace>` | Merged into main as `07a35120` ([report](reports/R-F1-SCHOOL.md)); live checks listed there. Follow-up for A2b: the AI refresh names its kinds. |
-| D2 · Island core | `main` · primary checkout (orchestrator) | The island replaces the live dock and every page composer (chat, Workspace and Library, Agents, thread surfaces); questions, thread view, composer with agent switch and @ references; tests and build pass. Left for D2: the three-region shell, the rail with Devices, the threads view, tab drag between sides, history. |
+| D2 · Island core | `main` · primary checkout (orchestrator) | The island replaces the live dock and every page composer (`6baccb03`). |
+| D2 · Shell | `main` · primary checkout (orchestrator) | The rail (prism brand, workspace switcher, seven destinations with Devices, pinned works, one account row with notifications, theme and help); the threads view (semantic search, groups, row → island choreography); one `--spectra-rail-width` for rail, stage and island; shortcuts open the island. Left: tab drag between sides, history, notifications through the island. |
+| F2 · Devices | `lane/devices` · `<local-workspace>` | Running |
+| D4 · Editors | `lane/editors` · `<local-workspace>` | Running |

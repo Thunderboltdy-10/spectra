@@ -1,18 +1,16 @@
 "use client";
 
 /**
- * One shared bottom clearance for every surface the floating composer/dock
- * band can cover (CANON R16, ARCHITECTURE-PLATFORM §3).
+ * One shared bottom clearance for every surface the island can cover
+ * (SHELL.md, "Page anatomy").
  *
- * The composer is `position: fixed`, so no layout inside a surface can know
- * how tall it is; each surface used to guess its own constant (`pb-24` here,
- * `pb-[150px]` there) and the guesses lost whenever the dock grew tabs or a
- * selection bar. Now the band measures itself: every mounted
- * `WorkbenchLiveStack` registers here, and the tallest visible band's height
- * is published as `--spectra-composer-safe-area` on the document root, where
- * every surface — Library list and board, workspace home, studio scrollports
- * — can consume it with one CSS rule. When no band is mounted the variable
- * is removed and surfaces fall back to their own small padding.
+ * The island is `position: fixed`, so no layout inside a surface can know how
+ * tall it is. The island registers its resting row here, and the tallest
+ * visible band's height is published as `--spectra-composer-safe-area` on the
+ * document root, where every surface — Library list and board, workspace
+ * home, studio scrollports — consumes it with one CSS rule. When no band is
+ * mounted the variable is removed and surfaces fall back to their own small
+ * padding.
  */
 
 const SAFE_AREA_VAR = "--spectra-composer-safe-area";

@@ -499,13 +499,23 @@ export function Island() {
 
   /* ------------------------------------------------------------ keyboard */
 
+  // Ctrl J, the global shortcuts and the rest of the app open the composer here.
+  const compose = useCallback(
+    (fresh = false) => {
+      if (fresh) slot?.startNewThread?.();
+      setHidden(false);
+      window.setTimeout(() => void go("composer"), 0);
+    },
+    [go, slot],
+  );
+  useEffect(() => spectraBus.on("island.compose", ({ fresh }) => compose(fresh)), [compose]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
       if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "j") {
         event.preventDefault();
-        setHidden(false);
-        window.setTimeout(() => void go("composer"), 0);
+        compose();
         return;
       }
       if (mod && event.key === ".") {
@@ -537,7 +547,7 @@ export function Island() {
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener("pointerdown", onDown, true);
     };
-  }, [closeView, go, view]);
+  }, [closeView, compose, view]);
 
   const onPillKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const buttons = Array.from(pillRef.current?.querySelectorAll<HTMLButtonElement>("[data-island-tab], [data-plus]") ?? []);
@@ -600,10 +610,12 @@ export function Island() {
   return (
     <div
       data-island
+      data-island-root
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
       className={cn(
-        "pointer-events-none fixed inset-x-0 bottom-0 z-composer-dock flex flex-col items-center gap-2 transition-opacity duration-300",
+        // The island floats at the bottom centre of the stage: right of the rail.
+        "pointer-events-none fixed bottom-0 left-[var(--spectra-rail-width,0px)] right-0 z-composer-dock flex flex-col items-center gap-2 transition-opacity duration-300",
         faded && "opacity-30 [&_*]:!pointer-events-none",
       )}
     >

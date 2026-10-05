@@ -130,6 +130,7 @@ describe("P6.I1 UX debt closure", () => {
   it("advertises only registered shortcuts and keeps navigation client-side", () => {
     const shortcuts = read("src/components/keyboard-shortcuts.tsx");
     const appShell = read("src/components/layout/app-shell.tsx");
+    const rail = read("src/components/layout/rail.tsx");
     expect(shortcuts).toContain("export const SHORTCUTS");
     expect(shortcuts).toContain("<Dialog open={open}");
     expect(shortcuts).not.toContain("Toggle orchestration panel");
@@ -137,12 +138,13 @@ describe("P6.I1 UX debt closure", () => {
     expect(appShell).not.toContain("window.location.assign");
     expect(appShell).not.toContain("window.location.href");
     expect(appShell).toContain("<SignedInContinue");
-    expect(appShell).toContain('data-sidebar-recents=""');
-    expect(appShell).toContain("prefetch={false}");
+    expect(rail).not.toContain("window.location");
+    expect(rail).toContain('data-sidebar-recents=""');
+    expect(rail).toContain("prefetch={false}");
     // Workspace discovery moved to the shared paged catalog: focus reuses a
     // warm page while a workspace change forces a fresh traversal.
     const catalog = read("src/features/spectra/data/use-catalog-pages.ts");
-    expect(appShell).toContain("useWorkspaceCatalog(selectedWorkspaceId)");
+    expect(rail).toContain("useWorkspaceCatalog(selectedWorkspaceId)");
     expect(catalog).toContain("window.addEventListener(\"focus\", onFocus)");
     expect(catalog).toContain("const onFocus = () => { void refresh(); };");
     expect(catalog).toContain("void refresh(true)");

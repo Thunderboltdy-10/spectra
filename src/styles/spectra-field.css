@@ -711,25 +711,27 @@ html[data-spectra-motion="none"]
   display: none;
 }
 
-/* Preserve the persisted navigation geometry before React hydrates so route
-   skeletons and loaded content share the same horizontal origin. */
-html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar {
-  width: 76px !important;
+/* The rail's width is one variable: the rail, the stage's left edge and the
+   island all read it, before React hydrates and after (SHELL.md). The rail
+   collapses to icons when the user asks, and below 1024 px unless the user
+   opened it there. */
+:root {
+  --spectra-rail-width: 232px;
 }
 
-html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
-  padding-left: 76px !important;
+html[data-spectra-sidebar-collapsed="true"] {
+  --spectra-rail-width: 56px;
+}
+
+@media (max-width: 1023px) {
+  html:not([data-spectra-sidebar-collapsed="false"]) {
+    --spectra-rail-width: 56px;
+  }
 }
 
 html[data-spectra-sidebar-collapsed="true"]
   .spectra-shell-sidebar
-  [data-sidebar-recents] {
-  display: none !important;
-}
-
-html[data-spectra-sidebar-collapsed="true"]
-  .spectra-shell-sidebar
-  [data-sidebar-expanded] {
+  :is([data-sidebar-recents], [data-sidebar-expanded]) {
   display: none !important;
 }
 

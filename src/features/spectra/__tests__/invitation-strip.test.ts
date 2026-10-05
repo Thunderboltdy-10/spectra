@@ -45,11 +45,11 @@ describe("share invitation inbox", () => {
 
   it("excludes pending share invitations from Alerts unread Mark-read math", () => {
     const chrome = readFileSync(
-      path.join(process.cwd(), "src/components/layout/app-shell.tsx"),
+      path.join(process.cwd(), "src/components/layout/use-shell-notifications.ts"),
       "utf8",
     );
     expect(chrome).toMatch(
-      /unreadCount = notifications\.filter\(\s*\(item\) => !item\.readAt && item\.kind !== "share"/,
+      /unreadCount = items\.filter\(\(item\) => !item\.readAt && item\.kind !== "share"/,
     );
     expect(chrome).toContain('!item.readAt && item.kind !== "share"');
     // Accept path stays: share rows keep the invitations collection deep-link.
@@ -59,7 +59,7 @@ describe("share invitation inbox", () => {
     );
     expect(notifications).toContain("href: SHARE_INVITATIONS_HREF");
     // Mark-read still no-ops shares (no schema readAt on shareInvitations).
-    expect(chrome).toContain('if (item.kind === "share") return;');
+    expect(chrome).toContain('if (item.readAt || item.kind === "share") return;');
     expect(chrome).not.toContain("markSpectraShareInvitationsRead");
   });
 });

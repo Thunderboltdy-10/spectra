@@ -110,6 +110,17 @@ Each status glyph uses its state hue on the accent.
 New, Share, Filter, Sort, Search, Attach, Send, More, Close, Collapse, Pin, Undo Spectra's changes, Open in side, Open
 full. These stay simple, but they are drawn in the house style so they sit with the rest.
 
+### Account
+
+The rail's account menu.
+
+| Glyph | Telling detail |
+| --- | --- |
+| Theme | A circle half ink, half paper, with a small accent spark |
+| Keyboard | A key bed with the space bar in the accent |
+| Sign out | A door frame with an accent arrow leaving it |
+| Analytics | Three bars, the tallest in the accent |
+
 ### Spectra
 
 The prism mark comes from the prism renderer (see [LIFE.md](LIFE.md#the-prism)). It is not an SVG icon.

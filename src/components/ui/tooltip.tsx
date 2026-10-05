@@ -20,12 +20,19 @@ export function Tooltip({
   shortcut,
   children,
   side = "top",
+  disabled = false,
+  className = "inline-flex",
 }: {
   label: string;
   /** Shown beside the name, e.g. "⌘K". */
   shortcut?: string;
   children: ReactElement;
-  side?: "top" | "bottom";
+  /** "right" for controls on the left edge, like the collapsed rail. */
+  side?: "top" | "bottom" | "right";
+  /** No tooltip, when the control already shows its name. */
+  disabled?: boolean;
+  /** The trigger wrapper's layout; a full-width row wants "flex". */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
@@ -34,12 +41,17 @@ export function Tooltip({
   const update = useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPosition({
-      left: rect.left + rect.width / 2,
-      top: side === "top" ? rect.top - 8 : rect.bottom + 8,
-    });
+    setPosition(
+      side === "right"
+        ? { left: rect.right + 8, top: rect.top + rect.height / 2 }
+        : {
+            left: rect.left + rect.width / 2,
+            top: side === "top" ? rect.top - 8 : rect.bottom + 8,
+          },
+    );
   }, [side]);
   const show = useCallback(() => {
+    if (disabled) return;
     if (timerRef.current) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(
       () => {
@@ -48,7 +60,10 @@ export function Tooltip({
       },
       Date.now() < warmUntil ? 0 : FIRST_DELAY_MS,
     );
-  }, [update]);
+  }, [disabled, update]);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   const hide = useCallback(() => {
     if (timerRef.current) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
@@ -78,7 +93,7 @@ export function Tooltip({
     <>
       <span
         ref={triggerRef}
-        className="inline-flex"
+        className={className}
         onPointerEnter={show}
         onPointerLeave={hide}
         onFocus={show}
@@ -95,14 +110,16 @@ export function Tooltip({
                 if (timerRef.current) window.clearTimeout(timerRef.current);
               }}
               onPointerLeave={hide}
-              className="pointer-events-auto fixed z-toast max-w-[240px] -translate-x-1/2 rounded-chip border border-[var(--border-default)] bg-[var(--text-primary)] px-2 py-1.5 text-micro font-medium leading-4 text-[var(--bg-primary)] shadow-[var(--shadow-lg)]"
+              className="pointer-events-auto fixed z-toast max-w-[240px] rounded-chip border border-[var(--border-default)] bg-[var(--text-primary)] px-2 py-1.5 text-micro font-medium leading-4 text-[var(--bg-primary)] shadow-[var(--shadow-lg)]"
               style={{
                 left: position.left,
                 top: position.top,
                 transform:
                   side === "top"
                     ? "translate(-50%,-100%)"
-                    : "translate(-50%,0)",
+                    : side === "right"
+                      ? "translate(0,-50%)"
+                      : "translate(-50%,0)",
               }}
             >
               {label}

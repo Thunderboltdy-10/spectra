@@ -2,6 +2,7 @@ import type { WorkAnchor } from "../work/registry";
 import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
 import type { BridgeTrustPreset } from "../../../../shared/bridge-trust";
+import type { AiSyncPurpose } from "../../../../shared/school-sync";
 
 export type SpectraCommandOutcome = {
   status: "completed" | "pending" | "needs-human" | "failed";
@@ -73,12 +74,7 @@ export type SpectraCommands = {
     level?: "read" | "modify";
   };
   "managebac.sync": {
-    purpose:
-      | "upcoming_deadlines"
-      | "class_resources"
-      | "timetable"
-      | "classes"
-      | "cas";
+    purpose: AiSyncPurpose;
   };
   "bridge.setup": {
     action: "pair" | "select-location" | "retry-connection" | "retry-folder";
@@ -115,6 +111,11 @@ export type SpectraEvents = {
   "shell.sidebarCrowd": { crowded: boolean };
   "shell.focusSidebarSearch": Record<string, never>;
   "shell.openCommandBar": Record<string, never>;
+  /* The threads view: every conversation, searchable (SHELL.md). */
+  "threads.open": { query?: string };
+  /** Open the island's composer; `fresh` lets go of the thread in focus first. */
+  "island.compose": { fresh?: boolean };
+  "threads.close": Record<string, never>;
   "work.unavailable": { workId: string };
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.changed": { runId: string };
@@ -158,4 +159,6 @@ export type SpectraQueries = {
   "prism.status": { status: import("../life/prism").PrismStatus | null };
   /* The thread open in the route's Side: the island replies to it. */
   "side.thread": { threadId: string; title: string } | null;
+  /* Whether the threads view is open, for the rail's Conversations entry. */
+  "threads.view": { open: boolean };
 };

@@ -12,7 +12,7 @@ import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { isActiveRunStatus, useRunTabs } from "../island/run-tabs";
 import { figureOf } from "../life/figure-dom";
 import { life } from "../life/life";
-import { travelElement, unformElement } from "../life/use-life";
+import { unformElement } from "../life/use-life";
 import { useThreadSearch } from "../semantic/use-semantic";
 import { groupThreads, matchThreads, type ThreadGroup } from "./threads-model";
 
@@ -121,9 +121,8 @@ export function ThreadsView({ initialQuery = "", onClose }: { initialQuery?: str
 
   const choose = useCallback(
     (thread: SpectraThread, row: HTMLElement) => {
-      // The row's lines part and pour into the island, where the thread joins the others.
-      const island = document.querySelector<HTMLElement>("[data-island] canvas") ?? document.querySelector<HTMLElement>("[data-island]");
-      if (life.on && island) void travelElement(row, { absorb: island }, { bars: ROW_BARS });
+      // The row's lines part and pour into the island, where the thread's tab forms.
+      spectraBus.emit("island.arrive", { threadId: thread._id, ...(life.on ? { from: figureOf(row, { bars: ROW_BARS }) } : {}) });
       onClose();
       const handled = spectraBus.command("run.openConversation", { runId: thread.lastRunId ?? thread._id, threadId: thread._id });
       if (!handled) router.push(`/chat?threadId=${encodeURIComponent(thread._id)}`);

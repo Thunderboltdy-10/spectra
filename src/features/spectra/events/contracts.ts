@@ -3,6 +3,7 @@ import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
 import type { BridgeTrustPreset } from "../../../../shared/bridge-trust";
 import type { AiSyncPurpose } from "../../../../shared/school-sync";
+import type { Figure } from "../life/figure";
 
 export type SpectraCommandOutcome = {
   status: "completed" | "pending" | "needs-human" | "failed";
@@ -115,6 +116,12 @@ export type SpectraEvents = {
   "threads.open": { query?: string };
   /** Open the island's composer; `fresh` lets go of the thread in focus first. */
   "island.compose": { fresh?: boolean };
+  /** A thread opened from elsewhere arrives in the island: `from` is what it leaves (ISLAND.md, "Arriving threads"). */
+  "island.arrive": { threadId: string; from?: Figure };
+  /** A notification reaches the user through the island (SHELL.md). */
+  "island.notify": { id: string; title: string; detail?: string; tone: "done" | "problem" | "needs" | "info" };
+  /** The user opened a notification from the island; the account's notifications act on it. */
+  "notifications.choose": { id: string };
   "threads.close": Record<string, never>;
   "work.unavailable": { workId: string };
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };

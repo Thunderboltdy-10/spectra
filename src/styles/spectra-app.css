@@ -12305,6 +12305,13 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
    cover. The band measures and publishes its own height
    (`composer-safe-area.ts`); surfaces consume it here instead of each
    guessing a constant that goes stale the moment the dock grows a row. */
+/* A page's scrolling body (SHELL.md, "Page anatomy"): its content scrolls
+   clear of the island, about 88 px, or the island's own band when taller. */
+.spectra-page-scroll {
+  padding-bottom: max(88px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
+  scroll-padding-bottom: max(88px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
+}
+
 .spectra-composer-clearance {
   padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
 }

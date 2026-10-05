@@ -160,6 +160,9 @@ export type SpectraQueries = {
   "prism.status": { status: import("../life/prism").PrismStatus | null };
   /* The thread open in the route's Side: the island replies to it. */
   "side.thread": { threadId: string; title: string } | null;
+  /* Whether a closable panel (work or a conversation) holds the Side: a page's
+     collapsible panel tucks into its edge tab until it closes (SHELL.md). */
+  "side.open": { kind: "work" | "thread" } | null;
   /* Whether the threads view is open, for the rail's Conversations entry. */
   "threads.view": { open: boolean };
 };

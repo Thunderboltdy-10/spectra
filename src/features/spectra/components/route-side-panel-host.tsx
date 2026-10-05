@@ -41,6 +41,7 @@ import {
  */
 const ROUTE_SIDE_PANEL_PREFIXES = [
   "/school",
+  "/devices",
   "/analytics",
   "/settings",
   "/managebac",
@@ -64,6 +65,9 @@ export function RouteSidePanelHost() {
   );
   const [work, setWork] = useState<SpectraArtifact | null>(null);
   const [thread, setThread] = useState<SpectraThread | null>(null);
+  /* The Side holds one panel (SHELL.md): what opened last is in front, and
+     closing it brings back what it covered. */
+  const [front, setFront] = useState<"work" | "thread">("work");
   const [workWidth, setWorkWidth] = useState(620);
   const [threadWidth, setThreadWidth] = useState(480);
   const [workLoad] = useState(() => createLatestStudioLoad(
@@ -89,6 +93,7 @@ export function RouteSidePanelHost() {
       const result = await workLoad.load(workId);
       if (!result) return;
       setWork(result.artifact);
+      setFront("work");
       openSplit(result.artifact);
     },
     [openSplit, workLoad],
@@ -115,6 +120,7 @@ export function RouteSidePanelHost() {
     const result = await threadLoad.load(target);
     if (!result) return false;
     setThread(result.thread);
+    setFront("thread");
     return true;
   }, [threadLoad]);
   const loadThread = useCallback(
@@ -266,12 +272,21 @@ export function RouteSidePanelHost() {
   }, [eligible, fullscreen, loadThread, loadWork]);
 
   // The island rests as the reply bar of the thread open here.
-  const sideThreadId = eligible ? thread?._id ?? null : null;
+  const showsWork = Boolean(work) && (front === "work" || !thread);
+  const showsThread = Boolean(thread) && (front === "thread" || !work);
+  const sideThreadId = eligible && showsThread ? thread?._id ?? null : null;
   const sideThreadTitle = thread?.title ?? "";
   useEffect(() => {
     spectraBus.setQuery("side.thread", sideThreadId ? { threadId: sideThreadId, title: sideThreadTitle } : null);
     return () => spectraBus.setQuery("side.thread", null);
   }, [sideThreadId, sideThreadTitle]);
+
+  // A page's collapsible panel tucks away while this holds the Side.
+  const sideKind = !eligible ? null : showsThread ? "thread" : showsWork ? "work" : null;
+  useEffect(() => {
+    spectraBus.setQuery("side.open", sideKind ? { kind: sideKind } : null);
+    return () => spectraBus.setQuery("side.open", null);
+  }, [sideKind]);
 
   // The island centres on what is left of the stage (ISLAND.md, "Placement").
   const measureSide = useCallback((node: HTMLDivElement | null) => {
@@ -292,6 +307,13 @@ export function RouteSidePanelHost() {
     workLoad.cancel();
     closeStudio();
     setWork(null);
+    setFront("thread");
+  }
+
+  function closeThread() {
+    threadLoad.cancel();
+    setThread(null);
+    setFront("work");
   }
 
   // What opens here grows out of the card or row it was opened from.
@@ -304,7 +326,7 @@ export function RouteSidePanelHost() {
   return (
     <div ref={measureSide} className="spectra-wave-y relative z-panel flex h-full max-w-[calc(100vw-76px)] shrink-0">
       {studio.mode === "split" && studio.activeArtifact ? (
-        <div ref={workSlot} data-side-slot="work" className="flex h-full shrink-0">
+        <div ref={workSlot} data-side-slot="work" hidden={!showsWork} className="flex h-full shrink-0 [&[hidden]]:hidden">
         <ArtifactStudio
           mode="split"
           artifact={studio.activeArtifact}
@@ -324,13 +346,13 @@ export function RouteSidePanelHost() {
         </div>
       ) : null}
       {thread ? (
-        <div ref={threadSlot} data-side-slot="thread" className="flex h-full shrink-0">
+        <div ref={threadSlot} data-side-slot="thread" hidden={!showsThread} className="flex h-full shrink-0 [&[hidden]]:hidden">
         <LiveThreadPanel
           threadId={thread._id}
           title={thread.title}
           width={threadWidth}
           onWidthChange={setThreadWidth}
-          onClose={() => { threadLoad.cancel(); setThread(null); }}
+          onClose={closeThread}
           onOpenArtifact={(workId) => void loadWork(workId)}
           onOpenWorkspace={(workspaceId) =>
             router.push(`/workspace/${encodeURIComponent(workspaceId)}`)

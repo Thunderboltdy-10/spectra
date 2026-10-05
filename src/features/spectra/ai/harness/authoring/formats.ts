@@ -52,7 +52,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   },
   planner_task: {
     create:
-      '{"title": "...", "description"?, "due"?: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm" (the user\'s time zone), "start"?, "end"?, "priority"?: "low"|"medium"|"high", "estimateMinutes"?, "subtasks"?: ["step", ...]}',
+      '{"title": "...", "due"?: "YYYY-MM-DD" or "YYYY-MM-DDTHH:mm" (the user\'s time zone), "description"? (notes), "subtasks"?: ["step", ...] (only when the user asks for steps), "priority"?: "low"|"medium"|"high", "estimateMinutes"?, "start"?, "end"?}',
     edit:
       "set {title?, description?, due?, start?, end?, status?: todo|doing|done, priority?, estimateMinutes?, progressNote?} | add_subtasks {subtasks} | update_subtask {subtask: number or title, title?, done?} | delete_subtasks {subtasks}",
     read: "the whole task",

@@ -261,6 +261,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 import { requestSpectra } from "../data/request";
+import { isSingleTask } from "../plan/model";
 function StudioTypePlaceholder() {
   return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
@@ -279,6 +280,10 @@ const QuizStudio = dynamic(
 );
 const PlanStudio = dynamic(
   () => import("./plan-studio").then((module) => withStudioViewportReady(module.PlanStudio)),
+  { loading: StudioTypePlaceholder },
+);
+const TaskStudio = dynamic(
+  () => import("./task-studio").then((module) => withStudioViewportReady(module.TaskStudio)),
   { loading: StudioTypePlaceholder },
 );
 const SheetsStudio = dynamic(
@@ -6405,7 +6410,17 @@ function ArtifactStudioEditor({
                   synchronizationReady={presentation.ready}
                 />
               ) : null}
-              {artifact.blueprintKey === "planner_task" ? (
+              {artifact.blueprintKey === "planner_task" && isSingleTask(editorContent) ? (
+                <TaskStudio
+                  key={`${artifact._id}:task`}
+                  mode={contentMode}
+                  title={title}
+                  content={editorContent}
+                  onChange={editorChange}
+                  readOnly={readOnly}
+                />
+              ) : null}
+              {artifact.blueprintKey === "planner_task" && !isSingleTask(editorContent) ? (
                 <PlanStudio
                   key={`${artifact._id}:plan`}
                   mode={contentMode}

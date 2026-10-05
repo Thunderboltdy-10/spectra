@@ -63,6 +63,10 @@ export const UNSEEN_FALLBACK_MS = 4000;
 const FADE_MS = 700;
 /** At most this many changed regions hold a tint. */
 const MAX_UNSEEN = 24;
+/** At most this many regions carry the spectral band at once. */
+export const MAX_BANDS = 3;
+/** The band's fade when the writing is done (--motion-slow). */
+const BAND_FADE_MS = 360;
 
 export type MomentSource =
   | { kind: "local"; point: Point }
@@ -335,12 +339,71 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
         unseen.set(element, setTimeout(() => fade(element), UNSEEN_FALLBACK_MS));
       }
     };
+    /*
+     * The spectral band (MOTION.md, "Spectra writing"): light sweeps across
+     * each region Spectra is writing. Prose has its band in CSS; any other
+     * region (a card face, an option, an event, a field, even an input) gets
+     * a band that follows it in a layer over the work, clipped to the work.
+     * CSS moves the light, so it runs while the field is off, and reduced
+     * motion leaves only the tint.
+     */
+    const bands = new Map<Element, HTMLElement>();
+    let bandLayer: HTMLElement | null = null;
+    let bandFrame = 0;
+    const working = () => /^(creating|updating)$/.test(root.getAttribute("data-ai-state") ?? "");
+    const dropBand = (element: Element) => {
+      const band = bands.get(element);
+      bands.delete(element);
+      if (!band) return;
+      band.classList.add("is-leaving");
+      setTimeout(() => band.remove(), BAND_FADE_MS);
+    };
+    const placeBands = () => {
+      bandFrame = 0;
+      if (!working()) for (const element of [...bands.keys()]) dropBand(element);
+      if (!bands.size || !bandLayer) return;
+      const base = root.getBoundingClientRect();
+      const main = root.querySelector(".spectra-artifact-main")?.getBoundingClientRect();
+      if (main) {
+        bandLayer.style.clipPath = `inset(${main.top - base.top}px ${base.right - main.right}px ${base.bottom - main.bottom}px ${main.left - base.left}px)`;
+      }
+      for (const [element, band] of bands) {
+        const r = element.getBoundingClientRect();
+        band.style.transform = `translate(${r.left - base.left}px, ${r.top - base.top}px)`;
+        band.style.width = `${r.width}px`;
+        band.style.height = `${r.height}px`;
+      }
+      bandFrame = requestAnimationFrame(placeBands);
+    };
+    const addBand = (element: Element) => {
+      if (bands.has(element) || bands.size >= MAX_BANDS || !working()) return;
+      if (!bandLayer) {
+        bandLayer = document.createElement("div");
+        bandLayer.className = "spectra-ai-band-layer";
+        bandLayer.setAttribute("aria-hidden", "true");
+      }
+      if (!bandLayer.isConnected) root.append(bandLayer);
+      const band = document.createElement("div");
+      band.className = "spectra-ai-band";
+      const radius = getComputedStyle(element).borderRadius;
+      if (radius && radius !== "0px") band.style.borderRadius = radius;
+      band.append(document.createElement("i"));
+      bandLayer.append(band);
+      bands.set(element, band);
+      if (!bandFrame) bandFrame = requestAnimationFrame(placeBands);
+    };
+
     const syncWriting = (justMarked: readonly Element[]) => {
       // Rich text keeps its own tint as decorations (editor/ai-region-decoration.ts): ProseMirror owns its DOM.
-      for (const element of justMarked) if (inContent(element) && !element.closest(".ProseMirror")) writing.add(element);
+      for (const element of justMarked) {
+        if (!inContent(element) || element.closest(".ProseMirror")) continue;
+        writing.add(element);
+        addBand(element);
+      }
       for (const element of writing) {
         if (element.isConnected && element.getAttribute("data-ai-region") === "true") continue;
         writing.delete(element);
+        dropBand(element);
         if (element.isConnected) markUnseen(element);
       }
     };
@@ -497,6 +560,9 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       for (const glow of glows.values()) glow.stop();
       glows.clear();
       seenObserver?.disconnect();
+      cancelAnimationFrame(bandFrame);
+      bands.clear();
+      bandLayer?.remove();
       for (const [element, timer] of unseen) {
         if (timer) clearTimeout(timer);
         element.removeAttribute("data-ai-unseen");

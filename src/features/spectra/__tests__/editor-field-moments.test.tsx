@@ -41,6 +41,7 @@ vi.mock("../life/figure-dom", () => ({
 
 import {
   BULK_BATCH,
+  MAX_BANDS,
   SEEN_MS,
   WARM_UP_MS,
   chooseSource,
@@ -125,11 +126,11 @@ describe("which changes become moments", () => {
   });
 });
 
-function Studio({ children }: { children?: React.ReactNode }) {
+function Studio({ children, aiState }: { children?: React.ReactNode; aiState?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEditorFieldMoments(ref);
   return (
-    <div ref={ref}>
+    <div ref={ref} data-ai-state={aiState}>
       <section className="spectra-artifact-main">
         <ul className="spectra-item-rail-list">{children}</ul>
       </section>
@@ -246,6 +247,34 @@ describe("the field in an editor", () => {
     await settle(1000);
     expect(item.hasAttribute("data-ai-unseen")).toBe(false);
     vi.unstubAllGlobals();
+  });
+
+  it("sweeps a spectral band over what Spectra is writing, and lets it go when done", async () => {
+    render(<Studio aiState="updating" />);
+    await settle(WARM_UP_MS + 10);
+    const field = document.createElement("input");
+    list().appendChild(field);
+    await settle();
+    field.setAttribute("data-ai-region", "true");
+    await settle();
+    const band = document.querySelector(".spectra-ai-band");
+    expect(band?.parentElement?.classList.contains("spectra-ai-band-layer")).toBe(true);
+    field.removeAttribute("data-ai-region");
+    await settle();
+    expect(band?.classList.contains("is-leaving")).toBe(true);
+    await settle(1000);
+    expect(document.querySelector(".spectra-ai-band")).toBeNull();
+  });
+
+  it("keeps the band to a few regions, and only while Spectra is working", async () => {
+    const view = render(<Studio aiState="updating" />);
+    await settle(WARM_UP_MS + 10);
+    for (let index = 0; index < MAX_BANDS + 2; index += 1) addCard().setAttribute("data-ai-region", "true");
+    await settle();
+    expect(document.querySelectorAll(".spectra-ai-band")).toHaveLength(MAX_BANDS);
+    view.rerender(<Studio aiState="edited" />);
+    await settle(1000);
+    expect(document.querySelectorAll(".spectra-ai-band")).toHaveLength(0);
   });
 
   it("unforms a deleted card where it was", async () => {

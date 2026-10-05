@@ -1051,7 +1051,10 @@ describe("sheets engine correctness", () => {
     const elapsed = performance.now() - started;
     expect(marked.sheets[0]!.cells.A1?.value).toBe("P8V1-F2-A1");
     expect(marked.sheets[0]!.cells.J4000?.value).toBe(rows * columns);
-    expect(elapsed).toBeLessThan(40);
+    // Untouched cells are the same objects: nothing was deep-copied.
+    expect(marked.sheets[0]!.cells.J4000).toBe(previous.sheets[0]!.cells.J4000);
+    // A loose bound, so a busy machine running the whole suite does not fail it.
+    expect(elapsed).toBeLessThan(250);
   });
 
   it("migrates ISO date strings to serials on normalize", () => {

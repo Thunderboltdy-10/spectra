@@ -16275,3 +16275,48 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
     display: none !important;
   }
 }
+
+/* Captions (MOTION.md): light runs slowly along the current caption's left
+   edge while Spectra works; when the run is done the headline is still. */
+.spectra-caption-live {
+  position: relative;
+  padding-left: 10px;
+}
+.spectra-caption-live::before,
+.spectra-caption-live::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+}
+.spectra-caption-live::before {
+  top: 2px;
+  bottom: 2px;
+  background: color-mix(in oklab, var(--text-tertiary) 22%, transparent);
+}
+.spectra-caption-live::after {
+  top: 0;
+  height: 60%;
+  background: linear-gradient(180deg, transparent, #8b6cf6, #4f9fe6, #40c48e, transparent);
+  animation: spectra-caption-light 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes spectra-caption-light {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(170%);
+  }
+}
+html[data-spectra-motion="reduced"] .spectra-caption-live::after,
+html[data-spectra-motion="none"] .spectra-caption-live::after {
+  animation: none;
+  transform: translateY(35%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spectra-caption-live::after {
+    animation: none;
+    transform: translateY(35%);
+  }
+}

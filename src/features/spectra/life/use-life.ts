@@ -109,6 +109,11 @@ let launch: { figure: Figure; at: number } | null = null;
 const LAUNCHERS = "[data-spectra-card], [data-life-launch]";
 const LAUNCH_BARS = "h2, h3, h4, [data-card-title], [data-row-title], [data-thread-title], p";
 
+/** Open the next surface out of `element` (a Side panel going full, say), whatever was pressed. */
+export function launchFrom(element: Element | null | undefined) {
+  if (element && life.on) launch = { figure: figureOf(element, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
+}
+
 function rememberLaunch(target: EventTarget | null) {
   const launcher = (target as Element | null)?.closest?.(LAUNCHERS);
   if (launcher && life.on) launch = { figure: figureOf(launcher, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
@@ -148,6 +153,14 @@ function watchPresses() {
 
 // Watch from the start, so the very first press is a cause too.
 watchPresses();
+
+/**
+ * Something acted at `point` that was not a press: Spectra's spark working a
+ * control when it drives the interface. What appears next forms from there.
+ */
+export function markCause(point: Point) {
+  lastPress = { point, at: performance.now() };
+}
 
 /** The point the user just acted at, if within the last second. */
 export function recentCause(): Point | undefined {
@@ -358,13 +371,19 @@ export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled: bo
 
 /* ------------------------------------------------------------ writing front */
 
+/** The last text with something written in it, found from the end, so a long reply costs no more than a short one. */
+function lastWritten(node: Node): Text | null {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").trim() ? (node as Text) : null;
+  for (let child = node.lastChild; child; child = child.previousSibling) {
+    const found = lastWritten(child);
+    if (found) return found;
+  }
+  return null;
+}
+
 /** Where the last written character of `root` ends, on screen. */
 function writingEnd(root: Element): DOMRect | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let last: Text | null = null;
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node.textContent ?? "").trim()) last = node as Text;
-  }
+  const last = lastWritten(root);
   if (!last) return null;
   const range = document.createRange();
   const length = last.length;

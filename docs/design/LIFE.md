@@ -138,7 +138,10 @@ The field never competes with the work.
 - Only the active window of the lattice is touched.
 - Formations draw as one path per colour per stroke.
 
-**Tiers.** The tier is chosen once, from device signals and the first frames:
+**Tiers.** The tier is chosen once, from device signals and the first frames. A device with 4 cores or 4 GB or less
+starts light. Otherwise the engine times its first 90 active frames, and if the median passes 6 ms it moves to the
+light tier the next time it falls asleep (never in the middle of a moment) and stays light for the visit. The writing
+front finds the end of a reply from the end, so a long reply costs no more than a short one.
 
 | Tier | Behaviour |
 | --- | --- |
@@ -204,7 +207,8 @@ surface with a background covers it.
 - `useWritingFront(ref, active)`: while Spectra's reply streams into a thread, a faint spectrum light in the field
   follows the writing front (the end of the last written word). The tail itself carries Spectra's caret, a small
   prism of the spectrum that breathes until the reply is complete.
-- Causes: the last press, the last drop, or the control acted on from the keyboard, within one second. The composer's
+- Causes: the last press, the last drop, the control acted on from the keyboard, or where Spectra's spark is working a
+  control (`markCause`), within one second. The composer's
   files and @ references form from that cause and part when removed; on send they go with the words, not apart.
 - `useLifeLanding(ref, key)`: shared elements (MOTION.md). Pressing a card (`[data-spectra-card]`) or any
   `[data-life-launch]` element remembers its figure; the next surface that lands within 2.5 s (a work or a thread in

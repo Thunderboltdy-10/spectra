@@ -268,6 +268,44 @@ describe("life engine", () => {
     run(8);
     expect(events.at(-1)?.type).toBe("asleep");
   });
+
+  /** An engine whose every frame takes `cost` ms by its own clock. */
+  function timed(cost: number) {
+    const events: LifeEvent[] = [];
+    let pending: ((now: number) => void) | null = null;
+    let clock = 0;
+    const life = new LifeEngine(fakeSurface(), fakeSurface(), "full", (event) => events.push(event), (frame) => {
+      pending = frame;
+    }, () => (clock += cost / 2));
+    life.handle({ type: "resize", width: 800, height: 600, ratio: 1 });
+    const run = (seconds: number, active = true) => {
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        if (active && t % 0.5 < 1 / 60) life.handle({ type: "pulse", x: 200 + t * 40, y: 200, strength: 1 });
+        const frame = pending;
+        pending = null;
+        frame?.(clock);
+      }
+    };
+    return { life, events, run };
+  }
+
+  it("settles on the light tier, between moments, when a device cannot keep the full field within budget", () => {
+    const { events, run } = timed(14);
+    run(3);
+    expect(events.some((event) => event.type === "tier")).toBe(false);
+    run(10, false);
+    const tier = events.find((event) => event.type === "tier");
+    expect(tier).toEqual({ type: "tier", tier: "light" });
+    // It changed while the field was asleep, never in the middle of a moment.
+    expect(events[events.indexOf(tier!) + 1]?.type).toBe("asleep");
+  });
+
+  it("stays full on a device that keeps within budget", () => {
+    const { events, run } = timed(1);
+    run(3);
+    run(10, false);
+    expect(events.some((event) => event.type === "tier")).toBe(false);
+  });
 });
 
 describe("particles", () => {

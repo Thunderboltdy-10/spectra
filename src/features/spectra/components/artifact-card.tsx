@@ -215,7 +215,7 @@ export function ArtifactCard({
             : "artifact"
       }
       state={cardState}
-      lifeKey={arrival ? `artifact:${artifact.id}` : undefined}
+      lifeKey={`artifact:${artifact.id}`}
       arrival={arrival}
       accent={artifact.pinned ? "var(--card-pinned)" : meta.color}
       className={cn(

@@ -198,6 +198,9 @@ surface with a background covers it.
   `"ai"` light leaves the prism, crosses the field and forms the element; `"human"` forms from the user's last
   action. Whatever was there when the page opened is simply content, and a key forms only once per visit. Artifact
   cards arrive while Spectra is creating them, or for 30 seconds after they were made (`cardArrival`).
+- `useLifeDeparture(ref, enabled?)`: something removed parts where it was. It is measured while still on the page and
+  unforms on the next frame, only if it really left: not on a page change, not on a remount, and not when more than
+  four things leave at once (a filter or a folder change is a new view, not removals). Cards and `Row` use it.
 
 **Ghosts.** Every `Skeleton` is marked `data-life-ghost` (its lines `data-life-ghost-bar`). While the field is on
 (`html[data-life="on"]`), `LifeField` holds a ghost of each one in the field, at most 16 at a time, and the CSS pulse

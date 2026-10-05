@@ -2,14 +2,13 @@
 
 import * as React from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { useLifeEntrance } from "@/features/spectra/life/use-life";
+import { useLifeDeparture, useLifeEntrance } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 
 /**
  * A list item (LANGUAGE.md): a leading glyph, a title, a meta line and
  * trailing actions. Life comes built in: a row made just now (`fresh`) forms
- * out of the field where it appears, and callers unform it with
- * `unformElement(ref.current)` just before removing it.
+ * out of the field where it appears, and a row that is removed parts there.
  */
 export const Row = React.forwardRef<
   HTMLDivElement,
@@ -30,6 +29,7 @@ export const Row = React.forwardRef<
   const ref = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(forwarded, () => ref.current!);
   useLifeEntrance(ref, { enabled: Boolean(fresh), bars: "[data-row-title], [data-row-meta]" });
+  useLifeDeparture(ref, true, { bars: "[data-row-title], [data-row-meta]" });
   return (
     <div
       ref={ref}

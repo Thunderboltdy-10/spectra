@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, type Ref, type RefCallback, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
 import { figureOf, type ElementFigureOptions } from "./figure-dom";
 import type { Point } from "./figure";
@@ -255,7 +255,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     if (!key || !element) return;
     if (arrived.has(key)) return;
     arrived.add(key);
-    if (!life.on) return;
+    if (!kind || !life.on) return;
     const settling = performance.now() - navigatedAt < 1600;
     if (settling && kind !== "ai") return;
     const previous = element.style.opacity;
@@ -285,4 +285,51 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     // Once per key: an arrival is a moment, not a state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+}
+
+/* ------------------------------------------------------------ departures */
+
+/** More leaving at once than this is a change of view (a filter, a folder), not things being removed. */
+const DEPARTURE_BATCH = 4;
+let departures: Array<() => void> = [];
+let departureFrame = 0;
+
+function flushDepartures() {
+  departureFrame = 0;
+  const batch = departures;
+  departures = [];
+  if (batch.length > DEPARTURE_BATCH || performance.now() - navigatedAt < 400) return;
+  for (const leave of batch) leave();
+}
+
+/**
+ * Something removed from a list or a board parts where it was (LIFE.md,
+ * "Delete"): its outline and lines break into dots that fall back into the
+ * field. It is measured while it is still there, and it only parts if it
+ * really left the page: not when the page changed, not when React mounts it
+ * again, and not when a whole view changes at once.
+ */
+export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled = true, figure: ElementFigureOptions = {}) {
+  const enabledRef = useRef(enabled);
+  const figureRef = useRef(figure);
+  useEffect(() => {
+    enabledRef.current = enabled;
+    figureRef.current = figure;
+  });
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return () => {
+      if (!enabledRef.current || !life.on || !element.isConnected) return;
+      const r = element.getBoundingClientRect();
+      if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return;
+      const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figureRef.current });
+      const where = window.location.pathname + window.location.search;
+      departures.push(() => {
+        if (element.isConnected || window.location.pathname + window.location.search !== where) return;
+        void life.unform(shape);
+      });
+      if (!departureFrame) departureFrame = requestAnimationFrame(flushDepartures);
+    };
+  }, [ref]);
 }

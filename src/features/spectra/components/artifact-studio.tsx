@@ -5,7 +5,7 @@ import { useWorkAvailability } from "./use-work-availability";
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";

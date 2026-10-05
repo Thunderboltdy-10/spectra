@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { uniqueToken } from "@/lib/unique-token";
 import {
   parseSpectraStreamEvent,

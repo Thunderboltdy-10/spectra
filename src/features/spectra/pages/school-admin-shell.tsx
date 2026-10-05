@@ -12,7 +12,7 @@ import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, Sparkles, UsersRound, type LucideIcon } from "lucide-react";
 import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users } from "@/components/icons/glyph-icons";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   getAdministration,

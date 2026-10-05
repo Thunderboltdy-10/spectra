@@ -49,7 +49,7 @@ import {
   type ReactNode,
 } from "react";
 import type * as Y from "yjs";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
 import {
   commandContext,

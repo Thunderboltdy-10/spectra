@@ -288,6 +288,9 @@ The island lives in `src/features/spectra/island/`.
   light of the row it left; with no tab yet, the + takes the light in.
 - **Notices** (`notice.tsx`) form out of the prism's light: finished or stopped threads, and every new
   notification (`island.notify`, from the account's notifications; opening one emits `notifications.choose`).
+- **The app's words** ("Saved", "Could not move it") are notices too: `toast` from `@/components/ui/toast` hands them to the
+  island, in the colour of what happened, with one action (Undo, Retry) and a duration (`Infinity` stays until dismissed). Pages
+  without the island fall back to a plain toast.
 - **Placement.** The island spans the stage between `--spectra-rail-width` and `--spectra-side-width` (published
   by the route's Side as it resizes) and glides when either changes.
 - **Safe area.** The island's resting row registers as the composer band, so pages keep their last lines clear of

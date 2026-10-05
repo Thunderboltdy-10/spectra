@@ -4,7 +4,7 @@ import { CornerUpLeft, MapPin } from "lucide-react";
 import { Clock3, Loader2, Bot, Check, MessageSquare, RefreshCw, Send } from "@/components/icons/glyph-icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import {
   getSpectraArtifactComments,
   getSpectraArtifactVersions,

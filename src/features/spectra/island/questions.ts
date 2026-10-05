@@ -1,4 +1,4 @@
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import type { CommandAttachment } from "../components/command-attachments";
 import { postSpectra, type SpectraRunTab } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";

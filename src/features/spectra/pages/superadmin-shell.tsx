@@ -12,7 +12,7 @@ import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spec
 import { useNow } from "@/hooks/use-now";
 import { Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, Sparkles, TicketCheck, Workflow } from "lucide-react";
 import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, RefreshCw, School, Search, Users } from "@/components/icons/glyph-icons";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   getAdministration,

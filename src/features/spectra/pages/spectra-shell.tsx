@@ -21,7 +21,7 @@ import dynamic from "next/dynamic";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { describeFailure } from "@/components/ui/truthful-state";
 import {
   ProductEmptyState,

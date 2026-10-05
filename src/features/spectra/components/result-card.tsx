@@ -4,7 +4,7 @@ import { Undo2 } from "lucide-react";
 import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X } from "@/components/icons/glyph-icons";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";

@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { Icon } from "@/components/icons";
 import { AdaptiveBar, type BarCommand, type CollapseStep } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";

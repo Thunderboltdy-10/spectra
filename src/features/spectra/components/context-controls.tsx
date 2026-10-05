@@ -11,7 +11,7 @@ import {
   type SpectraArtifact,
   type SpectraWorkspace,
 } from "../data/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 export function showContinuationConflict({
   currentTitle,

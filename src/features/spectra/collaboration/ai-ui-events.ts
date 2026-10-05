@@ -120,7 +120,8 @@ function rememberEvent(event: SpectraAiUiEvent): void {
         devicePairing().want();
         if (window.location.pathname.startsWith(DEVICES_HREF)) return;
         const shown = spectraBus.command("navigation.show", { route: "devices", intent: "explicit", target: "connect" });
-        if (!shown) window.location.assign(`${DEVICES_HREF}?connect=1`);
+        // Pages without the workbench router load Devices; ?connect=1 carries the request.
+        if (!shown) window.location.assign(new URL(`${DEVICES_HREF}?connect=1`, window.location.origin));
       },
     );
     return;

@@ -192,7 +192,10 @@ belongs to the F1 school lane or the coordinator.
 
 ## Merge notes
 
-- **Main.** At `d1907c4c` it merges into `lane/editors` with no conflicts (`git merge-tree`), so I did not merge it.
+- **Main.** At `b0eb697c` it merges into `lane/editors` with no conflicts (`git merge-tree`), so I did not merge it.
+  - Main's `useLifeDeparture` (kit `Row`, cards) and this lane's `useEditorFieldMoments` both unform removed things.
+    They do not overlap today: no `FIELD_OBJECTS` element renders a `Row` or a card.
+  - If an editor list adopts `Row`, drop its selector from `FIELD_OBJECTS`, or it will part twice.
 - **F2 (Devices / Bridge).**
   - The status control needs Bridge requests to open a work's file in its desktop app and to reveal it in its folder.
   - When they exist, set `can["open-in-office"]` and `can["show-in-folder"]` in `artifact-studio.tsx` (the

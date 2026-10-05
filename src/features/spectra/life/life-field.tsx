@@ -6,7 +6,7 @@ import { useSpectraMotion } from "../motion/motion-level";
 import type { LifeTier } from "./engine";
 import { figureOf } from "./figure-dom";
 import { life, type Formed } from "./life";
-import { markNavigation } from "./use-life";
+import { markNavigation, sendInto } from "./use-life";
 
 /*
  * The field's two canvases, fixed to the viewport: the back layer under the
@@ -118,7 +118,10 @@ export function LifeField() {
       lastDrag = { x: 0, y: 0, t: 0 };
       life.pulse(event.clientX, event.clientY, 0.9);
     };
-    const dragEnd = () => {
+    const dragEnd = (event: DragEvent) => {
+      // A cancelled drag flies back along its path: light from where it was let go, taken back into where it came from.
+      const source = event.target instanceof Element ? event.target : null;
+      if (event.dataTransfer?.dropEffect === "none" && lastDrag.t && source?.isConnected) sendInto(source, [lastDrag.x, lastDrag.y]);
       lastDrag = { x: 0, y: 0, t: 0 };
     };
 

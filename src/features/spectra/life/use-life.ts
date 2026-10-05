@@ -149,6 +149,58 @@ function watchPresses() {
     },
     { capture: true, passive: true },
   );
+  // "Add A to B" by dragging: remember A, and once B has taken the drop, light crosses into it.
+  window.addEventListener(
+    "dragstart",
+    (event) => {
+      const source = (event.target as Element | null)?.closest?.("[draggable='true'], [data-spectra-card], [data-row-title]") ?? (event.target as Element | null);
+      dragFrom = source?.getBoundingClientRect ? rectOf(source) : null;
+      // Picked up (MOTION.md, "Drag and drop"): where it came from stays as a quiet hole while it is carried. After
+      // the browser has taken its drag image, so the image is the whole item.
+      if (source instanceof HTMLElement) requestAnimationFrame(() => dragFrom && source.setAttribute("data-life-picked", ""));
+    },
+    { capture: true, passive: true },
+  );
+  window.addEventListener(
+    "dragend",
+    () => {
+      dragFrom = null;
+      document.querySelectorAll("[data-life-picked]").forEach((element) => element.removeAttribute("data-life-picked"));
+    },
+    { passive: true },
+  );
+  // Bubble phase: by now the page has handled the drop, and preventDefault says it was taken.
+  window.addEventListener("drop", (event) => {
+    const from = dragFrom;
+    dragFrom = null;
+    if (!from || !event.defaultPrevented || !life.on) return;
+    const receiver = (event.target as Element | null)?.closest?.(RECEIVERS);
+    sendInto(receiver ?? [event.clientX, event.clientY], from);
+  });
+}
+
+let dragFrom: Rect | null = null;
+/** Lists, folders and cards that take things in. Without one, a drop takes the light where it landed. */
+const RECEIVERS = "[data-life-receive]";
+
+/**
+ * "Add A to B" (LIFE.md, send): light alone crosses the field from A, or from
+ * where the user just acted, into B, which takes it in and pulses. A move by
+ * a menu, a drop, or Spectra filing something all read the same way.
+ */
+/** `from` defaults to where the user just acted; `null` means it came from nowhere on screen. */
+export function sendInto(target: Element | Point | null | undefined, from?: Element | Point | Rect | null) {
+  if (!target || !life.on) return;
+  const to = Array.isArray(target) ? (target as Point) : (target as Element).isConnected ? rectOf(target as Element) : null;
+  if (!to || (!Array.isArray(to) && (!(to as Rect).width || !(to as Rect).height))) return;
+  const [x, y] = Array.isArray(to) ? (to as Point) : [(to as Rect).x + (to as Rect).width / 2, (to as Rect).y + (to as Rect).height / 2];
+  const origin = from === undefined ? recentCause() : from;
+  const source = origin instanceof Element ? rectOf(origin) : origin;
+  if (!source) {
+    life.pulse(x, y, 0.7);
+    return;
+  }
+  void life.send(source, to, { absorb: !Array.isArray(to), strength: 0.8 }).then(() => life.pulse(x, y, 0.7));
 }
 
 // Watch from the start, so the very first press is a cause too.

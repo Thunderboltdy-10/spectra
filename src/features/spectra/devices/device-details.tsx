@@ -41,14 +41,15 @@ export function DeviceDetails({
   onAction: (request: LocalDeviceRequest) => void;
   onNativeWrites: (choice: NativeWrites) => void;
   onRemove: () => void;
-  onClose: () => void;
+  /** Only where Details is not its own panel. */
+  onClose?: () => void;
 }) {
   const local = device.isThisComputer && device.live;
   return (
     <div data-devices-details className="space-y-6">
       <div className="flex items-center gap-2">
         <h2 className="min-w-0 flex-1 truncate text-ui font-semibold text-[var(--text-primary)]">{device.name}</h2>
-        <IconButton icon="close" label="Hide details" size="compact" onClick={onClose} />
+        {onClose ? <IconButton icon="close" label="Hide details" size="compact" onClick={onClose} /> : null}
       </div>
 
       <Section title="Folders">

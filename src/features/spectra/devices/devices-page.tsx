@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { Icon } from "@/components/icons";
-import { AdaptiveBar, type BarCommand, type CollapseStep } from "@/components/ui/adaptive-bar";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { IconButton } from "@/components/ui/icon-button";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { EmptyState } from "@/components/ui/page-state";
+import { SidePanel } from "@/components/ui/side-panel";
 import { Row } from "@/components/ui/row";
 import { cn } from "@/lib/utils";
 import { api } from "../../../../convex/_generated/api";
@@ -15,7 +18,6 @@ import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { POLICY_PRESETS } from "../../../../shared/sync-policy";
 import { DEVICES_HREF, pairingFailureMessage, unpairBridge } from "../bridge/client";
 import { useBridgeHealth } from "../bridge/use-bridge";
-import { ProductPageHeader } from "../components/product-page-header";
 import { spectraBus } from "../events";
 import { permissionChoicePatch } from "../settings/schema/ai-permissions";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -26,21 +28,12 @@ import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview,
 import { PairingPanel } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 
-const DETAILS_KEY = "spectra.devices.details";
-const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "details" }, { hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }];
+const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }];
 
 /** A Convex or Bridge failure as one plain sentence, without its code. */
 function failureSentence(error: unknown): string {
   const message = error instanceof Error ? readConvexError(error).message || error.message : String(error ?? "");
   return message.replace(/^[A-Z][A-Z0-9_]+:\s*/, "").trim() || "That didn't work. Try again.";
-}
-
-function readDetailsOpen() {
-  try {
-    return window.localStorage.getItem(DETAILS_KEY) !== "closed";
-  } catch {
-    return true;
-  }
 }
 
 type Confirm =
@@ -68,7 +61,8 @@ export function DevicesPage() {
 
   const [now, setNow] = useState(() => Date.now());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  // Choosing a device opens Details, even after the user folded it.
+  const [reveal, setReveal] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -78,7 +72,6 @@ export function DevicesPage() {
   const connectParam = useRef(false);
 
   useEffect(() => {
-    setDetailsOpen(readDetailsOpen());
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -134,13 +127,9 @@ export function DevicesPage() {
   const refresh = local.refresh;
   useEffect(() => spectraBus.on("devices.changed", () => void refresh()), [refresh]);
 
-  function toggleDetails(open = !detailsOpen) {
-    setDetailsOpen(open);
-    try {
-      window.localStorage.setItem(DETAILS_KEY, open ? "open" : "closed");
-    } catch {
-      /* A remembered panel is a convenience. */
-    }
+  function showDetails(id: string | null) {
+    setSelectedId(id);
+    setReveal((value) => value + 1);
   }
 
   async function act(request: LocalDeviceRequest) {
@@ -230,7 +219,6 @@ export function DevicesPage() {
           },
         ] satisfies BarCommand[]
       : []),
-    { id: "details", icon: "openSide", label: detailsOpen ? "Hide details" : "Details", active: detailsOpen, onSelect: () => toggleDetails() },
   ];
 
   const deviceRow = (device: DeviceView) => (
@@ -240,13 +228,10 @@ export function DevicesPage() {
       glyph="devices"
       title={device.name}
       meta={`${device.label} · ${device.detail}`}
-      selected={detailsOpen && selected?.id === device.id}
+      selected={selected?.id === device.id}
       fresh={device.isThisComputer && justPaired}
       actionsVisible
-      onClick={() => {
-        setSelectedId(device.id);
-        toggleDetails(true);
-      }}
+      onClick={() => showDetails(device.id)}
       actions={
         <>
           <span className={cn("grid size-7 place-items-center", device.tone === "attention" ? "text-[var(--warning)]" : "text-[var(--text-tertiary)]")} aria-hidden>
@@ -258,8 +243,7 @@ export function DevicesPage() {
             size="compact"
             onClick={(event) => {
               event.stopPropagation();
-              setSelectedId(device.id);
-              toggleDetails(true);
+              showDetails(device.id);
             }}
           />
         </>
@@ -268,23 +252,23 @@ export function DevicesPage() {
   );
 
   return (
-    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto" data-spectra-app-surface="true" data-devices-page>
-      <div className="w-full px-4 pb-[var(--spectra-composer-safe-area,88px)] pt-6 sm:px-6 lg:px-8 lg:pt-8">
-        <ProductPageHeader
-          eyebrow="Spectra Bridge"
-          title="Devices"
-          description="Use files from your computers in Spectra. Bridge keeps the folders you choose in sync."
-          className="mb-6"
-        />
-        <AdaptiveBar commands={commands} plan={BAR_PLAN} label="Devices commands" align="start" className="mb-6" />
-        <p role="status" aria-live="polite" className="mb-4 min-h-5 text-caption text-[var(--text-secondary)]">
-          {notice}
-        </p>
+    <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-devices-page>
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <PageBody>
+          <PageHeader
+            title="Devices"
+            commands={commands}
+            plan={BAR_PLAN}
+            barLabel="Devices commands"
+            description="Use files from your computers in Spectra. Bridge keeps the folders you choose in sync."
+          />
+          <p role="status" aria-live="polite" className="mb-4 mt-3 min-h-5 text-caption text-[var(--text-secondary)]">
+            {notice}
+          </p>
 
-        <div className={cn("grid gap-8", detailsOpen && selected ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : "")}>
           <div className="min-w-0 space-y-8">
             <section aria-labelledby="devices-this" className="space-y-3">
-              <h2 id="devices-this" className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              <h2 id="devices-this" className="text-caption font-medium text-[var(--text-secondary)]">
                 This computer
               </h2>
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
@@ -300,7 +284,7 @@ export function DevicesPage() {
             </section>
 
             <section aria-labelledby="devices-others" className="space-y-3">
-              <h2 id="devices-others" className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              <h2 id="devices-others" className="text-caption font-medium text-[var(--text-secondary)]">
                 Other devices
               </h2>
               {model.others.length ? (
@@ -312,24 +296,27 @@ export function DevicesPage() {
               )}
             </section>
           </div>
-
-          {detailsOpen && selected ? (
-            <aside aria-label="Device details" className="min-w-0 border-t border-[var(--border-subtle)] pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-              <DeviceDetails
-                device={selected}
-                now={now}
-                busy={busy}
-                nativeWrites={nativeWrites}
-                nativeWritesDisabled={!policy}
-                onAction={(request) => void act(request)}
-                onNativeWrites={chooseNativeWrites}
-                onRemove={() => setConfirm({ kind: "remove-device", device: selected })}
-                onClose={() => toggleDetails(false)}
-              />
-            </aside>
-          ) : null}
-        </div>
+        </PageBody>
       </div>
+
+      <SidePanel id="devices.details" title="Details" label="Device details" icon="info" stageMin={520} defaultWidth={360} revealKey={reveal || null}>
+        {selected ? (
+          <div className="px-1 pb-6 pt-2">
+            <DeviceDetails
+              device={selected}
+              now={now}
+              busy={busy}
+              nativeWrites={nativeWrites}
+              nativeWritesDisabled={!policy}
+              onAction={(request) => void act(request)}
+              onNativeWrites={chooseNativeWrites}
+              onRemove={() => setConfirm({ kind: "remove-device", device: selected })}
+            />
+          </div>
+        ) : (
+          <EmptyState compact icon="devices" title="No devices yet" detail="Connect this computer to see its folders and choices here." />
+        )}
+      </SidePanel>
 
       <ConfirmDialog
         open={confirm !== null}

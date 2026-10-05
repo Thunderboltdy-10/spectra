@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@/components/icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { setToastSink, type ToastTone } from "@/components/ui/toast";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { postSpectra } from "../data/api";
@@ -23,13 +24,15 @@ import { forgetThread, placeThread, useArrangement } from "./arrange";
 import { IslandHistory } from "./history";
 import { arrangeTabs, dropTab, islandStatus, stepTab, tabTitle, type IslandSide, type IslandTab } from "./island-model";
 import { useIslandPrism } from "./island-prism";
-import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData } from "./notice";
+import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData, type NoticeTone } from "./notice";
 import { QuestionCard } from "./question-card";
 import { answerQuestion, pendingQuestions, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
 import { settleFirstVisit, useSeenRuns } from "./seen";
 import { ThreadView } from "./thread-view";
 import { useFlip, useTabDrag, type TabGhost as TabGhostRect } from "./use-tab-drag";
+
+const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "problem", warning: "needs", info: "info" };
 
 /*
  * The island (docs/design/ISLAND.md): where the user talks to Spectra, on
@@ -290,6 +293,21 @@ export function Island() {
     }
     lastStates.current = next;
   }, [allTabs]);
+
+  // The app's own words reach the user here too, in the colour of what happened.
+  useEffect(
+    () =>
+      setToastSink({
+        show: ({ id, tone, message, description, action, duration, onDismiss }) => {
+          const noticeTone = TOAST_TONE[tone];
+          setNotice({ key: `toast:${id}`, toastId: id, text: message, detail: description, tone: noticeTone, action, duration, onGone: onDismiss });
+          if (typeof message === "string") setAnnouncement(message);
+          if (life.on && shownRef.current === "prism" && noticeTone !== "info") life.radiate(prismRef.current.figure(), { colour: NOTICE_COLOUR[noticeTone], count: 8, reach: 14 });
+        },
+        dismiss: (id) => setNotice((current) => (current?.toastId !== undefined && (id === undefined || current.toastId === id) ? null : current)),
+      }),
+    [],
+  );
 
   // Notifications reach the user here (SHELL.md): the prism lights in their colour and the word forms from it.
   useEffect(

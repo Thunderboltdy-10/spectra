@@ -2,7 +2,7 @@
 
 import { useMemo, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { SPECTRA_REQUEST_UNREACHABLE } from "../data/request";
 
 function navigationDestination(href: string) {

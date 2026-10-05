@@ -19,7 +19,7 @@
  * frame, so nothing depends on a peer's pane size, scroll offset or zoom.
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   actIsDrag,
   actIsResize,
@@ -608,6 +608,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
   return (
     <div
       className="spectra-presence-actor"
+      data-ai={isAi ? "true" : undefined}
       data-departing={departing ? "true" : undefined}
       style={style}
     >
@@ -782,7 +783,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
         }}
       >
         {mode !== "caret" && mode !== "selection" && mode !== "hidden" && (
-          <CursorGlyph mode={mode} pressed={pressing} />
+          <CursorGlyph mode={mode} pressed={pressing} ai={isAi} />
         )}
         <span
           key={Math.floor(state.at / PRESENCE_LABEL_BUCKET_MS)}
@@ -910,9 +911,11 @@ function EdgeMarker({
 function CursorGlyph({
   mode,
   pressed,
+  ai = false,
 }: {
   mode: CursorMode;
   pressed: boolean;
+  ai?: boolean;
 }) {
   if (mode === "grab")
     return (
@@ -948,6 +951,8 @@ function CursorGlyph({
         />
       </svg>
     );
+  // Spectra's body in a work is a small prism (MOTION.md, "Spectra's presence"): its apex is the hotspot.
+  if (ai) return <PrismPointer pressed={pressed} />;
   // Pointer / press / menu share the compact arrow; a press tips it down.
   return (
     <svg
@@ -967,6 +972,36 @@ function CursorGlyph({
       {pressed ? (
         <circle cx="11.8" cy="11.6" r="2.2" fill="currentColor" opacity="0.3" />
       ) : null}
+    </svg>
+  );
+}
+
+function PrismPointer({ pressed }: { pressed: boolean }) {
+  const id = useId();
+  return (
+    <svg
+      className="spectra-presence-glyph"
+      data-ai="true"
+      data-pressed={pressed ? "true" : undefined}
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+    >
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#8b6cf6" />
+          <stop offset="0.5" stopColor="#4f9fe6" />
+          <stop offset="1" stopColor="#40c48e" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M4.2 1.6 12.3 9.6 3.2 11.9z"
+        fill={`url(#${id})`}
+        stroke="var(--bg-elevated)"
+        strokeWidth="0.9"
+        strokeLinejoin="round"
+      />
+      <path d="M4.2 1.6 7.6 10.6" stroke="#fff" strokeOpacity="0.45" strokeWidth="0.7" strokeLinecap="round" />
     </svg>
   );
 }

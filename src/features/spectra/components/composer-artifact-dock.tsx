@@ -9,7 +9,7 @@ import {
 } from "react";
 import { Loader2, Check, ExternalLink, FileText, Link2, X } from "@/components/icons/glyph-icons";
 import { useMutation } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import type { ResultCardStreamView } from "../ai/stream-events";

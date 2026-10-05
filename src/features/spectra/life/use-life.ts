@@ -339,6 +339,11 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
   useLayoutEffect(() => {
     const element = ref.current;
     if (!key || !element) return;
+    const back = takeReturn(key);
+    if (back) {
+      arrived.add(key);
+      return foldInto(element, back, figure);
+    }
     if (arrived.has(key)) return;
     arrived.add(key);
     if (!kind || !life.on) return;
@@ -515,4 +520,80 @@ export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string |
     // Once per key: a landing is a moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+}
+
+/** How long after a work closes its card may still appear to take it back: the page it returns to loads first. */
+const RETURN_WINDOW_MS = 1600;
+let returning: { key: string; figure: Figure; at: number } | null = null;
+
+function takeReturn(key: string): Figure | null {
+  if (!returning || returning.key !== key || performance.now() - returning.at > RETURN_WINDOW_MS) return null;
+  const { figure } = returning;
+  returning = null;
+  return figure;
+}
+
+/** The card is hidden while the closing work's dots flow back into its frame, and is real when they have. */
+function foldInto(element: HTMLElement, from: Figure, figure: ElementFigureOptions = {}) {
+  const previous = element.style.opacity;
+  element.style.opacity = "0";
+  let shown = false;
+  const show = () => {
+    if (shown) return;
+    shown = true;
+    element.style.opacity = previous;
+  };
+  const frame = requestAnimationFrame(() => {
+    const r = element.getBoundingClientRect();
+    if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return show();
+    void life.morph(from, figureOf(element, { bars: LAUNCH_BARS, maxBars: 6, ...figure })).formed.then(show);
+  });
+  const fallback = window.setTimeout(show, 900);
+  return () => {
+    cancelAnimationFrame(frame);
+    window.clearTimeout(fallback);
+    show();
+  };
+}
+
+/** Two rects mostly over each other: another surface took this one's place. */
+function replaced(a: Rect, b: DOMRect) {
+  const w = Math.min(a.x + a.width, b.right) - Math.max(a.x, b.left);
+  const h = Math.min(a.y + a.height, b.bottom) - Math.max(a.y, b.top);
+  return w > 0 && h > 0 && w * h > 0.5 * a.width * a.height;
+}
+
+/**
+ * The reverse of a landing (MOTION.md, "Shared elements"): when an opened
+ * surface closes, its dots flow back into the card it shows, if that card is
+ * on the page, or into the card as it appears on the page the user returns to.
+ * A surface replaced by another in the same place (switching tabs) does not
+ * fold.
+ */
+/** `replacedBy` names the surfaces that can take this one's place. */
+export function useLifeReturn(ref: RefObject<HTMLElement | null>, key: string | null | undefined, replacedBy: string) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!key || !element) return;
+    return () => {
+      if (!life.on || !element.isConnected) return;
+      const r = element.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const from = figureOf(element, { bars: "h1, h2, [data-artifact-title]", maxBars: 6 });
+      const rect = rectOf(element);
+      const at = performance.now();
+      requestAnimationFrame(() => {
+        if (element.isConnected) return;
+        for (const other of document.querySelectorAll(replacedBy)) {
+          if (replaced(rect, other.getBoundingClientRect())) return;
+        }
+        const card = document.querySelector<HTMLElement>(`[data-life-key="${key.replace(/["\\]/g, "\\$&")}"]`);
+        if (card?.isConnected) {
+          foldInto(card, from);
+          return;
+        }
+        returning = { key, figure: from, at };
+      });
+    };
+  }, [ref, key, replacedBy]);
 }

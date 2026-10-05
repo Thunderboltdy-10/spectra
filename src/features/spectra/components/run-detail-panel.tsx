@@ -5,7 +5,7 @@ import { Loader2, MessageSquarePlus, RotateCcw, Check, ExternalLink, Maximize2, 
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { spectraBus } from "../events";
 import {
   ConversationSurface,

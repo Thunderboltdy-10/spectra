@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { describeFailure } from "@/components/ui/truthful-state";
 import {
@@ -294,10 +294,9 @@ export function RouteSidePanelHost() {
     setWork(null);
   }
 
-  // What opens here grows out of the card or row it was opened from.
+  // A thread opened here grows out of the card or row it was opened from (a work's studio lands itself).
   const workSlot = useRef<HTMLDivElement>(null);
   const threadSlot = useRef<HTMLDivElement>(null);
-  useLifeLanding(workSlot, studio.mode === "split" ? studio.activeArtifact?._id : null);
   useLifeLanding(threadSlot, thread?._id);
 
   if (!eligible || (!work && !thread)) return null;

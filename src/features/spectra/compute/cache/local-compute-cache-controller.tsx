@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { spectraBus } from "../../events";
 import type { SpectraCommandOutcome } from "../../events/contracts";
 import { disposeReusablePythonWorker } from "../../code/python-runtime";

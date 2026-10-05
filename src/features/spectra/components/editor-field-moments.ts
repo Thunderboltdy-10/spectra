@@ -55,6 +55,14 @@ export const MAX_MOMENTS = 4;
 const SETTLE_MS = 360;
 /** At most this many regions hold light at once. */
 export const MAX_GLOWS = 3;
+/** What Spectra changed counts as seen after this long half in view (MOTION.md, "Afterwards"). */
+export const SEEN_MS = 1500;
+/** Without a way to tell what is in view, the tint simply fades after this long. */
+export const UNSEEN_FALLBACK_MS = 4000;
+/** The tint's fade, before its mark is removed (--motion-slow and a little). */
+const FADE_MS = 700;
+/** At most this many changed regions hold a tint. */
+const MAX_UNSEEN = 24;
 
 export type MomentSource =
   | { kind: "local"; point: Point }
@@ -289,6 +297,54 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       for (const [element, glow] of glows) glow.move(rectOf(element));
     };
 
+    /* Afterwards: what Spectra changed keeps a faint tint until you have seen it, then it fades (CSS, [data-ai-unseen]). */
+    const writing = new Set<Element>();
+    const unseen = new Map<Element, ReturnType<typeof setTimeout> | null>();
+    const fade = (element: Element) => {
+      const timer = unseen.get(element);
+      if (timer) clearTimeout(timer);
+      unseen.delete(element);
+      seenObserver?.unobserve(element);
+      element.setAttribute("data-ai-unseen", "fading");
+      setTimeout(() => {
+        if (element.getAttribute("data-ai-unseen") === "fading") element.removeAttribute("data-ai-unseen");
+      }, FADE_MS);
+    };
+    const seenObserver =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (!unseen.has(entry.target)) continue;
+                const timer = unseen.get(entry.target);
+                if (timer) clearTimeout(timer);
+                const inView = entry.isIntersecting && document.visibilityState === "visible";
+                unseen.set(entry.target, inView ? setTimeout(() => fade(entry.target), SEEN_MS) : null);
+              }
+            },
+            { threshold: 0.5 },
+          );
+    const markUnseen = (element: Element) => {
+      if (unseen.has(element) || unseen.size >= MAX_UNSEEN) return;
+      element.setAttribute("data-ai-unseen", "true");
+      if (seenObserver) {
+        unseen.set(element, null);
+        seenObserver.observe(element);
+      } else {
+        unseen.set(element, setTimeout(() => fade(element), UNSEEN_FALLBACK_MS));
+      }
+    };
+    const syncWriting = (justMarked: readonly Element[]) => {
+      // Rich text keeps its own tint as decorations (editor/ai-region-decoration.ts): ProseMirror owns its DOM.
+      for (const element of justMarked) if (inContent(element) && !element.closest(".ProseMirror")) writing.add(element);
+      for (const element of writing) {
+        if (element.isConnected && element.getAttribute("data-ai-region") === "true") continue;
+        writing.delete(element);
+        if (element.isConnected) markUnseen(element);
+      }
+    };
+
     let added: Element[] = [];
     let removed: Element[] = [];
     let marked: Element[] = [];
@@ -300,6 +356,8 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       added = [];
       removed = [];
       marked = [];
+      // The tint is CSS: it stays even while the field is off.
+      syncWriting(batch.marked);
       if (!life.on) {
         for (const glow of glows.values()) glow.stop();
         glows.clear();
@@ -361,6 +419,9 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
     const onPointerDown = (event: PointerEvent) => {
       markLocal([event.clientX, event.clientY]);
       const target = event.target instanceof Element ? event.target : null;
+      // Working on what Spectra changed is seeing it.
+      const tinted = target?.closest("[data-ai-unseen='true']");
+      if (tinted && unseen.has(tinted)) fade(tinted);
       const grabbable = target?.closest(`${FIELD_OBJECTS}, [draggable="true"], [data-spectra-part]`);
       drag =
         grabbable && inContent(grabbable)
@@ -435,6 +496,12 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       cancelAnimationFrame(scrollFrame);
       for (const glow of glows.values()) glow.stop();
       glows.clear();
+      seenObserver?.disconnect();
+      for (const [element, timer] of unseen) {
+        if (timer) clearTimeout(timer);
+        element.removeAttribute("data-ai-unseen");
+      }
+      unseen.clear();
       root.removeEventListener("pointerdown", onPointerDown, true);
       root.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("pointermove", onPointerMove);

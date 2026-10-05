@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";

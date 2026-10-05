@@ -69,6 +69,11 @@ function strings(value: unknown) {
 }
 
 /** Idempotently upgrades the historical one-task planner payload to a Plan. */
+/** A planner task is one task (TaskStudio); content already shaped as a plan of many tasks keeps the plan studio. */
+export function isSingleTask(content: unknown) {
+  return !(content && typeof content === "object" && Array.isArray((content as { tasks?: unknown }).tasks));
+}
+
 export function normalizePlanContent(value: unknown): PlanContent {
   const row = object(value);
   if (Array.isArray(row.tasks)) {

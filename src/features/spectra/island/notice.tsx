@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "@/components/icons";
+import type { ToastAction } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { Point } from "../life/figure";
 import { STATUS_COLOURS } from "../life/prism";
 import { unformElement, useLifeEntrance } from "../life/use-life";
 
 /*
- * A short word from the island: a thread finished or stopped, or a
- * notification arrived (SHELL.md: notifications reach the user through the
- * island). It forms out of the prism's light, waits while the pointer is on
+ * A short word from the island: a thread finished or stopped, a
+ * notification arrived, or the app has something to say ("Saved", "Could not
+ * move it") (SHELL.md: notifications reach the user through the island). It forms out of the prism's light, waits while the pointer is on
  * it, and parts back into the field when its time is up.
  */
 
@@ -18,9 +19,17 @@ export type NoticeTone = "done" | "problem" | "needs" | "info";
 
 export type IslandNoticeData = {
   key: string;
-  text: string;
-  detail?: string;
+  text: ReactNode;
+  detail?: ReactNode;
   tone: NoticeTone;
+  /** One thing to do about it: Undo, Retry. */
+  action?: ToastAction;
+  /** How long it stays, in milliseconds; `Infinity` until dismissed. */
+  duration?: number;
+  /** Told when the word goes, however it goes. */
+  onGone?: () => void;
+  /** A word from the app, by the id it was said with. */
+  toastId?: string | number;
   /** A thread's notice opens its thread view. */
   runId?: string;
   /** A notification's notice opens what it is about. */
@@ -50,8 +59,13 @@ export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: Isla
   const hovering = useRef(false);
   const latest = useRef(onDismiss);
   latest.current = onDismiss;
+  const gone = useRef(notice.onGone);
+  gone.current = notice.onGone;
+  useEffect(() => () => gone.current?.(), []);
+  const duration = notice.duration ?? NOTICE_MS;
   useEffect(() => {
-    let left = NOTICE_MS;
+    if (!Number.isFinite(duration)) return;
+    let left = duration;
     let started = performance.now();
     let timer = 0;
     const expire = () => {
@@ -79,7 +93,14 @@ export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: Isla
       element?.removeEventListener("pointerenter", pause);
       element?.removeEventListener("pointerleave", resume);
     };
-  }, []);
+  }, [duration]);
+
+  const leave = () => {
+    const element = ref.current;
+    if (element) void unformElement(element, { bars: "[data-notice-text]" });
+    onDismiss();
+  };
+  const action = notice.action;
 
   return (
     <div
@@ -98,14 +119,22 @@ export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: Isla
         </span>
         {notice.detail ? <span className="min-w-0 max-w-[180px] truncate text-[var(--text-tertiary)]">{notice.detail}</span> : null}
       </button>
+      {action ? (
+        <button
+          type="button"
+          onClick={async (event) => {
+            await action.onClick(event);
+            if (!event.defaultPrevented) leave();
+          }}
+          className="h-7 shrink-0 rounded-full px-2.5 text-caption font-medium text-[var(--text-primary)] outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+        >
+          {action.label}
+        </button>
+      ) : null}
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={() => {
-          const element = ref.current;
-          if (element) void unformElement(element, { bars: "[data-notice-text]" });
-          onDismiss();
-        }}
+        onClick={leave}
         className="mr-1 grid size-7 shrink-0 place-items-center rounded-full text-[var(--text-tertiary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
       >
         <Icon name="close" size={12} />

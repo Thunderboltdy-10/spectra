@@ -76,6 +76,7 @@ export function SpectraCard({
       ref={ref}
       className={spectraCardClass(variant, className)}
       data-spectra-card={variant}
+      data-life-key={lifeKey}
       data-card-state={state}
       style={{ ...style, ...(accent ? { "--card-accent": accent } : {}) } as CSSProperties}
     >

@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import type {
   ConversationBatchSelection,
   ConversationChoice,

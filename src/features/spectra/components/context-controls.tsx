@@ -9,7 +9,7 @@ import { workTypeMeta } from "./artifact-card";
 import { searchSpectra, type SpectraWorkspace } from "../data/api";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { SEMANTIC_DEBOUNCE_MS, useSemanticSearch } from "../semantic/use-semantic";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 export function showContinuationConflict({
   currentTitle,

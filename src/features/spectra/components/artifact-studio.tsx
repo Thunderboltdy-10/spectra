@@ -75,7 +75,7 @@ import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
 import { mountsForConnectedDevice } from "../bridge/mount-selection";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
-import { DEVICES_HREF } from "../bridge/client";
+import { DEVICES_HREF, openBridgeFile, revealBridgeFile } from "../bridge/client";
 import {
   Dialog,
   DialogContent,
@@ -5526,6 +5526,15 @@ function ArtifactStudioEditor({
         (mount) => mount._id === statusLocalReplica.mountId,
       )?.rootLabel
     : undefined;
+  // The work's file on this computer: a local copy in a folder selected here.
+  const statusLocalFile = useMemo(() => {
+    for (const replica of replicaTruth?.replicas ?? []) {
+      if (replica.kind !== "local" || replica.state === "unavailable" || !replica.relativePath) continue;
+      const mount = currentDeviceMounts.find((candidate) => candidate._id === replica.mountId);
+      if (mount) return { grantId: mount.grantId, relativePath: replica.relativePath };
+    }
+    return null;
+  }, [currentDeviceMounts, replicaTruth?.replicas]);
   const artifactStatus = useMemo(
     () =>
       artifactStatusOf({
@@ -5555,9 +5564,8 @@ function ArtifactStudioEditor({
           "keep-office": Boolean(nativeConflict) && !readOnly,
           compare: true,
           history: true,
-          // The desktop app has no "open" or "reveal" request yet (F2).
-          "open-in-office": false,
-          "show-in-folder": false,
+          "open-in-office": Boolean(statusLocalFile) && nativeOfficeDocument,
+          "show-in-folder": Boolean(statusLocalFile),
         },
       }),
     [
@@ -5571,6 +5579,7 @@ function ArtifactStudioEditor({
       readOnly,
       replicaTruth?.replicas,
       statusFolderLabel,
+      statusLocalFile,
       statusNow,
     ],
   );
@@ -5589,6 +5598,18 @@ function ArtifactStudioEditor({
     }
     if (kind === "history") {
       setHistoryOpen(true);
+      return;
+    }
+    if (kind === "open-in-office" || kind === "show-in-folder") {
+      if (!statusLocalFile) return;
+      void (kind === "open-in-office" ? openBridgeFile : revealBridgeFile)(statusLocalFile).catch(
+        (error: unknown) =>
+          toast.error(
+            error instanceof Error && error.message
+              ? error.message
+              : "Spectra Bridge could not reach this file.",
+          ),
+      );
       return;
     }
     if (kind === "compare") {

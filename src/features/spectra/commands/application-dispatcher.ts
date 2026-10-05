@@ -7,6 +7,7 @@ import {
   retainBridgeIntent,
 } from "./bridge-intents";
 import type { CommandEffectKind, CommandExecutionResult } from "./types";
+import { aiSyncPurpose } from "../../../../shared/school-sync";
 
 export type ApplicationCommandDispatcher = (
   commandId: string,
@@ -445,10 +446,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         }, "Sharing change requested.");
       }
       case "app.managebac.sync": {
-        const purpose = params.purpose === "class_resources" || params.purpose === "timetable" || params.purpose === "classes" || params.purpose === "cas" || params.purpose === "upcoming_deadlines"
-          ? params.purpose
-          : "upcoming_deadlines";
-        return dispatchSemantic(commandId, "mutate", "managebac.sync", { purpose }, "ManageBac sync requested.");
+        return dispatchSemantic(commandId, "mutate", "managebac.sync", { purpose: aiSyncPurpose(params.purpose) }, "ManageBac sync requested.");
       }
       case "app.managebac.select-classes": {
         const recordIds = stringList(params.recordIds).slice(0, 100);

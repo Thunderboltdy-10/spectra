@@ -8,6 +8,10 @@ const push = vi.fn();
 const toastSuccess = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 
+vi.mock("../semantic/use-semantic", () => ({
+  useSemanticSearch: () => ({ status: "idle", results: [], mode: null, degraded: null, error: null, tookMs: null, answered: null, refresh: () => {} }),
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/workspace",
   useRouter: () => ({ push }),

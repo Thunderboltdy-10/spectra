@@ -244,7 +244,7 @@ function operationCategory(operation: Doc<"spectraOperations">): PermissionCateg
   }
 }
 
-/** The user's stored choice: full control, or "Always allow" this category. */
+/** The user's stored choice: full control, or "Always allow" this category, unless they set it to Never. */
 async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, category: PermissionCategory) {
   const layer = await ctx.db
     .query("accountPreferences")
@@ -253,6 +253,7 @@ async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts
     )
     .unique();
   const ai = record(record(layer?.values).ai);
+  if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return false;
   if (ai.permissionFullControl === true) return true;
   return Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category);
 }
@@ -265,11 +266,18 @@ async function addAlwaysAllow(ctx: MutationCtx, accountId: Id<"accounts">, categ
       q.eq("accountId", accountId).eq("scope", "account").eq("scopeKey", "account"),
     )
     .unique();
-  const current = record(record(existing?.values).ai).permissionAllow;
-  const allow = Array.isArray(current) ? current.filter(isPermissionCategory) : [];
-  if (allow.includes(category)) return;
+  const ai = record(record(existing?.values).ai);
+  const allow = Array.isArray(ai.permissionAllow) ? ai.permissionAllow.filter(isPermissionCategory) : [];
+  const deny = Array.isArray(ai.permissionDeny) ? ai.permissionDeny.filter(isPermissionCategory) : [];
+  if (allow.includes(category) && !deny.includes(category)) return;
+  // Choosing "Always allow" on an approval replaces an earlier Never.
   const values = preferenceLayerValuesSchema.parse(
-    mergePreferenceValues(existing?.values ?? {}, { ai: { permissionAllow: [...allow, category] } }),
+    mergePreferenceValues(existing?.values ?? {}, {
+      ai: {
+        permissionAllow: allow.includes(category) ? allow : [...allow, category],
+        permissionDeny: deny.filter((entry) => entry !== category),
+      },
+    }),
   );
   const now = Date.now();
   if (existing)

@@ -1,12 +1,11 @@
 import { z } from "zod";
+import { AI_SYNC_PURPOSES, type AiSyncPurpose } from "../../../../../shared/school-sync";
 import type {
   RegisteredToolDefinition,
   ToolExecutionContext,
 } from "./registry";
 import { spectraToolRegistry } from "./registry";
 import { preferenceLayerValuesSchema } from "../../settings/schema/preferences";
-import { ARTIFACT_TYPE_KEYS } from "../../artifacts/types";
-import { artifactSkillReadResult } from "../../artifacts/skill-guidance";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
@@ -85,29 +84,6 @@ export function registerApplicationTools() {
     cancellable: true,
     resumable: true,
   };
-  define({
-    ...readDefaults,
-    id: "read_artifact_skill",
-    title: "Read work guidance",
-    // One finite built-in guide/schema bundle; preserve nested contract fields.
-    selfBoundedOutputCharacters: 96_000,
-    description: "Read built-in native artifact authoring guidance. Omit guideId for core guidance, the canonical editable content schema and a specialist-guide catalog, or provide one listed guideId for that guide only. This reads no user artifacts or account data.",
-    inputSchema: z.object({
-      blueprintKey: z.enum(ARTIFACT_TYPE_KEYS),
-      guideId: z.string().min(1).max(100).optional(),
-    }),
-    execute: async (_context, value) => {
-      const input = value as { blueprintKey: typeof ARTIFACT_TYPE_KEYS[number]; guideId?: string };
-      const { loadArtifactSkill } = await import("../../artifacts/registry");
-      const result = artifactSkillReadResult(await loadArtifactSkill(input.blueprintKey), input.guideId);
-      if (input.guideId) return result;
-      const { SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS } = await import("../../operations/schema");
-      return {
-        ...result,
-        contentSchema: SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[input.blueprintKey],
-      };
-    },
-  });
   define({
     ...readDefaults,
     id: "search_objects",
@@ -329,7 +305,7 @@ export function registerApplicationTools() {
     if (value.action === "change_level" && (!value.invitationId || !value.level)) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "An accepted invitation and new level are required." });
     if (value.action === "revoke" && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A grant id is required." });
   }), risk: "high", approval: "always", authorityTarget: "sharing" });
-  define({ ...appActionDefaults, id: "trigger_managebac_sync", title: "Sync ManageBac", description: "Refresh permission-bound ManageBac data with visible freshness and capability status.", inputSchema: z.object({ purpose: z.enum(["upcoming_deadlines", "class_resources", "timetable", "classes", "cas"]), force: z.boolean().optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_sync" });
+  define({ ...appActionDefaults, id: "trigger_managebac_sync", title: "Sync ManageBac", description: "Refresh permission-bound ManageBac data with visible freshness and capability status.", inputSchema: z.object({ purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]), force: z.boolean().optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_sync" });
   define({ ...appActionDefaults, id: "select_managebac_classes", title: "Choose ManageBac classes", description: "Set the account-scoped ManageBac class selection with revision fencing; unselected class details and planning records remain outside the sync scope.", inputSchema: z.object({ recordIds: z.array(z.string().min(1)).max(100), expectedRevision: z.number().int().min(0).optional(), retention: z.enum(["keep_in_spectra", "archive_projection"]).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_selection" });
   define({ ...appActionDefaults, id: "import_managebac_resource", title: "Import school resource", description: "Open the selected ManageBac class shelf to import a permissioned resource into Library through the human school flow.", inputSchema: z.object({ sourceRecordId: z.string().min(1), refresh: z.boolean().optional(), requestKey: z.string().min(8).max(240).optional() }), risk: "medium", approval: "policy", authorityTarget: "managebac_resource_import", aiAvailability: "prohibited", prohibitionReason: "AI resource import is unavailable. Open the selected ManageBac class shelf and use Import resource there; the school route verifies provider identity and saves an import receipt." });
   define({ ...appActionDefaults, id: "change_managebac_mapping", title: "Change ManageBac mapping", description: "ManageBac mapping changes use the dedicated human admin flow; AI mapping mutation is deferred until that typed path is exposed.", inputSchema: z.object({ mappingId: z.string(), patch: jsonObject }), risk: "high", approval: "always", authorityTarget: "managebac_mapping", aiAvailability: "prohibited", prohibitionReason: "ManageBac mapping changes are deferred to the dedicated human admin flow." });
@@ -513,13 +489,7 @@ export function registerApplicationTools() {
     description:
       "Refresh permission-bound ManageBac data with visible freshness and capability status.",
     inputSchema: z.object({
-      purpose: z.enum([
-        "upcoming_deadlines",
-        "class_resources",
-        "timetable",
-        "classes",
-        "cas",
-      ]),
+      purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]),
       force: z.boolean().optional(),
     }),
     risk: "medium",
@@ -695,6 +665,5 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
-  "read_artifact_skill",
   "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "create_calendar_personal_event", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "setup_bridge", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "add_comment", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

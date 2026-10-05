@@ -17,6 +17,22 @@ export const SCHOOL_SYNC_KINDS = [
 ] as const;
 export type SchoolSyncKind = (typeof SCHOOL_SYNC_KINDS)[number];
 
+/** What the AI asks ManageBac to refresh, and the sync kinds each one needs. */
+export const AI_SYNC_PURPOSE_KINDS = {
+  upcoming_deadlines: ["current_tasks"],
+  class_resources: ["task_resources"],
+  timetable: ["classes"],
+  classes: ["classes"],
+  past_tasks: ["past_tasks", "dropbox_files"],
+  grades: ["grades"],
+  cas: ["cas"],
+} as const satisfies Record<string, readonly SchoolSyncKind[]>;
+export type AiSyncPurpose = keyof typeof AI_SYNC_PURPOSE_KINDS;
+export const AI_SYNC_PURPOSES = Object.keys(AI_SYNC_PURPOSE_KINDS) as AiSyncPurpose[];
+export function aiSyncPurpose(value: unknown): AiSyncPurpose {
+  return typeof value === "string" && value in AI_SYNC_PURPOSE_KINDS ? (value as AiSyncPurpose) : "upcoming_deadlines";
+}
+
 export const SCHOOL_SYNC_MODES = ["auto", "manual", "off"] as const;
 export type SchoolSyncMode = (typeof SCHOOL_SYNC_MODES)[number];
 

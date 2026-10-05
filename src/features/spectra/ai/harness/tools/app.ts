@@ -1,5 +1,6 @@
 import { patchTouchesAiPermissions } from "../../../settings/schema/ai-permissions";
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "../../../settings/schema/preferences";
+import { AI_SYNC_PURPOSES } from "../../../../../../shared/school-sync";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
 import {
@@ -33,7 +34,7 @@ type CommandTool<A> = {
   after?: (args: A, result: CommandResult) => Partial<ToolOutcome>;
 };
 
-function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): HarnessTool<A> {
+export function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): HarnessTool<A> {
   return {
     name: spec.name,
     description: spec.description,
@@ -293,12 +294,12 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "managebac",
       description:
-        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. The user approves unless they allowed ManageBac changes.",
+        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. The user approves unless they allowed ManageBac changes.",
       parameters: {
         type: "object",
         properties: {
           action: { type: "string", enum: ["sync", "select_classes"] },
-          purpose: { type: "string", enum: ["upcoming_deadlines", "class_resources", "timetable", "classes", "cas"] },
+          purpose: { type: "string", enum: AI_SYNC_PURPOSES },
           classIds: { type: "array", items: { type: "string" } },
           expectedRevision: { type: "number" },
         },
@@ -314,7 +315,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       parse: (raw) => {
         const action = oneOf(raw, "action", ["sync", "select_classes"] as const);
         if (action === "sync")
-          return { action, purpose: oneOf(raw, "purpose", ["upcoming_deadlines", "class_resources", "timetable", "classes", "cas"] as const, "upcoming_deadlines") };
+          return { action, purpose: oneOf(raw, "purpose", AI_SYNC_PURPOSES, "upcoming_deadlines") };
         const expectedRevision = optionalNumber(raw, "expectedRevision");
         return { action, classIds: stringList(raw, "classIds"), ...(expectedRevision !== undefined ? { expectedRevision } : {}) };
       },

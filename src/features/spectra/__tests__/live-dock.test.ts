@@ -315,7 +315,7 @@ describe("Live Dock V2", () => {
     expect(runHook).toContain("Date.now() - tabsFetchedAt >=");
     expect(runHook).toContain("180_000");
     expect(runHook).not.toContain(": 12_000");
-    const shell = read("src/components/layout/app-shell.tsx");
+    const shell = read("src/components/layout/use-shell-notifications.ts");
     expect(shell).toContain("getSpectraNotificationCenter(false, 30)");
     expect(shell).toContain("}, 180_000);");
     expect(shell).not.toContain("}, 60_000);");
@@ -345,12 +345,13 @@ describe("Live Dock V2", () => {
     expect(kbar).toContain("border-0 bg-transparent");
     expect(kbar).toContain("focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none");
     expect(kbar).not.toContain("spectra-command-palette");
-    const shell = read("src/components/layout/app-shell.tsx");
-    expect(shell).toContain('aria-label="Open Spectra command bar"');
-    expect(shell).toContain('spectraBus.emit("shell.openCommandBar", {})');
+    // The rail's account menu is the quiet trigger.
+    const account = read("src/components/layout/account-menu.tsx");
+    expect(account).toContain("Search and commands");
+    expect(account).toContain('spectraBus.emit("shell.openCommandBar", {})');
     const shortcuts = read("src/components/keyboard-shortcuts.tsx");
     expect(shortcuts).toContain('keys: ["Mod", "Shift", "F"]');
-    expect(shortcuts).toContain('className={compact ? "size-8 border-0" : undefined}');
+    expect(shortcuts).toContain('description: "Find a conversation"');
   });
 
   it("never shows machine tokens in dock failure copy", () => {

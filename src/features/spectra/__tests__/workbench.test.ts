@@ -151,15 +151,17 @@ describe("Inspector and navigation contracts", () => {
     expect(revealCommentTarget({ id: "c2", body: "x", status: "orphaned", anchorLabel: "Old" }).kind).toBe("reanchor_required");
   });
 
-  it("uses one active sidebar tree for expanded and collapsed states", () => {
-    const source = readFileSync("src/components/layout/app-shell.tsx", "utf8");
-    const activeTree = source.slice(source.indexOf("<aside"), source.indexOf("{false ? ("));
-    expect(activeTree.match(/<aside/g)).toHaveLength(1);
-    expect(activeTree).toContain("data-collapsed={sidebarCollapsed}");
-    expect(activeTree).toContain('placeholder="Search recent chats"');
-    expect(activeTree).toContain('aria-label="Search recent chats"');
-    expect(activeTree).toContain("coreDestinations.map");
-    expect(activeTree).toContain("workspaces.map");
+  it("uses one rail for expanded and collapsed states, and finds conversations in the threads view", () => {
+    const rail = readFileSync("src/components/layout/rail.tsx", "utf8");
+    expect(rail.match(/<aside/g)).toHaveLength(1);
+    expect(rail).toContain("data-collapsed={collapsed}");
+    expect(rail).toContain("RAIL_DESTINATIONS.map");
+    expect(rail).toContain("workspaces.map");
+    expect(rail).toContain('spectraBus.on("shell.focusSidebarSearch", () => spectraBus.emit("threads.open", {}))');
+    expect(rail).not.toContain("Search recent chats");
+    const view = readFileSync("src/features/spectra/threads/threads-view.tsx", "utf8");
+    expect(view).toContain('placeholder="Find a conversation"');
+    expect(view).toContain("useThreadSearch(query");
   });
 
   it("keeps narrow navigation labeled and separates chat failures from empty results", () => {

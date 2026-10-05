@@ -1,6 +1,7 @@
 import { loadSkillTool } from "../skills";
 import type { AnyHarnessTool } from "../types";
 import { appTools } from "./app";
+import { commandTools, runOnlyTools } from "./commands";
 import { createArtifactTool, editArtifactTool, readArtifactTool } from "./artifacts";
 import { listLibraryTool, readCalendarTool, readThreadTool, schoolDataTool, searchTool, webSearchTool } from "./context";
 import { askUserTool, showWidgetTool, updateTodosTool, agentHandoffTool } from "./interaction";
@@ -8,9 +9,13 @@ import type { HarnessSession } from "./shared";
 
 export { createSession, type HarnessSession } from "./shared";
 
-/** Every tool the model has. There is no tool discovery step: all are always present. */
+/**
+ * Every tool the model has, always present. find_commands and run_command
+ * reach the rest of the command catalog through these same tools, plus the
+ * few commands that have no tool of their own.
+ */
 export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
-  return [
+  const offered = [
     createArtifactTool(session),
     editArtifactTool(session),
     readArtifactTool(session),
@@ -28,4 +33,5 @@ export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
     // Only offered when the user has agents to hand a request to.
     ...(session.agents.length && session.backend.useAgent ? [agentHandoffTool(session)] : []),
   ] as AnyHarnessTool[];
+  return [...offered, ...commandTools([...offered, ...runOnlyTools(session)], offered)];
 }

@@ -184,6 +184,32 @@ describe("AI harness durable state", () => {
     await f.runExecute();
   });
 
+  it("does not grant from full control a category the user set to Never", async () => {
+    const f = await fixture();
+    await f.actor.mutation(api.accountPreferences.writeLayer, {
+      scope: "account", scopeKey: "account", values: { ai: { permissionFullControl: true, permissionDeny: ["settings"] } },
+    });
+    await expect(
+      f.actor.mutation(api.spectraHarness.ensureApproved, { runId: f.ids.runId, executionId: EXECUTION, toolCallId: "call-1" }),
+    ).rejects.toThrow("AI_PERMISSION_REQUIRED");
+  });
+
+  it("replaces Never when the user picks Always allow on an approval", async () => {
+    const f = await fixture();
+    await f.actor.mutation(api.accountPreferences.writeLayer, {
+      scope: "account", scopeKey: "account", values: { ai: { permissionDeny: ["settings", "sharing"] } },
+    });
+    await f.pauseForApproval();
+    await f.actor.mutation(api.spectraHarness.answer, {
+      runId: f.ids.runId, executionId: EXECUTION, toolCallId: "call-1",
+      answer: { kind: "approval", allowed: true, alwaysAllow: true },
+    });
+    const prefs = await f.t.run((ctx) => ctx.db.query("accountPreferences").collect());
+    const ai = (prefs[0]?.values as { ai?: { permissionAllow?: string[]; permissionDeny?: string[] } }).ai;
+    expect(ai?.permissionAllow).toEqual(["settings"]);
+    expect(ai?.permissionDeny).toEqual(["sharing"]);
+  });
+
   it("never lets the AI change its own permissions, even when approved", async () => {
     const f = await fixture({ ai: { permissionFullControl: true } });
     await f.pauseForApproval();

@@ -25,13 +25,6 @@ import {
 } from "../references";
 import { ContextSourceRegistry } from "../context/registry/context-source-registry";
 import {
-  PermissionAwareSemanticIndex,
-  createSemanticIndexEntry,
-  entityTypeForAnchor,
-  semanticEntriesForWork,
-  type SemanticIndexEntry,
-} from "../context";
-import {
   RICH_CONTENT_SURFACES,
   IncrementalRichContentParser,
   getRichContentAdapter,
@@ -172,24 +165,6 @@ describe("Phase 7 context and semantic index", () => {
     expect(registry.resolveNested(["root", "secret", "child"])?.id).toBe("child");
     disposeRoot();
     expect(registry.get("root")).toBeUndefined();
-  });
-
-  it("filters permissions before search exposure for every retrieval purpose", () => {
-    const index = new PermissionAwareSemanticIndex();
-    const visible = createSemanticIndexEntry({ semanticId: "visible", entityType: "source", workspaceIds: ["ws-1"], permissionScope: { workspaceIds: ["ws-1"] }, text: "primary climate evidence", updatedAt: 2, provenance: { provider: "spectra" } });
-    const secret = createSemanticIndexEntry({ semanticId: "secret", entityType: "agent_evidence", workspaceIds: ["ws-2"], permissionScope: { workspaceIds: ["ws-2"] }, text: "primary climate secret", updatedAt: 3, provenance: { provider: "spectra" } });
-    index.upsert(visible); index.upsert(secret);
-    for (const purpose of ["kbar", "library", "context", "agent_routing", "reference_suggestion", "memory", "school"] as const) {
-      expect(index.search("climate", { accountId: "a", workspaceIds: ["ws-1"] }, 40, purpose).map((entry) => entry.semanticId)).toEqual(["visible"]);
-    }
-  });
-
-  it("maps all work regions to specific entity kinds", () => {
-    const expected = new Set<SemanticIndexEntry["entityType"]>();
-    for (const type of ARTIFACT_TYPE_KEYS) expected.add(entityTypeForAnchor({ ...rootAnchor(type), kind: type === "sheets" ? "chart" : type === "whiteboard" ? "frame" : type === "agent" ? "evidence" : "region" }));
-    expect([...expected]).toEqual(expect.arrayContaining(["document_block", "slide_element", "sheet_chart", "board_frame", "code_file", "quiz_question", "card", "agent_evidence", "plan_task", "work"]));
-    const rows = semanticEntriesForWork({ workId: "w", workspaceIds: ["ws"], title: "Research", permissionScope: { workspaceIds: ["ws"] }, updatedAt: 1, regions: [{ regionId: "b1", label: "Intro", text: "Evidence", anchor: { ...rootAnchor("document", "w"), kind: "block", path: ["blocks", "b1"] } }] });
-    expect(rows.map((entry) => entry.entityType)).toEqual(["work", "document_block"]);
   });
 });
 

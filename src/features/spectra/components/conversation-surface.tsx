@@ -68,7 +68,8 @@ import { ArtifactEmbedList } from "./artifact-embed-host";
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
-import { HarnessInputPanel, HarnessWidgets, WorkTouchCards, messageTouches } from "./harness-run-parts";
+import { HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
+import { HarnessWidgets, messageWidgets } from "./thread-widget";
 import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
 import { parseSpectraStreamEvent } from "../ai/stream-events";
 
@@ -2115,6 +2116,9 @@ export function ConversationSurface({
                           onLoad={() => void requestRunTrace(message.runId!)}
                         />
                       ) : null}
+                      {message.role === "assistant" ? (
+                        <HarnessWidgets widgets={messageWidgets(message.metadata)} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
+                      ) : null}
                       <WorkTouchCards touches={touches} onOpen={onOpenArtifact} />
                       {(() => {
                         const choices = messageChoices(
@@ -2311,7 +2315,7 @@ export function ConversationSurface({
                         compact={compact}
                       />
                     ) : null}
-                    <HarnessWidgets widgets={liveExchange.widgets} />
+                    <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
                     <WorkTouchCards touches={liveExchange.artifacts ?? []} onOpen={onOpenArtifact} />
                     {liveExchange.input && liveExchange.runId && onAnswer ? (
                       <HarnessInputPanel

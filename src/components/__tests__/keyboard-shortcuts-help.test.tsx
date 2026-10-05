@@ -18,7 +18,7 @@ describe("Keyboard shortcuts help", () => {
     const commandBar = screen.getByText("Open command bar").parentElement!;
     expect(commandBar.textContent).toMatch(/K$/);
     expect(commandBar.textContent).not.toMatch(/Shift/);
-    const search = screen.getByText("Focus sidebar search").parentElement!;
+    const search = screen.getByText("Find a conversation").parentElement!;
     expect(search.textContent).toMatch(/ShiftF$/);
   });
 });

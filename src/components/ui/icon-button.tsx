@@ -17,7 +17,7 @@ export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>
   accent?: string;
   /** Pressed state, for toggles. */
   pressed?: boolean;
-  tooltipSide?: "top" | "bottom";
+  tooltipSide?: "top" | "bottom" | "right";
 };
 
 const SIZES = { compact: "size-7", default: "size-8", large: "size-10" } as const;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { aiSyncPurpose } from "../../../../shared/school-sync";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
 import { documentContentSchema } from "../artifacts/schema/document";
@@ -530,15 +531,7 @@ function preprocessModelOperationContent(value: unknown) {
       input.command === "school_data.sync" ||
       input.command === "managebac.sync"
     ) {
-      const purpose = [
-        "upcoming_deadlines",
-        "class_resources",
-        "timetable",
-        "classes",
-        "cas",
-      ].includes(String(applicationArgs.purpose))
-        ? String(applicationArgs.purpose)
-        : "upcoming_deadlines";
+      const purpose = aiSyncPurpose(applicationArgs.purpose);
       return {
         ...row,
         input: {

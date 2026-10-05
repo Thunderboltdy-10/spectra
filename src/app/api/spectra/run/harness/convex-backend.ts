@@ -5,6 +5,8 @@ import type {
   HarnessBackend,
   LibraryItem,
   SearchHit,
+  SearchRequest,
+  SearchResponse,
   ThreadReadRequest,
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
@@ -13,6 +15,7 @@ import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operat
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
+import { SEMANTIC_KINDS, type SemanticResult, type SemanticSearchResponse } from "../../../../../../shared/semantic-types";
 import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
 import { executeOperation, rows, type EffectContext } from "./effects";
@@ -48,6 +51,8 @@ export type ConvexBackendInput = {
   timeZone: string;
   /** Operations already recorded for tool calls (a resumed run). */
   toolOperations?: Record<string, string[]>;
+  /** Items open on screen or referenced, most important first: a search ranking hint. */
+  openItemIds?: string[];
   onUiEvent?: EffectContext["onUiEvent"];
 };
 
@@ -68,6 +73,55 @@ function plainError(error: unknown) {
     .replace(/^[A-Z][A-Z0-9_]{3,}:\s*/, "")
     .split("\n")[0]!
     .slice(0, 600);
+}
+
+/** `Date.prototype.getTimezoneOffset()` for an IANA zone: minutes to add to local time to reach UTC. */
+export function timezoneOffsetMinutes(timeZone: string, at = Date.now()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date(at));
+    const part = (type: string) => Number(parts.find((entry) => entry.type === type)?.value ?? 0);
+    const local = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
+    return Math.round((Math.floor(at / 1_000) * 1_000 - local) / 60_000);
+  } catch {
+    return 0;
+  }
+}
+
+/** A semantic result as the harness names it: what it is, where it is, and where to read on. */
+export function searchHit(result: SemanticResult): SearchHit {
+  const anchor = result.anchor;
+  return {
+    kind: result.kind,
+    id: result.itemId,
+    title: result.title || "Untitled",
+    typeLabel: result.typeLabel,
+    ...(result.subtype ? { subtype: result.subtype } : {}),
+    ...(result.snippet ? { snippet: result.snippet } : {}),
+    ...(result.location || (anchor.kind === "artifact" && anchor.label) ? { location: result.location ?? (anchor.kind === "artifact" ? anchor.label : undefined) } : {}),
+    ...(anchor.kind === "artifact" && anchor.regionId ? { regionId: anchor.regionId } : {}),
+    ...(anchor.kind === "thread" && anchor.messageId ? { messageId: anchor.messageId } : {}),
+    ...(result.workspace ? { workspace: result.workspace.title } : {}),
+    ownership: result.ownership,
+    ...(result.updatedAt !== undefined ? { updatedAt: result.updatedAt } : {}),
+    ...(result.timeAt !== undefined ? { timeAt: result.timeAt } : {}),
+  };
+}
+
+/** One honest line when search could only match words or the index is incomplete. */
+export function degradedNote(mode: SemanticSearchResponse["mode"], reason?: SearchResponse["degraded"]) {
+  if (reason === "index_partial") return "\n(Some items are still being indexed, so recent changes may be missing.)";
+  if (mode === "words_only" || reason)
+    return "\n(Search matched exact words only right now, not meaning: try the words the item would contain, or list_library.)";
+  return "";
 }
 
 function calendarItemLine(item: Record<string, unknown>, timeZone: string) {
@@ -463,72 +517,85 @@ export class ConvexHarnessBackend implements HarnessBackend {
     };
   }
 
-  async search(input: { query: string; scope: "library" | "conversations" | "memory" | "all"; limit: number }): Promise<SearchHit[]> {
-    const term = input.query.trim().slice(0, 240);
-    const wants = (scope: "library" | "conversations" | "memory") => input.scope === "all" || input.scope === scope;
-    const [artifacts, threads, memory] = await Promise.all([
-      wants("library")
-        ? query<unknown & object, unknown>("spectraArtifacts:list", {
-            actorClerkId: this.actorClerkId,
-            placement: "all",
-            search: term,
-            limit: input.limit,
-          }).catch(() => [])
-        : Promise.resolve([]),
-      wants("conversations")
-        ? query<unknown & object, { results?: unknown }>("spectraThreads:search", {
-            actorClerkId: this.actorClerkId,
-            query: term,
-            limit: 8,
-          }).catch(() => ({ results: [] }))
-        : Promise.resolve({ results: [] }),
-      wants("memory") && term.length >= 3
-        ? act<unknown & object, { text?: string } | null>("memory:contextForRun", {
-            actorClerkId: this.actorClerkId,
-            queryText: term,
-            targetTokens: 1_000,
-          }).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-    const hits: SearchHit[] = [
-      ...rows(artifacts).map((artifact) => ({
-        kind: "artifact" as const,
-        id: String(artifact._id),
-        title: text(artifact.title) || "Untitled",
-        type: text(artifact.blueprintKey),
-        ...(text(artifact.summary) ? { snippet: text(artifact.summary).slice(0, 240) } : {}),
-      })),
-      ...rows((threads as { results?: unknown }).results).map((thread) => ({
-        kind: "thread" as const,
-        id: String(thread.id ?? thread._id),
-        threadId: String(thread.id ?? thread._id),
-        title: text(thread.title) || "Conversation",
-        ...(text(thread.summaryShort) ? { snippet: text(thread.summaryShort).slice(0, 240) } : {}),
-      })),
-    ];
-    const memoryText = text(memory?.text).trim();
-    if (memoryText) hits.push({ kind: "memory", id: "memory", title: "What you remember", snippet: memoryText.slice(0, 1_500) });
-    return hits.slice(0, Math.max(input.limit, 1) + 1);
+  private searchHints() {
+    return {
+      ...(this.input.openItemIds?.length ? { openItemIds: this.input.openItemIds.slice(0, 12) } : {}),
+      now: Date.now(),
+      timezoneOffsetMinutes: timezoneOffsetMinutes(this.timeZone),
+    };
+  }
+
+  async search(input: SearchRequest): Promise<SearchResponse> {
+    const response = await act<unknown & object, SemanticSearchResponse>("semantic:search", {
+      query: input.query.trim().slice(0, 500),
+      kinds: input.kinds?.length ? input.kinds : [...SEMANTIC_KINDS],
+      limit: Math.max(1, Math.min(30, input.limit)),
+      hints: this.searchHints(),
+    });
+    return {
+      hits: response.results.map(searchHit),
+      mode: response.mode,
+      ...(response.degraded ? { degraded: response.degraded.reason } : {}),
+    };
   }
 
   async readThread(input: ThreadReadRequest): Promise<string> {
     const threadId = input.threadId ?? this.input.threadId;
-    if (!threadId) return "There is no conversation to read.";
+    if (input.query) return this.findInThread(input.query, threadId);
+    if (!threadId) return "There is no conversation to read. Find one with search (kinds: thread).";
     const result = (await executeThreadRead(this.actorClerkId, {
       threadId,
-      ...(input.query ? { query: input.query } : {}),
-      ...(input.before && !input.query ? { before: input.before } : {}),
+      ...(input.messageId ? { messageId: input.messageId } : input.before ? { before: input.before } : {}),
       ...(input.limit ? { limit: input.limit } : {}),
     })) as Record<string, unknown>;
     if (result.ok === false) return `Could not read that conversation: ${text(result.message) || text(result.code)}`;
-    const messages = rows(result.messages ?? result.results ?? result.matches);
-    if (!messages.length) return input.query ? `No messages match "${input.query}".` : "No earlier messages.";
+    if (input.messageId) {
+      const role = text(result.role) === "assistant" ? "Spectra" : "User";
+      const more = typeof result.nextOffset === "number" ? "\n… (the message continues; it is longer than one read)" : "";
+      return clip(`[${input.messageId}] ${role}: ${text(result.content)}${more}`);
+    }
+    const messages = rows(result.messages);
+    if (!messages.length) return "No earlier messages.";
     const lines = messages.map((message) => {
       const role = text(message.role) === "assistant" ? "Spectra" : "User";
-      return `${role}: ${text(message.content ?? message.excerpt ?? message.snippet).slice(0, 2_000)}`;
+      return `[${String(message.messageId ?? "")}] ${role}: ${text(message.content).slice(0, 2_000)}`;
     });
     const before = text(result.before);
     return clip(`${lines.join("\n\n")}${before ? `\n\n(Older messages: read_thread with before "${before}")` : ""}`);
+  }
+
+  /** Find a passage by meaning and words: in one conversation, or across them all. */
+  private async findInThread(query: string, threadId: string | undefined): Promise<string> {
+    const response = await act<unknown & object, SemanticSearchResponse>("semantic:searchThreads", {
+      query: query.trim().slice(0, 500),
+      limit: 8,
+      hints: { ...this.searchHints(), ...(threadId ? { openItemIds: [threadId] } : {}) },
+    });
+    const note = degradedNote(response.mode, response.degraded?.reason);
+    const inThread = threadId ? response.results.filter((result) => result.itemId === threadId) : response.results;
+    const elsewhere = response.results.filter((result) => !inThread.includes(result));
+    const others = elsewhere.length
+      ? `\nOther conversations that match:\n${elsewhere.slice(0, 5).map((result) => `- ${result.title} (threadId ${result.itemId})${result.snippet ? `: ${result.snippet}` : ""}`).join("\n")}`
+      : "";
+    const best = inThread[0];
+    if (!best)
+      return `${threadId ? "Nothing in this conversation" : "No conversation"} matches "${query}".${others}${note}`;
+    const messageId = best.anchor.kind === "thread" ? best.anchor.messageId : undefined;
+    const bestThread = best.itemId;
+    let passage = best.snippet;
+    if (messageId) {
+      const read = (await executeThreadRead(this.actorClerkId, { threadId: bestThread, messageId }).catch(() => null)) as Record<string, unknown> | null;
+      if (read && read.ok !== false && text(read.content)) passage = `${text(read.role) === "assistant" ? "Spectra" : "User"}: ${text(read.content)}`;
+    }
+    return clip(
+      [
+        `Best match${threadId ? "" : `, in "${best.title}" (threadId ${bestThread})`}${messageId ? `, message ${messageId}` : ""}:`,
+        passage,
+        messageId ? `(Read around it with read_thread {threadId: "${bestThread}", before: "${messageId}"}.)` : "",
+      ]
+        .filter(Boolean)
+        .join("\n") + others + note,
+    );
   }
 
   async webSearch(input: { query: string; deep?: boolean }, signal: AbortSignal): Promise<WebResult[]> {

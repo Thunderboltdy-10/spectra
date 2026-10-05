@@ -2,7 +2,6 @@ import type { ArtifactBlueprint } from "../core";
 import {
   ARTIFACT_TYPE_MANIFESTS,
   getArtifactTypeManifest,
-  loadArtifactSkill,
   requireArtifactTypeManifest,
   validateArtifactContent,
 } from "../artifacts/registry";
@@ -234,6 +233,5 @@ export function validateBlueprintContent(key: string, content: unknown) {
 
 export {
   getArtifactTypeManifest,
-  loadArtifactSkill,
   requireArtifactTypeManifest,
 };

@@ -1,75 +1,81 @@
-import { loadArtifactSkill } from "../../artifacts/registry";
-import { artifactDesignGuidance } from "../../artifacts/skills/artifact-design";
-import { visualisationDesignGuide } from "../../artifacts/skills/visualisation-design";
-import type { ArtifactSkill } from "../../artifacts/types";
+import { SKILL_BUNDLE } from "../skills/bundle.generated";
+import type { BundledSkill } from "../skills/types";
 import { AUTHORING_FORMATS } from "./authoring/formats";
 import { ToolInputError, type HarnessTool } from "./types";
 
 /*
- * Skills are the per-type craft guides in src/features/spectra/artifacts/skills.
- * The system prompt carries only an index (name and one line); load_skill
- * returns the whole guide with the type's authoring format.
+ * Skills are folders, src/features/spectra/ai/skills/<name>/SKILL.md, bundled at build time
+ * (scripts/bundle-skills.mjs) so the server never reads the filesystem. The system prompt
+ * carries only each skill's name and one line; load_skill returns the body, the type's
+ * authoring format for artifact skills, and the names of the skill's resources.
  */
 
 export type SkillIndexEntry = { name: string; description: string };
 
-export const SKILL_INDEX: SkillIndexEntry[] = [
-  { name: "document", description: "Notes, essays, guides, reports and handouts in Markdown." },
-  { name: "presentation", description: "Slide decks: narrative, layouts, charts, speaker notes." },
-  { name: "sheets", description: "Workbooks: tables, formulas, formatting and charts." },
-  { name: "whiteboard", description: "Diagrams, cycles, mind maps and flows as nodes and connectors." },
-  { name: "flashcard_deck", description: "Active-recall cards, including cloze cards." },
-  { name: "quiz", description: "Practice questions with checked answers and explanations." },
-  { name: "planner_task", description: "One task with a due date, priority and subtasks." },
-  { name: "code", description: "Code projects and runnable browser, React or Python visualisations." },
-  { name: "agent", description: "Custom agents: purpose, instructions, tone and routing." },
-  { name: "design", description: "Visual design judgement for any artifact: hierarchy, density, review." },
-  { name: "visualisation", description: "Interactive educational visualisations and simulations in code." },
-];
+const SKILLS = new Map<string, BundledSkill>(SKILL_BUNDLE.map((skill) => [skill.name, skill]));
+
+export const SKILL_INDEX: readonly SkillIndexEntry[] = SKILL_BUNDLE.map(({ name, description }) => ({ name, description }));
+
+const SKILL_NAMES = SKILL_INDEX.map((entry) => entry.name);
 
 export function skillIndexText() {
   return SKILL_INDEX.map((entry) => `- ${entry.name}: ${entry.description}`).join("\n");
 }
 
-function section(title: string, lines: readonly string[]) {
-  return lines.length ? [`## ${title}`, ...lines.map((line) => `- ${line}`)].join("\n") : "";
+function authoringFormat(name: string) {
+  if (!(name in AUTHORING_FORMATS)) return "";
+  const format = AUTHORING_FORMATS[name as keyof typeof AUTHORING_FORMATS];
+  return [
+    "## Authoring format",
+    `Create (create_artifact content): ${format.create}`,
+    `Edit (edit_artifact operations): ${format.edit}`,
+    `Read parts with read_artifact: ${format.read}.`,
+  ].join("\n");
 }
 
-function renderTypeSkill(name: keyof typeof AUTHORING_FORMATS, skill: ArtifactSkill) {
-  const format = AUTHORING_FORMATS[name];
+function requireSkill(name: string) {
+  const skill = SKILLS.get(name);
+  if (!skill) throw new ToolInputError(`No skill is called "${name}". Skills: ${SKILL_NAMES.join(", ")}.`);
+  return skill;
+}
+
+/** The skill's guide, its authoring format when it is an artifact type, and its resources. */
+export function loadSkillText(name: string, resource?: string): string {
+  const skill = requireSkill(name);
+  if (resource) {
+    const file = skill.resources.find((entry) => entry.path === resource);
+    if (!file)
+      throw new ToolInputError(
+        skill.resources.length
+          ? `The ${name} skill has no resource "${resource}". Resources: ${skill.resources.map((entry) => entry.path).join(", ")}.`
+          : `The ${name} skill has no resources.`,
+      );
+    return `# ${name} / ${file.path}\n\n${file.content}`;
+  }
   return [
-    `# ${name} skill`,
-    skill.purpose,
-    `## Authoring format\nCreate (create_artifact content): ${format.create}\nEdit (edit_artifact operations): ${format.edit}\nRead parts with read_artifact: ${format.read}.\nThe authoring format above is what the tools take; where the guidance below names internal fields, express the same intent in this format.`,
-    section("When it fits", skill.createWhen),
-    section("Craft", skill.operations),
-    section("Keep intact", skill.preservationRules),
-    section("Check before finishing", skill.validation),
-    ...(skill.specialistGuides?.length
-      ? [section("Specialist guidance", skill.specialistGuides.flatMap((guide) => [`${guide.trigger}`, ...guide.instructions]))]
-      : []),
+    skill.body,
+    authoringFormat(name),
+    skill.resources.length
+      ? `## Resources\nLoad one with load_skill {name: "${name}", resource}: ${skill.resources.map((entry) => entry.path).join(", ")}.`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export async function loadSkillText(name: string): Promise<string> {
-  if (name === "design") return [`# design skill`, ...artifactDesignGuidance.map((line) => `- ${line}`)].join("\n");
-  if (name === "visualisation")
-    return [`# visualisation skill`, visualisationDesignGuide.trigger, ...visualisationDesignGuide.instructions.map((line) => `- ${line}`)].join("\n");
-  if (!(name in AUTHORING_FORMATS)) throw new ToolInputError(`No skill is called "${name}". Skills: ${SKILL_INDEX.map((entry) => entry.name).join(", ")}.`);
-  const skill = await loadArtifactSkill(name);
-  return renderTypeSkill(name as keyof typeof AUTHORING_FORMATS, skill);
-}
+type LoadSkillArgs = { name: string; resource?: string };
 
-export function loadSkillTool(): HarnessTool<{ name: string }> {
+export function loadSkillTool(): HarnessTool<LoadSkillArgs> {
   return {
     name: "load_skill",
     description:
-      "Load a skill: the full craft guide and authoring format for a kind of work. Load the matching skill before creating or substantially editing that kind of work, once per run.",
+      "Load a skill: the craft guide for a kind of work, with the authoring format for artifact types. Load the matching skill before creating or substantially editing that kind of work, once per conversation. Pass resource to read one of the reference files the skill lists.",
     parameters: {
       type: "object",
-      properties: { name: { type: "string", enum: SKILL_INDEX.map((entry) => entry.name) } },
+      properties: {
+        name: { type: "string", enum: SKILL_NAMES },
+        resource: { type: "string", description: "A reference file the skill lists, e.g. citation-styles.md." },
+      },
       required: ["name"],
       additionalProperties: false,
     },
@@ -77,10 +83,12 @@ export function loadSkillTool(): HarnessTool<{ name: string }> {
     label: (args) => `Loading the ${args.name} skill`,
     quiet: true,
     parse: (raw) => {
-      if (typeof raw.name !== "string" || !SKILL_INDEX.some((entry) => entry.name === raw.name))
-        throw new ToolInputError(`name must be one of ${SKILL_INDEX.map((entry) => entry.name).join(", ")}.`);
-      return { name: raw.name };
+      if (typeof raw.name !== "string" || !SKILLS.has(raw.name))
+        throw new ToolInputError(`name must be one of ${SKILL_NAMES.join(", ")}.`);
+      if (raw.resource !== undefined && (typeof raw.resource !== "string" || !raw.resource.trim()))
+        throw new ToolInputError("resource must be a file name the skill lists.");
+      return { name: raw.name, ...(typeof raw.resource === "string" ? { resource: raw.resource.trim() } : {}) };
     },
-    execute: async (args) => ({ ok: true, content: await loadSkillText(args.name) }),
+    execute: async (args) => ({ ok: true, content: loadSkillText(args.name, args.resource) }),
   };
 }

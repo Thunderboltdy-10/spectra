@@ -22,10 +22,20 @@ import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
 import { BridgeSettings } from "../../bridge/bridge-settings";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
+import {
+  PERMISSION_CATEGORIES,
+  PERMISSION_CATEGORY_DESCRIPTIONS,
+  PERMISSION_CATEGORY_LABELS,
+  PERMISSION_CHOICE_OPTIONS,
+  fullControlPatch,
+  permissionChoice,
+  permissionChoicePatch,
+  type PermissionChoice,
+} from "../schema/ai-permissions";
 import { registerSettingsToggleControl } from "../../collaboration/settings-toggle-control";
 
 const SECTIONS = [
-  { id: "ai", label: "Conversations", icon: Bot },
+  { id: "ai", label: "Spectra AI", icon: Bot },
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
@@ -98,6 +108,32 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} triggerClassName="min-w-[144px]" />} /> : null}
+    </SettingGroup>
+  );
+}
+
+/*
+ * Settings → Spectra AI → Permissions. Only the user changes these: the AI's
+ * settings command refuses any patch that touches them (see ai-permissions.ts).
+ */
+function PermissionSettings({ p, update }: SectionProps<"ai">) {
+  const stored = { permissionFullControl: p.permissionFullControl, permissionAllow: p.permissionAllow, permissionDeny: p.permissionDeny };
+  return (
+    <SettingGroup title="Permissions" description="Reading and ordinary edits always run and can be undone. Choose what Spectra may do that cannot be undone, or that changes your settings, sharing and connections.">
+      <ToggleRow label="Give Spectra full control" description="Allow every category below without asking. Turning this off sets every category back to Ask." checked={p.permissionFullControl} onCheckedChange={(on) => update(fullControlPatch(on))} />
+      {PERMISSION_CATEGORIES.map((category) => {
+        const label = PERMISSION_CATEGORY_LABELS[category];
+        return (
+          <SelectRow
+            key={category}
+            label={label.charAt(0).toUpperCase() + label.slice(1)}
+            description={PERMISSION_CATEGORY_DESCRIPTIONS[category]}
+            value={permissionChoice(stored, category)}
+            options={PERMISSION_CHOICE_OPTIONS}
+            onChange={(choice) => update(permissionChoicePatch(stored, category, choice as PermissionChoice))}
+          />
+        );
+      })}
     </SettingGroup>
   );
 }
@@ -308,7 +344,12 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
-    ai: <ConversationSettings p={preferences.ai} update={updateSection("ai")} />,
+    ai: (
+      <div className="space-y-10">
+        <ConversationSettings p={preferences.ai} update={updateSection("ai")} />
+        <PermissionSettings p={preferences.ai} update={updateSection("ai")} />
+      </div>
+    ),
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,

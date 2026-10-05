@@ -32,7 +32,7 @@ import type {
  * One Spectra run: the system prompt and environment, this thread's history,
  * the loop, captions, compaction and durable bookkeeping, wired together.
  * Storage and transport arrive as a sink, so the same driver serves the app
- * (Convex) and the smoke run (in memory).
+ * (Convex) and the evals (in memory).
  */
 
 export type HarnessEvent =
@@ -196,7 +196,6 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   else state = emptyLoopState([...(input.history ?? []), userMessage(input.prompt, input.attachments)]);
   latestText = state.text;
   let artifactsSeen = state.artifacts.length;
-  let widgetCount = 0;
 
   const outcome = await runHarnessLoop(
     state,
@@ -235,10 +234,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           captions?.stepEnded({ id: step.call.id, ok: step.outcome.ok, doneLabel: step.outcome.doneLabel });
         },
         onTodos: (todos) => emit({ type: "todos", todos }),
-        onWidget: (widget, step) => {
-          widgetCount += 1;
-          emit({ type: "widget", id: `${step.call.id}-${widgetCount}`, widget });
-        },
+        onWidget: (widget, step) => emit({ type: "widget", id: step.call.id, widget }),
         onUiEvents: (events) => {
           for (const event of events) emit({ type: "ui_event", key: event.key, payload: event.payload });
         },

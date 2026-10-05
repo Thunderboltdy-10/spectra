@@ -91,15 +91,6 @@ body {
   letter-spacing: 0;
 }
 
-.spectra-shell-sidebar {
-  background: var(--bg-sidebar);
-}
-
-.spectra-shell-sidebar nav a:hover {
-  background: color-mix(in oklab, var(--text-primary) 8%, var(--bg-sidebar));
-  color: var(--text-primary);
-}
-
 .spectra-shell-nav {
   position: relative;
 }
@@ -3350,7 +3341,7 @@ body {
   --bg-primary: #fbfaf8;
   --bg-secondary: #f6f4f0;
   --bg-tertiary: #efede8;
-  --bg-sidebar: #fcfbf9;
+  --bg-sidebar: var(--bg-primary);
   --bg-user-bubble: #f3efff;
   --bg-elevated: #fffefd;
   --bg-elevated-rgb: 255, 254, 253;
@@ -3442,7 +3433,6 @@ body {
 
   /* Layout dimensions */
   --header-height: 44px;
-  --sidebar-width: 240px;
   --details-rail-width: 292px;
   --composer-max-width: 880px;
 
@@ -3726,7 +3716,7 @@ html[data-spectra-motion="none"] *::after {
   --bg-primary: #121211;
   --bg-secondary: #1a1a19;
   --bg-tertiary: #222221;
-  --bg-sidebar: #0e0e0d;
+  --bg-sidebar: var(--bg-primary);
   --bg-user-bubble: #1e2530;
 
   --bg-elevated: #1e1e24;
@@ -12076,15 +12066,6 @@ body {
   letter-spacing: 0;
 }
 
-.spectra-shell-sidebar {
-  background: var(--bg-sidebar);
-}
-
-.spectra-shell-sidebar nav a:hover {
-  background: color-mix(in oklab, var(--text-primary) 8%, var(--bg-sidebar));
-  color: var(--text-primary);
-}
-
 .spectra-global-stage {
   background: transparent;
 }
@@ -12287,46 +12268,13 @@ body {
   width: max-content;
 }
 
-/* Shared Spectra redesign polish — transitions, composer, rails. */
-.spectra-workbench-live-stack {
-  position: fixed !important;
-  left: 0 !important;
-  right: 0 !important;
-}
-
-/* The fixed band is a hit-test shell, not a page-wide scrim. Keep the stack
-   transparent to pointer input and opt actual controls back in. In
-   particular, the run strip is full-width for scrolling but its empty space
-   must not cover an editor control underneath it. */
-.spectra-workbench-live-stack > .spectra-live-stack,
-.spectra-workbench-live-stack .spectra-live-dock-root,
-.spectra-workbench-live-stack .spectra-live-dock-row,
-.spectra-workbench-live-stack .spectra-run-tab-strip {
-  pointer-events: none;
-}
-
-.spectra-workbench-live-stack .spectra-live-dock-tab,
-.spectra-workbench-live-stack .spectra-live-dock-slot,
-.spectra-workbench-live-stack .spectra-live-dock-hover,
-.spectra-workbench-live-stack .spectra-command-bar,
-.spectra-workbench-live-stack .spectra-command-bar > * {
-  pointer-events: auto;
-}
-
-/* Modal dialogs share the composer-dock layer. While one is open, the dock
-   must not steal clicks from the dialog footer or paint as a competing
-   overlay. */
-body:has([role="dialog"][aria-modal="true"]) .spectra-workbench-live-stack,
-body:has([role="dialog"][aria-modal="true"]) .spectra-workbench-live-stack *,
-body:has([aria-label="Version history comparison"]) .spectra-workbench-live-stack,
-body:has([aria-label="Version history comparison"]) .spectra-workbench-live-stack *,
-/* Menus portal at the dropdown layer, below the dock. While any menu is
-   open, mute the dock so bottom rows (New → Whiteboard, row Actions near
-   the composer) stay clickable even when a surface still uses z-dropdown. */
-body:has([role="menu"][data-state="open"]) .spectra-workbench-live-stack,
-body:has([role="menu"][data-state="open"]) .spectra-workbench-live-stack *,
-body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack,
-body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
+/* Modal dialogs share the composer-dock layer with the island. While one is
+   open, the island must not steal clicks from the dialog footer. Menus are
+   left alone: the island's own menus need it to keep its hover. */
+body:has([role="dialog"][aria-modal="true"]) [data-island-root],
+body:has([role="dialog"][aria-modal="true"]) [data-island-root] *,
+body:has([aria-label="Version history comparison"]) [data-island-root],
+body:has([aria-label="Version history comparison"]) [data-island-root] * {
   pointer-events: none !important;
 }
 
@@ -12342,18 +12290,6 @@ body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
    composer band instead of parking underneath it. */
 .spectra-composer-above {
   bottom: calc(var(--spectra-composer-safe-area, 0px) + 8px);
-}
-
-@media (min-width: 768px) {
-  .spectra-app-shell[data-sidebar-collapsed="false"]
-    .spectra-workbench-live-stack {
-    left: 240px !important;
-  }
-
-  .spectra-app-shell[data-sidebar-collapsed="true"]
-    .spectra-workbench-live-stack {
-    left: 76px !important;
-  }
 }
 
 .spectra-command-bar {

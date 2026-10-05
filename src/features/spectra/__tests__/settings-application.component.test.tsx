@@ -33,7 +33,7 @@ describe("Settings application accessibility contract", () => {
       screen.getByRole("navigation", { name: "Settings sections" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("heading", { name: "Conversations", level: 2 }),
+      screen.getByRole("heading", { name: "Spectra AI", level: 2 }),
     ).toBeTruthy();
     expect(
       screen.getByRole("heading", {
@@ -49,6 +49,24 @@ describe("Settings application accessibility contract", () => {
       screen.getByRole("heading", { name: "Appearance", level: 2 }),
     ).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Reduced motion" })).toBeTruthy();
+  });
+
+  it("offers Ask, Always allow or Never for each AI permission, and full control", () => {
+    render(
+      <ThemeProvider>
+        <SettingsApplication initialSection="ai" />
+      </ThemeProvider>,
+    );
+    expect(screen.getByRole("heading", { name: "Permissions", level: 2 })).toBeTruthy();
+    for (const label of ["Permanent deletion", "Sending outside Spectra", "ManageBac changes", "Desktop file changes through Bridge", "Settings changes", "Sharing changes", "Connection changes"])
+      expect(screen.getByRole("combobox", { name: label }).textContent).toContain("Ask");
+    fireEvent.click(screen.getByRole("switch", { name: "Give Spectra full control" }));
+    const stored = JSON.parse(window.localStorage.getItem("spectra:preferences:v2") ?? "null") as {
+      ai?: { permissionFullControl?: boolean; permissionAllow?: string[]; permissionDeny?: string[] };
+    } | null;
+    expect(stored?.ai).toMatchObject({ permissionFullControl: true, permissionDeny: [] });
+    expect(stored?.ai?.permissionAllow).toHaveLength(7);
+    expect(screen.getByRole("combobox", { name: "Sharing changes" }).textContent).toContain("Always allow");
   });
 
   it("persists a setting as one versioned device preference document", () => {

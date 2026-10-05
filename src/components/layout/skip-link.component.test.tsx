@@ -27,7 +27,7 @@ vi.mock("@/features/spectra/data/use-catalog-pages", () => ({ useWorkspaceCatalo
 vi.mock("@/features/spectra/components/catalog-progress", () => ({ CatalogProgress: () => null }));
 vi.mock("@/components/spectra-logo", () => ({ SpectraLogo: () => null }));
 vi.mock("@/components/signed-in-continue", () => ({ SignedInContinue: () => null }));
-vi.mock("@/components/keyboard-shortcuts", () => ({ KeyboardShortcutsRegistrar: () => null, KeyboardShortcutsHelp: () => null, ShortcutsButton: () => null }));
+vi.mock("@/components/keyboard-shortcuts", () => ({ KeyboardShortcutsRegistrar: () => null, KeyboardShortcutsHelp: () => null }));
 vi.mock("@/features/spectra/components/universal-kbar", () => ({ UniversalKBar: () => null }));
 vi.mock("@/features/spectra/components/viewport-readiness-mount", () => ({ ViewportReadinessMount: () => null }));
 vi.mock("@/features/spectra/components/route-side-panel-host", () => ({ RouteSidePanelHost: () => null }));
@@ -35,7 +35,10 @@ vi.mock("@/features/spectra/components/viewport-reference-picker", () => ({ View
 vi.mock("@/features/spectra/island/island-host", () => ({ IslandHost: () => null }));
 vi.mock("@/features/spectra/bridge/product-offline-banner", () => ({ ProductOfflineBanner: () => null }));
 vi.mock("@/features/spectra/collaboration/app-choreography-host", () => ({ AppChoreographyMount: () => null }));
-vi.mock("@/components/ui/dropdown-menu", () => ({ OverflowMenu: () => null }));
+vi.mock("@/components/ui/dropdown-menu", () => { const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>; const Nothing = () => null; return { DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: Nothing, DropdownMenuItem: Nothing, DropdownMenuLabel: Nothing, DropdownMenuSeparator: Nothing, DropdownMenuRadioGroup: Nothing, DropdownMenuRadioItem: Nothing, OverflowMenu: Nothing }; });
+vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
+vi.mock("@/features/spectra/organization/tree-client", () => ({ useTreeQuickView: () => ({ nodes: [] }) }));
+vi.mock("@/features/spectra/threads/threads-view", () => ({ ThreadsViewHost: () => null }));
 
 function shellHtml() {
   return renderToStaticMarkup(<RootLayout><AppShell><button>Page content action</button></AppShell></RootLayout>);

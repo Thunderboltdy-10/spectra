@@ -12,6 +12,8 @@ import { prepareApplicationCommand } from "../operations/application-command";
 import { spectraToolRegistry } from "../tools/registry";
 import { spectraToolExecutor } from "../tools/execution/tool-executor";
 import { CALENDAR_COMMAND_ALIASES } from "../calendar/domain/command";
+import { readFileSync } from "node:fs";
+import { AI_SYNC_PURPOSE_KINDS, aiSyncPurpose } from "../../../../shared/school-sync";
 
 const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: string; event?: string; status?: string }> = [
   { command: "navigate_spectra", args: { destination: "calendar" }, event: "navigate_spectra" },
@@ -39,7 +41,6 @@ describe("tool titles students see in run steps", () => {
     const titles = spectraToolRegistry.list().map((tool) => tool.title);
     expect(titles.length).toBeGreaterThan(10);
     expect(titles.filter((title) => /artifact/i.test(title))).toEqual([]);
-    expect(spectraToolRegistry.require("read_artifact_skill").title).toBe("Read work guidance");
     expect(spectraToolRegistry.require("add_comment").title).toBe("Add comment");
   });
 });
@@ -70,6 +71,12 @@ describe("application action contract matrix (stubbed persistence)", () => {
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
   });
+
+  it.each([["upcoming_deadlines", ["current_tasks"]], ["past_tasks", ["past_tasks", "dropbox_files"]], ["cas", ["cas"]], ["nonsense", ["current_tasks"]]] as const)(
+    "asks ManageBac only for the kinds the %s refresh needs", (purpose, kinds) => {
+      expect(AI_SYNC_PURPOSE_KINDS[aiSyncPurpose(purpose)]).toEqual(kinds);
+      expect(readFileSync("convex/spectraApplicationWrites.ts", "utf8")).toContain("kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]]");
+    });
 
   it.each(Object.entries(CALENDAR_COMMAND_ALIASES))("dispatches Calendar alias %s with its operation identity", async (alias, canonical) => {
     const operation = prepareApplicationCommand(alias, calendarArgs[canonical]!);

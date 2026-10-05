@@ -244,8 +244,8 @@ export function useStudioDensity(
 }
 
 /**
- * The composer safe area is published globally by the composer band itself
- * (`composer-safe-area.ts`, mounted by `WorkbenchLiveStack`); studios consume
+ * The composer safe area is published globally by the island itself
+ * (`composer-safe-area.ts`); studios consume
  * `--spectra-composer-safe-area` from the document root like every other
  * surface. The per-studio publisher that used to live here measured the same
  * band six ways and still missed surfaces outside the studios.

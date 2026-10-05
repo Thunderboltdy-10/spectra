@@ -11,6 +11,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type HTMLAttributes,
   type MouseEvent,
 } from "react";
 import { Icon } from "@/components/icons";
@@ -23,6 +24,7 @@ import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation"
 import { readCommandAttachment, type CommandAttachment } from "../components/command-attachments";
 import { getSpectraInstalledAgents, searchSpectra, type SpectraArtifact, type SpectraInstalledAgent } from "../data/api";
 import { MARK_POSE, prismSvg, PRISM_PALETTES } from "../life/prism";
+import { useLifeArrival, useLifeDeparture } from "../life/use-life";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -169,6 +171,9 @@ export const IslandComposer = forwardRef<
     setAgentIndex(next - 1);
   };
 
+  const sending = useRef(false);
+  const departs = useCallback(() => !sending.current, []);
+
   const send = () => {
     const clean = text.trim();
     if (!clean || attachments.some((attachment) => attachment.error)) return;
@@ -183,6 +188,9 @@ export const IslandComposer = forwardRef<
       wordsRect,
       lineCount,
     });
+    // What was sent goes into the prism with the words; it does not part here.
+    sending.current = true;
+    requestAnimationFrame(() => (sending.current = false));
     setText("");
     setAttachments([]);
     setReferences([]);
@@ -281,8 +289,10 @@ export const IslandComposer = forwardRef<
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
           {chips.map((chip) => (
-            <span
+            <ComposerChip
               key={chip.id}
+              id={chip.id}
+              departs={departs}
               title={chip.error}
               className={cn(
                 "inline-flex h-7 max-w-[220px] items-center gap-1.5 rounded-chip border pl-1.5 pr-1 text-caption",
@@ -307,7 +317,7 @@ export const IslandComposer = forwardRef<
                     : setAttachments((current) => current.filter((item) => item.id !== chip.id))
                 }
               />
-            </span>
+            </ComposerChip>
           ))}
         </div>
       ) : null}
@@ -426,4 +436,12 @@ function AgentSwitch({
       </DropdownMenu>
     </span>
   );
+}
+
+/** A file or a reference in the message: it forms from where it came (the drop, the pick) and parts when removed. */
+function ComposerChip({ id, departs, ...props }: HTMLAttributes<HTMLSpanElement> & { id: string; departs: () => boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLifeArrival(ref, `composer-chip:${id}`, "human", { bars: "span" });
+  useLifeDeparture(ref, departs);
+  return <span ref={ref} {...props} />;
 }

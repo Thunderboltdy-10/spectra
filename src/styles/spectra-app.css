@@ -15009,33 +15009,31 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   max-width: 22ch;
 }
 
-/* Active-tail shimmer (POLISH-005). Only the unresolved live tail carries a
-   shimmer marker; completed paragraphs never shimmer. */
+/* The writing front (MOTION.md, "Streaming text"): Spectra's caret is a small
+   prism of the spectrum at the end of the unresolved tail. It breathes while
+   words arrive; completed paragraphs never carry it. The field's light follows
+   it from useWritingFront. */
 @keyframes spectra-tail-shimmer {
   0%,
   100% {
-    opacity: 0.32;
-    transform: scaleY(0.85);
+    opacity: 0.55;
+    transform: translateY(0.5px) scale(0.86);
   }
   50% {
     opacity: 1;
-    transform: scaleY(1);
+    transform: translateY(0) scale(1);
   }
 }
 
 .spectra-stream-active > :last-child::after {
   content: "";
   display: inline-block;
-  width: 0.5em;
-  height: 1.05em;
-  margin-left: 3px;
-  vertical-align: text-bottom;
-  border-radius: 2px;
-  background: linear-gradient(
-    100deg,
-    color-mix(in oklab, var(--accent-cyan) 55%, transparent),
-    color-mix(in oklab, var(--brand-primary) 70%, transparent)
-  );
+  width: 0.62em;
+  height: 0.56em;
+  margin-left: 4px;
+  vertical-align: 0.05em;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: conic-gradient(from 200deg at 50% 70%, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
   animation: spectra-tail-shimmer 1.15s var(--ease-standard) infinite;
 }
 

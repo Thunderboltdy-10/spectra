@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCall
 import type { LightColour, Rect } from "./engine";
 import { figureOf, type ElementFigureOptions } from "./figure-dom";
 import type { Point } from "./figure";
-import { life } from "./life";
+import { life, type GlowHandle } from "./life";
 
 /*
  * Life for components: the kit's hooks onto the field, so pages get the
@@ -105,7 +105,7 @@ export function travelElement(from: Element | Point, to: Element | { absorb: Ele
 let lastPress: { point: Point; at: number } | null = null;
 let pressWatch = false;
 
-/** Where the user last pressed or what they last acted on from the keyboard: the cause of what opens next. */
+/** Where the user last pressed, dropped, or acted from the keyboard: the cause of what appears next. */
 function watchPresses() {
   if (pressWatch || typeof window === "undefined") return;
   pressWatch = true;
@@ -126,7 +126,17 @@ function watchPresses() {
     },
     { capture: true, passive: true },
   );
+  window.addEventListener(
+    "drop",
+    (event) => {
+      lastPress = { point: [event.clientX, event.clientY], at: performance.now() };
+    },
+    { capture: true, passive: true },
+  );
 }
+
+// Watch from the start, so the very first press is a cause too.
+watchPresses();
 
 /** The point the user just acted at, if within the last second. */
 export function recentCause(): Point | undefined {
@@ -309,7 +319,7 @@ function flushDepartures() {
  * really left the page: not when the page changed, not when React mounts it
  * again, and not when a whole view changes at once.
  */
-export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled = true, figure: ElementFigureOptions = {}) {
+export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled: boolean | (() => boolean) = true, figure: ElementFigureOptions = {}) {
   const enabledRef = useRef(enabled);
   const figureRef = useRef(figure);
   useEffect(() => {
@@ -320,7 +330,8 @@ export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled = t
     const element = ref.current;
     if (!element) return;
     return () => {
-      if (!enabledRef.current || !life.on || !element.isConnected) return;
+      const departs = typeof enabledRef.current === "function" ? enabledRef.current() : enabledRef.current;
+      if (!departs || !life.on || !element.isConnected) return;
       const r = element.getBoundingClientRect();
       if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return;
       const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figureRef.current });
@@ -332,4 +343,52 @@ export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled = t
       if (!departureFrame) departureFrame = requestAnimationFrame(flushDepartures);
     };
   }, [ref]);
+}
+
+/* ------------------------------------------------------------ writing front */
+
+/** Where the last written character of `root` ends, on screen. */
+function writingEnd(root: Element): DOMRect | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node.textContent ?? "").trim()) last = node as Text;
+  }
+  if (!last) return null;
+  const range = document.createRange();
+  const length = last.length;
+  range.setStart(last, Math.max(0, length - 1));
+  range.setEnd(last, length);
+  const rects = range.getClientRects();
+  return rects.length ? rects[rects.length - 1] : null;
+}
+
+/**
+ * Spectra writing in a thread (MOTION.md, "Streaming text"): a little light in
+ * the field follows the writing front while words arrive, so the paper around
+ * the text feels the writing, and lets go when the reply is complete.
+ */
+export function useWritingFront(ref: RefObject<HTMLElement | null>, active: boolean) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!active || !root || !life.on) return;
+    let glow: GlowHandle | null = null;
+    let last = 0;
+    let frame = 0;
+    const follow = (now: number) => {
+      frame = requestAnimationFrame(follow);
+      if (now - last < 90) return;
+      last = now;
+      const end = writingEnd(root);
+      if (!end || (!end.width && !end.height)) return;
+      const rect = { x: end.right - 36, y: end.top - 8, width: 48, height: end.height + 16 };
+      if (glow) glow.move(rect);
+      else glow = life.glow(rect, "spectrum", 0.55);
+    };
+    frame = requestAnimationFrame(follow);
+    return () => {
+      cancelAnimationFrame(frame);
+      glow?.stop();
+    };
+  }, [ref, active]);
 }

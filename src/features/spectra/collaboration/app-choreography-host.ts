@@ -43,8 +43,34 @@ const controlPresentationListeners = new Set<() => void>();
    its next move crosses the field from there. The first move leaves the prism. */
 const sparkAt = new Map<string, [number, number]>();
 
+/** How long Spectra's light lingers where it last acted before it goes home. */
+export const SPARK_HOME_MS = 1400;
+const sparkHome = new Map<string, number>();
+
+/**
+ * When Spectra stops working the interface, its light crosses the field back
+ * into the prism, which takes it in, and its next move leaves the prism again.
+ * Another move before then keeps it out.
+ */
+function sparkGoesHome(actorId: string) {
+  window.clearTimeout(sparkHome.get(actorId));
+  sparkHome.set(
+    actorId,
+    window.setTimeout(() => {
+      sparkHome.delete(actorId);
+      const from = sparkAt.get(actorId);
+      sparkAt.delete(actorId);
+      const prism = document.querySelector("[data-island-prism]")?.getBoundingClientRect();
+      if (!from || !life.on || !prism?.width) return;
+      void life.send(from, { x: prism.x, y: prism.y, width: prism.width, height: prism.height }, { colour: "spectrum", strength: 0.6, absorb: true });
+    }, SPARK_HOME_MS),
+  );
+}
+
 /** Light crosses the field to where Spectra acts next. */
 function moveSpark(actorId: string, to: [number, number]) {
+  window.clearTimeout(sparkHome.get(actorId));
+  sparkHome.delete(actorId);
   const from = sparkAt.get(actorId) ?? prismPoint();
   sparkAt.set(actorId, to);
   // What Spectra makes here forms from where its spark is, as a person's would from their press.
@@ -76,6 +102,7 @@ export function presentAppControl(actorId: string, operationId: string, element:
         const r = element.getBoundingClientRect();
         if (r.width > 0) life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.6, "spectrum");
       }
+      sparkGoesHome(actorId);
     }
     if (controlPresentations.get(actorId) !== presentation) return;
     controlPresentations.delete(actorId);

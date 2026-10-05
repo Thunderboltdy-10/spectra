@@ -26,7 +26,7 @@ import {
   writeRouteSideSession,
   writeSharedWorkbenchSession,
 } from "../workbench";
-import { useLifeLanding } from "../life/use-life";
+import { launchFrom, useLifeLanding } from "../life/use-life";
 import { LiveThreadPanel } from "./live-thread-panel";
 import { createLatestStudioLoad } from "./latest-studio-load";
 import {
@@ -315,7 +315,11 @@ export function RouteSidePanelHost() {
           sourceLabel="Route preview"
           onPanelWidthChange={setWorkWidth}
           onClose={closeWork}
-          onExpand={() => fullscreen(studio.activeArtifact!._id)}
+          onExpand={() => {
+            // The Side panel grows into the full view.
+            launchFrom(workSlot.current);
+            fullscreen(studio.activeArtifact!._id);
+          }}
           onActivateTab={activateTab}
           onCloseTab={() => closeWork()}
           onDirtyChange={setDirty}

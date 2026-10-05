@@ -109,6 +109,11 @@ let launch: { figure: Figure; at: number } | null = null;
 const LAUNCHERS = "[data-spectra-card], [data-life-launch]";
 const LAUNCH_BARS = "h2, h3, h4, [data-card-title], [data-row-title], [data-thread-title], p";
 
+/** Open the next surface out of `element` (a Side panel going full, say), whatever was pressed. */
+export function launchFrom(element: Element | null | undefined) {
+  if (element && life.on) launch = { figure: figureOf(element, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
+}
+
 function rememberLaunch(target: EventTarget | null) {
   const launcher = (target as Element | null)?.closest?.(LAUNCHERS);
   if (launcher && life.on) launch = { figure: figureOf(launcher, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };

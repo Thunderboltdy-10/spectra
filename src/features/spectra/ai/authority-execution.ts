@@ -100,12 +100,6 @@ export function evaluateApplicationAuthority(input: {
   return { ...result, target: resolved.target, notice };
 }
 
-export function authorityRequiresConfirmation(
-  decision: ApplicationAuthorityEvaluation["decision"],
-) {
-  return decision === "confirm" || decision === "always-confirm";
-}
-
 export function authorityRequiresNotice(
   decision: ApplicationAuthorityEvaluation["decision"],
 ) {

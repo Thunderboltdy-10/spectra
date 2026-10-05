@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { calendarLocalTimeToEpoch, normalizeCalendarTimeInput } from "../../../../shared/calendar-time";
-import { prepareApplicationCommand } from "../operations/application-command";
+import { parseApplicationCommand } from "@/app/api/spectra/run/harness/application-commands";
+import { calendarSemanticAction } from "../calendar/domain/command";
 
 describe("Calendar wall-time intent", () => {
   it.each([
@@ -23,12 +24,13 @@ describe("Calendar wall-time intent", () => {
     expect(() => calendarLocalTimeToEpoch("2026-09-21T13:00", "Europe/Nowhere")).toThrow("TIMEZONE_INVALID");
     expect(() => normalizeCalendarTimeInput({ startLocal: "2026-09-21T13:00", timezone: "Europe/Madrid", startAt: Date.parse("2026-09-21T12:00Z") })).toThrow("TIME_MISMATCH");
   });
-  it("normalizes both application aliases and model tools through the registered schema", () => {
+  it("normalizes application aliases and wall times through the command contract", () => {
     const args = { planArtifactId: "task", planTaskId: "task-1", startLocal: "2026-09-21T13:00", endLocal: "2026-09-21T14:00", timezone: "Europe/Madrid" };
-    const canonical = prepareApplicationCommand("schedule_calendar_task", args);
-    expect(prepareApplicationCommand("calendar.schedule", args)).toEqual(canonical);
-    expect(canonical.input.args.startAt).toBe(Date.parse("2026-09-21T11:00Z"));
-    expect(canonical.input.args.endAt).toBe(Date.parse("2026-09-21T12:00Z"));
-    expect(() => prepareApplicationCommand("schedule_calendar_task", { ...args, endLocal: "2026-09-21T12:00" })).toThrow("RANGE_INVALID");
+    const canonical = parseApplicationCommand("schedule_calendar_task", args);
+    expect(parseApplicationCommand("calendar.schedule", args)).toEqual(canonical);
+    expect(canonical.args.startAt).toBe(Date.parse("2026-09-21T11:00Z"));
+    expect(canonical.args.endAt).toBe(Date.parse("2026-09-21T12:00Z"));
+    const backwards = parseApplicationCommand("schedule_calendar_task", { ...args, endLocal: "2026-09-21T12:00" });
+    expect(() => calendarSemanticAction("schedule_calendar_task", backwards.args)).toThrow("RANGE_INVALID");
   });
 });

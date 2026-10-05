@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   calendarSemanticAction,
   calendarUndoInverse,
@@ -7,8 +7,6 @@ import {
   normalizeCalendarCommand,
 } from "../calendar/domain/command";
 import { evaluateApplicationAuthority } from "../ai/authority-execution";
-import { spectraToolExecutor } from "../tools/execution/tool-executor";
-import { spectraToolRegistry } from "../tools/registry";
 
 describe("S9-AI residual honesty (Calendar / authority / approval)", () => {
   it("normalizes legacy Calendar aliases onto one operation identity", () => {
@@ -65,27 +63,4 @@ describe("S9-AI residual honesty (Calendar / authority / approval)", () => {
     expect(result.consequence).not.toMatch(/No files on this PC would change/i);
   });
 
-  it("does not execute a tool when approval is declined", async () => {
-    const definition = spectraToolRegistry.require("schedule_calendar_task");
-    const execute = vi.spyOn(definition, "execute").mockResolvedValue({ ok: true });
-    const result = await spectraToolExecutor.execute(
-      {
-        id: "cal-1",
-        name: "schedule_calendar_task",
-        input: {
-          planArtifactId: "planner-1",
-          planTaskId: "task-1",
-          startAt: 1000,
-          endAt: 2000,
-          timezone: "UTC",
-        },
-      },
-      {
-        requireApproval: async () => false,
-      },
-    );
-    expect(result).toMatchObject({ ok: false, code: "approval_declined" });
-    expect(execute).not.toHaveBeenCalled();
-    execute.mockRestore();
-  });
 });

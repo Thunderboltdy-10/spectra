@@ -2,7 +2,7 @@ import { storeArtifactContent } from "@/lib/convex-server";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
-import { normalizeApplicationCommand } from "@/features/spectra/operations/application-command";
+import { normalizeApplicationCommand, parseApplicationCommand } from "./application-commands";
 import { executeReferenceInsertion } from "./reference-command";
 import { act, mutate, query } from "./io";
 import {
@@ -24,7 +24,6 @@ import { catalogCommandForApplicationCommand } from "@/features/spectra/commands
 import { materializeAiChangedPaths } from "@/features/spectra/components/ai-region-path";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
-import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
 import { smartCompletionValue, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
@@ -91,23 +90,9 @@ export async function executeApplicationCommand(
       signal,
       operationId,
     );
-  const definition = spectraToolRegistry.get(command);
-  if (!definition || definition.capability !== "operate_application")
-    throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
+  const { args: parsed, authority: authorityTarget } = parseApplicationCommand(command, args);
   if (!catalogCommandForApplicationCommand(command))
     throw new Error(`APP_COMMAND_REGISTRY_DRIFT:${command}`);
-  // Normalize model-friendly aliases before Zod strips unknown fields. The
-  // settings schema intentionally accepts only persisted preference sections,
-  // so doing this after parse would silently turn a valid natural-language
-  // request into an empty settings write.
-  const inputArgs =
-    command === "change_spectra_settings"
-      ? {
-          ...args,
-          patch: normalizeAiPreferencePatch(args.patch),
-        }
-      : args;
-  const parsed = definition.inputSchema.parse(inputArgs) as Record<string, unknown>;
   let uiObservation: UiObservationFence | undefined;
   const applyMutation: typeof mutate = async <TArgs extends object, TResult>(_name: string, _args: TArgs) => {
     throwIfAborted(signal);
@@ -117,16 +102,12 @@ export async function executeApplicationCommand(
       ...(uiObservation ? { uiObservation } : {}),
     });
   };
-  if (definition.aiAvailability === "prohibited")
-    throw new Error(
-      `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
-    );
-  if (definition.authorityTarget) {
+  if (authorityTarget) {
     const authority = await evaluateCommandAuthority({
       actorClerkId,
       command,
       args: parsed,
-      authorityTarget: definition.authorityTarget,
+      authorityTarget,
     });
     throwIfAborted(signal);
     await recordAuthorityDecision({

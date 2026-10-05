@@ -26,26 +26,6 @@ import { createdDependencyIndex, mapOperationArtifactReferences } from "./depend
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 export const SPECTRA_CREATABLE_BLUEPRINT_KEYS = WORK_TYPE_KEYS;
 
-export const OPERATION_TYPES = [
-  "artifact.create",
-  "artifact.update",
-  "artifact.archive",
-  "workspace.create",
-  "workspace.update",
-  "artifact.link",
-  "workspaceItem.add",
-  "workspaceItem.hide",
-  "workspaceItem.setPinned",
-  "thread.create",
-  "resultCard.create",
-  "resultCard.update",
-  "app.command",
-  "plannerTask.create",
-  "quiz.create",
-  "flashcardDeck.create",
-  "delete",
-] as const;
-
 export const MODEL_OPERATION_TYPES = [
   "artifact.create",
   "artifact.update",
@@ -78,7 +58,6 @@ export const REQUEST_INTENT_MODES = [
   "mixed",
 ] as const;
 
-export type SpectraOperationType = (typeof OPERATION_TYPES)[number];
 export type ModelOperationType = (typeof MODEL_OPERATION_TYPES)[number];
 
 const shortText = z.string().trim().min(1).max(240);
@@ -492,20 +471,6 @@ export const spectraPlanSchema = z
   });
 
 export type SpectraPlan = z.infer<typeof spectraPlanSchema>;
-
-// Retained for the Wave 0 public policy API and non-model operation tests.
-export const operationInputSchema = z.object({
-  type: z.enum(OPERATION_TYPES),
-  input: z.unknown(),
-  affected: z.array(z.object({ type: z.string(), id: z.string() })).default([]),
-  bulkCount: z.number().int().nonnegative().optional(),
-});
-
-export type OperationInput = z.infer<typeof operationInputSchema>;
-
-export function parseOperationInput(value: unknown) {
-  return operationInputSchema.parse(value);
-}
 
 function preprocessModelOperationContent(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;

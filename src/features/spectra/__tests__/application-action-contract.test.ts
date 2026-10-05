@@ -8,9 +8,7 @@ vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegist
 vi.mock("@/app/api/spectra/run/harness/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
 
 import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
-import { prepareApplicationCommand } from "../operations/application-command";
-import { spectraToolRegistry } from "../tools/registry";
-import { spectraToolExecutor } from "../tools/execution/tool-executor";
+import { APPLICATION_COMMAND_NAMES, parseApplicationCommand } from "@/app/api/spectra/run/harness/application-commands";
 import { CALENDAR_COMMAND_ALIASES } from "../calendar/domain/command";
 import { readFileSync } from "node:fs";
 import { aiRefreshRequest, aiSyncPurpose } from "../../../../shared/school-sync";
@@ -39,15 +37,6 @@ const calendarArgs: Record<string, Record<string, unknown>> = {
   resize_calendar_block: { itemId: "block", endAt: 2000, expectedRevision: 1 },
 };
 
-describe("tool titles students see in run steps", () => {
-  it("say work, never artifact", () => {
-    const titles = spectraToolRegistry.list().map((tool) => tool.title);
-    expect(titles.length).toBeGreaterThan(10);
-    expect(titles.filter((title) => /artifact/i.test(title))).toEqual([]);
-    expect(spectraToolRegistry.require("add_comment").title).toBe("Add comment");
-  });
-});
-
 describe("application action contract matrix (stubbed persistence)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,19 +46,24 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.reference.mockResolvedValue({ ok: true, status: "canonical_write", receipt: { phase: "canonical_write", versionId: "version" } });
   });
 
-  it("accounts for every registered application action with execution or an explicit prohibition", () => {
-    const supported = spectraToolRegistry.list().filter((tool) => tool.capability === "operate_application" && tool.aiAvailability !== "prohibited").map((tool) => tool.id);
-    expect(cases.map((entry) => entry.command).sort()).toEqual(supported.sort());
+  it("accounts for every application command with a dispatch case", () => {
+    expect([...cases.map((entry) => entry.command), ...Object.keys(calendarArgs)].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
+  });
+
+  it("knows every command the harness tools send, and no other", () => {
+    const sent = ["tools/app.ts", "tools/commands.ts"].flatMap((file) =>
+      [...readFileSync(`src/features/spectra/ai/harness/${file}`, "utf8").matchAll(/command: "([a-z_]+)"/g)].map((match) => match[1]!));
+    expect([...new Set(sent)].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
   });
 
   it.each(cases)("stages and dispatches $command through its registered path", async ({ command, args, mutation, event, status }) => {
-    const operation = prepareApplicationCommand(command, args);
-    expect(operation.input.command).toBe(command);
+    const parsed = parseApplicationCommand(command, args);
+    expect(parsed.command).toBe(command);
     const events: string[] = [];
-    const result = await executeApplicationCommand("actor", "run", "attempt", command, operation.input.args, undefined,
+    const result = await executeApplicationCommand("actor", "run", "attempt", command, args, undefined,
       (emitted) => events.push(emitted.key), undefined, "operation") as Record<string, unknown>;
-    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command }));
-    if (mutation) expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({ runId: "run", executionId: "attempt", operationId: "operation", expectedCommand: command, expectedArgs: operation.input.args }));
+    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command, authorityTarget: parsed.authority }));
+    if (mutation) expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({ runId: "run", executionId: "attempt", operationId: "operation", expectedCommand: command, expectedArgs: parsed.args }));
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
@@ -83,21 +77,21 @@ describe("application action contract matrix (stubbed persistence)", () => {
     });
 
   it.each(Object.entries(CALENDAR_COMMAND_ALIASES))("dispatches Calendar alias %s with its operation identity", async (alias, canonical) => {
-    const operation = prepareApplicationCommand(alias, calendarArgs[canonical]!);
-    await executeApplicationCommand("actor", "run", "attempt", alias, operation.input.args, undefined, undefined, undefined, "operation");
+    expect(parseApplicationCommand(alias, calendarArgs[canonical]!).command).toBe(canonical);
+    await executeApplicationCommand("actor", "run", "attempt", alias, calendarArgs[canonical]!, undefined, undefined, undefined, "operation");
     expect(seams.calendar).toHaveBeenCalledWith(expect.objectContaining({ command: canonical, runId: "run", executionId: "attempt", operationId: "operation" }));
   });
 
-  it.each(spectraToolRegistry.list().filter((tool) => tool.capability === "operate_application" && tool.aiAvailability === "prohibited").map((tool) => tool.id))(
-    "provides an explicit limitation for %s", (command) => {
-      expect(() => prepareApplicationCommand(command, {})).toThrow("AUTHORITY_PROHIBITED");
+  it.each(["change_credentials", "delete_account", "change_ai_authority_mode", "change_managebac_mapping", "import_managebac_resource"])(
+    "never runs %s, which is not an application command", async (command) => {
+      expect(() => parseApplicationCommand(command, {})).toThrow(`APP_COMMAND_NOT_REGISTERED:${command}`);
+      await expect(executeApplicationCommand("actor", "run", "attempt", command, {}, undefined, undefined, undefined, "operation")).rejects.toThrow("APP_COMMAND_NOT_REGISTERED");
+      expect(seams.mutate).not.toHaveBeenCalled();
     });
 
-  it.each(cases.filter(({ command }) => spectraToolRegistry.require(command).approval === "always"))(
-    "does not dispatch unapproved $command", async ({ command, args }) => {
-      const execute = vi.fn();
-      const result = await spectraToolExecutor.execute({ id: "declined", name: command, input: args }, { requireApproval: async () => false, executeRegisteredTool: execute });
-      expect(result.ok).toBe(false);
-      expect(execute).not.toHaveBeenCalled();
-    });
+  it("rejects arguments outside a command's contract before any write", async () => {
+    await expect(executeApplicationCommand("actor", "run", "attempt", "organize_library", { action: "move", targetIds: ["node"] }, undefined, undefined, undefined, "operation")).rejects.toThrow(/destination/i);
+    expect(seams.authority).not.toHaveBeenCalled();
+    expect(seams.mutate).not.toHaveBeenCalled();
+  });
 });

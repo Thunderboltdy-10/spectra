@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
 import { figureOf, type ElementFigureOptions } from "./figure-dom";
-import type { Point } from "./figure";
+import type { Figure, Point } from "./figure";
 import { life, type GlowHandle } from "./life";
 
 /*
@@ -104,6 +104,15 @@ export function travelElement(from: Element | Point, to: Element | { absorb: Ele
 
 let lastPress: { point: Point; at: number } | null = null;
 let pressWatch = false;
+/** The card or row the user just opened something from: what opens next grows out of it (MOTION.md, "Shared elements"). */
+let launch: { figure: Figure; at: number } | null = null;
+const LAUNCHERS = "[data-spectra-card], [data-life-launch]";
+const LAUNCH_BARS = "h2, h3, h4, [data-card-title], [data-row-title], [data-thread-title], p";
+
+function rememberLaunch(target: EventTarget | null) {
+  const launcher = (target as Element | null)?.closest?.(LAUNCHERS);
+  if (launcher && life.on) launch = { figure: figureOf(launcher, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
+}
 
 /** Where the user last pressed, dropped, or acted from the keyboard: the cause of what appears next. */
 function watchPresses() {
@@ -113,6 +122,7 @@ function watchPresses() {
     "pointerdown",
     (event) => {
       lastPress = { point: [event.clientX, event.clientY], at: performance.now() };
+      rememberLaunch(event.target);
     },
     { capture: true, passive: true },
   );
@@ -123,6 +133,7 @@ function watchPresses() {
       const target = event.target as Element | null;
       const r = target?.getBoundingClientRect?.();
       if (r && r.width) lastPress = { point: [r.x + r.width / 2, r.y + r.height / 2], at: performance.now() };
+      rememberLaunch(target);
     },
     { capture: true, passive: true },
   );
@@ -391,4 +402,46 @@ export function useWritingFront(ref: RefObject<HTMLElement | null>, active: bool
       glow?.stop();
     };
   }, [ref, active]);
+}
+
+/* ------------------------------------------------------------ shared elements */
+
+/** How long after the press an opening still grows from the card: works load before they open. */
+const LAUNCH_WINDOW_MS = 2500;
+
+/**
+ * Something opened from a card or a row (MOTION.md, "Shared elements"): the
+ * card's dots flow out of its frame and into the surface that opens, then the
+ * surface is real. Call it on the opened surface, keyed by what it shows, so a
+ * new key lands and the same key re-rendering does not. Without a recent
+ * launch it does nothing; the surface's own entrance stands.
+ */
+export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string | null | undefined, figure: ElementFigureOptions = {}) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!key || !element || !life.on || !launch || performance.now() - launch.at > LAUNCH_WINDOW_MS) return;
+    const from = launch.figure;
+    launch = null;
+    const previous = element.style.opacity;
+    element.style.opacity = "0";
+    let shown = false;
+    const show = () => {
+      if (shown) return;
+      shown = true;
+      element.style.opacity = previous;
+    };
+    // A frame later, the surface has its final layout to grow into.
+    const frame = requestAnimationFrame(() => {
+      const target = figureOf(element, { bars: "h1, h2, [data-artifact-title], [data-thread-title], [data-panel-title]", maxBars: 8, ...figure });
+      void life.morph(from, target).formed.then(show);
+    });
+    const fallback = window.setTimeout(show, 900);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(fallback);
+      show();
+    };
+    // Once per key: a landing is a moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 }

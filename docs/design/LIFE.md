@@ -206,6 +206,10 @@ surface with a background covers it.
   prism of the spectrum that breathes until the reply is complete.
 - Causes: the last press, the last drop, or the control acted on from the keyboard, within one second. The composer's
   files and @ references form from that cause and part when removed; on send they go with the words, not apart.
+- `useLifeLanding(ref, key)`: shared elements (MOTION.md). Pressing a card (`[data-spectra-card]`) or any
+  `[data-life-launch]` element remembers its figure; the next surface that lands within 2.5 s (a work or a thread in
+  the Side, a work opened full) morphs from it: the card's dots flow into the new frame, then the surface is real.
+  Without a recent launch the surface makes its own entrance.
 
 **Ghosts.** Every `Skeleton` is marked `data-life-ghost` (its lines `data-life-ghost-bar`). While the field is on
 (`html[data-life="on"]`), `LifeField` holds a ghost of each one in the field, at most 16 at a time, and the CSS pulse

@@ -7,6 +7,7 @@ const field = vi.hoisted(() => ({
   form: vi.fn(() => ({ formed: Promise.resolve() })),
   travel: vi.fn(() => ({ formed: Promise.resolve() })),
   unform: vi.fn(() => Promise.resolve()),
+  morph: vi.fn(() => ({ formed: Promise.resolve() })),
   pulse: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("../life/life", () => ({
     form: field.form,
     travel: field.travel,
     unform: field.unform,
+    morph: field.morph,
     pulse: field.pulse,
   },
 }));
@@ -24,7 +26,7 @@ vi.mock("../life/figure-dom", () => ({
   figureOf: () => ({ strokes: [] }),
 }));
 
-import { markNavigation, useLifeArrival, useLifeDeparture } from "../life/use-life";
+import { markNavigation, useLifeArrival, useLifeDeparture, useLifeLanding } from "../life/use-life";
 
 function Item({ id, kind }: { id: string; kind?: "ai" | "human" }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -70,6 +72,7 @@ afterEach(() => {
   field.form.mockClear();
   field.travel.mockClear();
   field.unform.mockClear();
+  field.morph.mockClear();
 });
 
 describe("arrivals", () => {
@@ -116,5 +119,35 @@ describe("departures", () => {
     markNavigation();
     act(flushFrames);
     expect(field.unform).not.toHaveBeenCalled();
+  });
+});
+
+function Landing({ id }: { id: string | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLifeLanding(ref, id);
+  return <div ref={ref}>{id}</div>;
+}
+
+describe("landings", () => {
+  it("grows what opens out of the card it was opened from, once", () => {
+    const card = document.createElement("div");
+    card.setAttribute("data-spectra-card", "artifact");
+    document.body.append(card);
+    card.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+
+    const view = render(<Landing id="work-1" />);
+    act(flushFrames);
+    expect(field.morph).toHaveBeenCalledTimes(1);
+
+    view.rerender(<Landing id="work-2" />);
+    act(flushFrames);
+    expect(field.morph).toHaveBeenCalledTimes(1);
+    card.remove();
+  });
+
+  it("lets a surface opened without a card make its own entrance", () => {
+    render(<Landing id="work-3" />);
+    act(flushFrames);
+    expect(field.morph).not.toHaveBeenCalled();
   });
 });

@@ -435,7 +435,7 @@ const external: Glyph = () => (
   </>
 );
 
-const check: Glyph = () => <path d="M4.5 10.4l3.6 3.6 7.4-7.9" />;
+const check: Glyph = () => <path d="M4.5 10.4l3.6 3.6 7.4-7.9" pathLength={12} className="sg-tick" />;
 
 const chevronDown: Glyph = () => <path d="M5.75 8l4.25 4.25L14.25 8" />;
 

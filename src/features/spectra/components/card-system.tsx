@@ -1,8 +1,8 @@
 "use client";
 
+import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useRef } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useLifeArrival, useLifeDeparture, useLifeGlow, type ArrivalKind } from "../life/use-life";
@@ -84,7 +84,7 @@ export function SpectraCard({
   );
 }
 
-export function CardTypeIcon({ icon: Icon, color, className }: { icon: LucideIcon; color: string; className?: string }) {
+export function CardTypeIcon({ icon: Icon, color, className }: { icon: GlyphIcon; color: string; className?: string }) {
   return (
     <span className={cn("spectra-card-type-icon", className)} style={{ color, "--card-accent": color } as CSSProperties}>
       <Icon className="h-4 w-4" aria-hidden="true" />
@@ -101,7 +101,7 @@ export function IconAction({
   ...props
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
   label: string;
-  icon: LucideIcon;
+  icon: GlyphIcon;
   active?: boolean;
   danger?: boolean;
 }) {

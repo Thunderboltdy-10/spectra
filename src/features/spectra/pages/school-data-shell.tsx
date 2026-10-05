@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Archive, ClipboardCheck, MessageSquareText, Sparkles } from "lucide-react";
-import { Clock3, LoaderCircle, ShieldCheck, CalendarDays, ChevronRight, FileText, GraduationCap, RefreshCw, School, Users } from "@/components/icons/glyph-icons";
+import { Clock3, LoaderCircle, ShieldCheck, CalendarDays, ChevronRight, FileText, GraduationCap, RefreshCw, School, Users, Archive, ClipboardCheck, MessageSquareText, Cas } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
@@ -169,7 +168,7 @@ const sections: Array<{
   {
     key: "cas",
     label: "CAS",
-    icon: Sparkles,
+    icon: Cas,
     types: ["cas", "cas_experience", "cas_reflection", "cas_evidence"],
     categories: /cas/i,
   },

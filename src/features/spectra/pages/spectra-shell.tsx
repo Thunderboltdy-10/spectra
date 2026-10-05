@@ -3,9 +3,7 @@
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import { PencilLine, Sprout, Workflow } from "lucide-react";
-import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Home, Library, Plus, School, Share2, Trash2, Users, X, Presentation, Bot } from "@/components/icons/glyph-icons";
-import type { LucideIcon } from "lucide-react";
+import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Home, Library, Plus, School, Share2, Trash2, Users, X, Presentation, Bot, PencilLine, Sprout, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,
@@ -428,7 +426,7 @@ function workspaceHubTab(
 const createTypes: Array<{
   key: ArtifactTypeKey;
   label: string;
-  icon: LucideIcon;
+  icon: GlyphIcon;
 }> = (
   [
     ["document", FileText],
@@ -440,7 +438,7 @@ const createTypes: Array<{
     ["sheets", Table2],
     ["code", Code2],
     ["whiteboard", Workflow],
-  ] satisfies Array<[ArtifactTypeKey, LucideIcon]>
+  ] satisfies Array<[ArtifactTypeKey, GlyphIcon]>
 ).map(([key, icon]) => ({
   key,
   icon,
@@ -1062,7 +1060,7 @@ function ActionRow({
   label,
   onClick,
 }: {
-  icon: LucideIcon;
+  icon: GlyphIcon;
   label: string;
   onClick?: () => void;
 }) {

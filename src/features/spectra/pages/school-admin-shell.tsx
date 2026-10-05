@@ -10,8 +10,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, Sparkles, UsersRound, type LucideIcon } from "lucide-react";
-import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users } from "@/components/icons/glyph-icons";
+import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -489,7 +488,7 @@ function OverviewSurface({
                 ["Security", "governance", ShieldCheck],
                 ["Integrations", "integrations", Network],
                 ["Data & privacy", "governance", LockKeyhole],
-              ] as Array<[string, Tab, LucideIcon]>
+              ] as Array<[string, Tab, GlyphIcon]>
             ).map(([label, tab, Icon]) => (
               <button
                 type="button"
@@ -1644,8 +1643,8 @@ function UsageSurface({
   const categories = [
     ["Storage", "storage_bytes", HardDrive],
     ["Bandwidth", "bandwidth_bytes", Network],
-    ["Model input", "model_input_tokens", Sparkles],
-    ["Model output", "model_output_tokens", Sparkles],
+    ["Model input", "model_input_tokens", Activity],
+    ["Model output", "model_output_tokens", Activity],
     ["Rendering", "render_milliseconds", CircleGauge],
     ["Collaboration", "collaboration_bytes", UsersRound],
   ] as const;
@@ -2024,7 +2023,7 @@ function IntegrationsSurface({
 function GovernanceSurface() {
   const freedoms = [
     {
-      icon: Sparkles,
+      icon: Activity,
       title: "Full AI access",
       detail:
         "Models and adaptive AI operations are available to every ordinary user.",

@@ -1,7 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckSquare2, Grid3X3, LayoutDashboard, LogIn, Sparkles } from "lucide-react";
-import { ArrowRight, BookOpen, Code2, Loader2, Table2, CalendarDays, FileText, LockKeyhole, Presentation, Share2 } from "@/components/icons/glyph-icons";
+import { ArrowRight, BookOpen, Code2, Loader2, Table2, CalendarDays, FileText, LockKeyhole, Presentation, Share2, ArrowLeft, CheckSquare2, Grid3X3, LayoutDashboard, LogIn, Bot } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
@@ -73,7 +72,7 @@ const ICONS: Record<string, typeof FileText> = {
   sheets: Table2,
   code: Code2,
   whiteboard: Grid3X3,
-  agent: Sparkles,
+  agent: Bot,
 };
 
 function formatUpdated(value: number) {

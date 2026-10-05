@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, DatabaseZap, Layers3 } from "lucide-react";
-import { Clock3, ShieldCheck, BarChart3, RefreshCw } from "@/components/icons/glyph-icons";
+import { Clock3, ShieldCheck, BarChart3, RefreshCw, Activity, DatabaseZap, Layers3 } from "@/components/icons/glyph-icons";
 import { workTypeMeta } from "@/features/spectra/components/artifact-card";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import {

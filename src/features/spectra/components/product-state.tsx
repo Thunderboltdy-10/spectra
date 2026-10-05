@@ -1,9 +1,8 @@
-import { type LucideIcon } from "lucide-react";
-import { AlertCircle } from "@/components/icons/glyph-icons";
+import { AlertCircle, type GlyphIcon } from "@/components/icons/glyph-icons";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export function ProductEmptyState({ icon: Icon, title, detail, action, className }: { icon: LucideIcon; title: string; detail: string; action?: ReactNode; className?: string }) {
+export function ProductEmptyState({ icon: Icon, title, detail, action, className }: { icon: GlyphIcon; title: string; detail: string; action?: ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-h-52 flex-col items-center justify-center px-6 text-center", className)}>
       <span aria-hidden="true" className="grid size-10 place-items-center rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-tertiary)]"><Icon size={17} /></span>

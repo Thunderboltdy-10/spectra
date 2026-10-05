@@ -1,9 +1,9 @@
 "use client";
 
+import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, PencilLine } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
-import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
@@ -35,7 +35,7 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: Bot },
-  { id: "writing", label: "Writing", icon: Sparkles },
+  { id: "writing", label: "Writing", icon: PencilLine },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },

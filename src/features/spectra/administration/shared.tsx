@@ -1,8 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { type LucideIcon } from "lucide-react";
-import { ArrowUpRight, LoaderCircle, AlertCircle, CheckCircle2, X } from "@/components/icons/glyph-icons";
+import { ArrowUpRight, LoaderCircle, AlertCircle, CheckCircle2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
@@ -88,7 +87,7 @@ export function MetricCard({
   state,
   source,
 }: {
-  icon: LucideIcon;
+  icon: GlyphIcon;
   label: string;
   value: string;
   detail: string;
@@ -327,7 +326,7 @@ export function EmptyPanel({
   detail,
   action,
 }: {
-  icon: LucideIcon;
+  icon: GlyphIcon;
   title: string;
   detail: string;
   action?: ReactNode;

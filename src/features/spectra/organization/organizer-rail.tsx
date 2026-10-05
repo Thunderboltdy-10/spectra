@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Clock } from "lucide-react";
-import { ChevronRight, Home, Star, Trash2, Users } from "@/components/icons/glyph-icons";
+import { ChevronRight, Home, Star, Trash2, Users, Clock } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { useTreeContainers, type QuickViewKey, type TreeNode } from "./tree-client";
 import { nodeIdentity } from "./node-identity";

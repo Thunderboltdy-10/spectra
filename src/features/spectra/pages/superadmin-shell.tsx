@@ -10,8 +10,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useNow } from "@/hooks/use-now";
-import { Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, Sparkles, TicketCheck, Workflow } from "lucide-react";
-import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, RefreshCw, School, Search, Users } from "@/components/icons/glyph-icons";
+import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, RefreshCw, School, Search, Users, Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -553,7 +552,7 @@ function PlatformOverviewSurface({
           />
           <div className="space-y-3 px-4 pb-4 text-micro leading-4">
             <div className="flex gap-2">
-              <Sparkles size={13} className="mt-0.5 text-[var(--brand-primary)]" />
+              <Activity size={13} className="mt-0.5 text-[var(--brand-primary)]" />
               {formatCompact(totalTokens)} model tokens were metered this
               period.
             </div>
@@ -1856,7 +1855,7 @@ function PlatformUsageSurface({
           detail="Metered platform storage"
         />
         <MetricCard
-          icon={Sparkles}
+          icon={Activity}
           label="Model tokens"
           value={formatCompact(
             (overview.usage.totals.model_input_tokens ?? 0) +
@@ -2076,7 +2075,7 @@ function RequestsSurface({
 function PlatformGovernanceSurface() {
   const guarantees = [
     {
-      icon: Sparkles,
+      icon: Activity,
       title: "AI without role gates",
       detail:
         "Provider operations optimize quality, reliability, caching, and cost without narrowing user capability.",

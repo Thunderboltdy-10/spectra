@@ -106,6 +106,32 @@ for (const match of appCss.matchAll(
 
 const files = walk(join(ROOT, "src"));
 const tinyUtility = /text-\[(\d+(?:\.\d+)?)px\]/g;
+
+/* 8. Spectra draws its own icons (docs/design/ICONS.md). Generic line icons
+      belong to editor workbars only: their commands, studios and menus, the
+      slash menu, and their tests. Everything else imports glyphs. */
+const WORKBAR_ICON_PATHS = [
+  /^src\/components\/icons\//,
+  /^src\/features\/spectra\/commands\/(office|shared)\//,
+  /^src\/features\/spectra\/editor\//,
+  /^src\/features\/spectra\/components\/[a-z-]*-studio\.tsx$/,
+  /^src\/features\/spectra\/components\/(artifact-workbar|workbar-controls)\.tsx$/,
+  /(^|\/)__tests__\//,
+  /\.test\.tsx?$/,
+];
+for (const file of files) {
+  if (file.endsWith(".css")) continue;
+  const rel = relative(ROOT, file).replaceAll("\\", "/");
+  if (WORKBAR_ICON_PATHS.some((pattern) => pattern.test(rel))) continue;
+  const text = readFileSync(file, "utf8");
+  const match = text.match(/from\s+["']lucide-react["']/);
+  if (match) {
+    const line = text.slice(0, match.index).split("\n").length;
+    failures.push(
+      `${rel}:${line} imports lucide-react outside editor workbars (use @/components/icons or glyph-icons)`,
+    );
+  }
+}
 const cssFontSize = /font-size\s*:\s*(\d+(?:\.\d+)?)px/g;
 
 for (const file of files) {

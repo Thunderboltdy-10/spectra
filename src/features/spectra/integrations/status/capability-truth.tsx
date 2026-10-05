@@ -1,7 +1,6 @@
 "use client";
 
-import { CircleDashed, Unplug } from "lucide-react";
-import { Clock3, AlertTriangle, CheckCircle2, LockKeyhole, RefreshCw } from "@/components/icons/glyph-icons";
+import { Clock3, AlertTriangle, CheckCircle2, LockKeyhole, RefreshCw, CircleDashed, Unplug } from "@/components/icons/glyph-icons";
 import type { CapabilityState } from "../../core/capability-truth";
 import { cn } from "@/lib/utils";
 

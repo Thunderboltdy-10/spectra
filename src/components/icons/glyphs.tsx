@@ -646,6 +646,448 @@ const grip: Glyph = () => (
   </g>
 );
 
+/* ------------------------------------------------------------ pages and lists */
+
+/** Back: the head leans the way you are going. */
+const arrowLeft: Glyph = () => (
+  <>
+    <path d="M16.25 10H4.75" />
+    <AccentLine d="M8.75 5.75 4.5 10l4.25 4.25" className="sg-nudge-back" />
+  </>
+);
+
+const arrowUp: Glyph = () => (
+  <>
+    <path d="M10 16.25V4.75" />
+    <AccentLine d="M5.75 8.75 10 4.5l4.25 4.25" className="sg-lift" />
+  </>
+);
+
+const arrowDown: Glyph = () => (
+  <>
+    <path d="M10 3.75v11.5" />
+    <AccentLine d="M5.75 11.25 10 15.5l4.25-4.25" className="sg-drop" />
+  </>
+);
+
+/** Upload: the arrow rises out of the tray. */
+const upload: Glyph = () => (
+  <>
+    <Paper d="M3.25 13.25v1.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-1.5z" />
+    <path d="M3.25 13.25v1.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-1.5" />
+    <g className="sg-lift">
+      <path d="M10 12V3.5" />
+      <AccentLine d="M6.6 6.9 10 3.5l3.4 3.4" />
+    </g>
+  </>
+);
+
+const undo: Glyph = () => (
+  <>
+    <AccentLine d="M7.5 5.25 4.25 8.5 7.5 11.75" />
+    <path d="M4.5 8.5h7.25a3.9 3.9 0 0 1 0 7.8H9.25" />
+  </>
+);
+
+const reply: Glyph = () => (
+  <>
+    <AccentLine d="M8 4.75 3.75 9 8 13.25" className="sg-nudge-back" />
+    <path d="M4 9h7.25a5 5 0 0 1 5 5v1.75" />
+  </>
+);
+
+/** A grid of cards, one of them picked. */
+const grid: Glyph = () => (
+  <>
+    <Sheet d={box(3, 3, 6, 6, 1.4)} />
+    <Sheet d={box(11, 3, 6, 6, 1.4)} />
+    <Sheet d={box(3, 11, 6, 6, 1.4)} />
+    <path d={box(11, 11, 6, 6, 1.4)} fill={ACCENT} fillOpacity={0.22} stroke={ACCENT} />
+  </>
+);
+
+/** Rows with their leading marks. */
+const list: Glyph = () => (
+  <>
+    <path d="M7.5 5.25h9.25M7.5 10h9.25M7.5 14.75h6.5" />
+    <circle cx={4} cy={5.25} r={1.05} fill={ACCENT} stroke="none" />
+    <circle cx={4} cy={10} r={1.05} fill="currentColor" stroke="none" fillOpacity={0.55} />
+    <circle cx={4} cy={14.75} r={1.05} fill="currentColor" stroke="none" fillOpacity={0.55} />
+  </>
+);
+
+/** Columns, each with its cards: a board. */
+const board: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 3.25, 4, 9.75, 1)} />
+    <Sheet d={box(8, 3.25, 4, 13.5, 1)} />
+    <Sheet d={box(13.25, 3.25, 4, 6.5, 1)} />
+    <AccentFill d={box(8.9, 5, 2.2, 2.2, 0.5)} />
+  </>
+);
+
+const archive: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 3.5, 14.5, 4, 1.2)} />
+    <Sheet d="M4 7.5h12v7.75a1.5 1.5 0 0 1-1.5 1.5h-9a1.5 1.5 0 0 1-1.5-1.5z" />
+    <AccentLine d="M8.25 10.75h3.5" width={1.6} />
+  </>
+);
+
+/** A pulse: the line jumps where something happened. */
+const activity: Glyph = () => (
+  <>
+    <path d="M2.75 10.5h3.1l1.6-3.75" />
+    <AccentLine d="M7.45 6.75 10 15.25l2.2-7.5" className="sg-tick" />
+    <path d="M12.2 7.75l1.35 2.75h3.7" />
+  </>
+);
+
+const database: Glyph = () => (
+  <>
+    <Paper d="M4 5.25v9.5c0 1.25 2.7 2.25 6 2.25s6-1 6-2.25v-9.5z" />
+    <ellipse cx={10} cy={5.25} rx={6} ry={2.25} />
+    <path d="M4 5.25v9.5c0 1.25 2.7 2.25 6 2.25s6-1 6-2.25v-9.5" />
+    <AccentLine d="M4 10c0 1.25 2.7 2.25 6 2.25s6-1 6-2.25" width={1.25} />
+  </>
+);
+
+const server: Glyph = () => (
+  <>
+    <Sheet d={box(3, 3.25, 14, 5.75, 1.4)} />
+    <Sheet d={box(3, 11, 14, 5.75, 1.4)} />
+    <circle cx={6} cy={6.1} r={0.95} fill={ACCENT} stroke="none" />
+    <circle cx={6} cy={13.9} r={0.95} fill="currentColor" stroke="none" fillOpacity={0.55} />
+    <Fine d="M9.5 6.1h4.75M9.5 13.9h4.75" opacity={0.6} />
+  </>
+);
+
+/** A drive with its light: where files are kept. */
+const storage: Glyph = () => (
+  <>
+    <Sheet d="M5.1 4.25h9.8l2.35 6.5v4a1.5 1.5 0 0 1-1.5 1.5H4.25a1.5 1.5 0 0 1-1.5-1.5v-4z" />
+    <Fine d="M2.75 10.75h14.5" />
+    <circle cx={14.1} cy={13.5} r={0.95} fill={ACCENT} stroke="none" />
+    <Fine d="M5.25 13.5h4.5" opacity={0.6} />
+  </>
+);
+
+/** Three places joined: a connection between systems. */
+const network: Glyph = () => (
+  <>
+    <path d="M10 6.6v3.15M10 9.75l-4.5 3.4M10 9.75l4.5 3.4" strokeOpacity={0.7} />
+    <Sheet d={box(7.4, 2.75, 5.2, 4, 1.1)} />
+    <Sheet d={box(2.75, 13.15, 5.2, 4, 1.1)} />
+    <path d={box(12.05, 13.15, 5.2, 4, 1.1)} fill={ACCENT} fillOpacity={0.22} stroke={ACCENT} />
+  </>
+);
+
+/** A card with a face: who someone is. */
+const identity: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 4.25, 14.5, 11.5, 2)} />
+    <circle cx={7.4} cy={9.1} r={1.75} />
+    <path d="M4.75 13.4a2.75 2.75 0 0 1 5.3 0" />
+    <AccentLine d="M12 8.5h3M12 11.25h2" width={1.35} />
+  </>
+);
+
+const globe: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <path d="M10 2.75c-2.1 2-3 4.4-3 7.25s.9 5.25 3 7.25c2.1-2 3-4.4 3-7.25s-.9-5.25-3-7.25z" strokeWidth={1.25} />
+    <AccentLine d="M3.1 7.75h13.8M3.1 12.25h13.8" width={1.2} />
+  </>
+);
+
+const inbox: Glyph = () => (
+  <>
+    <Sheet d="M5.3 3.75h9.4l2.55 7v4.5a1.5 1.5 0 0 1-1.5 1.5H4.25a1.5 1.5 0 0 1-1.5-1.5v-4.5z" />
+    <AccentLine d="M2.9 10.75h3.85l1.1 2h4.3l1.1-2h3.85" width={1.35} />
+  </>
+);
+
+const bookmark: Glyph = () => (
+  <>
+    <Sheet d="M5.25 3.75a1 1 0 0 1 1-1h7.5a1 1 0 0 1 1 1v13.1l-4.75-3.3-4.75 3.3z" />
+    <AccentLine d="M8 6.5h4" width={1.35} />
+  </>
+);
+
+/** A console: a prompt and a waiting caret. */
+const terminal: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 3.5, 14.5, 13, 2)} />
+    <path d="M6 8l2.5 2.25L6 12.5" strokeWidth={1.4} />
+    <AccentLine d="M10.25 12.75h3.5" className="sg-caret" />
+  </>
+);
+
+/** A target: pick a place on screen. */
+const target: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={5.75} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={5.75} />
+    <path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" />
+    <circle cx={10} cy={10} r={1.4} fill={ACCENT} stroke="none" />
+  </>
+);
+
+const tool: Glyph = () => (
+  <>
+    <Sheet d="M12.3 3.1a4 4 0 0 0-3.85 5.25L3.6 13.2a1.6 1.6 0 0 0 2.25 2.25l4.85-4.85a4 4 0 0 0 5.25-3.85l-2.35 1.15-1.9-1.9z" />
+    <circle cx={5.15} cy={14.85} r={0.7} fill={ACCENT} stroke="none" />
+  </>
+);
+
+/** A flask with something in it: a test or an experiment. */
+const flask: Glyph = ({ id }) => (
+  <>
+    <clipPath id={`${id}-flask`}>
+      <path d="M8 2.75v4.6L3.6 15.1a1.4 1.4 0 0 0 1.2 2.15h10.4a1.4 1.4 0 0 0 1.2-2.15L12 7.35v-4.6z" />
+    </clipPath>
+    <g clipPath={`url(#${id}-flask)`}>
+      <AccentFill d="M2 12h16v6H2z" opacity={0.4} className="sg-rise" />
+    </g>
+    <path d="M8 2.75v4.6L3.6 15.1a1.4 1.4 0 0 0 1.2 2.15h10.4a1.4 1.4 0 0 0 1.2-2.15L12 7.35v-4.6" />
+    <path d="M7 2.75h6" />
+  </>
+);
+
+/** What Spectra remembers: a notebook held open by a ribbon. */
+const memory: Glyph = () => (
+  <>
+    <Sheet d="M4.25 3.75h10a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-10z" />
+    <path d="M4.25 3.75v12.5" strokeWidth={2} />
+    <Fine d="M7.5 7.5h5M7.5 10.25h3.75" />
+    <AccentFill d="M12 3.75h2.25v5l-1.125-.9-1.125.9z" />
+  </>
+);
+
+/** A dial with its needle: how much is used. */
+const gauge: Glyph = () => (
+  <>
+    <Paper d="M3.25 14.25a6.75 6.75 0 1 1 13.5 0z" />
+    <path d="M3.25 14.25a6.75 6.75 0 1 1 13.5 0" />
+    <path d="M3.25 14.25h13.5" strokeOpacity={0.45} />
+    <AccentLine d="M10 14.25l3.4-4.4" width={1.6} className="sg-hand" />
+    <circle cx={10} cy={14.25} r={1.1} fill={ACCENT} stroke="none" />
+  </>
+);
+
+/** A record of what happened: lines on a scroll. */
+const log: Glyph = () => (
+  <>
+    <Sheet d="M5.75 3h8.5a1.5 1.5 0 0 1 1.5 1.5V15.5a1.75 1.75 0 0 1-1.75 1.75H5.5" />
+    <path d="M5.75 3a1.5 1.5 0 0 0-1.5 1.5v1.75h3V4.5A1.5 1.5 0 0 0 5.75 3z" />
+    <path d="M5.5 17.25a1.75 1.75 0 0 0 1.75-1.75v-1.25" />
+    <AccentLine d="M9.5 7.25h3.5" width={1.35} />
+    <Fine d="M9.5 10h3.5M9.5 12.75h2.5" opacity={0.6} />
+  </>
+);
+
+/** A coin: billing and spend. */
+const billing: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <AccentLine d="M12.3 7.6c-.4-.85-1.25-1.35-2.3-1.35-1.3 0-2.3.75-2.3 1.85 0 2.5 4.6 1.3 4.6 3.85 0 1.1-1 1.85-2.3 1.85-1.05 0-1.95-.5-2.35-1.35M10 5v1.25M10 13.75V15" width={1.35} />
+  </>
+);
+
+/** A heart with a pulse: is everything healthy. */
+const health: Glyph = () => (
+  <>
+    <Sheet d="M10 16.5s-6.75-3.85-6.75-8.6A3.65 3.65 0 0 1 10 5.9a3.65 3.65 0 0 1 6.75 2c0 4.75-6.75 8.6-6.75 8.6z" />
+    <AccentLine d="M4.4 10.25h2.6l1.2-2 1.85 4 1.3-2h4.25" width={1.3} />
+  </>
+);
+
+/** A ticket with its notches: a request or an invitation. */
+const ticket: Glyph = () => (
+  <>
+    <Sheet d="M3.75 5h12.5a1 1 0 0 1 1 1v2.25a1.75 1.75 0 0 0 0 3.5V14a1 1 0 0 1-1 1H3.75a1 1 0 0 1-1-1v-2.25a1.75 1.75 0 0 0 0-3.5V6a1 1 0 0 1 1-1z" />
+    <AccentLine d="M7.6 10.1l1.5 1.5 3.3-3.4" width={1.5} className="sg-tick" />
+  </>
+);
+
+/** Sign in: an arrow entering the door. */
+const signIn: Glyph = () => (
+  <>
+    <Sheet d="M8.75 3.25h5.75a1.75 1.75 0 0 1 1.75 1.75v10a1.75 1.75 0 0 1-1.75 1.75H8.75" />
+    <AccentLine d="M3 10h8M8.5 7.25 11.25 10 8.5 12.75" className="sg-nudge" />
+  </>
+);
+
+const hidden: Glyph = () => (
+  <>
+    <Paper d="M2.75 10c3.9-5.4 10.6-5.4 14.5 0-3.9 5.4-10.6 5.4-14.5 0z" />
+    <path d="M2.75 10c3.9-5.4 10.6-5.4 14.5 0-3.9 5.4-10.6 5.4-14.5 0z" />
+    <circle cx={10} cy={10} r={2.2} />
+    <AccentLine d="M4 3.75l12 12.5" />
+  </>
+);
+
+/** Another person's pointer. */
+const pointer: Glyph = () => <Sheet d="M4.25 3.25 15.5 9.1l-4.85 1.55L8.1 15.3z" />;
+
+const dot: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={4.25} fill={ACCENT} fillOpacity={0.22} />
+    <circle cx={10} cy={10} r={4.25} stroke={ACCENT} />
+  </>
+);
+
+/** Not started yet: a ring still being drawn. */
+const pending: Glyph = () => <circle cx={10} cy={10} r={6.75} strokeDasharray="2.6 2.4" />;
+
+/** Live right now: a source sending out rings. */
+const live: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={1.75} fill={ACCENT} stroke="none" />
+    <path d="M6.6 6.6a4.8 4.8 0 0 0 0 6.8M13.4 6.6a4.8 4.8 0 0 1 0 6.8" />
+    <path d="M4.1 4.1a8.35 8.35 0 0 0 0 11.8M15.9 4.1a8.35 8.35 0 0 1 0 11.8" strokeOpacity={0.55} />
+  </>
+);
+
+const blocked: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <AccentLine d="M5 15 15 5" />
+  </>
+);
+
+const zoomIn: Glyph = () => (
+  <>
+    <circle cx={8.75} cy={8.75} r={5} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={8.75} cy={8.75} r={5} />
+    <path d="M12.5 12.5l4.25 4.25" />
+    <AccentLine d="M8.75 6.6v4.3M6.6 8.75h4.3" width={1.35} />
+  </>
+);
+
+const zoomOut: Glyph = () => (
+  <>
+    <circle cx={8.75} cy={8.75} r={5} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={8.75} cy={8.75} r={5} />
+    <path d="M12.5 12.5l4.25 4.25" />
+    <AccentLine d="M6.6 8.75h4.3" width={1.35} />
+  </>
+);
+
+/** Stacked sheets, the top one picked: layers to show or hide. */
+const layers: Glyph = () => (
+  <>
+    <path d="M3 12.6 10 16l7-3.4" strokeOpacity={0.55} />
+    <path d="M3 10.1 10 13.5l7-3.4" strokeOpacity={0.8} />
+    <path d="M10 3.5 17 6.9 10 10.3 3 6.9z" fill={ACCENT} fillOpacity={0.2} stroke={ACCENT} />
+  </>
+);
+
+const checklist: Glyph = () => (
+  <>
+    <AccentLine d="M3.25 5.4l1.3 1.3 2.4-2.5M3.25 11.4l1.3 1.3 2.4-2.5" width={1.4} />
+    <path d="M9.5 5.5h7.25M9.5 11.5h7.25" />
+    <Fine d="M9.5 15.75h5" opacity={0.55} />
+  </>
+);
+
+/** A place: a dropped pin. */
+const location: Glyph = () => (
+  <>
+    <Sheet d="M10 17.25s-5.5-5.1-5.5-9.25a5.5 5.5 0 0 1 11 0c0 4.15-5.5 9.25-5.5 9.25z" />
+    <circle cx={10} cy={8} r={1.9} fill={ACCENT} stroke="none" />
+  </>
+);
+
+/** A folder with its branches: the whole tree. */
+const folderTree: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 2.75, 6.5, 4.75, 1.1)} />
+    <path d="M5 7.5v7.25h4.25M5 10.75h4.25" strokeOpacity={0.7} />
+    <Sheet d={box(9.25, 8.75, 8, 4, 1)} />
+    <path d={box(9.25, 12.75, 8, 4, 1)} fill={ACCENT} fillOpacity={0.22} stroke={ACCENT} />
+  </>
+);
+
+/** Someone removed: a person with a mark. */
+const personRemove: Glyph = () => (
+  <>
+    <circle cx={8} cy={7} r={2.75} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={8} cy={7} r={2.75} />
+    <path d="M3 16.5a5 5 0 0 1 9.4-2.4" />
+    <AccentLine d="M13.75 12l3.25 3.25M17 12l-3.25 3.25" width={1.4} />
+  </>
+);
+
+/** Two versions side by side. */
+const compare: Glyph = () => (
+  <>
+    <Sheet d={box(2.75, 3.25, 6, 13.5, 1.3)} />
+    <path d={box(11.25, 3.25, 6, 13.5, 1.3)} />
+    <AccentLine d="M7.5 7.5h5.25M11.1 5.9l1.65 1.6-1.65 1.6M12.5 12.5H7.25M8.9 10.9l-1.65 1.6 1.65 1.6" width={1.3} />
+  </>
+);
+
+/* ------------------------------------------------------------ subjects (workspace icons) */
+
+/** A general subject: an open notebook. */
+const notebook: Glyph = () => (
+  <>
+    <Sheet d="M10 5.1c-1.9-1.4-4.4-1.75-7.25-1.35v11.5c2.85-.4 5.35-.05 7.25 1.35 1.9-1.4 4.4-1.75 7.25-1.35V3.75C14.4 3.35 11.9 3.7 10 5.1z" />
+    <path d="M10 5.1v11.5" />
+    <AccentLine d="M12.25 7.6c1.1-.35 2.1-.45 2.95-.4" width={1.25} />
+  </>
+);
+
+const atom: Glyph = () => (
+  <>
+    <ellipse cx={10} cy={10} rx={7.25} ry={2.9} />
+    <ellipse cx={10} cy={10} rx={7.25} ry={2.9} transform="rotate(60 10 10)" strokeOpacity={0.75} />
+    <ellipse cx={10} cy={10} rx={7.25} ry={2.9} transform="rotate(-60 10 10)" strokeOpacity={0.75} />
+    <circle cx={10} cy={10} r={1.45} fill={ACCENT} stroke="none" />
+  </>
+);
+
+const calculator: Glyph = () => (
+  <>
+    <Sheet d={box(4.25, 2.75, 11.5, 14.5, 2)} />
+    <AccentFill d={box(6.25, 4.75, 7.5, 3, 0.7)} opacity={0.35} />
+    <path d="M7 10.75h.01M10 10.75h.01M13 10.75h.01M7 14h.01M10 14h.01M13 14h.01" strokeWidth={1.8} />
+  </>
+);
+
+const sprout: Glyph = () => (
+  <>
+    <path d="M10 17.25V9.5" />
+    <Sheet d="M10 10.25C10 6.9 7.6 4.75 3.75 4.75 3.75 8.25 6.2 10.25 10 10.25z" />
+    <path d="M10 9.25c0-2.9 2.1-4.75 5.75-4.75 0 3.05-2.15 4.75-5.75 4.75z" fill={ACCENT} fillOpacity={0.22} stroke={ACCENT} />
+    <path d="M6.5 17.25h7" />
+  </>
+);
+
+/** CAS: creativity, activity and service, three rings that meet. */
+const cas: Glyph = () => (
+  <>
+    <circle cx={7.4} cy={7.6} r={3.9} fill="currentColor" fillOpacity={0.08} />
+    <circle cx={7.4} cy={7.6} r={3.9} />
+    <circle cx={12.6} cy={7.6} r={3.9} strokeOpacity={0.8} />
+    <circle cx={10} cy={12.1} r={3.9} fill={ACCENT} fillOpacity={0.18} stroke={ACCENT} />
+  </>
+);
+
+/** A grade: a mark in a circle with a ribbon. */
+const grade: Glyph = () => (
+  <>
+    <path d="M7.25 12.75 5.75 17.5l4.25-1.9 4.25 1.9-1.5-4.75" strokeOpacity={0.7} />
+    <circle cx={10} cy={8} r={5.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={8} r={5.25} />
+    <AccentLine d="M7.75 8.1l1.6 1.6 2.95-3.1" width={1.5} className="sg-tick" />
+  </>
+);
+
 export const GLYPHS = {
   // Artifact types
   document: page,
@@ -728,6 +1170,59 @@ export const GLYPHS = {
   keyboard,
   signOut,
   analytics,
+  // Pages and lists
+  arrowLeft,
+  arrowUp,
+  arrowDown,
+  upload,
+  undo,
+  reply,
+  grid,
+  list,
+  board,
+  layers,
+  zoomIn,
+  zoomOut,
+  archive,
+  bookmark,
+  checklist,
+  folderTree,
+  compare,
+  location,
+  target,
+  pointer,
+  hidden,
+  tool,
+  terminal,
+  flask,
+  memory,
+  signIn,
+  personRemove,
+  ticket,
+  inbox,
+  globe,
+  // Systems and states
+  activity,
+  gauge,
+  health,
+  log,
+  database,
+  server,
+  storage,
+  network,
+  identity,
+  billing,
+  live,
+  pending,
+  blocked,
+  dot,
+  // School and subjects
+  cas,
+  grade,
+  notebook,
+  atom,
+  calculator,
+  sprout,
 } satisfies Record<string, Glyph>;
 
 export type IconName = keyof typeof GLYPHS;
@@ -742,4 +1237,10 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
     names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
+  {
+    family: "Pages and lists",
+    names: ["arrowLeft", "arrowUp", "arrowDown", "upload", "undo", "reply", "grid", "list", "board", "layers", "zoomIn", "zoomOut", "archive", "bookmark", "checklist", "folderTree", "compare", "location", "target", "pointer", "hidden", "tool", "terminal", "flask", "memory", "signIn", "personRemove", "ticket", "inbox", "globe"],
+  },
+  { family: "Systems and states", names: ["activity", "gauge", "health", "log", "database", "server", "storage", "network", "identity", "billing", "live", "pending", "blocked", "dot"] },
+  { family: "School and subjects", names: ["cas", "grade", "notebook", "atom", "calculator", "sprout"] },
 ];

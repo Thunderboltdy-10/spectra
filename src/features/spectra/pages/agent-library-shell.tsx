@@ -1,8 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sparkles, WandSparkles, type LucideIcon } from "lucide-react";
-import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, SlidersHorizontal, X } from "@/components/icons/glyph-icons";
+import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, SlidersHorizontal, X, Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sprout, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -80,11 +79,11 @@ type LibraryCard = {
   installedRelease?: number;
 };
 
-const cardIcons: LucideIcon[] = [
+const cardIcons: GlyphIcon[] = [
   FlaskConical,
   FilePenLine,
   BookOpen,
-  WandSparkles,
+  Sprout,
   GraduationCap,
   Beaker,
   MessageCircleQuestion,
@@ -361,7 +360,7 @@ function LibrarySectionBlock({
           {cards.slice(0, limit).map(children)}
         </div>
       ) : (
-        <p className="flex items-center gap-2 py-4 text-caption text-[var(--text-secondary)]"><Sparkles className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
+        <p className="flex items-center gap-2 py-4 text-caption text-[var(--text-secondary)]"><Bot className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
       )}
     </section>
   );

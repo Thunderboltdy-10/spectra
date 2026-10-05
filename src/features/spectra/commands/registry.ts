@@ -1,4 +1,4 @@
-import { Circle } from "lucide-react";
+import { Circle } from "@/components/icons/glyph-icons";
 import type {
   Command,
   CommandBinding,

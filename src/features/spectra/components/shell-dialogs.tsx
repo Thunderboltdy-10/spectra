@@ -1,7 +1,6 @@
 "use client";
 
-import { Atom, Brain, Calculator, FlaskConical, Sparkles, Sprout } from "lucide-react";
-import { BookOpen, Loader2, BarChart3, CheckCircle2, GraduationCap, Home, Trash2 } from "@/components/icons/glyph-icons";
+import { BookOpen, Loader2, BarChart3, CheckCircle2, GraduationCap, Home, Trash2, Atom, Brain, Calculator, FlaskConical, NotebookOpen, Sprout } from "@/components/icons/glyph-icons";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +28,7 @@ import { cn } from "@/lib/utils";
 
 /* The workspace icon vocabulary is shared with the new-workspace panel. */
 export const workspaceIconChoices = [
-  ["Sparkles", Sparkles],
+  ["Sparkles", NotebookOpen],
   ["BookOpen", BookOpen],
   ["GraduationCap", GraduationCap],
   ["Atom", Atom],

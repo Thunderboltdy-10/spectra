@@ -1,8 +1,8 @@
 "use client";
 
+import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import type { LucideIcon } from "lucide-react";
 import { Icon, type IconName } from "@/components/icons";
 import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
@@ -133,7 +133,7 @@ DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName;
 export type OverflowItem<T extends string = string> = {
   key: T;
   label: string;
-  icon?: LucideIcon | IconName;
+  icon?: GlyphIcon | IconName;
   disabled?: boolean;
   /** Shown right-aligned: a count, a shortcut, or a state word. */
   hint?: string;
@@ -179,7 +179,7 @@ export function OverflowMenu<T extends string>({
   size?: number;
   /** Three dots by default. Override only when the menu has a settled glyph
       of its own, e.g. a bell for notification delivery. */
-  icon?: LucideIcon | IconName;
+  icon?: GlyphIcon | IconName;
   triggerClassName?: string;
   contentClassName?: string;
   /** Menu items count as Follow controls so choosing Follow AI does not

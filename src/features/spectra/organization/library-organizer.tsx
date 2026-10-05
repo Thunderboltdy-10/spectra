@@ -10,8 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { LayoutGrid, Rows3, Sparkles } from "lucide-react";
-import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2 } from "@/components/icons/glyph-icons";
+import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2, LayoutGrid, Rows3, ArrowRight } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";
@@ -1771,7 +1770,7 @@ function NodeMenu({
                 {single.isContainer ? (
                   <ChevronRight className="size-3.5 text-[var(--text-tertiary)]" />
                 ) : (
-                  <Sparkles className="size-3.5 text-[var(--text-tertiary)]" />
+                  <ArrowRight className="size-3.5 text-[var(--text-tertiary)]" />
                 )}
                 {single.isContainer ? "Open folder" : "Open"}
               </DropdownMenuItem>

@@ -1,8 +1,6 @@
 "use client";
 
-import { Undo2 } from "lucide-react";
-import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X } from "@/components/icons/glyph-icons";
-import type { LucideIcon } from "lucide-react";
+import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X, Undo2, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useState } from "react";
 import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
@@ -23,7 +21,7 @@ function tone(card: ResultCardView) {
   return "var(--accent-cyan)";
 }
 
-function actionIcon(key: string): LucideIcon {
+function actionIcon(key: string): GlyphIcon {
   if (key === "retry") return RotateCcw;
   if (key === "confirm") return Check;
   if (key === "cancel" || key === "reject") return X;

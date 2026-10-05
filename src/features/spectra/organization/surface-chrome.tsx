@@ -1,8 +1,7 @@
 "use client";
 
 import { type ReactNode, type RefObject } from "react";
-import { ArrowDownUp, Columns3, PanelLeftClose, PanelLeftOpen, Upload } from "lucide-react";
-import { Loader2, FolderPlus, Plus, Search, SlidersHorizontal, X } from "@/components/icons/glyph-icons";
+import { Loader2, FolderPlus, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, PanelLeftClose, PanelLeftOpen, Upload } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,

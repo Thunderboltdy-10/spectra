@@ -16386,3 +16386,33 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
     filter: none;
   }
 }
+
+/* Spectra's presence in a work (MOTION.md): a small prism caret with a short
+   trail of light. Its caret is a spectrum rule capped by a prism; its ink and
+   its trail are the spectrum, not a person's colour. */
+.spectra-presence-actor[data-ai="true"] .spectra-presence-caret {
+  background: linear-gradient(180deg, #8b6cf6, #4f9fe6, #40c48e);
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-caret::before {
+  left: -3px;
+  top: -7px;
+  width: 8px;
+  height: 7px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: conic-gradient(from 180deg, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-ink::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, #8b6cf6 12%, transparent) 30%,
+    color-mix(in oklab, #4f9fe6 16%, transparent) 55%,
+    color-mix(in oklab, #40c48e 10%, transparent) 75%,
+    transparent 92%
+  );
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-trail {
+  background: conic-gradient(#8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+  box-shadow: 0 0 6px color-mix(in oklab, #8b6cf6 40%, transparent);
+}

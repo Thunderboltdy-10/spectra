@@ -154,6 +154,14 @@ function watchPresses() {
 // Watch from the start, so the very first press is a cause too.
 watchPresses();
 
+/**
+ * Something acted at `point` that was not a press: Spectra's spark working a
+ * control when it drives the interface. What appears next forms from there.
+ */
+export function markCause(point: Point) {
+  lastPress = { point, at: performance.now() };
+}
+
 /** The point the user just acted at, if within the last second. */
 export function recentCause(): Point | undefined {
   watchPresses();

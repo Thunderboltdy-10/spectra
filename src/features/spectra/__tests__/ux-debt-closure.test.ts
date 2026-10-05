@@ -108,14 +108,14 @@ describe("P6.I1 UX debt closure", () => {
   });
 
   it("maps load failures through ProductErrorState without server jargon", () => {
-    const school = read("src/features/spectra/pages/school-data-shell.tsx");
+    const school = read("src/features/spectra/school/school-page.tsx");
     const calendar = read(
       "src/features/spectra/calendar/ui/calendar-application.tsx",
     );
     const routes = read("src/lib/route-handler.ts");
-    expect(school).toContain("<ProductErrorState");
+    expect(school).toContain("<ProblemState");
     expect(school).toContain("describeFailure");
-    expect(school).toContain("School records could not be read just now.");
+    expect(school).toContain("Try again");
     expect(school).not.toContain("Unexpected server error");
     expect(calendar).toContain("<ProductErrorState");
     expect(calendar).toContain("describeFailure");

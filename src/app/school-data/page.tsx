@@ -1,15 +1,6 @@
-import { AppShell } from "@/components/layout/app-shell";
-import { SchoolDataShell } from "@/features/spectra/pages/school-data-shell";
-import { SchoolMembershipGate } from "@/features/spectra/components/school-membership-gate";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default function SchoolDataPage() {
-  return (
-    <AppShell fullBleed contentClassName="!p-0">
-      <SchoolMembershipGate>
-        <SchoolDataShell />
-      </SchoolMembershipGate>
-    </AppShell>
-  );
+// School data moved into School; old links land there.
+export default function SchoolDataPage(): never {
+  redirect("/school");
 }

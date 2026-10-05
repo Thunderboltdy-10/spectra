@@ -325,6 +325,19 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
       ) : null}
 
       <DetailHeading>Evidence</DetailHeading>
+      {/* Files dropped here become evidence; the drop carries light in (LIFE.md, "Sends"). */}
+      <div
+        data-life-receive
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          const file = event.dataTransfer.files?.[0];
+          if (!file) return;
+          event.preventDefault();
+          void addEvidence(file);
+        }}
+      >
       {experience.evidence.length ? (
         <div className="-mx-2.5 mb-2">
           {experience.evidence.map((file) => (
@@ -339,8 +352,9 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
           ))}
         </div>
       ) : (
-        <p className="mb-2 text-caption text-[var(--text-secondary)]">Photos and files that show what you did.</p>
+        <p className="mb-2 text-caption text-[var(--text-secondary)]">Photos and files that show what you did. Drop them here, or add them.</p>
       )}
+      </div>
       <input
         ref={fileInput}
         type="file"

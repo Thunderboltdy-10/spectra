@@ -15,8 +15,8 @@ vi.mock("@/lib/auth-server", async (original) => ({
 vi.mock("@/components/layout/app-shell", () => ({
   AppShell: ({ children }: { children: ReactNode }) => children,
 }));
-vi.mock("@/features/spectra/pages/school-data-shell", () => ({
-  SchoolDataShell: () => {
+vi.mock("@/features/spectra/school/school-page", () => ({
+  SchoolPage: () => {
     readers.school();
     return <p>School reader mounted</p>;
   },
@@ -37,7 +37,6 @@ vi.mock("@/features/spectra/pages/analytics-shell", () => ({
 
 import AnalyticsPage from "@/app/analytics/page";
 import SchoolPage from "@/app/school/page";
-import SchoolDataPage from "@/app/school-data/page";
 import ManageBacPage from "@/app/managebac/page";
 
 // Resolve the server boundary before rendering client children, as Next does.
@@ -62,7 +61,6 @@ beforeEach(() => {
 
 describe.each([
   ["/school", SchoolPage],
-  ["/school-data", SchoolDataPage],
   ["/managebac", ManageBacPage],
   ["/analytics", AnalyticsPage],
 ] as const)("school membership boundary on %s", (_path, page) => {

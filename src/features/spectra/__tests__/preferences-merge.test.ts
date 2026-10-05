@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { knownCapabilityIds } from "../capabilities/catalog";
-import { swapWorkbarCommandOrders } from "../commands/registry";
 import { documentMotionLevel } from "../settings/preference-store";
 import {
   DEFAULT_SPECTRA_PREFERENCES,
@@ -22,7 +21,7 @@ describe("preference merge (P3.I4)", () => {
     const current = applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {
       workbar: {
         document: {
-          expanded: true,
+          tabOrder: ["Insert"],
           commands: {
             "document.format.bold": { pinned: true },
             "document.format.italic": { hidden: true },
@@ -36,14 +35,14 @@ describe("preference merge (P3.I4)", () => {
     const next = applyPreferencePatch(current, {
       workbar: {
         document: {
-          commands: { "document.format.bold": { order: 2 } },
+          commands: { "document.format.bold": { label: "Strong" } },
         },
       },
     });
-    expect(next.workbar.document?.expanded).toBe(true);
+    expect(next.workbar.document?.tabOrder).toEqual(["Insert"]);
     expect(next.workbar.document?.commands?.["document.format.bold"]).toMatchObject({
       pinned: true,
-      order: 2,
+      label: "Strong",
     });
     expect(next.workbar.document?.commands?.["document.format.italic"]).toEqual({ hidden: true });
     expect(next.workbar.sheets?.commands?.["sheets.format.bold"]).toEqual({ pinned: true });
@@ -225,24 +224,24 @@ describe("preference merge (P3.I4)", () => {
     });
   });
 
-  it("swaps two command orders in one layout write", () => {
-    const next = swapWorkbarCommandOrders(
-      {
-        commands: {
-          "document.format.bold": { order: 1 },
-          "document.format.italic": { order: 4 },
+  it("keeps a person's group and command order per tab, and replaces it whole", () => {
+    const current = applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {
+      workbar: {
+        document: {
+          groupOrder: { Insert: ["Media", "Tables"] },
+          commandOrder: { Insert: ["document.insert.image", "document.insert.table"] },
         },
       },
-      {
-        sourceId: "document.format.bold",
-        targetId: "document.format.italic",
-        sourceOrder: 1,
-        targetOrder: 4,
-        tab: "Format",
+    });
+    const next = applyPreferencePatch(current, {
+      workbar: {
+        document: { groupOrder: { Insert: ["Links"], Format: ["Font"] } },
       },
-    );
-    expect(next.commands?.["document.format.bold"]).toEqual({ order: 4, tab: "Format" });
-    expect(next.commands?.["document.format.italic"]).toEqual({ order: 1 });
+    });
+    expect(next.workbar.document?.groupOrder).toEqual({ Insert: ["Links"], Format: ["Font"] });
+    expect(next.workbar.document?.commandOrder).toEqual({
+      Insert: ["document.insert.image", "document.insert.table"],
+    });
   });
 
   it("parks preference-layer subscriptions after the first snapshot", () => {

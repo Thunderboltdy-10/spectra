@@ -15426,17 +15426,110 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   background: var(--brand-primary);
 }
 
-/* The expanded form gives each command group a labelled column, so it needs a
-   taller command rail — the tab rail is unchanged. */
-.spectra-editor-workbar[data-workbar-expanded="true"] {
-  height: 104px;
-  min-height: 104px;
-  grid-template-rows: 26px minmax(60px, auto);
+/* Groups (EDITORS.md, "The workbar"). A hairline divides one group from the
+   next, the way a ribbon's groups read as units; undo and redo lead. */
+.spectra-workbar-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
 }
 
-.spectra-editor-workbar[data-workbar-expanded="true"]
-  .spectra-workbar-rail-commands {
-  align-items: flex-end;
+.spectra-workbar-group + .spectra-workbar-group {
+  margin-left: 5px;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 6px;
+}
+
+.spectra-workbar-group-menu {
+  color: var(--text-secondary);
+}
+
+.spectra-workbar-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 650;
+}
+
+/* A contextual tab belongs to the selected object, so it carries the accent
+   even when it is not the open tab. */
+.spectra-command-tab[data-contextual="true"] {
+  color: color-mix(in oklab, var(--brand-primary) 72%, var(--text-secondary));
+}
+
+.spectra-command-tab[data-contextual="true"]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-primary);
+}
+
+/* Customise mode: every group open, each command a chip that can be dragged or
+   moved with the arrow keys. The bar may scroll sideways only here. */
+.spectra-workbar-customize {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.spectra-workbar-chip,
+.spectra-workbar-group-handle {
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--control-radius);
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: grab;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-workbar-group-handle {
+  border-style: solid;
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+
+.spectra-workbar-chip[data-fixed] {
+  border-style: solid;
+  cursor: default;
+  opacity: 0.7;
+}
+
+.spectra-workbar-chip:focus-visible,
+.spectra-workbar-group-handle:focus-visible,
+.spectra-workbar-chip:hover,
+.spectra-workbar-group-handle:hover {
+  border-color: var(--brand-primary);
+}
+
+.spectra-workbar-chip[data-dragging] {
+  opacity: 0.45;
+}
+
+.spectra-workbar-group[data-drop-target] {
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--brand-primary) 5%, transparent);
+}
+
+.spectra-workbar-done {
+  color: var(--brand-primary);
 }
 
 /* Genuinely trailing: status, a sync pill, the primary verb. Never commands. */
@@ -15446,36 +15539,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-
-.spectra-workbar-expanded-groups {
-  display: flex;
-  min-width: 0;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.spectra-workbar-command-group {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  border-left: 1px solid var(--border-subtle);
-  padding-left: 7px;
-}
-
-.spectra-workbar-command-group-label {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.spectra-workbar-command-group-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
 }
 
 .spectra-workbar-progress {
@@ -15985,19 +16048,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   overflow-y: auto;
 }
 
-/* Per-command density is a real preference, so it has to change something.
-   `compact` sheds the label at every width and keeps the icon; `medium` keeps
-   the label even where the container query would otherwise shed it. */
-.spectra-artifact-workbar-action[data-workbar-density="compact"] {
-  width: 32px;
-  justify-content: center;
-  padding-inline: 0;
-}
-
-.spectra-artifact-workbar-action[data-workbar-density="compact"] span {
-  font-size: 0;
-}
-
 /* Label shedding. The accessible name stays on the button, so a shed label
    costs nothing to a screen reader or to a pointer with a tooltip. */
 @container artifact-workbar (max-width: 720px) {
@@ -16016,20 +16066,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   }
 
   .spectra-workbar-mode span {
-    font-size: var(--text-micro);
-  }
-}
-
-/* `medium` is the user saying "keep this one legible". It has to outrank the
-   shedding rules above, so it is declared after them. */
-@container artifact-workbar (max-width: 720px) {
-  .spectra-artifact-workbar-action[data-workbar-density="medium"] {
-    width: auto;
-    justify-content: flex-start;
-    padding-inline: 9px;
-  }
-
-  .spectra-artifact-workbar-action[data-workbar-density="medium"] span {
     font-size: var(--text-micro);
   }
 }

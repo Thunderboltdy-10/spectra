@@ -296,8 +296,6 @@ export type CommandBinding = {
   general?: boolean;
   /** Honest rendering density for controls that support a larger form. */
   controlSize?: "compact" | "medium";
-  /** Persisted workbar density override, applied by the shared renderer. */
-  density?: "compact" | "medium";
   shortcut?: string;
   /** Native-format availability is declared per command. Unspecified means
    * the command is non-mutating or safely representable in every profile. */
@@ -314,14 +312,18 @@ export type CommandBinding = {
   visibility?: "public" | "internal";
 };
 
+/**
+ * One person's arrangement of one editor's workbar. Orders are per tab: the
+ * groups in the order they chose, and the commands in the order they chose.
+ * Which commands collapse, and how, is the editor's plan and is not stored.
+ */
 export type CommandLayout = {
-  expanded?: boolean;
   tabOrder?: string[];
+  groupOrder?: Record<string, string[]>;
+  commandOrder?: Record<string, string[]>;
   commands?: Record<string, {
     tab?: string;
-    order?: number;
     label?: string;
-    density?: "compact" | "medium";
     hidden?: boolean;
     pinned?: boolean;
   }>;

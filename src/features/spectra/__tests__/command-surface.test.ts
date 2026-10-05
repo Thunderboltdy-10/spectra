@@ -97,17 +97,17 @@ describe("N2 command surface", () => {
     }, 0).defaultPlacement.tab).toBe("General");
   });
 
-  it("pins and reorders commands through the persisted layout", () => {
+  it("pins and renames commands through the persisted layout, keeping the shipped order", () => {
     const chart = commandForBinding("sheets", {
       id: "chart",
       label: "Chart",
       onSelect: vi.fn(),
     }, 9);
     const resolved = resolveCommandLayout(chart, {
-      commands: { "sheets.chart": { pinned: true, order: 2, label: "Quick chart" } },
+      commands: { "sheets.chart": { pinned: true, label: "Quick chart" } },
     });
     expect(resolved.title).toBe("Quick chart");
-    expect(resolved.defaultPlacement).toMatchObject({ tab: "General", order: 2 });
+    expect(resolved.defaultPlacement).toMatchObject({ tab: "General", order: 9 });
     expect(resolved.sourceTab).toBe("Insert");
   });
 

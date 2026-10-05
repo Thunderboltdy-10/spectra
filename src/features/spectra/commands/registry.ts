@@ -340,33 +340,6 @@ export async function executeCommandAsync<P extends CommandParam>(
   return result !== false;
 }
 
-export function swapWorkbarCommandOrders(
-  layout: CommandLayout | undefined,
-  swap: {
-    sourceId: string;
-    targetId: string;
-    sourceOrder: number;
-    targetOrder: number;
-    tab: string;
-  },
-): CommandLayout {
-  return {
-    ...layout,
-    commands: {
-      ...layout?.commands,
-      [swap.sourceId]: {
-        ...layout?.commands?.[swap.sourceId],
-        order: swap.targetOrder,
-        tab: swap.tab,
-      },
-      [swap.targetId]: {
-        ...layout?.commands?.[swap.targetId],
-        order: swap.sourceOrder,
-      },
-    },
-  };
-}
-
 export function resolveCommandLayout<P>(command: Command<P>, layout?: CommandLayout) {
   const override = layout?.commands?.[command.id];
   const sourceTab = command.sourceTab ?? command.defaultPlacement.tab;
@@ -376,11 +349,7 @@ export function resolveCommandLayout<P>(command: Command<P>, layout?: CommandLay
     defaultPlacement: {
       ...command.defaultPlacement,
       tab: override?.pinned ? "General" : override?.tab ?? command.defaultPlacement.tab,
-      order: override?.order ?? command.defaultPlacement.order,
     },
-    presentation: override?.density === "compact"
-      ? { ...command.presentation, medium: command.presentation.compact }
-      : command.presentation,
     hidden: override?.hidden === true,
     sourceTab,
     customization: override ?? undefined,

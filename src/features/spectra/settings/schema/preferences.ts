@@ -133,6 +133,31 @@ const accessibilitySchema = z.object({
   runStatusAnnouncements: z.enum(["important", "all", "off"]).default("important"),
 });
 
+/**
+ * One person's arrangement of one editor's workbar (EDITORS.md, "Users can
+ * reorder"): the tab order, and per tab the order of its groups and of its
+ * commands. Which commands collapse, and how, belongs to the editor's plan and
+ * is deliberately not stored. Older saved keys (`expanded`, per-command
+ * `order` and `density`) are stripped on read.
+ */
+const ORDERED_IDS = z.array(z.string().min(1).max(160)).max(400);
+export const workbarLayoutSchema = z.object({
+  tabOrder: z.array(z.string()).optional(),
+  groupOrder: z.record(z.string(), ORDERED_IDS).optional(),
+  commandOrder: z.record(z.string(), ORDERED_IDS).optional(),
+  commands: z
+    .record(
+      z.string(),
+      z.object({
+        tab: z.string().optional(),
+        label: z.string().trim().min(1).max(48).optional(),
+        hidden: z.boolean().optional(),
+        pinned: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const preferenceLayerValuesSchema = z
   .object({
     general: generalSchema.partial().optional(),
@@ -148,23 +173,7 @@ export const preferenceLayerValuesSchema = z
     workbar: z
       .record(
         z.string(),
-        z.object({
-          expanded: z.boolean().optional(),
-          tabOrder: z.array(z.string()).optional(),
-          commands: z
-            .record(
-              z.string(),
-              z.object({
-                tab: z.string().optional(),
-                order: z.number().int().optional(),
-                label: z.string().trim().min(1).max(48).optional(),
-                density: z.enum(["compact", "medium"]).optional(),
-                hidden: z.boolean().optional(),
-                pinned: z.boolean().optional(),
-              }),
-            )
-            .optional(),
-        }),
+        workbarLayoutSchema,
       )
       .optional(),
   })
@@ -256,23 +265,7 @@ export const spectraPreferencesSchema = z.object({
   workbar: z
     .record(
       z.string(),
-      z.object({
-        expanded: z.boolean().optional(),
-        tabOrder: z.array(z.string()).optional(),
-        commands: z
-          .record(
-            z.string(),
-            z.object({
-              tab: z.string().optional(),
-              order: z.number().int().optional(),
-              label: z.string().trim().min(1).max(48).optional(),
-              density: z.enum(["compact", "medium"]).optional(),
-              hidden: z.boolean().optional(),
-              pinned: z.boolean().optional(),
-            }),
-          )
-          .optional(),
-      }),
+      workbarLayoutSchema,
     )
     .default({}),
 }).strict();

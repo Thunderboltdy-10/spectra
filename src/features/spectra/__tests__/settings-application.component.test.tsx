@@ -85,7 +85,7 @@ describe("Settings application accessibility contract", () => {
     });
   });
 
-  it("hides deleted command ids and exposes rename and density for living ones", async () => {
+  it("hides deleted command ids and exposes rename for living ones, and no retired size or expanded controls", async () => {
     window.localStorage.setItem(
       "spectra:preferences:v2",
       JSON.stringify({
@@ -107,7 +107,8 @@ describe("Settings application accessibility contract", () => {
     );
     expect(await screen.findByDisplayValue("Strong")).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Name on the workbar for Bold" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Button size for Bold" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Button size for Bold" })).toBeNull();
+    expect(screen.queryByText("Expanded workbar")).toBeNull();
     expect(screen.queryByDisplayValue("Dead control")).toBeNull();
     expect(screen.queryByText("document.format.ghostFromNova")).toBeNull();
   });

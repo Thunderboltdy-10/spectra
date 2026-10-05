@@ -186,6 +186,7 @@ export function SidePanel({
   children,
   className,
   onOpenChange,
+  revealKey,
 }: {
   /** Remembers open and width under this key, per page. */
   id: string;
@@ -205,6 +206,8 @@ export function SidePanel({
   children: React.ReactNode;
   className?: string;
   onOpenChange?: (open: boolean) => void;
+  /** Each new value opens the panel, as if its tab were pressed: the page chose something to show in it. */
+  revealKey?: string | number | null;
 }) {
   const [stored, setStored] = React.useState<Stored>({ open: defaultOpen, width: defaultWidth });
   const [rowWidth, setRowWidth] = React.useState(0);
@@ -255,6 +258,17 @@ export function SidePanel({
     setStored(next);
     writeStored(id, next);
   }
+
+  const setOpenRef = React.useRef(setOpen);
+  React.useLayoutEffect(() => {
+    setOpenRef.current = setOpen;
+  });
+  const revealed = React.useRef(revealKey);
+  React.useEffect(() => {
+    if (revealKey == null || revealKey === revealed.current) return;
+    revealed.current = revealKey;
+    setOpenRef.current(true);
+  }, [revealKey]);
 
   function resizeTo(next: number) {
     const clamped = Math.round(Math.min(Math.max(next, minWidth), maxWidth));

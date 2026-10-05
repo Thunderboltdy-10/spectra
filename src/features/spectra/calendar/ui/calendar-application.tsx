@@ -1,7 +1,15 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { ChevronLeft, LoaderCircle, ChevronRight, CheckCircle2, ExternalLink, Link2, LockKeyhole, PanelLeft, Plus, RefreshCw, Search, X, Layers3, ZoomIn, ZoomOut } from "@/components/icons/glyph-icons";
+import { ChevronLeft, ChevronRight, CheckCircle2, ExternalLink, Link2, LoaderCircle, LockKeyhole, Plus } from "@/components/icons/glyph-icons";
+import { Icon } from "@/components/icons";
+import type { BarCommand } from "@/components/ui/adaptive-bar";
+import { IconButton } from "@/components/ui/icon-button";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
+import { EmptyState, LoadingRows } from "@/components/ui/page-state";
+import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
+import { plainText } from "../../../../../shared/semantic-chunks";
+import { useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -16,14 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProductErrorState } from "../../components/product-state";
-import { ProductPageHeader } from "../../components/product-page-header";
-import {
-  StudioSplitPlaceholder,
-  useArtifactStudioState,
-} from "../../components/artifact-studio-shell";
-import { StudioItemRail } from "../../components/studio-item-rail";
 import { spectraBus } from "../../events";
-import { getSpectraArtifact, syncSpectraManageBac, type SpectraArtifact } from "../../data/api";
+import { syncSpectraManageBac } from "../../data/api";
 import {
   CALENDAR_LAYERS,
   calendarItemFromWire,
@@ -43,14 +45,9 @@ import {
 import { requestSpectra } from "../../data/request";
 import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
 
-const ArtifactStudio = dynamic(
-  () =>
-    import("../../components/artifact-studio").then((module) => module.ArtifactStudio),
-  { loading: () => <StudioSplitPlaceholder /> },
-);
-
 const HOUR = 60 * 60_000;
 const HOUR_PX = 48;
+const WORKDAY_START_HOUR = 7;
 const HOURS = 24;
 const MIN_DAYS = 1;
 const MAX_DAYS = 10;
@@ -448,15 +445,14 @@ export function CalendarApplication() {
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
-  const [plansOpen, setPlansOpen] = useState(true);
+  const [sideTab, setSideTab] = useState<"plans" | "details">("plans");
+  const [reveal, setReveal] = useState(0);
   const [layersOpen, setLayersOpen] = useState(false);
   const [planQuery, setPlanQuery] = useState("");
   const [draggingPlanId, setDraggingPlanId] = useState<string>();
   const [gesturePreview, setGesturePreview] = useState<GesturePreview | null>(null);
   const [resizeGesture, setResizeGesture] = useState<ResizeGesture | null>(null);
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
-  const [openedArtifacts, setOpenedArtifacts] = useState<SpectraArtifact[]>([]);
-  const [panelWidth, setPanelWidth] = useState(780);
   const dragRef = useRef<DragPayload | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const loadLockRef = useRef(false);
@@ -477,7 +473,6 @@ export function CalendarApplication() {
     to?: number,
     showRefresh?: boolean,
   ) => Promise<void>>(async () => undefined);
-  const studio = useArtifactStudioState("spectra.calendar.studio", openedArtifacts);
   const visibleRange = useMemo(
     () => ({
       from: days[0]!,
@@ -610,7 +605,20 @@ export function CalendarApplication() {
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     return () => observer.disconnect();
-  }, [daySpan, days.length, error, plansOpen, studio.mode]);
+  }, [daySpan, days.length, error]);
+
+  // The grid opens on working hours (SHELL.md): 07:00 just under the day heads.
+  const openedOnHoursRef = useRef(false);
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (openedOnHoursRef.current || !scroller || !overview) return;
+    const hours = scroller.querySelector<HTMLElement>("[data-calendar-hours]");
+    const head = scroller.querySelector<HTMLElement>(".spectra-calendar-day-head");
+    if (!hours) return;
+    openedOnHoursRef.current = true;
+    const hoursTop = hours.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTop = Math.max(0, hoursTop + WORKDAY_START_HOUR * HOUR_PX - (head?.offsetHeight ?? 0) - 8);
+  }, [overview, error]);
 
   // The grid's columns, drops and resizes are all in the browser's zone, so
   // every time on it is too. The overview's zone is only a guess from stored
@@ -901,29 +909,8 @@ export function CalendarApplication() {
   function openWork(workId: string) {
     setActivePlanId(workId);
     setSelected(null);
-    void (async () => {
-      try {
-        let artifact = openedArtifacts.find((entry) => entry._id === workId);
-        if (!artifact) {
-          const result = await getSpectraArtifact(workId);
-          artifact = result.artifact;
-          setOpenedArtifacts((current) =>
-            current.some((entry) => entry._id === artifact!._id)
-              ? current
-              : [...current, artifact!],
-          );
-        }
-        // Calendar is a launch surface for the work itself. Opening a plan in
-        // the split inspector made a task feel like a modified calendar
-        // detail, hid the canonical artifact chrome, and left too little room
-        // for its editor. Use the same full artifact tab the Library uses.
-        studio.openTab(artifact);
-      } catch (nextError) {
-        toast.error(
-          nextError instanceof Error ? nextError.message : "Could not open this work.",
-        );
-      }
-    })();
+    // Work opens in the Side (SHELL.md); its "Open full" goes on to Library.
+    void spectraBus.command("work.open", { workId });
   }
 
   function openItem(item: CalendarItem) {
@@ -936,6 +923,8 @@ export function CalendarApplication() {
       return;
     }
     setSelected(item);
+    setSideTab("details");
+    setReveal((count) => count + 1);
   }
 
   function jumpTo(date: Date) {
@@ -1022,35 +1011,6 @@ export function CalendarApplication() {
   }
 
   useEffect(() => {
-    const openSplit = studio.openSplit;
-    const openTab = studio.openTab;
-    return spectraBus.handle("work.open", (command) => {
-      void (async () => {
-        try {
-          setActivePlanId(command.workId);
-          setSelected(null);
-          let artifact = openedArtifacts.find((entry) => entry._id === command.workId);
-          if (!artifact) {
-            const result = await getSpectraArtifact(command.workId);
-            artifact = result.artifact;
-            setOpenedArtifacts((current) =>
-              current.some((entry) => entry._id === artifact!._id)
-                ? current
-                : [...current, artifact!],
-            );
-          }
-          if (command.surface === "full") openTab(artifact);
-          else openSplit(artifact);
-        } catch (nextError) {
-          toast.error(
-            nextError instanceof Error ? nextError.message : "Could not open this work.",
-          );
-        }
-      })();
-    });
-  }, [openedArtifacts, studio.openSplit, studio.openTab]);
-
-  useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     const onWheel = (event: WheelEvent) => {
@@ -1066,256 +1026,83 @@ export function CalendarApplication() {
     return () => scroller.removeEventListener("wheel", onWheel);
   }, [changeDaySpan, error, overview]);
 
-  function closeOpenedTab(artifactId: string) {
-    if (studio.dirtyIds.has(artifactId)) {
-      toast.message("Wait for this work to synchronize before closing it.");
-      return;
-    }
-    studio.closeTab(artifactId);
-  }
-
-  if (studio.mode === "tab" && studio.activeArtifact) {
-    return (
-      <div className="relative h-full min-h-0">
-        <ArtifactStudio
-          mode="tab"
-          artifact={studio.activeArtifact}
-          artifacts={openedArtifacts}
-          tabs={studio.tabs}
-          dirtyIds={studio.dirtyIds}
-          sourceLabel="Calendar"
-          onClose={studio.closeStudio}
-          onExpand={studio.openTab}
-          onActivateTab={studio.activateTab}
-          onCloseTab={closeOpenedTab}
-          onDirtyChange={studio.setDirty}
-        />
-      </div>
-    );
-  }
+  const commands: BarCommand[] = [
+    { id: "add", icon: "add", label: "Add event", pinned: true, onSelect: () => setComposerOpen(true) },
+    { id: "layers", icon: "layers", label: "Layers", active: layersOpen, onSelect: () => setLayersOpen((open) => !open) },
+    {
+      id: "refresh",
+      icon: "retry",
+      label: "Refresh calendar",
+      labelPolicy: "never",
+      disabled: refreshing,
+      onSelect: () => void load("merge", visibleRange.from, visibleRange.to, true),
+    },
+  ];
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
-      <div className="spectra-calendar-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 px-5 pb-4 pt-6 sm:px-8 lg:px-10">
-        <ProductPageHeader
-          title="Calendar"
-          description="See school time and place Plans on it."
-          actions={
-            <>
-              <button
-                type="button"
-                className={`relative grid size-10 shrink-0 place-items-center rounded-control border transition ${layersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                data-active={layersOpen || undefined}
-                aria-pressed={layersOpen}
-                aria-label={layersOpen ? "Hide layers" : "Show layers"}
-                title="Layers"
-                onClick={() => setLayersOpen((open) => !open)}
-              >
-                <Layers3 className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => void load("merge", visibleRange.from, visibleRange.to, true)}
-                disabled={refreshing}
-                className="grid size-10 shrink-0 place-items-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                aria-label="Refresh calendar"
-                title="Refresh calendar"
-              >
-                {refreshing ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setComposerOpen(true)}
-                className="agent-library-create"
-              >
-                <Plus className="size-3.5" />
-                Add event
-              </button>
-            </>
-          }
-        />
-        <div className="spectra-calendar-toolbar mt-6">
-          <div className="spectra-calendar-week-nav">
-            {!plansOpen ? (
-              <button
-                type="button"
-                className="spectra-calendar-week-step"
-                aria-label="Show plans"
-                title="Show plans"
-                onClick={() => setPlansOpen(true)}
-              >
-                <PanelLeft className="size-4" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              aria-label="Previous range"
-              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, -daySpan)))}
-              className="spectra-calendar-week-step"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <CalendarDatePicker
-              value={focusedStart}
-              label={formatRange(focusedStart, daySpan)}
-              onChange={(date) => jumpTo(date)}
-            />
-            <button
-              type="button"
-              aria-label="Next range"
-              onClick={() => jumpTo(new Date(addLocalDays(focusedStart, daySpan)))}
-              className="spectra-calendar-week-step"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => jumpTo(new Date())}
-              className="spectra-calendar-today"
-            >
-              Today
-            </button>
-          </div>
-          <div className="spectra-calendar-zoom">
-            <button
-              type="button"
-              className="spectra-calendar-icon"
-              aria-label="Zoom out, show more days"
-              title="Zoom out"
-              disabled={daySpan >= MAX_DAYS}
-              onClick={() => changeDaySpan(daySpan + 1)}
-            >
-              <ZoomOut className="size-4" />
-            </button>
-            <span className="spectra-calendar-zoom-label">
-              {daySpan} {daySpan === 1 ? "day" : "days"}
-            </span>
-            <button
-              type="button"
-              className="spectra-calendar-icon"
-              aria-label="Zoom in, show fewer days"
-              title="Zoom in"
-              disabled={daySpan <= MIN_DAYS}
-              onClick={() => changeDaySpan(daySpan - 1)}
-            >
-              <ZoomIn className="size-4" />
-            </button>
-          </div>
-        </div>
-        {continuation && !error ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-[var(--text-secondary)]" role="status">
-            <span>Calendar is partially loaded.</span>
-            <Button variant="secondary" size="sm" disabled={refreshing} onClick={() => void load("merge", continuation.from, continuation.to, true, continuation)}>
-              {refreshing ? "Loading more…" : "Load more"}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="spectra-item-rail-stage spectra-calendar-body min-h-0 flex-1">
-        <StudioItemRail
-          label="Plans"
-          count={unscheduledPlans.length}
-          collapsed={!plansOpen}
-          onToggleCollapsed={() => setPlansOpen(false)}
-          items={unscheduledPlans.map((item) => ({
-            id: item.id,
-            title: item.title,
-            subtitle: planSubtitle(item),
-            active: Boolean(activePlanId && planWorkId(item) === activePlanId),
-          }))}
-          onSelect={(id) => {
-            const item = unscheduledPlans.find((entry) => entry.id === id);
-            if (item) openItem(item);
-          }}
-          canEdit
-          exportable
-          showIndex={false}
-          draggingId={draggingPlanId}
-          onDragStart={(id) => {
-            const item = (overview?.unscheduledTasks ?? []).find((entry) => entry.id === id);
-            if (!item) return;
-            setDraggingPlanId(id);
-            dragRef.current = { type: "plan", item, grabOffsetMinutes: 0 };
-          }}
-          onDragEnd={() => {
-            setDraggingPlanId(undefined);
-            dragRef.current = null;
-            setGesturePreview(null);
-          }}
-          tools={
-            <div className="mt-2 grid gap-1.5">
-              <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
-                <Search className="size-3.5 shrink-0" />
-                <input
-                  value={planQuery}
-                  onChange={(event) => setPlanQuery(event.target.value)}
-                  placeholder="Find a plan"
-                  aria-label="Find a plan"
-                  className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
-                />
-              </label>
+      <div className="spectra-calendar-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-spectra-app-surface="true">
+        <div className="shrink-0 px-4 pb-3 pt-5 sm:px-6 lg:px-8 lg:pt-7">
+          <PageHeader title="Calendar" commands={commands} plan={CALENDAR_BAR_PLAN} barLabel="Calendar commands" />
+          <div className="spectra-calendar-toolbar mt-4">
+            <div className="spectra-calendar-week-nav">
+              <IconButton icon="chevronLeft" label="Previous range" onClick={() => jumpTo(new Date(addLocalDays(focusedStart, -daySpan)))} />
+              <CalendarDatePicker value={focusedStart} label={formatRange(focusedStart, daySpan)} onChange={(date) => jumpTo(date)} />
+              <IconButton icon="chevronRight" label="Next range" onClick={() => jumpTo(new Date(addLocalDays(focusedStart, daySpan)))} />
+              <Button variant="ghost" size="sm" onClick={() => jumpTo(new Date())}>
+                Today
+              </Button>
             </div>
-          }
-          footer={
-            loading ? (
-              <div className="flex items-center gap-2 px-1 py-3 text-micro text-[var(--text-tertiary)]">
-                <LoaderCircle className="size-3.5 animate-spin" />
-                Loading plans
-              </div>
-            ) : error ? (
-              <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
-                Plans could not be read just now.
-              </p>
-            ) : !unscheduledPlans.length ? (
-              <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
-                {continuation?.cursors.planner
-                  ? "Load more to finish checking plans."
-                  : planQuery
-                  ? `No plans match “${planQuery}”.`
-                  : "No unscheduled plans. Create one from Library, then drag it onto a day."}
-              </p>
-            ) : null
-          }
-        />
+            <div className="spectra-calendar-zoom">
+              <IconButton icon="zoomOut" label="Show more days" disabled={daySpan >= MAX_DAYS} onClick={() => changeDaySpan(daySpan + 1)} />
+              <span className="spectra-calendar-zoom-label">
+                {daySpan} {daySpan === 1 ? "day" : "days"}
+              </span>
+              <IconButton icon="zoomIn" label="Show fewer days" disabled={daySpan <= MIN_DAYS} onClick={() => changeDaySpan(daySpan - 1)} />
+            </div>
+          </div>
+          {continuation && !error ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-caption text-[var(--text-secondary)]" role="status">
+              <span>Calendar is partly loaded.</span>
+              <Button variant="secondary" size="sm" disabled={refreshing} onClick={() => void load("merge", continuation.from, continuation.to, true, continuation)}>
+                {refreshing ? "Loading more…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+        </div>
 
         <section className="relative min-h-0 min-w-0 flex-1">
           {layersOpen ? (
             <aside
-              className="spectra-studio-inspector-overlay absolute right-3 top-3 z-chrome w-[240px] rounded-card border border-[var(--border-default)] bg-[var(--wave-paper,var(--bg-primary))] p-3 shadow-hover"
+              className="absolute right-4 top-1 z-dropdown w-[240px] rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-lg)] sm:right-6 lg:right-8"
               aria-label="Calendar layers"
             >
-              <p className="px-1 pb-2 text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-                Layers
-              </p>
-              <div className="space-y-1">
-                {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
-                  <label
-                    key={layer.key}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-micro hover:bg-[var(--bg-hover)]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={visibleLayers.has(layer.key)}
-                      onChange={() =>
-                        setVisibleLayers((current) => {
-                          const next = new Set(current);
-                          if (next.has(layer.key)) next.delete(layer.key);
-                          else next.add(layer.key);
-                          return next;
-                        })
-                      }
-                    />
-                    <span className="size-2 rounded-full" style={{ background: layer.color }} />
-                    <span className="flex-1">{layer.label}</span>
-                  </label>
-                ))}
+              <div className="flex items-center justify-between gap-2 pb-1 pl-2">
+                <span className="text-caption font-medium text-[var(--text-secondary)]">Layers</span>
+                <IconButton icon="close" label="Close layers" size="compact" onClick={() => setLayersOpen(false)} />
               </div>
+              {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
+                <label
+                  key={layer.key}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-control px-2 py-1.5 text-caption hover:bg-[var(--bg-hover)]"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-[var(--text-primary)]"
+                    checked={visibleLayers.has(layer.key)}
+                    onChange={() =>
+                      setVisibleLayers((current) => {
+                        const next = new Set(current);
+                        if (next.has(layer.key)) next.delete(layer.key);
+                        else next.add(layer.key);
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="h-3 w-[3px] rounded-full" style={{ background: layer.color }} />
+                  <span className="flex-1">{layer.label}</span>
+                </label>
+              ))}
             </aside>
           ) : null}
 
@@ -1325,22 +1112,14 @@ export function CalendarApplication() {
                 title="Calendar could not be loaded"
                 detail={error}
                 action={
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void load("replace", visibleRange.from, visibleRange.to, true)}
-                  >
+                  <Button variant="primary" size="sm" onClick={() => void load("replace", visibleRange.from, visibleRange.to, true)}>
                     Try again
                   </Button>
                 }
               />
             </div>
           ) : (
-            <div
-              ref={scrollerRef}
-              className="spectra-calendar-scroll"
-              onScroll={onScrollerScroll}
-            >
+            <div ref={scrollerRef} className="spectra-calendar-scroll" onScroll={onScrollerScroll}>
               {days.length ? (
                 <WeekGrid
                   days={days}
@@ -1366,45 +1145,133 @@ export function CalendarApplication() {
             </div>
           )}
         </section>
+
+        <CalendarComposer
+          open={composerOpen}
+          timezone={timezone}
+          onClose={() => setComposerOpen(false)}
+          onCreated={() => {
+            setComposerOpen(false);
+            void load("merge", visibleRange.from, visibleRange.to, true);
+          }}
+        />
       </div>
 
-      {selected ? (
-        <CalendarItemPanel
-          item={selected}
-          timezone={timezone}
-          onClose={() => setSelected(null)}
-          onCommit={commit}
-          onRemove={removeItem}
-        />
-      ) : null}
-      <CalendarComposer
-        open={composerOpen}
-        timezone={timezone}
-        onClose={() => setComposerOpen(false)}
-        onCreated={() => {
-          setComposerOpen(false);
-          void load("merge", visibleRange.from, visibleRange.to, true);
-        }}
-      />
-      </div>
-      {studio.mode === "split" && studio.activeArtifact ? (
-        <ArtifactStudio
-          mode="split"
-          artifact={studio.activeArtifact}
-          artifacts={openedArtifacts}
-          tabs={studio.tabs}
-          dirtyIds={studio.dirtyIds}
-          panelWidth={panelWidth}
-          sourceLabel="Calendar"
-          onPanelWidthChange={setPanelWidth}
-          onClose={studio.closeStudio}
-          onExpand={studio.openTab}
-          onActivateTab={studio.activateTab}
-          onCloseTab={closeOpenedTab}
-          onDirtyChange={studio.setDirty}
-        />
-      ) : null}
+      <SidePanel
+        id="calendar.plans"
+        title="Plans"
+        icon="checklist"
+        stageMin={640}
+        revealKey={reveal || null}
+        header={
+          <PanelTabs
+            label="Calendar side"
+            tabs={[
+              { id: "plans", label: "Plans", icon: "checklist" },
+              { id: "details", label: "Details", icon: "info" },
+            ]}
+            value={sideTab}
+            onChange={(id) => setSideTab(id as "plans" | "details")}
+          />
+        }
+      >
+        {sideTab === "plans" ? (
+          <div data-life-receive className="min-w-0">
+            <Input value={planQuery} onChange={(event) => setPlanQuery(event.target.value)} placeholder="Find a plan" aria-label="Find a plan" />
+            <p className="px-1 pb-1 pt-3 text-caption text-[var(--text-tertiary)]">Drag a plan onto a day to give it time.</p>
+            {loading ? (
+              <LoadingRows label="Loading plans" count={4} />
+            ) : error ? (
+              <p className="px-1 py-3 text-caption leading-5 text-[var(--text-secondary)]">Plans could not be read just now.</p>
+            ) : !unscheduledPlans.length ? (
+              <p className="px-1 py-3 text-caption leading-5 text-[var(--text-secondary)]">
+                {continuation?.cursors.planner
+                  ? "Load more to finish checking plans."
+                  : planQuery
+                    ? `No plans match “${planQuery}”.`
+                    : "Every plan has its time. New plans from Library show up here."}
+              </p>
+            ) : (
+              <ul className="-mx-1.5 space-y-0.5">
+                {unscheduledPlans.map((item) => (
+                  <PlanRow
+                    key={item.id}
+                    item={item}
+                    active={Boolean(activePlanId && planWorkId(item) === activePlanId)}
+                    dragging={draggingPlanId === item.id}
+                    onOpen={() => openItem(item)}
+                    onDragStart={() => {
+                      setDraggingPlanId(item.id);
+                      dragRef.current = { type: "plan", item, grabOffsetMinutes: 0 };
+                    }}
+                    onDragEnd={() => {
+                      setDraggingPlanId(undefined);
+                      dragRef.current = null;
+                      setGesturePreview(null);
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : selected ? (
+          <CalendarItemDetails key={selected.id} item={selected} timezone={timezone} onCommit={commit} onRemove={removeItem} />
+        ) : (
+          <EmptyState compact icon="info" title="Nothing chosen" detail="Choose an event or a block of work to see its details." />
+        )}
+      </SidePanel>
     </div>
+  );
+}
+
+const CALENDAR_BAR_PLAN = [{ hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
+
+/** An unscheduled plan: open it, or drag it onto a day. */
+function PlanRow({
+  item,
+  active,
+  dragging,
+  onOpen,
+  onDragStart,
+  onDragEnd,
+}: {
+  item: CalendarItem;
+  active: boolean;
+  dragging: boolean;
+  onOpen: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
+  const ref = useRef<HTMLLIElement>(null);
+  useLifeArrival(ref, item.id, "human");
+  const subtitle = planSubtitle(item);
+  return (
+    <li
+      ref={ref}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData("text/plain", item.id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={cn("group", dragging && "opacity-40")}
+    >
+      <button
+        type="button"
+        data-life-launch
+        onClick={onOpen}
+        aria-current={active ? "true" : undefined}
+        className="flex w-full min-w-0 items-center gap-2.5 rounded-control px-2 py-2 text-left outline-none transition-colors hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] aria-[current=true]:bg-[var(--bg-hover)]"
+      >
+        <Icon name="task" size={16} accent="var(--accent-gold)" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-ui font-medium text-[var(--text-primary)]">{item.title}</span>
+          {subtitle ? <span className="block truncate text-caption text-[var(--text-tertiary)]">{subtitle}</span> : null}
+        </span>
+        <Icon name="grip" size={14} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+    </li>
   );
 }
 
@@ -1474,7 +1341,7 @@ function WeekGrid({
             (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
           return (
-            <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell">
+            <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell" data-life-receive>
               {items.map((item) => {
                 const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
                 return (
@@ -1482,13 +1349,10 @@ function WeekGrid({
                     key={item.id}
                     type="button"
                     title={item.title}
+                    data-life-launch
                     onClick={() => onOpen(item)}
                     className="spectra-calendar-chip"
-                    style={{
-                      borderColor: `${layer.color}55`,
-                      background: `color-mix(in oklab, ${layer.color} 16%, var(--bg-elevated))`,
-                      color: layer.color,
-                    }}
+                    style={{ boxShadow: `inset 3px 0 0 ${layer.color}` }}
                   >
                     {item.title}
                   </button>
@@ -1497,16 +1361,18 @@ function WeekGrid({
             </div>
           );
         })}
-        <div className="spectra-calendar-gutter relative" style={{ height: hoursHeight }}>
-          {Array.from({ length: HOURS }, (_, hour) => (
-            <span
-              key={hour}
-              className="absolute right-2 -translate-y-1/2 text-micro text-[var(--text-tertiary)]"
-              style={{ top: hour * HOUR_PX }}
-            >
-              {String(hour).padStart(2, "0")}:00
-            </span>
-          ))}
+        <div className="spectra-calendar-gutter relative" style={{ height: hoursHeight }} data-calendar-hours>
+          {Array.from({ length: HOURS }, (_, hour) =>
+            hour === 0 ? null : (
+              <span
+                key={hour}
+                className="absolute right-2 -translate-y-1/2 text-micro tabular-nums text-[var(--text-tertiary)]"
+                style={{ top: hour * HOUR_PX }}
+              >
+                {String(hour).padStart(2, "0")}:00
+              </span>
+            ),
+          )}
         </div>
         {dayDates.map((day) => {
           const columnItems = timedItems.filter(
@@ -1530,19 +1396,21 @@ function WeekGrid({
               key={`${day.toISOString()}-hours`}
               onDragOver={(event) => onPreview(event, day)}
               onDrop={(event) => onDrop(event, day)}
+              data-life-receive
               className="relative border-r border-[var(--border-subtle)] last:border-r-0"
               style={{ height: hoursHeight }}
             >
               {Array.from({ length: HOURS }, (_, hour) => (
                 <div
                   key={hour}
-                  className="absolute inset-x-0 border-t border-[var(--border-subtle)]"
+                  className="absolute inset-x-0 border-t border-[color-mix(in_oklab,var(--border-subtle)_60%,transparent)]"
                   style={{ top: hour * HOUR_PX }}
                 />
               ))}
               {nowTop !== null ? (
                 <span
-                  className="pointer-events-none absolute inset-x-0 z-chrome h-px bg-emerald-700"
+                  aria-hidden
+                  className="spectra-calendar-now pointer-events-none absolute inset-x-0 z-chrome h-px"
                   style={{ top: nowTop }}
                 />
               ) : null}
@@ -1633,6 +1501,11 @@ function TimedBlock({
   ) => void;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+  const ref = useRef<HTMLButtonElement>(null);
+  const placed = !item.id.startsWith("pending:");
+  // A new event forms where it was placed; a removed one parts there.
+  useLifeArrival(ref, placed ? item.id : undefined, "human");
+  useLifeDeparture(ref, placed);
   const top = (minutesOnDay(item.startAt!, timezone) / 60) * HOUR_PX;
   const duration = timedBlockDuration(item);
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
@@ -1640,8 +1513,10 @@ function TimedBlock({
   const laneWidth = 100 / lane.lanes;
   return (
     <button
+      ref={ref}
       type="button"
       title={item.title}
+      data-life-launch
       draggable={canMove}
       onDragStart={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -1650,7 +1525,7 @@ function TimedBlock({
       onDragEnd={onDragEnd}
       onClick={onOpen}
       className={cn(
-        "group absolute z-chrome overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-chrome hover:shadow-md",
+        "group absolute z-chrome overflow-hidden rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] py-1 pl-2.5 pr-2 text-left transition-shadow hover:shadow-[var(--shadow-sm)]",
         previewing && "opacity-25",
         pending && "animate-pulse",
       )}
@@ -1659,91 +1534,71 @@ function TimedBlock({
         height,
         left: `calc(${lane.lane * laneWidth}% + 4px)`,
         width: `calc(${laneWidth}% - 8px)`,
-        borderColor: `${layer.color}55`,
-        background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`,
-        color: layer.color,
+        boxShadow: `inset 3px 0 0 ${layer.color}`,
       }}
     >
       {canMove ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "start")}
-          className="absolute inset-x-1 top-0 z-chrome h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+          className="absolute inset-x-1 top-0 z-chrome h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-[var(--bg-hover)] group-hover:opacity-100"
         />
       ) : null}
-      <span className="flex items-center gap-1 text-micro font-bold">
+      <span className="flex items-center gap-1 text-micro tabular-nums text-[var(--text-secondary)]">
         <span className="truncate">
           {formatTime(item.startAt!, timezone)}
           {item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}
         </span>
         {item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}
       </span>
-      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">
+      <span className="block truncate text-caption font-medium text-[var(--text-primary)]">
         {item.title}
       </span>
       {canMove ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "end")}
-          className="absolute inset-x-1 bottom-0 z-chrome h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+          className="absolute inset-x-1 bottom-0 z-chrome h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-[var(--bg-hover)] group-hover:opacity-100"
         />
       ) : null}
     </button>
   );
 }
 
-function CalendarItemPanel({
+function CalendarItemDetails({
   item,
   timezone,
-  onClose,
   onCommit,
   onRemove,
 }: {
   item: CalendarItem;
   timezone: string;
-  onClose: () => void;
   onCommit: (action: Record<string, unknown>) => Promise<void>;
   onRemove: (item: CalendarItem) => Promise<boolean>;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // The block it was opened from grows into these details.
+  useLifeLanding(ref, `calendar:${item.id}`);
   // School records belong to their source; everything a person placed here
   // (events, scheduled work) can be taken off again.
   const removable = !item.sourceLocked;
+  // Notes can arrive as rich text from a plan or from ManageBac: read them as words.
+  const notes = item.notes ? plainText(item.notes) : "";
   return (
-    <aside
-      className="fixed inset-y-0 right-0 z-panel w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-lg)]"
-      aria-label={`${item.title} details`}
-    >
-      <div className="flex items-start justify-between gap-3">
+    <div ref={ref} aria-label={`${item.title} details`} className="min-w-0 px-1 pb-4">
+      <span className="inline-flex items-center gap-2 text-caption font-medium text-[var(--text-secondary)]">
+        <span className="h-3 w-[3px] rounded-full" style={{ background: layer.color }} />
+        {layer.label}
+        {item.sourceLocked ? <LockKeyhole className="size-3" /> : null}
+      </span>
+      <h2 className="mt-2 text-title font-semibold leading-tight">{item.title}</h2>
+      <dl className="mt-4 space-y-3 text-ui">
         <div>
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-micro font-bold"
-            style={{ background: `${layer.color}18`, color: layer.color }}
-          >
-            {item.sourceLocked ? <LockKeyhole className="size-3" /> : null}
-            {layer.label}
-          </span>
-          <h2 className="mt-3 font-display text-metric font-semibold tracking-[-0.02em]">
-            {item.title}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close details"
-          className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
-      <dl className="mt-5 space-y-3 text-caption">
-        <div>
-          <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-            Time
-          </dt>
-          <dd className="mt-1">
+          <dt className="text-caption text-[var(--text-tertiary)]">Time</dt>
+          <dd className="mt-0.5">
             {item.allDay
               ? "All day"
               : item.startAt !== undefined
@@ -1753,31 +1608,24 @@ function CalendarItemPanel({
         </div>
         {item.location ? (
           <div>
-            <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-              Location
-            </dt>
-            <dd className="mt-1">{item.location}</dd>
+            <dt className="text-caption text-[var(--text-tertiary)]">Location</dt>
+            <dd className="mt-0.5">{item.location}</dd>
           </div>
         ) : null}
-        {item.notes ? (
+        {notes ? (
           <div>
-            <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-              Notes
-            </dt>
-            <dd className="mt-1 whitespace-pre-wrap leading-5 text-[var(--text-secondary)]">
-              {item.notes}
-            </dd>
+            <dt className="text-caption text-[var(--text-tertiary)]">Notes</dt>
+            <dd className="mt-0.5 whitespace-pre-wrap leading-5 text-[var(--text-secondary)]">{notes}</dd>
           </div>
         ) : null}
       </dl>
       {isReschedulable(item) && item.endAt !== undefined ? (
-        <section className="mt-5 rounded-xl border border-[var(--border-default)] p-3">
-          <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-            Duration
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
+        <div className="mt-4">
+          <p className="text-caption text-[var(--text-tertiary)]">Duration</p>
+          <div className="mt-1.5 flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() =>
                 void onCommit({
                   action: "resizeWorkBlock",
@@ -1786,12 +1634,12 @@ function CalendarItemPanel({
                   expectedRevision: item.revision,
                 })
               }
-              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold"
             >
               − 30 min
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() =>
                 void onCommit({
                   action: "resizeWorkBlock",
@@ -1800,40 +1648,42 @@ function CalendarItemPanel({
                   expectedRevision: item.revision,
                 })
               }
-              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold"
             >
               + 30 min
-            </button>
+            </Button>
           </div>
-        </section>
+        </div>
       ) : null}
-      {item.kind === "scheduled_work_block" ? (
-        <button
-          type="button"
-          onClick={() =>
-            void onCommit({
-              action: "completeWorkBlock",
-              itemId: item.id,
-              expectedRevision: item.revision,
-            })
-          }
-          disabled={item.status === "completed"}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--text-primary)] px-3 py-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:cursor-default disabled:opacity-60"
-        >
-          <CheckCircle2 className="size-3.5" />
-          {item.status === "completed" ? "Completed" : "Mark complete"}
-        </button>
-      ) : null}
-      {removable ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          className="mt-3 w-full"
-          onClick={() => setConfirmRemove(true)}
-        >
-          Remove from Calendar
-        </Button>
-      ) : null}
+      <div className="mt-5 flex flex-col gap-2">
+        {item.kind === "scheduled_work_block" ? (
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={item.status === "completed"}
+            onClick={() => void onCommit({ action: "completeWorkBlock", itemId: item.id, expectedRevision: item.revision })}
+          >
+            <CheckCircle2 className="size-3.5" />
+            {item.status === "completed" ? "Completed" : "Mark complete"}
+          </Button>
+        ) : null}
+        {item.linkedWorkIds.map((workId) => (
+          <Button
+            key={workId}
+            variant="secondary"
+            size="sm"
+            data-life-launch
+            onClick={() => void spectraBus.command("work.open", { workId })}
+          >
+            <Link2 className="size-3.5" />
+            {workId === item.planArtifactId ? "Open plan" : "Open linked work"}
+          </Button>
+        ))}
+        {removable ? (
+          <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)}>
+            Remove from Calendar
+          </Button>
+        ) : null}
+      </div>
       <ConfirmDialog
         open={confirmRemove}
         title={`Remove “${item.title}”?`}
@@ -1854,50 +1704,29 @@ function CalendarItemPanel({
           });
         }}
       />
-      {item.linkedWorkIds.length ? (
-        <section className="mt-5">
-          <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-            Linked work
-          </p>
-          <div className="mt-2 space-y-2">
-            {item.linkedWorkIds.map((workId) => (
-              <button
-                key={workId}
-                type="button"
-                onClick={() => void spectraBus.command("work.open", { workId, surface: "full" })}
-                className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-micro font-semibold hover:bg-[var(--bg-hover)]"
-              >
-                <Link2 className="size-3.5" />
-                {workId === item.planArtifactId ? "Open plan" : "Open linked work"}
-                <ExternalLink className="ml-auto size-3" />
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
       {item.source ? (
-        <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3">
-          <p className="flex items-center gap-2 text-micro font-semibold">
+        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4">
+          <p className="flex items-center gap-2 text-caption font-medium">
             <LockKeyhole className="size-3.5" />
-            Official source
+            From {item.source.provider}
           </p>
-          <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
-            {item.source.provider} controls the official time and deadline. Schedule your work separately.
+          <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
+            {item.source.provider} sets the official time and deadline. Schedule your own work separately.
           </p>
           {item.source.url ? (
             <a
               href={item.source.url}
               target="_blank"
               rel="noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-micro font-semibold underline underline-offset-2"
+              className="mt-2 inline-flex items-center gap-1 text-caption font-medium underline underline-offset-2"
             >
-              Open source
+              Open in {item.source.provider}
               <ExternalLink className="size-3" />
             </a>
           ) : null}
-        </section>
+        </div>
       ) : null}
-    </aside>
+    </div>
   );
 }
 

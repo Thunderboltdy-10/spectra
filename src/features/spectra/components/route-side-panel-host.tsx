@@ -41,6 +41,7 @@ import {
  */
 const ROUTE_SIDE_PANEL_PREFIXES = [
   "/school",
+  "/calendar",
   "/devices",
   "/analytics",
   "/settings",

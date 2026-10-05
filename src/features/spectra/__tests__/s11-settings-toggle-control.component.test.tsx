@@ -7,6 +7,13 @@ import { SettingsApplication } from "../settings/ui/settings-application";
 import { settingsToggleControls } from "../collaboration/settings-toggle-control";
 import { SMART_COMPLETION_TARGET } from "../actions/protocol/semantic-action";
 
+// The page header's command bar measures its room.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
 const remote = vi.hoisted(() => ({
   layers: [{ scope: "account", values: { writing: { smartCompletion: true } }, updatedAt: 1 }],
   query: vi.fn(),

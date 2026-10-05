@@ -32,6 +32,9 @@ import { SelectField } from "@/components/ui/select";
 import { embedCapabilitiesFor } from "../capabilities";
 import { useArtifactEmbedContainer } from "./artifact-embed-host";
 import { usePinVersionPicker } from "./use-pin-version-picker";
+import { rankEmbedCandidates } from "./embed-candidates";
+import { useRelated, useSemanticSearch } from "../semantic/use-semantic";
+import type { SemanticAnchor } from "../../../../shared/semantic-types";
 
 type Interaction = ArtifactEmbedInteraction;
 
@@ -96,21 +99,29 @@ export function ArtifactEmbedsPanel({
     setReferenceView("");
   }, [open, regions]);
 
-  const candidates = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return artifacts
-      .filter(
-        (artifact) =>
-          isArtifactTypeKey(artifact.blueprintKey) &&
-          artifact._id !== containerId &&
-          artifact.status !== "deleted" &&
-          (!needle ||
-            `${artifact.title} ${artifact.summary ?? ""} ${artifact.blueprintKey}`
-              .toLowerCase()
-              .includes(needle)),
-      )
-      .slice(0, 40);
-  }, [artifacts, containerId, search]);
+  const picking = open && creating;
+  const semantic = useSemanticSearch(search, {
+    kinds: ["artifact"],
+    limit: 20,
+    openItemIds: containerType === "artifact" ? [containerId] : undefined,
+    enabled: picking,
+  });
+  const related = useRelated(
+    containerType === "artifact" ? containerId : null,
+    { limit: 12, enabled: picking },
+  );
+  const candidates = useMemo(
+    () =>
+      rankEmbedCandidates({
+        artifacts,
+        containerId,
+        query: search,
+        searchIds: semantic.results.map(workIdOf),
+        relatedIds: related.results.map(workIdOf),
+      }),
+    [artifacts, containerId, search, semantic.results, related.results],
+  );
+  const searching = semantic.status === "loading" && candidates.length === 0;
   const selectedArtifact = artifacts.find(
     (artifact) => artifact._id === sourceArtifactId,
   );
@@ -504,7 +515,7 @@ export function ArtifactEmbedsPanel({
                     })}
                     {candidates.length === 0 ? (
                       <p className="px-3 py-4 text-center text-micro text-[var(--text-tertiary)]">
-                        No accessible work matches.
+                        {searching ? "Searching…" : "No accessible work matches."}
                       </p>
                     ) : null}
                   </div>
@@ -701,4 +712,9 @@ export function ArtifactEmbedsPanel({
       ) : null}
     </AnimatePresence>
   );
+}
+
+/** A search or related hit names its work by the anchor; other kinds never match a work id. */
+function workIdOf(result: { itemId: string; anchor: SemanticAnchor }) {
+  return result.anchor.kind === "artifact" ? result.anchor.artifactId : result.itemId;
 }

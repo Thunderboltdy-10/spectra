@@ -137,10 +137,16 @@ export function ArtifactEmbedList({
           onModeChange={
             result.canConfigure
               ? (mode) =>
+                  // A refused resize used to surface as an unhandled
+                  // rejection and nothing on screen; say it, like remove.
                   void update({
                     embedId: embed.embedId as Id<"artifactEmbeds">,
                     mode,
-                  })
+                  }).catch((error) =>
+                    toast.error(
+                      describeFailure(error, { fallback: "The reference size could not be changed." }).message,
+                    ),
+                  )
               : undefined
           }
           onRemove={

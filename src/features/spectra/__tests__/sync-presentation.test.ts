@@ -122,6 +122,14 @@ describe("sync presentation (P1.I3)", () => {
     expect(presentation.ready).toBe(false);
   });
 
+  it("says a change waits for a paused folder instead of promising a retry", () => {
+    const paused = { kind: "local" as const, state: "pending" as const, retryAt: 1, errorCode: "folder-paused" };
+    expect(replicaDisclosure([paused], Date.now())).toEqual(["This device · Paused on this computer"]);
+    const presentation = presentSync({ replicas: [paused], openConflictCount: 0, replicaPendingCount: 0, online: true });
+    expect(presentation.detail).toBe("This folder is paused on this computer. Spectra saves the change when you resume it.");
+    expect(presentation.detail).not.toMatch(/folder-paused|retry/i);
+  });
+
   it("says queued and where the file lives when Bridge is down during a native write", () => {
     const presentation = presentSync({
       replicas: [

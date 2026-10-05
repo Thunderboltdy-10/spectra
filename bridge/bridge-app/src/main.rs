@@ -106,6 +106,9 @@ enum MountSyncOutcome {
     Completed,
     RetryScheduled,
     AlreadyRunning,
+    /// The folder is paused: nothing was scanned or sent. It is scanned again
+    /// once it resumes.
+    Paused,
 }
 
 fn retain_current_mounts(
@@ -298,6 +301,12 @@ fn paused_mounts(grants: &GrantRegistry, journal: &Journal) -> HashSet<String> {
         .map(|grant| grant.id)
         .filter(|grant_id| flag(journal, &mount_paused_key(grant_id)))
         .collect()
+}
+
+/// Whether this folder holds its changes: syncing is paused for every folder,
+/// or for this one.
+fn folder_paused(journal: &Journal, grant_id: &str) -> bool {
+    sync_paused(journal) || flag(journal, &mount_paused_key(grant_id))
 }
 
 fn set_mount_paused(
@@ -2603,6 +2612,7 @@ async fn drain_pending_payload_uploads(
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
+    paused_grants: &HashSet<String>,
 ) -> anyhow::Result<usize> {
     let mut uploaded = 0usize;
     for _ in 0..10 {
@@ -2613,6 +2623,11 @@ async fn drain_pending_payload_uploads(
             }
             break;
         };
+        if paused_grants.contains(&request.grant_id) {
+            // A paused folder sends nothing. Spectra asks for this file again
+            // on a later pass, after the folder resumes; other folders go on.
+            continue;
+        }
         if !finish_pending_payload_upload(grants, journal, deployment, credential, request).await? {
             break;
         }
@@ -2792,12 +2807,28 @@ async fn drain_structure_requests(
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
+    paused_grants: &HashSet<String>,
 ) -> anyhow::Result<usize> {
     let mut handled = 0;
     for _ in 0..20 {
         let Some(request) = claim_fs_request(deployment, credential).await? else {
             break;
         };
+        if paused_grants.contains(&request.grant_id) {
+            // A paused folder is not reorganized; Spectra offers this change
+            // again later, as it does a paused folder's writes.
+            complete_claimed_structure(
+                deployment,
+                credential,
+                journal,
+                &request,
+                "waiting",
+                None,
+                Some(("folder-paused", "This folder is paused on this computer.")),
+            )
+            .await?;
+            continue;
+        }
         let relative_source = std::path::Path::new(&request.source_relative_path);
         let target_candidate = request
             .target_relative_path
@@ -3441,6 +3472,11 @@ async fn sync_grant(
     else {
         return Ok(MountSyncOutcome::AlreadyRunning);
     };
+    // A scan registers files with Spectra and uploads their bytes, so a
+    // paused folder is not scanned: its watcher keeps changes in the journal.
+    if folder_paused(journal, &grant.id) {
+        return Ok(MountSyncOutcome::Paused);
+    }
     if !grant.is_available() {
         set_mount_status(
             journal,
@@ -3863,6 +3899,7 @@ async fn run_sync_iteration(
             Ok(MountSyncOutcome::AlreadyRunning) => {
                 restored_grants_reconciled.insert(grant.id);
             }
+            Ok(MountSyncOutcome::Paused) => {}
             Err(_) => failed = true,
         }
     }
@@ -3939,7 +3976,9 @@ async fn run_sync_iteration(
     }
 
     let structure_handled =
-        match drain_structure_requests(grants, journal, deployment, &credential).await {
+        match drain_structure_requests(grants, journal, deployment, &credential, &paused_grants)
+            .await
+        {
             Ok(handled) => {
                 cloud_request_succeeded = true;
                 let _ = journal.delete_config("structure_queue_error");
@@ -3952,7 +3991,9 @@ async fn run_sync_iteration(
             }
         };
     let payload_handled =
-        match drain_pending_payload_uploads(grants, journal, deployment, &credential).await {
+        match drain_pending_payload_uploads(grants, journal, deployment, &credential, &paused_grants)
+            .await
+        {
             Ok(handled) => {
                 cloud_request_succeeded = true;
                 let _ = journal.delete_config("payload_queue_error");
@@ -4389,6 +4430,38 @@ mod devices_tests {
         assert!(snapshot.mounts[0].paused);
         assert_eq!(snapshot.mounts[0].friendly_path.split(" \u{203a} ").last(), Some("Biology"));
         assert!(set_mount_paused(&grants, &journal, "grant_gone", true).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_paused_folder_is_never_scanned_to_spectra() {
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        let grants = GrantRegistry::default();
+        let biology = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        let maths = grants
+            .add_native_selection("Maths".into(), &temp_folder("Maths"))
+            .unwrap();
+        let active: ActiveMountSyncs = Arc::new(Mutex::new(HashSet::new()));
+
+        set_mount_paused(&grants, &journal, &biology.id, true).unwrap();
+        assert!(folder_paused(&journal, &biology.id));
+        assert!(!folder_paused(&journal, &maths.id));
+        // The scan returns before it reads the folder or calls Spectra, and
+        // leaves the folder's status as it was.
+        assert!(matches!(
+            sync_grant(&biology, &journal, &active).await,
+            Ok(MountSyncOutcome::Paused)
+        ));
+        assert!(active.lock().unwrap().is_empty());
+
+        // Pausing every folder holds the other one too.
+        set_sync_paused(&journal, true).unwrap();
+        assert!(folder_paused(&journal, &maths.id));
+        assert!(matches!(
+            sync_grant(&maths, &journal, &active).await,
+            Ok(MountSyncOutcome::Paused)
+        ));
     }
 
     #[test]

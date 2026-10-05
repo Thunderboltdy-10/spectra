@@ -59,26 +59,30 @@ function inferTab(type: WorkType, binding: CommandBinding) {
   return tab === binding.contextualTab || COMMAND_TABS[type].includes(tab) ? tab : "General";
 }
 
+// The patterns match at the start of a word (with an optional un-/re- on the
+// verbs that take one: ungroup, reorder, rerun). As bare substrings they
+// read "review" in "Preview", "row" in "Arrow", "add" in "Padding" and
+// "order" in "Border", and put those commands on tabs that do not own them.
 function inferNamedTab(type: WorkType, binding: CommandBinding) {
   if (binding.contextualTab) return binding.contextualTab;
   if (binding.tab) return COMMAND_TABS[type].includes(binding.tab) ? binding.tab : "General";
   const value = `${binding.id} ${binding.label}`.toLowerCase();
-  if (/(insert|add|new|create)/.test(value) && COMMAND_TABS[type].includes("Insert")) return "Insert";
-  if (/insert|add|new|image|table|equation|chart|shape/.test(value)) return "Insert";
-  if (/format|font|color|bold|italic|align/.test(value)) return "Format";
-  if (/sort|filter|freeze|validation|conditional|row|column|data/.test(value) && COMMAND_TABS[type].includes("Data")) return "Data";
-  if (/formula|calculate|function|named.?range|sum|average/.test(value) && COMMAND_TABS[type].includes("Formula")) return "Formula";
-  if (/review|comment|find|copy|source|spell|track/.test(value) && COMMAND_TABS[type].includes("Review")) return "Review";
-  if (/design|theme|background/.test(value) && COMMAND_TABS[type].includes("Design")) return "Design";
-  if (/transition|animate|animation/.test(value) && COMMAND_TABS[type].includes("Animate")) return "Animate";
-  if (/layout|arrange|order|group|move.*(?:earlier|later|front|back)/.test(value)) {
+  if (/\b(?:insert|add(?!ress)|new|create)/.test(value) && COMMAND_TABS[type].includes("Insert")) return "Insert";
+  if (/\b(?:insert|add(?!ress)|new|image|table|equation|chart|shape)/.test(value)) return "Insert";
+  if (/\b(?:un|re)?(?:format|font|color|bold|italic|align)/.test(value)) return "Format";
+  if (/\b(?:un|re)?(?:sort|filter|freeze|validation|conditional|row|column|data)/.test(value) && COMMAND_TABS[type].includes("Data")) return "Data";
+  if (/\b(?:formula|calculate|function|named.?range|sum|average)/.test(value) && COMMAND_TABS[type].includes("Formula")) return "Formula";
+  if (/\b(?:review|comment|find|copy|source|spell|track)/.test(value) && COMMAND_TABS[type].includes("Review")) return "Review";
+  if (/\b(?:design|theme|background)/.test(value) && COMMAND_TABS[type].includes("Design")) return "Design";
+  if (/\b(?:transition|animate|animation)/.test(value) && COMMAND_TABS[type].includes("Animate")) return "Animate";
+  if (/\b(?:un|re)?(?:layout|arrange|order|group|move.*(?:earlier|later|front|back))/.test(value)) {
     if (COMMAND_TABS[type].includes("Arrange")) return "Arrange";
     if (COMMAND_TABS[type].includes("Layout")) return "Layout";
     return type === "planner_task" ? "Plan" : "General";
   }
-  if (/run|preview|build|test/.test(value)) return type === "code" ? "Run" : "Evaluate";
-  if (/present|play|slideshow/.test(value)) return "Present";
-  if (/reference|citation|source/.test(value)) return COMMAND_TABS[type].includes("References") ? "References" : "General";
+  if (/\b(?:un|re)?(?:run|preview|build|test)/.test(value)) return type === "code" ? "Run" : "Evaluate";
+  if (/\b(?:present|play|slideshow)/.test(value)) return "Present";
+  if (/\b(?:reference|citation|source)/.test(value)) return COMMAND_TABS[type].includes("References") ? "References" : "General";
   return "General";
 }
 
@@ -90,19 +94,19 @@ function inferContextualTab(type: WorkType, binding: CommandBinding) {
   // only with a selection — which is how "Show grid" ended up on the Shape tab.
   if (binding.tab && COMMAND_TABS[type].includes(binding.tab)) return undefined;
   const value = `${binding.id} ${binding.label}`.toLowerCase();
-  if (type !== "document" && /(insert|add|new|create)/.test(value)) return undefined;
+  if (type !== "document" && /\b(?:insert|add(?!ress)|new|create)/.test(value)) return undefined;
   if (type === "document") {
     if (value.includes("equation")) return "Equation";
-    if (value.includes("table") && !/(insert|add|new|create)/.test(value)) return "Table";
-    if (value.includes("image") && !/(insert|add|new|create)/.test(value)) return "Image";
+    if (value.includes("table") && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Table";
+    if (value.includes("image") && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Image";
   }
   if (type === "sheets") {
-    if (value.includes("chart") && !/(insert|add|new|create)/.test(value)) return "Chart";
-    if (value.includes("formula") && !/(insert|add|new|create)/.test(value)) return "Formula";
+    if (value.includes("chart") && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Chart";
+    if (value.includes("formula") && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Formula";
   }
   if (type === "presentation") {
     if (value.includes("transition")) return "Transition";
-    if (/shape|align|arrange|group/.test(value) && !/(insert|add|new|create)/.test(value)) return "Shape";
+    if (/shape|align|arrange|group/.test(value) && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Shape";
   }
   if (type === "whiteboard" && /shape|align|arrange|group|lock/.test(value)) return "Shape";
   if (type === "code" && /preview|output|console|run/.test(value)) return "Code output";

@@ -348,7 +348,7 @@ const quiz: WorkbarPlan = {
       ...more("group:Results", "group:Quiz"),
     ],
     Questions: [],
-    // "Preview as learner" lands here: the tab inference reads "review" in it.
+    // "Preview as learner" is placed here by its binding (tab: "Review").
     Review: [...hide("preview")],
   },
 };

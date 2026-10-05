@@ -23,4 +23,35 @@ describe("workbar tab inference", () => {
     const command = commandForBinding("presentation", { id: "add-image", label: "Add image", onSelect: () => {} }, 0);
     expect(command.defaultPlacement.tab).toBe("Insert");
   });
+  // The name patterns match at the start of a word. As substrings they read
+  // "review" in "Preview", "row" in "Arrow", "add" in "Padding" and "order" in
+  // "Border", and those commands landed on tabs that do not own them.
+  it.each([
+    ["quiz", "preview", "Preview", "General"],
+    ["sheets", "preview", "Print preview", "General"],
+    ["sheets", "arrow", "Arrow", "General"],
+    ["document", "padding", "Cell padding", "General"],
+    ["sheets", "address", "Cell address", "General"],
+    ["presentation", "border", "Border", "General"],
+  ] as const)("does not read a pattern inside a word (%s %s)", (type, id, label, tab) => {
+    const command = commandForBinding(type, { id, label, onSelect: () => {} }, 0);
+    expect(command.defaultPlacement.tab).toBe(tab);
+  });
+
+  it.each([
+    ["presentation", "ungroup", "Ungroup", "Arrange"],
+    ["presentation", "reorder", "Reorder", "Arrange"],
+    ["sheets", "unfreeze", "Unfreeze", "Data"],
+    ["code", "rerun", "Rerun", "Run"],
+    ["sheets", "review-comments", "Review comments", "Review"],
+    ["sheets", "sort-rows", "Sort rows", "Data"],
+  ] as const)("still reads whole words and their un-/re- forms (%s %s)", (type, id, label, tab) => {
+    const command = commandForBinding(type, { id, label, onSelect: () => {} }, 0);
+    expect(command.defaultPlacement.tab).toBe(tab);
+  });
+
+  it("keeps an explicit tab over the name", () => {
+    const command = commandForBinding("quiz", { id: "preview", label: "Preview as learner", tab: "Review", onSelect: () => {} }, 0);
+    expect(command.defaultPlacement.tab).toBe("Review");
+  });
 });

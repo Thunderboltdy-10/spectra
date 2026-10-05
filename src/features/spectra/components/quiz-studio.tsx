@@ -1505,6 +1505,7 @@ export function QuizStudio({
               id: "preview",
               label: "Preview as learner",
               icon: Eye,
+              tab: "Review",
               priority: "essential",
               onSelect: () => openQuizMode("preview"),
             }

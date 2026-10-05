@@ -50,7 +50,7 @@ const history = [button("undo", "Undo"), button("redo", "Redo")];
 const SMALL_EDITORS: Partial<Record<WorkType, CommandBinding[]>> = {
   quiz: [
     ...history,
-    button("preview", "Preview as learner"),
+    button("preview", "Preview as learner", { tab: "Review" }),
     button("settings", "Quiz settings"),
     button("questions", "Hide questions"),
     button("add-question", "Add question", { keepLabel: true }),

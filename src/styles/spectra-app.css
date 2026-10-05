@@ -16313,3 +16313,13 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
     transform: translateY(35%);
   }
 }
+
+/* Drag and drop (MOTION.md): while an item is carried, where it came from is a
+   quiet hole; it fills back in when the item lands or flies back. */
+[data-life-picked]:not([data-dragging]) {
+  opacity: 0.42;
+  filter: saturate(0.6);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    filter var(--motion-fast) var(--ease-standard);
+}

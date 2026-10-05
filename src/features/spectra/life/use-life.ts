@@ -155,10 +155,20 @@ function watchPresses() {
     (event) => {
       const source = (event.target as Element | null)?.closest?.("[draggable='true'], [data-spectra-card], [data-row-title]") ?? (event.target as Element | null);
       dragFrom = source?.getBoundingClientRect ? rectOf(source) : null;
+      // Picked up (MOTION.md, "Drag and drop"): where it came from stays as a quiet hole while it is carried. After
+      // the browser has taken its drag image, so the image is the whole item.
+      if (source instanceof HTMLElement) requestAnimationFrame(() => dragFrom && source.setAttribute("data-life-picked", ""));
     },
     { capture: true, passive: true },
   );
-  window.addEventListener("dragend", () => (dragFrom = null), { passive: true });
+  window.addEventListener(
+    "dragend",
+    () => {
+      dragFrom = null;
+      document.querySelectorAll("[data-life-picked]").forEach((element) => element.removeAttribute("data-life-picked"));
+    },
+    { passive: true },
+  );
   // Bubble phase: by now the page has handled the drop, and preventDefault says it was taken.
   window.addEventListener("drop", (event) => {
     const from = dragFrom;

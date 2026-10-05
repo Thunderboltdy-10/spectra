@@ -188,6 +188,18 @@ describe("sends", () => {
     row.remove();
   });
 
+  it("leaves a quiet hole where a picked item came from until it lands", () => {
+    const row = document.createElement("div");
+    row.setAttribute("draggable", "true");
+    document.body.append(row);
+    row.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    act(flushFrames);
+    expect(row.hasAttribute("data-life-picked")).toBe(true);
+    row.dispatchEvent(new Event("dragend", { bubbles: true }));
+    expect(row.hasAttribute("data-life-picked")).toBe(false);
+    row.remove();
+  });
+
   it("only pulses a target when there is nowhere the move came from", () => {
     const list = document.createElement("div");
     document.body.append(list);

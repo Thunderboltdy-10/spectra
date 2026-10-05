@@ -1,5 +1,5 @@
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
+import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { aiRegionDecorationKey } from "./ai-region-decoration";
 import { isYjsOriginDocumentTransaction } from "./collaboration-change";
@@ -38,9 +38,21 @@ export function insertedRanges(transaction: Transaction) {
   return ranges;
 }
 
-export const AiTextResolve = Extension.create({
+export type AiTextResolveOptions = {
+  /** Whether Spectra is writing here. Defaults to the document's AI region (ai-region-decoration.ts). */
+  writing: ((state: EditorState) => boolean) | null;
+  /** Whether a transaction brings someone else's text. Defaults to a Yjs-origin change. */
+  remote: ((transaction: Transaction) => boolean) | null;
+};
+
+export const AiTextResolve = Extension.create<AiTextResolveOptions>({
   name: "spectraAiTextResolve",
+  addOptions() {
+    return { writing: null, remote: null };
+  },
   addProseMirrorPlugins() {
+    const isWriting = this.options.writing ?? ((state: EditorState) => Boolean(aiRegionDecorationKey.getState(state)?.target));
+    const isRemote = this.options.remote ?? isYjsOriginDocumentTransaction;
     return [
       new Plugin<ResolveState>({
         key: aiTextResolveKey,
@@ -50,8 +62,7 @@ export const AiTextResolve = Extension.create({
             let next = previous.map(transaction.mapping, transaction.doc);
             const expireBefore = transaction.getMeta(EXPIRE_META) as number | undefined;
             if (expireBefore !== undefined) next = next.remove(next.find(undefined, undefined, (spec) => spec.at <= expireBefore));
-            const writing = Boolean(aiRegionDecorationKey.getState(oldState)?.target);
-            if (!transaction.docChanged || !writing || !isYjsOriginDocumentTransaction(transaction)) return next;
+            if (!transaction.docChanged || !isRemote(transaction) || !isWriting(oldState)) return next;
             const at = Date.now();
             const marks: Decoration[] = [];
             for (const [from, to] of insertedRanges(transaction)) {

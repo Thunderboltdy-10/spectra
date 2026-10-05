@@ -129,6 +129,11 @@ const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
 };
 
 /** Pairing and removing ask first (settings); reading is free; the rest are ordinary. */
+/** Labels see the raw arguments, so an unknown action still reads plainly. */
+function devicesLabel(action: string): [string, string] {
+  return DEVICES_LABELS[action as DevicesAction] ?? ["Working on your devices", "Worked on your devices"];
+}
+
 export function devicesToolEffect(action: DevicesAction): ToolEffect {
   if (action === "status") return "read";
   if (action === "pair" || action === "remove_folder" || action === "remove_device") return "settings";
@@ -473,8 +478,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: (args: DevicesArgs) => devicesToolEffect(args.action),
       category: (args: DevicesArgs) => (devicesToolEffect(args.action) === "settings" ? "settings" : undefined),
-      label: (args: DevicesArgs) => DEVICES_LABELS[args.action][0],
-      doneLabel: (args: DevicesArgs) => DEVICES_LABELS[args.action][1],
+      label: (args: DevicesArgs) => devicesLabel(args.action)[0],
+      doneLabel: (args: DevicesArgs) => devicesLabel(args.action)[1],
       question: (args: DevicesArgs) =>
         args.action === "pair"
           ? "Connect this computer to Spectra? You'll confirm a code on the computer."

@@ -702,7 +702,7 @@ export function ChatShell() {
           <div className="flex items-center gap-1">
             <GlobalSearch
               trigger="icon"
-              onOpenArtifact={(artifact) => openArtifact(artifact._id)}
+              onOpenArtifact={(artifactId) => openArtifact(artifactId)}
               onOpenWorkspace={(workspace) =>
                 selectWorkspaceContext(workspace._id)
               }

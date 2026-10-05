@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
+import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
+import { CrossfadeText } from "../motion/motion-primitives";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import type { AnsweredInput } from "../ai/harness-exchange";
 import { InlineEmphasis } from "./inline-emphasis";
@@ -52,6 +54,8 @@ export function ProgressTrace({
   });
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
   const [userTouched, setUserTouched] = useState<Set<string>>(() => new Set());
+  // Steps seen working here: when one finishes, its light settles into a tick that draws itself.
+  const [ranHere, setRanHere] = useState<Set<string>>(() => new Set());
   const [displayOrder, setDisplayOrder] = useState<string[]>(() =>
     steps.map((step) => step.id),
   );
@@ -73,13 +77,15 @@ export function ProgressTrace({
       });
       prevRunningRef.current = runningId;
     }
+    const fresh = steps.filter((step) => step.status === "running" && !ranHere.has(step.id));
+    if (fresh.length) setRanHere((current) => new Set([...current, ...fresh.map((step) => step.id)]));
     for (const step of steps) {
       if (step.status !== "running" && !completedAtRef.current.has(step.id)) {
         completedAtRef.current.set(step.id, Date.now());
       }
       if (step.status === "running") completedAtRef.current.delete(step.id);
     }
-  }, [steps, userTouched]);
+  }, [steps, userTouched, ranHere]);
 
   useEffect(() => {
     const ids = steps.map((step) => step.id);
@@ -184,9 +190,12 @@ export function ProgressTrace({
             className={cn(
               "min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
               thinking && "thinking-wave",
+              // The current caption has light running slowly along its left edge (MOTION.md, "Captions").
+              !finished && "spectra-caption-live",
             )}
           >
-            {headline}
+            {/* Present tense becomes past tense with a quick cross-fade. */}
+            <CrossfadeText value={headline} primitive="completion" />
           </span>
           {expandable ? (
             <ChevronDown
@@ -242,7 +251,7 @@ export function ProgressTrace({
                         ) : step.status === "error" ? (
                           <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
                         ) : (
-                          <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+                          <Icon name="check" size={14} animate={ranHere.has(step.id)} className="text-[var(--success)]" />
                         )}
                         <span
                           className={cn(

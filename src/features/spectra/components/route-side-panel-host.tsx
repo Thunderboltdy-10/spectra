@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -26,6 +26,7 @@ import {
   writeRouteSideSession,
   writeSharedWorkbenchSession,
 } from "../workbench";
+import { launchFrom, useLifeLanding } from "../life/use-life";
 import { LiveThreadPanel } from "./live-thread-panel";
 import { createLatestStudioLoad } from "./latest-studio-load";
 import {
@@ -293,10 +294,17 @@ export function RouteSidePanelHost() {
     setWork(null);
   }
 
+  // What opens here grows out of the card or row it was opened from.
+  const workSlot = useRef<HTMLDivElement>(null);
+  const threadSlot = useRef<HTMLDivElement>(null);
+  useLifeLanding(workSlot, studio.mode === "split" ? studio.activeArtifact?._id : null);
+  useLifeLanding(threadSlot, thread?._id);
+
   if (!eligible || (!work && !thread)) return null;
   return (
     <div ref={measureSide} className="spectra-wave-y relative z-panel flex h-full max-w-[calc(100vw-76px)] shrink-0">
       {studio.mode === "split" && studio.activeArtifact ? (
+        <div ref={workSlot} data-side-slot="work" className="flex h-full shrink-0">
         <ArtifactStudio
           mode="split"
           artifact={studio.activeArtifact}
@@ -307,14 +315,20 @@ export function RouteSidePanelHost() {
           sourceLabel="Route preview"
           onPanelWidthChange={setWorkWidth}
           onClose={closeWork}
-          onExpand={() => fullscreen(studio.activeArtifact!._id)}
+          onExpand={() => {
+            // The Side panel grows into the full view.
+            launchFrom(workSlot.current);
+            fullscreen(studio.activeArtifact!._id);
+          }}
           onActivateTab={activateTab}
           onCloseTab={() => closeWork()}
           onDirtyChange={setDirty}
           executeApplicationCommand={applicationCommandDispatcher}
         />
+        </div>
       ) : null}
       {thread ? (
+        <div ref={threadSlot} data-side-slot="thread" className="flex h-full shrink-0">
         <LiveThreadPanel
           threadId={thread._id}
           title={thread.title}
@@ -326,6 +340,7 @@ export function RouteSidePanelHost() {
             router.push(`/workspace/${encodeURIComponent(workspaceId)}`)
           }
         />
+        </div>
       ) : null}
     </div>
   );

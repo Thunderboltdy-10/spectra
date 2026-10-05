@@ -26,7 +26,7 @@ import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 import { getRunLedger } from "./run-ledger";
 import { life, type GlowHandle } from "../life/life";
-import { prismPoint } from "../life/use-life";
+import { markCause, prismPoint } from "../life/use-life";
 import { startSettingsObservationClient } from "./settings-observation-client";
 
 let coordinator = new AppChoreographyCoordinator();
@@ -45,6 +45,8 @@ const sparkAt = new Map<string, [number, number]>();
 function moveSpark(actorId: string, to: [number, number]) {
   const from = sparkAt.get(actorId) ?? prismPoint();
   sparkAt.set(actorId, to);
+  // What Spectra makes here forms from where its spark is, as a person's would from their press.
+  markCause(to);
   if (!life.on || Math.hypot(to[0] - from[0], to[1] - from[1]) < 6) return;
   life.send(from, to, { colour: "spectrum", strength: 0.7 });
 }

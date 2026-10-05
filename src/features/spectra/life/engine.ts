@@ -75,12 +75,18 @@ export type LifeCommand =
   /** A held formation sinks back into the field instead. */
   | { type: "sink"; id: number };
 
+/** Frames timed before the tier is settled, and the median a device must keep under to stay full. */
+const TIER_SAMPLE = 90;
+const FRAME_BUDGET_MS = 6;
+
 export type LifeEvent =
   | { type: "formed"; id: number }
   | { type: "gone"; id: number }
   | { type: "arrived"; id: number }
   | { type: "asleep" }
-  | { type: "awake" };
+  | { type: "awake" }
+  /** The device could not keep the full field within budget; it runs light from now on. */
+  | { type: "tier"; tier: LifeTier };
 
 export type LifeSurface = {
   canvas: OffscreenCanvas | HTMLCanvasElement;
@@ -154,7 +160,7 @@ export class LifeEngine {
   constructor(
     private back: LifeSurface,
     private front: LifeSurface,
-    private readonly tier: LifeTier,
+    private tier: LifeTier,
     private readonly emit: (event: LifeEvent) => void,
     private readonly schedule: (frame: (now: number) => void) => void,
     private readonly now: () => number,
@@ -507,6 +513,32 @@ export class LifeEngine {
     }
   }
 
+  /* Budgets (LIFE.md): the tier is settled from the first active frames. */
+  private frameCosts: number[] = [];
+  private tierSettled = false;
+  private goLight = false;
+
+  private measure(cost: number) {
+    if (this.tierSettled || this.tier === "light") return;
+    this.frameCosts.push(cost);
+    if (this.frameCosts.length < TIER_SAMPLE) return;
+    const sorted = [...this.frameCosts].sort((a, b) => a - b);
+    this.goLight = sorted[Math.floor(sorted.length / 2)] > FRAME_BUDGET_MS;
+    this.tierSettled = true;
+    this.frameCosts = [];
+  }
+
+  /** Between moments, never during one: nothing is forming or travelling when the field is asleep. */
+  private settleTier() {
+    if (!this.goLight) return;
+    this.goLight = false;
+    this.tier = "light";
+    this.lattice = new FieldLattice(this.width, this.height, LIGHT_TUNING);
+    this.particles = new Particles(300);
+    this.wireParticles();
+    this.emit({ type: "tier", tier: "light" });
+  }
+
   private wakeUp() {
     if (this.running) return;
     this.running = true;
@@ -520,14 +552,17 @@ export class LifeEngine {
     const dt = Math.min(1 / 30, Math.max(1 / 240, (now - this.last) / 1000));
     this.last = now;
     this.time += dt;
+    const start = this.now();
     const alive = this.update(dt);
     this.draw();
+    this.measure(this.now() - start);
     if (alive) {
       this.schedule(this.frame);
       return;
     }
     this.running = false;
     this.clear();
+    this.settleTier();
     this.emit({ type: "asleep" });
   };
 

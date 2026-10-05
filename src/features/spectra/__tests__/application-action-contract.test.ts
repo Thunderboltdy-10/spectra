@@ -13,7 +13,7 @@ import { spectraToolRegistry } from "../tools/registry";
 import { spectraToolExecutor } from "../tools/execution/tool-executor";
 import { CALENDAR_COMMAND_ALIASES } from "../calendar/domain/command";
 import { readFileSync } from "node:fs";
-import { AI_SYNC_PURPOSE_KINDS, aiSyncPurpose } from "../../../../shared/school-sync";
+import { aiRefreshRequest, aiSyncPurpose } from "../../../../shared/school-sync";
 
 const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: string; event?: string; status?: string }> = [
   { command: "navigate_spectra", args: { destination: "calendar" }, event: "navigate_spectra" },
@@ -77,8 +77,9 @@ describe("application action contract matrix (stubbed persistence)", () => {
 
   it.each([["upcoming_deadlines", ["current_tasks"]], ["past_tasks", ["past_tasks", "dropbox_files"]], ["cas", ["cas"]], ["nonsense", ["current_tasks"]]] as const)(
     "asks ManageBac only for the kinds the %s refresh needs", (purpose, kinds) => {
-      expect(AI_SYNC_PURPOSE_KINDS[aiSyncPurpose(purpose)]).toEqual(kinds);
-      expect(readFileSync("convex/spectraApplicationWrites.ts", "utf8")).toContain("kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]]");
+      expect(aiRefreshRequest(purpose, undefined)).toEqual({ reason: `ai_${aiSyncPurpose(purpose)}`, force: true, kinds });
+      expect(aiRefreshRequest(purpose, false).force).toBe(false);
+      expect(readFileSync("convex/spectraApplicationWrites.ts", "utf8")).toContain("aiRefreshRequest(args.purpose, args.force)");
     });
 
   it.each(Object.entries(CALENDAR_COMMAND_ALIASES))("dispatches Calendar alias %s with its operation identity", async (alias, canonical) => {

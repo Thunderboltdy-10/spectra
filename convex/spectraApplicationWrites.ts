@@ -8,7 +8,7 @@ import { applicationApprovalScope, applicationOperationScope, applicationWriteRe
 import { mapOperationArtifactReferences } from "../src/features/spectra/operations/dependencies";
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
-import { AI_SYNC_PURPOSE_KINDS, aiSyncPurpose } from "../shared/school-sync";
+import { aiRefreshRequest } from "../shared/school-sync";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
 
@@ -75,10 +75,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
-    case "trigger_managebac_sync": {
-      const purpose = aiSyncPurpose(args.purpose);
-      return { name: "managebac:requestAiRefresh", args: { reason: `ai_${purpose}`, force: args.force !== false, kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]] } };
-    }
+    case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force) };
     case "select_managebac_classes": return { name: "managebac:setSelectedClasses", args: {
       recordIds: strings(args.recordIds),
       ...(typeof args.expectedRevision === "number" ? { expectedRevision: args.expectedRevision } : {}),

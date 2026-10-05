@@ -32,6 +32,11 @@ export const AI_SYNC_PURPOSES = Object.keys(AI_SYNC_PURPOSE_KINDS) as AiSyncPurp
 export function aiSyncPurpose(value: unknown): AiSyncPurpose {
   return typeof value === "string" && value in AI_SYNC_PURPOSE_KINDS ? (value as AiSyncPurpose) : "upcoming_deadlines";
 }
+/** The `managebac:requestAiRefresh` arguments for an AI sync: only the kinds its purpose needs. */
+export function aiRefreshRequest(purposeValue: unknown, forceValue: unknown) {
+  const purpose = aiSyncPurpose(purposeValue);
+  return { reason: `ai_${purpose}`, force: forceValue !== false, kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]] as SchoolSyncKind[] };
+}
 
 export const SCHOOL_SYNC_MODES = ["auto", "manual", "off"] as const;
 export type SchoolSyncMode = (typeof SCHOOL_SYNC_MODES)[number];

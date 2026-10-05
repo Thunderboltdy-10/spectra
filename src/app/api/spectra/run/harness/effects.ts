@@ -30,6 +30,7 @@ import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/p
 import { smartCompletionValue, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
 import { waitForSettingsAction } from "./ui-observation";
 import { describeDevicesForAi, type CloudOverview } from "@/features/spectra/devices/devices-model";
+import { aiRefreshRequest } from "../../../../../../shared/school-sync";
 
 export function rows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -504,11 +505,7 @@ export async function executeApplicationCommand(
     throw new Error("SHARING_ACTION_INVALID");
   }
   if (command === "trigger_managebac_sync") {
-    const purpose = String(parsed.purpose ?? "upcoming_deadlines");
-    const result = await applyMutation("managebac:requestAiRefresh", {
-      reason: `ai_${purpose}`,
-      force: parsed.force !== false,
-    });
+    const result = await applyMutation("managebac:requestAiRefresh", aiRefreshRequest(parsed.purpose, parsed.force));
     onUiEvent?.({
       key: "managebac_sync_requested",
       payload: { targetId: "managebac", note: "Requested a ManageBac refresh" },

@@ -11,8 +11,12 @@ import {
 } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { ArrowRight, Clock3, Pencil, Check, CheckCircle2, FolderPlus, History, MessageSquare, Pin, Plus, Trash2, X } from "@/components/icons/glyph-icons";
+import { ArrowRight, Clock3, CheckCircle2, FolderPlus, MessageSquare } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageHeader } from "@/components/ui/page-header";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { SpectraMark } from "@/components/spectra-mark";
@@ -68,6 +72,8 @@ const ArtifactStudio = dynamic(
   { loading: () => <StudioSplitPlaceholder /> },
 );
 
+const CHAT_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "runs" }, { toMenu: "delete" }, { toMenu: "rename" }, { toMenu: "pin" }, { hideLabel: "new" }, { toMenu: "runs" }];
+
 function chatLoadErrorMessage(threadId: string | null) {
   return threadId
     ? "This conversation could not load. Try again."
@@ -97,8 +103,7 @@ export function ChatShell() {
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
   const loadGenerationRef = useRef(0);
-  const historyToggleRef = useRef<HTMLButtonElement | null>(null);
-  const historyOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const historyOpenerRef = useRef<HTMLElement | null>(null);
   const syncedRequestedThreadRef = useRef<string | null | undefined>(undefined);
   const consumedPromptRef = useRef<string | null>(null);
   const closePresentation = useSpectraContextStore(
@@ -681,6 +686,66 @@ export function ChatShell() {
     ),
   );
 
+  function toggleRuns() {
+    if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
+      toast.message("Save or discard your open work before opening Runs.");
+      return;
+    }
+    studio.closeStudio();
+    if (!historyOpen)
+      historyOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setHistoryOpen((value) => !value);
+    if (!historyOpen)
+      void getSpectraResultCards({ includeHidden: true, limit: 50 }).then((result) => setHistory(result.resultCards));
+  }
+  const chatCommands: BarCommand[] = [
+    {
+      id: "search",
+      icon: "search",
+      label: "Search",
+      pinned: true,
+      render: () => (
+        <GlobalSearch
+          trigger="icon"
+          onOpenArtifact={(artifact) => openArtifact(artifact._id)}
+          onOpenWorkspace={(workspace) => selectWorkspaceContext(workspace._id)}
+        />
+      ),
+    },
+    { id: "new", icon: "add", label: "New chat", onSelect: () => selectThread(null) },
+    { id: "runs", icon: "activity", label: "Runs", active: historyOpen, onSelect: toggleRuns },
+    ...(threadId
+      ? ([
+          {
+            id: "rename",
+            icon: "edit",
+            label: "Rename chat",
+            labelPolicy: "never",
+            onSelect: () => {
+              setTitleDraft(visibleTitle);
+              setRenaming(true);
+            },
+          },
+          {
+            id: "pin",
+            icon: "pin",
+            label: detail?.thread.pinned ? "Unpin chat" : "Pin chat",
+            labelPolicy: "never",
+            active: Boolean(detail?.thread.pinned),
+            disabled: threadBusy === "pin",
+            onSelect: () => void togglePinned(),
+          },
+          {
+            id: "delete",
+            icon: "trash",
+            label: "Delete chat",
+            labelPolicy: "never",
+            disabled: !threadPlacement || threadBusy === "trash",
+            onSelect: () => void trashThread(),
+          },
+        ] satisfies BarCommand[])
+      : []),
+  ];
   return (
     <div className="spectra-wave-y relative isolate flex h-full min-h-0">
       <section
@@ -688,108 +753,14 @@ export function ChatShell() {
           studio.mode === "tab" ? "hidden" : "flex min-w-0 flex-1 flex-col"
         }
       >
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 sm:px-7">
-          <div className="min-w-0">
-            <CrossfadeText
-              value={visibleTitle}
-              primitive="reveal"
-              className="truncate font-display text-ui font-semibold text-[var(--text-primary)]"
-            />
-            <div className="text-micro uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Chat · Shared Spectra conversation
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <GlobalSearch
-              trigger="icon"
-              onOpenArtifact={(artifact) => openArtifact(artifact._id)}
-              onOpenWorkspace={(workspace) =>
-                selectWorkspaceContext(workspace._id)
-              }
-            />
-            {threadId ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setTitleDraft(visibleTitle);
-                  setRenaming(true);
-                }}
-                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-                aria-label="Rename chat"
-                title="Rename chat"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-            {threadId ? (
-              <button
-                type="button"
-                disabled={threadBusy === "pin"}
-                onClick={() => void togglePinned()}
-                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                aria-label={
-                  detail?.thread.pinned ? "Unpin chat" : "Pin chat"
-                }
-                title={detail?.thread.pinned ? "Unpin chat" : "Pin chat"}
-              >
-                <Pin
-                  className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`}
-                />
-              </button>
-            ) : null}
-            {threadId ? (
-              <button
-                type="button"
-                disabled={!threadPlacement || threadBusy === "trash"}
-                onClick={() => void trashThread()}
-                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-                aria-label="Delete chat"
-                title="Delete chat"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => selectThread(null)}
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              aria-label="New chat"
-              title="New chat"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (
-                  studio.activeArtifact &&
-                  studio.dirtyIds.has(studio.activeArtifact._id)
-                ) {
-                  toast.message(
-                    "Save or discard your open work before opening Runs.",
-                  );
-                  return;
-                }
-                studio.closeStudio();
-                if (!historyOpen)
-                  historyOpenerRef.current = historyToggleRef.current;
-                setHistoryOpen((value) => !value);
-                if (!historyOpen)
-                  void getSpectraResultCards({
-                    includeHidden: true,
-                    limit: 50,
-                  }).then((result) => setHistory(result.resultCards));
-              }}
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              aria-label="Open runs"
-              aria-expanded={historyOpen}
-              title="Runs"
-              ref={historyToggleRef}
-            >
-              <History className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </header>
+        <div className="shrink-0 px-4 pt-3 sm:px-6 lg:px-8">
+          <PageHeader
+            title={<CrossfadeText value={visibleTitle} primitive="reveal" className="block truncate" />}
+            commands={chatCommands}
+            plan={CHAT_BAR_PLAN}
+            barLabel="Chat commands"
+          />
+        </div>
         {renaming && threadId ? (
           <div className="absolute left-5 top-12 z-modal flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-hover sm:left-7">
             <input
@@ -804,23 +775,13 @@ export function ChatShell() {
               }}
               className="h-9 min-w-0 flex-1 bg-transparent px-2 text-ui font-medium text-[var(--text-primary)] outline-none"
             />
-            <button
-              type="button"
+            <IconButton
+              icon="check"
+              label="Save name"
               disabled={!titleDraft.trim() || threadBusy === "title"}
               onClick={() => void saveTitle()}
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--success)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
-              aria-label="Save title"
-            >
-              <Check className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setRenaming(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-              aria-label="Cancel rename"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            />
+            <IconButton icon="close" label="Cancel" onClick={() => setRenaming(false)} />
           </div>
         ) : null}
         <ConversationSurface
@@ -844,13 +805,9 @@ export function ChatShell() {
                 }
                 className="mb-5 min-h-0 items-start rounded-card border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] px-4 py-3 text-left"
                 action={
-                  <button
-                    type="button"
-                    onClick={retryRouteLoad}
-                    className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
-                  >
+                  <Button variant="primary" size="sm" onClick={retryRouteLoad}>
                     Try again
-                  </button>
+                  </Button>
                 }
               />
             ) : undefined
@@ -907,13 +864,9 @@ export function ChatShell() {
                 detail={loadError}
                 className="mx-auto min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px]"
                 action={
-                  <button
-                    type="button"
-                    onClick={retryRouteLoad}
-                    className="h-9 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
-                  >
+                  <Button variant="primary" size="sm" onClick={retryRouteLoad}>
                     Try again
-                  </button>
+                  </Button>
                 }
               />
             ) : (
@@ -1020,23 +973,15 @@ export function ChatShell() {
       </div>
 
       {historyOpen ? (
-        <aside className="absolute inset-y-14 right-0 z-chrome w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-soft">
+        <aside aria-label="Runs and chats" className="absolute inset-y-0 right-0 z-panel w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-[var(--shadow-lg)]">
           <div className="mb-4 flex items-center justify-between">
             <div>
-          <h2 className="text-ui font-semibold">Runs & chats</h2>
+              <h2 className="text-ui font-semibold">Runs and chats</h2>
               <p className="text-micro text-[var(--text-tertiary)]">
                 Hidden results remain inspectable.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={closeHistory}
-              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              aria-label="Close runs"
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <IconButton icon="close" label="Close runs" onClick={closeHistory} />
           </div>
           <div className="mb-5 space-y-1">
             {threads.slice(0, 12).map((thread) => (
@@ -1059,9 +1004,9 @@ export function ChatShell() {
               </button>
             ))}
           </div>
-          <div className="border-t border-[var(--border-subtle)] pt-3 text-micro font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+          <h3 className="border-t border-[var(--border-subtle)] pt-3 text-caption font-medium text-[var(--text-secondary)]">
             All runs
-          </div>
+          </h3>
           <div className="mt-2 space-y-1.5">
             {history.map((card) => (
               <div

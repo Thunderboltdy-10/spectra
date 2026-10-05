@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown, LayoutGrid, Loader2, Mail, Share2 } from "lucide-react";
+import { LayoutGrid } from "lucide-react";
+import { Loader2, ChevronDown, Mail, Share2 } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { workTypeMeta } from "./artifact-card";
 import type { SpectraShareInvitation } from "../data/api";

@@ -9,24 +9,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import {
-  AlertCircle,
-  ArrowDown,
-  Bot,
-  Check,
-  ChevronDown,
-  CircleDot,
-  Code2,
-  ExternalLink,
-  FileText,
-  FolderPlus,
-  GitCompareArrows,
-  Loader2,
-  MessageSquare,
-  ShieldCheck,
-  Undo2,
-  Wrench,
-} from "lucide-react";
+import { ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "lucide-react";
+import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";

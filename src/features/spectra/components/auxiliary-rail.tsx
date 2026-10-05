@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 
 /**

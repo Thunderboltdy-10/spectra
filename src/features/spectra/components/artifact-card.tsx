@@ -7,13 +7,8 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import {
-  Building2,
-  Check,
-  MoreHorizontal,
-  Share2,
-  Sparkles,
-} from "lucide-react";
+import { Building2, Sparkles } from "lucide-react";
+import { Check, MoreHorizontal, Share2 } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";

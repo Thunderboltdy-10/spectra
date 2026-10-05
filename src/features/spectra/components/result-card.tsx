@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertCircle, Bot, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, Undo2, X } from "lucide-react";
+import { Undo2 } from "lucide-react";
+import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X } from "@/components/icons/glyph-icons";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";

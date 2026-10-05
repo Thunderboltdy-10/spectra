@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
+import { Loader2, AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";

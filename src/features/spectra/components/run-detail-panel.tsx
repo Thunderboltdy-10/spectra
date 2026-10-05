@@ -1,16 +1,7 @@
 "use client";
 
-import {
-  BookmarkPlus,
-  Check,
-  ExternalLink,
-  Loader2,
-  Maximize2,
-  MessageSquare,
-  MessageSquarePlus,
-  RotateCcw,
-  X,
-} from "lucide-react";
+import { BookmarkPlus } from "lucide-react";
+import { Loader2, MessageSquarePlus, RotateCcw, Check, ExternalLink, Maximize2, MessageSquare, X } from "@/components/icons/glyph-icons";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";

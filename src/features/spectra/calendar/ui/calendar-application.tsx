@@ -1,23 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-  ExternalLink,
-  Layers3,
-  Link2,
-  LoaderCircle,
-  LockKeyhole,
-  PanelLeft,
-  Plus,
-  RefreshCw,
-  Search,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { Layers3, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, LoaderCircle, ChevronRight, CheckCircle2, ExternalLink, Link2, LockKeyhole, PanelLeft, Plus, RefreshCw, Search, X } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";

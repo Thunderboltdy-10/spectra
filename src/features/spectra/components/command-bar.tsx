@@ -2,17 +2,8 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import {
-  ArrowUp,
-  ChevronRight,
-  FileText,
-  Image as ImageIcon,
-  Loader2,
-  Paperclip,
-  Plus,
-  Square,
-  X,
-} from "lucide-react";
+import { ArrowUp } from "lucide-react";
+import { Image as ImageIcon, Loader2, Square, ChevronRight, FileText, Paperclip, Plus, X } from "@/components/icons/glyph-icons";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";

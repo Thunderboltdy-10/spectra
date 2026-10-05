@@ -1,6 +1,6 @@
 "use client";
 
-import { GripVertical, PanelLeft, Plus } from "lucide-react";
+import { GripVertical, PanelLeft, Plus } from "@/components/icons/glyph-icons";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export type StudioItemRailEntry = {

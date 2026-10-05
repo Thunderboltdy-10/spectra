@@ -1,20 +1,7 @@
 "use client";
 
-import {
-  Atom,
-  BarChart3,
-  BookOpen,
-  Brain,
-  Calculator,
-  CheckCircle2,
-  FlaskConical,
-  GraduationCap,
-  Home,
-  Loader2,
-  Sparkles,
-  Sprout,
-  Trash2,
-} from "lucide-react";
+import { Atom, Brain, Calculator, FlaskConical, Sparkles, Sprout } from "lucide-react";
+import { BookOpen, Loader2, BarChart3, CheckCircle2, GraduationCap, Home, Trash2 } from "@/components/icons/glyph-icons";
 import {
   Dialog,
   DialogContent,

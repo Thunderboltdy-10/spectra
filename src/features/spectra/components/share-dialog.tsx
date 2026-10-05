@@ -1,19 +1,7 @@
 "use client";
 
-import {
-  Building2,
-  Check,
-  Copy,
-  Globe2,
-  Inbox,
-  Link2,
-  Loader2,
-  Search,
-  Share2,
-  ShieldCheck,
-  UserPlus,
-  X,
-} from "lucide-react";
+import { Building2, Globe2, Inbox } from "lucide-react";
+import { Copy, Loader2, ShieldCheck, UserPlus, Check, Link2, Search, Share2, X } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {

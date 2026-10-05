@@ -1,22 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Archive,
-  CalendarDays,
-  ChevronRight,
-  ClipboardCheck,
-  Clock3,
-  FileText,
-  GraduationCap,
-  LoaderCircle,
-  MessageSquareText,
-  RefreshCw,
-  School,
-  ShieldCheck,
-  Sparkles,
-  Users,
-} from "lucide-react";
+import { Archive, ClipboardCheck, MessageSquareText, Sparkles } from "lucide-react";
+import { Clock3, LoaderCircle, ShieldCheck, CalendarDays, ChevronRight, FileText, GraduationCap, RefreshCw, School, Users } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, Check, ExternalLink, Loader2 } from "lucide-react";
+import { Bookmark } from "lucide-react";
+import { Loader2, Check, ExternalLink } from "@/components/icons/glyph-icons";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";

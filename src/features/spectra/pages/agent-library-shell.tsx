@@ -1,26 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  Beaker,
-  Bot,
-  BookOpen,
-  CheckCircle2,
-  FilePenLine,
-  FlaskConical,
-  GraduationCap,
-  Grid3X3,
-  Loader2,
-  MessageCircleQuestion,
-  Plus,
-  Search,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  WandSparkles,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sparkles, WandSparkles, type LucideIcon } from "lucide-react";
+import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, SlidersHorizontal, X } from "@/components/icons/glyph-icons";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback,

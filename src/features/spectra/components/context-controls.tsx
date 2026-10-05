@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Files, FolderPlus, Search, Sparkles, X } from "lucide-react";
+import { Sparkles } from "lucide-react";
+import { BookOpen, Files, FolderPlus, Search, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { workTypeMeta } from "./artifact-card";

@@ -1,11 +1,5 @@
-import {
-  Folder,
-  FolderOpen,
-  Link2,
-  MessageSquare,
-  Layers,
-  type LucideIcon,
-} from "lucide-react";
+import { type LucideIcon } from "lucide-react";
+import { Folder, FolderOpen, Link2, MessageSquare, Layers } from "@/components/icons/glyph-icons";
 import { workTypeMeta } from "../components/artifact-card";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { TreeNode } from "./tree-client";

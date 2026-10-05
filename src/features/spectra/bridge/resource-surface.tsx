@@ -5,7 +5,7 @@ import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spec
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { Download, FileText, Loader2, X } from "lucide-react";
+import { Download, Loader2, FileText, X } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import type { SpectraArtifact } from "../data/api";
 import { spectraBus } from "../events";

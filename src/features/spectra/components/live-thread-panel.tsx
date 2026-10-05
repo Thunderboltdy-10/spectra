@@ -1,6 +1,7 @@
 "use client";
 
-import { Crosshair, MessageSquare, Play, X } from "lucide-react";
+import { Crosshair } from "lucide-react";
+import { Play, MessageSquare, X } from "@/components/icons/glyph-icons";
 import { useEffect, type CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";

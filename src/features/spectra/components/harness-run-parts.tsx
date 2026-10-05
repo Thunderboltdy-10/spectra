@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, FileText, Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck, ExternalLink, FileText } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { workTypeMeta } from "../artifacts/presentation";
 import type { HarnessAnswerValue } from "../ai/harness-exchange";

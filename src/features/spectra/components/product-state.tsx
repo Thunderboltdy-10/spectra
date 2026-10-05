@@ -1,4 +1,5 @@
-import { AlertCircle, type LucideIcon } from "lucide-react";
+import { type LucideIcon } from "lucide-react";
+import { AlertCircle } from "@/components/icons/glyph-icons";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 

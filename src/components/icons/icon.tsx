@@ -46,7 +46,7 @@ export function Icon({ name, size = 16, accent, animate, label, className, style
       style={accent ? ({ ...style, "--icon-accent": accent } as CSSProperties) : style}
       {...props}
     >
-      {name === "agent" || name === "agents" || name === "undoSpectra" ? (
+      {name === "agent" || name === "agents" || name === "undoSpectra" || name === "working" ? (
         <defs>
           <linearGradient id={spectrum} x1="0" y1="0" x2="1" y2="0">
             {SPECTRUM_STOPS.map((stop) => (

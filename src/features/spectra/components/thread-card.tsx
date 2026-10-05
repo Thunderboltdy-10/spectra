@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, MessageSquare, MessagesSquare, Play, Radio } from "lucide-react";
+import { Radio } from "lucide-react";
+import { Play, Check, MessageSquare, MessagesSquare } from "@/components/icons/glyph-icons";
 import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { SpectraThread } from "../data/api";

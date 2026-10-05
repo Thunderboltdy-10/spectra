@@ -1,39 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertCircle,
-  AlertTriangle,
-  BookOpen,
-  CalendarDays,
-  CheckCircle2,
-  ChevronRight,
-  CircleHelp,
-  Clock3,
-  Code2,
-  ExternalLink,
-  FileClock,
-  FileText,
-  Fingerprint,
-  History,
-  KeyRound,
-  Link2,
-  ListChecks,
-  LoaderCircle,
-  LockKeyhole,
-  Network,
-  Play,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Save,
-  School,
-  Settings2,
-  ShieldCheck,
-  TriangleAlert,
-  UserCheck,
-  X,
-} from "lucide-react";
+import { Fingerprint, ListChecks, Network, TriangleAlert } from "lucide-react";
+import { BookOpen, CircleHelp, Clock3, Code2, FileClock, KeyRound, LoaderCircle, Play, RotateCcw, Save, Settings2, ShieldCheck, UserCheck, AlertCircle, AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ExternalLink, FileText, History, Link2, LockKeyhole, Plus, RefreshCw, School, X } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";

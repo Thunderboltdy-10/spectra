@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Loader2, RotateCw, ShieldCheck } from "lucide-react";
+import { Loader2, RotateCw, ShieldCheck, AlertTriangle } from "@/components/icons/glyph-icons";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   buildSpectraSandboxDocument,

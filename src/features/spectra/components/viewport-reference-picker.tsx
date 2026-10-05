@@ -1,6 +1,7 @@
 "use client";
 
-import { Crosshair, X } from "lucide-react";
+import { Crosshair } from "lucide-react";
+import { X } from "@/components/icons/glyph-icons";
 import { useEffect, useState } from "react";
 import {
   contextSourceRegistry,

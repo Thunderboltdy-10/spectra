@@ -536,6 +536,109 @@ const analytics: Glyph = () => (
   </>
 );
 
+/* ------------------------------------------------------------ more actions */
+
+/** Spectra at work: an arc of the spectrum. Spinners turn it with `animate-spin`. */
+const working: Glyph = ({ spectrum }) => (
+  <>
+    <circle cx={10} cy={10} r={6.75} strokeOpacity={0.16} />
+    <path d="M10 3.25a6.75 6.75 0 0 1 6.75 6.75" stroke={`url(#${spectrum})`} strokeWidth={1.9} />
+  </>
+);
+
+const chevronLeft: Glyph = () => <path d="M12 5.75L7.75 10 12 14.25" />;
+
+const chevronUp: Glyph = () => <path d="M5.75 12L10 7.75 14.25 12" />;
+
+const arrowRight: Glyph = () => (
+  <>
+    <path d="M3.75 10h11.5" />
+    <AccentLine d="M11.25 5.75L15.5 10l-4.25 4.25" className="sg-nudge" />
+  </>
+);
+
+const retry: Glyph = () => (
+  <g className="sg-spin">
+    <path d="M4.1 11.2A6.1 6.1 0 1 0 6 5.4" />
+    <AccentLine d="M3.6 3.6l.4 2.75 2.75-.4" />
+  </g>
+);
+
+const play: Glyph = () => (
+  <>
+    <AccentFill d="M6.5 4.6v10.8a.8.8 0 0 0 1.2.7l8.6-5.4a.8.8 0 0 0 0-1.4L7.7 3.9a.8.8 0 0 0-1.2.7z" opacity={0.18} />
+    <path d="M6.5 4.6v10.8a.8.8 0 0 0 1.2.7l8.6-5.4a.8.8 0 0 0 0-1.4L7.7 3.9a.8.8 0 0 0-1.2.7z" />
+  </>
+);
+
+const stop: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <AccentFill d={box(7.4, 7.4, 5.2, 5.2, 1)} />
+  </>
+);
+
+const help: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <AccentLine d="M7.85 8a2.2 2.2 0 1 1 3.05 2.05c-.6.25-.9.7-.9 1.35v.35" width={1.6} />
+    <circle cx={10} cy={14.1} r={0.95} fill={ACCENT} stroke="none" />
+  </>
+);
+
+const SHIELD = "M10 2.75l5.75 2.1v4.4c0 3.7-2.45 6.6-5.75 8-3.3-1.4-5.75-4.3-5.75-8v-4.4z";
+
+const shield: Glyph = () => (
+  <>
+    <Sheet d={SHIELD} />
+    <AccentLine d="M7.4 10.1l1.85 1.85 3.5-3.7" width={1.6} className="sg-tick" />
+  </>
+);
+
+const clock: Glyph = () => (
+  <>
+    <circle cx={10} cy={10} r={7.25} fill="currentColor" fillOpacity={0.1} />
+    <circle cx={10} cy={10} r={7.25} />
+    <AccentLine d="M10 5.9V10l2.75 1.65" className="sg-hand" />
+  </>
+);
+
+const copy: Glyph = () => (
+  <>
+    <path d="M12.75 5.5V4.25a1.5 1.5 0 0 0-1.5-1.5h-6.5a1.5 1.5 0 0 0-1.5 1.5v6.5a1.5 1.5 0 0 0 1.5 1.5H6" strokeOpacity={0.55} className="sg-peek" />
+    <Sheet d={box(7.25, 7.25, 10, 10, 1.5)} />
+    <AccentFill d={box(9.25, 10, 4.5, 1.5, 0.75)} />
+  </>
+);
+
+const download: Glyph = () => (
+  <>
+    <Paper d="M3.25 13.25v1.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-1.5z" />
+    <path d="M3.25 13.25v1.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-1.5" />
+    <g className="sg-drop">
+      <path d="M10 3.25v8.5" />
+      <AccentLine d="M6.6 8.6L10 12l3.4-3.4" />
+    </g>
+  </>
+);
+
+const edit: Glyph = () => (
+  <>
+    <Sheet d="M12.6 3.9a1.6 1.6 0 0 1 2.25 0l1.25 1.25a1.6 1.6 0 0 1 0 2.25l-8.4 8.4-3.6.85.85-3.6z" />
+    <AccentLine d="M11.4 5.1l3.5 3.5" />
+    <Fine d="M10.5 16.25h5.75" opacity={0.6} />
+  </>
+);
+
+/** Six dots: what can be picked up and moved. */
+const grip: Glyph = () => (
+  <g fill="currentColor" stroke="none">
+    {[6, 10, 14].flatMap((y) => [7.5, 12.5].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r={1.15} />))}
+  </g>
+);
+
 export const GLYPHS = {
   // Artifact types
   document: page,
@@ -570,6 +673,10 @@ export const GLYPHS = {
   problem,
   info,
   done,
+  working,
+  clock,
+  shield,
+  help,
   // Actions
   add,
   share,
@@ -598,6 +705,16 @@ export const GLYPHS = {
   star,
   sidebar,
   mail,
+  chevronLeft,
+  chevronUp,
+  arrowRight,
+  retry,
+  play,
+  stop,
+  copy,
+  download,
+  edit,
+  grip,
   // Account
   theme,
   keyboard,
@@ -611,10 +728,10 @@ export type IconName = keyof typeof GLYPHS;
 export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
   { family: "Artifact types", names: ["document", "slides", "sheet", "quiz", "flashcards", "whiteboard", "code", "task", "timetable", "pdf", "folder", "agent", "conversations"] },
   { family: "Navigation", names: ["home", "library", "calendar", "conversations", "school", "agents", "devices", "settings"] },
-  { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done"] },
+  { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done", "working", "clock", "shield", "help"] },
   {
     family: "Actions",
-    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "link", "bell", "people", "image", "star", "sidebar", "mail"],
+    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "link", "bell", "people", "image", "star", "sidebar", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
 ];

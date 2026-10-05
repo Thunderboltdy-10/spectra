@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, LoaderCircle, School, ShieldCheck } from "lucide-react";
+import { LoaderCircle, ShieldCheck, Check, School } from "@/components/icons/glyph-icons";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {

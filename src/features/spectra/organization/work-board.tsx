@@ -7,7 +7,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { FolderInput, FolderOpen, Layers, Loader2 } from "lucide-react";
+import { Loader2, FolderInput, FolderOpen, Layers } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,

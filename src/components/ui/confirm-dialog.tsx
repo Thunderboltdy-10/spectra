@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@/components/icons/glyph-icons";
 import { Button } from "./button";
 import {
   Dialog,

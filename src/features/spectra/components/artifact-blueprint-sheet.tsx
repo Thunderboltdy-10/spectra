@@ -1,16 +1,7 @@
 "use client";
 
-import {
-  BookOpen,
-  Bot,
-  CalendarCheck2,
-  Code2,
-  FileText,
-  HelpCircle,
-  Presentation,
-  Table2,
-  Workflow,
-} from "lucide-react";
+import { Workflow } from "lucide-react";
+import { BookOpen, CalendarCheck2, Code2, HelpCircle, Table2, Bot, FileText, Presentation } from "@/components/icons/glyph-icons";
 import type { LucideIcon } from "lucide-react";
 import { workTypeMeta } from "./artifact-card";
 import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";

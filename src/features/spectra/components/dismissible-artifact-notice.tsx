@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { X } from "@/components/icons/glyph-icons";
 import { useState, type ReactNode } from "react";
 
 /** Dismisses presentation only; the caller retains the error and recovery state. */

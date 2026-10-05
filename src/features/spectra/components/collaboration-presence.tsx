@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  CornerUpLeft,
-  Eye,
-  EyeOff,
-  MousePointer2,
-  Users,
-  X,
-} from "lucide-react";
+import { CornerUpLeft, EyeOff, MousePointer2 } from "lucide-react";
+import { Eye, Users, X } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SpectraMark } from "@/components/spectra-mark";
 import {

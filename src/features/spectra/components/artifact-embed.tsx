@@ -1,19 +1,6 @@
 "use client";
 
-import {
-  AlertCircle,
-  ArrowUpRight,
-  CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  FileQuestion,
-  LockKeyhole,
-  Maximize2,
-  Minimize2,
-  RotateCw,
-  Send,
-  X,
-} from "lucide-react";
+import { ArrowUpRight, ChevronLeft, RotateCw, AlertCircle, CalendarDays, ChevronRight, FileQuestion, LockKeyhole, Maximize2, Minimize2, Send, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";

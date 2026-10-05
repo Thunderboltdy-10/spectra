@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Loader2,
-} from "lucide-react";
+import { ChevronLeft, ChevronUp, Loader2, Check, ChevronDown, ChevronRight } from "@/components/icons/glyph-icons";
 import { useMemo, useState } from "react";
 import { SelectField } from "@/components/ui/select";
 import { embedCapabilityEnabled } from "../capabilities";

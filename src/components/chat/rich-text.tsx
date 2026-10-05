@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 
 type RichTextProps = { content: string; className?: string };

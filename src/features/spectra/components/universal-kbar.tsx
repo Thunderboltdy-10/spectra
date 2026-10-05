@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { Search, X } from "lucide-react";
+import { Search, X } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useFollowAi } from "../collaboration/follow-ai";

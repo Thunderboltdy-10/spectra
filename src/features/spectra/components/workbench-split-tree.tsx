@@ -1,6 +1,6 @@
 "use client";
 
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2 } from "@/components/icons/glyph-icons";
 import { useCallback, useState, type PointerEvent, type ReactNode } from "react";
 import {
   activateWorkbenchTab,

@@ -1,13 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  GripVertical,
-  Maximize2,
-  PanelRightClose,
-  Plus,
-  X,
-} from "lucide-react";
+import { GripVertical, PanelRightClose, Maximize2, Plus, X } from "@/components/icons/glyph-icons";
 import {
   useEffect,
   useMemo,

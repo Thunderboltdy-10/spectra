@@ -10,20 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  ChevronRight,
-  FolderPlus,
-  Home,
-  LayoutGrid,
-  Link2,
-  Pencil,
-  RotateCcw,
-  Rows3,
-  Share2,
-  Sparkles,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { LayoutGrid, Rows3, Sparkles } from "lucide-react";
+import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2 } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";

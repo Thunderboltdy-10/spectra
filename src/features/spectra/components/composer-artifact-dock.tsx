@@ -7,7 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { Check, ExternalLink, FileText, Link2, Loader2, X } from "lucide-react";
+import { Loader2, Check, ExternalLink, FileText, Link2, X } from "@/components/icons/glyph-icons";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import type { Id } from "../../../../convex/_generated/dataModel";

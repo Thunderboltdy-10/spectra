@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  AlertTriangle,
-  LockKeyhole,
-  Loader2,
-  Play,
-  RotateCw,
-  ShieldCheck,
-  TerminalSquare,
-} from "lucide-react";
+import { TerminalSquare } from "lucide-react";
+import { Loader2, Play, RotateCw, ShieldCheck, AlertTriangle, LockKeyhole } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type PublishedCodeBuildPayload } from "../code/published-build";
 import { codeParameterSnapshot } from "../code/model";

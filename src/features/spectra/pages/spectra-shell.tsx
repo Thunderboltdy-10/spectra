@@ -3,32 +3,8 @@
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import {
-  BookOpen,
-  CalendarCheck2,
-  CheckCircle2,
-  Download,
-  ExternalLink,
-  FileText,
-  Files,
-  HelpCircle,
-  Home,
-  Library,
-  Loader2,
-  PencilLine,
-  Plus,
-  School,
-  Share2,
-  Sprout,
-  Trash2,
-  Users,
-  X,
-  Presentation,
-  Table2,
-  Code2,
-  Workflow,
-  Bot,
-} from "lucide-react";
+import { PencilLine, Sprout, Workflow } from "lucide-react";
+import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Home, Library, Plus, School, Share2, Trash2, Users, X, Presentation, Bot } from "@/components/icons/glyph-icons";
 import type { LucideIcon } from "lucide-react";
 import {
   useCallback,

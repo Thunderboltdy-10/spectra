@@ -1,7 +1,7 @@
 "use client";
 
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
-import { BookOpen, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Plus, X } from "@/components/icons/glyph-icons";
 import {
   createContext,
   useCallback,

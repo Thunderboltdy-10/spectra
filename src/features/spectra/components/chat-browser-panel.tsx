@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, MessageSquare, MessagesSquare, Search, X } from "lucide-react";
+import { CalendarDays, MessageSquare, MessagesSquare, Search, X } from "@/components/icons/glyph-icons";
 import type { SpectraThread } from "../data/api";
 import { getSpectraThread, getSpectraThreads } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";

@@ -104,11 +104,17 @@ Each status glyph uses its state hue on the accent.
 | Read only | A padlock with an open eye |
 | Two versions | A path splitting into two |
 | Problem | A soft triangle with a short line |
+| Working | An arc of the spectrum on a faint ring; spinners turn it |
+| Clock | A face whose accent hand moves on when hovered |
+| Shield | A shield with an accent tick: verified, permitted |
+| Help | A circle with an accent question mark |
 
 ### Actions outside workbars
 
 New, Share, Filter, Sort, Search, Attach, Send, More, Close, Collapse, Pin, Undo Spectra's changes, Open in side, Open
-full. These stay simple, but they are drawn in the house style so they sit with the rest.
+full, Back, Up, Next (an arrow whose head leans on hover), Retry, Play, Stop, Copy, Download (the arrow drops into the
+tray), Edit, and Grip (six dots: what can be picked up). These stay simple, but they are drawn in the house style so
+they sit with the rest.
 
 ### Account
 
@@ -131,8 +137,11 @@ The prism mark comes from the prism renderer (see [LIFE.md](LIFE.md#the-prism)).
   width and the accent from props (`size`, `accent`, `animate`).
 - **Names.** The set is typed, so an unknown name is a type error.
 - **Artifact types.** `workTypeMeta[type].glyph` names each type's glyph, beside its hue (`color`).
-- **Adoption.** The set and the lab landed with the design core. Pages move from lucide to glyphs as D2 and D3
-  rebuild them; the lint ban below is switched on when the last page has moved.
+- **Icon components.** Where code expects an icon component (a menu item, a command, an action), import it from
+  `src/components/icons/glyph-icons.tsx`. It exports Spectra glyphs under the names code already uses (`X`, `Check`,
+  `Loader2`, and so on), sized from `size` or the `size-*`/`h-*` class, so any icon prop draws our set.
+- **Adoption.** Pages outside editor workbars import their icons from `glyph-icons`. Names with no glyph yet stay on
+  lucide until one is drawn; the lint ban below is switched on when none are left.
 - **Enforcement.** `check:design-tokens` bans `lucide-react` imports outside editor workbar code and
   `src/components/icons/`.
 - **New glyphs** follow this document and are added to the icon lab page (`/dev/icons`). It shows every glyph at 16

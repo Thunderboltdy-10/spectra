@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, GraduationCap, LoaderCircle, Search } from "lucide-react";
+import { LoaderCircle, Check, GraduationCap, Search } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

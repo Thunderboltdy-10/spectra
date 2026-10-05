@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { School } from "lucide-react";
+import { School } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import { ProductEmptyState } from "./product-state";
 import { isAuthNoSchool, requireActor } from "@/lib/auth-server";

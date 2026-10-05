@@ -1,7 +1,7 @@
 "use client";
 
 import { describeFailure } from "@/components/ui/truthful-state";
-import { Check, Link2, Loader2, Plus, Search, X } from "lucide-react";
+import { Loader2, Check, Link2, Plus, Search, X } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { useMutation } from "convex/react";

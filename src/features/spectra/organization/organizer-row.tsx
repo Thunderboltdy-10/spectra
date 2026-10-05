@@ -1,13 +1,7 @@
 "use client";
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  ChevronRight,
-  Check,
-  MoreHorizontal,
-  Share2,
-  Star,
-} from "lucide-react";
+import { ChevronRight, Check, MoreHorizontal, Share2, Star } from "@/components/icons/glyph-icons";
 import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MOTION_DURATIONS, MOTION_EASINGS } from "../motion/tokens";

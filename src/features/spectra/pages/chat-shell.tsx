@@ -11,20 +11,7 @@ import {
 } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import {
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  Clock3,
-  FolderPlus,
-  History,
-  MessageSquare,
-  Pencil,
-  Pin,
-  Plus,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ArrowRight, Clock3, Pencil, Check, CheckCircle2, FolderPlus, History, MessageSquare, Pin, Plus, Trash2, X } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";

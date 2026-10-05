@@ -1,14 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import {
-  AlertCircle,
-  ArrowUpRight,
-  CheckCircle2,
-  LoaderCircle,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { type LucideIcon } from "lucide-react";
+import { ArrowUpRight, LoaderCircle, AlertCircle, CheckCircle2, X } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";

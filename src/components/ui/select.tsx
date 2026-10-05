@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
 import { useFloatingLayer } from "./layer-context";

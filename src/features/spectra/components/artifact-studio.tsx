@@ -69,6 +69,7 @@ import { FileStorageControls } from "../bridge/file-storage-controls";
 import { useNow } from "@/hooks/use-now";
 import { ArtifactHeaderActions, type HeaderCommand } from "./artifact-header-actions";
 import { ArtifactStatusControl } from "./artifact-status-control";
+import { useEditorFieldMoments } from "./editor-field-moments";
 import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
@@ -4625,6 +4626,8 @@ function ArtifactStudioEditor({
     anchor?: NonNullable<CollaborationPresence["cursor"]>["anchor"];
   } | null>(null);
   const studioSurfaceRef = useRef<HTMLDivElement>(null);
+  // Things in the work form, unform and leave wakes in the field.
+  useEditorFieldMoments(studioSurfaceRef);
   const lastStudioInteractionAtRef = useRef(0);
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();

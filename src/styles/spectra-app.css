@@ -15526,6 +15526,37 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   color: var(--brand-primary);
 }
 
+/* Things in a work are physical (EDITORS.md): what you pick up lifts off
+   the page while carried and settles when put down. Keyframes on `scale`
+   and `filter` compose with the transform that places a node and leave each
+   editor's own transitions alone. */
+[data-lifted] {
+  scale: 1.02;
+  filter: drop-shadow(0 10px 18px color-mix(in oklab, var(--text-primary) 16%, transparent));
+  animation: spectra-lift var(--motion-base) var(--ease-out-expo);
+}
+
+[data-settling] {
+  animation: spectra-settle var(--motion-slow) var(--ease-out-expo);
+}
+
+@keyframes spectra-lift {
+  from {
+    scale: 1;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+}
+
+@keyframes spectra-settle {
+  from {
+    scale: 1.02;
+    filter: drop-shadow(0 10px 18px color-mix(in oklab, var(--text-primary) 16%, transparent));
+  }
+  60% {
+    scale: 0.995;
+  }
+}
+
 /* The status control (EDITORS.md): pinned in every artifact header. The
    glyph changes in place; words slide out of it while something happens. */
 .spectra-status-control {

@@ -37,6 +37,8 @@ const CONFIRMED_COMMANDS = new Set([
   "change_sharing",
   "trigger_managebac_sync",
   "select_managebac_classes",
+  "pair_device",
+  "remove_device",
 ]);
 const LOCAL_EFFECT_COMMANDS = new Set(["organize_library", "delete_library_items", "change_sync_policy"]);
 

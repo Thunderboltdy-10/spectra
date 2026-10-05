@@ -40,7 +40,6 @@ export type KBarSearchResult = {
 
 const CONTEXT_BOOSTS: Record<string, Partial<Record<"settings" | "artifact" | "chat" | "library" | "workspace", number>>> = {
   "app.settings.toggle-continuation": { settings: 35, chat: 20 },
-  "app.bridge.open-settings": { settings: 28 },
   "app.settings.change": { settings: 22 },
   "app.settings.manage-account": { settings: 18 },
   "app.settings.clear-compute-cache": { settings: 16 },
@@ -60,9 +59,8 @@ const CONTEXT_BOOSTS: Record<string, Partial<Record<"settings" | "artifact" | "c
   "app.sharing.change": { artifact: 16, workspace: 14 },
   "app.managebac.sync": { settings: 24 },
   "app.managebac.select-classes": { settings: 22 },
-  "app.bridge.pair": { settings: 34 },
-  "app.bridge.setup": { settings: 30 },
-  "app.bridge.policy.change": { settings: 26 },
+  "app.devices.pair": { settings: 30 },
+  "app.devices.add-folder": { library: 14 },
 };
 
 const K_BAR_COMMAND_IDS = new Set([
@@ -91,13 +89,13 @@ const K_BAR_COMMAND_IDS = new Set([
   "app.managebac.sync",
   "app.managebac.select-classes",
   "app.managebac.import-resource",
-  "app.bridge.pair",
-  "app.bridge.setup",
-  "app.bridge.policy.change",
+  "app.devices.open",
+  "app.devices.pair",
+  "app.devices.add-folder",
+  "app.devices.pause",
   "app.settings.toggle-continuation",
   "app.settings.manage-account",
   "app.settings.clear-compute-cache",
-  "app.bridge.open-settings",
   // These two are result-only entries, populated by the authorized search.
   "app.navigate",
   "app.work.open",

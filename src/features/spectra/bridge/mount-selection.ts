@@ -10,7 +10,7 @@ export type ActiveBridgeMount = {
 /** Limit folder choices to grants that this paired local Bridge actually has. */
 export function mountsForConnectedDevice<T extends ActiveBridgeMount>(
   mounts: readonly T[] | undefined,
-  status: BridgeStatus | null,
+  status: (Pick<BridgeStatus, "paired" | "deviceId"> & { mounts?: ReadonlyArray<{ id: string }> }) | null,
   connected: boolean,
 ): T[] {
   if (!mounts || !connected || !status?.paired || !status.deviceId) return [];

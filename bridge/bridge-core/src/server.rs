@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -13,8 +14,15 @@ use axum::{Json, Router};
 use rand::RngCore;
 use subtle::ConstantTimeEq;
 
-use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer};
+use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalControlSnapshot, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
+
+/*
+ * The local control API. Spectra's Devices page drives the Bridge through it:
+ * pairing, status, folders, pausing, logs, updates and unpairing. The Bridge
+ * has no window of its own; the only native surfaces are the tray, the folder
+ * picker and the pairing confirmation, and both dialogs are opened from here.
+ */
 
 pub struct ServerState {
     paired: RwLock<bool>,
@@ -23,6 +31,7 @@ pub struct ServerState {
     bind_error: RwLock<Option<String>>,
     pending_pairing: RwLock<HashMap<String, PairingOffer>>,
     pairing_completion: RwLock<HashMap<String, String>>,
+    pairing_failure: RwLock<HashMap<String, String>>,
     device_id: RwLock<Option<String>>,
     cloud_seen_at: AtomicU64,
     local_control: RwLock<Option<Arc<dyn LocalBridgeControl>>>,
@@ -30,13 +39,21 @@ pub struct ServerState {
 
 #[async_trait]
 pub trait LocalBridgeControl: Send + Sync {
-    fn pairing_requested(&self);
+    /// Pairs this computer for a waiting offer. It may show the native
+    /// confirmation with the offer's code and wait for the person's answer.
     async fn auto_pair(&self, challenge: &str) -> Result<(), String>;
     async fn request_update(&self) -> Result<String, String>;
-    fn mounts(&self) -> Vec<LocalMountStatus>;
+    fn snapshot(&self) -> LocalControlSnapshot;
+    /// Opens the native folder picker on this computer.
     async fn select_mount(&self) -> Result<(), String>;
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
+    async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String>;
+    async fn set_sync_paused(&self, paused: bool) -> Result<(), String>;
+    /// Opens the Bridge log file on this computer.
+    async fn open_logs(&self) -> Result<(), String>;
+    /// Forgets this computer's pairing and stops syncing. Files stay.
+    async fn unpair(&self) -> Result<(), String>;
 }
 
 impl ServerState {
@@ -57,6 +74,7 @@ impl ServerState {
             bind_error: RwLock::new(None),
             pending_pairing: RwLock::new(HashMap::new()),
             pairing_completion: RwLock::new(HashMap::new()),
+            pairing_failure: RwLock::new(HashMap::new()),
             device_id: RwLock::new(None),
             cloud_seen_at: AtomicU64::new(0),
             local_control: RwLock::new(None),
@@ -71,6 +89,22 @@ impl ServerState {
     pub fn mark_cloud_seen(&self) {
         self.cloud_seen_at.store(unix_ms(), Ordering::Relaxed);
     }
+    /// Whether a cloud request succeeded in the last 15 seconds.
+    pub fn cloud_connected(&self) -> bool {
+        self.cloud_seen_within(15_000)
+    }
+    pub fn cloud_seen_within(&self, window_ms: u64) -> bool {
+        let seen = self.cloud_seen_at.load(Ordering::Relaxed);
+        seen > 0 && unix_ms().saturating_sub(seen) <= window_ms
+    }
+    /// The first configured Spectra origin, for opening the Devices page.
+    pub fn primary_origin(&self) -> Option<String> {
+        let origins = self.allowed_origins.read().unwrap();
+        let mut sorted: Vec<&String> = origins.iter().collect();
+        // Prefer a deployed origin over a local development one.
+        sorted.sort_by_key(|origin| (origin.starts_with("http://"), origin.as_str()));
+        sorted.first().map(|origin| (*origin).clone())
+    }
     pub fn pair(&self, origin: String) -> String {
         let mut token = vec![0_u8; 32];
         rand::rng().fill_bytes(&mut token);
@@ -78,6 +112,13 @@ impl ServerState {
         self.allowed_origins.write().unwrap().insert(origin);
         *self.paired.write().unwrap() = true;
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+    }
+    /// Unpairing: the browser session and the device identity are dropped.
+    pub fn forget_pairing(&self) {
+        *self.paired.write().unwrap() = false;
+        *self.session_token.write().unwrap() = vec![];
+        *self.device_id.write().unwrap() = None;
+        self.cloud_seen_at.store(0, Ordering::Relaxed);
     }
     fn prune_expired_pairing(&self) {
         let now = unix_ms();
@@ -105,26 +146,12 @@ impl ServerState {
             "origin is not configured for Spectra"
         );
         self.prune_expired_pairing();
+        self.pairing_failure.write().unwrap().remove(&offer.challenge);
         self.pending_pairing
             .write()
             .unwrap()
             .insert(offer.challenge.clone(), offer);
-        if let Some(control) = self.local_control.read().unwrap().as_ref() {
-            control.pairing_requested();
-        }
         Ok(())
-    }
-    pub fn confirm_pairing_code(&self, code: &str) -> anyhow::Result<PairingOffer> {
-        self.prune_expired_pairing();
-        let mut pending = self.pending_pairing.write().unwrap();
-        let challenge = pending
-            .iter()
-            .find(|(_, offer)| offer.short_code == code)
-            .map(|(challenge, _)| challenge.clone())
-            .ok_or_else(|| anyhow::anyhow!("pairing code does not match"))?;
-        Ok(pending
-            .remove(&challenge)
-            .expect("pairing offer was just found"))
     }
     pub fn take_pairing_offer(&self, challenge: &str) -> anyhow::Result<PairingOffer> {
         self.prune_expired_pairing();
@@ -136,27 +163,6 @@ impl ServerState {
             .ok_or_else(|| anyhow::anyhow!("no pairing is waiting"))?;
         anyhow::ensure!(offer.expires_at > unix_ms(), "pairing offer expired");
         Ok(offer)
-    }
-    pub fn pending_pairing_code(&self) -> Option<String> {
-        self.prune_expired_pairing();
-        self.pending_pairing
-            .read()
-            .unwrap()
-            .values()
-            .max_by_key(|offer| offer.expires_at)
-            .map(|offer| offer.short_code.clone())
-    }
-    pub fn pending_pairing_codes(&self) -> Vec<String> {
-        self.prune_expired_pairing();
-        let mut codes: Vec<String> = self
-            .pending_pairing
-            .read()
-            .unwrap()
-            .values()
-            .map(|offer| offer.short_code.clone())
-            .collect();
-        codes.sort();
-        codes
     }
     pub fn is_paired(&self) -> bool {
         *self.paired.read().unwrap()
@@ -173,6 +179,13 @@ impl ServerState {
             .unwrap()
             .insert(challenge, token.clone());
         token
+    }
+    /// A pairing attempt ended without pairing; the page reads why once.
+    pub fn fail_pairing(&self, challenge: String, reason: String) {
+        self.pairing_failure
+            .write()
+            .unwrap()
+            .insert(challenge, reason);
     }
     pub fn restore_pairing(&self, origin: String, token: &str) -> anyhow::Result<()> {
         let decoded =
@@ -214,25 +227,35 @@ impl ServerState {
         }
         self.resume_session(origin)
     }
-    fn local_status(&self) -> LocalBridgeStatus {
-        let cloud_seen_at = self.cloud_seen_at.load(Ordering::Relaxed);
+    pub fn local_status(&self) -> LocalBridgeStatus {
+        let snapshot = self
+            .local_control
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|control| control.snapshot())
+            .unwrap_or_default();
         LocalBridgeStatus {
             version: env!("CARGO_PKG_VERSION").into(),
             protocol_version: crate::PROTOCOL_VERSION.into(),
             paired: self.is_paired(),
-            cloud_connected: cloud_seen_at > 0 && unix_ms().saturating_sub(cloud_seen_at) <= 15_000,
+            cloud_connected: self.cloud_connected(),
             device_id: self.device_id.read().unwrap().clone(),
-            mounts: self
-                .local_control
-                .read()
-                .unwrap()
-                .as_ref()
-                .map(|control| control.mounts())
-                .unwrap_or_default(),
+            device_name: snapshot.device_name,
+            paused: snapshot.paused,
+            last_sync_at: snapshot.last_sync_at,
+            mounts: snapshot.mounts,
+            office_files: snapshot.office_files,
         }
     }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
         self.pairing_completion.write().unwrap().remove(challenge)
+    }
+    fn take_pairing_failure(&self, challenge: &str) -> Option<String> {
+        self.pairing_failure.write().unwrap().remove(challenge)
+    }
+    fn control(&self) -> Option<Arc<dyn LocalBridgeControl>> {
+        self.local_control.read().unwrap().clone()
     }
 }
 
@@ -242,6 +265,10 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/mount/select", post(select_mount))
         .route("/v1/mount/retry", post(retry_mount))
         .route("/v1/mount/remove", post(remove_mount))
+        .route("/v1/mount/pause", post(pause_mount))
+        .route("/v1/sync/pause", post(pause_sync))
+        .route("/v1/logs/open", post(open_logs))
+        .route("/v1/unpair", post(unpair))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let origins = state
         .allowed_origins
@@ -266,6 +293,29 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .with_state(state)
 }
 
+fn controls_not_ready() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Bridge controls are not ready",
+    )
+        .into_response()
+}
+
+/// Runs one control action: 204 when it worked, 400 with its sentence when not.
+async fn act<F, Fut>(state: &ServerState, action: F) -> Response
+where
+    F: FnOnce(Arc<dyn LocalBridgeControl>) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    match state.control() {
+        Some(control) => match action(control).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
+}
+
 async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -281,18 +331,7 @@ async fn status(State(state): State<Arc<ServerState>>) -> Json<LocalBridgeStatus
 }
 
 async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
-    let control = state.local_control.read().unwrap().clone();
-    match control {
-        Some(control) => match control.select_mount().await {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
-        },
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Bridge controls are not ready",
-        )
-            .into_response(),
-    }
+    act(&state, |control| async move { control.select_mount().await }).await
 }
 
 #[derive(serde::Deserialize)]
@@ -301,77 +340,99 @@ struct MountAction {
     grant_id: String,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MountPause {
+    grant_id: String,
+    paused: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncPause {
+    paused: bool,
+}
+
 async fn retry_mount(
     State(state): State<Arc<ServerState>>,
     Json(input): Json<MountAction>,
 ) -> Response {
-    let control = state.local_control.read().unwrap().clone();
-    match control {
-        Some(control) => match control.retry_mount(&input.grant_id).await {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
-        },
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Bridge controls are not ready",
-        )
-            .into_response(),
-    }
+    act(&state, |control| async move {
+        control.retry_mount(&input.grant_id).await
+    })
+    .await
 }
 
 async fn remove_mount(
     State(state): State<Arc<ServerState>>,
     Json(input): Json<MountAction>,
 ) -> Response {
-    let control = state.local_control.read().unwrap().clone();
-    match control {
-        Some(control) => match control.remove_mount(&input.grant_id).await {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
-        },
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Bridge controls are not ready",
-        )
-            .into_response(),
-    }
+    act(&state, |control| async move {
+        control.remove_mount(&input.grant_id).await
+    })
+    .await
 }
 
+async fn pause_mount(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<MountPause>,
+) -> Response {
+    act(&state, |control| async move {
+        control.set_mount_paused(&input.grant_id, input.paused).await
+    })
+    .await
+}
+
+async fn pause_sync(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<SyncPause>,
+) -> Response {
+    act(&state, |control| async move {
+        control.set_sync_paused(input.paused).await
+    })
+    .await
+}
+
+async fn open_logs(State(state): State<Arc<ServerState>>) -> Response {
+    act(&state, |control| async move { control.open_logs().await }).await
+}
+
+async fn unpair(State(state): State<Arc<ServerState>>) -> Response {
+    let response = act(&state, |control| async move { control.unpair().await }).await;
+    if response.status() == StatusCode::NO_CONTENT {
+        state.forget_pairing();
+    }
+    response
+}
+
+/// Accepts an offer and pairs in the background: the native confirmation may
+/// wait for the person, so the page polls `/v1/pair/status` for the outcome.
 async fn pair_offer(
     State(state): State<Arc<ServerState>>,
     Json(offer): Json<PairingOffer>,
 ) -> Response {
-    match state.accept_pairing_offer(offer.clone()) {
-        Ok(()) => {
-            let control = state.local_control.read().unwrap().clone();
-            match control {
-                Some(control) => match control.auto_pair(&offer.challenge).await {
-                    Ok(()) => StatusCode::NO_CONTENT.into_response(),
-                    Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
-                },
-                None => (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Bridge controls are not ready",
-                )
-                    .into_response(),
-            }
-        }
-        Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    let Some(control) = state.control() else {
+        return controls_not_ready();
+    };
+    if let Err(error) = state.accept_pairing_offer(offer.clone()) {
+        return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
     }
+    let background = state.clone();
+    tokio::spawn(async move {
+        if let Err(error) = control.auto_pair(&offer.challenge).await {
+            background.fail_pairing(offer.challenge, error);
+        }
+    });
+    StatusCode::ACCEPTED.into_response()
 }
 
 async fn request_update(State(state): State<Arc<ServerState>>) -> Response {
-    let control = state.local_control.read().unwrap().clone();
-    match control {
+    match state.control() {
         Some(control) => match control.request_update().await {
             Ok(message) => Json(serde_json::json!({ "message": message })).into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
         },
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Bridge controls are not ready",
-        )
-            .into_response(),
+        None => controls_not_ready(),
     }
 }
 
@@ -384,10 +445,13 @@ async fn pair_status(
     State(state): State<Arc<ServerState>>,
     Json(input): Json<PairStatus>,
 ) -> Response {
-    match state.take_pairing_completion(&input.challenge) {
-        Some(session_token) => {
-            Json(serde_json::json!({ "paired": true, "sessionToken": session_token }))
-                .into_response()
+    if let Some(session_token) = state.take_pairing_completion(&input.challenge) {
+        return Json(serde_json::json!({ "paired": true, "sessionToken": session_token }))
+            .into_response();
+    }
+    match state.take_pairing_failure(&input.challenge) {
+        Some(failure) => {
+            Json(serde_json::json!({ "paired": false, "failure": failure })).into_response()
         }
         None => Json(serde_json::json!({ "paired": false })).into_response(),
     }
@@ -472,28 +536,119 @@ pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{LocalMountStatus, LocalOfficeFile};
+    use std::sync::Mutex;
+
+    const ORIGIN: &str = "http://localhost:3000";
+
+    #[derive(Default)]
+    struct FakeControl {
+        calls: Mutex<Vec<String>>,
+        decline_pairing: bool,
+    }
+
+    #[async_trait]
+    impl LocalBridgeControl for FakeControl {
+        async fn auto_pair(&self, challenge: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("pair:{}", &challenge[..4]));
+            if self.decline_pairing {
+                Err("Pairing was declined on this computer.".into())
+            } else {
+                Ok(())
+            }
+        }
+        async fn request_update(&self) -> Result<String, String> {
+            Ok("updating".into())
+        }
+        fn snapshot(&self) -> LocalControlSnapshot {
+            LocalControlSnapshot {
+                device_name: "Studio PC".into(),
+                paused: true,
+                last_sync_at: Some(42),
+                mounts: vec![LocalMountStatus {
+                    id: "grant_ab".into(),
+                    label: "Biology".into(),
+                    friendly_path: "Documents › Biology".into(),
+                    state: "active".into(),
+                    detail: "Up to date".into(),
+                    synced: 3,
+                    total: 3,
+                    double_sync_risk: false,
+                    paused: false,
+                    last_sync_at: Some(41),
+                }],
+                office_files: vec![LocalOfficeFile {
+                    folder: "Biology".into(),
+                    name: "Essay.docx".into(),
+                }],
+            }
+        }
+        async fn select_mount(&self) -> Result<(), String> {
+            self.calls.lock().unwrap().push("select".into());
+            Ok(())
+        }
+        async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("retry:{grant_id}"));
+            Ok(())
+        }
+        async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("remove:{grant_id}"));
+            Ok(())
+        }
+        async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("pause-mount:{grant_id}:{paused}"));
+            Ok(())
+        }
+        async fn set_sync_paused(&self, paused: bool) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("pause:{paused}"));
+            Ok(())
+        }
+        async fn open_logs(&self) -> Result<(), String> {
+            self.calls.lock().unwrap().push("logs".into());
+            Ok(())
+        }
+        async fn unpair(&self) -> Result<(), String> {
+            self.calls.lock().unwrap().push("unpair".into());
+            Ok(())
+        }
+    }
+
+    fn offer(challenge: char, code: &str) -> PairingOffer {
+        PairingOffer {
+            challenge: challenge.to_string().repeat(64),
+            short_code: code.into(),
+            browser_origin: ORIGIN.into(),
+            expires_at: unix_ms() + 60_000,
+        }
+    }
+
+    /// Serves the router on a free port and returns its base URL.
+    async fn spawn(state: Arc<ServerState>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router(state)).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
     #[test]
     fn pairing_mints_unique_tokens_and_pins_origin() {
         let state = ServerState::unpaired();
-        let a = state.pair("http://localhost:3000".into());
-        let b = state.pair("http://localhost:3000".into());
+        let a = state.pair(ORIGIN.into());
+        let b = state.pair(ORIGIN.into());
         assert_ne!(a, b);
-        assert!(
-            state
-                .allowed_origins
-                .read()
-                .unwrap()
-                .contains("http://localhost:3000")
-        );
+        assert!(state.allowed_origins.read().unwrap().contains(ORIGIN));
     }
     #[test]
     fn pairing_session_restores_after_process_restart() {
         let original = ServerState::unpaired();
-        let token = original.pair("http://localhost:3000".into());
+        let token = original.pair(ORIGIN.into());
         let restored = ServerState::unpaired();
-        restored
-            .restore_pairing("http://localhost:3000".into(), &token)
-            .unwrap();
+        restored.restore_pairing(ORIGIN.into(), &token).unwrap();
         assert!(*restored.paired.read().unwrap());
         assert_eq!(
             *restored.session_token.read().unwrap(),
@@ -503,47 +658,34 @@ mod tests {
     #[test]
     fn pairing_offer_is_consumed_by_spectra_owned_auto_pair_flow() {
         let state = ServerState::unpaired();
-        let offer = PairingOffer {
-            challenge: "a".repeat(64),
-            short_code: "123456".into(),
-            browser_origin: "http://localhost:3000".into(),
-            expires_at: unix_ms() + 60_000,
-        };
+        let offer = offer('a', "123456");
         state.accept_pairing_offer(offer.clone()).unwrap();
         assert_eq!(state.take_pairing_offer(&offer.challenge).unwrap(), offer);
         assert!(state.take_pairing_offer(&offer.challenge).is_err());
     }
     #[test]
-    fn six_pairing_offers_keep_every_code() {
+    fn several_waiting_offers_are_each_kept_until_taken() {
         let state = ServerState::unpaired();
         for index in 0..6 {
             state
                 .accept_pairing_offer(PairingOffer {
                     challenge: format!("{:0>64}", index),
                     short_code: format!("{index:06}"),
-                    browser_origin: "http://localhost:3000".into(),
+                    browser_origin: ORIGIN.into(),
                     expires_at: unix_ms() + 60_000,
                 })
                 .unwrap();
         }
-        assert_eq!(
-            state.pending_pairing_codes(),
-            vec!["000000", "000001", "000002", "000003", "000004", "000005"]
-        );
         let first = state.take_pairing_offer(&"0".repeat(64)).unwrap();
         assert_eq!(first.short_code, "000000");
-        assert_eq!(state.pending_pairing_codes().len(), 5);
-        assert!(
-            state
-                .pending_pairing_codes()
-                .contains(&"000005".to_string())
-        );
+        assert_eq!(state.pending_pairing.read().unwrap().len(), 5);
+        assert!(state.take_pairing_offer(&format!("{:0>64}", 5)).is_ok());
     }
     #[test]
     fn complete_pairing_reuses_the_session_for_a_second_tab() {
         let state = ServerState::unpaired();
-        let first = state.complete_pairing("a".repeat(64), "http://localhost:3000".into());
-        let second = state.complete_pairing("b".repeat(64), "http://localhost:3000".into());
+        let first = state.complete_pairing("a".repeat(64), ORIGIN.into());
+        let second = state.complete_pairing("b".repeat(64), ORIGIN.into());
         assert_eq!(first, second);
         assert_eq!(
             state.take_pairing_completion(&"a".repeat(64)).as_deref(),
@@ -555,36 +697,169 @@ mod tests {
         );
     }
     #[test]
-    fn wrong_pairing_code_leaves_the_waiting_offer() {
-        let state = ServerState::unpaired();
-        let offer = PairingOffer {
-            challenge: "c".repeat(64),
-            short_code: "654321".into(),
-            browser_origin: "http://localhost:3000".into(),
-            expires_at: unix_ms() + 60_000,
-        };
-        state.accept_pairing_offer(offer.clone()).unwrap();
-        assert!(state.confirm_pairing_code("000000").is_err());
-        assert_eq!(state.pending_pairing_codes(), vec!["654321"]);
-    }
-    #[test]
     fn paired_session_can_resume_only_for_an_allowed_origin() {
         let state = ServerState::unpaired();
-        let token = state.pair("http://localhost:3000".into());
-        assert_eq!(state.resume_session("http://localhost:3000"), Some(token));
+        let token = state.pair(ORIGIN.into());
+        assert_eq!(state.resume_session(ORIGIN), Some(token));
         assert_eq!(state.resume_session("http://evil.test"), None);
-        assert_eq!(
-            state.resume_session_with_token("http://localhost:3000", "wrong"),
-            None
-        );
+        assert_eq!(state.resume_session_with_token(ORIGIN, "wrong"), None);
     }
     #[test]
     fn unpaired_empty_token_cannot_authenticate_or_resume() {
         let state = ServerState::unpaired();
         assert!(!state.session_token_matches(""));
+        assert_eq!(state.resume_session_with_token(ORIGIN, ""), None);
+    }
+    #[test]
+    fn forgetting_pairing_drops_the_session_and_device() {
+        let state = ServerState::unpaired();
+        let token = state.pair(ORIGIN.into());
+        state.set_device_id("device-1".into());
+        state.mark_cloud_seen();
+        state.forget_pairing();
+        assert!(!state.is_paired());
+        assert!(!state.session_token_matches(&token));
+        assert!(!state.cloud_connected());
+        assert_eq!(state.local_status().device_id, None);
+    }
+    #[test]
+    fn status_reports_the_control_snapshot() {
+        let state = ServerState::unpaired();
+        state.install_local_control(Arc::new(FakeControl::default()));
+        let status = state.local_status();
+        assert_eq!(status.device_name, "Studio PC");
+        assert!(status.paused);
+        assert_eq!(status.last_sync_at, Some(42));
+        assert_eq!(status.mounts[0].friendly_path, "Documents › Biology");
+        assert_eq!(status.office_files[0].name, "Essay.docx");
+    }
+    #[test]
+    fn the_deployed_origin_opens_before_a_local_one() {
+        let state = ServerState::unpaired();
+        state
+            .allowed_origins
+            .write()
+            .unwrap()
+            .insert("https://spectra.school".into());
+        assert_eq!(state.primary_origin().as_deref(), Some("https://spectra.school"));
+    }
+
+    #[tokio::test]
+    async fn every_control_route_needs_the_paired_session() {
+        let state = Arc::new(ServerState::unpaired());
+        let control = Arc::new(FakeControl::default());
+        state.install_local_control(control.clone());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        for path in [
+            "/v1/mount/select",
+            "/v1/sync/pause",
+            "/v1/logs/open",
+            "/v1/unpair",
+        ] {
+            let response = client
+                .post(format!("{base}{path}"))
+                .header("origin", ORIGIN)
+                .json(&serde_json::json!({ "paused": true }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 401, "{path} must be protected");
+        }
+        assert!(control.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_devices_page_drives_folders_pausing_logs_and_unpairing() {
+        let state = Arc::new(ServerState::unpaired());
+        let control = Arc::new(FakeControl::default());
+        state.install_local_control(control.clone());
+        let token = state.pair(ORIGIN.into());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let post = |path: &str, body: serde_json::Value| {
+            client
+                .post(format!("{base}{path}"))
+                .header("origin", ORIGIN)
+                .bearer_auth(&token)
+                .json(&body)
+                .send()
+        };
+        for (path, body) in [
+            ("/v1/mount/pause", serde_json::json!({ "grantId": "grant_ab", "paused": true })),
+            ("/v1/mount/retry", serde_json::json!({ "grantId": "grant_ab" })),
+            ("/v1/sync/pause", serde_json::json!({ "paused": false })),
+            ("/v1/logs/open", serde_json::json!({})),
+        ] {
+            assert_eq!(post(path, body).await.unwrap().status(), 204, "{path}");
+        }
+        let status: LocalBridgeStatus = client
+            .get(format!("{base}/v1/status"))
+            .header("origin", ORIGIN)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(status.mounts.len(), 1);
+        assert_eq!(post("/v1/unpair", serde_json::json!({})).await.unwrap().status(), 204);
+        assert!(!state.is_paired());
         assert_eq!(
-            state.resume_session_with_token("http://localhost:3000", ""),
-            None
+            post("/v1/sync/pause", serde_json::json!({ "paused": true }))
+                .await
+                .unwrap()
+                .status(),
+            401,
+            "an unpaired Bridge no longer accepts the old session"
         );
+        assert_eq!(
+            *control.calls.lock().unwrap(),
+            vec![
+                "pause-mount:grant_ab:true",
+                "retry:grant_ab",
+                "pause:false",
+                "logs",
+                "unpair"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn pairing_runs_in_the_background_and_reports_its_outcome() {
+        let state = Arc::new(ServerState::unpaired());
+        state.install_local_control(Arc::new(FakeControl {
+            decline_pairing: true,
+            ..FakeControl::default()
+        }));
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let offer = offer('d', "654321");
+        let accepted = client
+            .post(format!("{base}/v1/pair"))
+            .json(&offer)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(accepted.status(), 202);
+        let mut outcome = serde_json::Value::Null;
+        for _ in 0..50 {
+            outcome = client
+                .post(format!("{base}/v1/pair/status"))
+                .json(&serde_json::json!({ "challenge": offer.challenge }))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if outcome.get("failure").is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(outcome["paired"], false);
+        assert_eq!(outcome["failure"], "Pairing was declined on this computer.");
     }
 }

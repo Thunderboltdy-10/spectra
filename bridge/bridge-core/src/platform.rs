@@ -40,6 +40,14 @@ pub trait Platform: Send + Sync {
     fn recycle(&self, path: &Path) -> anyhow::Result<()>;
     fn store_credential(&self, account_id: &str, credential: &str) -> anyhow::Result<()>;
     fn read_credential(&self, account_id: &str) -> anyhow::Result<Option<String>>;
+    /// Forgets a stored device credential when this computer is unpaired.
+    /// A credential that was never stored is already forgotten.
+    fn delete_credential(&self, account_id: &str) -> anyhow::Result<()> {
+        match keyring::Entry::new("Spectra Bridge", account_id)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
     fn enable_autostart(&self) -> anyhow::Result<()>;
     fn before_write(&self, _target: &Path) -> io::Result<()> {
         Ok(())

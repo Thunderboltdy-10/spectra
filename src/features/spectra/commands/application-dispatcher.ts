@@ -2,10 +2,9 @@ import type { SpectraPreferences } from "../settings/schema";
 import { applyPreferencePatch } from "../settings/schema";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
-import {
-  clearBridgeIntent,
-  retainBridgeIntent,
-} from "./bridge-intents";
+import { DEVICES_HREF, loadBridgeStatusCache } from "../bridge/client";
+import { runLocalDeviceAction } from "../devices/device-actions";
+import { devicePairing } from "../devices/pairing";
 import type { CommandEffectKind, CommandExecutionResult } from "./types";
 import { aiSyncPurpose } from "../../../../shared/school-sync";
 
@@ -125,7 +124,7 @@ const routeForMap = {
   "app.page.school": "/school",
   "app.page.analytics": "/analytics",
   "app.chat.new": "/chat?new=1",
-  "app.bridge.open-settings": "/settings?section=devices",
+  "app.devices.open": DEVICES_HREF,
 } as const;
 
 function routeFor(commandId: string) {
@@ -178,6 +177,10 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       case "app.navigate": {
         const destination = params.destination;
         const targetId = typeof params.targetId === "string" ? params.targetId.trim() : undefined;
+        if (destination === "devices" && host.openRoute) {
+          const readiness = readinessFrom(await host.openRoute(DEVICES_HREF));
+          return completed(commandId, "navigate", "Devices opened.", readiness);
+        }
         if (destination === "artifact") {
           if (!targetId) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.navigate requires targetId for artifacts");
           const readiness = readinessFrom(await host.openArtifact(targetId, "panel"));
@@ -207,7 +210,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       case "app.page.school":
       case "app.page.analytics":
       case "app.chat.new":
-      case "app.bridge.open-settings": {
+      case "app.devices.open": {
         const href = routeFor(commandId);
         if (!href || !host.openRoute)
           throw new Error(`APPLICATION_COMMAND_HANDLER_UNAVAILABLE: ${commandId}`);
@@ -322,102 +325,27 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (targetIds.length === 0) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.sync.policy.change requires targetIds");
         return dispatchSemantic(commandId, "mutate", "sync.policy.change", { targetIds, patch }, "Sync policy change requested.");
       }
-      case "app.bridge.pair":
-      case "app.bridge.setup":
-      case "app.bridge.policy.change": {
-        const action =
-          commandId === "app.bridge.pair"
-            ? "pair"
-            : commandId === "app.bridge.policy.change"
-              ? "policy"
-              : typeof params.action === "string"
-                ? params.action
-                : "pair";
-        if (commandId === "app.bridge.policy.change") {
-          if (
-            params.preset !== "managed-copy" &&
-            params.preset !== "native-sync" &&
-            params.preset !== "advanced"
-          ) {
-            throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.policy.change requires preset");
-          }
-          const dispatched = await spectraBus.commandAsyncResults("bridge.policy.change", {
-            preset: params.preset,
-          });
-          if (dispatched.listeners > 0) {
-            const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
-            return fromHandler(commandId, "mutate", "Bridge trust change requested.", explicit, { preset: params.preset });
-          }
-          const actionId = typeof params.actionId === "string" && params.actionId.trim()
-            ? params.actionId.trim()
-            : `bridge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          retainBridgeIntent({
-            kind: "policy",
-            actionId,
-            input: { preset: params.preset },
-          });
-          let readiness: ReturnType<typeof readinessFrom>;
-          try {
-            readiness = readinessFrom(await host.navigate("settings", "devices"));
-          } catch (error) {
-            clearBridgeIntent(actionId);
-            throw error;
-          }
-          if (readiness?.status === "failed" || readiness?.status === "cancelled") {
-            clearBridgeIntent(actionId);
-            return completed(commandId, "mutate", "Bridge trust settings could not be opened.", readiness, { actionId });
-          }
-          return {
-            commandId,
-            effect: "mutate",
-            status: "pending",
-            message: "Bridge trust settings opened. The selected preset will resume when the settings surface is ready.",
-            ...(readiness ? { readiness } : {}),
-            data: { actionId, preset: params.preset, handoff: true },
-          };
-        }
-        if (action !== "pair" && action !== "select-location" && action !== "retry-connection" && action !== "retry-folder")
-          throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup requires a supported action");
-        if (action === "retry-folder" && (typeof params.grantId !== "string" || !params.grantId.trim()))
-          throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup retry-folder requires grantId");
-        const dispatched = await spectraBus.commandAsyncResults("bridge.setup", {
-          action,
-          ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
-        });
-        if (dispatched.listeners > 0) {
-          const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
-          return fromHandler(commandId, "open", "Bridge setup requested.", explicit, { action });
-        }
-        const actionId = typeof params.actionId === "string" && params.actionId.trim()
-          ? params.actionId.trim()
-          : `bridge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        retainBridgeIntent({
-          kind: "setup",
-          actionId,
-          input: {
-            action,
-            ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
-          },
-        });
-        let readiness: ReturnType<typeof readinessFrom>;
-        try {
-          readiness = readinessFrom(await host.navigate("settings", "devices"));
-        } catch (error) {
-          clearBridgeIntent(actionId);
-          throw error;
-        }
-        if (readiness?.status === "failed" || readiness?.status === "cancelled") {
-          clearBridgeIntent(actionId);
-          return completed(commandId, "open", "Bridge settings could not be opened.", readiness, { actionId });
-        }
+      case "app.devices.pair": {
+        // The page holds the Convex client that starts pairing; ask it to.
+        devicePairing().want();
+        const readiness = host.openRoute ? readinessFrom(await host.openRoute(DEVICES_HREF)) : undefined;
         return {
           commandId,
-          effect: "open",
+          effect: "mutate",
           status: "pending",
-          message: "Bridge settings opened. The requested setup step will resume when the settings surface is ready.",
+          message: "Connecting this computer. Confirm the code on the computer when it asks.",
           ...(readiness ? { readiness } : {}),
-          data: { actionId, action, handoff: true },
         };
+      }
+      case "app.devices.add-folder":
+      case "app.devices.pause": {
+        const paused = typeof params.paused === "boolean" ? params.paused : !loadBridgeStatusCache()?.paused;
+        const outcome = await runLocalDeviceAction(
+          commandId === "app.devices.add-folder"
+            ? { action: "add_folder" }
+            : { action: paused ? "pause_syncing" : "resume_syncing" },
+        );
+        return fromHandler(commandId, "mutate", outcome.message, outcome);
       }
       case "app.memory.write": {
         if (typeof params.content !== "string" || !params.content.trim())

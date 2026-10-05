@@ -13,35 +13,37 @@ use spectra_bridge_core::fs::{
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
 use spectra_bridge_core::journal::{Journal, NativeAckItem, OpState, ResourceRecord};
 use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
-use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
+use spectra_bridge_core::protocol::{
+    LocalControlSnapshot, LocalMountStatus, LocalOfficeFile, PairingOffer,
+};
 use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite,
     DeliveredChange, DiscoveredRegistration, DiscoveredResource, MAX_NATIVE_PAYLOAD_BYTES,
-    QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange, WriteCompletion, claim_fs_request,
-    claim_pending_payload_upload, claim_write, complete_fs_request_with_claim,
-    complete_write_with_claim, detach_mount, discover_resources_page, drain_cloud_queue,
-    exchange_pairing, inspect_write_target, migrate_cloud_replica_page,
-    reconcile_missing_resources, refresh_structure_claim, refresh_write_claim, register_mount,
-    resume_pairing, set_mount_availability, upload_resource_payload,
+    DeviceHealthReport, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
+    WriteCompletion, claim_fs_request, claim_pending_payload_upload, claim_write,
+    complete_fs_request_with_claim, complete_write_with_claim, detach_mount,
+    discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
+    migrate_cloud_replica_page, reconcile_missing_resources, refresh_structure_claim,
+    refresh_write_claim, register_mount, report_health, resume_pairing, set_mount_availability,
+    upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, ScanEntry, StabilityTracker, WatcherConfig, file_held_by_office,
     is_office_lock_file, is_online_only, office_lock_exists, office_lock_paths, relative_key,
     reusable_hash, scan_mount, stable_file_snapshot,
 };
+use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 
 struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
-    wake: PollWake,
     active_mount_syncs: ActiveMountSyncs,
 }
 
@@ -170,26 +172,19 @@ struct SpectraLocalControl {
     active_mount_syncs: ActiveMountSyncs,
 }
 
-impl SpectraLocalControl {
-    fn mount_views(&self) -> Vec<MountView> {
-        mount_views(&self.grants, &self.journal)
-    }
-}
-
+/// Everything the Devices page does on this computer arrives here through the
+/// local control API. Each change refreshes the tray at once.
 #[async_trait::async_trait]
 impl LocalBridgeControl for SpectraLocalControl {
-    fn pairing_requested(&self) {
-        // Pairing is initiated and completed from Spectra; the tray window stays hidden.
-    }
-
     async fn auto_pair(&self, challenge: &str) -> Result<(), String> {
         let offer = self
             .state
             .take_pairing_offer(challenge)
             .map_err(|error| error.to_string())?;
-        let result = complete_pairing_offer(&offer, &self.state, &self.journal).await;
+        let result = complete_pairing_offer(&self.app, &offer, &self.state, &self.journal).await;
         if result.is_ok() {
             self.wake.wake_configuration();
+            refresh_tray(&self.app);
         }
         result
     }
@@ -198,23 +193,12 @@ impl LocalBridgeControl for SpectraLocalControl {
         request_bridge_update(&self.app).await
     }
 
-    fn mounts(&self) -> Vec<LocalMountStatus> {
-        self.mount_views()
-            .into_iter()
-            .map(|mount| LocalMountStatus {
-                id: mount.id,
-                label: mount.label,
-                state: mount.state,
-                detail: mount.detail,
-                synced: mount.synced,
-                total: mount.total,
-                double_sync_risk: mount.double_sync_risk,
-            })
-            .collect()
+    fn snapshot(&self) -> LocalControlSnapshot {
+        control_snapshot(&self.grants, &self.journal)
     }
 
     async fn select_mount(&self) -> Result<(), String> {
-        select_mount_impl(
+        let result = select_mount_impl(
             &self.app,
             &self.grants,
             &self.journal,
@@ -222,7 +206,9 @@ impl LocalBridgeControl for SpectraLocalControl {
             &self.active_mount_syncs,
         )
         .await
-        .map(|_| ())
+        .map(|_| ());
+        refresh_tray(&self.app);
+        result
     }
 
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
@@ -237,7 +223,618 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
-        remove_mount_impl(grant_id, &self.grants, &self.journal, &self.wake).await
+        let result = remove_mount_impl(grant_id, &self.grants, &self.journal, &self.wake).await;
+        refresh_tray(&self.app);
+        result
+    }
+
+    async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String> {
+        set_mount_paused(&self.grants, &self.journal, grant_id, paused)?;
+        self.wake.wake();
+        refresh_tray(&self.app);
+        Ok(())
+    }
+
+    async fn set_sync_paused(&self, paused: bool) -> Result<(), String> {
+        set_sync_paused(&self.journal, paused)?;
+        self.wake.wake();
+        refresh_tray(&self.app);
+        Ok(())
+    }
+
+    async fn open_logs(&self) -> Result<(), String> {
+        open_logs_impl(&self.app, &self.journal)
+    }
+
+    async fn unpair(&self) -> Result<(), String> {
+        unpair_this_computer(&self.grants, &self.journal)?;
+        self.state.forget_pairing();
+        self.wake.wake_configuration();
+        refresh_tray(&self.app);
+        Ok(())
+    }
+}
+
+/* ---------------------------------------------------------------- local state */
+
+const SYNC_PAUSED_KEY: &str = "sync_paused";
+const LAST_SYNC_KEY: &str = "last_sync_at";
+
+fn mount_paused_key(grant_id: &str) -> String {
+    format!("mount_paused:{grant_id}")
+}
+
+fn mount_synced_at_key(grant_id: &str) -> String {
+    format!("mount_synced_at:{grant_id}")
+}
+
+fn set_flag(journal: &Journal, key: &str, on: bool) -> Result<(), String> {
+    if on {
+        journal.set_config(key, "true")
+    } else {
+        journal.delete_config(key)
+    }
+    .map_err(|error| error.to_string())
+}
+
+fn flag(journal: &Journal, key: &str) -> bool {
+    journal.config(key).ok().flatten().as_deref() == Some("true")
+}
+
+/// Syncing is paused for every folder, from the tray or the Devices page.
+fn sync_paused(journal: &Journal) -> bool {
+    flag(journal, SYNC_PAUSED_KEY)
+}
+
+fn set_sync_paused(journal: &Journal, paused: bool) -> Result<(), String> {
+    set_flag(journal, SYNC_PAUSED_KEY, paused)
+}
+
+/// The folders paused one by one. Their changes wait in the journal.
+fn paused_mounts(grants: &GrantRegistry, journal: &Journal) -> HashSet<String> {
+    grants
+        .device_grants()
+        .into_iter()
+        .map(|grant| grant.id)
+        .filter(|grant_id| flag(journal, &mount_paused_key(grant_id)))
+        .collect()
+}
+
+fn set_mount_paused(
+    grants: &GrantRegistry,
+    journal: &Journal,
+    grant_id: &str,
+    paused: bool,
+) -> Result<(), String> {
+    if !grants
+        .device_grants()
+        .iter()
+        .any(|grant| grant.id == grant_id)
+    {
+        return Err("This folder is no longer on this computer.".into());
+    }
+    set_flag(journal, &mount_paused_key(grant_id), paused)
+}
+
+fn read_ms(journal: &Journal, key: &str) -> Option<u64> {
+    journal
+        .config(key)
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse().ok())
+}
+
+/// A pass that finished cleanly: every active folder that is not paused is
+/// up to date as of now.
+fn record_clean_pass(
+    grants: &GrantRegistry,
+    journal: &Journal,
+    paused_grants: &HashSet<String>,
+    now: u64,
+) {
+    let _ = journal.set_config(LAST_SYNC_KEY, &now.to_string());
+    for grant in grants.device_grants() {
+        if paused_grants.contains(&grant.id) {
+            continue;
+        }
+        let active = journal
+            .config(&format!("mount_status:{}", grant.id))
+            .ok()
+            .flatten()
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+            .is_some_and(|value| value.get("state").and_then(|state| state.as_str()) == Some("active"));
+        if active {
+            let _ = journal.set_config(&mount_synced_at_key(&grant.id), &now.to_string());
+        }
+    }
+}
+
+/// The computer's name as its owner knows it.
+fn this_device_name() -> String {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(output) = std::process::Command::new("scutil")
+                .args(["--get", "ComputerName"])
+                .output()
+            {
+                let name = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if output.status.success() && !name.is_empty() {
+                    return name;
+                }
+            }
+        }
+        ["COMPUTERNAME", "HOSTNAME"]
+            .iter()
+            .find_map(|name| std::env::var(name).ok())
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "This computer".into())
+    })
+    .clone()
+}
+
+/// "Documents › Biology": the folder and the one it sits in.
+fn friendly_path(path: &std::path::Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let parent = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|parent| parent.to_str());
+    match (parent, name) {
+        (_, "") => path.display().to_string(),
+        (Some(parent), name) => format!("{parent} \u{203a} {name}"),
+        (None, name) => name.to_owned(),
+    }
+}
+
+/// The files Office holds open right now in the selected folders.
+fn office_files(grants: &GrantRegistry, journal: &Journal) -> Vec<LocalOfficeFile> {
+    let grants = grants.device_grants();
+    let mut files = Vec::new();
+    for (key, _) in journal.config_prefix("lock_held:").unwrap_or_default() {
+        let held = key.trim_start_matches("lock_held:");
+        let Some(grant) = grants
+            .iter()
+            .find(|grant| held.starts_with(&format!("{}:", grant.id)))
+        else {
+            continue;
+        };
+        let Ok(Some(resource)) = journal.resource_by_id(&held[grant.id.len() + 1..]) else {
+            continue;
+        };
+        let name = resource
+            .path_key
+            .rsplit('/')
+            .next()
+            .unwrap_or(&resource.path_key)
+            .to_owned();
+        files.push(LocalOfficeFile {
+            folder: grant.label.clone(),
+            name,
+        });
+    }
+    files.sort_by(|left, right| (&left.folder, &left.name).cmp(&(&right.folder, &right.name)));
+    files.dedup();
+    files
+}
+
+fn control_snapshot(grants: &GrantRegistry, journal: &Journal) -> LocalControlSnapshot {
+    LocalControlSnapshot {
+        device_name: this_device_name(),
+        paused: sync_paused(journal),
+        last_sync_at: read_ms(journal, LAST_SYNC_KEY),
+        mounts: mount_views(grants, journal),
+        office_files: office_files(grants, journal),
+    }
+}
+
+/// What the journal keeps for one folder, forgotten when the folder goes.
+fn forget_mount_config(journal: &Journal, grant_id: &str) -> Result<(), String> {
+    for prefix in [
+        "mount:",
+        "mount_status:",
+        "mount_double_sync:",
+        "cloud_mount:",
+        "mount_paused:",
+        "mount_synced_at:",
+    ] {
+        journal
+            .delete_config(&format!("{prefix}{grant_id}"))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Unpairing forgets this computer's key, its folders and the browser
+/// session, and stops syncing. The files in the folders stay where they are.
+fn unpair_this_computer(grants: &GrantRegistry, journal: &Journal) -> Result<(), String> {
+    if let Some(device_id) = journal
+        .config("device_id")
+        .map_err(|error| error.to_string())?
+    {
+        HostPlatform
+            .delete_credential(&device_id)
+            .map_err(|error| format!("Couldn't forget this computer's key: {error}"))?;
+    }
+    for grant in grants.device_grants() {
+        grants.remove(&grant.id);
+        forget_mount_config(journal, &grant.id)?;
+    }
+    for key in [
+        "device_id",
+        "browser_origin",
+        "browser_session_token",
+        SYNC_PAUSED_KEY,
+        LAST_SYNC_KEY,
+    ] {
+        journal
+            .delete_config(key)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/* ---------------------------------------------------------------- health */
+
+const HEALTH_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// What this computer tells Spectra about itself, so the Devices page on any
+/// other device can show it. The problem is a stable code; Spectra words it.
+fn health_report(grants: &GrantRegistry, journal: &Journal, paused: bool) -> DeviceHealthReport {
+    let mounts = mount_views(grants, journal);
+    let problem = mounts
+        .iter()
+        .filter(|mount| !mount.paused)
+        .find_map(|mount| match mount.state.as_str() {
+            "unavailable" => Some(("folder-unavailable", mount)),
+            "error" => Some(("folder-error", mount)),
+            _ => None,
+        });
+    DeviceHealthReport {
+        paused,
+        folders: mounts.len(),
+        problem: problem.map(|(code, _)| code.to_owned()),
+        // Only the folder's own name leaves the computer, as it already does
+        // when the folder is registered; its parents stay local.
+        problem_folder: problem.map(|(_, mount)| mount.label.clone()),
+        last_sync_at: read_ms(journal, LAST_SYNC_KEY),
+    }
+}
+
+/// Sends a report when the state changes, and once a minute otherwise so the
+/// page knows when this computer was last seen.
+#[derive(Default)]
+struct HealthReporter {
+    last: Option<(DeviceHealthReport, std::time::Instant)>,
+}
+
+impl HealthReporter {
+    fn due(&self, report: &DeviceHealthReport) -> bool {
+        match &self.last {
+            None => true,
+            Some((last, sent_at)) => {
+                (last.paused, last.folders, &last.problem, &last.problem_folder)
+                    != (
+                        report.paused,
+                        report.folders,
+                        &report.problem,
+                        &report.problem_folder,
+                    )
+                    || sent_at.elapsed() >= HEALTH_REPORT_INTERVAL
+            }
+        }
+    }
+
+    fn sent(&mut self, report: DeviceHealthReport) {
+        self.last = Some((report, std::time::Instant::now()));
+    }
+}
+
+/* ---------------------------------------------------------------- tray */
+
+const TRAY_ID: &str = "spectra-bridge";
+const TRAY_REFRESH: std::time::Duration = std::time::Duration::from_secs(5);
+/// The tray waits a few missed polls before it calls the cloud unreachable.
+const TRAY_CLOUD_GRACE_MS: u64 = 45_000;
+
+/// The state dot on the tray prism (docs/product/DEVICES.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayDot {
+    None,
+    Grey,
+    Orange,
+    Red,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TrayView {
+    dot: TrayDot,
+    tooltip: String,
+}
+
+fn folder_count(count: usize) -> String {
+    match count {
+        0 => "No folders yet".into(),
+        1 => "1 folder".into(),
+        count => format!("{count} folders"),
+    }
+}
+
+/// Tray tooltips are short (Windows keeps 127 characters).
+fn short_label(label: &str) -> String {
+    if label.chars().count() > 32 {
+        format!("{}\u{2026}", label.chars().take(31).collect::<String>())
+    } else {
+        label.to_owned()
+    }
+}
+
+/// What the tray says, in plain words, and which dot it shows: none when
+/// connected, grey when disconnected or paused, orange when it needs the
+/// person, red for a problem.
+fn tray_view(paired: bool, connected: bool, paused: bool, mounts: &[LocalMountStatus]) -> TrayView {
+    if !paired {
+        return TrayView {
+            dot: TrayDot::Orange,
+            tooltip: "Spectra Bridge \u{b7} Not connected yet".into(),
+        };
+    }
+    if paused {
+        return TrayView {
+            dot: TrayDot::Grey,
+            tooltip: format!(
+                "Spectra Bridge \u{b7} Paused \u{b7} {}",
+                folder_count(mounts.len())
+            ),
+        };
+    }
+    let problems = mounts
+        .iter()
+        .filter(|mount| !mount.paused && matches!(mount.state.as_str(), "error" | "unavailable"))
+        .collect::<Vec<_>>();
+    match problems.as_slice() {
+        [] => {}
+        [only] => {
+            return TrayView {
+                dot: TrayDot::Red,
+                tooltip: format!(
+                    "Spectra Bridge \u{b7} Problem with {}",
+                    short_label(&only.label)
+                ),
+            };
+        }
+        many => {
+            return TrayView {
+                dot: TrayDot::Red,
+                tooltip: format!("Spectra Bridge \u{b7} Problem with {} folders", many.len()),
+            };
+        }
+    }
+    if !connected {
+        return TrayView {
+            dot: TrayDot::Grey,
+            tooltip: "Spectra Bridge \u{b7} Disconnected".into(),
+        };
+    }
+    TrayView {
+        dot: TrayDot::None,
+        tooltip: format!(
+            "Spectra Bridge \u{b7} Connected \u{b7} {}",
+            folder_count(mounts.len())
+        ),
+    }
+}
+
+/// The icon pixels for the display scale: 16 px at 100 percent.
+fn tray_icon_size(scale_factor: f64) -> u32 {
+    (16.0 * scale_factor.clamp(1.0, 2.0)).round() as u32
+}
+
+macro_rules! tray_png {
+    ($theme:literal, $dot:literal, $size:literal) => {
+        include_bytes!(concat!(
+            "../icons/tray/",
+            $theme,
+            "-",
+            $dot,
+            "-",
+            $size,
+            ".png"
+        )) as &[u8]
+    };
+}
+
+macro_rules! tray_png_by_size {
+    ($theme:literal, $dot:literal, $size:expr) => {
+        match $size {
+            0..=17 => tray_png!($theme, $dot, 16),
+            18..=21 => tray_png!($theme, $dot, 20),
+            22..=27 => tray_png!($theme, $dot, 24),
+            _ => tray_png!($theme, $dot, 32),
+        }
+    };
+}
+
+macro_rules! tray_png_by_dot {
+    ($theme:literal, $dot:expr, $size:expr) => {
+        match $dot {
+            TrayDot::None => tray_png_by_size!($theme, "none", $size),
+            TrayDot::Grey => tray_png_by_size!($theme, "grey", $size),
+            TrayDot::Orange => tray_png_by_size!($theme, "orange", $size),
+            TrayDot::Red => tray_png_by_size!($theme, "red", $size),
+        }
+    };
+}
+
+/// The prism tray icons, generated from the app's prism renderer by
+/// scripts/generate-bridge-tray-icons.ts (npm run icons:bridge).
+fn tray_icon_png(light_taskbar: bool, dot: TrayDot, size: u32) -> &'static [u8] {
+    if light_taskbar {
+        tray_png_by_dot!("light", dot, size)
+    } else {
+        tray_png_by_dot!("dark", dot, size)
+    }
+}
+
+#[cfg(windows)]
+fn taskbar_is_light() -> bool {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize")
+        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
+        .map(|value| value == 1)
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn taskbar_is_light() -> bool {
+    static CACHE: Mutex<Option<(std::time::Instant, bool)>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((checked_at, light)) = *cache
+        && checked_at.elapsed() < std::time::Duration::from_secs(60)
+    {
+        return light;
+    }
+    let light = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+        .map(|output| !String::from_utf8_lossy(&output.stdout).contains("Dark"))
+        .unwrap_or(false);
+    *cache = Some((std::time::Instant::now(), light));
+    light
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn taskbar_is_light() -> bool {
+    false
+}
+
+struct TrayHandles {
+    pause: MenuItem<tauri::Wry>,
+    shown: Mutex<Option<(TrayView, bool, u32, bool)>>,
+}
+
+/// Brings the tray icon, tooltip and Pause/Resume item up to date.
+fn refresh_tray(app: &tauri::AppHandle) {
+    let (Some(handles), Some(runtime), Some(state)) = (
+        app.try_state::<TrayHandles>(),
+        app.try_state::<BridgeRuntime>(),
+        app.try_state::<Arc<ServerState>>(),
+    ) else {
+        return;
+    };
+    let paused = sync_paused(&runtime.journal);
+    let view = tray_view(
+        state.is_paired(),
+        state.cloud_seen_within(TRAY_CLOUD_GRACE_MS),
+        paused,
+        &mount_views(&runtime.grants, &runtime.journal),
+    );
+    let light = taskbar_is_light();
+    let scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| monitor.scale_factor())
+        .unwrap_or(1.0);
+    let next = (view, light, tray_icon_size(scale), paused);
+    let mut shown = handles
+        .shown
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if shown.as_ref() == Some(&next) {
+        return;
+    }
+    let (view, light, size, paused) = &next;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        if let Ok(icon) = tauri::image::Image::from_bytes(tray_icon_png(*light, view.dot, *size)) {
+            let _ = tray.set_icon(Some(icon));
+        }
+        let _ = tray.set_tooltip(Some(&view.tooltip));
+    }
+    let _ = handles.pause.set_text(if *paused {
+        "Resume syncing"
+    } else {
+        "Pause syncing"
+    });
+    *shown = Some(next);
+}
+
+/// The Devices page on the Spectra this computer is paired with.
+fn devices_page_url(origin: &str) -> Option<String> {
+    let origin = origin.trim().trim_end_matches('/');
+    let scheme_ok = origin.starts_with("https://") || origin.starts_with("http://");
+    let plain = !origin.is_empty()
+        && origin
+            .chars()
+            .all(|character| character.is_ascii_graphic() && !matches!(character, '"' | '\'' | '\x60'));
+    (scheme_ok && plain).then(|| format!("{origin}/devices"))
+}
+
+fn open_devices_page(app: &tauri::AppHandle) {
+    let origin = app
+        .try_state::<BridgeRuntime>()
+        .and_then(|runtime| runtime.journal.config("browser_origin").ok().flatten())
+        .or_else(|| {
+            app.try_state::<Arc<ServerState>>()
+                .and_then(|state| state.primary_origin())
+        });
+    let Some(url) = origin.as_deref().and_then(devices_page_url) else {
+        return;
+    };
+    if let Err(error) = open_with_system(std::ffi::OsStr::new(&url))
+        && let Some(runtime) = app.try_state::<BridgeRuntime>()
+    {
+        record_runtime_error(&runtime.journal, "Could not open Spectra", &error);
+    }
+}
+
+/* ---------------------------------------------------------------- pairing */
+
+const PAIRING_DECLINED: &str = "Pairing was cancelled on this computer.";
+
+/// "123 456": the code as the Devices page shows it.
+fn spaced_code(code: &str) -> String {
+    if code.len() == 6 && code.is_ascii() {
+        format!("{} {}", &code[..3], &code[3..])
+    } else {
+        code.to_owned()
+    }
+}
+
+fn pairing_confirmation_text(code: &str) -> String {
+    format!(
+        "Spectra wants to connect this computer to your account.\n\nThe Devices page in Spectra shows the code {}. Connect only if it matches.",
+        spaced_code(code)
+    )
+}
+
+/// The one native prompt pairing needs: the person confirms, on this
+/// computer, the code the Devices page shows.
+async fn confirm_pairing_on_this_computer(
+    app: &tauri::AppHandle,
+    code: &str,
+) -> Result<(), String> {
+    let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(pairing_confirmation_text(code))
+        .title("Connect to Spectra")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Connect".into(),
+            "Cancel".into(),
+        ))
+        .show(move |confirmed| {
+            let _ = answer_tx.send(confirmed);
+        });
+    match answer_rx.await {
+        Ok(true) => Ok(()),
+        _ => Err(PAIRING_DECLINED.into()),
     }
 }
 
@@ -380,19 +977,7 @@ fn record_runtime_error(journal: &Journal, context: &str, error: &dyn std::fmt::
     let _ = journal.set_config("last_runtime_error", &bounded);
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MountView {
-    id: String,
-    label: String,
-    state: String,
-    detail: String,
-    synced: usize,
-    total: usize,
-    double_sync_risk: bool,
-}
-
-fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
+fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<LocalMountStatus> {
     grants
         .device_grants()
         .into_iter()
@@ -420,7 +1005,10 @@ fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
             } else {
                 base_detail.to_owned()
             };
-            MountView {
+            LocalMountStatus {
+                friendly_path: friendly_path(grant.device_root()),
+                paused: flag(journal, &mount_paused_key(&grant.id)),
+                last_sync_at: read_ms(journal, &mount_synced_at_key(&grant.id)),
                 id: grant.id,
                 label: grant.label,
                 state: value
@@ -1740,7 +2328,9 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         None
     };
     let (detail, synced, total) = mount_pass_status(&pass, repair_delay_ms);
-    set_mount_status(journal, &grant.id, "active", &detail, synced, total)
+    set_mount_status(journal, &grant.id, "active", &detail, synced, total)?;
+    let _ = journal.set_config(&mount_synced_at_key(&grant.id), &current_time_ms().to_string());
+    Ok(())
 }
 
 const OVERSIZED_FILE_DETAIL: &str = "Files over 100 MB stay on this computer only; compress their pictures and videos to sync them.";
@@ -2092,6 +2682,7 @@ async fn drain_write_requests(
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
+    paused_grants: &HashSet<String>,
 ) -> anyhow::Result<usize> {
     let mut by_replica = BTreeMap::<String, Vec<ClaimedWrite>>::new();
     // Bound simultaneous payload memory and time spent prefetching leases.
@@ -2107,6 +2698,20 @@ async fn drain_write_requests(
             }
         };
         record_write_progress(journal, "claimed", Some(&request), None);
+        if paused_grants.contains(&request.grant_id) {
+            // A paused folder takes no writes; Spectra offers this one again later.
+            complete_claimed_write(
+                deployment,
+                credential,
+                journal,
+                &request,
+                "waiting",
+                None,
+                Some(("folder-paused", "This folder is paused on this computer.")),
+            )
+            .await?;
+            continue;
+        }
         by_replica
             .entry(request.replica_id.clone())
             .or_default()
@@ -2864,28 +3469,18 @@ async fn sync_grant(
     }
 }
 
-#[tauri::command]
-fn pending_pairing_code(state: tauri::State<'_, Arc<ServerState>>) -> Option<String> {
-    state.pending_pairing_code()
-}
-
-#[tauri::command]
-fn bridge_status(
-    state: tauri::State<'_, Arc<ServerState>>,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> (bool, Vec<MountView>) {
-    let mounts = mount_views(&runtime.grants, &runtime.journal);
-    (state.is_paired(), mounts)
-}
-
-#[tauri::command]
+/// Pairs this computer for an offer from the Devices page. A computer already
+/// paired to the account resumes quietly; a new pairing (or one whose key
+/// Spectra no longer knows) first asks the person, in a native dialog showing
+/// the same code as the page.
 async fn complete_pairing_offer(
+    app: &tauri::AppHandle,
     offer: &PairingOffer,
     state: &Arc<ServerState>,
     journal: &Arc<Journal>,
 ) -> Result<(), String> {
     let deployment = deployment_url(journal)?;
-    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This device".into());
+    let device_name = this_device_name();
     let installation_id = match journal
         .config("installation_id")
         .map_err(|error| error.to_string())?
@@ -2921,6 +3516,7 @@ async fn complete_pairing_offer(
         {
             Ok(exchange) => (exchange.device_id, exchange.browser_origin),
             Err(error) if should_repair_pairing(&error.to_string()) => {
+                confirm_pairing_on_this_computer(app, &offer.short_code).await?;
                 let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
                     .await
                     .map_err(|error| error.to_string())?;
@@ -2932,6 +3528,7 @@ async fn complete_pairing_offer(
             Err(error) => return Err(error.to_string()),
         }
     } else {
+        confirm_pairing_on_this_computer(app, &offer.short_code).await?;
         let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
             .await
             .map_err(|error| error.to_string())?;
@@ -2988,22 +3585,6 @@ mod pairing_tests {
     }
 }
 
-#[tauri::command]
-async fn confirm_pairing(
-    code: String,
-    state: tauri::State<'_, Arc<ServerState>>,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> Result<(), String> {
-    let offer = state
-        .confirm_pairing_code(&code)
-        .map_err(|error| error.to_string())?;
-    let result = complete_pairing_offer(&offer, &state, &runtime.journal).await;
-    if result.is_ok() {
-        runtime.wake.wake_configuration();
-    }
-    result
-}
-
 async fn select_mount_impl(
     app: &tauri::AppHandle,
     grants: &Arc<GrantRegistry>,
@@ -3058,21 +3639,6 @@ async fn select_mount_impl(
     Ok(Some((grant.id, label)))
 }
 
-#[tauri::command]
-async fn select_mount(
-    app: tauri::AppHandle,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> Result<Option<(String, String)>, String> {
-    select_mount_impl(
-        &app,
-        &runtime.grants,
-        &runtime.journal,
-        &runtime.wake,
-        &runtime.active_mount_syncs,
-    )
-    .await
-}
-
 async fn retry_mount_impl(
     grant_id: &str,
     grants: &Arc<GrantRegistry>,
@@ -3121,21 +3687,6 @@ async fn retry_mount_impl(
     Ok(())
 }
 
-#[tauri::command]
-async fn retry_mount(
-    grant_id: String,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> Result<(), String> {
-    retry_mount_impl(
-        &grant_id,
-        &runtime.grants,
-        &runtime.journal,
-        &runtime.wake,
-        &runtime.active_mount_syncs,
-    )
-    .await
-}
-
 async fn remove_mount_impl(
     grant_id: &str,
     grants: &Arc<GrantRegistry>,
@@ -3158,29 +3709,12 @@ async fn remove_mount_impl(
         }
     }
     grants.remove(grant_id);
-    for prefix in [
-        "mount:",
-        "mount_status:",
-        "mount_double_sync:",
-        "cloud_mount:",
-    ] {
-        journal
-            .delete_config(&format!("{prefix}{grant_id}"))
-            .map_err(|error| error.to_string())?;
-    }
+    forget_mount_config(journal, grant_id)?;
     wake.wake();
     Ok(())
 }
 
-#[tauri::command]
-async fn remove_mount(
-    grant_id: String,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> Result<(), String> {
-    remove_mount_impl(&grant_id, &runtime.grants, &runtime.journal, &runtime.wake).await
-}
-
-fn open_log_file(path: &std::path::Path) -> std::io::Result<()> {
+fn open_with_system(path: &std::ffi::OsStr) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -3227,7 +3761,7 @@ fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), Strin
         )
     };
     std::fs::write(&path, contents).map_err(|error| error.to_string())?;
-    open_log_file(&path).map_err(|error| format!("Could not open the Bridge log: {error}"))
+    open_with_system(path.as_os_str()).map_err(|error| format!("Could not open the Bridge log: {error}"))
 }
 
 async fn run_sync_iteration(
@@ -3239,6 +3773,7 @@ async fn run_sync_iteration(
     last_compaction: &mut std::time::Instant,
     deployment: &mut Option<String>,
     configuration_dirty: &mut bool,
+    health: &mut HealthReporter,
 ) -> PollResult {
     if *configuration_dirty || deployment.is_none() {
         match deployment_url(journal) {
@@ -3272,6 +3807,39 @@ async fn run_sync_iteration(
         }
     };
 
+    let paused = sync_paused(journal);
+    let paused_grants = paused_mounts(grants, journal);
+    let report = health_report(grants, journal, paused);
+    if health.due(&report) {
+        match report_health(deployment, &credential, &report).await {
+            Ok(()) => {
+                health.sent(report);
+                state.mark_cloud_seen();
+                let _ = journal.delete_config("health_report_error");
+            }
+            Err(error) if should_repair_pairing(&error.to_string()) => {
+                // Spectra removed this computer (from the Devices page here or
+                // on another device). Forget it, unless pairing replaced the
+                // key while this report was in flight.
+                let still_current = journal.config("device_id").ok().flatten().as_deref()
+                    == Some(device_id.as_str())
+                    && HostPlatform.read_credential(&device_id).ok().flatten().as_deref()
+                        == Some(credential.as_str());
+                if still_current && unpair_this_computer(grants, journal).is_ok() {
+                    state.forget_pairing();
+                }
+                return PollResult::Unauthenticated;
+            }
+            Err(error) => {
+                let _ = journal.set_config("health_report_error", &error.to_string());
+            }
+        }
+    }
+    if paused {
+        // Changes found on disk wait in the journal until syncing resumes.
+        return PollResult::SuccessfulIdle;
+    }
+
     if let Err(error) = run_replica_migration(journal, deployment, &credential).await {
         let _ = journal.set_config("replica_migration_error", &error);
         return PollResult::FailedMigration;
@@ -3285,7 +3853,7 @@ async fn run_sync_iteration(
         device_grants.iter().map(|grant| grant.id.clone()),
     );
     for grant in device_grants {
-        if restored_grants_reconciled.contains(&grant.id) {
+        if restored_grants_reconciled.contains(&grant.id) || paused_grants.contains(&grant.id) {
             continue;
         }
         match sync_grant(&grant, journal, active_mount_syncs).await {
@@ -3312,7 +3880,7 @@ async fn run_sync_iteration(
             0
         }
     };
-    match drain_cloud_queue(journal, deployment, &credential).await {
+    match drain_cloud_queue_holding(journal, deployment, &credential, &paused_grants).await {
         Ok(deliveries) => {
             cloud_request_succeeded = true;
             let mut delivery_failed = false;
@@ -3396,7 +3964,15 @@ async fn run_sync_iteration(
                 0
             }
         };
-    let write_handled = match drain_write_requests(grants, journal, deployment, &credential).await {
+    let write_handled = match drain_write_requests(
+        grants,
+        journal,
+        deployment,
+        &credential,
+        &paused_grants,
+    )
+    .await
+    {
         Ok(handled) => {
             cloud_request_succeeded = true;
             let _ = journal.delete_config("write_queue_error");
@@ -3431,6 +4007,9 @@ async fn run_sync_iteration(
         *last_compaction = std::time::Instant::now();
     }
 
+    if !failed {
+        record_clean_pass(grants, journal, &paused_grants, current_time_ms());
+    }
     if failed {
         PollResult::FailedRequest
     } else if native_ack_handled + structure_handled + payload_handled + write_handled > 0 {
@@ -3456,6 +4035,7 @@ async fn run_sync_worker(
     let mut last_compaction = std::time::Instant::now();
     let mut deployment = None;
     let mut configuration_dirty = true;
+    let mut health = HealthReporter::default();
 
     loop {
         if wake.is_shutdown() {
@@ -3476,6 +4056,7 @@ async fn run_sync_worker(
             &mut last_compaction,
             &mut deployment,
             &mut configuration_dirty,
+            &mut health,
         )
         .await;
         if result == PollResult::Disconnected || result == PollResult::Unauthenticated {
@@ -3497,24 +4078,17 @@ async fn run_sync_worker(
     }
 }
 
-#[tauri::command]
-fn open_logs(
-    app: tauri::AppHandle,
-    runtime: tauri::State<'_, BridgeRuntime>,
-) -> Result<(), String> {
-    open_logs_impl(&app, &runtime.journal)
-}
-
 fn main() {
     configure_embedded_release_environment();
     record_process_start();
     let sync_wake = PollWake::new();
     let shutdown_wake = sync_wake.clone();
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Starting Bridge again while it runs opens its home: the
+            // Devices page. A login start stays quiet.
+            if !args.iter().any(|argument| argument == "--autostart") {
+                open_devices_page(app);
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -3524,15 +4098,6 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![
-            pending_pairing_code,
-            bridge_status,
-            confirm_pairing,
-            select_mount,
-            retry_mount,
-            remove_mount,
-            open_logs
-        ])
         .setup(move |app| {
             let sync_wake = sync_wake.clone();
             // Debug and release binaries must share the same per-user journal
@@ -3544,12 +4109,6 @@ fn main() {
             if isolated_runtime.is_none() {
                 app.autolaunch().enable()?;
                 repair_windows_autostart_command()?;
-            }
-            // The Bridge is tray infrastructure. Spectra owns pairing, folder
-            // selection, policy and status; the native surface is opt-in from
-            // the tray only and never appears during normal startup.
-            if let Some(window) = app.get_webview_window("main") {
-                window.hide()?;
             }
             let data_dir = resolve_bridge_data_dir(isolated_runtime, app.path().app_data_dir()?)?;
             std::fs::create_dir_all(&data_dir)?;
@@ -3602,7 +4161,6 @@ fn main() {
             app.manage(BridgeRuntime {
                 grants: grants.clone(),
                 journal: journal.clone(),
-                wake: sync_wake.clone(),
                 active_mount_syncs: Arc::new(Mutex::new(HashSet::new())),
             });
             let active_mount_syncs = app.state::<BridgeRuntime>().active_mount_syncs.clone();
@@ -3639,47 +4197,49 @@ fn main() {
                     record_runtime_error(&server_journal, "Bridge server stopped", &error);
                 }
             });
-            let show = MenuItem::with_id(app, "show", "Open Spectra Bridge", true, None::<&str>)?;
-            let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
-            let stop = MenuItem::with_id(app, "stop", "Stop Bridge", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &logs, &stop])?;
+            // Bridge has no window: the tray, the folder picker and the
+            // pairing confirmation are its only native surfaces. Everything
+            // else happens on the Devices page in Spectra.
+            let open = MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
+            let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
             let tray_journal = journal.clone();
-            let mut tray = TrayIconBuilder::new()
+            let tray_wake = sync_wake.clone();
+            TrayIconBuilder::with_id(TRAY_ID)
                 .menu(&menu)
-                .tooltip("Spectra Bridge · Disconnected")
+                .tooltip("Spectra Bridge")
+                .icon(tauri::image::Image::from_bytes(tray_icon_png(
+                    taskbar_is_light(),
+                    TrayDot::Grey,
+                    32,
+                ))?)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                    "open" => open_devices_page(app),
+                    "pause" => {
+                        let paused = !sync_paused(&tray_journal);
+                        if let Err(error) = set_sync_paused(&tray_journal, paused) {
+                            record_runtime_error(&tray_journal, "Could not change syncing", &error);
                         }
+                        tray_wake.wake();
+                        refresh_tray(app);
                     }
-                    "logs" => {
-                        if let Err(error) = open_logs_impl(app, &tray_journal) {
-                            record_runtime_error(
-                                &tray_journal,
-                                "Could not open the Bridge log",
-                                &error,
-                            );
-                        }
-                    }
-                    "stop" => app.exit(0),
+                    "quit" => app.exit(0),
                     _ => {}
-                });
-            let tray_icon =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
-            tray = tray.icon(tray_icon);
-            tray.build(app)?;
+                })
+                .build(app)?;
+            app.manage(TrayHandles {
+                pause,
+                shown: Mutex::new(None),
+            });
+            let tray_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    refresh_tray(&tray_app);
+                    tokio::time::sleep(TRAY_REFRESH).await;
+                }
+            });
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                // Closing the window is a presentation action, not a Bridge
-                // shutdown. Keep the service and tray icon alive; the explicit
-                // tray action is the only normal way to stop the Bridge.
-                api.prevent_close();
-                let _ = window.hide();
-            }
         })
         .build(tauri::generate_context!())
         .expect("Spectra Bridge shell failed")
@@ -3691,6 +4251,276 @@ fn main() {
                 shutdown_wake.shutdown();
             }
         });
+}
+
+#[cfg(test)]
+mod devices_tests {
+    use super::*;
+
+    fn mount(label: &str, state: &str, paused: bool) -> LocalMountStatus {
+        LocalMountStatus {
+            id: format!("grant_{label}"),
+            label: label.into(),
+            friendly_path: format!("Documents \u{203a} {label}"),
+            state: state.into(),
+            detail: String::new(),
+            synced: 0,
+            total: 0,
+            double_sync_risk: false,
+            paused,
+            last_sync_at: None,
+        }
+    }
+
+    fn temp_folder(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir()
+            .join(format!("spectra-bridge-{}", uuid::Uuid::new_v4()))
+            .join(name);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_tray_says_its_state_in_plain_words() {
+        let three = [
+            mount("Biology", "active", false),
+            mount("History", "active", false),
+            mount("Maths", "syncing", false),
+        ];
+        assert_eq!(
+            tray_view(true, true, false, &three),
+            TrayView {
+                dot: TrayDot::None,
+                tooltip: "Spectra Bridge \u{b7} Connected \u{b7} 3 folders".into()
+            }
+        );
+        assert_eq!(
+            tray_view(true, true, false, &three[..1]).tooltip,
+            "Spectra Bridge \u{b7} Connected \u{b7} 1 folder"
+        );
+        assert_eq!(
+            tray_view(true, false, false, &three),
+            TrayView {
+                dot: TrayDot::Grey,
+                tooltip: "Spectra Bridge \u{b7} Disconnected".into()
+            }
+        );
+        assert_eq!(tray_view(false, false, false, &[]).dot, TrayDot::Orange);
+        let paused = tray_view(true, true, true, &three);
+        assert_eq!(paused.dot, TrayDot::Grey);
+        assert_eq!(paused.tooltip, "Spectra Bridge \u{b7} Paused \u{b7} 3 folders");
+    }
+
+    #[test]
+    fn a_folder_problem_turns_the_dot_red_unless_that_folder_is_paused() {
+        let unreachable = [mount("Biology", "unavailable", false), mount("Maths", "active", false)];
+        let view = tray_view(true, true, false, &unreachable);
+        assert_eq!(view.dot, TrayDot::Red);
+        assert_eq!(view.tooltip, "Spectra Bridge \u{b7} Problem with Biology");
+        let two = [mount("Biology", "error", false), mount("Maths", "unavailable", false)];
+        assert_eq!(
+            tray_view(true, true, false, &two).tooltip,
+            "Spectra Bridge \u{b7} Problem with 2 folders"
+        );
+        let paused_problem = [mount("Biology", "unavailable", true)];
+        assert_eq!(tray_view(true, true, false, &paused_problem).dot, TrayDot::None);
+    }
+
+    #[test]
+    fn every_tray_icon_is_embedded_at_its_size() {
+        for light in [true, false] {
+            for dot in [TrayDot::None, TrayDot::Grey, TrayDot::Orange, TrayDot::Red] {
+                for (scale, size) in [(1.0, 16), (1.25, 20), (1.5, 24), (2.0, 32), (3.0, 32)] {
+                    let png = tray_icon_png(light, dot, tray_icon_size(scale));
+                    assert_eq!(&png[1..4], b"PNG");
+                    let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+                    let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+                    assert_eq!((width, height), (size, size), "{light} {dot:?} {scale}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn folders_show_with_their_parent() {
+        let path = std::path::Path::new("/Users/sam/Documents/Biology");
+        assert_eq!(friendly_path(path), "Documents \u{203a} Biology");
+        assert_eq!(friendly_path(std::path::Path::new("Biology")), "Biology");
+    }
+
+    #[test]
+    fn the_devices_page_opens_only_on_a_web_origin() {
+        assert_eq!(
+            devices_page_url("https://spectra.school/").as_deref(),
+            Some("https://spectra.school/devices")
+        );
+        assert_eq!(
+            devices_page_url("http://localhost:3000").as_deref(),
+            Some("http://localhost:3000/devices")
+        );
+        assert_eq!(devices_page_url("file:///etc/passwd"), None);
+        assert_eq!(devices_page_url("https://a.test\" & calc"), None);
+        assert_eq!(devices_page_url(""), None);
+    }
+
+    #[test]
+    fn the_pairing_dialog_shows_the_code_as_the_page_does() {
+        assert_eq!(spaced_code("123456"), "123 456");
+        assert!(pairing_confirmation_text("123456").contains("123 456"));
+    }
+
+    #[test]
+    fn pausing_is_remembered_per_computer_and_per_folder() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let grant = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        assert!(!sync_paused(&journal));
+        set_sync_paused(&journal, true).unwrap();
+        assert!(sync_paused(&journal));
+        assert!(control_snapshot(&grants, &journal).paused);
+        set_sync_paused(&journal, false).unwrap();
+        assert!(!sync_paused(&journal));
+
+        set_mount_paused(&grants, &journal, &grant.id, true).unwrap();
+        assert_eq!(paused_mounts(&grants, &journal), HashSet::from([grant.id.clone()]));
+        let snapshot = control_snapshot(&grants, &journal);
+        assert!(snapshot.mounts[0].paused);
+        assert_eq!(snapshot.mounts[0].friendly_path.split(" \u{203a} ").last(), Some("Biology"));
+        assert!(set_mount_paused(&grants, &journal, "grant_gone", true).is_err());
+    }
+
+    #[test]
+    fn a_clean_pass_dates_active_folders_but_not_paused_ones() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let active = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        let paused = grants
+            .add_native_selection("Maths".into(), &temp_folder("Maths"))
+            .unwrap();
+        set_mount_status(&journal, &active.id, "active", "Up to date", 2, 2).unwrap();
+        set_mount_status(&journal, &paused.id, "active", "Up to date", 1, 1).unwrap();
+        record_clean_pass(&grants, &journal, &HashSet::from([paused.id.clone()]), 1_000);
+        let snapshot = control_snapshot(&grants, &journal);
+        assert_eq!(snapshot.last_sync_at, Some(1_000));
+        let synced_at = |id: &str| {
+            snapshot
+                .mounts
+                .iter()
+                .find(|mount| mount.id == id)
+                .unwrap()
+                .last_sync_at
+        };
+        assert_eq!(synced_at(&active.id), Some(1_000));
+        assert_eq!(synced_at(&paused.id), None);
+    }
+
+    #[test]
+    fn office_files_name_the_file_and_its_folder() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let grant = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        journal
+            .upsert_resource(&ResourceRecord {
+                local_resource_id: "lr_essay".into(),
+                grant_id: grant.id.clone(),
+                path_key: "Term 1/Essay.docx".into(),
+                volume: None,
+                file_index: None,
+                content_hash: None,
+                revision: None,
+                available: true,
+                unavailable_reason: None,
+                last_seen_generation: 0,
+            })
+            .unwrap();
+        journal
+            .set_config(&lock_hold_key(&grant.id, "lr_essay"), "1")
+            .unwrap();
+        journal
+            .set_config(&lock_hold_key("grant_other", "lr_essay"), "1")
+            .unwrap();
+        assert_eq!(
+            office_files(&grants, &journal),
+            vec![LocalOfficeFile {
+                folder: "Biology".into(),
+                name: "Essay.docx".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn unpairing_forgets_folders_and_the_browser_session_but_not_the_installation() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let grant = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        journal.set_config(&format!("mount:{}", grant.id), "{}").unwrap();
+        journal.set_config(&mount_paused_key(&grant.id), "true").unwrap();
+        journal.set_config("browser_origin", "https://spectra.school").unwrap();
+        journal.set_config("browser_session_token", "token").unwrap();
+        journal.set_config("installation_id", "install-1").unwrap();
+        set_sync_paused(&journal, true).unwrap();
+        unpair_this_computer(&grants, &journal).unwrap();
+        assert!(grants.device_grants().is_empty());
+        assert_eq!(journal.config(&format!("mount:{}", grant.id)).unwrap(), None);
+        assert_eq!(journal.config(&mount_paused_key(&grant.id)).unwrap(), None);
+        assert_eq!(journal.config("browser_session_token").unwrap(), None);
+        assert!(!sync_paused(&journal));
+        assert_eq!(
+            journal.config("installation_id").unwrap().as_deref(),
+            Some("install-1")
+        );
+    }
+
+    #[test]
+    fn health_is_reported_on_change_and_otherwise_once_a_minute() {
+        let mut reporter = HealthReporter::default();
+        let report = DeviceHealthReport {
+            folders: 2,
+            last_sync_at: Some(1),
+            ..DeviceHealthReport::default()
+        };
+        assert!(reporter.due(&report));
+        reporter.sent(report.clone());
+        let later = DeviceHealthReport {
+            last_sync_at: Some(2),
+            ..report.clone()
+        };
+        assert!(!reporter.due(&later), "a newer sync time alone waits");
+        let problem = DeviceHealthReport {
+            problem: Some("folder-unavailable".into()),
+            ..report.clone()
+        };
+        assert!(reporter.due(&problem));
+        reporter.last = Some((report.clone(), std::time::Instant::now() - HEALTH_REPORT_INTERVAL));
+        assert!(reporter.due(&report));
+    }
+
+    #[test]
+    fn health_names_the_first_unreachable_folder_that_is_not_paused() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let paused = grants
+            .add_native_selection("Art".into(), &temp_folder("Art"))
+            .unwrap();
+        let missing = grants
+            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .unwrap();
+        set_mount_status(&journal, &paused.id, "unavailable", "", 0, 0).unwrap();
+        set_mount_paused(&grants, &journal, &paused.id, true).unwrap();
+        set_mount_status(&journal, &missing.id, "unavailable", "", 0, 0).unwrap();
+        let report = health_report(&grants, &journal, false);
+        assert_eq!(report.folders, 2);
+        assert_eq!(report.problem.as_deref(), Some("folder-unavailable"));
+        assert_eq!(report.problem_folder.as_deref(), Some("Biology"));
+    }
 }
 
 #[cfg(test)]

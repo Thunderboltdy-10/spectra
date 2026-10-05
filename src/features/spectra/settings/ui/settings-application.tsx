@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
-import { Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
@@ -20,7 +20,6 @@ import { downloadDocumentBlob } from "../../components/artifact-studio-file-util
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
-import { BridgeSettings } from "../../bridge/bridge-settings";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
 import {
   PERMISSION_CATEGORIES,
@@ -39,7 +38,6 @@ const SECTIONS = [
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
-  { id: "devices", label: "Files and devices", icon: Cable },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
 
@@ -353,7 +351,6 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
-    devices: <BridgeSettings />,
     privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,
   };
   return (

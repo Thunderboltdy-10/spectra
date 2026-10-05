@@ -26,10 +26,9 @@ import {
   isCloudDiscoveryFailure,
 } from "../bridge/humanize";
 
-const settings = fs.readFileSync(
-  path.join(process.cwd(), "src/features/spectra/bridge/bridge-settings.tsx"),
-  "utf8",
-);
+const settings = ["devices-page.tsx", "device-details.tsx", "devices-model.ts"]
+  .map((file) => fs.readFileSync(path.join(process.cwd(), "src/features/spectra/devices", file), "utf8"))
+  .join("\n");
 const resource = fs.readFileSync(
   path.join(process.cwd(), "src/features/spectra/bridge/resource-surface.tsx"),
   "utf8",
@@ -100,8 +99,6 @@ describe("sync toggles (P1.I4)", () => {
     expect(resource).toContain("FileStorageControls");
     expect(studio).toContain("FileStorageControls");
     expect(studio).toContain("isProtectedOriginalWork");
-    expect(settings).toContain("showProtected");
-    expect(settings).toContain("onProtectedChange");
   });
 
   it("never treats an offline folder as 0 of N", () => {
@@ -196,7 +193,6 @@ describe("sync toggles (P1.I4)", () => {
       }),
     ).toBe("not-running");
     expect(bridgeReachabilityCopy("not-running").label).toBe("Not running");
-    expect(settings).toContain("bridgeReachabilityCopy");
     expect(folderChipLabel({
       state: "disconnected",
       discoveryFailed: false,
@@ -227,7 +223,6 @@ describe("sync toggles (P1.I4)", () => {
       discoveryFailed: false,
       reachability: "connected",
     })).not.toBe("Waiting for Bridge");
-    expect(settings).toContain("folderChipLabel");
   });
 
   it("speaks listing failures as unavailable-truth, never Convex jargon", () => {
@@ -284,7 +279,7 @@ describe("sync toggles (P1.I4)", () => {
     expect(resource).not.toContain("Bridge can stream");
     expect(resource).not.toMatch(/Image preview/i);
     expect(settings).toContain("Update Bridge");
-    expect(settings).toContain("Disconnect this computer");
+    expect(settings).toContain("Remove this device");
     expect(settings).toContain("revokeDevice");
     expect(settings).toContain("forgetSession");
     expect(healthHook).toContain("clearBridgeSession");
@@ -295,8 +290,8 @@ describe("sync toggles (P1.I4)", () => {
 
   it("exits Disconnecting without waiting on a hung Bridge refresh", () => {
     const disconnect = settings.slice(
-      settings.indexOf("async function disconnectThisComputer"),
-      settings.indexOf("async function setStorageChoice"),
+      settings.indexOf("async function confirmAction"),
+      settings.indexOf("const connecting ="),
     );
     expect(disconnect).toContain("forgetSession");
     expect(disconnect).toContain("void local.refresh()");

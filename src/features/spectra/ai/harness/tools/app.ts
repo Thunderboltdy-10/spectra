@@ -24,8 +24,8 @@ type CommandTool<A> = {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  effect: ToolEffect;
-  category?: PermissionCategory;
+  effect: ToolEffect | ((args: A) => ToolEffect);
+  category?: PermissionCategory | ((args: A) => PermissionCategory | undefined);
   label: (args: A) => string;
   doneLabel: (args: A) => string;
   question?: (args: A) => string;
@@ -40,7 +40,7 @@ export function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): H
     description: spec.description,
     parameters: spec.parameters,
     effect: spec.effect,
-    ...(spec.category ? { category: () => spec.category } : {}),
+    ...(spec.category ? { category: (args: A) => (typeof spec.category === "function" ? spec.category(args) : spec.category) } : {}),
     label: spec.label,
     ...(spec.question ? { question: spec.question } : {}),
     parse: spec.parse,
@@ -95,6 +95,70 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
   }
   if (!LOCAL_TIME.test(value)) throw new ToolInputError(`${key} must be YYYY-MM-DDTHH:mm (or YYYY-MM-DD for all day), in the user's time zone.`);
   return value.length === 10 ? `${value}T00:00` : value;
+}
+
+/* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
+
+export const DEVICES_TOOL_ACTIONS = [
+  "status",
+  "pair",
+  "add_folder",
+  "retry_folder",
+  "pause_folder",
+  "remove_folder",
+  "pause_syncing",
+  "show_logs",
+  "update",
+  "remove_device",
+] as const;
+
+type DevicesAction = (typeof DEVICES_TOOL_ACTIONS)[number];
+export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean };
+
+const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
+  status: ["Checking your devices", "Checked your devices"],
+  pair: ["Connecting this computer", "Started connecting this computer"],
+  add_folder: ["Opening the folder picker", "Opened the folder picker"],
+  retry_folder: ["Retrying the folder", "Asked to retry the folder"],
+  pause_folder: ["Changing the folder's syncing", "Asked to change the folder's syncing"],
+  remove_folder: ["Removing the folder", "Asked to remove the folder"],
+  pause_syncing: ["Changing syncing on this computer", "Asked to change syncing"],
+  show_logs: ["Opening Bridge's logs", "Asked to open Bridge's logs"],
+  update: ["Updating Spectra Bridge", "Asked Spectra Bridge to update"],
+  remove_device: ["Removing the device", "Removed the device"],
+};
+
+/** Pairing and removing ask first (settings); reading is free; the rest are ordinary. */
+/** Labels see the raw arguments, so an unknown action still reads plainly. */
+function devicesLabel(action: string): [string, string] {
+  return DEVICES_LABELS[action as DevicesAction] ?? ["Working on your devices", "Worked on your devices"];
+}
+
+export function devicesToolEffect(action: DevicesAction): ToolEffect {
+  if (action === "status") return "read";
+  if (action === "pair" || action === "remove_folder" || action === "remove_device") return "settings";
+  return "write";
+}
+
+function parseDevicesArgs(raw: Record<string, unknown>): DevicesArgs {
+  const action = oneOf(raw, "action", DEVICES_TOOL_ACTIONS);
+  const grantId = optionalString(raw, "grantId", 200);
+  const deviceId = optionalString(raw, "deviceId", 200);
+  if ((action === "retry_folder" || action === "pause_folder" || action === "remove_folder") && !grantId)
+    throw new ToolInputError(`${action} needs grantId; read it with action status.`);
+  if (action === "remove_device" && !deviceId) throw new ToolInputError("remove_device needs deviceId; read it with action status.");
+  const paused = action === "pause_folder" || action === "pause_syncing" ? raw.paused !== false : undefined;
+  return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }) };
+}
+
+function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
+  const action =
+    args.action === "pause_folder"
+      ? args.paused === false ? "resume_folder" : "pause_folder"
+      : args.action === "pause_syncing"
+        ? args.paused === false ? "resume_syncing" : "pause_syncing"
+        : args.action;
+  return { action, ...(args.grantId ? { grantId: args.grantId } : {}), ...(args.deviceId ? { deviceId: args.deviceId } : {}) };
 }
 
 export function appTools(session: HarnessSession): AnyHarnessTool[] {
@@ -368,11 +432,11 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, a workspace or an artifact (targetId). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, a workspace or an artifact (targetId). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
       parameters: {
         type: "object",
         properties: {
-          destination: { type: "string", enum: ["library", "calendar", "settings", "workspace", "artifact"] },
+          destination: { type: "string", enum: ["library", "calendar", "settings", "devices", "workspace", "artifact"] },
           targetId: { type: "string" },
         },
         required: ["destination"],
@@ -384,7 +448,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { destination: string; targetId?: string }) =>
         args.destination === "artifact" ? `Opened ${titled(session, args.targetId, "your work")}` : `Opened ${args.destination}`,
       parse: (raw) => {
-        const destination = oneOf(raw, "destination", ["library", "calendar", "settings", "workspace", "artifact"] as const);
+        const destination = oneOf(raw, "destination", ["library", "calendar", "settings", "devices", "workspace", "artifact"] as const);
         const targetId = optionalString(raw, "targetId", 200);
         if ((destination === "artifact" || destination === "workspace") && !targetId) throw new ToolInputError("targetId is required.");
         return { destination, ...(targetId ? { targetId } : {}) };
@@ -398,26 +462,39 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
     }),
     commandTool(session, {
-      name: "setup_bridge",
+      name: "devices",
       description:
-        "Open the Bridge settings step that connects Spectra to files on the user's computer: pair, select-location, retry-connection or retry-folder {grantId}. The user finishes the step themselves.",
+        "The user's computers connected through Spectra Bridge. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["pair", "select-location", "retry-connection", "retry-folder"] },
+          action: { type: "string", enum: [...DEVICES_TOOL_ACTIONS] },
           grantId: { type: "string" },
+          deviceId: { type: "string" },
+          paused: { type: "boolean" },
         },
         required: ["action"],
         additionalProperties: false,
       },
-      effect: "read",
-      label: () => "Opening Bridge setup",
-      doneLabel: () => "Opened Bridge setup",
-      parse: (raw) => ({
-        action: oneOf(raw, "action", ["pair", "select-location", "retry-connection", "retry-folder"] as const),
-        ...(optionalString(raw, "grantId", 200) ? { grantId: optionalString(raw, "grantId", 200) } : {}),
-      }),
-      command: (args) => ({ command: "setup_bridge", args }),
+      effect: (args: DevicesArgs) => devicesToolEffect(args.action),
+      category: (args: DevicesArgs) => (devicesToolEffect(args.action) === "settings" ? "settings" : undefined),
+      label: (args: DevicesArgs) => devicesLabel(args.action)[0],
+      doneLabel: (args: DevicesArgs) => devicesLabel(args.action)[1],
+      question: (args: DevicesArgs) =>
+        args.action === "pair"
+          ? "Connect this computer to Spectra? You'll confirm a code on the computer."
+          : args.action === "remove_folder"
+            ? "Stop using this folder in Spectra? Its files stay on the computer."
+            : "Remove this device? It stops syncing; its files stay on the computer.",
+      parse: (raw) => parseDevicesArgs(raw),
+      command: (args) =>
+        args.action === "status"
+          ? { command: "read_devices", args: {} }
+          : args.action === "pair"
+            ? { command: "pair_device", args: {} }
+            : args.action === "remove_device"
+              ? { command: "remove_device", args: { deviceId: args.deviceId } }
+              : { command: "control_device", args: controlDeviceArgs(args) },
     }),
   ];
   return tools as unknown as AnyHarnessTool[];

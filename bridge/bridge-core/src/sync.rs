@@ -4,7 +4,7 @@ use crate::protocol::PairingOffer;
 use crate::retry::retry_delay_ms;
 use crate::watcher::office_lock_exists_with;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -874,6 +874,50 @@ pub async fn resume_pairing(
     .await
 }
 
+/// What this computer tells Spectra about itself, so other devices can show
+/// it: whether syncing is paused, how many folders it serves, the problem it
+/// has (a stable code, worded by Spectra) and when it last finished a pass.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceHealthReport {
+    pub paused: bool,
+    pub folders: usize,
+    pub problem: Option<String>,
+    /// The folder the problem is about, as the person names it.
+    pub problem_folder: Option<String>,
+    pub last_sync_at: Option<u64>,
+}
+
+pub async fn report_health(
+    deployment_url: &str,
+    credential: &str,
+    report: &DeviceHealthReport,
+) -> anyhow::Result<()> {
+    let _: serde_json::Value =
+        mutation(deployment_url, "bridge:reportHealth", health_args(credential, report)).await?;
+    Ok(())
+}
+
+/// Convex optional arguments are absent, never null.
+fn health_args(credential: &str, report: &DeviceHealthReport) -> serde_json::Value {
+    let mut args = serde_json::json!({
+        "credential": credential,
+        "paused": report.paused,
+        "folders": report.folders,
+        "appVersion": env!("CARGO_PKG_VERSION"),
+    });
+    if let Some(problem) = &report.problem {
+        args["problem"] = problem.clone().into();
+    }
+    if let Some(folder) = &report.problem_folder {
+        args["problemFolder"] = folder.clone().into();
+    }
+    if let Some(last_sync_at) = report.last_sync_at {
+        args["lastSyncAt"] = last_sync_at.into();
+    }
+    args
+}
+
 /// A lock/unlock report has no content hash. Comparing it to the stored hash
 /// would mark every Word-open event as superseded and Convex would never hear
 /// that the file is held.
@@ -907,8 +951,29 @@ pub async fn drain_cloud_queue(
     deployment_url: &str,
     credential: &str,
 ) -> anyhow::Result<Vec<DeliveredChange>> {
+    drain_cloud_queue_holding(journal, deployment_url, credential, &HashSet::new()).await
+}
+
+/// How long a change from a paused folder waits before it is looked at again.
+pub const PAUSED_FOLDER_RECHECK: Duration = Duration::from_secs(15);
+
+/// Drains outbound changes, keeping those of paused folders (by local grant)
+/// in the journal untouched until the folder resumes.
+pub async fn drain_cloud_queue_holding(
+    journal: &Journal,
+    deployment_url: &str,
+    credential: &str,
+    paused_grants: &HashSet<String>,
+) -> anyhow::Result<Vec<DeliveredChange>> {
     let mut grouped = BTreeMap::<String, Vec<(QueueItem, QueuedChangeEnvelope)>>::new();
     for item in journal.due_queue(100)? {
+        if !paused_grants.is_empty()
+            && serde_json::from_str::<QueuedChangeEnvelope>(&item.payload)
+                .is_ok_and(|envelope| paused_grants.contains(&envelope.grant_id))
+        {
+            journal.defer_queue(item.id, PAUSED_FOLDER_RECHECK)?;
+            continue;
+        }
         if item.direction != "outbound-change" {
             journal.fail_queue(
                 &item,
@@ -1093,6 +1158,78 @@ mod tests {
         assert_eq!(
             journal.by_key("superseded").unwrap().unwrap().state,
             crate::journal::OpState::Failed
+        );
+    }
+
+    #[test]
+    fn health_report_omits_what_it_does_not_know() {
+        let args = health_args(
+            "credential",
+            &DeviceHealthReport {
+                paused: true,
+                folders: 2,
+                problem: None,
+                problem_folder: None,
+                last_sync_at: None,
+            },
+        );
+        assert_eq!(args["paused"], true);
+        assert_eq!(args["folders"], 2);
+        assert!(args.get("problem").is_none());
+        assert!(args.get("lastSyncAt").is_none());
+        let args = health_args(
+            "credential",
+            &DeviceHealthReport {
+                problem: Some("folder-unavailable".into()),
+                problem_folder: Some("Documents › Biology".into()),
+                last_sync_at: Some(5),
+                ..DeviceHealthReport::default()
+            },
+        );
+        assert_eq!(args["problem"], "folder-unavailable");
+        assert_eq!(args["problemFolder"], "Documents › Biology");
+        assert_eq!(args["lastSyncAt"], 5);
+    }
+
+    #[tokio::test]
+    async fn a_paused_folder_keeps_its_changes_queued_without_counting_attempts() {
+        let journal = Journal::in_memory().unwrap();
+        let operation = journal
+            .begin_intent("held", "cloud.report-change", Some("lr_held"), None, None)
+            .unwrap();
+        let envelope = QueuedChangeEnvelope {
+            grant_id: "grant_paused".into(),
+            mount_id: "mount_paused".into(),
+            change: ReportedChange {
+                journal_id: operation.op_id.clone(),
+                resource_id: "lr_held".into(),
+                op: "unavailable".into(),
+                relative_path: Some("essay.docx".into()),
+                previous_relative_path: None,
+                hash: None,
+                revision_before: None,
+                size: None,
+                native_format: None,
+            },
+        };
+        journal
+            .enqueue(
+                &operation.op_id,
+                "outbound-change",
+                &serde_json::to_string(&envelope).unwrap(),
+            )
+            .unwrap();
+        let paused = HashSet::from(["grant_paused".to_owned()]);
+        let delivered =
+            drain_cloud_queue_holding(&journal, "http://127.0.0.1:1", "unused", &paused)
+                .await
+                .unwrap();
+        assert!(delivered.is_empty());
+        assert!(journal.due_queue(10).unwrap().is_empty(), "held, not due");
+        assert_ne!(
+            journal.by_key("held").unwrap().unwrap().state,
+            crate::journal::OpState::Failed,
+            "a held change is not superseded or failed"
         );
     }
 

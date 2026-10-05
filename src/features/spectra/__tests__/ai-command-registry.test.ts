@@ -18,7 +18,7 @@ describe("N8 app command registry", () => {
         "app.managebac.select-classes",
         "app.managebac.mapping",
         "app.reference.insert",
-        "app.bridge.pair",
+        "app.devices.pair",
         "app.security.credentials",
       ]),
     );
@@ -28,8 +28,9 @@ describe("N8 app command registry", () => {
   });
 
   it("records prohibited security actions instead of omitting them", () => {
-    expect(appCommandById("app.bridge.pair")).toMatchObject({
-      aiAuthority: "prohibited",
+    expect(appCommandById("app.devices.pair")).toMatchObject({
+      aiAuthority: "allowed",
+      risk: "confirm",
     });
     expect(
       appCommandById("app.security.credentials")?.availability({} as never),

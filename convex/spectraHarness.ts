@@ -233,7 +233,9 @@ export const joinableRun = query({
 function operationCategory(operation: Doc<"spectraOperations">): PermissionCategory | null {
   if (operation.type !== "app.command") return "permanent_delete";
   switch (String(record(operation.input).command)) {
-    case "change_spectra_settings": return "settings";
+    case "change_spectra_settings":
+    case "pair_device":
+    case "remove_device": return "settings";
     case "change_sharing": return "sharing";
     case "trigger_managebac_sync":
     case "select_managebac_classes": return "managebac";

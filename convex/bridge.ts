@@ -144,6 +144,43 @@ export const resumePairing = mutation({
   },
 });
 
+/**
+ * A paired Bridge reports its health once a minute or when it changes. This
+ * keeps "last seen" honest and lets the Devices page on another device say
+ * whether that computer is paused or has a problem.
+ */
+export const reportHealth = mutation({
+  args: {
+    credential: v.string(),
+    paused: v.boolean(),
+    folders: v.number(),
+    problem: v.optional(v.string()),
+    problemFolder: v.optional(v.string()),
+    lastSyncAt: v.optional(v.number()),
+    appVersion: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
+    const device = await ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique();
+    if (!device || device.state !== "active") throw new Error("BRIDGE_CREDENTIAL_INVALID");
+    const now = Date.now();
+    const health = {
+      paused: args.paused,
+      folders: z.number().int().min(0).max(10_000).parse(args.folders),
+      problem: z.string().regex(/^[a-z][a-z-]{0,59}$/).optional().parse(args.problem),
+      problemFolder: z.string().trim().min(1).max(200).optional().parse(args.problemFolder),
+      lastSyncAt: z.number().int().min(0).max(now + 60_000).optional().parse(args.lastSyncAt),
+      reportedAt: now,
+    };
+    await ctx.db.patch(device._id, {
+      lastSeenAt: now,
+      appVersion: z.string().trim().min(1).max(40).parse(args.appVersion),
+      health,
+    });
+    return null;
+  },
+});
+
 export const devices = query({ args: {}, handler: async (ctx) => {
   const actor = await getAuthenticatedActor(ctx);
   if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");

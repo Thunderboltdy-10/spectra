@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SPECTRA_PREFERENCES } from "../settings/schema";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
-import {
-  __resetBridgeIntents,
-  pendingBridgeIntent,
-  takePendingBridgeIntent,
-} from "../commands/bridge-intents";
+import { devicePairing } from "../devices/pairing";
+
+const { runLocalDeviceAction } = vi.hoisted(() => ({
+  runLocalDeviceAction: vi.fn(async (request: { action: string }) => ({ status: "completed" as const, message: `ran ${request.action}` })),
+}));
+vi.mock("../devices/device-actions", () => ({ runLocalDeviceAction }));
 import { spectraBus } from "../events";
 
 describe("application command dispatcher", () => {
@@ -241,54 +242,33 @@ describe("application command dispatcher", () => {
     });
   });
 
-  it("retains an off-page Bridge retry and lets the mounted surface consume it once", async () => {
-    __resetBridgeIntents();
-    const navigate = vi.fn().mockResolvedValue({
-      actionId: "settings-1",
-      targetId: "devices",
-      view: "settings" as const,
-      routeGeneration: 1,
-      status: "ready" as const,
-    });
+  it("opens Devices, asks the page to connect this computer, and runs local actions", async () => {
+    const openRoute = vi.fn();
     const dispatch = createApplicationCommandDispatcher({
       openArtifact: vi.fn(),
-      navigate,
+      navigate: vi.fn(),
+      openRoute,
       replacePreferences: vi.fn(),
       preferences: DEFAULT_SPECTRA_PREFERENCES,
     });
-    try {
-      await expect(dispatch("app.bridge.setup", {
-        action: "retry-folder",
-        grantId: "grant-7",
-        actionId: "bridge-action-7",
-      })).resolves.toMatchObject({
-        status: "pending",
-        data: { actionId: "bridge-action-7", handoff: true },
-      });
-      expect(navigate).toHaveBeenCalledWith("settings", "devices");
-      expect(pendingBridgeIntent()).toMatchObject({
-        actionId: "bridge-action-7",
-        kind: "setup",
-        input: { action: "retry-folder", grantId: "grant-7" },
-      });
+    devicePairing().takeWanted();
 
-      const intent = takePendingBridgeIntent();
-      expect(intent).toMatchObject({ actionId: "bridge-action-7" });
-      expect(takePendingBridgeIntent()).toBeNull();
-      if (!intent || intent.kind !== "setup") throw new Error("Expected a setup handoff.");
-      const calls: string[] = [];
-      const remove = spectraBus.handle("bridge.setup", (input) => {
-        calls.push(`${input.action}:${input.grantId}`);
-        return { status: "completed" as const, message: "Folder retry completed." };
-      });
-      try {
-        await spectraBus.commandAsync("bridge.setup", intent!.input);
-      } finally {
-        remove();
-      }
-      expect(calls).toEqual(["retry-folder:grant-7"]);
-    } finally {
-      __resetBridgeIntents();
-    }
+    await expect(dispatch("app.devices.open", {})).resolves.toMatchObject({ status: "completed" });
+    await dispatch("app.navigate", { destination: "devices" });
+    expect(openRoute).toHaveBeenCalledWith("/devices");
+    expect(openRoute).toHaveBeenCalledTimes(2);
+
+    await expect(dispatch("app.devices.pair", {})).resolves.toMatchObject({ status: "pending" });
+    expect(devicePairing().takeWanted()).toBe(true);
+    expect(devicePairing().takeWanted()).toBe(false);
+
+    await expect(dispatch("app.devices.add-folder", {})).resolves.toMatchObject({ status: "completed", message: "ran add_folder" });
+    await dispatch("app.devices.pause", { paused: true });
+    await dispatch("app.devices.pause", { paused: false });
+    expect(runLocalDeviceAction.mock.calls.map(([request]) => request.action)).toEqual([
+      "add_folder",
+      "pause_syncing",
+      "resume_syncing",
+    ]);
   });
 });

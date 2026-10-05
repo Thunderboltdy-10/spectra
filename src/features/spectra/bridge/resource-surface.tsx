@@ -13,7 +13,7 @@ import { humanizePublicFailure } from "./humanize";
 import { locationLabel } from "./status";
 import { useSyncPresentation } from "./use-sync-presentation";
 import { useBridgeHealth } from "./use-bridge";
-import { BRIDGE_SETTINGS_HREF } from "./client";
+import { DEVICES_HREF } from "./client";
 import { ReconnectAction } from "./storage-toggle-group";
 import { FileStorageControls } from "./file-storage-controls";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
@@ -208,7 +208,7 @@ export function ResourceSurface({
             className="mt-1 text-micro font-medium text-[var(--text-secondary)]"
             onClick={
               presentation.action?.kind === "reconnect"
-                ? () => router.push(BRIDGE_SETTINGS_HREF)
+                ? () => router.push(DEVICES_HREF)
                 : undefined
             }
           >
@@ -357,7 +357,7 @@ export function ResourceSurface({
               </h2>
               {presentation.action?.kind === "reconnect" ? (
                 <div className="mt-2">
-                  <ReconnectAction href={BRIDGE_SETTINGS_HREF} />
+                  <ReconnectAction href={DEVICES_HREF} />
                 </div>
               ) : null}
               <ul className="mt-3 space-y-2 text-micro text-[var(--text-secondary)]">

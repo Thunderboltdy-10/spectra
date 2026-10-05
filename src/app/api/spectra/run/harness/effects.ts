@@ -29,6 +29,7 @@ import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-
 import { normalizeAiPreferencePatch } from "@/features/spectra/settings/schema/preferences";
 import { smartCompletionValue, type UiObservationFence } from "@/features/spectra/actions/protocol/semantic-action";
 import { waitForSettingsAction } from "./ui-observation";
+import { describeDevicesForAi, type CloudOverview } from "@/features/spectra/devices/devices-model";
 
 export function rows(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
@@ -194,38 +195,46 @@ export async function executeApplicationCommand(
     await onUiEvent?.({
       key: "settings_changed",
       payload: {
-        targetId: changedSection === "integrations" ? "devices" : changedSection ?? "ai",
+        targetId: changedSection && changedSection !== "integrations" ? changedSection : "ai",
         note: "Updated Spectra settings",
       },
     });
     return settings;
   }
-  if (command === "setup_bridge") {
-    const action = parsed.action;
-    const grantId = typeof parsed.grantId === "string" ? parsed.grantId.trim() : "";
-    if (action === "retry-folder" && !grantId)
-      throw new Error("BRIDGE_GRANT_REQUIRED");
+  if (command === "read_devices") {
+    const overview = await query<Record<string, never>, CloudOverview | null>("bridge:overview", {});
+    return { devices: describeDevicesForAi(overview, Date.now()) };
+  }
+  if (command === "control_device" || command === "pair_device") {
+    // These run on the user's computer, through the Spectra page open there
+    // and its local Bridge; the page reports the result on Devices.
+    const action = command === "pair_device" ? "pair" : String(parsed.action);
+    const grantId = typeof parsed.grantId === "string" ? parsed.grantId : undefined;
+    const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId : undefined;
     onUiEvent?.({
-      key: "bridge_setup",
+      key: "devices_action",
       payload: {
         action,
-        actionId: executionId,
+        actionId: `${executionId}:${operationId ?? action}`,
         ...(grantId ? { grantId } : {}),
-        targetId: "devices",
-        note: "Open Bridge settings to finish this setup step",
+        ...(deviceId ? { deviceId } : {}),
+        note: action === "pair" ? "Connecting this computer" : "Working on your computer",
       },
     });
     return {
       ok: true,
-      status: "needs-human",
-      message: "Bridge settings are ready. The user must complete the setup step and any local consent.",
-      command: {
-        id: "app.bridge.setup",
-        actionId: executionId,
-        action,
-        ...(grantId ? { grantId } : {}),
-      },
+      status: "requested",
+      action,
+      message:
+        action === "pair"
+          ? "Spectra is connecting the computer the user has it open on. The user confirms the code on the computer; check with devices status afterwards."
+          : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
     };
+  }
+  if (command === "remove_device") {
+    const result = await applyMutation("bridge:revokeDevice", { deviceId: String(parsed.deviceId) });
+    onUiEvent?.({ key: "devices_changed", payload: { note: "Removed a device" } });
+    return result;
   }
   if (command === "organize_library") {
     const action = typeof parsed.action === "string" ? parsed.action : "";

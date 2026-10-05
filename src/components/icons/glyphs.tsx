@@ -451,6 +451,13 @@ const trash: Glyph = () => (
   </>
 );
 
+const pause: Glyph = () => (
+  <>
+    <Sheet d={box(5.25, 4.25, 3.25, 11.5, 1)} />
+    <Sheet d={box(11.5, 4.25, 3.25, 11.5, 1)} />
+  </>
+);
+
 const link: Glyph = () => (
   <>
     <path d="M8.6 11.4a3 3 0 0 0 4.25 0l2.6-2.6a3 3 0 0 0-4.25-4.25l-.9.9" />
@@ -698,6 +705,7 @@ export const GLYPHS = {
   chevronDown,
   chevronRight,
   trash,
+  pause,
   link,
   bell,
   people,
@@ -731,7 +739,7 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
   { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done", "working", "clock", "shield", "help"] },
   {
     family: "Actions",
-    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "link", "bell", "people", "image", "star", "sidebar", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
+    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
 ];

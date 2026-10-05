@@ -71,7 +71,7 @@ import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
 import { mountsForConnectedDevice } from "../bridge/mount-selection";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
-import { BRIDGE_SETTINGS_HREF } from "../bridge/client";
+import { DEVICES_HREF } from "../bridge/client";
 import {
   Dialog,
   DialogContent,
@@ -5838,7 +5838,7 @@ function ArtifactStudioEditor({
             ) : null}
             {presentation.action?.kind === "reconnect" ? (
               <a
-                href={BRIDGE_SETTINGS_HREF}
+                href={DEVICES_HREF}
                 className="text-micro font-semibold text-[var(--text-primary)]"
               >
                 {presentation.action.label}
@@ -6187,7 +6187,7 @@ function ArtifactStudioEditor({
           </span>
           {currentDeviceMounts.length === 0 ? (
             <NextLink
-              href={BRIDGE_SETTINGS_HREF}
+              href={DEVICES_HREF}
               className="shrink-0 font-semibold text-[var(--text-primary)] underline underline-offset-2"
             >
               Open Spectra Settings
@@ -6576,7 +6576,7 @@ function ArtifactStudioEditor({
             <div role="status" className="space-y-2 text-micro text-[var(--text-secondary)]">
               <p>No active folder is available. Add one in Spectra Settings.</p>
               <NextLink
-                href={BRIDGE_SETTINGS_HREF}
+                href={DEVICES_HREF}
                 className="font-medium text-[var(--text-primary)] underline underline-offset-2"
               >
                 Open Spectra Settings

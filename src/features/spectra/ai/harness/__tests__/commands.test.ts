@@ -50,7 +50,7 @@ describe("find_commands", () => {
     expect(top("book a dentist appointment")).toBe("calendar.add_event");
     expect(top("invite my friend to edit")).toBe("sharing.change");
     expect(top("refresh my school deadlines")).toBe("managebac.sync");
-    expect(top("connect my computer files")).toBe("bridge.setup");
+    expect(top("connect my computer files")).toBe("devices.pair");
     expect(rankCommands("zzzz qqqq")).toEqual([]);
   });
 
@@ -101,7 +101,7 @@ describe("run_command", () => {
           call("r1", "run_command", { id: "permissions.ai", args: { permissionFullControl: true } }),
           call("r2", "run_command", { id: "settings.change", args: { patch: { ai: { permissionAllow: ["sharing"] } } } }),
           call("r3", "run_command", { id: "settings.change", args: { patch: { ai: { permissionDeny: [] } } } }),
-          call("r4", "run_command", { id: "bridge.trust", args: {} }),
+          call("r4", "run_command", { id: "devices.native_writes", args: {} }),
           call("r5", "run_command", { id: "nope.missing", args: {} }),
         ],
       },
@@ -111,7 +111,7 @@ describe("run_command", () => {
     expect(results[0]).toMatch(/Only the user can do "Change Spectra AI permissions"/);
     expect(results[1]).toMatch(/cannot change its own permissions/);
     expect(results[2]).toMatch(/cannot change its own permissions/);
-    expect(results[3]).toMatch(/Only the user can do "Change Bridge trust"/);
+    expect(results[3]).toMatch(/Only the user can do "Change native writes"/);
     expect(results[4]).toMatch(/There is no command "nope.missing"/);
     expect(backend.commands).toEqual([]);
   });
@@ -166,6 +166,44 @@ describe("run_command", () => {
       ]);
       expect(outcome.status, entry.id).toBe("completed");
       expect(run.backend.commands.map((sent) => sent.command), entry.id).toEqual([reach.appCommand]);
+    }
+  });
+});
+
+describe("devices tool", () => {
+  it("reads and controls a computer straight away, through the shared commands", async () => {
+    const { backend, run } = setup();
+    const outcome = await run([
+      {
+        text: "",
+        toolCalls: [
+          call("d1", "devices", { action: "status" }),
+          call("d2", "devices", { action: "retry_folder", grantId: "grant_a" }),
+          call("d3", "devices", { action: "pause_syncing", paused: false }),
+        ],
+      },
+      { text: "Done.", toolCalls: [] },
+    ]);
+    expect(outcome.status).toBe("completed");
+    expect(backend.commands.map((entry) => [entry.command, entry.args])).toEqual([
+      ["read_devices", {}],
+      ["control_device", { action: "retry_folder", grantId: "grant_a" }],
+      ["control_device", { action: "resume_syncing" }],
+    ]);
+  });
+
+  it("asks first, in the settings category, to connect or remove a computer", async () => {
+    for (const [args, question] of [
+      [{ action: "pair" }, /Connect this computer to Spectra?/],
+      [{ action: "remove_device", deviceId: "device-desk" }, /Remove this device?/],
+    ] as const) {
+      const { backend, run } = setup();
+      const outcome = await run([{ text: "", toolCalls: [call("d1", "devices", args)] }]);
+      expect(outcome.status).toBe("paused");
+      if (outcome.status !== "paused") return;
+      expect(outcome.pending).toMatchObject({ kind: "approval", toolName: "devices", category: "settings" });
+      expect(outcome.pending.question).toMatch(question);
+      expect(backend.commands).toEqual([]);
     }
   });
 });

@@ -1,6 +1,9 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
 import { spectraBus } from "../events";
 import { handleSettingsObservationEvent } from "./settings-observation-client";
+import { DEVICES_HREF } from "../bridge/client";
+import { runAiDeviceAction } from "../devices/device-actions";
+import { devicePairing } from "../devices/pairing";
 
 export type SpectraAiUiEvent = {
   key: string;
@@ -98,15 +101,37 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
-  if (event.key === "bridge_setup") {
+  if (event.key === "devices_action") {
+    const payload = event.payload ?? {};
+    const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+    const action = text(payload.action);
+    if (!action) return;
+    const actorId = event.runId;
+    const note = text(payload.note) ?? "Working on your devices";
+    void runAiDeviceAction(
+      { action, actionId: text(payload.actionId), grantId: text(payload.grantId), deviceId: text(payload.deviceId) },
+      (connect) => {
+        if (!connect) {
+          noteAiSurface({ ...(actorId ? { actorId } : {}), route: "devices", note });
+          return;
+        }
+        // The user approved connecting this computer: show Devices, which
+        // starts pairing, whether or not they follow Spectra.
+        devicePairing().want();
+        if (window.location.pathname.startsWith(DEVICES_HREF)) return;
+        const shown = spectraBus.command("navigation.show", { route: "devices", intent: "explicit", target: "connect" });
+        // Pages without the workbench router load Devices; ?connect=1 carries the request.
+        if (!shown) window.location.assign(new URL(`${DEVICES_HREF}?connect=1`, window.location.origin));
+      },
+    );
+    return;
+  }
+  if (event.key === "devices_changed") {
+    spectraBus.emit("devices.changed", {});
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
-      route: "settings",
-      target: "devices",
-      note:
-        typeof event.payload?.note === "string"
-          ? event.payload.note
-          : "Open Bridge settings to finish setup",
+      route: "devices",
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Updated your devices",
     });
     return;
   }
@@ -186,6 +211,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     destination !== "library" &&
     destination !== "calendar" &&
     destination !== "settings" &&
+    destination !== "devices" &&
     destination !== "workspace"
   )
     return;

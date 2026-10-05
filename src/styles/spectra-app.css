@@ -16336,3 +16336,342 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
     transform: translateY(35%);
   }
 }
+
+/* Drag and drop (MOTION.md): while an item is carried, where it came from is a
+   quiet hole; it fills back in when the item lands or flies back. */
+[data-life-picked]:not([data-dragging]) {
+  opacity: 0.42;
+  filter: saturate(0.6);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    filter var(--motion-fast) var(--ease-standard);
+}
+
+/* Afterwards (MOTION.md): what Spectra changed keeps a faint tint until it has
+   been seen, then fades. An outline, so it never replaces a node's own
+   background or shadow. */
+.spectra-artifact-main [data-ai-unseen] {
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+  transition: outline-color var(--motion-slow) var(--ease-standard);
+}
+.spectra-artifact-main [data-ai-unseen="true"] {
+  outline-color: color-mix(in oklab, #8b6cf6 30%, transparent);
+}
+
+/* Spectra writing prose (MOTION.md, "Spectra writing"): a soft spectral band
+   sweeps the block being written, behind its text. Transform only; under
+   reduced motion the band settles out of view and the quiet tint remains.
+   List items keep the plain mark, since clipping would cut their markers. */
+.spectra-artifact-studio:is([data-ai-state="creating"], [data-ai-state="updating"])
+  .spectra-artifact-main
+  .ProseMirror
+  > [data-ai-region="true"]:not(ul, ol) {
+  overflow: clip;
+}
+.spectra-artifact-studio:is([data-ai-state="creating"], [data-ai-state="updating"])
+  .spectra-artifact-main
+  .ProseMirror
+  > [data-ai-region="true"]:not(ul, ol)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in oklab, #8b6cf6 9%, transparent) 40%,
+    color-mix(in oklab, #4f9fe6 12%, transparent) 50%,
+    color-mix(in oklab, #40c48e 9%, transparent) 60%,
+    transparent 72%
+  );
+  transform: translateX(-100%);
+  animation: spectra-ai-band 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes spectra-ai-band {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Spectra's words resolve from a slight blur, a chunk at a time (editor/ai-text-resolve.ts). */
+.spectra-ai-resolve {
+  animation: spectra-ai-resolve 440ms var(--ease-standard) both;
+}
+@keyframes spectra-ai-resolve {
+  from {
+    opacity: 0.15;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* Spectra's presence in a work (MOTION.md): a small prism caret with a short
+   trail of light. Its caret is a spectrum rule capped by a prism; its ink and
+   its trail are the spectrum, not a person's colour. */
+.spectra-presence-actor[data-ai="true"] .spectra-presence-caret {
+  background: linear-gradient(180deg, #8b6cf6, #4f9fe6, #40c48e);
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-caret::before {
+  left: -3px;
+  top: -7px;
+  width: 8px;
+  height: 7px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: conic-gradient(from 180deg, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-ink::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, #8b6cf6 12%, transparent) 30%,
+    color-mix(in oklab, #4f9fe6 16%, transparent) 55%,
+    color-mix(in oklab, #40c48e 10%, transparent) 75%,
+    transparent 92%
+  );
+}
+.spectra-presence-actor[data-ai="true"] .spectra-presence-trail {
+  background: conic-gradient(#8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
+  box-shadow: 0 0 6px color-mix(in oklab, #8b6cf6 40%, transparent);
+}
+
+/* A planner task (task-studio.tsx): one quiet card. A title, when it is due,
+   notes and done; steps and More only once they are wanted. */
+.spectra-task-studio {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.spectra-task-card {
+  display: flex;
+  width: min(640px, 100%);
+  flex-direction: column;
+  gap: 14px;
+  margin: 28px auto 0;
+  padding: 22px 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-elevated);
+}
+.spectra-task-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.spectra-task-done {
+  display: grid;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 4px;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--bg-elevated);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.spectra-task-done:hover:not(:disabled) {
+  border-color: var(--success);
+}
+.spectra-task-done:active:not(:disabled) {
+  transform: scale(0.9);
+}
+.spectra-task-card[data-done] .spectra-task-done {
+  border-color: var(--success);
+  background: var(--success);
+}
+.spectra-task-title {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 1.4;
+  field-sizing: content;
+  outline: none;
+}
+.spectra-task-card[data-done] .spectra-task-title {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
+}
+.spectra-task-when,
+.spectra-task-extras,
+.spectra-task-more,
+.spectra-task-reminders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.spectra-task-when {
+  padding-left: 34px;
+}
+.spectra-task-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.spectra-task-field > span {
+  color: var(--text-tertiary);
+}
+.spectra-task-field input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+.spectra-task-field input[type="number"] {
+  width: 96px;
+}
+.spectra-task-distance {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.spectra-task-distance.is-late {
+  color: var(--danger);
+}
+.spectra-task-icon-button {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+.spectra-task-icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.spectra-task-notes {
+  min-height: 64px;
+  margin-left: 34px;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  field-sizing: content;
+  outline: none;
+}
+.spectra-task-school,
+.spectra-task-school-notes {
+  margin-left: 34px;
+}
+.spectra-task-school {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.spectra-task-school > p {
+  flex: 1 1 260px;
+}
+.spectra-task-school-notes {
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.spectra-task-steps {
+  margin-left: 34px;
+}
+.spectra-task-steps ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.spectra-task-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.spectra-task-step input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--success);
+}
+.spectra-task-step input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+}
+.spectra-task-step[data-done] input[type="text"] {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.spectra-task-step .spectra-task-icon-button {
+  opacity: 0;
+}
+.spectra-task-step:hover .spectra-task-icon-button,
+.spectra-task-step:focus-within .spectra-task-icon-button {
+  opacity: 1;
+}
+.spectra-task-extras {
+  margin-left: 30px;
+}
+.spectra-task-quiet {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.spectra-task-quiet:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.spectra-task-more {
+  align-items: flex-start;
+  margin-left: 34px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.spectra-task-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.spectra-task-chip {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+}

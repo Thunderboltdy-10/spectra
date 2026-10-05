@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2, LayoutGrid, Rows3, ArrowRight } from "@/components/icons/glyph-icons";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";

@@ -298,6 +298,13 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     check: (context) => [...completed(context), ...oneCreated(context, "planner_task", { atLeast: 3 })],
   },
   {
+    name: "planner task, one thing",
+    group: "create",
+    prompt: "Remind me to return my library book by Thursday.",
+    // A task is one thing by default: no invented checklist (EDITORS.md, "Planner task").
+    check: (context) => [...completed(context), ...oneCreated(context, "planner_task", 0)],
+  },
+  {
     name: "timetable",
     group: "create",
     prompt: "Make me a revision timetable for next week: one hour of maths, biology and French each weekday after school.",

@@ -11,7 +11,7 @@ import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { plainText } from "../../../../../shared/semantic-chunks";
 import { useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";

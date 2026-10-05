@@ -11,7 +11,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useNow } from "@/hooks/use-now";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { LAYER_CLASS } from "@/components/ui/layers";

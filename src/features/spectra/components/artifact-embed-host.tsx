@@ -3,7 +3,7 @@
 import { describeFailure } from "@/components/ui/truthful-state";
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import type { SpectraArtifactEmbed } from "../data/api";

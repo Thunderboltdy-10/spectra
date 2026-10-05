@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
   getAdministration,

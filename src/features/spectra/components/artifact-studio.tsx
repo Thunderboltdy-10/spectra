@@ -5,7 +5,7 @@ import { useWorkAvailability } from "./use-work-availability";
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -70,6 +70,7 @@ import { useNow } from "@/hooks/use-now";
 import { ArtifactHeaderActions, type HeaderCommand } from "./artifact-header-actions";
 import { ArtifactStatusControl } from "./artifact-status-control";
 import { useEditorFieldMoments } from "./editor-field-moments";
+import { useLifeLanding, useLifeReturn } from "../life/use-life";
 import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
@@ -261,6 +262,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 import { requestSpectra } from "../data/request";
+import { isSingleTask } from "../plan/model";
 function StudioTypePlaceholder() {
   return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
@@ -279,6 +281,10 @@ const QuizStudio = dynamic(
 );
 const PlanStudio = dynamic(
   () => import("./plan-studio").then((module) => withStudioViewportReady(module.PlanStudio)),
+  { loading: StudioTypePlaceholder },
+);
+const TaskStudio = dynamic(
+  () => import("./task-studio").then((module) => withStudioViewportReady(module.TaskStudio)),
   { loading: StudioTypePlaceholder },
 );
 const SheetsStudio = dynamic(
@@ -4628,6 +4634,10 @@ function ArtifactStudioEditor({
   const studioSurfaceRef = useRef<HTMLDivElement>(null);
   // Things in the work form, unform and leave wakes in the field.
   useEditorFieldMoments(studioSurfaceRef);
+  // Opened from a card or a row, the work grows out of it (MOTION.md, "Shared elements"), wherever it opens.
+  useLifeLanding(studioSurfaceRef, artifact._id);
+  // Closed, it folds back into its card.
+  useLifeReturn(studioSurfaceRef, `artifact:${artifact._id}`, ".spectra-artifact-studio");
   const lastStudioInteractionAtRef = useRef(0);
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();
@@ -6405,7 +6415,17 @@ function ArtifactStudioEditor({
                   synchronizationReady={presentation.ready}
                 />
               ) : null}
-              {artifact.blueprintKey === "planner_task" ? (
+              {artifact.blueprintKey === "planner_task" && isSingleTask(editorContent) ? (
+                <TaskStudio
+                  key={`${artifact._id}:task`}
+                  mode={contentMode}
+                  title={title}
+                  content={editorContent}
+                  onChange={editorChange}
+                  readOnly={readOnly}
+                />
+              ) : null}
+              {artifact.blueprintKey === "planner_task" && !isSingleTask(editorContent) ? (
                 <PlanStudio
                   key={`${artifact._id}:plan`}
                   mode={contentMode}

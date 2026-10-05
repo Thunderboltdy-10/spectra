@@ -8,7 +8,7 @@ import { useMutation } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { AnimatePresence, motion } from "framer-motion";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import {
   postSpectra,
   type SpectraArtifact,

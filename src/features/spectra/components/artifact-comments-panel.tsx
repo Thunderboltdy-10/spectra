@@ -3,7 +3,7 @@
 import { Loader2, UserPlus, Bell, Check, MessageSquare, Search, Send, Trash2, X, CornerUpLeft, MapPin, Reply } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import {
   getSpectraArtifactCommentPreference,
   getSpectraArtifactComments,

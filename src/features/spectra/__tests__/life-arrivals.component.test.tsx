@@ -28,7 +28,7 @@ vi.mock("../life/figure-dom", () => ({
   figureOf: () => ({ strokes: [] }),
 }));
 
-import { markNavigation, sendInto, useLifeArrival, useLifeDeparture, useLifeLanding } from "../life/use-life";
+import { markNavigation, sendInto, useLifeArrival, useLifeDeparture, useLifeLanding, useLifeReturn } from "../life/use-life";
 
 function Item({ id, kind }: { id: string; kind?: "ai" | "human" }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -156,6 +156,46 @@ describe("landings", () => {
   });
 });
 
+function Surface({ id }: { id: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLifeReturn(ref, `work:${id}`, ".test-surface");
+  return <div ref={ref} className="test-surface">{id}</div>;
+}
+
+function Card({ id }: { id: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLifeArrival(ref, `work:${id}`, "human");
+  return <div ref={ref} data-life-key={`work:${id}`}>{id}</div>;
+}
+
+describe("returns", () => {
+  it("folds a closing work back into its card on the page", () => {
+    const view = render(<><Surface id="r1" /><Card id="r1" /></>);
+    view.rerender(<><Card id="r1" /></>);
+    act(flushFrames);
+    act(flushFrames);
+    expect(field.morph).toHaveBeenCalledTimes(1);
+  });
+
+  it("folds into the card as it appears on the page the user returns to", () => {
+    const view = render(<Surface id="r2" />);
+    view.rerender(<></>);
+    act(flushFrames);
+    view.rerender(<Card id="r2" />);
+    act(flushFrames);
+    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(field.form).not.toHaveBeenCalled();
+  });
+
+  it("does not fold a work another took the place of", () => {
+    const view = render(<><Surface key="r3" id="r3" /><Card id="r3" /></>);
+    view.rerender(<><Surface key="r4" id="r4" /><Card id="r3" /></>);
+    act(flushFrames);
+    act(flushFrames);
+    expect(field.morph).not.toHaveBeenCalled();
+  });
+});
+
 describe("sends", () => {
   const drop = (target: Element, taken: boolean) => {
     const event = new Event("drop", { bubbles: true, cancelable: true });
@@ -185,6 +225,18 @@ describe("sends", () => {
     row.dispatchEvent(new Event("dragstart", { bubbles: true }));
     drop(document.body, false);
     expect(field.send).not.toHaveBeenCalled();
+    row.remove();
+  });
+
+  it("leaves a quiet hole where a picked item came from until it lands", () => {
+    const row = document.createElement("div");
+    row.setAttribute("draggable", "true");
+    document.body.append(row);
+    row.dispatchEvent(new Event("dragstart", { bubbles: true }));
+    act(flushFrames);
+    expect(row.hasAttribute("data-life-picked")).toBe(true);
+    row.dispatchEvent(new Event("dragend", { bubbles: true }));
+    expect(row.hasAttribute("data-life-picked")).toBe(false);
     row.remove();
   });
 

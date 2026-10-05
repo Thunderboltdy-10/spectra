@@ -2,7 +2,7 @@
 
 import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X, Undo2, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";

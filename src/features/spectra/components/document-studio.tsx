@@ -49,7 +49,7 @@ import {
   type ReactNode,
 } from "react";
 import type * as Y from "yjs";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
 import {
   commandContext,
@@ -75,6 +75,7 @@ import {
   aiRegionDecorationKey,
   type AiRegionDecorationTarget,
 } from "../editor/ai-region-decoration";
+import { AiTextResolve } from "../editor/ai-text-resolve";
 import { Callout } from "../editor/callout-node";
 import { DocumentImage, NativeDocxImage } from "../editor/document-image";
 import {
@@ -1034,6 +1035,7 @@ export function DocumentStudio({
           nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
         }),
         AiRegionDecoration,
+        AiTextResolve,
         SpectraTiptapAutocomplete.configure({
           enabled:
             preferences.writing.smartCompletion &&

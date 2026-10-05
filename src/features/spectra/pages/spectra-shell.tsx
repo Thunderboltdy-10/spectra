@@ -19,7 +19,7 @@ import dynamic from "next/dynamic";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 import { describeFailure } from "@/components/ui/truthful-state";
 import {
   ProductEmptyState,
@@ -56,7 +56,6 @@ import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../components/work-companion";
-import { useLifeLanding } from "../life/use-life";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ChatBrowserButton, ChatBrowserPanel } from "../components/chat-browser-panel";
@@ -1815,9 +1814,6 @@ export function SpectraShell({
   const [companionTab, setCompanionTab] = useState<CompanionTab>("details");
   const [companionReveal, setCompanionReveal] = useState(0);
   const [companionSheetFor, setCompanionSheetFor] = useState<string | null>(null);
-  const fullWorkRef = useRef<HTMLDivElement>(null);
-  // Fullscreen work grows out of whatever it was opened from.
-  useLifeLanding(fullWorkRef, studio.mode === "tab" ? studio.activeArtifact?._id : null);
   const applicationCommandDispatcher = useMemo(
     () =>
       createApplicationCommandDispatcher({
@@ -4452,7 +4448,7 @@ export function SpectraShell({
                   executeApplicationCommand={applicationCommandDispatcher}
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
-                <div ref={fullWorkRef} className="relative flex min-h-0 min-w-0 flex-1">
+                <div className="relative flex min-h-0 min-w-0 flex-1">
                 <ArtifactStudio
                   key={studio.activeArtifact._id}
                   mode="tab"

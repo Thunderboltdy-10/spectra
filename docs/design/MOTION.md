@@ -81,6 +81,7 @@ animated layout properties.
 - **Side artifact ↔ fullscreen artifact.**
 - **Threads view row → island tab:** particles stream into the tab.
 - **Artifact card in a thread → the opened artifact.**
+- **Closing a work → its card:** the work folds back into its card, if the card is on the page or appears on the page the user returns to. A work replaced by another in the same place (switching tabs) does not fold.
 
 ### Spectra writing (AI light)
 

@@ -37,7 +37,8 @@ const AccentFill = ({ d, opacity = 1, className }: { d: string; opacity?: number
   <path d={d} fill={ACCENT} fillOpacity={opacity} stroke="none" className={className} />
 );
 const AccentLine = ({ d, width = 1.5, className }: { d: string; width?: number; className?: string }) => (
-  <path d={d} stroke={ACCENT} strokeWidth={width} className={className} />
+  // A tick draws itself over a normalised length (spectra-icons.css, sg-draw).
+  <path d={d} stroke={ACCENT} strokeWidth={width} className={className} pathLength={className?.includes("sg-tick") ? 12 : undefined} />
 );
 
 /** Rounded rectangle as a path, so it can be a paper plane and an outline at once. */

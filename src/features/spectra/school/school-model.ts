@@ -1,6 +1,7 @@
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind, SchoolSyncMode } from "../../../../shared/school-sync";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import type { ArtifactStatus } from "../components/artifact-status";
 
 /* The School page's reading of F1's API (convex/school.README.md): plain
@@ -198,3 +199,10 @@ export function strands(types: SchoolExperience["types"]) {
 
 /** What the class-scoped kinds are called on a class's row. */
 export const CLASS_KIND_ORDER: SchoolSyncKind[] = ["classes", "current_tasks", "past_tasks", "task_resources", "grades", "dropbox_files"];
+
+/** An error as one plain sentence, without its code (convex/school.README.md: errors read as `CODE: message`). */
+export function sentenceOf(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? readConvexError(error).message || error.message : "";
+  const sentence = raw.replace(/^[A-Z][A-Z0-9_]+:\s*/, "").replace(/\[Request ID:[^\]]*\]\s*/gi, "").trim();
+  return sentence && !/server error/i.test(sentence) ? sentence : fallback;
+}

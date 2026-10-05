@@ -1,24 +1,5 @@
 /* Agent Library — a quiet, high-density catalog aligned to the supplied
    reference while remaining inside Spectra's merged navigation shell. */
-.agent-library-create {
-  margin-left: 8px;
-  display: inline-flex;
-  height: 36px;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid transparent;
-  border-radius: var(--card-radius);
-  background: var(--text-primary);
-  padding: 0 14px;
-  color: var(--bg-primary);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.agent-library-create:hover {
-  filter: brightness(0.96);
-}
-
 .agent-library-filter {
   position: relative;
   display: flex;

@@ -55,6 +55,8 @@ class Life {
   private nextId = 1;
   private waiting = new Map<string, () => void>();
   private activity = new Set<(awake: boolean) => void>();
+  /** Set once the device has shown it cannot keep the full field within budget; it stays light from then on. */
+  private light = false;
 
   /** True while a field is attached and running. */
   get on() {
@@ -62,8 +64,9 @@ class Life {
   }
 
   /** Attaches the field to its two canvases. Returns the detach function. */
-  attach(back: HTMLCanvasElement, front: HTMLCanvasElement, tier: LifeTier): () => void {
+  attach(back: HTMLCanvasElement, front: HTMLCanvasElement, chosen: LifeTier): () => void {
     this.detach();
+    const tier: LifeTier = this.light ? "light" : chosen;
     const receive = (event: LifeEvent) => this.receive(event);
     if (typeof back.transferControlToOffscreen === "function" && typeof Worker !== "undefined") {
       const worker = new Worker(new URL("./life.worker.ts", import.meta.url), { type: "module" });
@@ -117,6 +120,10 @@ class Life {
   private receive(event: LifeEvent) {
     if (event.type === "awake" || event.type === "asleep") {
       for (const listener of this.activity) listener(event.type === "awake");
+      return;
+    }
+    if (event.type === "tier") {
+      this.light = event.tier === "light";
       return;
     }
     const key = `${event.type}:${event.id}`;

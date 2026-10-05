@@ -138,7 +138,10 @@ The field never competes with the work.
 - Only the active window of the lattice is touched.
 - Formations draw as one path per colour per stroke.
 
-**Tiers.** The tier is chosen once, from device signals and the first frames:
+**Tiers.** The tier is chosen once, from device signals and the first frames. A device with 4 cores or 4 GB or less
+starts light. Otherwise the engine times its first 90 active frames, and if the median passes 6 ms it moves to the
+light tier the next time it falls asleep (never in the middle of a moment) and stays light for the visit. The writing
+front finds the end of a reply from the end, so a long reply costs no more than a short one.
 
 | Tier | Behaviour |
 | --- | --- |

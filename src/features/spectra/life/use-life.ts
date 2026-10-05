@@ -363,13 +363,19 @@ export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled: bo
 
 /* ------------------------------------------------------------ writing front */
 
+/** The last text with something written in it, found from the end, so a long reply costs no more than a short one. */
+function lastWritten(node: Node): Text | null {
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").trim() ? (node as Text) : null;
+  for (let child = node.lastChild; child; child = child.previousSibling) {
+    const found = lastWritten(child);
+    if (found) return found;
+  }
+  return null;
+}
+
 /** Where the last written character of `root` ends, on screen. */
 function writingEnd(root: Element): DOMRect | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let last: Text | null = null;
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if ((node.textContent ?? "").trim()) last = node as Text;
-  }
+  const last = lastWritten(root);
   if (!last) return null;
   const range = document.createRange();
   const length = last.length;

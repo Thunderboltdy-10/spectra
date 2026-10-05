@@ -8,6 +8,7 @@ import {
   type StudioContract,
   type StudioDensity,
 } from "../components/artifact-studio-shell";
+import { Bold, Image, Italic, List, Quote, Redo2, Table, Undo2 } from "lucide-react";
 import { SHARED_FONT_SIZES, SHARED_FONT_STACKS, type CommandParam } from "../commands";
 
 /**
@@ -147,6 +148,7 @@ beforeEach(() => {
       const mode = (this as HTMLElement).getAttribute?.("data-measure-mode");
       if (mode === "icon") return 32;
       if (mode === "full") return 80;
+      if ((this as HTMLElement).hasAttribute?.("data-measure-group")) return 70;
       return (this as HTMLElement).clientWidth || 40;
     },
   });
@@ -185,23 +187,13 @@ describe("artifact workbar", () => {
     expect(size).toHaveBeenCalledWith(400);
   });
 
-  it("never lists an action in both the bar and the overflow menu", () => {
+  it("never lists an action in two places, and never loses one", () => {
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
       get: () => 280,
     });
     renderWorkbar(documentDefaults());
-
     const bar = screen.getByRole("toolbar", { name: "Document workbar" });
-    fireEvent.pointerDown(within(bar).getByRole("button", { name: /More/i }), {
-      button: 0,
-      ctrlKey: false,
-    });
-    // The menu is portaled, so it lives outside the toolbar element. That is what
-    // keeps the bar 42px tall, and it is also what makes "in the bar" and "in the
-    // menu" two answerable questions.
-    const menu = screen.getByRole("menu");
-    expect(bar.contains(menu)).toBe(false);
 
     const present = (scope: HTMLElement, label: string) => {
       const exact = new RegExp(`^${label}$`);
@@ -213,16 +205,24 @@ describe("artifact workbar", () => {
         within(scope).queryAllByRole("combobox", { name: exact }).length > 0
       );
     };
-
     const labels = ["Find", "Undo", "Redo", "Outline", "Comments", "Font", "Size", "Bold", "Italic"];
-    const inBoth = labels.filter((label) => present(bar, label) && present(menu, label));
-    expect(inBoth).toEqual([]);
-    // And everything stays reachable from one side or the other — shedding moves
-    // a control, it never deletes one.
-    const missing = labels.filter(
-      (label) => !present(bar, label) && !present(menu, label),
-    );
-    expect(missing).toEqual([]);
+    const places = new Map(labels.map((label) => [label, present(bar, label) ? 1 : 0]));
+
+    // Every menu the bar holds, a folded group's or More, opened one at a time.
+    // They are portaled, which is what keeps the bar's height fixed.
+    const triggers = within(bar)
+      .getAllByRole("button")
+      .filter((button) => / group$|^More /.test(button.getAttribute("aria-label") ?? ""));
+    expect(triggers.length).toBeGreaterThan(0);
+    for (const trigger of triggers) {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+      const menu = screen.getByRole("menu");
+      expect(bar.contains(menu)).toBe(false);
+      for (const label of labels) if (present(menu, label)) places.set(label, places.get(label)! + 1);
+      fireEvent.keyDown(menu, { key: "Escape" });
+    }
+    expect(labels.filter((label) => places.get(label)! > 1)).toEqual([]);
+    expect(labels.filter((label) => places.get(label) === 0)).toEqual([]);
   });
 
   it("sheds to the overflow menu as the pane tightens instead of clipping", () => {
@@ -283,7 +283,64 @@ describe("artifact workbar", () => {
 
     const undo = screen.getByRole("button", { name: "Undo" });
     expect(undo).toHaveProperty("disabled", true);
-    expect(undo.getAttribute("title")).toContain("Nothing to undo yet");
+    // The reason is on the button itself, not only in a hover tooltip.
+    expect(document.getElementById(undo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Nothing to undo yet");
+    expect(undo.getAttribute("title")).toBeNull();
+  });
+});
+
+/** An Insert tab with a group whose commands mean nothing without their words. */
+function insertBindings(): CommandBinding[] {
+  return [
+    { id: "history.undo", label: "Undo", icon: Undo2, general: true, priority: "essential", onSelect: () => {} },
+    { id: "history.redo", label: "Redo", icon: Redo2, general: true, priority: "essential", onSelect: () => {} },
+    { id: "insert.table", label: "Table", icon: Table, tab: "Insert", group: "Tables", onSelect: () => {} },
+    { id: "insert.image", label: "Image", icon: Image, tab: "Insert", group: "Media", onSelect: () => {} },
+    { id: "insert.citation", label: "Citation", icon: Quote, tab: "Insert", group: "References", onSelect: () => {} },
+    { id: "insert.footnote", label: "Footnote", icon: Quote, tab: "Insert", group: "References", onSelect: () => {} },
+    { id: "format.bold", label: "Bold", icon: Bold, tab: "Format", group: "Font", onSelect: () => {} },
+    { id: "format.italic", label: "Italic", icon: Italic, tab: "Format", group: "Font", onSelect: () => {} },
+    { id: "format.list.bullet", label: "Bulleted list", icon: List, tab: "Format", group: "Lists", onSelect: () => {} },
+  ];
+}
+
+describe("the editor's collapse plan", () => {
+  it("leads every tab with undo and redo, as icons only", () => {
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo.textContent).toBe("");
+    expect(screen.getByRole("button", { name: "Redo" })).toBeTruthy();
+    expect(undo.closest("[data-workbar-history]")).toBeTruthy();
+  });
+
+  it("never labels a universal symbol, even with room to spare", () => {
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Format" }));
+    expect(screen.getByRole("button", { name: "Bold" }).textContent).toBe("");
+  });
+
+  it("shows every command with its words when there is room", () => {
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    expect(screen.getByRole("button", { name: "Table" }).textContent).toBe("Table");
+    expect(screen.getByRole("button", { name: "Citation" }).textContent).toBe("Citation");
+    expect(screen.queryByRole("button", { name: "References group" })).toBeNull();
+  });
+
+  it("moves a label-dependent group into its own dropdown as a unit", () => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 300 });
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Insert" }));
+    // Icons that are unmistakable lose their words first…
+    expect(screen.getByRole("button", { name: "Table" }).textContent).toBe("");
+    // …and Citation is never shrunk to an icon: its whole group folds instead.
+    expect(screen.queryByRole("button", { name: "Citation" })).toBeNull();
+    const trigger = screen.getByRole("button", { name: "References group" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Citation" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: "Footnote" })).toBeTruthy();
   });
 });
 
@@ -301,11 +358,37 @@ describe("workbar customization", () => {
     expect(screen.getByRole("button", { name: /Reset this workbar/i })).toBeTruthy();
   });
 
-  it("writes only its own type's layout when expanding", () => {
-    workbarStore.value = { sheets: { expanded: true } };
-    renderWorkbar(documentDefaults());
-    fireEvent.click(screen.getByRole("button", { name: /Expand workbar/i }));
-    expect((workbarStore.value as Record<string, unknown>).sheets).toEqual({ expanded: true });
-    expect((workbarStore.value as Record<string, unknown>).document).toBeTruthy();
+  it("reorders a command within its group and saves only its own type's layout", () => {
+    workbarStore.value = { sheets: { tabOrder: ["Data"] } };
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Format" }));
+    fireEvent.click(screen.getByRole("button", { name: /Customize/i }));
+    // Nothing runs while customising, and undo and redo cannot move.
+    expect(screen.queryByRole("button", { name: "Move Undo" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Move Italic" }), { key: "ArrowLeft" });
+    const stored = workbarStore.value as Record<string, { commandOrder?: Record<string, string[]> } | undefined>;
+    expect(stored.document?.commandOrder?.Format?.slice(0, 2)).toEqual([
+      "document.format.italic",
+      "document.format.bold",
+    ]);
+    expect(stored.sheets).toEqual({ tabOrder: ["Data"] });
+    const chips = screen.getAllByRole("button", { name: /^Move (Bold|Italic)$/ });
+    expect(chips.map((chip) => chip.getAttribute("aria-label"))).toEqual(["Move Italic", "Move Bold"]);
+  });
+
+  it("moves a whole group, and reset returns the shipped order", () => {
+    renderWorkbar(insertBindings());
+    fireEvent.click(screen.getByRole("tab", { name: "Format" }));
+    fireEvent.click(screen.getByRole("button", { name: /Customize/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Move group Lists" }), { key: "ArrowLeft" });
+    const stored = () => (workbarStore.value as Record<string, { groupOrder?: Record<string, string[]> } | undefined>).document;
+    expect(stored()?.groupOrder?.Format).toEqual(["Lists", "Font"]);
+    fireEvent.click(screen.getByRole("button", { name: "Finish customizing" }));
+    const groups = [...screen.getByRole("toolbar").querySelectorAll("[data-workbar-group]")].map((node) =>
+      node.getAttribute("data-workbar-group"),
+    );
+    expect(groups).toEqual(["History", "Lists", "Font"]);
+    fireEvent.click(screen.getByRole("button", { name: /Reset this workbar/i }));
+    expect(stored()).toEqual({});
   });
 });

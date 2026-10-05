@@ -109,6 +109,68 @@ function firstDocumentImage(value: unknown, depth = 0): Record<string, unknown> 
   return undefined;
 }
 
+export type WhiteboardPreviewNode = {
+  id: string;
+  label: string;
+  /** Percent of the frame, from the node's place on the board. */
+  left: number;
+  top: number;
+};
+
+const finite = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+/**
+ * A board preview keeps the board's own arrangement: each node sits where it
+ * sits on the board's current page, scaled into the frame. The preview used
+ * to scatter nodes by their index, so a flow chart read as confetti and two
+ * nodes side by side could land on opposite corners.
+ */
+export function whiteboardPreviewNodes(
+  content: Record<string, unknown>,
+  limit: number,
+): WhiteboardPreviewNode[] {
+  const all = records(content.nodes).filter((node) => node.hidden !== true);
+  const viewportPage = record(content.viewport).pageId;
+  const page =
+    typeof viewportPage === "string"
+      ? viewportPage
+      : records(content.pages)[0]?.id;
+  const onPage =
+    typeof page === "string" && all.some((node) => node.pageId === page)
+      ? all.filter((node) => node.pageId === page)
+      : all;
+  const nodes = onPage.slice(0, limit);
+  const placed = nodes.filter((node) => finite(node.x) && finite(node.y));
+  const minX = Math.min(...placed.map((node) => node.x as number));
+  const minY = Math.min(...placed.map((node) => node.y as number));
+  const maxX = Math.max(...placed.map((node) => node.x as number));
+  const maxY = Math.max(...placed.map((node) => node.y as number));
+  const spanX = maxX - minX;
+  const spanY = maxY - minY;
+  return nodes.map((node, index) => {
+    const label =
+      textFrom(node.content, 70) || String(node.type ?? "Node");
+    const id = String(node.id ?? index);
+    if (!finite(node.x) || !finite(node.y))
+      return {
+        id,
+        label,
+        left: 8 + ((index * 23) % 70),
+        top: 10 + ((index * 31) % 68),
+      };
+    // 6–76% across and 8–72% down leaves room for the node's own box.
+    const left = spanX > 0 ? 6 + ((node.x - minX) / spanX) * 70 : 40;
+    const top = spanY > 0 ? 8 + ((node.y - minY) / spanY) * 64 : 40;
+    return {
+      id,
+      label,
+      left: Math.round(left * 10) / 10,
+      top: Math.round(top * 10) / 10,
+    };
+  });
+}
+
 function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   const source = embed.source;
   const type = source?.blueprintKey;
@@ -243,6 +305,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 setRevealed(false);
               }}
               disabled={!canNavigate || activeIndex === 0}
+              aria-label="Previous card"
               className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -259,6 +322,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 setRevealed(false);
               }}
               disabled={!canNavigate || activeIndex >= cards.length - 1}
+              aria-label="Next card"
               className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
@@ -328,6 +392,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               type="button"
               onClick={() => setActiveIndex((value) => Math.max(0, value - 1))}
               disabled={activeIndex === 0}
+              aria-label="Previous slide"
               className="disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -343,6 +408,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 )
               }
               disabled={activeIndex >= slides.length - 1}
+              aria-label="Next slide"
               className="disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
@@ -422,24 +488,26 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   }
 
   if (type === "whiteboard") {
-    const nodes = records(content.nodes).slice(
-      0,
+    const nodes = whiteboardPreviewNodes(
+      content,
       embed.mode === "compact" ? 8 : 24,
     );
     return (
       <div className="relative min-h-[190px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:18px_18px]">
-        {nodes.map((node, index) => (
+        {nodes.map((node) => (
           <div
-            key={String(node.id ?? index)}
+            key={node.id}
             className="absolute max-w-[120px] rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro text-[var(--text-primary)] shadow-sm"
-            style={{
-              left: `${8 + ((index * 23) % 70)}%`,
-              top: `${10 + ((index * 31) % 68)}%`,
-            }}
+            style={{ left: `${node.left}%`, top: `${node.top}%` }}
           >
-            {textFrom(node.content, 70) || String(node.type ?? "Node")}
+            {node.label}
           </div>
         ))}
+        {nodes.length === 0 ? (
+          <p className="absolute inset-0 flex items-center justify-center text-micro text-[var(--text-tertiary)]">
+            Empty board
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -795,9 +863,23 @@ export function ArtifactEmbed({
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-[140px] flex-1 basis-[min(100%,220px)]">
-          <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
-            {embed.source.title}
-          </div>
+          {onOpenSource ? (
+            // A click on the name opens the work in the Side (EDITORS.md,
+            // Embeds). The Open button is the keyboard path, so the name
+            // stays out of the tab order instead of repeating it.
+            <button
+              type="button"
+              tabIndex={-1}
+              onClick={() => onOpenSource(embed.source!.artifactId)}
+              className="block max-w-full truncate text-left text-caption font-semibold text-[var(--text-primary)] hover:underline hover:underline-offset-2"
+            >
+              {embed.source.title}
+            </button>
+          ) : (
+            <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
+              {embed.source.title}
+            </div>
+          )}
           <div
             className="mt-0.5 flex items-center gap-2 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]"
             aria-label={`${meta?.label ?? "Reference"} reference: ${referenceState}`}
@@ -848,8 +930,9 @@ export function ArtifactEmbed({
             type="button"
             onClick={() => onOpenSource(embed.source!.artifactId)}
             className="flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            aria-label={`Open ${embed.source.title}`}
           >
-            Open source
+            Open
             <ArrowUpRight className="h-3 w-3" />
           </button>
         ) : null}

@@ -1,37 +1,40 @@
 "use client";
 
 import {
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Maximize2,
-  Minimize2,
-  Settings2,
+  Check,
+  ChevronDown,
+  GripVertical,
   RotateCcw,
   MoreHorizontal,
   Redo2,
+  Settings2,
   Undo2,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { moveKey, planGroupedLayout, type GroupedLayout } from "@/components/ui/adaptive-groups";
 import { SelectField } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { WorkCapability } from "../work/registry";
 import {
+  COMMAND_TABS,
   commandContext,
   commandForBinding,
+  contextualTabsFor,
   eventBelongsToFocusedStudio,
   executeCommand,
   resolveCommandLayout,
   shortcutMatchesEvent,
-  swapWorkbarCommandOrders,
   tabsFor,
   type CommandBinding,
   type CommandLayout,
@@ -41,14 +44,26 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import {
   useStudioContract,
   type StudioContentHistory,
-  type StudioDensity,
 } from "./artifact-studio-shell";
 import {
   WorkbarCommandControl,
   WorkbarControlMenuRow,
   isRenderedControl,
 } from "./workbar-controls";
-import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, shouldWarnEssentialOverBudget, workbarPlanKey } from "./workbar-overflow";
+import {
+  arrangeWorkbar,
+  groupedItemsOf,
+  type ArrangedAction,
+  type ArrangedGroup,
+  type WorkbarAction as PlacedAction,
+} from "./workbar-arrange";
+import {
+  HISTORY_GROUP,
+  WORKBAR_METRICS,
+  estimateCommandWidths,
+  estimateGroupMenuWidth,
+  planStepsFor,
+} from "./workbar-plans";
 
 export type { CommandBinding } from "../commands";
 
@@ -86,39 +101,20 @@ export function contentHistoryBindings(
 }
 
 /**
- * Spectra's one artifact workbar.
+ * Spectra's one artifact workbar (EDITORS.md, "The workbar").
  *
- * Every work type gets one control row. It is 42px tall at every width, it
- * never wraps, it never scrolls, and an open menu never changes its height —
- * menus are portaled, so they overlay the bar instead of growing it.
+ * Two rails at a fixed height: the tabs (contextual tabs appear while their
+ * object is selected), and the active tab's commands in their groups. When
+ * there is room every command shows inline with its words. When there is not,
+ * the editor's hand-written plan (`workbar-plans.ts`) decides what gives way:
+ * a label whose icon is unmistakable, or a whole group into its own dropdown,
+ * or a group into More. Undo and redo lead every tab and never collapse;
+ * universal symbols are never labelled; a command whose meaning is in its
+ * words is never shrunk to an icon.
  *
- * A type declares *what* its controls mean; the bar decides how they survive
- * pressure. That is deliberate: nine types independently inventing an
- * adaptation strategy is how the baseline ended up with a bar that grew taller
- * (deck), a bar that deleted whole control groups (sheets at 682), a bar with
- * its own horizontal scrollbar (planner, presentation), and a bar whose
- * overflow control was the thing that overflowed (code at 850).
- *
- * Priorities
- *   essential  First in line for the bar, and the last thing to leave it.
- *   secondary  In the bar while there is room; moves into `⋯` before an
- *              essential does. Rendered in exactly one place, so nothing is
- *              ever listed twice.
- *   advanced   Always in `⋯`. Rare, destructive, or configuration actions.
- *
- * Room is a *width budget*, not a count. A font picker is not the same width as
- * an icon button, and a bar that counted them the same either clipped or left
- * half its row empty. Each control declares what it costs in button-widths, the
- * pane's density sets the budget, and the row fills in priority order until the
- * budget is spent. Everything else goes to the one overflow menu — deterministic
- * at every width, and never in two places at once.
- *
- * The primary verb is separate, is never shed and never wraps (one per bar).
- * Modes come from `work/registry` through the studio contract, so a type
- * cannot invent a mode outside the registry or show one the viewer lacks.
+ * A person can reorder groups and commands in customise mode. The order is
+ * saved per person and per editor; the plan follows each command by id.
  */
-
-export type WorkbarPriority = "essential" | "secondary" | "advanced";
 
 export type WorkbarModeSpec = {
   id: string;
@@ -149,39 +145,22 @@ export type WorkbarPrimarySpec = {
   requires?: WorkCapability;
 };
 
-/**
- * What a control costs in the bar, measured in icon-button widths. These are the
- * rendered widths of `workbar-controls.tsx`, rounded up: a font picker really is
- * about two and a half buttons wide, and pretending otherwise is what made the
- * old flat cap clip.
- */
-const CONTROL_COST: Record<string, number> = {
-  button: 1,
-  toggle: 1,
-  color: 1,
-  numeric: 2,
-  segmented: 2.2,
-  select: 2.6,
-  menu: 2.6,
+type BarAction = ArrangedAction & { onSelect: (value?: CommandParam) => void };
+
+const EMPTY_LAYOUT: Pick<GroupedLayout, "labelHidden" | "groupMenus" | "inMore"> = {
+  labelHidden: new Set(),
+  groupMenus: new Set(),
+  inMore: new Set(),
 };
 
-/** How much bar there is to spend, by the pane's own density. */
-const BAR_BUDGET: Record<StudioDensity, number> = {
-  comfortable: 11,
-  compact: 8,
-  tight: 5,
-};
-
-function actionCost(action: CommandBinding) {
-  return CONTROL_COST[action.control?.kind ?? "button"] ?? 1;
-}
-
-function actionsWeight(actions: readonly CommandBinding[]) {
-  return actions.reduce((total, action) => total + actionCost(action), 0);
-}
-
-function actionTitle(action: CommandBinding) {
+function tooltipOf(action: CommandBinding) {
   return action.hint ? `${action.label} · ${action.hint}` : action.label;
+}
+
+function layoutKey(layout: Pick<GroupedLayout, "labelHidden" | "groupMenus" | "inMore">) {
+  return [layout.labelHidden, layout.groupMenus, layout.inMore]
+    .map((set) => [...set].sort().join(","))
+    .join("|");
 }
 
 /**
@@ -199,7 +178,6 @@ export function ArtifactWorkbar({
   primary,
   trailing,
   overflow,
-  children,
   selectionContext,
   className,
 }: {
@@ -217,13 +195,10 @@ export function ArtifactWorkbar({
    */
   trailing?: ReactNode;
   /**
-   * Extra items rendered inside the same `⋯` menu as shed secondary/advanced
-   * actions. Use this for grouped exports or templates — never for a second
-   * overflow control, and never for a panel that grows the bar.
+   * Extra items rendered inside More, after the bar's own. Use this for grouped
+   * exports or templates — never for a second overflow control.
    */
   overflow?: ReactNode;
-  /** Legacy inline content. Prefer `actions`; this does not shed. */
-  children?: ReactNode | ((activeTab: string) => ReactNode);
   /** Selection kind activates a registry-declared contextual tab. */
   selectionContext?: string;
   className?: string;
@@ -234,17 +209,10 @@ export function ArtifactWorkbar({
   const storedLayout = preferences.workbar[contract.type] as CommandLayout | undefined;
   const [activeTab, setActiveTab] = useState("General");
   const [customizing, setCustomizing] = useState(false);
-  const [iconOnlyIds, setIconOnlyIds] = useState<string[]>([]);
-  const [overflowIds, setOverflowIds] = useState<string[]>([]);
-  const [metaCollapsed, setMetaCollapsed] = useState(false);
+  const [collapse, setCollapse] = useState(EMPTY_LAYOUT);
+  const [dragging, setDragging] = useState<{ kind: "command" | "group"; id: string } | null>(null);
   const commandsHostRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
-  const tabsRailRef = useRef<HTMLDivElement>(null);
-  const metaRef = useRef<HTMLDivElement>(null);
-  const overflowPlanKeyRef = useRef<string | null>(null);
-  const previousOverflowPlanKeyRef = useRef<string | null>(null);
-  const overflowHostWidthRef = useRef<number | null>(null);
-  const [dragCommandId, setDragCommandId] = useState<string | null>(null);
   const previousSelectionContext = useRef<string | undefined>(undefined);
   const commandCtx = useMemo(
     () => commandContext(contract.type, can, contract.role, selectionContext, {
@@ -264,6 +232,10 @@ export function ArtifactWorkbar({
     () => tabsFor(contract.type, selectionContext, storedLayout),
     [contract.type, selectionContext, storedLayout],
   );
+  const contextualTabs = useMemo(() => {
+    const permanent = COMMAND_TABS[contract.type];
+    return new Set(contextualTabsFor(contract.type).filter((tab) => !permanent.includes(tab)));
+  }, [contract.type]);
   const tabSignature = tabs.join("\u001f");
   useEffect(() => {
     if (selectionContext !== previousSelectionContext.current) {
@@ -305,30 +277,21 @@ export function ArtifactWorkbar({
   const saveLayout = (next: CommandLayout) => {
     update("workbar", { [contract.type]: next });
   };
-  const updateCommandLayout = (commandId: string, patch: NonNullable<CommandLayout["commands"]>[string]) => {
-    saveLayout({
-      ...storedLayout,
-      commands: {
-        ...storedLayout?.commands,
-        [commandId]: { ...storedLayout?.commands?.[commandId], ...patch },
-      },
-    });
-  };
-  /** How many commands carry an override, so "reset" can state its consequence. */
-  const customizedCount = useMemo(
-    () => Object.values(storedLayout?.commands ?? {}).filter(
-      (override) => override && Object.values(override).some((value) => value !== undefined),
-    ).length,
-    [storedLayout],
+  const customized = Boolean(
+    storedLayout?.tabOrder?.length ||
+      Object.keys(storedLayout?.groupOrder ?? {}).length ||
+      Object.keys(storedLayout?.commandOrder ?? {}).length ||
+      Object.values(storedLayout?.commands ?? {}).some(
+        (override) => override && Object.values(override).some((value) => value !== undefined),
+      ),
   );
 
   const resolvedModes = useMemo<readonly WorkbarModeSpec[]>(() => {
     if (Array.isArray(modes)) return modes;
     const registryModes = modes as WorkbarRegistryModes;
     // The registry is the authority on which modes exist and who may enter
-    // them. Rendering from it is what makes CANON D1/D3 structural: authoring
-    // is always first, and an activity can never become a peer tab a type
-    // invented for itself.
+    // them, so authoring is always first and an activity cannot become a peer
+    // tab a type invented for itself.
     return contract.modes.map((mode) => ({
       id: mode.id,
       label: mode.label,
@@ -337,192 +300,149 @@ export function ArtifactWorkbar({
     }));
   }, [contract.modes, modes]);
 
-  const visibleActions = useMemo(() => commands
-    .filter(({ command }) => {
-      if (command.hidden) return false;
-      // Favourites live on General without leaving their home tab. Pinning Bold
-      // must not empty Format; that is how a person forgets the interface and
-      // still finds the verb where they last used it.
-      const onActiveTab =
-        command.defaultPlacement.tab === activeTab ||
-        command.sourceTab === activeTab ||
-        command.contextualTab === activeTab;
-      return onActiveTab && command.availability(commandCtx).state !== "hidden";
-    })
-    .sort((left, right) => left.command.defaultPlacement.order - right.command.defaultPlacement.order)
-      .map(({ binding, command }) => {
+  const placedActions = useMemo<PlacedAction[]>(() => commands
+    .filter(({ command }) => !command.hidden && command.availability(commandCtx).state !== "hidden")
+    .map(({ binding, command }) => {
       const availability = command.availability(commandCtx);
-      return ({
-      ...binding,
-      id: command.id,
-      label: command.title,
-      group: command.defaultPlacement.group,
-      density: storedLayout?.commands?.[command.id]?.density,
-      disabled: availability.state === "disabled",
-      hint:
-        availability.state === "disabled"
-          ? availability.reason
-          : binding.hint,
-      // The one execute path. A pointer, a shortcut, the overflow menu and the
-      // AI dispatcher all arrive here, and a parameterized control hands its
-      // value straight through rather than closing over a second setter.
-      onSelect: (value?: CommandParam) => executeCommand(command, commandCtx, value),
-    }); }), [activeTab, commandCtx, commands, storedLayout]);
-  const essential = visibleActions.filter(
-    (action) => (action.priority ?? "secondary") === "essential",
-  );
-  const advanced = visibleActions.filter(
-    (action) => action.priority === "advanced",
-  );
+      return {
+        ...binding,
+        id: command.id,
+        label: command.title,
+        group: command.defaultPlacement.group,
+        placedTab: command.defaultPlacement.tab,
+        sourceTab: command.sourceTab,
+        contextualTab: command.contextualTab,
+        disabled: availability.state === "disabled",
+        hint: availability.state === "disabled" ? availability.reason : binding.hint,
+        // The one execute path. A pointer, a shortcut, a menu and the AI
+        // dispatcher all arrive here, and a parameterized control hands its
+        // value straight through rather than closing over a second setter.
+        onSelect: (value?: CommandParam) => executeCommand(command, commandCtx, value),
+      };
+    }), [commandCtx, commands]);
 
-  if (
-    process.env.NODE_ENV !== "production" &&
-    shouldWarnEssentialOverBudget(
-      `${label}:${activeTab}`,
-      actionsWeight(essential),
-      BAR_BUDGET.comfortable,
-    )
-  ) {
-    console.warn(
-      `[spectra] ${label}: essential actions are ${actionsWeight(essential).toFixed(1)} button-widths wide on "${activeTab}", past the ${BAR_BUDGET.comfortable} the bar can show at full width. Demote the tail to "secondary" so the shedding order stays a decision rather than an accident.`,
-    );
-  }
-
-  const showPrimary = !primary?.requires || can(primary.requires);
-  const rowActions = visibleActions;
-  const overflowCommandIds = visibleActions.map((action) => action.id).join("\u001f");
-  const overflowCommandIdsRef = useRef(overflowCommandIds);
-  const overflowSignature = visibleActions
-    .map((action) => `${action.id}:${action.disabled ? "1" : "0"}`)
+  const arranged = useMemo(
+    () => arrangeWorkbar({ type: contract.type, tab: activeTab, actions: placedActions, layout: storedLayout }),
+    [activeTab, contract.type, placedActions, storedLayout],
+  );
+  const barGroups = useMemo<ArrangedGroup[]>(
+    () => [
+      ...(arranged.history.length ? [{ name: HISTORY_GROUP, actions: arranged.history }] : []),
+      ...arranged.groups,
+    ],
+    [arranged],
+  );
+  const steps = useMemo(() => planStepsFor(contract.type, activeTab), [activeTab, contract.type]);
+  const moreAlways = arranged.advanced.length > 0 || Boolean(overflow);
+  const measureSignature = barGroups
+    .map((group) => `${group.name}:${group.actions.map((action) => `${action.id}/${action.label}/${action.disabled ? 1 : 0}`).join(",")}`)
     .join("\u001f");
-  const measuredOverflow = useMemo(
-    () => new Set(overflowIds),
-    [overflowIds],
-  );
-  const measuredIconOnly = useMemo(
-    () => new Set(iconOnlyIds),
-    [iconOnlyIds],
-  );
-  const alwaysOverflow = useMemo(
-    () => new Set(advanced.map((action) => action.id)),
-    [advanced],
-  );
-  const barActions = customizing
-    ? rowActions
-    : rowActions.filter(
-        (action) =>
-          !alwaysOverflow.has(action.id) && !measuredOverflow.has(action.id),
-      );
-  const menuActions = customizing
-    ? []
-    : rowActions.filter(
-        (action) =>
-          alwaysOverflow.has(action.id) || measuredOverflow.has(action.id),
-      );
 
   useLayoutEffect(() => {
     const host = commandsHostRef.current;
     const measure = measureRef.current;
     if (!host || !measure) return;
-    if (overflowCommandIdsRef.current !== overflowCommandIds) {
-      overflowPlanKeyRef.current = null;
-      previousOverflowPlanKeyRef.current = null;
-      overflowHostWidthRef.current = null;
-      overflowCommandIdsRef.current = overflowCommandIds;
-    }
-
-    const recompute = (fromResize: boolean) => {
+    const recompute = () => {
       const hostWidth = host.clientWidth;
+      // Before the first layout there is nothing honest to plan against.
       if (hostWidth < 40) return;
-      if (
-        fromResize &&
-        shouldIgnoreWorkbarHostResize(overflowHostWidthRef.current, hostWidth)
-      )
-        return;
-      overflowHostWidthRef.current = hostWidth;
       const reserved = [...host.querySelectorAll<HTMLElement>("[data-workbar-reserved]")]
-        .reduce((total, node) => total + node.offsetWidth, 0);
-      const available = Math.max(0, hostWidth - reserved - 8);
-      const nodes = [...measure.querySelectorAll<HTMLElement>("[data-measure-id]")];
-      const widths = new Map<string, { full: number; icon: number }>();
-      for (const node of nodes) {
-        const id = node.dataset.measureId;
-        if (!id) continue;
-        const current = widths.get(id) ?? { full: 0, icon: 32 };
-        const width = Math.ceil(node.offsetWidth || node.getBoundingClientRect().width);
+        .reduce((total, node) => total + node.offsetWidth + WORKBAR_METRICS.groupGap, 0);
+      const available = Math.max(0, hostWidth - reserved);
+      const measured = new Map<string, { full: number; icon: number }>();
+      const groupMenu: Record<string, number> = {};
+      for (const node of measure.querySelectorAll<HTMLElement>("[data-measure-id]")) {
+        const id = node.dataset.measureId!;
+        const width = Math.ceil(node.offsetWidth);
+        const current = measured.get(id) ?? { full: 0, icon: 0 };
         if (node.dataset.measureMode === "icon") current.icon = width;
         else current.full = width;
-        widths.set(id, current);
+        measured.set(id, current);
       }
-      // jsdom and the first paint can report 0. Inventing 72px then collapses
-      // the row while half of it is still empty. Wait for a real layout — and
-      // do not wipe a previous plan, or table-context remounts loop the bar.
-      if (!shouldCommitWorkbarPlan(widths.values())) return;
-      const plan = planWorkbarOverflow(
-        rowActions.map((action) => ({
-          id: action.id,
-          fullWidth: Math.max(widths.get(action.id)?.full || 0, 32),
-          iconWidth: Math.max(widths.get(action.id)?.icon || 0, 32),
-          canCollapseToIcon:
-            Boolean(action.icon) &&
-            !action.keepLabel &&
-            action.density !== "medium" &&
-            !isRenderedControl(action),
-          disabled: action.disabled,
-          priority: action.priority,
-        })),
-        available,
-        36,
-      );
-      const nextKey = workbarPlanKey(plan);
-      if (
-        !shouldReplaceWorkbarPlan(
-          nextKey,
-          overflowPlanKeyRef.current,
-          previousOverflowPlanKeyRef.current,
-        )
-      )
-        return;
-      previousOverflowPlanKeyRef.current = overflowPlanKeyRef.current;
-      overflowPlanKeyRef.current = nextKey;
-      setIconOnlyIds((current) =>
-        sameIdList(current, plan.iconOnlyIds) ? current : plan.iconOnlyIds,
-      );
-      setOverflowIds((current) =>
-        sameIdList(current, plan.overflowIds) ? current : plan.overflowIds,
-      );
-    };
-
-    recompute(false);
-    const observer = new ResizeObserver(() => recompute(true));
-    observer.observe(host);
-    return () => observer.disconnect();
-  }, [overflowSignature, overflowCommandIds, customizing, activeTab, rowActions]);
-
-  useLayoutEffect(() => {
-    const tabs = tabsRailRef.current;
-    const meta = metaRef.current;
-    if (!tabs || !meta) return;
-    const recompute = () => {
-      if (tabs.clientWidth < 80) return;
-      const tabList = tabs.querySelector<HTMLElement>(".spectra-command-tabs");
-      const tabWidth = tabList?.scrollWidth ?? 0;
-      // Measure the expanded cluster, not the current one. A collapsed
-      // dropdown is narrower, which would immediately un-collapse and loop.
-      const nextCollapsed = tabWidth + 108 + 24 > tabs.clientWidth;
-      setMetaCollapsed((current) => {
-        if (current === nextCollapsed) return current;
-        // Stay collapsed until there is slack, so selecting a table (extra
-        // commands, slightly tighter rail) cannot flip the header every frame.
-        if (current && tabWidth + 108 > tabs.clientWidth) return current;
-        return nextCollapsed;
+      for (const node of measure.querySelectorAll<HTMLElement>("[data-measure-group]")) {
+        const width = Math.ceil(node.offsetWidth);
+        if (width > 0) groupMenu[node.dataset.measureGroup!] = width;
+      }
+      const items = groupedItemsOf(arranged, (action) => {
+        const real = measured.get(action.id);
+        // A control that has not laid out yet (the first frame, jsdom) is
+        // planned at its estimated width rather than as nothing.
+        return real && real.full > 0 && real.icon > 0 ? real : estimateCommandWidths(action);
       });
+      for (const group of arranged.groups) groupMenu[group.name] ??= estimateGroupMenuWidth(group.name);
+      const next = planGroupedLayout({
+        items,
+        plan: steps,
+        available,
+        metrics: {
+          ...WORKBAR_METRICS,
+          groupMenu,
+          moreAlways,
+        },
+      });
+      setCollapse((current) => (layoutKey(current) === layoutKey(next) ? current : next));
     };
     recompute();
-    const observer = new ResizeObserver(recompute);
-    observer.observe(tabs);
+    const observer = new ResizeObserver(() => recompute());
+    observer.observe(host);
     return () => observer.disconnect();
-  }, [tabs, customizing]);
+    // `measureSignature` stands for `arranged`: a fresh array with the same
+    // commands must not re-plan, or a selection that only changes state would
+    // relayout the bar every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measureSignature, steps, customizing, moreAlways]);
+
+  const layout = customizing ? EMPTY_LAYOUT : collapse;
+  const moreGroups = useMemo(() => {
+    const shed = arranged.groups
+      .map((group) => ({ name: group.name, actions: group.actions.filter((action) => layout.inMore.has(action.id)) }))
+      .filter((group) => group.actions.length);
+    const merged = new Map<string, ArrangedAction[]>();
+    for (const group of [...shed, ...arranged.advanced]) {
+      merged.set(group.name, [...(merged.get(group.name) ?? []), ...group.actions]);
+    }
+    return [...merged].map(([name, groupActions]) => ({ name, actions: groupActions }));
+  }, [arranged, layout.inMore]);
+
+  const showPrimary = !primary?.requires || can(primary.requires);
+
+  /** Customise mode: move a command within its group, or a group within the tab. */
+  const moveCommand = (id: string, before: string | null) => {
+    const order = arranged.groups.flatMap((group) => group.actions.map((action) => action.id));
+    saveLayout({
+      ...storedLayout,
+      commandOrder: { ...storedLayout?.commandOrder, [activeTab]: moveKey(order, id, before) },
+    });
+  };
+  const moveGroup = (name: string, before: string | null) => {
+    const order = arranged.groups.map((group) => group.name);
+    saveLayout({
+      ...storedLayout,
+      groupOrder: { ...storedLayout?.groupOrder, [activeTab]: moveKey(order, name, before) },
+    });
+  };
+  const stepCommand = (group: ArrangedGroup, index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= group.actions.length) return;
+    const id = group.actions[index]!.id;
+    const before = delta < 0 ? group.actions[target]!.id : group.actions[target + 1]?.id ?? null;
+    if (before === null) {
+      // Moving to the end of its group is moving before the next group's first.
+      const next = arranged.groups[arranged.groups.indexOf(group) + 1]?.actions[0]?.id ?? null;
+      moveCommand(id, next);
+    } else moveCommand(id, before);
+  };
+  const stepGroup = (index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= arranged.groups.length) return;
+    const name = arranged.groups[index]!.name;
+    moveGroup(name, delta < 0 ? arranged.groups[target]!.name : arranged.groups[target + 1]?.name ?? null);
+  };
+  const arrowStep = (event: ReactKeyboardEvent, step: (delta: -1 | 1) => void) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    step(event.key === "ArrowLeft" ? -1 : 1);
+  };
 
   return (
     <div
@@ -531,53 +451,34 @@ export function ArtifactWorkbar({
       aria-label={label}
       aria-orientation="horizontal"
       data-workbar-density={contract.density}
-      data-workbar-expanded={storedLayout?.expanded || undefined}
       data-workbar-customizing={customizing || undefined}
     >
-      {/* Rail one: the tab strip, and nothing that competes with it.
-          Tabs are structure — "which part of this editor am I in" — and the
-          commands below are actions. When both rails looked alike the tabs read
-          as just more buttons, so the strip gets its own row, its own weight and
-          a rule under it. Only bar-level settings sit at its right edge. */}
-      <div className="spectra-workbar-rail-tabs" ref={tabsRailRef}>
+      {/* Rail one: the tab strip, and the bar's own settings at its right edge. */}
+      <div className="spectra-workbar-rail-tabs">
         <div className="spectra-command-tabs" role="tablist" aria-label={`${label} categories`}>
-          {tabs.map((tab, index) => (
+          {tabs.map((tab) => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
-              draggable={customizing}
+              data-contextual={contextualTabs.has(tab) || undefined}
               onClick={() => setActiveTab(tab)}
               onDragOver={(event) => {
-                if (!customizing) return;
+                if (customizing && dragging?.kind === "command") event.preventDefault();
+              }}
+              onDrop={(event) => {
+                // A command dropped on a tab moves to that tab.
+                if (!customizing || dragging?.kind !== "command") return;
                 event.preventDefault();
-              }}
-              onDrop={() => {
-                if (dragCommandId) {
-                  updateCommandLayout(dragCommandId, { tab, pinned: false });
-                  setDragCommandId(null);
-                  return;
-                }
-              }}
-              onDragStart={(event) => {
-                if (!customizing) return;
-                event.dataTransfer.setData("text/spectra-tab", tab);
-              }}
-              onDragOverCapture={(event) => {
-                if (!event.dataTransfer.types.includes("text/spectra-tab")) return;
-                event.preventDefault();
-              }}
-              onDropCapture={(event) => {
-                const source = event.dataTransfer.getData("text/spectra-tab");
-                if (!source || source === tab) return;
-                event.preventDefault();
-                const next = [...tabs];
-                const from = next.indexOf(source);
-                if (from < 0) return;
-                next.splice(from, 1);
-                next.splice(index, 0, source);
-                saveLayout({ ...storedLayout, tabOrder: next });
+                saveLayout({
+                  ...storedLayout,
+                  commands: {
+                    ...storedLayout?.commands,
+                    [dragging.id]: { ...storedLayout?.commands?.[dragging.id], tab, pinned: false },
+                  },
+                });
+                setDragging(null);
               }}
               className="spectra-command-tab"
             >
@@ -585,28 +486,70 @@ export function ArtifactWorkbar({
             </button>
           ))}
         </div>
-        <div className="spectra-workbar-rail-meta" ref={metaRef}>{renderCustomizeMenu()}</div>
+        <div className="spectra-workbar-rail-meta">
+          {customizing ? (
+            <button
+              type="button"
+              className="spectra-workbar-menu-trigger spectra-workbar-done"
+              aria-pressed
+              aria-label="Finish customizing"
+              onClick={() => setCustomizing(false)}
+            >
+              <Check className="size-3.5" />
+              <span>Done</span>
+            </button>
+          ) : (
+            <Tooltip label="Customize workbar" side="bottom">
+              <button
+                type="button"
+                className="spectra-workbar-menu-trigger"
+                aria-pressed={false}
+                aria-label="Customize workbar"
+                onClick={() => setCustomizing(true)}
+              >
+                <Settings2 className="size-3.5" />
+              </button>
+            </Tooltip>
+          )}
+          <Tooltip
+            label={customized ? "Reset this workbar to its shipped order" : "This workbar is already in its shipped order"}
+            side="bottom"
+          >
+            <button
+              type="button"
+              className="spectra-workbar-menu-trigger"
+              aria-label="Reset this workbar"
+              disabled={!customized}
+              onClick={() => saveLayout({})}
+            >
+              <RotateCcw className="size-3.5" />
+            </button>
+          </Tooltip>
+        </div>
       </div>
-      {/* Rail two: the active tab's commands, starting at the same left edge as
-          the tabs. They used to live in the trailing cluster, which right-aligned
-          them and left a quarter of the bar empty on a wide window. */}
+      {/* Rail two: the active tab's commands, in their groups. */}
       <div className="spectra-workbar-rail-commands">
         <div className="spectra-workbar-commands relative" ref={commandsHostRef}>
-          <div ref={measureRef} className="spectra-workbar-measure" aria-hidden>
-            {rowActions.map((action) => (
-              <span key={action.id} data-measure-id={action.id} data-measure-mode="full">
-                <WorkbarAction action={action} />
-              </span>
+          <div ref={measureRef} className="spectra-workbar-measure" aria-hidden inert>
+            {barGroups.flatMap((group) => group.actions).map((action) => (
+              <Fragment key={action.id}>
+                <span data-measure-id={action.id} data-measure-mode="full">
+                  <WorkbarAction action={action as BarAction} />
+                </span>
+                <span data-measure-id={action.id} data-measure-mode="icon">
+                  <WorkbarAction action={action as BarAction} iconOnly />
+                </span>
+              </Fragment>
             ))}
-            {rowActions.map((action) => (
-              <span key={`${action.id}-icon`} data-measure-id={action.id} data-measure-mode="icon">
-                <WorkbarAction action={action} iconOnly />
+            {arranged.groups.map((group) => (
+              <span key={group.name} data-measure-group={group.name} className="spectra-workbar-menu-trigger">
+                {group.name}
+                <span className="inline-block size-3" />
               </span>
             ))}
           </div>
           {resolvedModes.length > 1 ? (
             <div className="spectra-workbar-modes" role="group" aria-label="View" data-workbar-reserved>
-
               {resolvedModes.map((mode) => (
                 <button
                   key={mode.id}
@@ -615,7 +558,6 @@ export function ArtifactWorkbar({
                   data-active={mode.active || undefined}
                   disabled={mode.disabled}
                   onClick={mode.onSelect}
-                  title={mode.label}
                   className="spectra-workbar-mode"
                 >
                   {mode.icon ? <mode.icon className="size-3.5 shrink-0" /> : null}
@@ -629,77 +571,60 @@ export function ArtifactWorkbar({
               {selector}
             </div>
           ) : null}
-          {typeof children === "function" ? children(activeTab) : children}
-          {storedLayout?.expanded ? (
-            <div className="spectra-workbar-expanded-groups" role="group" aria-label={`${label} expanded commands`}>
-              {Object.entries(Object.groupBy(barActions, (action) => action.group ?? activeTab)).map(([group, groupActions]) => (
-                <div key={group} className="spectra-workbar-command-group" role="group" aria-label={group}>
-                  <span className="spectra-workbar-command-group-label">{group}</span>
-                  <div className="spectra-workbar-command-group-actions">
-                    {(groupActions ?? []).map((action) => (
-                      <WorkbarAction
-                        key={action.id}
-                        action={action}
-                        iconOnly={measuredIconOnly.has(action.id)}
-                        customizing={customizing}
-                        onDragStart={() => setDragCommandId(action.id)}
-                        onDrop={() => {
-                          if (!dragCommandId || dragCommandId === action.id) return;
-                          const source = commands.find(({ command }) => command.id === dragCommandId)?.command;
-                          const target = commands.find(({ command }) => command.id === action.id)?.command;
-                          if (!source || !target) return;
-                          saveLayout(swapWorkbarCommandOrders(storedLayout, {
-                            sourceId: dragCommandId,
-                            targetId: action.id,
-                            sourceOrder: source.defaultPlacement.order,
-                            targetOrder: target.defaultPlacement.order,
-                            tab: activeTab,
-                          }));
-                          setDragCommandId(null);
-                        }}
-                      />
-                    ))}
+          {customizing
+            ? renderCustomizing()
+            : barGroups.map((group) => {
+                const shown = group.actions.filter((action) => !layout.inMore.has(action.id));
+                if (!shown.length) return null;
+                const folded = layout.groupMenus.has(group.name);
+                return (
+                  <div
+                    key={group.name}
+                    className="spectra-workbar-group"
+                    role="group"
+                    aria-label={group.name}
+                    data-workbar-group={group.name}
+                    data-workbar-history={group.name === HISTORY_GROUP || undefined}
+                  >
+                    {folded ? (
+                      <WorkbarMenu
+                        label={group.name}
+                        ariaLabel={`${group.name} group`}
+                        triggerClassName="spectra-workbar-group-menu"
+                      >
+                        {shown.map((action) => (
+                          <WorkbarMenuEntry key={action.id} action={action as BarAction} />
+                        ))}
+                      </WorkbarMenu>
+                    ) : (
+                      shown.map((action) => (
+                        <WorkbarAction
+                          key={action.id}
+                          action={action as BarAction}
+                          iconOnly={action.labelPolicy === "never" || layout.labelHidden.has(action.id)}
+                        />
+                      ))
+                    )}
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : barActions.map((action) => (
-            <WorkbarAction
-              key={action.id}
-              action={action}
-              iconOnly={measuredIconOnly.has(action.id)}
-              customizing={customizing}
-              onDragStart={() => setDragCommandId(action.id)}
-              onDrop={() => {
-                if (!dragCommandId || dragCommandId === action.id) return;
-                const source = commands.find(({ command }) => command.id === dragCommandId)?.command;
-                const target = commands.find(({ command }) => command.id === action.id)?.command;
-                if (!source || !target) return;
-                saveLayout(swapWorkbarCommandOrders(storedLayout, {
-                  sourceId: dragCommandId,
-                  targetId: action.id,
-                  sourceOrder: source.defaultPlacement.order,
-                  targetOrder: target.defaultPlacement.order,
-                  tab: activeTab,
-                }));
-                setDragCommandId(null);
-              }}
-            />
-          ))}
-          {/* The overflow sits with the commands it holds, not with the bar's
-              settings: `⋯` here means "more of these", which is the only reading
-              that helps someone hunting for a control that has been shed. */}
-          {menuActions.length || overflow ? (
+                );
+              })}
+          {/* More sits with the commands it holds: `⋯` here means "more of these". */}
+          {!customizing && (moreGroups.length || overflow) ? (
             <WorkbarMenu
               label={<MoreHorizontal className="size-4" />}
               ariaLabel={`More ${label.toLowerCase()}`}
               align="end"
               triggerClassName="spectra-workbar-overflow"
             >
-              {menuActions.map((action) => (
-                isRenderedControl(action)
-                  ? <WorkbarControlMenuRow key={action.id} action={action} onEmit={(value) => action.onSelect(value)} />
-                  : <WorkbarMenuItem key={action.id} action={action} />
+              {moreGroups.map((group) => (
+                <Fragment key={group.name}>
+                  {moreGroups.length > 1 ? (
+                    <DropdownMenuLabel className="spectra-workbar-menu-heading">{group.name}</DropdownMenuLabel>
+                  ) : null}
+                  {group.actions.map((action) => (
+                    <WorkbarMenuEntry key={action.id} action={action as BarAction} />
+                  ))}
+                </Fragment>
               ))}
               {overflow}
             </WorkbarMenu>
@@ -743,120 +668,102 @@ export function ArtifactWorkbar({
   );
 
   /**
-   * The customizer is a panel, not a control: a search field, a legend, and one
-   * row per registered command. It lives in a hoisted inner function rather than
-   * a separate component so it keeps reading the very layout state the bar
-   * renders from — a second copy of that state is exactly how a customizer
-   * drifts from the bar it is supposed to customize.
+   * Customise mode, on the live bar: every group open, each command a chip a
+   * person can drag (or move with the arrow keys) within its group, and each
+   * group a handle that moves the whole group. Undo and redo stay first and
+   * cannot move. Nothing executes while customising.
    */
-  function renderCustomizeMenu() {
-    const expandButton = (
-      <button
-        type="button"
-        className="spectra-workbar-menu-trigger"
-        aria-label={storedLayout?.expanded ? "Collapse workbar" : "Expand workbar"}
-        title={storedLayout?.expanded ? "Collapse workbar" : "Expand workbar"}
-        onClick={() => saveLayout({ ...storedLayout, expanded: !storedLayout?.expanded })}
-      >
-        {storedLayout?.expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-      </button>
-    );
-    const resetButton = (
-      <button
-        type="button"
-        className="spectra-workbar-menu-trigger"
-        aria-label="Reset this workbar"
-        title="Reset this workbar"
-        disabled={!customizedCount && !storedLayout?.tabOrder && !storedLayout?.expanded}
-        onClick={() => saveLayout({})}
-      >
-        <RotateCcw className="size-3.5" />
-      </button>
-    );
-    const customizeButton = (
-      <button
-        type="button"
-        className="spectra-workbar-menu-trigger"
-        aria-pressed={customizing}
-        aria-label={customizing ? "Finish customizing" : "Customize workbar"}
-        title={customizing ? "Finish customizing" : "Customize workbar"}
-        onClick={() => setCustomizing((value) => !value)}
-      >
-        <Settings2 className="size-3.5" />
-      </button>
-    );
-    if (!metaCollapsed) {
-      return (
-        <div className="flex items-center gap-0.5">
-          {customizeButton}
-          {expandButton}
-          {resetButton}
-        </div>
-      );
-    }
+  function renderCustomizing() {
     return (
-      <WorkbarMenu
-          label={<Settings2 className="size-3.5" />}
-          ariaLabel={`Customize ${label.toLowerCase()}`}
-          align="end"
-          triggerClassName="spectra-workbar-menu-trigger"
-        >
-          <WorkbarMenuAction onSelect={() => setCustomizing((value) => !value)}>
-            <Settings2 className="size-3.5" />
-            <span>{customizing ? "Finish customizing" : "Customize workbar"}</span>
-          </WorkbarMenuAction>
-          <WorkbarMenuAction onSelect={() => saveLayout({ ...storedLayout, expanded: !storedLayout?.expanded })}>
-            {storedLayout?.expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            <span>{storedLayout?.expanded ? "Collapse workbar" : "Expand workbar"}</span>
-          </WorkbarMenuAction>
-          <WorkbarMenuAction
-            disabled={!customizedCount && !storedLayout?.tabOrder && !storedLayout?.expanded}
-            title={customizedCount
-              ? `Return ${customizedCount} changed ${customizedCount === 1 ? "command" : "commands"} to the default layout`
-              : "This workbar is already at its default"}
-            onSelect={() => saveLayout({})}
+      <div className="spectra-workbar-customize" aria-label={`Arrange ${activeTab}`} role="group">
+        {arranged.history.length ? (
+          <div className="spectra-workbar-group" data-workbar-history role="group" aria-label={HISTORY_GROUP}>
+            {arranged.history.map((action) => (
+              <span key={action.id} className="spectra-workbar-chip" data-fixed aria-label={`${action.label} stays first`}>
+                {action.icon ? <action.icon className="size-3.5" /> : action.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {arranged.groups.map((group, groupIndex) => (
+          <div
+            key={group.name}
+            className="spectra-workbar-group"
+            role="group"
+            aria-label={group.name}
+            data-workbar-group={group.name}
+            data-drop-target={dragging?.kind === "group" && dragging.id !== group.name ? "" : undefined}
+            onDragOver={(event) => {
+              if (dragging?.kind === "group") event.preventDefault();
+            }}
+            onDrop={(event) => {
+              if (dragging?.kind !== "group" || dragging.id === group.name) return;
+              event.preventDefault();
+              moveGroup(dragging.id, group.name);
+              setDragging(null);
+            }}
           >
-            <RotateCcw className="size-3.5" />
-            <span>Reset this workbar{customizedCount ? ` (${customizedCount})` : ""}</span>
-          </WorkbarMenuAction>
-        </WorkbarMenu>
+            <button
+              type="button"
+              draggable
+              className="spectra-workbar-group-handle"
+              aria-label={`Move group ${group.name}`}
+              aria-roledescription="movable group"
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                setDragging({ kind: "group", id: group.name });
+              }}
+              onDragEnd={() => setDragging(null)}
+              onKeyDown={(event) => arrowStep(event, (delta) => stepGroup(groupIndex, delta))}
+            >
+              <GripVertical className="size-3" />
+              <span>{group.name}</span>
+            </button>
+            {group.actions.map((action, index) => (
+              <button
+                key={action.id}
+                type="button"
+                draggable
+                className="spectra-workbar-chip"
+                aria-label={`Move ${action.label}`}
+                aria-roledescription="movable command"
+                data-dragging={dragging?.id === action.id || undefined}
+                onDragStart={(event) => {
+                  event.stopPropagation();
+                  event.dataTransfer.effectAllowed = "move";
+                  setDragging({ kind: "command", id: action.id });
+                }}
+                onDragEnd={() => setDragging(null)}
+                onDragOver={(event) => {
+                  if (dragging?.kind === "command") event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  if (dragging?.kind !== "command" || dragging.id === action.id) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  moveCommand(dragging.id, action.id);
+                  setDragging(null);
+                }}
+                onKeyDown={(event) => arrowStep(event, (delta) => stepCommand(group, index, delta))}
+              >
+                {action.icon ? <action.icon className="size-3.5 shrink-0" /> : null}
+                <span>{action.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
     );
   }
 }
 
 /**
  * One command, one shape. A command that declares a control renders as that
- * control; everything else is the plain action button. Deciding this in a single
- * place is what keeps a font picker from becoming a second kind of citizen that
- * the customizer, the overflow menu and the AI path each have to special-case.
+ * control; everything else is the plain action button.
  */
-function WorkbarAction({
-  action,
-  iconOnly,
-  customizing,
-  onDragStart,
-  onDrop,
-}: {
-  action: CommandBinding;
-  iconOnly?: boolean;
-  customizing?: boolean;
-  onDragStart?: () => void;
-  onDrop?: () => void;
-}) {
+function WorkbarAction({ action, iconOnly }: { action: BarAction; iconOnly?: boolean }) {
   return (
-    <div
-      data-workbar-action=""
-      data-workbar-id={action.id}
-      data-workbar-icon-only={iconOnly || undefined}
-      draggable={customizing}
-      onDragStart={onDragStart}
-      onDragOver={(event) => {
-        if (!customizing) return;
-        event.preventDefault();
-      }}
-      onDrop={onDrop}
-      className={cn(customizing && "cursor-grab")}
-    >
+    <div data-workbar-action="" data-workbar-id={action.id} data-workbar-icon-only={iconOnly || undefined}>
       {isRenderedControl(action) ? (
         <WorkbarCommandControl action={action} onEmit={(value) => action.onSelect(value)} />
       ) : (
@@ -866,50 +773,42 @@ function WorkbarAction({
   );
 }
 
-function WorkbarActionButton({
-  action,
-  iconOnly,
-}: {
-  action: CommandBinding;
-  iconOnly?: boolean;
-}) {
+function WorkbarActionButton({ action, iconOnly }: { action: BarAction; iconOnly?: boolean }) {
   const Icon = action.icon;
-  const visuallyIconOnly = Boolean(
-    Icon && (iconOnly || action.density === "compact"),
-  );
+  const showLabel = !(iconOnly && Icon);
+  const hintId = useId();
   const button = (
     <button
       type="button"
       aria-label={action.label}
-      title={actionTitle(action)}
+      aria-describedby={action.hint ? hintId : undefined}
       aria-pressed={action.active}
       data-active={action.active || undefined}
-      data-workbar-density={
-        action.density === "compact" && !Icon
-          ? "medium"
-          : action.density ?? undefined
-      }
-      data-workbar-keep-label={action.keepLabel || undefined}
-      data-workbar-icon-only={iconOnly || undefined}
+      data-workbar-icon-only={!showLabel || undefined}
       disabled={action.disabled}
       onClick={() => action.onSelect()}
       className="spectra-artifact-workbar-action"
     >
       {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
-      {iconOnly && Icon ? null : <span>{action.label}</span>}
+      {showLabel ? <span>{action.label}</span> : null}
+      {action.hint ? <span id={hintId} hidden>{action.hint}</span> : null}
     </button>
   );
-  return visuallyIconOnly ? (
-    <Tooltip label={actionTitle(action)}>{button}</Tooltip>
-  ) : button;
+  // The words are on screen when the label shows; the tooltip is for the icon
+  // alone, or for the reason and the shortcut the label does not carry.
+  return !showLabel || action.hint ? <Tooltip label={tooltipOf(action)}>{button}</Tooltip> : button;
 }
 
-function WorkbarMenuItem({ action }: { action: CommandBinding }) {
+/** A command inside a group's dropdown or More: the choice is already open. */
+function WorkbarMenuEntry({ action }: { action: BarAction }) {
+  if (isRenderedControl(action)) {
+    return <WorkbarControlMenuRow action={action} onEmit={(value) => action.onSelect(value)} />;
+  }
   const Icon = action.icon;
   return (
     <WorkbarMenuAction
       disabled={action.disabled}
-      title={actionTitle(action)}
+      title={action.hint}
       data-active={action.active || undefined}
       onSelect={() => action.onSelect()}
     >

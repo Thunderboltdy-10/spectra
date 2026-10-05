@@ -1,0 +1,448 @@
+"use client";
+
+import { useEffect, type RefObject } from "react";
+import { life, type GlowHandle, type Rect } from "../life/life";
+import { barsOf, figureOf, inkOf } from "../life/figure-dom";
+import { outlineFigure, rowsFigure, type Figure, type Point } from "../life/figure";
+
+/*
+ * The field in editors (LIFE.md "In editors", EDITORS.md "All editors").
+ *
+ * Things in a work behave as physical things made of the field:
+ * - something new forms out of the field where it was made: from your
+ *   pointer or caret, from a collaborator's (or Spectra's) cursor, or, when
+ *   Spectra writes without a cursor, as light that travels from the prism
+ *   through the field and gathers into the new content's lines;
+ * - a deletion unforms where the thing was;
+ * - a region Spectra is writing holds light around it in the field; inside
+ *   the text, AI light stays CSS (MOTION.md), never dots;
+ * - drags leave a wake, and a drop settles with a pulse.
+ *
+ * Over content every figure hands over within about 600 ms (the engine's
+ * formation timing). The observer does no work while the field is off, and
+ * at most a few moments run per frame, so a large re-render never floods it.
+ */
+
+/** Objects of every editor, by the classes they already carry. */
+export const FIELD_OBJECTS = [
+  "[data-life-object]",
+  ".spectra-item-rail-list > li",
+  ".whiteboard-node",
+  ".presentation-object",
+  ".timetable-event",
+  ".spectra-plan-list article",
+  ".ProseMirror > :is(table, .tableWrapper, figure, img, hr, pre, [data-type])",
+].join(", ");
+
+/** Text blocks: they form as their lines, and only when someone else wrote them. */
+export const FIELD_TEXT_BLOCKS = ".ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol)";
+
+const AI_REGION = '[data-ai-region="true"]';
+/** Collaborators' cursors, and Spectra's spark when it drives the interface. */
+const CURSORS = ".spectra-presence-cursor, .spectra-ai-spark";
+/** The island's prism: where Spectra's matter comes from when it has no cursor here. */
+const PRISM = "[data-island-prism]";
+
+/** Mounting, switching a slide or a tab: the content arrives at once, and is not "made". */
+export const WARM_UP_MS = 900;
+/** An addition this soon after your own press or key is yours. */
+export const LOCAL_WINDOW_MS = 600;
+/** More additions than this in one batch is a re-render, not an edit. */
+export const BULK_BATCH = 12;
+/** At most this many moments run per frame. */
+export const MAX_MOMENTS = 4;
+/** How long a dropped thing takes to settle (MOTION.md --motion-slow). */
+const SETTLE_MS = 360;
+/** At most this many regions hold light at once. */
+export const MAX_GLOWS = 3;
+
+export type MomentSource =
+  | { kind: "local"; point: Point }
+  | { kind: "peer"; point: Point; ai: boolean }
+  | { kind: "prism"; point: Point }
+  | { kind: "self" };
+
+/** Where a change's matter comes from (LIFE.md: "it rises from the field at its cause"). */
+export function chooseSource({
+  local,
+  cursors,
+  aiActive,
+  prism,
+  target,
+}: {
+  /** Your last press or caret, when it was recent. */
+  local: Point | null;
+  /** The people in this work, and Spectra's cursor when it acts like one. */
+  cursors: readonly { point: Point; ai: boolean }[];
+  aiActive: boolean;
+  prism: Point | null;
+  target: Rect;
+}): MomentSource {
+  if (local) return { kind: "local", point: local };
+  const centre: Point = [target.x + target.width / 2, target.y + target.height / 2];
+  let nearest: { point: Point; ai: boolean } | null = null;
+  let best = Number.POSITIVE_INFINITY;
+  for (const cursor of cursors) {
+    const distance = Math.hypot(cursor.point[0] - centre[0], cursor.point[1] - centre[1]);
+    if (distance < best) {
+      best = distance;
+      nearest = cursor;
+    }
+  }
+  if (nearest) return { kind: "peer", point: nearest.point, ai: nearest.ai };
+  if (aiActive && prism) return { kind: "prism", point: prism };
+  return { kind: "self" };
+}
+
+export type BatchPlan = {
+  forms: Element[];
+  unforms: Element[];
+};
+
+/**
+ * Which additions form and which removals unform. A batch bigger than a
+ * person's edit is a re-render; a removal and an addition of the same kind
+ * in one batch is an edit in place (the new content forms, nothing unforms);
+ * your own new paragraphs never animate (typing Enter is not an event).
+ */
+export function planBatch({
+  added,
+  removed,
+  local,
+  isText,
+}: {
+  added: readonly Element[];
+  removed: readonly Element[];
+  local: boolean;
+  isText: (element: Element) => boolean;
+}): BatchPlan {
+  if (added.length > BULK_BATCH || removed.length > BULK_BATCH) return { forms: [], unforms: [] };
+  const forms = added.filter((element) => !(local && isText(element)));
+  const replaced = new Set<Element>();
+  const pending = [...added];
+  for (const element of removed) {
+    const twin = pending.findIndex((candidate) => candidate.tagName === element.tagName && isText(candidate) === isText(element));
+    if (twin >= 0) {
+      replaced.add(element);
+      pending.splice(twin, 1);
+    }
+  }
+  const unforms = removed.filter((element) => !replaced.has(element) && !isText(element));
+  return { forms: forms.slice(0, MAX_MOMENTS), unforms: unforms.slice(0, MAX_MOMENTS) };
+}
+
+const rectOf = (element: Element): Rect => {
+  const r = element.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+};
+
+const centreOf = (rect: Rect | DOMRect): Point => [rect.x + rect.width / 2, rect.y + rect.height / 2];
+
+const visible = (rect: Rect) =>
+  rect.width > 1 &&
+  rect.height > 1 &&
+  rect.y + rect.height > 0 &&
+  rect.x + rect.width > 0 &&
+  rect.y < window.innerHeight &&
+  rect.x < window.innerWidth;
+
+/** The figure of new content: its frame (when it has one) and its lines of text. */
+export function contentFigure(element: Element, text: boolean): Figure {
+  if (text) {
+    const strokes = barsOf(element).map((stroke) => ({ ...stroke, alpha: Math.max(stroke.alpha, 0.22) }));
+    return { strokes };
+  }
+  return figureOf(element, { bars: "p, span, strong, em, h1, h2, h3, h4, li, td, th, img, i" });
+}
+
+/** A figure for something that has already left the page, from its last place. */
+function ghostFigure(rect: Rect, radius: number): Figure {
+  const ink = inkOf();
+  const outline = outlineFigure(rect, { radius, colour: ink, alpha: 0.3 });
+  const rows = rect.height > 28 ? rowsFigure(rect, [0.7, 0.45], { colour: ink }) : { strokes: [] };
+  return { strokes: [...outline.strokes, ...rows.strokes] };
+}
+
+function collect(nodes: Iterable<Node>, matches: (element: Element) => boolean, into: Element[]) {
+  for (const node of nodes) {
+    if (!(node instanceof Element)) continue;
+    if (matches(node)) {
+      into.push(node);
+      continue;
+    }
+    // A container that arrived with objects inside (a list, a section).
+    for (const inner of node.querySelectorAll(`${FIELD_OBJECTS}, ${FIELD_TEXT_BLOCKS}`)) {
+      into.push(inner);
+      if (into.length > BULK_BATCH) return;
+    }
+  }
+}
+
+export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { enabled = true }: { enabled?: boolean } = {}) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!enabled || !root || typeof MutationObserver === "undefined") return;
+    const mountedAt = performance.now();
+    const inContent = (element: Element) => Boolean(element.closest(".spectra-artifact-main")) && !element.closest("[inert], [aria-hidden='true']");
+    const isText = (element: Element) => element.matches(FIELD_TEXT_BLOCKS);
+    const isObject = (element: Element) => element.matches(FIELD_OBJECTS) || isText(element);
+
+    /* Your own last act: where your matter comes from. */
+    let localAt = -Infinity;
+    let localPoint: Point | null = null;
+    const markLocal = (point: Point | null) => {
+      localAt = performance.now();
+      localPoint = point;
+    };
+    const caretPoint = (): Point | null => {
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return null;
+      const box = selection.getRangeAt(0).getBoundingClientRect();
+      return box.width || box.height ? [box.x, box.y + box.height / 2] : null;
+    };
+    const recentLocal = () => (performance.now() - localAt < LOCAL_WINDOW_MS ? (localPoint ?? caretPoint()) : null);
+
+    /* Last places of what is on screen, so a deletion can unform where it was. */
+    const lastPlace = new WeakMap<Element, { rect: Rect; radius: number }>();
+    let rememberedAt = -Infinity;
+    const remember = (force = false) => {
+      const now = performance.now();
+      // Typing changes the page every key; the places only need to be fresh.
+      if (!force && now - rememberedAt < 250) return;
+      rememberedAt = now;
+      for (const element of root.querySelectorAll(FIELD_OBJECTS)) {
+        if (!inContent(element)) continue;
+        const rect = rectOf(element);
+        if (!visible(rect)) continue;
+        const previous = lastPlace.get(element);
+        lastPlace.set(element, {
+          rect,
+          radius: previous?.radius ?? (Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) || 6),
+        });
+      }
+    };
+
+    const sourceFor = (target: Rect): MomentSource => {
+      const cursors: { point: Point; ai: boolean }[] = [];
+      for (const cursor of document.querySelectorAll(CURSORS)) {
+        const box = cursor.getBoundingClientRect();
+        if (box.width || box.height) cursors.push({ point: [box.x, box.y], ai: cursor.getAttribute("data-ai") === "true" || cursor.classList.contains("spectra-ai-spark") });
+      }
+      const prismElement = document.querySelector(PRISM);
+      const prismBox = prismElement?.getBoundingClientRect();
+      return chooseSource({
+        local: recentLocal(),
+        cursors,
+        aiActive: Boolean(root.querySelector(AI_REGION)) || root.hasAttribute("data-ai-lifecycle"),
+        prism: prismBox && prismBox.width ? centreOf(prismBox) : null,
+        target,
+      });
+    };
+
+    let formedThisFrame = new Set<Element>();
+    const formHere = (element: Element) => {
+      if (formedThisFrame.has(element)) return;
+      formedThisFrame.add(element);
+      const rect = rectOf(element);
+      if (!visible(rect)) return;
+      const figure = contentFigure(element, isText(element));
+      if (!figure.strokes.length) return;
+      const source = sourceFor(rect);
+      if (source.kind === "prism") {
+        // Spectra's matter crosses the field from the prism and gathers into the lines.
+        life.travel(source.point, figure, { colour: "spectrum" });
+      } else {
+        life.form(figure, {
+          from: source.kind === "self" ? [rect.x, rect.y] : source.point,
+          // Yours and a person's are ink; Spectra's is its light.
+          colour: source.kind === "peer" && source.ai ? "spectrum" : inkOf(),
+        });
+      }
+    };
+
+    const unformThere = (element: Element) => {
+      const place = lastPlace.get(element);
+      if (!place || !visible(place.rect)) return;
+      const local = recentLocal();
+      void life.unform(ghostFigure(place.rect, place.radius), { from: local ?? centreOf(place.rect) });
+    };
+
+    /* Light held around what Spectra is writing. */
+    const glows = new Map<Element, GlowHandle>();
+    const syncGlows = (justMarked: readonly Element[]) => {
+      for (const [element, glow] of glows) {
+        if (!element.isConnected || element.getAttribute("data-ai-region") !== "true") {
+          glow.stop();
+          glows.delete(element);
+        }
+      }
+      for (const element of justMarked) {
+        if (glows.size >= MAX_GLOWS || glows.has(element) || !inContent(element)) continue;
+        const rect = rectOf(element);
+        if (!visible(rect)) continue;
+        glows.set(element, life.glow(rect, "spectrum", 0.7));
+        // The writing arrives from its source and gathers into the region's lines.
+        formHere(element);
+      }
+    };
+    const moveGlows = () => {
+      for (const [element, glow] of glows) glow.move(rectOf(element));
+    };
+
+    let added: Element[] = [];
+    let removed: Element[] = [];
+    let marked: Element[] = [];
+    let frame = 0;
+    const flush = () => {
+      frame = 0;
+      const batch = { added, removed, marked };
+      formedThisFrame = new Set();
+      added = [];
+      removed = [];
+      marked = [];
+      if (!life.on) {
+        for (const glow of glows.values()) glow.stop();
+        glows.clear();
+        return;
+      }
+      if (performance.now() - mountedAt >= WARM_UP_MS) {
+        const plan = planBatch({
+          added: batch.added.filter((element) => element.isConnected && inContent(element)),
+          removed: batch.removed,
+          local: recentLocal() !== null,
+          isText,
+        });
+        for (const element of plan.unforms) unformThere(element);
+        for (const element of plan.forms) formHere(element);
+      }
+      syncGlows(batch.marked);
+      remember(batch.added.length + batch.removed.length > 0);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(flush);
+    };
+
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") {
+          const element = record.target as Element;
+          if (element.getAttribute("data-ai-region") === "true") marked.push(element);
+          continue;
+        }
+        collect(record.addedNodes, isObject, added);
+        // A removed node has left its parent, so selectors like "list > li"
+        // no longer match it: what was on screen is known by its last place.
+        for (const node of record.removedNodes) {
+          if (!(node instanceof Element)) continue;
+          if (lastPlace.has(node)) {
+            removed.push(node);
+            continue;
+          }
+          const inner = node.getElementsByTagName("*");
+          for (let index = 0; index < inner.length && index < 400; index += 1) {
+            if (lastPlace.has(inner[index])) removed.push(inner[index]);
+          }
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) {
+            if (node.matches(AI_REGION)) marked.push(node);
+            else marked.push(...node.querySelectorAll(AI_REGION));
+          }
+        }
+      }
+      schedule();
+    });
+    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-ai-region"] });
+
+    /* Drags leave a wake; a drop settles. */
+    let drag: { x: number; y: number; t: number; moved: boolean; live: boolean; element: Element } | null = null;
+    let wakeFrame = 0;
+    let pendingWake: [number, number, number, number] | null = null;
+    const onPointerDown = (event: PointerEvent) => {
+      markLocal([event.clientX, event.clientY]);
+      const target = event.target instanceof Element ? event.target : null;
+      const grabbable = target?.closest(`${FIELD_OBJECTS}, [draggable="true"], [data-spectra-part]`);
+      drag =
+        grabbable && inContent(grabbable)
+          ? { x: event.clientX, y: event.clientY, t: event.timeStamp, moved: false, live: true, element: grabbable }
+          : null;
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!drag?.live || !(event.buttons & 1) || !life.on) return;
+      const dt = Math.max(1, event.timeStamp - drag.t);
+      const dx = event.clientX - drag.x;
+      const dy = event.clientY - drag.y;
+      if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+      if (!drag.moved) {
+        // Picked up: it lifts off the page while it is carried (CSS, [data-lifted]).
+        drag.element.setAttribute("data-lifted", "true");
+      }
+      drag.moved = true;
+      pendingWake = [event.clientX, event.clientY, (dx / dt) * 1000, (dy / dt) * 1000];
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      drag.t = event.timeStamp;
+      if (!wakeFrame) {
+        wakeFrame = requestAnimationFrame(() => {
+          wakeFrame = 0;
+          if (pendingWake) life.wake(...pendingWake);
+          pendingWake = null;
+        });
+      }
+    };
+    const drop = (x: number, y: number) => {
+      if (!drag) return;
+      // Put down: it settles, and the field answers where it landed.
+      const element = drag.element;
+      if (element.hasAttribute("data-lifted")) {
+        element.removeAttribute("data-lifted");
+        element.setAttribute("data-settling", "true");
+        window.setTimeout(() => element.removeAttribute("data-settling"), SETTLE_MS);
+      }
+      if (drag.moved && life.on) life.pulse(x, y, 0.55);
+      drag = null;
+    };
+    const onPointerUp = (event: PointerEvent) => drop(event.clientX, event.clientY);
+    // A native drag (the item rails) ends with dragend, not pointerup.
+    const onDragEnd = (event: DragEvent) => {
+      if (drag) drag.moved = true;
+      drop(event.clientX, event.clientY);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.length === 1 || event.key === "Enter" || event.key === "Backspace" || event.key === "Delete") markLocal(null);
+    };
+    let scrollFrame = 0;
+    const onScroll = () => {
+      if (!scrollFrame) scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        moveGlows();
+        remember(true);
+      });
+    };
+    root.addEventListener("pointerdown", onPointerDown, true);
+    root.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, true);
+    root.addEventListener("dragend", onDragEnd, true);
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    window.addEventListener("resize", onScroll);
+    remember(true);
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(wakeFrame);
+      cancelAnimationFrame(scrollFrame);
+      for (const glow of glows.values()) glow.stop();
+      glows.clear();
+      root.removeEventListener("pointerdown", onPointerDown, true);
+      root.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      root.removeEventListener("dragend", onDragEnd, true);
+      drag?.element.removeAttribute("data-lifted");
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [enabled, rootRef]);
+}

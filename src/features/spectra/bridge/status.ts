@@ -286,15 +286,6 @@ export function isPresentationReady(key: SyncPresentation["key"]): boolean {
   );
 }
 
-/** Quiet labels stay off the header; every other state is spoken in place. */
-export function headerSyncMessage(presentation: SyncPresentation): string | undefined {
-  if (isPresentationReady(presentation.key) && presentation.key !== "live") {
-    return undefined;
-  }
-  if (presentation.key === "live") return undefined;
-  return presentation.label;
-}
-
 export function presentSync(input: PresentSyncInput): SyncPresentation {
   if (input.readOnly) {
     return {

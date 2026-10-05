@@ -68,12 +68,12 @@ describe("application command dispatcher", () => {
     });
 
     await dispatch("app.settings.change", {
-      patch: { workbar: { document: { expanded: true } } },
+      patch: { workbar: { document: { groupOrder: { General: ["Font", "Paragraph"] } } } },
       section: "workbar",
     });
 
     expect(replacePreferences).toHaveBeenCalledWith(expect.objectContaining({
-      workbar: { document: { expanded: true } },
+      workbar: { document: { groupOrder: { General: ["Font", "Paragraph"] } } },
     }));
   });
 
@@ -178,7 +178,7 @@ describe("application command dispatcher", () => {
         replacePreferences: vi.fn(),
         preferences: DEFAULT_SPECTRA_PREFERENCES,
       });
-      await dispatch("app.settings.change", { patch: { workbar: { document: { expanded: true } } } });
+      await dispatch("app.settings.change", { patch: { workbar: { document: { groupOrder: { General: ["Font", "Paragraph"] } } } } });
       await dispatch("app.sync.policy.change", { targetIds: ["work-1"], patch: { preset: "both" } });
       await dispatch("app.memory.write", { action: "create", content: "Prefer concise answers" });
       await dispatch("app.sharing.change", { resourceType: "artifact", resourceId: "work-1", action: "revoke", grantId: "grant-1" });

@@ -448,7 +448,6 @@ export function CodeStudio({
   readOnly: readOnlyProp,
   collaborationDocument,
   synchronizationReady,
-  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -460,7 +459,6 @@ export function CodeStudio({
   readOnly: boolean;
   collaborationDocument?: Y.Doc;
   synchronizationReady: boolean;
-  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   // The work registry is the single authority on what this viewer may do.

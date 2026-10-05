@@ -183,7 +183,7 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
 
 const WORKBAR_TYPES = [
   "document", "sheets", "presentation", "quiz", "flashcard_deck",
-  "planner_task", "code", "whiteboard", "agent",
+  "planner_task", "timetable", "code", "whiteboard", "agent",
 ] as const;
 
 const KNOWN_COMMAND_IDS = knownCapabilityIds();
@@ -218,7 +218,6 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
         options={WORKBAR_TYPES.map((value) => ({ value, label: value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) }))}
         onChange={(value) => setType(value as typeof type)}
       />
-      <ToggleRow label="Expanded workbar" checked={layout.expanded === true} onCheckedChange={(expanded) => save({ ...layout, expanded })} />
       {tabs.map((tab, index) => (
         <SettingRow key={tab} label={`${tab} tab`} description="Tab order" control={<div className="flex items-center gap-1"><Button aria-label={`Move ${tab} earlier`} size="sm" variant="ghost" disabled={index === 0} onClick={() => { const next = [...tabs]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; save({ ...layout, tabOrder: next }); }}>←</Button><Button aria-label={`Move ${tab} later`} size="sm" variant="ghost" disabled={index === tabs.length - 1} onClick={() => { const next = [...tabs]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; save({ ...layout, tabOrder: next }); }}>→</Button></div>} />
       ))}
@@ -239,29 +238,13 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
                   saveCommand(commandId, { ...override, label: label.length ? label : undefined });
                 }}
               />
-              <SelectField
-                ariaLabel={`Button size for ${shippedName}`}
-                value={override.density ?? "default"}
-                onChange={(density) => {
-                  saveCommand(commandId, {
-                    ...override,
-                    density: density === "compact" || density === "medium" ? density : undefined,
-                  });
-                }}
-                options={[
-                  { value: "default", label: "Default size" },
-                  { value: "compact", label: "Compact" },
-                  { value: "medium", label: "Medium" },
-                ]}
-                triggerClassName="min-w-[144px]"
-              />
               <Button size="sm" variant="ghost" onClick={() => saveCommand(commandId, { ...override, pinned: !override.pinned })}>{override.pinned ? "Unpin" : "Pin"}</Button>
               <Button size="sm" variant="ghost" onClick={() => saveCommand(commandId, { ...override, hidden: !override.hidden })}>{override.hidden ? "Restore" : "Remove"}</Button>
             </div>
           </div>
         );
       })}
-      <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, tab order, densities, and hidden controls for this work type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
+      <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, the order of tabs, groups and commands, and hidden controls for this work type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
     </SettingGroup>
   );
 }

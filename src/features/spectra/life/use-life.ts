@@ -234,7 +234,7 @@ export function markNavigation() {
 
 /** Where the prism is, for light that leaves it. */
 export function prismPoint(): Point {
-  const prism = typeof document === "undefined" ? null : document.querySelector<HTMLElement>("[data-island] canvas");
+  const prism = typeof document === "undefined" ? null : document.querySelector<HTMLElement>("[data-island-prism]");
   const r = prism?.getBoundingClientRect();
   return r && r.width ? [r.left + r.width / 2, r.top + r.height / 2] : [window.innerWidth / 2, window.innerHeight - 40];
 }

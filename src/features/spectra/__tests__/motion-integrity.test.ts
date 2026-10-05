@@ -36,6 +36,12 @@ const ALL_KEYFRAMES = [
 /** Properties keyframes may animate: composite or paint only, never layout. */
 const ALLOWED_PROPS = new Set([
   "transform",
+  // The individual transform properties are composited like transform. A
+  // keyframe on `scale` lifts a board node without overriding the transform
+  // that places it.
+  "scale",
+  "translate",
+  "rotate",
   "opacity",
   "box-shadow",
   "filter",

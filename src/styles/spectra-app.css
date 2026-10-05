@@ -12598,12 +12598,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   flex-wrap: nowrap;
 }
 
-@container (max-width: 780px) {
-  .spectra-artifact-sync-status {
-    display: none !important;
-  }
-}
-
 .spectra-artifact-main {
   /* The workbar lives above the scrollport. Overflow starts in
      `.spectra-editor-body`, so the 42px bar never covers the canvas. */
@@ -15385,17 +15379,323 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   background: var(--brand-primary);
 }
 
-/* The expanded form gives each command group a labelled column, so it needs a
-   taller command rail — the tab rail is unchanged. */
-.spectra-editor-workbar[data-workbar-expanded="true"] {
-  height: 104px;
-  min-height: 104px;
-  grid-template-rows: 26px minmax(60px, auto);
+/* Groups (EDITORS.md, "The workbar"). A hairline divides one group from the
+   next, the way a ribbon's groups read as units; undo and redo lead. */
+.spectra-workbar-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
 }
 
-.spectra-editor-workbar[data-workbar-expanded="true"]
-  .spectra-workbar-rail-commands {
-  align-items: flex-end;
+.spectra-workbar-group + .spectra-workbar-group {
+  margin-left: 5px;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 6px;
+}
+
+.spectra-workbar-group-menu {
+  color: var(--text-secondary);
+}
+
+.spectra-workbar-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 650;
+}
+
+/* A contextual tab belongs to the selected object, so it carries the accent
+   even when it is not the open tab. */
+.spectra-command-tab[data-contextual="true"] {
+  color: color-mix(in oklab, var(--brand-primary) 72%, var(--text-secondary));
+}
+
+.spectra-command-tab[data-contextual="true"]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-primary);
+}
+
+/* Customise mode: every group open, each command a chip that can be dragged or
+   moved with the arrow keys. The bar may scroll sideways only here. */
+.spectra-workbar-customize {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.spectra-workbar-chip,
+.spectra-workbar-group-handle {
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--control-radius);
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: grab;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-workbar-group-handle {
+  border-style: solid;
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+
+.spectra-workbar-chip[data-fixed] {
+  border-style: solid;
+  cursor: default;
+  opacity: 0.7;
+}
+
+.spectra-workbar-chip:focus-visible,
+.spectra-workbar-group-handle:focus-visible,
+.spectra-workbar-chip:hover,
+.spectra-workbar-group-handle:hover {
+  border-color: var(--brand-primary);
+}
+
+.spectra-workbar-chip[data-dragging] {
+  opacity: 0.45;
+}
+
+.spectra-workbar-group[data-drop-target] {
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--brand-primary) 5%, transparent);
+}
+
+.spectra-workbar-done {
+  color: var(--brand-primary);
+}
+
+/* Things in a work are physical (EDITORS.md): what you pick up lifts off
+   the page while carried and settles when put down. Keyframes on `scale`
+   and `filter` compose with the transform that places a node and leave each
+   editor's own transitions alone. */
+[data-lifted] {
+  scale: 1.02;
+  filter: drop-shadow(0 10px 18px color-mix(in oklab, var(--text-primary) 16%, transparent));
+  animation: spectra-lift var(--motion-base) var(--ease-out-expo);
+}
+
+[data-settling] {
+  animation: spectra-settle var(--motion-slow) var(--ease-out-expo);
+}
+
+@keyframes spectra-lift {
+  from {
+    scale: 1;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+}
+
+@keyframes spectra-settle {
+  from {
+    scale: 1.02;
+    filter: drop-shadow(0 10px 18px color-mix(in oklab, var(--text-primary) 16%, transparent));
+  }
+  60% {
+    scale: 0.995;
+  }
+}
+
+/* The status control (EDITORS.md): pinned in every artifact header. The
+   glyph changes in place; words slide out of it while something happens. */
+.spectra-status-control {
+  display: inline-flex;
+  height: 32px;
+  max-width: 15rem;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--control-radius);
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  outline: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard);
+}
+
+.spectra-status-control:hover,
+.spectra-status-control[data-state="open"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-status-control:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+/* Saved is quiet ink; a problem speaks in its hue. */
+.spectra-status-control[data-status="saved"] {
+  color: var(--text-tertiary);
+}
+
+.spectra-status-control[data-status="problem"],
+.spectra-status-control[data-status="versions"],
+.spectra-status-control[data-status="waitingOffice"] {
+  color: var(--status-hue);
+}
+
+.spectra-status-glyph {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.spectra-status-glyph-layer {
+  display: grid;
+  grid-area: 1 / 1;
+  place-items: center;
+  animation: spectra-status-glyph-in var(--motion-base) var(--ease-out-expo) both;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-status-glyph-layer[data-leaving] {
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+@keyframes spectra-status-glyph-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.spectra-status-words {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transform-origin: left center;
+  animation: spectra-status-words-out var(--motion-base) var(--ease-out-expo) both;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-status-control[data-words="leaving"] .spectra-status-words {
+  opacity: 0;
+  transform: translateX(-8px) scaleX(0.8);
+}
+
+/* The words come out of the glyph, not from nowhere. */
+@keyframes spectra-status-words-out {
+  from {
+    opacity: 0;
+    transform: translateX(-8px) scaleX(0.8);
+  }
+}
+
+.spectra-status-popover-head {
+  display: flex;
+  gap: 10px;
+  padding: 12px 12px 10px;
+}
+
+.spectra-status-popover-glyph {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, currentColor 10%, transparent);
+}
+
+.spectra-status-facts {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--border-subtle);
+  margin: 0;
+  padding: 10px 12px;
+  font-size: var(--text-micro);
+}
+
+.spectra-status-facts > div {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 8px;
+}
+
+.spectra-status-facts dt {
+  color: var(--text-tertiary);
+}
+
+.spectra-status-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.spectra-status-details {
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 12px;
+}
+
+.spectra-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px;
+}
+
+.spectra-status-actions button {
+  height: 28px;
+  border-radius: var(--control-radius);
+  padding: 0 10px;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.spectra-status-actions button:hover {
+  background: var(--bg-hover);
+}
+
+.spectra-status-actions button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.spectra-status-actions button[data-primary] {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.spectra-status-actions button:disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 /* Genuinely trailing: status, a sync pill, the primary verb. Never commands. */
@@ -15405,36 +15705,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-
-.spectra-workbar-expanded-groups {
-  display: flex;
-  min-width: 0;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.spectra-workbar-command-group {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  border-left: 1px solid var(--border-subtle);
-  padding-left: 7px;
-}
-
-.spectra-workbar-command-group-label {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.spectra-workbar-command-group-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
 }
 
 .spectra-workbar-progress {
@@ -15944,19 +16214,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   overflow-y: auto;
 }
 
-/* Per-command density is a real preference, so it has to change something.
-   `compact` sheds the label at every width and keeps the icon; `medium` keeps
-   the label even where the container query would otherwise shed it. */
-.spectra-artifact-workbar-action[data-workbar-density="compact"] {
-  width: 32px;
-  justify-content: center;
-  padding-inline: 0;
-}
-
-.spectra-artifact-workbar-action[data-workbar-density="compact"] span {
-  font-size: 0;
-}
-
 /* Label shedding. The accessible name stays on the button, so a shed label
    costs nothing to a screen reader or to a pointer with a tooltip. */
 @container artifact-workbar (max-width: 720px) {
@@ -15975,20 +16232,6 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   }
 
   .spectra-workbar-mode span {
-    font-size: var(--text-micro);
-  }
-}
-
-/* `medium` is the user saying "keep this one legible". It has to outrank the
-   shedding rules above, so it is declared after them. */
-@container artifact-workbar (max-width: 720px) {
-  .spectra-artifact-workbar-action[data-workbar-density="medium"] {
-    width: auto;
-    justify-content: flex-start;
-    padding-inline: 9px;
-  }
-
-  .spectra-artifact-workbar-action[data-workbar-density="medium"] span {
     font-size: var(--text-micro);
   }
 }

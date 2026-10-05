@@ -17,7 +17,7 @@ const row = (value: unknown): Row => value && typeof value === "object" && !Arra
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 // Moving items to the Trash is undoable, so it asks only when desktop files
 // are affected (counted below), like organising the library.
-export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes"]);
+export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "remove_device"]);
 const localEffectCommands = new Set(["organize_library", "change_sync_policy", "delete_library_items"]);
 
 function semanticInput(input: Row) {
@@ -59,6 +59,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       break;
     }
     case "delete_library_items": return { name: "orgTree:trash", args: { nodeIds: targetIds } };
+    case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
     case "write_memory": return args.action === "create"
       ? { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } }

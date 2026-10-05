@@ -9,6 +9,7 @@ import {
   SERVER_PLUMBING,
   aiAuthorityForApp,
   artifactCapabilityReach,
+  catalogCommand,
   catalogCommandForApp,
   serverFunctionCoverage,
 } from "../commands/ai-reach";
@@ -68,10 +69,11 @@ describe("command parity", () => {
   });
 
   it("never lets the AI change its own permissions, credentials or account", () => {
-    for (const id of ["app.security.authority-mode", "app.bridge.policy.change", "app.security.credentials", "app.security.delete-account", "app.bridge.pair"]) {
+    for (const id of ["app.security.authority-mode", "app.security.credentials", "app.security.delete-account"]) {
       const entry = catalogCommandForApp(id);
       expect(entry?.reach.kind, id).toBe("user");
     }
+    expect(catalogCommand("devices.native_writes")?.reach.kind).toBe("user");
     expect(COMMAND_CATALOG.filter((entry) => entry.area === "permissions").every((entry) => entry.reach.kind === "user")).toBe(true);
   });
 

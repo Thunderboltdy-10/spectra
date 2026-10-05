@@ -18,7 +18,10 @@ import { AI_SYNC_PURPOSE_KINDS, aiSyncPurpose } from "../../../../shared/school-
 const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: string; event?: string; status?: string }> = [
   { command: "navigate_spectra", args: { destination: "calendar" }, event: "navigate_spectra" },
   { command: "add_comment", args: { artifactId: "artifact", body: "Review this paragraph.", anchor: { regionId: "document:body/0" } }, mutation: "artifactComments:create", event: "comment_added" },
-  { command: "setup_bridge", args: { action: "pair" }, event: "bridge_setup", status: "needs-human" },
+  { command: "read_devices", args: {} },
+  { command: "pair_device", args: {}, event: "devices_action", status: "requested" },
+  { command: "control_device", args: { action: "retry_folder", grantId: "grant" }, event: "devices_action", status: "requested" },
+  { command: "remove_device", args: { deviceId: "device" }, mutation: "bridge:revokeDevice", event: "devices_changed" },
   { command: "organize_library", args: { action: "rename", targetIds: ["node"], name: "Sources" }, mutation: "orgTree:rename" },
   { command: "delete_library_items", args: { targetIds: ["node"] }, mutation: "orgTree:trash" },
   { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } }, mutation: "accountPreferences:writeLayer" },

@@ -9,6 +9,7 @@ import {
   type CloudOverview,
   type LocalBridge,
 } from "../devices-model";
+import type { StoredPermissionPreferences } from "../../settings/schema/ai-permissions";
 import { bridgeDownloadUrl, bridgePlatform, type BridgeStatus } from "../../bridge/client";
 
 const NOW = 1_800_000_000_000;
@@ -155,7 +156,7 @@ describe("devices model", () => {
 });
 
 describe("native writes", () => {
-  const prefs = { permissionFullControl: false, permissionAllow: [], permissionDeny: [] } as const;
+  const prefs: StoredPermissionPreferences = { permissionFullControl: false, permissionAllow: [], permissionDeny: [] };
   it("reads never unless files write back, then ask or always from the Bridge files permission", () => {
     expect(nativeWritesChoice("manual", { ...prefs, permissionAllow: [] })).toBe("never");
     expect(nativeWritesChoice("bidirectional", { ...prefs, permissionAllow: [] })).toBe("ask");

@@ -177,11 +177,32 @@ const APP_SPECS: readonly AppSpec[] = [
     choreography: { target: "settings-control", region: "continueCurrentConversation" },
   },
   {
-    id: "app.bridge.open-settings",
-    description: "Open the existing Files and devices surface for Bridge setup and status.",
+    id: "app.devices.open",
+    description: "Open the Devices page without changing anything.",
     risk: "safe",
     availability: "readable",
-    choreography: { target: "settings-control", region: "devices" },
+    choreography: { target: "devices-route" },
+  },
+  {
+    id: "app.devices.pair",
+    description: "Connect this computer through Spectra Bridge; the user confirms the code on the computer.",
+    risk: "confirm",
+    availability: "readable",
+    choreography: { target: "devices-route", region: "pair" },
+  },
+  {
+    id: "app.devices.add-folder",
+    description: "Open the folder picker on this computer through Spectra Bridge.",
+    risk: "safe",
+    availability: "readable",
+    choreography: { target: "devices-route", region: "folders" },
+  },
+  {
+    id: "app.devices.pause",
+    description: "Pause or resume syncing for every folder on this computer.",
+    risk: "safe",
+    availability: "readable",
+    choreography: { target: "devices-route", region: "syncing" },
   },
   {
     id: "app.library.delete",
@@ -294,30 +315,6 @@ const APP_SPECS: readonly AppSpec[] = [
     risk: "safe",
     availability: "readable",
     choreography: { target: "calendar-route" },
-  },
-  {
-    id: "app.bridge.pair",
-    description:
-      "Bridge pairing changes local security authority and must be performed by the user.",
-    risk: "always-confirm",
-    availability: "readable",
-    choreography: { target: "settings-security" },
-  },
-  {
-    id: "app.bridge.setup",
-    description:
-      "Prepare the exact Bridge settings handoff for pairing, folder selection, or a truthful recovery retry; the user completes local consent.",
-    risk: "safe",
-    availability: "readable",
-    choreography: { target: "settings-security", region: "bridge-setup" },
-  },
-  {
-    id: "app.bridge.policy.change",
-    description:
-      "Change the Bridge trust preset through the existing account policy path.",
-    risk: "always-confirm",
-    availability: "readable",
-    choreography: { target: "settings-control", region: "bridge-trust" },
   },
   {
     id: "app.security.credentials",

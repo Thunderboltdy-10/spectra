@@ -6,6 +6,7 @@ import type {
 } from "./registry";
 import { spectraToolRegistry } from "./registry";
 import { preferenceLayerValuesSchema } from "../../settings/schema/preferences";
+import { FOLDER_ACTIONS, LOCAL_DEVICE_ACTIONS } from "../../devices/actions";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
@@ -288,9 +289,14 @@ export function registerApplicationTools() {
     concurrencyDomain: "application_command",
   };
 
-  define({ ...appActionDefaults, id: "navigate_spectra", title: "Navigate Spectra", description: "Request a registered Spectra route or work target. The user's Follow AI preference controls whether this request changes their viewport.", inputSchema: z.object({ destination: z.enum(["library", "calendar", "settings", "workspace", "artifact"]), targetId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
+  define({ ...appActionDefaults, id: "navigate_spectra", title: "Navigate Spectra", description: "Request a registered Spectra route or work target. The user's Follow AI preference controls whether this request changes their viewport.", inputSchema: z.object({ destination: z.enum(["library", "calendar", "settings", "devices", "workspace", "artifact"]), targetId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
   define({ ...appActionDefaults, id: "add_comment", title: "Add comment", description: "Add a durable, visibly AI-attributed comment or reply through the artifact comment system. Read the target artifact first and use a precise semantic region id from that content; use work:root only for a comment about the whole artifact. Set parentCommentId only when replying to an existing thread. Do not invent a quoted excerpt.", inputSchema: z.object({ artifactId: z.string().min(1), body: z.string().trim().min(1).max(20_000), anchor: z.object({ regionId: z.string().trim().min(1).max(240), fallbackExcerpt: z.string().max(500).optional() }), parentCommentId: z.string().optional() }), authorityTarget: "content" });
-  define({ ...appActionDefaults, id: "setup_bridge", title: "Prepare Bridge setup", description: "Open the exact Bridge settings handoff for pairing, folder selection, or a retry. The user still completes pairing, folder grants, and any write-enabling consent.", inputSchema: z.object({ action: z.enum(["pair", "select-location", "retry-connection", "retry-folder"]), grantId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
+  define({ ...appActionDefaults, id: "read_devices", title: "Read devices", description: "Read the user's computers connected through Spectra Bridge: state, folders, last sync and any problem, in plain words.", inputSchema: z.object({}), risk: "low", approval: "never", authorityTarget: "navigation" });
+  define({ ...appActionDefaults, id: "control_device", title: "Control a device", description: "Ask Spectra on the user's computer to add, retry, pause, resume or remove a folder, pause or resume syncing, open Bridge's logs, or install a Bridge update. The computer runs it through its local Bridge.", inputSchema: z.object({ action: z.enum(LOCAL_DEVICE_ACTIONS), grantId: z.string().trim().min(1).max(200).optional(), deviceId: z.string().trim().min(1).max(200).optional() }).superRefine((value, ctx) => {
+    if (FOLDER_ACTIONS.has(value.action) && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A folder grant id is required." });
+  }), risk: "low", approval: "never", authorityTarget: "navigation" });
+  define({ ...appActionDefaults, id: "pair_device", title: "Connect this computer", description: "Start connecting the computer the user has Spectra open on. The user confirms the code on the computer; Spectra never confirms it.", inputSchema: z.object({}), risk: "medium", approval: "always", authorityTarget: "settings" });
+  define({ ...appActionDefaults, id: "remove_device", title: "Remove a device", description: "Unpair one of the user's computers and stop its syncing. Files on that computer stay.", inputSchema: z.object({ deviceId: z.string().trim().min(1).max(200) }), risk: "high", approval: "always", authorityTarget: "settings" });
   define({ ...appActionDefaults, id: "organize_library", title: "Organize Library", description: "Create, rename, move, or link Library nodes through the canonical organization operation path.", inputSchema: z.object({ action: z.enum(["create_folder", "rename", "move", "link"]), targetIds: z.array(z.string()).max(100).default([]), destinationId: z.string().optional(), name: z.string().trim().min(1).max(200).optional() }).superRefine((value, ctx) => {
     if (value.action === "create_folder" && !value.name) ctx.addIssue({ code: "custom", path: ["name"], message: "A folder name is required." });
     if (value.action !== "create_folder" && value.targetIds.length === 0) ctx.addIssue({ code: "custom", path: ["targetIds"], message: "At least one target is required." });
@@ -551,11 +557,6 @@ export function registerApplicationTools() {
   */
   for (const [id, title, reason] of [
     [
-      "pair_bridge",
-      "Pair Spectra Bridge",
-      "Bridge pairing and revocation are never AI-performable.",
-    ],
-    [
       "change_credentials",
       "Change credentials",
       "Credential changes are never AI-performable.",
@@ -665,5 +666,5 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
-  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "create_calendar_personal_event", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "setup_bridge", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "add_comment", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
+  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "create_calendar_personal_event", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "read_devices", "control_device", "pair_device", "remove_device", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "import_managebac_resource", "change_managebac_mapping", "insert_reference", "add_comment", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

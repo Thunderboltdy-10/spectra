@@ -32,7 +32,7 @@ export type AiLocation = {
 
 export type AiSurfaceLocation = {
   actorId?: string;
-  route: "library" | "calendar" | "settings" | "workspace" | "artifact";
+  route: "library" | "calendar" | "settings" | "workspace" | "artifact" | "devices";
   target?: string;
   note?: string;
   updatedAt: number;

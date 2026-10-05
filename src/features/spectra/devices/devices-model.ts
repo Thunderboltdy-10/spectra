@@ -314,3 +314,26 @@ export function nativeWritesPlan(
   if (choice === "never") return { preset: writesBack(direction) ? "spectra" : null, permission: null };
   return { preset: writesBack(direction) ? null : "both", permission: choice === "always" ? "allow" : "ask" };
 }
+
+/**
+ * Every paired computer for Spectra AI, in plain words with the ids its
+ * device actions take. The server cannot see which computer the user is on,
+ * so each is described from what it last reported.
+ */
+export function describeDevicesForAi(cloud: CloudOverview | null | undefined, now: number): string {
+  const { others } = devicesModel({ local: { reachability: "not-set-up", status: null }, cloud, now });
+  if (!others.length)
+    return "No computer is connected. The user can connect the one they are on from the Devices page, or ask Spectra to (devices action pair).";
+  const described = others.map((device) => {
+    const lines = [`${device.name} (${device.platformLabel}, deviceId ${device.id}): ${device.label}. ${device.detail}`];
+    if (device.lastSyncAt) lines.push(`Last sync ${timeAgo(device.lastSyncAt, now)}.`);
+    if (device.version) lines.push(`Spectra Bridge ${device.version}${device.updateRequired ? ", out of date" : ""}.`);
+    for (const folder of device.folders)
+      lines.push(`- Folder ${folder.name} (grantId ${folder.id})${folder.detail ? `: ${folder.detail}` : ""}`);
+    return lines.join("\n");
+  });
+  return [
+    ...described,
+    "Folder, pause, logs and update actions run on the computer where the user has Spectra open with Bridge.",
+  ].join("\n\n");
+}

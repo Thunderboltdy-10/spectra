@@ -2885,7 +2885,7 @@ export function SpectraShell({
     function onAiNavigate(detail: {
       actorId?: string;
       intent?: "explicit";
-      route: "library" | "calendar" | "settings" | "workspace" | "artifact";
+      route: "library" | "calendar" | "settings" | "workspace" | "artifact" | "devices";
       target?: string;
     }) {
       if (detail.intent !== "explicit" && !isFollowingAi()) return;
@@ -2904,6 +2904,8 @@ export function SpectraShell({
         );
       } else if (detail.route === "calendar") {
         router.push("/calendar");
+      } else if (detail.route === "devices") {
+        router.push(detail.target === "connect" ? "/devices?connect=1" : "/devices");
       }
     }
     const refresh = () => {

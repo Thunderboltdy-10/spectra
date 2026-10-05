@@ -87,10 +87,12 @@ describe("read_thread tool", () => {
     const { run } = tools(seeded());
     expect((await run("read_thread", { messageId: "m2" })).outcome.content).toBe("[m2] assistant: Friday, per your teacher.");
     expect((await run("read_thread", { before: "m2" })).outcome.content).toBe("[m1] user: When is the photosynthesis essay due?");
+    expect((await run("read_thread", { after: "m1" })).outcome.content).toBe("[m2] assistant: Friday, per your teacher.");
   });
 
   it("takes one view at a time", () => {
     const { byName } = tools(seeded());
-    expect(() => byName.get("read_thread")!.parse!({ query: "due", messageId: "m1" })).toThrow(/one of query, messageId or before/);
+    expect(() => byName.get("read_thread")!.parse!({ query: "due", messageId: "m1" })).toThrow(/one of query, messageId, before or after/);
+    expect(() => byName.get("read_thread")!.parse!({ before: "m2", after: "m1" })).toThrow(/one of query, messageId, before or after/);
   });
 });

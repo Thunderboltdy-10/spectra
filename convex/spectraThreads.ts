@@ -1314,6 +1314,49 @@ export const listMessages = query({
   },
 });
 
+/**
+ * Messages next to one message: the older ones before it or the newer ones after it, in
+ * conversation order. Lets the AI read on from a passage it found, in either direction.
+ */
+export const listMessagesFrom = query({
+  args: {
+    threadId: v.id("spectraThreads"),
+    messageId: v.id("spectraMessages"),
+    direction: v.union(v.literal("older"), v.literal("newer")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    const anchor = await ctx.db.get(args.messageId);
+    if (!anchor || anchor.threadId !== thread._id || (anchor.schoolId && anchor.schoolId !== actor.schoolId)) throw new Error("Message not found");
+    const limit = Math.max(1, Math.min(Math.round(Number.isFinite(args.limit) ? args.limit! : MESSAGE_PAGE_LIMIT), 80));
+    const older = args.direction === "older";
+    // The index orders by (createdAt, _creationTime), so messages written in the same
+    // millisecond still sit on one side of the anchor.
+    const beyond = (message: Doc<"spectraMessages">) =>
+      message.createdAt === anchor.createdAt
+        ? older ? message._creationTime < anchor._creationTime : message._creationTime > anchor._creationTime
+        : true;
+    const ordered = ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_created", (q) => older
+        ? q.eq("threadId", thread._id).lte("createdAt", anchor.createdAt)
+        : q.eq("threadId", thread._id).gte("createdAt", anchor.createdAt))
+      .order(older ? "desc" : "asc");
+    const messages: Doc<"spectraMessages">[] = [];
+    let more = false;
+    for await (const message of ordered) {
+      if (message._id === anchor._id || !beyond(message)) continue;
+      if (messages.length === limit) {
+        more = true;
+        break;
+      }
+      messages.push(message);
+    }
+    return { messages: older ? messages.reverse() : messages, more };
+  },
+});
+
 async function messageContentRevision(content: string) {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");

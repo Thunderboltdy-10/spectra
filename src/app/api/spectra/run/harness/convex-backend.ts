@@ -546,9 +546,14 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const threadId = input.threadId ?? this.input.threadId;
     if (input.query) return this.findInThread(input.query, threadId);
     if (!threadId) return "There is no conversation to read. Find one with search (kinds: thread).";
+    const from = input.before ?? input.after;
     const result = (await executeThreadRead(this.actorClerkId, {
       threadId,
-      ...(input.messageId ? { messageId: input.messageId } : input.before ? { before: input.before } : {}),
+      ...(input.messageId
+        ? { messageId: input.messageId }
+        : from
+          ? { from, direction: input.after ? "newer" : "older" }
+          : {}),
       ...(input.limit ? { limit: input.limit } : {}),
     })) as Record<string, unknown>;
     if (result.ok === false) return `Could not read that conversation: ${text(result.message) || text(result.code)}`;
@@ -558,13 +563,21 @@ export class ConvexHarnessBackend implements HarnessBackend {
       return clip(`[${input.messageId}] ${role}: ${text(result.content)}${more}`);
     }
     const messages = rows(result.messages);
-    if (!messages.length) return "No earlier messages.";
+    if (!messages.length) return input.after ? "No later messages." : "No earlier messages.";
     const lines = messages.map((message) => {
       const role = text(message.role) === "assistant" ? "Spectra" : "User";
       return `[${String(message.messageId ?? "")}] ${role}: ${text(message.content).slice(0, 2_000)}`;
     });
-    const before = text(result.before);
-    return clip(`${lines.join("\n\n")}${before ? `\n\n(Older messages: read_thread with before "${before}")` : ""}`);
+    const thread = threadId === this.input.threadId ? "" : `threadId: "${threadId}", `;
+    const first = String(messages[0]!.messageId ?? "");
+    const last = String(messages[messages.length - 1]!.messageId ?? "");
+    // Paging on in the direction read, and back the way it came when it started from a message.
+    const more = result.more === true;
+    const pages = [
+      (input.after ? from : more) ? `older: read_thread {${thread}before: "${first}"}` : "",
+      (input.after ? more : Boolean(from)) ? `newer: read_thread {${thread}after: "${last}"}` : "",
+    ].filter(Boolean);
+    return clip(`${lines.join("\n\n")}${pages.length ? `\n\n(Read on: ${pages.join("; ")})` : ""}`);
   }
 
   /** Find a passage by meaning and words: in one conversation, or across them all. */
@@ -594,7 +607,9 @@ export class ConvexHarnessBackend implements HarnessBackend {
       [
         `Best match${threadId ? "" : `, in "${best.title}" (threadId ${bestThread})`}${messageId ? `, message ${messageId}` : ""}:`,
         passage,
-        messageId ? `(Read around it with read_thread {threadId: "${bestThread}", before: "${messageId}"}.)` : "",
+        messageId
+          ? `(Read on from it with read_thread {threadId: "${bestThread}", after: "${messageId}"}, or the messages before it with before: "${messageId}".)`
+          : "",
       ]
         .filter(Boolean)
         .join("\n") + others + note,

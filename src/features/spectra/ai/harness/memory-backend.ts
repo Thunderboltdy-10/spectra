@@ -154,6 +154,12 @@ export class MemoryBackend implements HarnessBackend {
       const message = thread.find((entry) => entry.id === input.messageId);
       return message ? `[${message.id}] ${message.role}: ${message.content}` : "That message is not in this conversation.";
     }
+    if (input.after) {
+      const start = thread.findIndex((entry) => entry.id === input.after);
+      const later = start < 0 ? [] : thread.slice(start + 1, start + 1 + (input.limit ?? 20));
+      if (!later.length) return "No later messages.";
+      return later.map((message) => `[${message.id}] ${message.role}: ${message.content}`).join("\n");
+    }
     const end = input.before ? thread.findIndex((entry) => entry.id === input.before) : thread.length;
     const messages = thread
       .slice(0, end < 0 ? thread.length : end)

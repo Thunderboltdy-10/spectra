@@ -102,6 +102,8 @@ export type ThreadReadRequest = {
   messageId?: string;
   /** Read messages older than this message id. */
   before?: string;
+  /** Read messages newer than this message id: page on from a passage. */
+  after?: string;
   limit?: number;
 };
 

@@ -159,13 +159,13 @@ export function searchTool(session: HarnessSession): HarnessTool<SearchArgs> {
   };
 }
 
-type ThreadArgs = { threadId?: string; query?: string; messageId?: string; before?: string; limit?: number };
+type ThreadArgs = { threadId?: string; query?: string; messageId?: string; before?: string; after?: string; limit?: number };
 
 export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs> {
   return {
     name: "read_thread",
     description:
-      "Read earlier messages of this conversation (or another, by threadId) when the context above leaves them out: messageId reads one whole message (from a search result), before (a message id) reads older messages, and query finds the passage that best matches, by meaning and words.",
+      "Read earlier messages of this conversation (or another, by threadId) when the context above leaves them out: messageId reads one whole message (from a search result), before or after (a message id) read the messages older or newer than it, and query finds the passage that best matches, by meaning and words. Page on from any passage with before or after.",
     parameters: {
       type: "object",
       properties: {
@@ -173,6 +173,7 @@ export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs>
         query: { type: "string" },
         messageId: { type: "string", description: "Read this message in full." },
         before: { type: "string", description: "A message id; returns messages before it." },
+        after: { type: "string", description: "A message id; returns messages after it." },
         limit: { type: "number" },
       },
       additionalProperties: false,
@@ -185,10 +186,11 @@ export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs>
         query: optionalString(raw, "query", 300),
         messageId: optionalString(raw, "messageId", 200),
         before: optionalString(raw, "before", 200),
+        after: optionalString(raw, "after", 200),
         limit: optionalNumber(raw, "limit"),
       };
-      if ([args.query, args.messageId, args.before].filter(Boolean).length > 1)
-        throw new ToolInputError("Pass one of query, messageId or before.");
+      if ([args.query, args.messageId, args.before, args.after].filter(Boolean).length > 1)
+        throw new ToolInputError("Pass one of query, messageId, before or after.");
       return args;
     },
     execute: async (args, ctx) => ({

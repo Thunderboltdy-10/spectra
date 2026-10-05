@@ -1,5 +1,5 @@
 export type AppSurface =
-  "library" | "workspace" | "settings" | "calendar" | "school" | "artifact" | "none";
+  "library" | "workspace" | "settings" | "calendar" | "school" | "agents" | "analytics" | "devices" | "artifact" | "none";
 
 export type AppViewportSnapshot = {
   visibleSurfaces: readonly AppSurface[];
@@ -297,6 +297,9 @@ export function appSurfaceFromPathname(pathname: string): AppSurface {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/calendar")) return "calendar";
   if (pathname.startsWith("/school")) return "school";
+  if (pathname.startsWith("/agents")) return "agents";
+  if (pathname.startsWith("/analytics")) return "analytics";
+  if (pathname.startsWith("/devices")) return "devices";
   if (pathname.startsWith("/workspace")) return "workspace";
   if (pathname.startsWith("/library")) return "library";
   return "workspace";

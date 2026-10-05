@@ -19,6 +19,7 @@
 
 import { useSyncExternalStore } from "react";
 import { spectraBus } from "../events";
+import type { FollowRoute } from "./follow-navigation";
 
 export type AiLocation = {
   actorId?: string;
@@ -32,7 +33,7 @@ export type AiLocation = {
 
 export type AiSurfaceLocation = {
   actorId?: string;
-  route: "library" | "calendar" | "settings" | "workspace" | "artifact" | "devices";
+  route: FollowRoute;
   target?: string;
   note?: string;
   updatedAt: number;

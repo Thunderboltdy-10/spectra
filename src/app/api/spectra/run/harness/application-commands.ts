@@ -23,7 +23,7 @@ const calendarTime = {
   disambiguation: z.enum(["earlier", "later"]).optional(),
 };
 
-export const NAVIGATION_DESTINATIONS = ["library", "calendar", "settings", "devices", "workspace", "artifact"] as const;
+export const NAVIGATION_DESTINATIONS = ["library", "calendar", "settings", "devices", "workspace", "artifact", "agents", "school", "analytics"] as const;
 
 type ApplicationCommand = { input: z.ZodType<Record<string, unknown>>; authority?: AiTargetClass };
 

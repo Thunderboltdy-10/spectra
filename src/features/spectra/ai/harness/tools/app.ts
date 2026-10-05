@@ -99,6 +99,19 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
 
 /* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
 
+/** The places open_in_spectra can show; the app's follow navigator handles each one. */
+export const OPEN_IN_SPECTRA_DESTINATIONS = [
+  "library",
+  "calendar",
+  "settings",
+  "devices",
+  "workspace",
+  "artifact",
+  "agents",
+  "school",
+  "analytics",
+] as const;
+
 export const DEVICES_TOOL_ACTIONS = [
   "status",
   "pair",
@@ -432,11 +445,11 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, devices, a workspace or an artifact (targetId). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
       parameters: {
         type: "object",
         properties: {
-          destination: { type: "string", enum: ["library", "calendar", "settings", "devices", "workspace", "artifact"] },
+          destination: { type: "string", enum: [...OPEN_IN_SPECTRA_DESTINATIONS] },
           targetId: { type: "string" },
         },
         required: ["destination"],
@@ -448,7 +461,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { destination: string; targetId?: string }) =>
         args.destination === "artifact" ? `Opened ${titled(session, args.targetId, "your work")}` : `Opened ${args.destination}`,
       parse: (raw) => {
-        const destination = oneOf(raw, "destination", ["library", "calendar", "settings", "devices", "workspace", "artifact"] as const);
+        const destination = oneOf(raw, "destination", OPEN_IN_SPECTRA_DESTINATIONS);
         const targetId = optionalString(raw, "targetId", 200);
         if ((destination === "artifact" || destination === "workspace") && !targetId) throw new ToolInputError("targetId is required.");
         return { destination, ...(targetId ? { targetId } : {}) };

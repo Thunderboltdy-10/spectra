@@ -1,6 +1,7 @@
 "use client";
 
 import { createElement, Fragment, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AppChoreographyCoordinator,
   appSurfaceFromPathname,
@@ -28,6 +29,7 @@ import { getRunLedger } from "./run-ledger";
 import { life, type GlowHandle } from "../life/life";
 import { markCause, prismPoint } from "../life/use-life";
 import { startSettingsObservationClient } from "./settings-observation-client";
+import { startFollowNavigation } from "./follow-navigation";
 
 let coordinator = new AppChoreographyCoordinator();
 const artifactPerformers = new Map<string, AiPerformer>();
@@ -418,10 +420,13 @@ export function releaseChoreographyActor(actorId: string): void {
 
 export function AppChoreographyMount() {
   const follow = useFollowAi();
+  const router = useRouter();
   const [cursor, setCursor] = useState<{ left: number; top: number } | null>(null);
   const [controlPointers, setControlPointers] = useState<Array<{ actorId: string; left: number; top: number }>>([]);
   useEffect(() => startAppChoreographyMaintenance(), []);
   useEffect(() => startSettingsObservationClient(), []);
+  // Spectra shows a destination on every page through the client router.
+  useEffect(() => startFollowNavigation((href) => router.push(href)), [router]);
   useEffect(() => {
     let observing = false;
     const observer = new MutationObserver(() => update());

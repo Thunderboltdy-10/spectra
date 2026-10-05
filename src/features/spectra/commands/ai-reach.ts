@@ -85,8 +85,6 @@ const gap = (reason: string): AiReach => ({ kind: "user", reason, gap: true });
 
 const PERMISSION_REASON =
   "It changes what Spectra AI may do. Only the user changes that, in Settings, so the AI can never grant itself more.";
-const NOT_A_FOLLOW_DESTINATION =
-  "Following Spectra opens Library, Calendar, Settings, a workspace or a work item. This page is not a follow destination yet; adding it is a shell change.";
 
 export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   // Navigation
@@ -147,25 +145,28 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "navigation.open_agents",
     area: "navigation",
     title: "Open Agents",
-    description: "Show the specialist agents page.",
+    description: "Show the specialist agents page, or one agent (targetId: the agent's id).",
+    keywords: ["specialists", "go to"],
     ui: ["app.page.agents"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "agents" }, appCommand: "navigate_spectra", example: {} }),
   },
   {
     id: "navigation.open_school",
     area: "navigation",
     title: "Open School",
     description: "Show school data and class shelves.",
+    keywords: ["classes", "grades", "go to"],
     ui: ["app.page.school"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "school" }, appCommand: "navigate_spectra", example: {} }),
   },
   {
     id: "navigation.open_analytics",
     area: "navigation",
     title: "Open Analytics",
     description: "Show learning analytics.",
+    keywords: ["progress", "insights", "go to"],
     ui: ["app.page.analytics"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "analytics" }, appCommand: "navigate_spectra", example: {} }),
   },
 
   // Conversation

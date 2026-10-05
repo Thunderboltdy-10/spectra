@@ -5,8 +5,13 @@
  * The widget runs in an iframe with sandbox="allow-scripts" only, so it has an
  * opaque origin: no access to the app, its cookies, storage or Convex. The
  * document carries a strict CSP (no network at all), and the only messages it
- * sends out are its height; the only one it accepts is the theme.
+ * sends out are its height, a heartbeat and the watchdog's stop; the only one
+ * it accepts is the theme. Its scripts run under the watchdog
+ * (./widget-watchdog.ts), so a loop that never ends is stopped, not left to
+ * freeze the app.
  */
+
+import { guardWidgetScripts, widgetWatchdogScript } from "./widget-watchdog";
 
 export const WIDGET_LIMITS = Object.freeze({
   /** The whole snippet, markup, styles and scripts together. */
@@ -38,7 +43,12 @@ export const WIDGET_CSP = [
 
 export type WidgetTheme = "light" | "dark";
 
-export const WIDGET_MESSAGE = { size: "spectra-widget:size", theme: "spectra-widget:theme" } as const;
+export const WIDGET_MESSAGE = {
+  size: "spectra-widget:size",
+  theme: "spectra-widget:theme",
+  alive: "spectra-widget:alive",
+  stopped: "spectra-widget:stopped",
+} as const;
 
 const HUES = { red: "#ff647f", orange: "#ffab4a", yellow: "#f6d75d", green: "#48c997", blue: "#4f9fe6", violet: "#9176e8" } as const;
 
@@ -158,9 +168,10 @@ export function buildWidgetDocument(input: { title: string; html: string; theme:
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     `<title>${escapeAttribute(input.title)}</title>`,
     `<style>${widgetThemeCss()}</style>`,
+    `<script>${widgetWatchdogScript(WIDGET_MESSAGE)}</script>`,
     "</head>",
     "<body>",
-    widgetFragment(input.html),
+    guardWidgetScripts(widgetFragment(input.html)),
     `<script>${BRIDGE}</script>`,
     "</body>",
     "</html>",

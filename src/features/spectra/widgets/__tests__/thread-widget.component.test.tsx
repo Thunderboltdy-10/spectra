@@ -107,3 +107,45 @@ describe("saved replies", () => {
     expect(container.querySelectorAll("iframe")).toHaveLength(0);
   });
 });
+
+describe("ThreadWidget watchdog", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("announces when the frame's watchdog stopped its scripts, leaving its note in the frame", () => {
+    render(<ThreadWidget widget={widget} />);
+    const iframe = frame();
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "spectra-widget:stopped" }, source: iframe.contentWindow }));
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("This visual was stopped");
+    expect(frame()).toBeInTheDocument();
+  });
+
+  it("removes a frame that stops answering and says why", () => {
+    vi.useFakeTimers();
+    render(<ThreadWidget widget={widget} />);
+    const iframe = frame();
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "spectra-widget:alive" }, source: iframe.contentWindow }));
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(frame()).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(screen.queryByTitle("Projectile range")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("This visual was stopped");
+  });
+
+  it("never removes a frame it has not heard from yet", () => {
+    vi.useFakeTimers();
+    render(<ThreadWidget widget={widget} />);
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(frame()).toBeInTheDocument();
+  });
+});

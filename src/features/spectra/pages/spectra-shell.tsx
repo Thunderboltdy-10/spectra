@@ -162,6 +162,7 @@ import {
   updateWorkbenchSurface,
   writeSharedWorkbenchSession,
 } from "../workbench";
+import { onLibraryHandoff, takeLibraryHandoffs } from "../workbench/library-handoff";
 import {
   artifactIdFromSpectraLocation,
   artifactIdFromSpectraPath,
@@ -1256,6 +1257,18 @@ export function SpectraShell({
     refreshInvitations,
   } = useShareInvitations(invitationCollection);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  // Files another page handed over ("Copy into Library" on School) import here.
+  const importLibraryFileRef = useRef<((file: File, parentNodeId?: string | null) => Promise<void>) | null>(null);
+  useEffect(() => {
+    importLibraryFileRef.current = importLibraryFile;
+  });
+  useEffect(() => {
+    const drain = () => {
+      for (const file of takeLibraryHandoffs()) void importLibraryFileRef.current?.(file, null);
+    };
+    drain();
+    return onLibraryHandoff(drain);
+  }, []);
 
   /**
    * Favorites used to live in this browser's localStorage, which meant they

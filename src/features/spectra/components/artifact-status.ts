@@ -64,6 +64,8 @@ export type ArtifactStatusInput = {
 
 export type ArtifactStatus = {
   state: ArtifactStatusState;
+  /** The state's name in the popover, when the surface is not a work ("Syncing" on School). */
+  name?: string;
   glyph: IconName;
   /** The state hue, on the glyph's accent. */
   hue: string;

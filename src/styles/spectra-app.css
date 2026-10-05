@@ -16371,3 +16371,18 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
     transform: translateX(100%);
   }
 }
+
+/* Spectra's words resolve from a slight blur, a chunk at a time (editor/ai-text-resolve.ts). */
+.spectra-ai-resolve {
+  animation: spectra-ai-resolve 440ms var(--ease-standard) both;
+}
+@keyframes spectra-ai-resolve {
+  from {
+    opacity: 0.15;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}

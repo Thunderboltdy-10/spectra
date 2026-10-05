@@ -23,6 +23,13 @@ vi.mock("next/navigation", () => ({
 
 import { SchoolAdminShell } from "../pages/school-admin-shell";
 
+// The header bar and the context panel measure themselves.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
 const overview = {
   school: {
     schoolId: "school-1",
@@ -75,6 +82,16 @@ async function openInvite(email: string) {
 }
 
 describe("School admin People", () => {
+  it("titles the page on one line and keeps the school context in a Side panel on Overview", async () => {
+    navigation.tab = "overview";
+    render(<SchoolAdminShell />);
+    expect(await screen.findByRole("heading", { level: 1, name: "School admin" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "School context" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Member roles" }));
+    expect(navigation.replace).toHaveBeenCalledWith(expect.stringContaining("tab=people"), { scroll: false });
+  });
+
   it("keeps Overview when the People tab is opened offline", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);

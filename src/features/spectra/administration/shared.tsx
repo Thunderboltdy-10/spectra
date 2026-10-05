@@ -1,12 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUpRight, LoaderCircle, AlertCircle, CheckCircle2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { ArrowUpRight, AlertCircle, CheckCircle2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import { ProductEmptyState, ProductErrorState } from "@/features/spectra/components/product-state";
 import { Button } from "@/components/ui/button";
+import { LoadingRows } from "@/components/ui/page-state";
 import {
   Dialog,
   DialogContent,
@@ -312,12 +313,7 @@ export function AdminDialog({
 }
 
 export function LoadingPanel({ label = "Loading" }: { label?: string }) {
-  return (
-    <div role="status" className="flex min-h-56 items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
-      <LoaderCircle size={16} aria-hidden="true" className="animate-spin" />
-      {label}
-    </div>
-  );
+  return <LoadingRows label={label} count={5} className="px-4 py-3" />;
 }
 
 export function EmptyPanel({
@@ -341,7 +337,7 @@ export function ErrorPanel({
   message: string;
   retry: () => void;
 }) {
-  return <ProductErrorState title="Administration data is unavailable" detail={message} action={<AdminButton onClick={retry}>Try again</AdminButton>} />;
+  return <ProductErrorState title="This didn’t load" detail={message} action={<AdminButton onClick={retry}>Try again</AdminButton>} />;
 }
 
 export function InlineLink({

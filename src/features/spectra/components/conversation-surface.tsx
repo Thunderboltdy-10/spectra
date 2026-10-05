@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { useWritingFront } from "../life/use-life";
 import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "sonner";
 import { SpectraMark } from "@/components/spectra-mark";
@@ -1581,8 +1582,10 @@ function LiveContentReveal({
     profile: "conversation",
     enabled: streaming,
   });
+  const frontRef = useRef<HTMLDivElement>(null);
+  useWritingFront(frontRef, active);
   return (
-    <div className={active ? "spectra-stream-active" : undefined}>
+    <div ref={frontRef} className={active ? "spectra-stream-active" : undefined}>
       <SpectraRichContent
         content={visibleText}
         className={cn(

@@ -140,7 +140,8 @@ export interface HarnessBackend {
   readThread(input: ThreadReadRequest, signal: AbortSignal): Promise<string>;
   webSearch(input: { query: string; deep?: boolean }, signal: AbortSignal): Promise<WebResult[]>;
   readCalendar(input: { from: number; to: number; title?: string }, signal: AbortSignal): Promise<string>;
-  readSchoolData(input: { purpose: string; classId?: string }, signal: AbortSignal): Promise<string>;
+  /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
+  readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;
   /**
    * Record a command before the run pauses to ask, so the user's approval

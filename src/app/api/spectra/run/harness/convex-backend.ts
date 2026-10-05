@@ -20,6 +20,7 @@ import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
 import { executeOperation, rows, type EffectContext } from "./effects";
 import { act, mutate, query, safeJson } from "./io";
+import { isSchoolApiPurpose, readSchoolApi } from "./school-read";
 import { executeThreadRead } from "./thread-read";
 
 const isArtifactTypeKey = (value: string): value is ArtifactTypeKey => (ARTIFACT_TYPE_KEYS as readonly string[]).includes(value);
@@ -644,7 +645,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
     return agent ? { title: agent.title, instructions: agent.instructions } : null;
   }
 
-  async readSchoolData(input: { purpose: string; classId?: string }): Promise<string> {
+  async readSchoolData(input: { purpose: string; classId?: string; recordId?: string }): Promise<string> {
+    // Past tasks, grades, CAS and single records come from the School page's own queries.
+    if (input.recordId || isSchoolApiPurpose(input.purpose))
+      return clip(await readSchoolApi((name, args) => query(name, args), input, this.timeZone));
     const result = await query<unknown & object, Record<string, unknown> | null>("managebac:recordsForPurpose", {
       purpose: input.purpose,
       ...(input.classId ? { classId: input.classId } : {}),

@@ -353,7 +353,6 @@ export function TimetableStudio({
   aiChangedPaths?: string[];
   readOnly: boolean;
   synchronizationReady?: boolean;
-  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const studioHistory = useOptionalStudioContract()?.history;

@@ -37,6 +37,7 @@ import {
   Maximize2,
   MessageSquare,
   MessageSquarePlus,
+  MessagesSquare,
   PanelRight,
   Play,
   Plus,
@@ -65,8 +66,10 @@ import {
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
 import { FileStorageControls } from "../bridge/file-storage-controls";
-import { headerSyncMessage } from "../bridge/status";
-import { CrossfadeText } from "../motion";
+import { useNow } from "@/hooks/use-now";
+import { ArtifactHeaderActions, type HeaderCommand } from "./artifact-header-actions";
+import { ArtifactStatusControl } from "./artifact-status-control";
+import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
 import { mountsForConnectedDevice } from "../bridge/mount-selection";
@@ -202,7 +205,6 @@ import { ArtifactDraftRecovery, describeLocalRecoveryFailure } from "./artifact-
 import { ChatBrowserButton } from "./chat-browser-panel";
 import {
   WorkbarMenuAction,
-  WorkbarMore,
   WorkbarSelect,
 } from "./artifact-workbar";
 import {
@@ -2864,6 +2866,7 @@ function ArtifactStudioEditor({
     }),
   );
   const bridge = useBridgeHealth();
+  const router = useRouter();
   const activeBridgeMounts = useQuery(
     api.bridge.activeMounts,
     useAuthedArgs({}),
@@ -5509,7 +5512,148 @@ function ArtifactStudioEditor({
       transportError: live.error,
     },
   );
-  const artifactSyncMessage = headerSyncMessage(presentation);
+  const statusNow = useNow(30_000);
+  const [statusActionBusy, setStatusActionBusy] = useState(false);
+  const [statusCompareOpen, setStatusCompareOpen] = useState(false);
+  const statusLocalReplica = replicaTruth?.replicas.find(
+    (replica) => replica.kind === "local",
+  );
+  const statusFolderLabel = statusLocalReplica?.mountId
+    ? activeBridgeMounts?.find(
+        (mount) => mount._id === statusLocalReplica.mountId,
+      )?.rootLabel
+    : undefined;
+  const artifactStatus = useMemo(
+    () =>
+      artifactStatusOf({
+        presentation,
+        replicas:
+          replicaTruth?.replicas.map((replica) => ({
+            kind: replica.kind,
+            state: replica.state,
+            lastVerifiedAt: replica.lastVerifiedAt,
+            retryAt: replica.retryAt,
+            errorCode: replica.errorCode,
+            relativePath: replica.relativePath,
+          })) ?? [],
+        folderLabel: statusFolderLabel,
+        officeApplication: nativeOfficeDocument
+          ? nativeOfficeApplication
+          : undefined,
+        nativeActivity: Boolean(nativeMaterialization),
+        nativeConflict: Boolean(nativeConflict),
+        savedAt: dirty ? undefined : artifact.updatedAt,
+        now: statusNow || Date.now(),
+        can: {
+          retry: !readOnly,
+          "sign-in": true,
+          reconnect: true,
+          "keep-spectra": Boolean(nativeConflict) && !readOnly,
+          "keep-office": Boolean(nativeConflict) && !readOnly,
+          compare: true,
+          history: true,
+          // The desktop app has no "open" or "reveal" request yet (F2).
+          "open-in-office": false,
+          "show-in-folder": false,
+        },
+      }),
+    [
+      artifact.updatedAt,
+      dirty,
+      nativeConflict,
+      nativeMaterialization,
+      nativeOfficeApplication,
+      nativeOfficeDocument,
+      presentation,
+      readOnly,
+      replicaTruth?.replicas,
+      statusFolderLabel,
+      statusNow,
+    ],
+  );
+  const handleStatusAction = (kind: ArtifactStatusActionKind) => {
+    if (kind === "retry") {
+      void save();
+      return;
+    }
+    if (kind === "sign-in") {
+      router.push("/sign-in");
+      return;
+    }
+    if (kind === "reconnect") {
+      router.push(BRIDGE_SETTINGS_HREF);
+      return;
+    }
+    if (kind === "history") {
+      setHistoryOpen(true);
+      return;
+    }
+    if (kind === "compare") {
+      if (nativeConflict?.previews?.length) {
+        setStatusCompareOpen((open) => !open);
+      } else {
+        setHistoryOpen(true);
+      }
+      return;
+    }
+    if (kind === "keep-spectra" || kind === "keep-office") {
+      setStatusActionBusy(true);
+      void reconcileNativeRevision(kind === "keep-spectra" ? "spectra" : "word")
+        .catch((error: unknown) =>
+          setNativeWriteError(
+            error instanceof Error
+              ? error.message
+              : "The conflict could not be resolved safely.",
+          ),
+        )
+        .finally(() => setStatusActionBusy(false));
+    }
+  };
+  const statusDetails =
+    statusCompareOpen && nativeConflict?.previews?.length ? (
+      <div className="grid gap-1 text-micro leading-4 text-[var(--text-tertiary)]">
+        {nativeConflict.previews.slice(0, 3).map((preview) => (
+          <div
+            key={preview.regionId}
+            className="grid gap-0.5 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1"
+          >
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-[var(--text-secondary)]">
+                Spectra:
+              </span>{" "}
+              {preview.spectra}
+            </span>
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-[var(--text-secondary)]">
+                {nativeOfficeApplication}:
+              </span>{" "}
+              {preview.external}
+            </span>
+          </div>
+        ))}
+      </div>
+    ) : null;
+  const headerCommands: HeaderCommand[] = [
+    {
+      id: "comments",
+      label: "Comments",
+      icon: MessageSquare,
+      onSelect: () => setCommentsOpen(true),
+    },
+    ...(onOpenChats
+      ? [
+          {
+            id: "chats",
+            label: "Browse chats about this work",
+            icon: MessagesSquare,
+            onSelect: onOpenChats,
+          },
+        ]
+      : []),
+    ...(mode === "split" && !compact
+      ? [{ id: "open-as-tab", label: "Open as tab", icon: Maximize2, onSelect: onExpand }]
+      : []),
+  ];
   const syncTruth = useMemo(
     () => ({ state: presentation.state, label: presentation.label }),
     [presentation.label, presentation.state],
@@ -5798,215 +5942,155 @@ function ArtifactStudioEditor({
               {identityBlock}
             </div>
           </div>
-          <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-1">
-            {(presentation.state === "saving" ||
-              presentation.state === "pending" ||
-              live.state === "connecting" ||
-              live.state === "synchronizing") &&
-            presentation.state !== "offline" &&
-            presentation.state !== "error" ? (
-              <span
-                className="spectra-artifact-sync-status inline-flex items-center"
-                role="status"
-                aria-live="polite"
-                aria-label={artifactSyncMessage || presentation.label}
-                title={presentation.detail || presentation.label}
-              >
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-              </span>
-            ) : null}
-            {artifactSyncMessage ? (
-              <span
-                className={`spectra-artifact-sync-message max-w-[13rem] truncate text-micro ${
-                  presentation.state === "error"
-                    ? "text-[var(--danger)]"
-                    : "text-[var(--text-secondary)]"
-                }`}
-                role="status"
-                aria-live="polite"
-                data-sync-state={presentation.state}
-                title={presentation.detail || artifactSyncMessage}
-              >
-                {/* State changes crossfade on the completion grammar instead
-                    of snapping — the transition saving → saved is a resolve,
-                    not a swap. */}
-                <CrossfadeText
-                  value={artifactSyncMessage}
-                  primitive="completion"
-                />
-              </span>
-            ) : null}
-            {presentation.action?.kind === "reconnect" ? (
-              <a
-                href={BRIDGE_SETTINGS_HREF}
-                className="text-micro font-semibold text-[var(--text-primary)]"
-              >
-                {presentation.action.label}
-              </a>
-            ) : null}
-            {presentation.action?.kind === "retry" ? (
-              <button
-                type="button"
-                className="text-micro font-semibold text-[var(--text-primary)]"
-                disabled={syncBusy || readOnly}
-                onClick={() => void save()}
-              >
-                {presentation.action.label}
-              </button>
-            ) : null}
-            {presentation.action?.kind === "sign-in" ? (
-              <NextLink
-                href="/sign-in"
-                className="text-micro font-semibold text-[var(--text-primary)]"
-              >
-                {presentation.action.label}
-              </NextLink>
-            ) : null}
-            <StudioPresenceIndicator
-              transport={live.transport}
-              currentAccountId={live.accountId}
-              currentDisplayName={live.displayName}
-              regions={commentRegions}
-              onFocusPresence={(person) => {
-                const studio = studioSurfaceRef.current;
-                if (!studio) return;
-                const blockId =
-                  person.cursor?.anchor?.kind === "block"
-                    ? person.cursor.anchor.id
-                    : person.selection?.ranges[0]?.blockId;
-                const lineIndex =
-                  person.cursor?.anchor?.lineIndex ??
-                  person.selection?.ranges[0]?.lineIndex;
-                const regionId = person.activeRegionId;
-                const target =
-                  (blockId
-                    ? studio.querySelector<HTMLElement>(
-                        `[data-block-id="${
-                          typeof CSS !== "undefined" && CSS.escape
-                            ? CSS.escape(blockId)
-                            : blockId.replace(/["\\]/g, "\\$&")
-                        }"]`,
-                      )
-                    : null) ??
-                  (regionId
-                    ? studio.querySelector<HTMLElement>(
-                        `[data-region-id="${
-                          typeof CSS !== "undefined" && CSS.escape
-                            ? CSS.escape(regionId)
-                            : regionId.replace(/["\\]/g, "\\$&")
-                        }"], [data-ai-path="${
-                          typeof CSS !== "undefined" && CSS.escape
-                            ? CSS.escape(regionId)
-                            : regionId.replace(/["\\]/g, "\\$&")
-                        }"]`,
-                      )
-                    : null) ??
-                  studio.querySelector<HTMLElement>('[data-ai-region="true"]');
-                if (!target) return;
-                let focus: HTMLElement = target;
-                if (
-                  typeof lineIndex === "number" &&
-                  lineIndex >= 0 &&
-                  (target.matches("ul,ol") ||
-                    target.querySelector(":scope > li"))
-                ) {
-                  const items =
-                    target.querySelectorAll<HTMLElement>(":scope > li");
-                  focus =
-                    items[Math.min(lineIndex, Math.max(0, items.length - 1))] ??
-                    target;
-                }
-                focus.scrollIntoView({
-                  block: "nearest",
-                  inline: "nearest",
-                  behavior: "smooth",
-                });
-              }}
-            />
-            <IconButton
-              label="Comments"
-              onClick={() => setCommentsOpen(true)}
-              icon={MessageSquare}
-            />
-            {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} label="Browse chats about this work" /> : null}
-            {mode === "split" && !compact ? (
-              <IconButton
-                label="Open as tab"
-                onClick={onExpand}
-                icon={Maximize2}
+          <ArtifactHeaderActions
+            presence={
+              <StudioPresenceIndicator
+                transport={live.transport}
+                currentAccountId={live.accountId}
+                currentDisplayName={live.displayName}
+                regions={commentRegions}
+                onFocusPresence={(person) => {
+                  const studio = studioSurfaceRef.current;
+                  if (!studio) return;
+                  const blockId =
+                    person.cursor?.anchor?.kind === "block"
+                      ? person.cursor.anchor.id
+                      : person.selection?.ranges[0]?.blockId;
+                  const lineIndex =
+                    person.cursor?.anchor?.lineIndex ??
+                    person.selection?.ranges[0]?.lineIndex;
+                  const regionId = person.activeRegionId;
+                  const target =
+                    (blockId
+                      ? studio.querySelector<HTMLElement>(
+                          `[data-block-id="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(blockId)
+                              : blockId.replace(/["\\]/g, "\\$&")
+                          }"]`,
+                        )
+                      : null) ??
+                    (regionId
+                      ? studio.querySelector<HTMLElement>(
+                          `[data-region-id="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(regionId)
+                              : regionId.replace(/["\\]/g, "\\$&")
+                          }"], [data-ai-path="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(regionId)
+                              : regionId.replace(/["\\]/g, "\\$&")
+                          }"]`,
+                        )
+                      : null) ??
+                    studio.querySelector<HTMLElement>('[data-ai-region="true"]');
+                  if (!target) return;
+                  let focus: HTMLElement = target;
+                  if (
+                    typeof lineIndex === "number" &&
+                    lineIndex >= 0 &&
+                    (target.matches("ul,ol") ||
+                      target.querySelector(":scope > li"))
+                  ) {
+                    const items =
+                      target.querySelectorAll<HTMLElement>(":scope > li");
+                    focus =
+                      items[Math.min(lineIndex, Math.max(0, items.length - 1))] ??
+                      target;
+                  }
+                  focus.scrollIntoView({
+                    block: "nearest",
+                    inline: "nearest",
+                    behavior: "smooth",
+                  });
+                }}
               />
-            ) : null}
-            <WorkbarMore label="More work actions">
-              {nativePortableArtifact ? (
-                <>
+            }
+            status={
+              <ArtifactStatusControl
+                status={artifactStatus}
+                onAction={handleStatusAction}
+                busy={syncBusy || statusActionBusy}
+                details={statusDetails}
+              />
+            }
+            commands={headerCommands}
+            moreLabel="More work actions"
+            more={
+              <>
+                {nativePortableArtifact ? (
+                  <>
+                    <WorkbarMenuAction
+                      disabled={nativeRecoveryBusy !== null}
+                      onSelect={() => void downloadNativeCopy()}
+                    >
+                      <FileDown className="h-4 w-4" />{" "}
+                      {nativeRecoveryBusy === "download"
+                        ? "Preparing copy…"
+                        : "Download native copy"}
+                    </WorkbarMenuAction>
+                    <WorkbarMenuAction
+                      disabled={nativeRecoveryBusy !== null}
+                      onSelect={requestNativeCopy}
+                    >
+                      <Download className="h-4 w-4" />{" "}
+                      {nativeRecoveryBusy === "materialize"
+                        ? "Queueing local copy…"
+                        : "Keep a copy on this computer"}
+                    </WorkbarMenuAction>
+                  </>
+                ) : null}
+                {onShare ? (
                   <WorkbarMenuAction
-                    disabled={nativeRecoveryBusy !== null}
-                    onSelect={() => void downloadNativeCopy()}
+                    onSelect={() => {
+                      onShare();
+                    }}
                   >
-                    <FileDown className="h-4 w-4" />{" "}
-                    {nativeRecoveryBusy === "download"
-                      ? "Preparing copy…"
-                      : "Download native copy"}
+                    <Share2 className="h-4 w-4" /> Share work
                   </WorkbarMenuAction>
-                  <WorkbarMenuAction
-                    disabled={nativeRecoveryBusy !== null}
-                    onSelect={requestNativeCopy}
-                  >
-                    <Download className="h-4 w-4" />{" "}
-                    {nativeRecoveryBusy === "materialize"
-                      ? "Queueing local copy…"
-                      : "Keep a copy on this computer"}
-                  </WorkbarMenuAction>
-                </>
-              ) : null}
-              {onShare ? (
+                ) : null}
                 <WorkbarMenuAction
                   onSelect={() => {
-                    onShare();
+                    setEmbedsOpen(true);
                   }}
                 >
-                  <Share2 className="h-4 w-4" /> Share work
+                  <Link2 className="h-4 w-4" /> References
                 </WorkbarMenuAction>
-              ) : null}
-              <WorkbarMenuAction
-                onSelect={() => {
-                  setEmbedsOpen(true);
-                }}
-              >
-                <Link2 className="h-4 w-4" /> References
-              </WorkbarMenuAction>
-              {artifact.blueprintKey !== "planner_task" ? (
+                {artifact.blueprintKey !== "planner_task" ? (
+                  <WorkbarMenuAction
+                    onSelect={() => {
+                      detailsPinnedRef.current = true;
+                      setDetailsOpen((open) => !open);
+                    }}
+                  >
+                    <PanelRight className="h-4 w-4" />
+                    {detailsOpen ? "Close details" : "Open details"}
+                  </WorkbarMenuAction>
+                ) : null}
                 <WorkbarMenuAction
                   onSelect={() => {
-                    detailsPinnedRef.current = true;
-                    setDetailsOpen((open) => !open);
+                    loadVersionHistory();
                   }}
                 >
-                  <PanelRight className="h-4 w-4" />
-                  {detailsOpen ? "Close details" : "Open details"}
+                  <History className="h-4 w-4" /> Version history
                 </WorkbarMenuAction>
-              ) : null}
-              <WorkbarMenuAction
-                onSelect={() => {
-                  loadVersionHistory();
-                }}
-              >
-                <History className="h-4 w-4" /> Version history
-              </WorkbarMenuAction>
-              <WorkbarMenuAction onSelect={() => setLocalDraftsArtifactId(artifact._id)}>
-                <RotateCcw className="h-4 w-4" /> Local drafts
-              </WorkbarMenuAction>
-            </WorkbarMore>
-            <IconButton
-              label={
-                decideClose(dirty, live.unsynchronizedChanges) === "confirm"
-                  ? "Save or discard before closing"
-                  : "Close"
-              }
-              onClick={requestStudioClose}
-              icon={X}
-            />
-          </div>
+                <WorkbarMenuAction onSelect={() => setLocalDraftsArtifactId(artifact._id)}>
+                  <RotateCcw className="h-4 w-4" /> Local drafts
+                </WorkbarMenuAction>
+              </>
+            }
+            close={
+              <IconButton
+                label={
+                  decideClose(dirty, live.unsynchronizedChanges) === "confirm"
+                    ? "Save or discard before closing"
+                    : "Close"
+                }
+                onClick={requestStudioClose}
+                icon={X}
+              />
+            }
+          />
         </div>
       </header>
       <ArtifactDraftRecovery
@@ -6339,7 +6423,6 @@ function ArtifactStudioEditor({
                   readOnly={readOnly}
                   mode={contentMode}
                   synchronizationReady={presentation.ready}
-                  syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
               ) : null}
@@ -6359,7 +6442,6 @@ function ArtifactStudioEditor({
                       : undefined
                   }
                   synchronizationReady={presentation.ready}
-                  syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
               ) : null}
@@ -6373,7 +6455,6 @@ function ArtifactStudioEditor({
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   synchronizationReady={presentation.ready}
-                  syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
               ) : null}
@@ -6387,7 +6468,6 @@ function ArtifactStudioEditor({
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   synchronizationReady={presentation.ready}
-                  syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
               ) : null}
@@ -6401,7 +6481,6 @@ function ArtifactStudioEditor({
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   synchronizationReady={presentation.ready}
-                  syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
               ) : null}

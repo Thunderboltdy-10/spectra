@@ -669,9 +669,6 @@ export function WhiteboardStudio({
   aiChangedPaths = [],
   readOnly: readOnlyProp,
   synchronizationReady: _synchronizationReady = true,
-  // Sync truth belongs to the shell's identity row. The board used to print it
-  // a second time inside its own bar; one artifact says one thing once.
-  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -681,7 +678,6 @@ export function WhiteboardStudio({
   aiChangedPaths?: string[];
   readOnly: boolean;
   synchronizationReady?: boolean;
-  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   // Registry truth, resolved once by the shell: what this viewer may do, how

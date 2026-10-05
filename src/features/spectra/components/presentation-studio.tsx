@@ -1565,7 +1565,6 @@ export function PresentationStudio({
   aiChangedPaths?: string[];
   readOnly: boolean;
   synchronizationReady: boolean;
-  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const committedDeck = useMemo(

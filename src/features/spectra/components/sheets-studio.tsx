@@ -773,10 +773,6 @@ export const SheetsStudio = memo(function SheetsStudio({
   readOnly = false,
   mode = "tab",
   synchronizationReady = true,
-  // Save state belongs to the shared rail above this studio, not to a status bar
-  // of our own. The prop stays in the signature because the shell passes it to
-  // every type; the sheet deliberately does not print it a second time.
-  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -787,6 +783,7 @@ export const SheetsStudio = memo(function SheetsStudio({
   /** A side panel gets the data and the selection, not the whole rig (§11F). */
   mode?: "split" | "tab";
   synchronizationReady?: boolean;
+  /** Unused: the status control says it. The landing page still passes it; drop it there, then here. */
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {

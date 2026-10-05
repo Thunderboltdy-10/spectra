@@ -23,12 +23,15 @@ const classes = Array.from({ length: 22 }, (_, index) => ({
   workspaceId: null, selected: index === 0,
 }));
 beforeEach(() => {
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+  // Room for the header's commands, as on a desktop window.
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1200);
   harness.overview.mockResolvedValue({ admin: true, data: {
     integration, previews: [], capabilities: [], conflicts: [], syncRuns: [], mapping: { status: "verified" },
   } });
   harness.candidates.mockResolvedValue({ integration, identityRequired: false, classes, selectionRevision: 1 });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 it("uses the personal class collection for the admin overview and picker without an empty preview list", async () => {
   render(<ManageBacIntegrationShell />);

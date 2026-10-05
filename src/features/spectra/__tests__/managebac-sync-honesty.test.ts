@@ -15,7 +15,7 @@ describe("ManageBac sync UX honesty", () => {
     );
     expect(shell).toContain("Validating ManageBac capabilities");
     expect(shell).toContain("integrationStatusLabel");
-    expect(shell).toContain('"ManageBac · Personal data"');
+    expect(shell).toContain('"ManageBac connection"');
     expect(shell).toContain('"Your ManageBac data"');
     expect(shell).toContain("Syncing…");
     expect(shell).toContain("Retry sync");

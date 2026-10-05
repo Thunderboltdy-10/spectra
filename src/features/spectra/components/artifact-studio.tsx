@@ -70,6 +70,7 @@ import { useNow } from "@/hooks/use-now";
 import { ArtifactHeaderActions, type HeaderCommand } from "./artifact-header-actions";
 import { ArtifactStatusControl } from "./artifact-status-control";
 import { useEditorFieldMoments } from "./editor-field-moments";
+import { useLifeLanding } from "../life/use-life";
 import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
@@ -4633,6 +4634,8 @@ function ArtifactStudioEditor({
   const studioSurfaceRef = useRef<HTMLDivElement>(null);
   // Things in the work form, unform and leave wakes in the field.
   useEditorFieldMoments(studioSurfaceRef);
+  // Opened from a card or a row, the work grows out of it (MOTION.md, "Shared elements"), wherever it opens.
+  useLifeLanding(studioSurfaceRef, artifact._id);
   const lastStudioInteractionAtRef = useRef(0);
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();

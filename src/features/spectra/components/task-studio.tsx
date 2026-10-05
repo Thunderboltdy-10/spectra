@@ -7,7 +7,6 @@ import { SelectField } from "@/components/ui/select";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import { cn } from "@/lib/utils";
 import { projectBindingsFromIr } from "../capabilities";
-import { useLifeArrival, useLifeDeparture } from "../life/use-life";
 import { normalizePlanContent } from "../plan/model";
 import { planToIcs } from "../plan/projections";
 import { formatMinutesBefore, REMINDER_MINUTE_OPTIONS } from "../reminders/minutes-before";
@@ -127,12 +126,9 @@ function StepRow({
   onChange: (patch: Partial<Step>) => void;
   onRemove: () => void;
 }) {
-  const ref = useRef<HTMLLIElement>(null);
-  // A step the user adds forms from where they pressed, and parts where it was when removed.
-  useLifeArrival(ref, `task-step:${step.id}`, "human", { bars: "input[type='text']" });
-  useLifeDeparture(ref);
+  // A field object: a step forms from where it was made (your press, or the prism when Spectra adds it) and parts when removed.
   return (
-    <li ref={ref} className="spectra-task-step" data-done={step.done || undefined}>
+    <li className="spectra-task-step" data-life-object="" data-done={step.done || undefined}>
       <input
         type="checkbox"
         checked={step.done}

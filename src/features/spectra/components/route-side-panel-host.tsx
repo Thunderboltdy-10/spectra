@@ -294,10 +294,9 @@ export function RouteSidePanelHost() {
     setWork(null);
   }
 
-  // What opens here grows out of the card or row it was opened from.
+  // A thread opened here grows out of the card or row it was opened from (a work's studio lands itself).
   const workSlot = useRef<HTMLDivElement>(null);
   const threadSlot = useRef<HTMLDivElement>(null);
-  useLifeLanding(workSlot, studio.mode === "split" ? studio.activeArtifact?._id : null);
   useLifeLanding(threadSlot, thread?._id);
 
   if (!eligible || (!work && !thread)) return null;

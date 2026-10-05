@@ -16323,3 +16323,15 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
     opacity var(--motion-fast) var(--ease-standard),
     filter var(--motion-fast) var(--ease-standard);
 }
+
+/* Afterwards (MOTION.md): what Spectra changed keeps a faint tint until it has
+   been seen, then fades. An outline, so it never replaces a node's own
+   background or shadow. */
+.spectra-artifact-main [data-ai-unseen] {
+  outline: 1px solid transparent;
+  outline-offset: 3px;
+  transition: outline-color var(--motion-slow) var(--ease-standard);
+}
+.spectra-artifact-main [data-ai-unseen="true"] {
+  outline-color: color-mix(in oklab, #8b6cf6 30%, transparent);
+}

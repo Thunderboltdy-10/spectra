@@ -41,6 +41,7 @@ vi.mock("../life/figure-dom", () => ({
 
 import {
   BULK_BATCH,
+  SEEN_MS,
   WARM_UP_MS,
   chooseSource,
   planBatch,
@@ -210,6 +211,41 @@ describe("the field in an editor", () => {
     item.removeAttribute("data-ai-region");
     await settle();
     expect(field.glowStop).toHaveBeenCalled();
+  });
+
+  it("keeps a faint tint on what Spectra changed until it has been seen", async () => {
+    let seen: IntersectionObserverCallback = () => {};
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          seen = callback;
+        }
+        observe = observe;
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    render(<Studio />);
+    await settle(WARM_UP_MS + 10);
+    const item = addCard();
+    item.setAttribute("data-ai-region", "true");
+    await settle();
+    expect(item.hasAttribute("data-ai-unseen")).toBe(false);
+    item.removeAttribute("data-ai-region");
+    await settle();
+    expect(item.getAttribute("data-ai-unseen")).toBe("true");
+    expect(observe).toHaveBeenCalledWith(item);
+    // Not yet in view: it waits.
+    await settle(SEEN_MS * 2);
+    expect(item.getAttribute("data-ai-unseen")).toBe("true");
+    act(() => seen([{ target: item, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver));
+    await settle(SEEN_MS + 10);
+    expect(item.getAttribute("data-ai-unseen")).toBe("fading");
+    await settle(1000);
+    expect(item.hasAttribute("data-ai-unseen")).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it("unforms a deleted card where it was", async () => {

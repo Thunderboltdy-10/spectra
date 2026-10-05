@@ -16335,3 +16335,39 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
 .spectra-artifact-main [data-ai-unseen="true"] {
   outline-color: color-mix(in oklab, #8b6cf6 30%, transparent);
 }
+
+/* Spectra writing prose (MOTION.md, "Spectra writing"): a soft spectral band
+   sweeps the block being written, behind its text. Transform only; under
+   reduced motion the band settles out of view and the quiet tint remains.
+   List items keep the plain mark, since clipping would cut their markers. */
+.spectra-artifact-studio:is([data-ai-state="creating"], [data-ai-state="updating"])
+  .spectra-artifact-main
+  .ProseMirror
+  > [data-ai-region="true"]:not(ul, ol) {
+  overflow: clip;
+}
+.spectra-artifact-studio:is([data-ai-state="creating"], [data-ai-state="updating"])
+  .spectra-artifact-main
+  .ProseMirror
+  > [data-ai-region="true"]:not(ul, ol)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in oklab, #8b6cf6 9%, transparent) 40%,
+    color-mix(in oklab, #4f9fe6 12%, transparent) 50%,
+    color-mix(in oklab, #40c48e 9%, transparent) 60%,
+    transparent 72%
+  );
+  transform: translateX(-100%);
+  animation: spectra-ai-band 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes spectra-ai-band {
+  to {
+    transform: translateX(100%);
+  }
+}

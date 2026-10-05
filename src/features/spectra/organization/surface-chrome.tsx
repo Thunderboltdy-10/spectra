@@ -1,7 +1,7 @@
 "use client";
 
-import { type ReactNode, type RefObject } from "react";
-import { Loader2, FolderPlus, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, PanelLeftClose, PanelLeftOpen, Upload } from "@/components/icons/glyph-icons";
+import { type ReactNode } from "react";
+import { Loader2, FolderPlus, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -506,31 +506,3 @@ export function SurfaceNewMenu({
   );
 }
 
-/**
- * Give the rows the whole window. Reachable from both views, because the reader
- * who wants more room for a board wants it for a list too.
- */
-export function SurfaceRailToggle({
-  collapsed,
-  onToggle,
-  buttonRef,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-  buttonRef?: RefObject<HTMLButtonElement | null>;
-}) {
-  const Icon = collapsed ? PanelLeftOpen : PanelLeftClose;
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      onClick={onToggle}
-      aria-pressed={collapsed}
-      aria-label={collapsed ? "Show the folder rail" : "Hide the folder rail"}
-      title={collapsed ? "Show the folder rail" : "Hide the folder rail"}
-      className={cn(controlClass, "w-8 justify-center px-0")}
-    >
-      <Icon className="size-3.5" />
-    </button>
-  );
-}

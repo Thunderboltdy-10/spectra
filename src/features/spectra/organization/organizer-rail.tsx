@@ -62,7 +62,7 @@ export function OrganizerRail({
     <nav
       aria-label="Library folders"
       className={cn(
-        "spectra-composer-clearance flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] px-2 py-3",
+        "flex w-[248px] shrink-0 flex-col overflow-y-auto px-2 py-3",
         className,
       )}
     >
@@ -70,11 +70,12 @@ export function OrganizerRail({
         type="button"
         data-drop-node={floorId ?? "root"}
         data-drop-kind="container"
+        data-life-receive
         onClick={() => handlers.onNavigate({ kind: "folder", nodeId: floorId })}
         className={cn(
           "flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-ui font-medium transition-colors",
           atFloor
-            ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] text-[var(--text-primary)]"
+            ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
             : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
           dropNodeId === (floorId ?? "root") &&
             "ring-2 ring-brand",
@@ -111,7 +112,7 @@ export function OrganizerRail({
               className={cn(
                 "flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
                 active
-                  ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
+                  ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
               )}
             >
@@ -126,7 +127,7 @@ export function OrganizerRail({
           className={cn(
             "mt-1 flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
             location.kind === "trash"
-              ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
+              ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
               : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
           )}
         >
@@ -191,6 +192,7 @@ function RailBranch({
             <div
               data-drop-node={node.nodeId}
               data-drop-kind="container"
+              data-life-receive
               onPointerDown={(event) => handlers.onBeginDrag(event, node)}
               onContextMenu={(event) => handlers.onContextMenu(event, node)}
               onClick={() =>
@@ -202,7 +204,7 @@ function RailBranch({
               className={cn(
                 "group flex h-8 cursor-default items-center gap-1 rounded-chip pr-1.5 text-ui transition-colors",
                 selected
-                  ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
+                  ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 dropNodeId === node.nodeId &&
                   "ring-2 ring-brand",

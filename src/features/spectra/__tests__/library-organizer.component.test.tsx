@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TreeNode } from "../organization/tree-client";
 
@@ -137,13 +137,17 @@ afterEach(() => {
 });
 
 describe("LibraryOrganizer", () => {
-  it("keeps the folder rail's quick views above the measured composer band", () => {
+  it("keeps folders in a popover tree beside the breadcrumb, not a column", () => {
     renderOrganizer();
-    const rail = screen.getByRole("navigation", { name: "Library folders" });
-    expect(rail.classList.contains("spectra-composer-clearance")).toBe(true);
+    expect(screen.queryByRole("navigation", { name: "Library folders" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Folders" }));
+    const tree = screen.getByRole("navigation", { name: "Library folders" });
     for (const name of ["Recent", "Favorites", "Shared", "Trash"]) {
-      expect(screen.getByRole("button", { name }).closest("nav")).toBe(rail);
+      expect(within(tree).getByRole("button", { name })).toBeTruthy();
     }
+    // Choosing a place closes the tree.
+    fireEvent.click(within(tree).getByRole("button", { name: "Trash" }));
+    expect(screen.queryByRole("navigation", { name: "Library folders" })).toBeNull();
   });
 
   it("labels broad search results and names the work Enter will open", async () => {
@@ -224,6 +228,7 @@ describe("LibraryOrganizer", () => {
 
   it("asks before deleting forever when Delete is pressed in the Trash", async () => {
     renderOrganizer();
+    fireEvent.click(screen.getByRole("button", { name: "Folders" }));
     fireEvent.click(screen.getByRole("button", { name: /Trash/ }));
     await screen.findByText("Old notes");
     selectFirstRowAndPress("Delete");

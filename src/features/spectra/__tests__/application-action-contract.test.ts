@@ -29,6 +29,15 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "trigger_managebac_sync", args: { purpose: "classes", force: true }, mutation: "managebac:requestAiRefresh" },
   { command: "select_managebac_classes", args: { recordIds: ["class"], expectedRevision: 1 }, mutation: "managebac:setSelectedClasses" },
   { command: "insert_reference", args: { hostWorkId: "host", targetWorkId: "source" }, event: "reference_insert", status: "canonical_write" },
+  { command: "organize_library", args: { action: "create_workspace", name: "Physics" }, mutation: "spectraWorkspaces:create", event: "organize_library" },
+  { command: "restore_library_items", args: { targetIds: ["node"] }, mutation: "orgTree:restore", event: "organize_library" },
+  { command: "pin_library_item", args: { targetId: "node", pinned: true }, mutation: "orgTree:setPinned", event: "organize_library" },
+  { command: "manage_conversation", args: { threadId: "thread", title: "Biology revision" }, mutation: "spectraThreads:update" },
+  { command: "save_version", args: { artifactId: "work", name: "Before the rewrite" }, mutation: "changeGroups:createNamedCheckpoint", event: "version_saved" },
+  { command: "set_school_sync_mode", args: { kind: "grades", mode: "manual" }, mutation: "school:setMode", event: "managebac_sync_preferences" },
+  { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
+  { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },
+  { command: "remove_calendar_event", args: { itemId: "event" }, mutation: "calendar:removePersonalItem", event: "calendar_changed" },
 ];
 const calendarArgs: Record<string, Record<string, unknown>> = {
   schedule_calendar_task: { planArtifactId: "plan", planTaskId: "task", startAt: 1000, endAt: 2000, timezone: "UTC" },
@@ -47,7 +56,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
   });
 
   it("accounts for every application command with a dispatch case", () => {
-    expect([...cases.map((entry) => entry.command), ...Object.keys(calendarArgs)].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
+    expect([...new Set([...cases.map((entry) => entry.command), ...Object.keys(calendarArgs)])].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
   });
 
   it("knows every command the harness tools send, and no other", () => {

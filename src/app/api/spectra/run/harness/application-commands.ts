@@ -4,7 +4,7 @@ import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/com
 import { FOLDER_ACTIONS, LOCAL_DEVICE_ACTIONS } from "@/features/spectra/devices/actions";
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "@/features/spectra/settings/schema/preferences";
 import { normalizeCalendarTimeInput } from "../../../../../../shared/calendar-time";
-import { AI_SYNC_PURPOSES, type AiSyncPurpose } from "../../../../../../shared/school-sync";
+import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES, type AiSyncPurpose } from "../../../../../../shared/school-sync";
 
 /*
  * The application commands the harness tools send (tools/app.ts and
@@ -59,19 +59,39 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   organize_library: {
     input: z
       .object({
-        action: z.enum(["create_folder", "rename", "move", "link"]),
+        action: z.enum(["create_folder", "create_workspace", "rename", "move", "link"]),
         targetIds: z.array(z.string()).max(100).default([]),
         destinationId: z.string().optional(),
         name: z.string().trim().min(1).max(200).optional(),
       })
       .superRefine((value, ctx) => {
-        if (value.action === "create_folder" && !value.name) ctx.addIssue({ code: "custom", path: ["name"], message: "A folder name is required." });
-        if (value.action !== "create_folder" && value.targetIds.length === 0) ctx.addIssue({ code: "custom", path: ["targetIds"], message: "At least one target is required." });
+        const creates = value.action === "create_folder" || value.action === "create_workspace";
+        if (creates && !value.name) ctx.addIssue({ code: "custom", path: ["name"], message: "A name is required." });
+        if (!creates && value.targetIds.length === 0) ctx.addIssue({ code: "custom", path: ["targetIds"], message: "At least one target is required." });
         if ((value.action === "move" || value.action === "link") && !value.destinationId) ctx.addIssue({ code: "custom", path: ["destinationId"], message: "A destination is required." });
       }),
     authority: "tree",
   },
   delete_library_items: { input: z.object({ targetIds: z.array(z.string()).min(1).max(100) }), authority: "tree_delete" },
+  restore_library_items: { input: z.object({ targetIds: z.array(z.string()).min(1).max(100) }), authority: "tree" },
+  pin_library_item: { input: z.object({ targetId: z.string().trim().min(1).max(200), pinned: z.boolean() }), authority: "tree" },
+  manage_conversation: {
+    input: z
+      .object({
+        threadId: z.string().trim().min(1).max(200),
+        title: z.string().trim().min(1).max(200).optional(),
+        pinned: z.boolean().optional(),
+        archived: z.boolean().optional(),
+      })
+      .refine((value) => value.title !== undefined || value.pinned !== undefined || value.archived !== undefined, {
+        message: "Say what changes: title, pinned or archived.",
+      }),
+    authority: "content",
+  },
+  save_version: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(180) }),
+    authority: "content",
+  },
   change_spectra_settings: { input: z.object({ patch: preferenceLayerValuesSchema }), authority: "settings" },
   change_sync_policy: {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),
@@ -107,6 +127,23 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({
       recordIds: z.array(z.string().min(1)).max(100),
       expectedRevision: z.number().int().min(0).optional(),
+      retention: z.enum(["keep_in_spectra", "archive_projection"]).optional(),
+    }),
+    authority: "managebac_selection",
+  },
+  set_school_sync_mode: {
+    input: z.object({
+      kind: z.enum(SCHOOL_SYNC_KINDS),
+      // null clears a class's own choice so it follows the kind's mode again.
+      mode: z.enum(SCHOOL_SYNC_MODES).nullable(),
+      providerClassId: z.string().trim().min(1).max(200).optional(),
+    }).refine((value) => value.mode !== null || value.providerClassId, { message: "Only a class's own choice can be cleared." }),
+    authority: "managebac_selection",
+  },
+  manage_class_workspaces: {
+    input: z.object({
+      action: z.enum(["create", "release"]),
+      recordIds: z.array(z.string().min(1)).min(1).max(100),
       retention: z.enum(["keep_in_spectra", "archive_projection"]).optional(),
     }),
     authority: "managebac_selection",
@@ -149,6 +186,9 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       expectedRevision: z.number(),
     }),
   },
+  // Finishing or removing an item is the user's own reversible calendar work.
+  complete_calendar_block: { input: z.object({ itemId: z.string().min(1), expectedRevision: z.number() }), authority: "content" },
+  remove_calendar_event: { input: z.object({ itemId: z.string().min(1) }), authority: "content" },
 };
 
 export const APPLICATION_COMMAND_NAMES = Object.keys(COMMANDS);

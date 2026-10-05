@@ -147,6 +147,28 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "managebac_sync_preferences" || event.key === "managebac_class_workspaces") {
+    // What syncs is set on the School page; class workspaces live in the library.
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: event.key === "managebac_sync_preferences" ? "school" : "library",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updating your school sync",
+    });
+    return;
+  }
+  if (event.key === "version_saved") {
+    const artifactId = event.payload?.targetId;
+    if (typeof artifactId !== "string" || !artifactId) return;
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Saved a version",
+    });
+    return;
+  }
   if (event.key === "calendar_changed") {
     const targetId = event.payload?.targetId;
     noteAiSurface({

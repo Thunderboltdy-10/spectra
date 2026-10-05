@@ -1,6 +1,6 @@
 import { patchTouchesAiPermissions } from "../../../settings/schema/ai-permissions";
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "../../../settings/schema/preferences";
-import { AI_SYNC_PURPOSES } from "../../../../../../shared/school-sync";
+import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES } from "../../../../../../shared/school-sync";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
 import {
@@ -98,6 +98,18 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
 }
 
 /* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
+
+const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
+const LIBRARY_ACTIONS = ["create_folder", "create_workspace", "rename", "move", "link", "pin", "unpin"] as const;
+const MANAGEBAC_ACTIONS = ["sync", "select_classes", "set_sync_mode", "create_class_workspaces", "release_class_workspaces"] as const;
+type ManageBacAction = (typeof MANAGEBAC_ACTIONS)[number];
+const MANAGEBAC_LABELS: Record<ManageBacAction, [string, string]> = {
+  sync: ["Syncing ManageBac", "Synced ManageBac"],
+  select_classes: ["Choosing your ManageBac classes", "Chose your ManageBac classes"],
+  set_sync_mode: ["Changing what syncs from school", "Changed what syncs from school"],
+  create_class_workspaces: ["Making class workspaces", "Made class workspaces"],
+  release_class_workspaces: ["Releasing class workspaces", "Released class workspaces"],
+};
 
 /** The places open_in_spectra can show; the app's follow navigator handles each one. */
 export const OPEN_IN_SPECTRA_DESTINATIONS = [
@@ -208,11 +220,11 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "calendar",
-      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
+      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId} takes a personal event or work block off the calendar. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["add_event", "schedule_task", "move_block", "resize_block"] },
+          action: { type: "string", enum: [...CALENDAR_ACTIONS] },
           title: { type: "string" },
           start: { type: "string" },
           end: { type: "string" },
@@ -231,7 +243,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { action: string; title?: string }) =>
         args.action === "add_event" ? `Added *${args.title}* to your calendar` : "Updated your calendar",
       parse: (raw) => {
-        const action = oneOf(raw, "action", ["add_event", "schedule_task", "move_block", "resize_block"] as const);
+        const action = oneOf(raw, "action", CALENDAR_ACTIONS);
+        if (action === "remove_event") return { action, itemId: requireString(raw, "itemId", 200) };
         if (action === "add_event")
           return {
             action,
@@ -245,6 +258,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true) };
         const expectedRevision = optionalNumber(raw, "expectedRevision");
         if (expectedRevision === undefined) throw new ToolInputError("expectedRevision is required; read it with read_calendar.");
+        if (action === "complete_block") return { action, itemId: requireString(raw, "itemId", 200), expectedRevision };
         return action === "move_block"
           ? { action, itemId: requireString(raw, "itemId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", false), expectedRevision }
           : { action, itemId: requireString(raw, "itemId", 200), end: localTime(raw, "end", true), expectedRevision };
@@ -265,6 +279,9 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           };
         if (action === "schedule_task")
           return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone } };
+        if (action === "complete_block")
+          return { command: "complete_calendar_block", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
+        if (action === "remove_event") return { command: "remove_calendar_event", args: { itemId: args.itemId } };
         if (action === "move_block")
           return {
             command: "move_calendar_block",
@@ -276,11 +293,11 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "organize_library",
       description:
-        "Organize the library: create_folder {name, destinationId?}, rename {targetIds: [one id], name}, move {targetIds, destinationId}, link {targetIds, destinationId} (adds a shortcut without moving). Ids are folder or item ids from list_library. If items have files on the user's computer through Bridge, the user is asked first.",
+        "Organize the library: create_folder {name, destinationId?}, create_workspace {name, destinationId?}, rename {targetIds: [one id], name} (folders, work and workspaces), move {targetIds, destinationId}, link {targetIds, destinationId} (adds a shortcut without moving), pin and unpin {targetIds: [one id]}. Ids are folder, workspace or item ids from list_library. If items have files on the user's computer through Bridge, the user is asked first.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["create_folder", "rename", "move", "link"] },
+          action: { type: "string", enum: [...LIBRARY_ACTIONS] },
           targetIds: { type: "array", items: { type: "string" } },
           destinationId: { type: "string" },
           name: { type: "string" },
@@ -290,19 +307,98 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "write",
       label: (args: { action: string; name?: string }) =>
-        args.action === "create_folder" ? `Creating the folder *${args.name}*` : "Organizing your library",
+        args.action === "create_folder"
+          ? `Creating the folder *${args.name}*`
+          : args.action === "create_workspace"
+            ? `Creating the workspace *${args.name}*`
+            : "Organizing your library",
       doneLabel: (args: { action: string; name?: string }) =>
-        args.action === "create_folder" ? `Created the folder *${args.name}*` : "Organized your library",
+        args.action === "create_folder"
+          ? `Created the folder *${args.name}*`
+          : args.action === "create_workspace"
+            ? `Created the workspace *${args.name}*`
+            : "Organized your library",
       parse: (raw) => {
-        const action = oneOf(raw, "action", ["create_folder", "rename", "move", "link"] as const);
+        const action = oneOf(raw, "action", LIBRARY_ACTIONS);
         const name = optionalString(raw, "name", 200);
-        if ((action === "create_folder" || action === "rename") && !name) throw new ToolInputError("name is required.");
-        const targetIds = action === "create_folder" ? [] : stringList(raw, "targetIds");
+        const creates = action === "create_folder" || action === "create_workspace";
+        if ((creates || action === "rename") && !name) throw new ToolInputError("name is required.");
+        const targetIds = creates ? [] : stringList(raw, "targetIds");
+        if ((action === "pin" || action === "unpin") && targetIds.length !== 1) throw new ToolInputError("pin and unpin take one id in targetIds.");
         const destinationId = optionalString(raw, "destinationId", 200);
         if ((action === "move" || action === "link") && !destinationId) throw new ToolInputError("destinationId is required.");
         return { action, targetIds, ...(destinationId ? { destinationId } : {}), ...(name ? { name } : {}) };
       },
-      command: (args: Record<string, unknown>) => ({ command: "organize_library", args }),
+      command: (args: Record<string, unknown>) =>
+        args.action === "pin" || args.action === "unpin"
+          ? { command: "pin_library_item", args: { targetId: (args.targetIds as string[])[0], pinned: args.action === "pin" } }
+          : { command: "organize_library", args },
+    }),
+    commandTool(session, {
+      name: "restore_from_trash",
+      description:
+        "Bring library items back from the Trash to where they were, with any desktop files they had. Ids are the ones move_to_trash took, or Trash items the user names.",
+      parameters: {
+        type: "object",
+        properties: { targetIds: { type: "array", items: { type: "string" } } },
+        required: ["targetIds"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      label: (args: { targetIds: string[] }) =>
+        args.targetIds.length === 1 ? `Restoring ${titled(session, args.targetIds[0], "an item")}` : `Restoring ${plural(args.targetIds.length, "item")}`,
+      doneLabel: (args: { targetIds: string[] }) => `Restored ${plural(args.targetIds.length, "item")} from the Trash`,
+      parse: (raw) => ({ targetIds: stringList(raw, "targetIds") }),
+      command: (args) => ({ command: "restore_library_items", args: { targetIds: args.targetIds } }),
+    }),
+    commandTool(session, {
+      name: "save_version",
+      description:
+        "Save a named version of a work item: a checkpoint the user can return to from its history. Use it before a large change they may want to undo, or when they ask to keep this state.",
+      parameters: {
+        type: "object",
+        properties: { artifactId: { type: "string" }, name: { type: "string" } },
+        required: ["artifactId", "name"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      label: (args: { artifactId: string }) => `Saving a version of ${titled(session, args.artifactId, "your work")}`,
+      doneLabel: (args: { artifactId: string; name: string }) => `Saved *${args.name}* of ${titled(session, args.artifactId, "your work")}`,
+      parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), name: requireString(raw, "name", 180) }),
+      command: (args) => ({ command: "save_version", args: { artifactId: args.artifactId, name: args.name } }),
+    }),
+    commandTool(session, {
+      name: "manage_conversation",
+      description:
+        "Rename, pin, unpin, archive or restore a conversation in the user's chat list. Omit threadId for this conversation.",
+      parameters: {
+        type: "object",
+        properties: {
+          threadId: { type: "string" },
+          title: { type: "string" },
+          pinned: { type: "boolean" },
+          archived: { type: "boolean" },
+        },
+        additionalProperties: false,
+      },
+      effect: "write",
+      label: (args: { title?: string }) => (args.title ? `Renaming the conversation *${args.title}*` : "Tidying your conversations"),
+      doneLabel: (args: { title?: string }) => (args.title ? `Renamed the conversation *${args.title}*` : "Tidied your conversations"),
+      parse: (raw) => {
+        const threadId = optionalString(raw, "threadId", 200);
+        const title = optionalString(raw, "title", 200);
+        const pinned = typeof raw.pinned === "boolean" ? raw.pinned : undefined;
+        const archived = typeof raw.archived === "boolean" ? raw.archived : undefined;
+        if (title === undefined && pinned === undefined && archived === undefined)
+          throw new ToolInputError("Say what changes: title, pinned or archived.");
+        return {
+          ...(threadId ? { threadId } : {}),
+          ...(title ? { title } : {}),
+          ...(pinned !== undefined ? { pinned } : {}),
+          ...(archived !== undefined ? { archived } : {}),
+        };
+      },
+      command: (args) => ({ command: "manage_conversation", args }),
     }),
     commandTool(session, {
       name: "move_to_trash",
@@ -371,38 +467,77 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "managebac",
       description:
-        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. The user approves unless they allowed ManageBac changes.",
+        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. The user approves unless they allowed ManageBac changes.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["sync", "select_classes"] },
+          action: { type: "string", enum: [...MANAGEBAC_ACTIONS] },
           purpose: { type: "string", enum: AI_SYNC_PURPOSES },
           classIds: { type: "array", items: { type: "string" } },
           expectedRevision: { type: "number" },
+          kind: { type: "string", enum: [...SCHOOL_SYNC_KINDS] },
+          mode: { type: "string", enum: [...SCHOOL_SYNC_MODES, "follow"] },
+          classId: { type: "string" },
+          retention: { type: "string", enum: ["keep_in_spectra", "archive_projection"] },
         },
         required: ["action"],
         additionalProperties: false,
       },
       effect: "irreversible",
       category: "managebac",
-      label: (args: { action: string }) => (args.action === "sync" ? "Syncing ManageBac" : "Choosing your ManageBac classes"),
-      doneLabel: (args: { action: string }) => (args.action === "sync" ? "Synced ManageBac" : "Chose your ManageBac classes"),
-      question: (args: { action: string; classIds?: string[] }) =>
-        args.action === "sync" ? "Refresh your school records from ManageBac now?" : `Sync only these ${plural(args.classIds?.length ?? 0, "class")} from ManageBac?`,
+      label: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[0] ?? "Updating ManageBac",
+      doneLabel: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[1] ?? "Updated ManageBac",
+      question: (args: { action: string; classIds?: string[]; kind?: string; mode?: string; classId?: string }) => {
+        const classes = plural(args.classIds?.length ?? 0, "class");
+        const kind = String(args.kind ?? "").replace(/_/g, " ");
+        if (args.action === "sync") return "Refresh your school records from ManageBac now?";
+        if (args.action === "set_sync_mode")
+          return args.mode === "follow"
+            ? `Let this class follow your choice for ${kind} again?`
+            : `Sync ${kind}${args.classId ? " for this class" : ""} ${args.mode === "auto" ? "automatically" : args.mode === "manual" ? "only when you ask" : "never"}?`;
+        if (args.action === "create_class_workspaces") return `Make a workspace for ${classes}?`;
+        if (args.action === "release_class_workspaces") return `Release the workspaces of ${classes}?`;
+        return `Sync only these ${classes} from ManageBac?`;
+      },
       parse: (raw) => {
-        const action = oneOf(raw, "action", ["sync", "select_classes"] as const);
+        const action = oneOf(raw, "action", MANAGEBAC_ACTIONS);
         if (action === "sync")
           return { action, purpose: oneOf(raw, "purpose", AI_SYNC_PURPOSES, "upcoming_deadlines") };
+        if (action === "set_sync_mode") {
+          const classId = optionalString(raw, "classId", 200);
+          const mode = oneOf(raw, "mode", [...SCHOOL_SYNC_MODES, "follow"] as const);
+          if (mode === "follow" && !classId) throw new ToolInputError("mode follow needs classId.");
+          return { action, kind: oneOf(raw, "kind", SCHOOL_SYNC_KINDS), mode, ...(classId ? { classId } : {}) };
+        }
+        if (action === "create_class_workspaces") return { action, classIds: stringList(raw, "classIds") };
+        if (action === "release_class_workspaces") {
+          const retention = raw.retention === undefined ? undefined : oneOf(raw, "retention", ["keep_in_spectra", "archive_projection"] as const);
+          return { action, classIds: stringList(raw, "classIds"), ...(retention ? { retention } : {}) };
+        }
         const expectedRevision = optionalNumber(raw, "expectedRevision");
         return { action, classIds: stringList(raw, "classIds"), ...(expectedRevision !== undefined ? { expectedRevision } : {}) };
       },
-      command: (args: Record<string, unknown>) =>
-        args.action === "sync"
-          ? { command: "trigger_managebac_sync", args: { purpose: args.purpose } }
-          : {
-              command: "select_managebac_classes",
-              args: { recordIds: args.classIds, ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}) },
+      command: (args: Record<string, unknown>) => {
+        if (args.action === "sync") return { command: "trigger_managebac_sync", args: { purpose: args.purpose } };
+        if (args.action === "set_sync_mode")
+          return {
+            command: "set_school_sync_mode",
+            args: { kind: args.kind, mode: args.mode === "follow" ? null : args.mode, ...(args.classId ? { providerClassId: args.classId } : {}) },
+          };
+        if (args.action === "create_class_workspaces" || args.action === "release_class_workspaces")
+          return {
+            command: "manage_class_workspaces",
+            args: {
+              action: args.action === "create_class_workspaces" ? "create" : "release",
+              recordIds: args.classIds,
+              ...(args.retention ? { retention: args.retention } : {}),
             },
+          };
+        return {
+          command: "select_managebac_classes",
+          args: { recordIds: args.classIds, ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}) },
+        };
+      },
     }),
     commandTool(session, {
       name: "remember",

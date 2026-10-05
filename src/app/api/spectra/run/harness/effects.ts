@@ -310,6 +310,25 @@ export async function executeApplicationCommand(
         },
       };
     }
+    if (action === "create_workspace") {
+      const name = String(parsed.name ?? "").trim();
+      const result = await applyMutation("spectraWorkspaces:create", {
+        title: name,
+        ...(destinationId ? { parentNodeId: destinationId } : {}),
+      });
+      // spectraWorkspaces:create returns the new workspace's id.
+      const workspaceId = typeof result === "string" ? result : "";
+      onUiEvent?.({
+        key: "organize_library",
+        payload: {
+          action,
+          targetId: workspaceId,
+          destinationId: destinationId ?? null,
+          note: `Created the workspace ${name}`,
+        },
+      });
+      return { workspaceId, name };
+    }
     if (action === "rename") {
       const result = await applyMutation("orgTree:rename", {
         actorClerkId,
@@ -365,6 +384,50 @@ export async function executeApplicationCommand(
       ? parsed.targetIds.filter((id): id is string => typeof id === "string")
       : [];
     return await applyMutation("orgTree:trash", { actorClerkId, nodeIds: targetIds });
+  }
+  if (command === "restore_library_items") {
+    const targetIds = (parsed.targetIds as string[]);
+    const result = await applyMutation("orgTree:restore", { nodeIds: targetIds });
+    onUiEvent?.({
+      key: "organize_library",
+      payload: {
+        action: "restore",
+        targetId: targetIds[0],
+        note: `Restored ${targetIds.length} item${targetIds.length === 1 ? "" : "s"} from the Trash`,
+      },
+    });
+    return result;
+  }
+  if (command === "pin_library_item") {
+    const targetId = String(parsed.targetId);
+    const result = await applyMutation("orgTree:setPinned", { nodeId: targetId, pinned: parsed.pinned === true });
+    onUiEvent?.({
+      key: "organize_library",
+      payload: { action: parsed.pinned ? "pin" : "unpin", targetId, note: parsed.pinned ? "Pinned in the library" : "Unpinned in the library" },
+    });
+    return result;
+  }
+  if (command === "manage_conversation") {
+    const result = await applyMutation("spectraThreads:update", parsed);
+    return result ?? { ok: true, threadId: parsed.threadId };
+  }
+  if (command === "save_version") {
+    const artifactId = String(parsed.artifactId);
+    const result = await applyMutation("changeGroups:createNamedCheckpoint", { artifactId, name: parsed.name });
+    onUiEvent?.({ key: "version_saved", payload: { targetId: artifactId, note: `Saved the version ${String(parsed.name)}` } });
+    return result;
+  }
+  if (command === "complete_calendar_block" || command === "remove_calendar_event") {
+    const itemId = String(parsed.itemId);
+    const result = await applyMutation(
+      command === "complete_calendar_block" ? "calendar:completeWorkBlock" : "calendar:removePersonalItem",
+      parsed,
+    );
+    onUiEvent?.({
+      key: "calendar_changed",
+      payload: { targetId: itemId, note: command === "complete_calendar_block" ? "Marked a work block done" : "Removed a Calendar event" },
+    });
+    return result;
   }
   if (command === "change_sync_policy") {
     const targetIds = Array.isArray(parsed.targetIds)
@@ -513,6 +576,31 @@ export async function executeApplicationCommand(
         targetId: "managebac",
         note: `Updated the ManageBac class selection (${recordIds.length} selected)`,
         selectedCount: recordIds.length,
+      },
+    });
+    return result;
+  }
+  if (command === "set_school_sync_mode") {
+    const result = await applyMutation(parsed.providerClassId ? "school:setClassOverride" : "school:setMode", parsed);
+    onUiEvent?.({
+      key: "managebac_sync_preferences",
+      payload: { targetId: "managebac", note: parsed.mode === null ? "This class follows your school sync choice again" : `School sync for ${String(parsed.kind).replace(/_/g, " ")} set to ${String(parsed.mode)}` },
+    });
+    return result;
+  }
+  if (command === "manage_class_workspaces") {
+    const recordIds = parsed.recordIds as string[];
+    const result = await applyMutation(
+      parsed.action === "release" ? "managebac:releaseClassWorkspaces" : "managebac:materializeClassWorkspaces",
+      parsed,
+    );
+    onUiEvent?.({
+      key: "managebac_class_workspaces",
+      payload: {
+        targetId: "managebac",
+        note: parsed.action === "release"
+          ? `Released ${recordIds.length} class workspace${recordIds.length === 1 ? "" : "s"}`
+          : `Made workspaces for ${recordIds.length} class${recordIds.length === 1 ? "" : "es"}`,
       },
     });
     return result;

@@ -38,6 +38,8 @@ const CONFIRMED_COMMANDS = new Set([
   "change_sharing",
   "trigger_managebac_sync",
   "select_managebac_classes",
+  "set_school_sync_mode",
+  "manage_class_workspaces",
   "pair_device",
   "remove_device",
 ]);
@@ -385,6 +387,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
 
   private async commandOperation(request: Pick<CommandRequest, "command" | "args">) {
     const args = { ...request.args };
+    // "This conversation" is the one the run belongs to.
+    if (request.command === "manage_conversation" && !args.threadId && this.input.threadId) args.threadId = this.input.threadId;
     let localFiles = 0;
     if (LOCAL_EFFECT_COMMANDS.has(request.command)) {
       const count = await localFileCountForApplicationCommand(this.actorClerkId, request.command, args);

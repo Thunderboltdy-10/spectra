@@ -463,6 +463,7 @@ export function ArtifactWorkbar({
               role="tab"
               aria-selected={activeTab === tab}
               data-contextual={contextualTabs.has(tab) || undefined}
+              data-life-receive={customizing || undefined}
               onClick={() => setActiveTab(tab)}
               onDragOver={(event) => {
                 if (customizing && dragging?.kind === "command") event.preventDefault();

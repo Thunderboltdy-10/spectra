@@ -214,6 +214,11 @@ surface with a background covers it.
   `[data-life-launch]` element remembers its figure; the next surface that lands within 2.5 s (a work or a thread in
   the Side, a work opened full) morphs from it: the card's dots flow into the new frame, then the surface is real.
   Without a recent launch the surface makes its own entrance.
+- Sends ("add A to B"): any drag in the page that ends in a drop the page takes (`preventDefault`) carries light
+  from what was dragged into the closest `[data-life-receive]` (a folder, a list, a tab), which takes it in and
+  pulses; without one, the light lands where it was dropped. For moves that are not drags (a "Move to" menu,
+  Spectra filing something), call `sendInto(target, from?)`. `from` defaults to the last cause; `null` only pulses
+  the target.
 
 **Ghosts.** Every `Skeleton` is marked `data-life-ghost` (its lines `data-life-ghost-bar`). While the field is on
 (`html[data-life="on"]`), `LifeField` holds a ghost of each one in the field, at most 16 at a time, and the CSS pulse

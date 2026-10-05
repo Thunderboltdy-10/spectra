@@ -5,6 +5,7 @@ import type { LightColour, Rect } from "./engine";
 import { figureOf, type ElementFigureOptions } from "./figure-dom";
 import type { Figure, Point } from "./figure";
 import { life, type GlowHandle } from "./life";
+import { STATUS_COLOURS } from "./prism";
 
 /*
  * Life for components: the kit's hooks onto the field, so pages get the
@@ -119,10 +120,40 @@ function rememberLaunch(target: EventTarget | null) {
   if (launcher && life.on) launch = { figure: figureOf(launcher, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
 }
 
+/** What ticks something off: a task's done control, a checklist item in a work. */
+export const DONE_TICKS = "[data-life-done], li[data-type='taskItem']";
+
+/** Something was ticked off here: the paper answers with a pulse in the done colour (LIFE.md, pulse). */
+function doneAt(element: Element) {
+  if (!life.on) return;
+  const r = element.getBoundingClientRect();
+  if (!r.width) return;
+  life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.8, STATUS_COLOURS.done);
+}
+
 /** Where the user last pressed, dropped, or acted from the keyboard: the cause of what appears next. */
 function watchPresses() {
   if (pressWatch || typeof window === "undefined") return;
   pressWatch = true;
+  // A checkbox that became checked, or a done control pressed while it was not done yet.
+  window.addEventListener(
+    "change",
+    (event) => {
+      const box = event.target as HTMLInputElement | null;
+      if (box?.type === "checkbox" && box.checked && box.closest(DONE_TICKS)) doneAt(box);
+    },
+    { capture: true, passive: true },
+  );
+  window.addEventListener(
+    "click",
+    (event) => {
+      const control = (event.target as Element | null)?.closest?.("button[data-life-done], [role='checkbox'][data-life-done]");
+      if (!control || control.matches(":disabled")) return;
+      const state = control.getAttribute("aria-checked") ?? control.getAttribute("aria-pressed");
+      if (state !== "true") doneAt(control);
+    },
+    { capture: true, passive: true },
+  );
   window.addEventListener(
     "pointerdown",
     (event) => {

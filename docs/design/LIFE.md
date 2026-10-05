@@ -105,6 +105,7 @@ animation.
 | Delete | The thing **unforms** from where you acted. |
 | Create by hand | The thing **forms** from where you made it. |
 | Add A to B | A **send** from A into B, which **absorbs** it and pulses. |
+| Tick something off | The paper **pulses** green where it was done: a task's done control, a step, a checklist item in a work (`data-life-done`). Undoing it is quiet. |
 
 ### In editors
 

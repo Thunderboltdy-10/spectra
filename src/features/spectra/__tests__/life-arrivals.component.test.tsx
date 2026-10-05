@@ -249,3 +249,37 @@ describe("sends", () => {
     list.remove();
   });
 });
+
+describe("ticking something off", () => {
+  it("pulses in the done colour where a task was done, and not when it is undone", () => {
+    const done = document.createElement("button");
+    done.setAttribute("data-life-done", "");
+    done.setAttribute("aria-pressed", "false");
+    document.body.append(done);
+    done.click();
+    expect(field.pulse).toHaveBeenCalledTimes(1);
+    expect(field.pulse.mock.calls[0]).toEqual([60, 30, 0.8, expect.anything()]);
+    done.setAttribute("aria-pressed", "true");
+    done.click();
+    expect(field.pulse).toHaveBeenCalledTimes(1);
+    done.remove();
+  });
+
+  it("answers a checklist item ticked in a work, and not any checkbox", () => {
+    const item = document.createElement("li");
+    item.setAttribute("data-type", "taskItem");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    item.append(box);
+    const setting = document.createElement("input");
+    setting.type = "checkbox";
+    document.body.append(item, setting);
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    setting.checked = true;
+    setting.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(field.pulse).toHaveBeenCalledTimes(1);
+    item.remove();
+    setting.remove();
+  });
+});

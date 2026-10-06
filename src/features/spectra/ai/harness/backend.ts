@@ -1,5 +1,8 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { CommentRow } from "./comments";
+import type { EmbedRow } from "./embeds";
+import type { SharingState } from "./sharing";
+import type { VersionRow } from "./versions";
 import type { ToolOutcome } from "./types";
 
 /*
@@ -145,6 +148,12 @@ export interface HarnessBackend {
   readCalendar(input: { from: number; to: number; title?: string }, signal: AbortSignal): Promise<string>;
   /** A work's comments, resolved ones too when asked; null when the user cannot open the work. */
   readComments(input: { artifactId: string; includeResolved?: boolean }, signal: AbortSignal): Promise<CommentRow[] | null>;
+  /** A work's saved versions, newest first, and whether older ones exist; null when the user cannot open the work. */
+  readVersions(input: { artifactId: string; limit: number }, signal: AbortSignal): Promise<{ versions: VersionRow[]; more: boolean } | null>;
+  /** The live embeds inside a work, and whether the user can change them; null when the user cannot open the work. */
+  readEmbeds(input: { artifactId: string }, signal: AbortSignal): Promise<{ embeds: EmbedRow[]; canConfigure: boolean } | null>;
+  /** Who can open a work, workspace or agent; null when the user cannot share it. */
+  readSharing(input: { resourceType: "workspace" | "artifact" | "agent"; resourceId: string }, signal: AbortSignal): Promise<SharingState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;

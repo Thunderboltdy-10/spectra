@@ -3,6 +3,7 @@ import { foldForSearch } from "../../../../../../shared/semantic-chunks";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type ToolEffect } from "../types";
 import { commandTool } from "./app";
 import { oneOf, optionalNumber, optionalString, requireString, type HarnessSession } from "./shared";
+import { workTools } from "./work";
 
 /*
  * The command catalog, for the model. find_commands finds what a user can do
@@ -93,6 +94,7 @@ export function runOnlyTools(session: HarnessSession): AnyHarnessTool[] {
       },
       command: (args) => ({ command: "insert_reference", args }),
     }),
+    ...workTools(session),
   ] as unknown as AnyHarnessTool[];
 }
 
@@ -116,6 +118,8 @@ const CONCEPTS: readonly (readonly string[])[] = [
   ["chat", "conversation", "thread", "message", "talk"],
   ["agent", "specialist", "assistant"],
   ["publish", "release", "public", "link"],
+  ["version", "history", "restore", "revert", "undo", "rollback", "earlier", "previous"],
+  ["embed", "reference", "live", "linked", "pin", "inset"],
   ["stop", "cancel", "halt"],
   ["permission", "allow", "control", "authority", "approve"],
 ];

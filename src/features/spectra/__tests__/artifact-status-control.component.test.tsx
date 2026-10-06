@@ -170,7 +170,7 @@ describe("the header around it", () => {
   const commands = [
     { id: "comments", label: "Comments", icon: MessageSquare, onSelect: () => {} },
     { id: "chats", label: "Browse chats about this work", icon: MessagesSquare, onSelect: () => {} },
-    { id: "open-as-tab", label: "Open as tab", icon: Maximize2, onSelect: () => {} },
+    { id: "open-full", label: "Open full", icon: Maximize2, onSelect: () => {} },
   ];
 
   it("keeps every command when there is room", () => {
@@ -180,9 +180,9 @@ describe("the header around it", () => {
   it("moves commands into More from the end, and never the pinned status", () => {
     const fixed = 200;
     const tight = HEADER_IDENTITY_MIN + fixed + 4 + 32;
-    expect([...shedHeaderCommands({ commands, rowWidth: tight, fixedWidth: fixed })]).toEqual(["open-as-tab", "chats"]);
+    expect([...shedHeaderCommands({ commands, rowWidth: tight, fixedWidth: fixed })]).toEqual(["open-full", "chats"]);
     expect([...shedHeaderCommands({ commands, rowWidth: 300, fixedWidth: fixed })].sort()).toEqual(
-      ["chats", "comments", "open-as-tab"],
+      ["chats", "comments", "open-full"],
     );
   });
 
@@ -201,7 +201,7 @@ describe("the header around it", () => {
     expect(buttons).toEqual([
       "Comments",
       "Browse chats about this work",
-      "Open as tab",
+      "Open full",
       "Status: Saved",
       "More work actions",
       "Close",

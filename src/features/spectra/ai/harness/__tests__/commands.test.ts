@@ -51,6 +51,12 @@ describe("find_commands", () => {
     expect(top("invite my friend to edit")).toBe("sharing.change");
     expect(top("refresh my school deadlines")).toBe("managebac.sync");
     expect(top("connect my computer files")).toBe("devices.pair");
+    expect(top("bring my essay back to an earlier version")).toBe("work.restore_version");
+    expect(top("who changed this and when")).toBe("work.history");
+    expect(top("make a public link anyone can open")).toBe("sharing.public_link");
+    expect(top("who has access to my essay")).toBe("sharing.read");
+    expect(top("cancel the invite I sent")).toBe("sharing.withdraw_invitation");
+    expect(top("resize the embedded spreadsheet")).toBe("work.manage_embed");
     expect(rankCommands("zzzz qqqq")).toEqual([]);
   });
 

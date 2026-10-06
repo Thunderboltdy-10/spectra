@@ -9,7 +9,7 @@ import { WorkbarMenuAction, WorkbarMore } from "./artifact-workbar";
 /*
  * The right end of an artifact header, on AdaptiveBar's plan engine. The
  * status control and the people here are pinned: they never collapse. The
- * header's own commands (Comments, Chats, Open as tab) step into the header's
+ * header's own commands (Comments, Chats, Open full) step into the header's
  * More when the title needs the room, so the header never grows a second
  * overflow button beside the one it has.
  */

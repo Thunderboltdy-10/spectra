@@ -7,12 +7,13 @@ import { normalizeCalendarTimeInput } from "../../../../../../shared/calendar-ti
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES, type AiSyncPurpose } from "../../../../../../shared/school-sync";
 
 /*
- * The application commands the harness tools send (tools/app.ts and
- * tools/commands.ts), with the arguments each one takes and the authority
- * class it is judged under. This is the server's boundary: an operation whose
- * command is not here, or whose arguments do not parse, never runs.
- * Convex's spectraApplicationWrites:execute then maps each command to its one
- * mutation.
+ * The application commands the harness tools send (tools/app.ts,
+ * tools/commands.ts and tools/work.ts), with the arguments each one takes and
+ * the authority class it is judged under. This is the server's boundary: an
+ * operation whose command is not here, or whose arguments do not parse, never
+ * runs. Convex's spectraApplicationWrites:execute then maps most commands to
+ * their one mutation; restore_version and the reference commands write
+ * through the collaboration room instead.
  */
 
 const calendarTime = {
@@ -103,6 +104,32 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({ artifactId: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(180) }),
     authority: "content",
   },
+  // Restoring saves the current work as a version first, so it is undoable.
+  restore_version: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), versionId: z.string().trim().min(1).max(200) }),
+    authority: "content",
+  },
+  // Publishing serves a Code work's build to everyone who can open it.
+  publish_code: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), action: z.enum(["publish", "unpublish"]) }),
+    authority: "content",
+  },
+  // Embeds are the host work's content: changing or removing one is an edit.
+  manage_embed: {
+    input: z
+      .object({
+        artifactId: z.string().trim().min(1).max(200),
+        embedId: z.string().trim().min(1).max(200),
+        action: z.enum(["resize", "follow_live", "pin", "recheck", "remove"]),
+        mode: z.enum(["compact", "expanded"]).optional(),
+        versionId: z.string().trim().min(1).max(200).optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.action === "resize" && !value.mode) ctx.addIssue({ code: "custom", path: ["mode"], message: "resize needs a mode." });
+        if (value.action === "pin" && !value.versionId) ctx.addIssue({ code: "custom", path: ["versionId"], message: "pin needs a version id." });
+      }),
+    authority: "content",
+  },
   change_spectra_settings: { input: z.object({ patch: preferenceLayerValuesSchema }), authority: "settings" },
   change_sync_policy: {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),
@@ -117,16 +144,25 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       .object({
         resourceType: z.enum(["workspace", "artifact", "agent"]),
         resourceId: z.string(),
-        action: z.enum(["invite", "change_level", "revoke"]),
+        action: z.enum(["invite", "change_level", "revoke", "withdraw_invitation", "set_exception", "clear_exception", "create_public_link", "revoke_public_link"]),
         subjectId: z.string().optional(),
         invitationId: z.string().optional(),
         grantId: z.string().optional(),
+        accountId: z.string().optional(),
+        linkId: z.string().optional(),
         level: z.enum(["read", "modify"]).optional(),
+        effect: z.enum(["deny", "restrict"]).optional(),
+        expiresInDays: z.union([z.literal(7), z.literal(30)]).optional(),
       })
       .superRefine((value, ctx) => {
         if (value.action === "invite" && !value.subjectId) ctx.addIssue({ code: "custom", path: ["subjectId"], message: "An invitee account id is required." });
         if (value.action === "change_level" && (!value.invitationId || !value.level)) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "An accepted invitation and new level are required." });
         if (value.action === "revoke" && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A grant id is required." });
+        if (value.action === "withdraw_invitation" && !value.invitationId) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "A pending invitation id is required." });
+        if ((value.action === "set_exception" || value.action === "clear_exception") && !value.accountId) ctx.addIssue({ code: "custom", path: ["accountId"], message: "The member's account id is required." });
+        if ((value.action === "set_exception" || value.action === "clear_exception") && value.resourceType === "workspace") ctx.addIssue({ code: "custom", path: ["resourceType"], message: "Exceptions are set on a single work, not a workspace." });
+        if (value.action === "set_exception" && !value.effect) ctx.addIssue({ code: "custom", path: ["effect"], message: "An exception is deny or restrict." });
+        if (value.action === "revoke_public_link" && !value.linkId) ctx.addIssue({ code: "custom", path: ["linkId"], message: "A public link id is required." });
       }),
     authority: "sharing",
   },

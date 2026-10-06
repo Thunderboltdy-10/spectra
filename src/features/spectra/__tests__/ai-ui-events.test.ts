@@ -20,6 +20,12 @@ import { AppChoreographyMount } from "../collaboration/app-choreography-host";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const reveal = vi.hoisted(() => ({ post: vi.fn(), success: vi.fn() }));
+vi.mock("../data/api", async (original) => ({ ...(await original<typeof import("../data/api")>()), postSpectra: reveal.post }));
+vi.mock("@/components/ui/toast", async (original) => {
+  const actual = await original<typeof import("@/components/ui/toast")>();
+  return { ...actual, toast: Object.assign(actual.toast, { success: reveal.success }) };
+});
 
 describe("AI UI events", () => {
   beforeEach(() => __resetFollowAi());
@@ -242,5 +248,28 @@ describe("AI UI events", () => {
       else actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
     }
   });
-});
 
+  it("shows a public link Spectra made to the user once, fetched with their session, never from the event", async () => {
+    window.localStorage.clear();
+    reveal.post.mockResolvedValue({ url: "/public#secret-token" });
+    const event = { key: "public_link_created", runId: "run-1", payload: { targetId: "work", resourceType: "artifact", linkId: "link", operationId: "op-1" } };
+    expect(JSON.stringify(event)).not.toContain("secret-token");
+    handleSpectraAiUiEvent(event);
+    handleSpectraAiUiEvent(event); // a replay after reload
+    await vi.waitFor(() => expect(reveal.success).toHaveBeenCalledTimes(1));
+    expect(reveal.post).toHaveBeenCalledTimes(1);
+    expect(reveal.post).toHaveBeenCalledWith({ action: "revealAiPublicLink", runId: "run-1", operationId: "op-1" });
+    const [message, options] = reveal.success.mock.calls[0]!;
+    expect(message).toBe("Spectra made a public link");
+    expect(options.action.label).toBe("Copy link");
+  });
+
+  it("tells an open Code editor that Spectra changed its published build", () => {
+    const changed: string[] = [];
+    const off = spectraBus.on("code.publishedChanged", ({ artifactId }) => changed.push(artifactId));
+    handleSpectraAiUiEvent({ key: "runtime_published", runId: "run-1", payload: { targetId: "code-1", note: "Published the live build" } });
+    off();
+    expect(changed).toEqual(["code-1"]);
+    expect(getAiLocation()).toMatchObject({ artifactId: "code-1" });
+  });
+});

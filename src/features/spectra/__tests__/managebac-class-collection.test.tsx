@@ -67,7 +67,7 @@ it("refreshes the count and controlled selection from the same new collection", 
     expect(within(list).getAllByRole("option")).toHaveLength(1);
     expect(within(list).queryAllByRole("option", { selected: true })).toHaveLength(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
   expect(await screen.findByRole("button", { name: /^Classes\s*1$/ })).toBeTruthy();
 });
 

@@ -71,6 +71,26 @@ describe("PanelTabs", () => {
     view.rerender(<PanelTabs tabs={tabs} value={value} onChange={(id) => (value = id)} label="Companion" />);
     expect(screen.getByRole("tab", { name: "Comments" }).getAttribute("aria-selected")).toBe("true");
   });
+
+  it("keeps a page's extra tabs in a More menu, and the current one always in the row", () => {
+    const tabs = [
+      { id: "overview", label: "Overview", icon: "grid" as const },
+      { id: "people", label: "People", icon: "people" as const },
+      { id: "usage", label: "Usage", icon: "analytics" as const },
+      { id: "audit", label: "Audit", icon: "log" as const },
+    ];
+    const names = () => screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"));
+    const view = render(<PanelTabs tabs={tabs} value="overview" onChange={() => {}} label="Admin sections" primaryCount={2} />);
+    expect(names()).toEqual(["Overview", "People"]);
+    expect(screen.getByRole("button", { name: "More Admin sections" })).toBeTruthy();
+    // Audit is current: it trades into the last place in the row, People moves to More.
+    view.rerender(<PanelTabs tabs={tabs} value="audit" onChange={() => {}} label="Admin sections" primaryCount={2} />);
+    expect(names()).toEqual(["Overview", "Audit"]);
+    // Without a count, every tab stays in the row and there is no More menu.
+    view.rerender(<PanelTabs tabs={tabs} value="audit" onChange={() => {}} label="Admin sections" />);
+    expect(names()).toEqual(["Overview", "People", "Usage", "Audit"]);
+    expect(screen.queryByRole("button", { name: "More Admin sections" })).toBeNull();
+  });
 });
 
 describe("page anatomy", () => {

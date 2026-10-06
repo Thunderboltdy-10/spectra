@@ -119,3 +119,58 @@ export function insertOperationReference(type: string, content: unknown, referen
   }
   throw new Error("Live references can be inserted into documents, whiteboards, and presentations. Use one of those as the host.");
 }
+
+function withoutReference(node: DocumentJsonNode, embedId: string): { node: DocumentJsonNode; removed: number } {
+  if (!node.content) return { node, removed: 0 };
+  let removed = 0;
+  const content: DocumentJsonNode[] = [];
+  for (const child of node.content) {
+    if (child.type === "spectraReference" && child.attrs?.embedId === embedId) {
+      removed += 1;
+      continue;
+    }
+    const next = withoutReference(child, embedId);
+    removed += next.removed;
+    content.push(next.node);
+  }
+  return { node: removed ? { ...node, content } : node, removed };
+}
+
+/** Take an embed's node out of its host, as the editors' own remove does:
+ * the document's reference block, the board's embed node with its edges, the
+ * deck's embed objects. `removed` is 0 when the node is already gone. */
+export function removeOperationReference(type: string, content: unknown, embedId: string): { content: unknown; removed: number } {
+  const current = record(content);
+  if (type === "document") {
+    const document = documentContentToProseMirrorJson(current);
+    const next = withoutReference(document, embedId);
+    if (!next.removed) return { content, removed: 0 };
+    return { content: { ...current, tiptap: next.node, blocks: documentBlocksFromJson(next.node) }, removed: next.removed };
+  }
+  if (type === "whiteboard") {
+    const board = normalizeWhiteboardContent(content);
+    const ids = new Set(board.nodes.filter((node) => node.type === "embed" && record(node.content).embedId === embedId).map((node) => node.id));
+    if (!ids.size) return { content, removed: 0 };
+    return {
+      content: {
+        ...current,
+        ...board,
+        nodes: board.nodes.filter((node) => !ids.has(node.id)),
+        edges: board.edges.filter((edge) => !ids.has(edge.from) && !ids.has(edge.to)),
+        zOrder: board.zOrder.filter((id) => !ids.has(id)),
+      },
+      removed: ids.size,
+    };
+  }
+  if (type === "presentation") {
+    const deck = normalizePresentationContent(content);
+    let removed = 0;
+    const slides = deck.slides.map((slide) => {
+      const objects = slide.objects.filter((object) => !(object.type === "embed" && record(object.content).embedId === embedId));
+      removed += slide.objects.length - objects.length;
+      return objects.length === slide.objects.length ? slide : { ...slide, objects };
+    });
+    return removed ? { content: { ...deck, slides }, removed } : { content, removed: 0 };
+  }
+  return { content, removed: 0 };
+}

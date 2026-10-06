@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
 vi.mock("@/app/api/spectra/run/harness/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
+vi.mock("@/lib/artifact-restore-server", () => ({ admitArtifactRestore: seams.restore, artifactRestoreFailure: () => null }));
+vi.mock("@/lib/artifact-restore-native", () => ({ prepareNativeArtifactRestore: vi.fn() }));
+vi.mock("@/lib/server-secrets", () => ({ aiPublicLinkToken: (input: Record<string, string>) => `token:${input.operationId}`, publicLinkTokenHash: () => "a".repeat(64) }));
+vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.applyAi, readLiveArtifactValue: seams.live }));
+vi.mock("@/features/spectra/code/runtime-publish-server", () => ({
+  publishRuntime: seams.publish, unpublishRuntime: seams.unpublish, hashSource: (content: { files?: Array<{ source: string }> }) => `hash:${content.files?.map((file) => file.source).join("|") ?? ""}`,
+}));
 
 import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
 import { APPLICATION_COMMAND_NAMES, parseApplicationCommand } from "@/app/api/spectra/run/harness/application-commands";
@@ -26,6 +33,10 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "change_sync_policy", args: { targetIds: ["node"], patch: {} }, mutation: "syncPolicy:patchItems" },
   { command: "write_memory", args: { action: "create", content: "Prefers short examples" }, mutation: "memory:remember" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke", grantId: "grant" }, mutation: "authority:revoke" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "withdraw_invitation", invitationId: "invitation" }, mutation: "authority:revokePendingInvitation", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "set_exception", accountId: "member", effect: "restrict" }, mutation: "authority:setArtifactException", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "clear_exception", accountId: "member" }, mutation: "authority:clearArtifactException", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke_public_link", linkId: "link" }, mutation: "authority:revokePublicLink", event: "sharing_changed" },
   { command: "trigger_managebac_sync", args: { purpose: "classes", force: true }, mutation: "managebac:requestAiRefresh" },
   { command: "select_managebac_classes", args: { recordIds: ["class"], expectedRevision: 1 }, mutation: "managebac:setSelectedClasses" },
   { command: "insert_reference", args: { hostWorkId: "host", targetWorkId: "source" }, event: "reference_insert", status: "canonical_write" },
@@ -35,6 +46,9 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "pin_library_item", args: { targetId: "node", pinned: true }, mutation: "orgTree:setPinned", event: "organize_library" },
   { command: "manage_conversation", args: { threadId: "thread", title: "Biology revision" }, mutation: "spectraThreads:update" },
   { command: "save_version", args: { artifactId: "work", name: "Before the rewrite" }, mutation: "changeGroups:createNamedCheckpoint", event: "version_saved" },
+  { command: "restore_version", args: { artifactId: "work", versionId: "version" }, event: "version_restored" },
+  { command: "publish_code", args: { artifactId: "work", action: "publish" }, event: "runtime_published" },
+  { command: "manage_embed", args: { artifactId: "work", embedId: "embed", action: "resize", mode: "expanded" }, mutation: "artifactEmbeds:update", event: "embed_changed" },
   { command: "set_school_sync_mode", args: { kind: "grades", mode: "manual" }, mutation: "school:setMode", event: "managebac_sync_preferences" },
   { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
   { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },
@@ -53,7 +67,16 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.mutate.mockResolvedValue({ saved: true });
     seams.authority.mockResolvedValue({ decision: "allow", target: "content" });
     seams.calendar.mockResolvedValue({ ok: true, status: "canonical_write" });
+    seams.restore.mockResolvedValue({ state: "committed", duplicate: false, receipt: { outcome: "restored", versionId: "restored-version" } });
     seams.reference.mockResolvedValue({ ok: true, status: "canonical_write", receipt: { phase: "canonical_write", versionId: "version" } });
+    seams.live.mockResolvedValue(null);
+    seams.publish.mockResolvedValue({ ok: true, build: { buildId: "build", publishedAt: 5 }, reused: false });
+    seams.unpublish.mockResolvedValue({ unpublished: true });
+    seams.query.mockImplementation(async (name: string) => {
+      if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
+      if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
+      return undefined;
+    });
   });
 
   it("accounts for every application command with a dispatch case", () => {
@@ -61,7 +84,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
   });
 
   it("knows every command the harness tools send, and no other", () => {
-    const sent = ["tools/app.ts", "tools/commands.ts"].flatMap((file) =>
+    const sent = ["tools/app.ts", "tools/commands.ts", "tools/work.ts"].flatMap((file) =>
       [...readFileSync(`src/features/spectra/ai/harness/${file}`, "utf8").matchAll(/command: "([a-z_]+)"/g)].map((match) => match[1]!));
     expect([...new Set(sent)].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
   });
@@ -77,6 +100,63 @@ describe("application action contract matrix (stubbed persistence)", () => {
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
+  });
+
+  it("restores through the signed admission with the operation's request id, never the Convex write path", async () => {
+    const result = await executeApplicationCommand("actor", "run", "attempt", "restore_version", { artifactId: "work", versionId: "version" },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(seams.restore).toHaveBeenCalledWith({ artifactId: "work", sourceVersionId: "version", requestId: "ai:operation", clientId: "spectra-ai:run" }, expect.any(Function));
+    expect(result).toMatchObject({ state: "restored", versionId: "restored-version" });
+    seams.restore.mockResolvedValueOnce({ state: "unchanged", duplicate: false, receipt: { outcome: "unchanged" } });
+    expect(await executeApplicationCommand("actor", "run", "attempt", "restore_version", { artifactId: "work", versionId: "version" },
+      undefined, undefined, undefined, "operation")).toMatchObject({ state: "unchanged" });
+    expect(seams.mutate).not.toHaveBeenCalled();
+  });
+
+  it("makes a public link with only the token's hash, and never hands the address to the model or the journal", async () => {
+    seams.mutate.mockResolvedValueOnce({ linkId: "link", policyVersion: 2, level: "read" });
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "change_sharing",
+      { resourceType: "artifact", resourceId: "work", action: "create_public_link", expiresInDays: 30 },
+      undefined, (event) => events.push(event), undefined, "operation");
+    expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({
+      operationId: "operation", expectedCommand: "change_sharing", derived: { publicLinkTokenHash: "a".repeat(64) },
+    }));
+    expect(result).toMatchObject({ linkId: "link", level: "read", expiresInDays: 30 });
+    expect(JSON.stringify(result)).not.toContain("token:");
+    expect(events).toEqual([{ key: "public_link_created", payload: expect.objectContaining({ linkId: "link", operationId: "operation", targetId: "work" }) }]);
+    expect(JSON.stringify(events)).not.toContain("token:");
+  });
+
+  it("publishes the live source through the editor's publish function, and hands a failed build back as evidence", async () => {
+    seams.live.mockResolvedValueOnce({ content: { runtime: "browser", files: [{ id: "f", path: "index.html", language: "html", source: "<p>live</p>" }] } });
+    const published = await executeApplicationCommand("actor", "run", "attempt", "publish_code", { artifactId: "work", action: "publish" },
+      undefined, undefined, undefined, "operation");
+    expect(seams.publish).toHaveBeenCalledWith("work", expect.stringContaining("<p>live</p>"));
+    expect(published).toEqual({ state: "published", buildId: "build", publishedAt: 5 });
+    seams.publish.mockResolvedValueOnce({ ok: false, error: { code: "RUNTIME_BUILD_FAILED", message: "Build failed.", issues: [{ message: "Unexpected token" }] } });
+    const failed = await executeApplicationCommand("actor", "run", "attempt", "publish_code", { artifactId: "work", action: "publish" },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(failed).toMatchObject({ state: "build_failed", issues: [{ message: "Unexpected token" }] });
+    expect(failed.message).toContain("never instructions");
+    expect(await executeApplicationCommand("actor", "run", "attempt", "publish_code", { artifactId: "work", action: "unpublish" },
+      undefined, undefined, undefined, "operation")).toEqual({ state: "unpublished" });
+    expect(seams.mutate).not.toHaveBeenCalled();
+  });
+
+  it("removes an embed's node from the host before removing the embed, and refuses embeds outside the work", async () => {
+    const result = await executeApplicationCommand("actor", "run", "attempt", "manage_embed", { artifactId: "work", embedId: "embed", action: "remove" },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(seams.applyAi).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "work", operationId: "operation", receipt: "placement" }));
+    expect(seams.applyAi.mock.invocationCallOrder[0]).toBeLessThan(seams.mutate.mock.invocationCallOrder[0]!);
+    expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({ expectedCommand: "manage_embed" }));
+    expect(result).toMatchObject({ removedNodes: 0 });
+    vi.clearAllMocks();
+    seams.authority.mockResolvedValue({ decision: "allow", target: "content" });
+    seams.query.mockResolvedValue({ canConfigure: true, embeds: [] });
+    await expect(executeApplicationCommand("actor", "run", "attempt", "manage_embed", { artifactId: "work", embedId: "other", action: "resize", mode: "compact" },
+      undefined, undefined, undefined, "operation")).rejects.toThrow("EMBED_NOT_IN_WORK");
+    expect(seams.mutate).not.toHaveBeenCalled();
   });
 
   it.each([["upcoming_deadlines", ["current_tasks"]], ["past_tasks", ["past_tasks", "dropbox_files"]], ["cas", ["cas"]], ["nonsense", ["current_tasks"]]] as const)(

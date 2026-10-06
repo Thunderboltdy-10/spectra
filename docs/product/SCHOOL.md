@@ -56,8 +56,9 @@ Settings sit on the School page's **Sync** tab, not buried in Settings.
   - the grade and feedback;
   - the student's submitted files.
 - **Submitted files.**
-  - They can be opened in Spectra's viewers (PDF, documents, slides).
-  - "Copy into Library" makes an editable artifact from them.
+  - PDFs and photos open in Spectra's own viewer, without leaving the task.
+  - "Copy into Library" makes an editable artifact from them, which is how documents and slides open in Spectra.
+  - Anything Spectra has no viewer for opens in a new tab.
 - **Search.** Past tasks and their files are indexed for search, so Spectra AI can say "Use my Year 10 essay on
   Macbeth as a reference".
 

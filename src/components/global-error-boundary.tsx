@@ -5,22 +5,40 @@ import { readConvexError } from "../../shared/convex-error.mjs";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { SPECTRA_REQUEST_UNREACHABLE } from "@/features/spectra/data/request";
 
 type Props = { children: ReactNode; resetKey?: string | null };
 type State = { hasError: boolean; error?: Error };
 
+/** Why a part of Spectra stopped: this device lost its connection, or something else broke. */
+export type IsolatedFailure = { offline: boolean; retry: () => void };
+
+type IsolatedProps = {
+  children: ReactNode;
+  /** What shows instead. A function can say different things for offline and for any other failure. */
+  fallback?: ReactNode | ((failure: IsolatedFailure) => ReactNode);
+};
+type IsolatedState = { failed: boolean; offline: boolean };
+
+/** Offline only when it is: the browser says so, or a Spectra request never reached the server. */
+function failedOffline(error: unknown) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  return error instanceof Error && error.message === SPECTRA_REQUEST_UNREACHABLE;
+}
+
 /** Swallows a subtree failure so a bad query cannot blank the whole product. */
-export class IsolatedErrorBoundary extends Component<
-  { children: ReactNode; fallback?: ReactNode },
-  { failed: boolean }
-> {
-  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+export class IsolatedErrorBoundary extends Component<IsolatedProps, IsolatedState> {
+  constructor(props: IsolatedProps) {
     super(props);
-    this.state = { failed: false };
+    this.state = { failed: false, offline: false };
   }
 
-  static getDerivedStateFromError(): { failed: boolean } {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown): IsolatedState {
+    return { failed: true, offline: failedOffline(error) };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    if (!this.state.offline) console.error("[IsolatedErrorBoundary]", error, info.componentStack);
   }
 
   componentDidMount() {
@@ -32,20 +50,27 @@ export class IsolatedErrorBoundary extends Component<
   }
 
   recover = () => {
-    if (this.state.failed) this.setState({ failed: false });
+    if (this.state.failed) this.setState({ failed: false, offline: false });
   };
 
   render() {
-    if (this.state.failed) {
-      return (
-        this.props.fallback ?? (
-          <p className="px-4 py-6 text-caption text-[var(--text-secondary)]" role="status">
-            This device is offline. You can keep working; Spectra will reconnect when it can.
-          </p>
-        )
-      );
-    }
-    return this.props.children;
+    if (!this.state.failed) return this.props.children;
+    const failure: IsolatedFailure = { offline: this.state.offline, retry: this.recover };
+    const { fallback } = this.props;
+    if (typeof fallback === "function") return fallback(failure);
+    if (fallback !== undefined) return fallback;
+    return failure.offline ? (
+      <p className="px-4 py-6 text-caption text-[var(--text-secondary)]" role="status">
+        This device is offline. This part comes back when it reconnects.
+      </p>
+    ) : (
+      <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-6">
+        <p className="text-caption text-[var(--text-secondary)]">This part of Spectra stopped working.</p>
+        <Button size="sm" onClick={failure.retry}>
+          Try again
+        </Button>
+      </div>
+    );
   }
 }
 

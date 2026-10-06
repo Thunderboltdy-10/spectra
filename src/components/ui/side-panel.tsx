@@ -6,6 +6,7 @@ import { spectraBus } from "@/features/spectra/events";
 import { useLifeLanding } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { AdaptiveBar, type BarCommand, type CollapseStep } from "./adaptive-bar";
+import { OverflowMenu } from "./dropdown-menu";
 import { IconButton } from "./icon-button";
 import { Tooltip } from "./tooltip";
 
@@ -102,29 +103,43 @@ export function PanelHeader({
 export type PanelTab = { id: string; label: string; icon: IconName; count?: number };
 
 /**
- * A panel's tabs. With room each shows its name; in a narrow panel the
- * others become icons with tooltips and only the current one keeps its name.
+ * A panel's or a page's tabs. With room each shows its name; in a narrow
+ * panel the others become icons with tooltips and only the current one keeps
+ * its name. With `primaryCount`, tabs past it wait in a More menu that
+ * overlays (it never wraps the row or pushes the surface), and the current
+ * tab always trades places into the row, so it is never hidden.
  */
 export function PanelTabs({
   tabs,
   value,
   onChange,
   label,
+  primaryCount,
+  className,
 }: {
   tabs: readonly PanelTab[];
   value: string;
   onChange: (id: string) => void;
   label: string;
+  /** How many tabs stay in the row; the rest go to the More menu. All, when unset. */
+  primaryCount?: number;
+  className?: string;
 }) {
   const refs = React.useRef(new Map<string, HTMLButtonElement>());
+  const keep = primaryCount && primaryCount > 0 && primaryCount < tabs.length ? primaryCount : tabs.length;
+  const ordered = [...tabs];
+  const current = ordered.findIndex((tab) => tab.id === value);
+  if (current >= keep) ordered.splice(keep - 1, 0, ...ordered.splice(current, 1));
+  const shown = ordered.slice(0, keep);
+  const more = ordered.slice(keep);
   function move(from: number, by: number) {
-    const next = tabs[(from + by + tabs.length) % tabs.length];
+    const next = shown[(from + by + shown.length) % shown.length];
     onChange(next.id);
     refs.current.get(next.id)?.focus();
   }
   return (
-    <div role="tablist" aria-label={label} className="@container/tabs mt-1 flex min-w-0 items-center gap-0.5 border-b border-[var(--border-subtle)] pb-1.5">
-      {tabs.map((tab, index) => {
+    <div role="tablist" aria-label={label} className={cn("@container/tabs mt-1 flex min-w-0 items-center gap-0.5 border-b border-[var(--border-subtle)] pb-1.5", className)}>
+      {shown.map((tab, index) => {
         const selected = tab.id === value;
         return (
           <Tooltip key={tab.id} label={tab.label} disabled={selected}>
@@ -162,6 +177,16 @@ export function PanelTabs({
           </Tooltip>
         );
       })}
+      {more.length ? (
+        <span className="ml-auto shrink-0">
+          <OverflowMenu
+            label={`More ${label}`}
+            size={32}
+            items={more.map((tab) => ({ key: tab.id, label: tab.label, icon: tab.icon, hint: tab.count ? String(tab.count) : undefined }))}
+            onSelect={onChange}
+          />
+        </span>
+      ) : null}
     </div>
   );
 }

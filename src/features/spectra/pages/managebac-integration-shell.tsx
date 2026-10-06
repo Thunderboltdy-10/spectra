@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, CircleHelp, Clock3, Code2, FileClock, LoaderCircle, Play, RotateCcw, Save, Settings2, ShieldCheck, UserCheck, AlertCircle, AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ExternalLink, FileText, History, Link2, LockKeyhole, Plus, RefreshCw, School, X, Fingerprint, ListChecks, TriangleAlert } from "@/components/icons/glyph-icons";
+import { BookOpen, CircleHelp, Clock3, Code2, FileClock, LoaderCircle, Play, RotateCcw, Save, Settings2, ShieldCheck, UserCheck, AlertCircle, AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ExternalLink, FileText, Link2, LockKeyhole, Plus, RefreshCw, School, X, Fingerprint, ListChecks, TriangleAlert } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -11,14 +11,13 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ProductSectionNav } from "../components/product-section-nav";
 import { Icon } from "@/components/icons";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { EmptyState as PageEmptyState, LoadingRows } from "@/components/ui/page-state";
-import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
+import { PanelTabs, SidePanel, type PanelTab } from "@/components/ui/side-panel";
 import { ClassShelfEditor } from "../components/class-shelf-editor";
 import { fetchMyClassCandidates } from "../components/class-shelf-picker";
 import {
@@ -51,15 +50,15 @@ type Tab =
   | "provenance";
 
 const tabs = [
-  { key: "overview", label: "Overview", icon: School },
-  { key: "classes", label: "Classes", icon: BookOpen },
-  { key: "calendar", label: "Calendar", icon: CalendarDays },
-  { key: "periods", label: "Period map", icon: Clock3 },
-  { key: "tasks", label: "Tasks", icon: ListChecks },
-  { key: "history", label: "Sync history", icon: History },
-  { key: "conflicts", label: "Conflicts", icon: AlertTriangle },
-  { key: "provenance", label: "Provenance", icon: Fingerprint },
-] satisfies Array<{ key: Tab; label: string; icon: typeof School }>;
+  { id: "overview", label: "Overview", icon: "school" },
+  { id: "classes", label: "Classes", icon: "library" },
+  { id: "calendar", label: "Calendar", icon: "calendar" },
+  { id: "periods", label: "Period map", icon: "clock" },
+  { id: "tasks", label: "Tasks", icon: "checklist" },
+  { id: "history", label: "Sync history", icon: "versions" },
+  { id: "conflicts", label: "Conflicts", icon: "problem" },
+  { id: "provenance", label: "Provenance", icon: "identity" },
+] satisfies Array<PanelTab & { id: Tab }>;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -877,7 +876,7 @@ export function ManageBacIntegrationShell() {
             </div>
           ) : null}
 
-          <ProductSectionNav label="ManageBac sections" items={tabs} active={tab} onChange={setTab} className="mt-5" />
+          <PanelTabs label="ManageBac sections" tabs={tabs} value={tab} onChange={(id) => setTab(id as Tab)} primaryCount={5} className="mt-5" />
 
           <div className="min-h-[470px] py-4">
             {!integration ? (

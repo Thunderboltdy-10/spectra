@@ -10,7 +10,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useNow } from "@/hooks/use-now";
-import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, School, Search, Users, Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
+import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, Plus, School, Search, Users, Activity, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LifeBuoy, Network, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -22,9 +22,8 @@ import { metricDefinition } from "@/features/spectra/administration/metric-regis
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
-import { SidePanel } from "@/components/ui/side-panel";
+import { PanelTabs, SidePanel, type PanelTab } from "@/components/ui/side-panel";
 import { describeFailure } from "@/components/ui/truthful-state";
-import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import {
   AdminButton,
@@ -57,14 +56,14 @@ type Tab =
   | "governance"
   | "security";
 
-const tabs: Array<{ key: Tab; label: string; icon: typeof School }> = [
-  { key: "overview", label: "Overview", icon: LayoutGrid },
-  { key: "schools", label: "Schools", icon: School },
-  { key: "operations", label: "Operations", icon: ServerCog },
-  { key: "usage", label: "Usage & finance", icon: CircleDollarSign },
-  { key: "requests", label: "Requests & support", icon: LifeBuoy },
-  { key: "governance", label: "Governance", icon: ShieldCheck },
-  { key: "security", label: "Audit & security", icon: LockKeyhole },
+const tabs: Array<PanelTab & { id: Tab }> = [
+  { id: "overview", label: "Overview", icon: "grid" },
+  { id: "schools", label: "Schools", icon: "school" },
+  { id: "operations", label: "Operations", icon: "server" },
+  { id: "usage", label: "Usage & finance", icon: "billing" },
+  { id: "requests", label: "Requests & support", icon: "help" },
+  { id: "governance", label: "Governance", icon: "shield" },
+  { id: "security", label: "Audit & security", icon: "locked" },
 ];
 
 type SchoolRow = {
@@ -670,7 +669,7 @@ export function SuperadminShell() {
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab") as Tab | null;
   const [tab, setTabState] = useState<Tab>(
-    requestedTab && tabs.some((item) => item.key === requestedTab)
+    requestedTab && tabs.some((item) => item.id === requestedTab)
       ? requestedTab
       : "overview",
   );
@@ -774,11 +773,12 @@ export function SuperadminShell() {
           barLabel="Platform commands"
           description="Health, usage and school operations, without opening anyone's work."
         />
-        <ProductSectionNav
+        <PanelTabs
           label="Platform sections"
-          items={tabs}
-          active={tab}
-          onChange={setTab}
+          tabs={tabs}
+          value={tab}
+          onChange={(id) => setTab(id as Tab)}
+          primaryCount={5}
           className="mb-4 mt-4"
         />
         {tab === "overview" ? (

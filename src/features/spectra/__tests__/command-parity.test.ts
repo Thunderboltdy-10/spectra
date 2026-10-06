@@ -99,7 +99,8 @@ describe("command parity", () => {
       if (capability.id.startsWith("app.")) continue;
       const reach = artifactCapabilityReach(capability.id);
       if (reach.kind === "tool") {
-        expect(reach.tool).toBe("edit_artifact");
+        // Publishing a Code build is its own command; every other editor command is an edit.
+        expect(reach.tool).toBe(/^code\.(un)?publish$/.test(capability.id) ? "publish_code" : "edit_artifact");
         counts.edit += 1;
       } else {
         expect(reach.reason.length).toBeGreaterThan(20);

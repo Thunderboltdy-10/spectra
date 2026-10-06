@@ -801,6 +801,16 @@ export function CodeStudio({
     return spectraBus.handle("work.reveal", onReveal);
   }, [artifactId, activeFileId, workbook.files]);
 
+  // Spectra can publish or take down the build too; show what it did.
+  const [publishedRevision, setPublishedRevision] = useState(0);
+  useEffect(
+    () =>
+      spectraBus.on("code.publishedChanged", (detail) => {
+        if (detail.artifactId === artifactId) setPublishedRevision((value) => value + 1);
+      }),
+    [artifactId],
+  );
+
   useEffect(() => {
     let current = true;
     setPublishState("loading");
@@ -829,7 +839,7 @@ export function CodeStudio({
     return () => {
       current = false;
     };
-  }, [artifactId]);
+  }, [artifactId, publishedRevision]);
 
   // The workbook as it is now. An asset upload or import finishes after an
   // await, when the render that started it holds a stale workbook; building

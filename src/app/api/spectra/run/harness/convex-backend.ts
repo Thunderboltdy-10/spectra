@@ -12,6 +12,9 @@ import type {
 } from "@/features/spectra/ai/harness/backend";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
+import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
+import type { SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
+import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
@@ -63,6 +66,8 @@ export type ConvexBackendInput = {
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
+const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "restore", "migration", "checkpoint"]);
+const EMBED_STATES = new Set<string>(["ready", "no_access", "deleted", "archived", "version_unavailable", "removed"]);
 
 function clip(value: string, max = 12_000) {
   return value.length > max ? `${value.slice(0, max)}\n… (cut short; ask for a narrower range)` : value;
@@ -660,6 +665,118 @@ export class ConvexHarnessBackend implements HarnessBackend {
         createdAt: typeof comment.createdAt === "number" ? comment.createdAt : 0,
       }];
     });
+  }
+
+  async readVersions(input: { artifactId: string; limit: number }): Promise<{ versions: VersionRow[]; more: boolean } | null> {
+    const page = await query<unknown & object, { versions?: unknown; isDone?: boolean }>("spectraArtifacts:listVersions", {
+      artifactId: input.artifactId,
+      limit: Math.max(1, Math.min(50, Math.round(input.limit))),
+    }).catch(() => null);
+    if (!page || !Array.isArray(page.versions)) return null;
+    const versions = rows(page.versions).flatMap((version): VersionRow[] => {
+      const source = text(version.source) as VersionSource;
+      if (!VERSION_SOURCES.has(source)) return [];
+      return [{
+        id: String(version._id),
+        createdAt: typeof version.createdAt === "number" ? version.createdAt : 0,
+        source,
+        ...(text(version.name) ? { name: text(version.name) } : {}),
+        ...(text(version.summary) ? { summary: text(version.summary) } : {}),
+        authors: rows(version.creators).map((creator) => text(creator.name)).filter(Boolean),
+        ...(source === "ai" || text(version.runId) ? { byAi: true } : {}),
+      }];
+    });
+    return { versions, more: page.isDone === false };
+  }
+
+  async readEmbeds(input: { artifactId: string }): Promise<{ embeds: EmbedRow[]; canConfigure: boolean } | null> {
+    const [host, list] = await Promise.all([
+      query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId: this.actorClerkId, artifactId: input.artifactId }).catch(() => null),
+      query<unknown & object, { canConfigure?: boolean; embeds?: unknown }>("artifactEmbeds:listForContainer", {
+        containerType: "artifact",
+        containerId: input.artifactId,
+      }).catch(() => null),
+    ]);
+    if (!host || !list || !Array.isArray(list.embeds)) return null;
+    const embeds = rows(list.embeds).flatMap((embed): EmbedRow[] => {
+      const state = text(embed.state);
+      if (!EMBED_STATES.has(state) || state === "removed") return [];
+      const source = embed.source && typeof embed.source === "object" ? (embed.source as Record<string, unknown>) : {};
+      const version = embed.version && typeof embed.version === "object" ? (embed.version as Record<string, unknown>) : {};
+      return [{
+        embedId: text(embed.embedId),
+        regionId: text(embed.containerRegionId),
+        sourceArtifactId: text(embed.sourceArtifactId),
+        ...(text(source.title) ? { sourceTitle: text(source.title) } : {}),
+        ...(text(source.blueprintKey) ? { sourceType: text(source.blueprintKey) } : {}),
+        mode: embed.mode === "expanded" ? "expanded" : "compact",
+        interaction: embed.interaction === "edit" || embed.interaction === "interact" ? embed.interaction : "read",
+        versionPolicy: embed.versionPolicy === "pinned" ? "pinned" : "live",
+        ...(text(embed.pinnedVersionId) ? { pinnedVersionId: text(embed.pinnedVersionId) } : {}),
+        ...(text(version.name) ? { versionName: text(version.name) } : {}),
+        ...(typeof version.createdAt === "number" ? { versionAt: version.createdAt } : {}),
+        state: state as EmbedState,
+        ...(text(embed.placementRefreshKey) ? { recheckable: true } : {}),
+      }];
+    });
+    return { embeds, canConfigure: list.canConfigure === true };
+  }
+
+  async readSharing(input: { resourceType: "workspace" | "artifact" | "agent"; resourceId: string }): Promise<SharingState | null> {
+    const resource = { resourceType: input.resourceType, resourceId: input.resourceId };
+    const level = (value: unknown) => (value === "modify" ? "modify" : "read") as "read" | "modify";
+    // The share dialog's reads: each checks the user may share (or publish) this.
+    const [invitations, audience, links] = await Promise.all([
+      query<unknown & object, unknown>("authority:shareState", resource).catch(() => null),
+      input.resourceType === "workspace"
+        ? Promise.resolve(undefined)
+        : query<unknown & object, unknown>("authority:artifactInheritedAudience", { artifactId: input.resourceId }).catch(() => null),
+      query<unknown & object, unknown>("authority:listPublicLinks", resource).catch(() => undefined),
+    ]);
+    if (!Array.isArray(invitations)) return null;
+    const account = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+    return {
+      invitations: rows(invitations).map((entry): SharingInvitation => {
+        const who = account(entry.account);
+        return {
+          invitationId: text(entry.invitationId),
+          status: entry.status === "accepted" ? "accepted" : "pending",
+          level: level(entry.level),
+          ...(text(who.accountId) ? { accountId: text(who.accountId) } : {}),
+          ...(text(who.name) ? { name: text(who.name) } : {}),
+          ...(text(who.email) ? { email: text(who.email) } : {}),
+          ...(text(entry.grantId) ? { grantId: text(entry.grantId) } : {}),
+          ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+        };
+      }),
+      ...(Array.isArray(audience)
+        ? {
+            members: rows(audience).map((entry): SharingMember => {
+              const who = account(entry.account);
+              const exception = account(entry.exception).effect;
+              return {
+                accountId: text(who.accountId),
+                ...(text(who.name) ? { name: text(who.name) } : {}),
+                ...(text(who.email) ? { email: text(who.email) } : {}),
+                inheritedLevel: level(entry.inheritedLevel),
+                effectiveLevel: entry.effectiveLevel === "modify" || entry.effectiveLevel === "read" ? entry.effectiveLevel : null,
+                workspaces: rows(entry.sources).map((source) => text(source.workspaceTitle)).filter(Boolean),
+                ...(exception === "deny" || exception === "restrict" ? { exception } : {}),
+              };
+            }),
+          }
+        : {}),
+      ...(Array.isArray(links)
+        ? {
+            links: rows(links).map((entry): SharingLink => ({
+              linkId: text(entry.linkId),
+              ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+              ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+              ...(text(entry.domainRestriction) ? { domain: text(entry.domainRestriction) } : {}),
+            })),
+          }
+        : {}),
+    };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

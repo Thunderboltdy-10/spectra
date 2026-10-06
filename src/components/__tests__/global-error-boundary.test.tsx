@@ -2,10 +2,11 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ErrorScreen, GlobalErrorBoundary } from "@/components/global-error-boundary";
+import { ErrorScreen, GlobalErrorBoundary, IsolatedErrorBoundary } from "@/components/global-error-boundary";
+import { SPECTRA_REQUEST_UNREACHABLE } from "@/features/spectra/data/request";
 import RouteError from "@/app/error";
 
 const refresh = vi.fn();
@@ -182,5 +183,63 @@ describe("module loading recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(screen.getByText("Recovered content")).toBeTruthy();
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("IsolatedErrorBoundary", () => {
+  function Breaks({ error }: { error?: Error }): ReactNode {
+    if (error) throw error;
+    return <p>Part content</p>;
+  }
+
+  it("says the part stopped working, not that the device is offline, when it is online", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    let error: Error | undefined = new Error("a query broke");
+    function Part() {
+      return <Breaks error={error} />;
+    }
+    render(<IsolatedErrorBoundary><Part /></IsolatedErrorBoundary>);
+    expect(screen.getByRole("alert").textContent).toContain("This part of Spectra stopped working.");
+    expect(screen.queryByText(/offline/i)).toBeNull();
+    error = undefined;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(screen.getByText("Part content")).toBeTruthy();
+  });
+
+  it("says offline when the browser is offline, and comes back on reconnect", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    let error: Error | undefined = new Error("a query broke");
+    function Part() {
+      return <Breaks error={error} />;
+    }
+    render(<IsolatedErrorBoundary><Part /></IsolatedErrorBoundary>);
+    expect(screen.getByRole("status").textContent).toContain("This device is offline.");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    error = undefined;
+    online.mockReturnValue(true);
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(screen.getByText("Part content")).toBeTruthy();
+  });
+
+  it("treats a Spectra request that never reached the server as offline", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    render(<IsolatedErrorBoundary><Breaks error={new Error(SPECTRA_REQUEST_UNREACHABLE)} /></IsolatedErrorBoundary>);
+    expect(screen.getByRole("status").textContent).toContain("This device is offline.");
+  });
+
+  it("hands the caller whether it was offline, so each surface can say its own line", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    render(
+      <IsolatedErrorBoundary fallback={({ offline }) => <p>{offline ? "Library offline" : "Library failed"}</p>}>
+        <Breaks error={new Error("broke")} />
+      </IsolatedErrorBoundary>,
+    );
+    expect(screen.getByText("Library failed")).toBeTruthy();
   });
 });

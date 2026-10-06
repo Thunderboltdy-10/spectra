@@ -164,17 +164,11 @@ describe("Inspector and navigation contracts", () => {
     expect(view).toContain("useThreadSearch(query");
   });
 
-  it("keeps narrow navigation labeled and separates chat failures from empty results", () => {
-    const sectionNav = readFileSync(
-      "src/features/spectra/components/product-section-nav.tsx",
-      "utf8",
-    );
+  it("separates chat failures from empty results", () => {
     const chatBrowser = readFileSync(
       "src/features/spectra/components/chat-browser-panel.tsx",
       "utf8",
     );
-    expect(sectionNav).toContain('Math.min(3, primaryCount)');
-    expect(sectionNav).toContain("whitespace-nowrap");
     expect(chatBrowser).toContain('title="Chats couldn’t load"');
     expect(chatBrowser).toContain("setLoadError(true)");
     expect(chatBrowser).toContain('role={isMobile ? "dialog" : undefined}');

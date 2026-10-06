@@ -55,6 +55,23 @@ function intakeAttestationKey() {
     .digest();
 }
 
+const AI_PUBLIC_LINK_PURPOSE = "spectra.ai-public-link.v1";
+
+/** The address of a public link Spectra AI made. It is derived from the
+ * operation that made it, so nothing stores the secret: Convex and the run's
+ * journal keep only its hash, and the run's owner can fetch it again. */
+export function aiPublicLinkToken(input: { runId: string; operationId: string; resourceType: string; resourceId: string }) {
+  const key = createHmac("sha256", bridgeKey()).update(AI_PUBLIC_LINK_PURPOSE).digest();
+  return createHmac("sha256", key)
+    .update([input.runId, input.operationId, input.resourceType, input.resourceId].join("\n"))
+    .digest("base64url");
+}
+
+/** What publicLinks stores and /public looks up: the token's SHA-256 in hex. */
+export function publicLinkTokenHash(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 export function signTrustedIntakeAttestation(
   input: Omit<
     IntakeAttestation,

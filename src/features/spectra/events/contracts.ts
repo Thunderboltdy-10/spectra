@@ -90,6 +90,8 @@ export type SpectraEvents = {
   "threads.changed": Record<string, never>;
   /** Something about this computer's Bridge changed: refresh what shows it. */
   "devices.changed": Record<string, never>;
+  /** A Code work's published build changed (Spectra published or took it down). */
+  "code.publishedChanged": { artifactId: string };
   "notifications.changed": Record<string, never>;
   /* Open the pending share invitations in the Library (a notification's
      Review), including when the Library already shows them. */

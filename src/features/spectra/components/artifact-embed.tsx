@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowUpRight, ChevronLeft, RotateCw, AlertCircle, CalendarDays, ChevronRight, FileQuestion, LockKeyhole, Maximize2, Minimize2, Send, X } from "@/components/icons/glyph-icons";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ArrowUpRight, Check, ChevronLeft, RotateCw, AlertCircle, CalendarDays, ChevronRight, FileQuestion, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Radio, Send, X } from "@/components/icons/glyph-icons";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
 import { workTypeMeta } from "./artifact-card";
@@ -562,6 +562,24 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   return null;
 }
 
+/** The key an embed's preview and its editor share, so one grows out of the other and folds back into it. */
+export function embedLifeKey(embedId: string) {
+  return `embed:${embedId}`;
+}
+
+/** What a press inside a preview uses itself: it neither opens nor edits the work. */
+const PREVIEW_CONTROLS =
+  "button, a, input, select, textarea, label, summary, iframe, [role='button'], [role='checkbox'], [role='radio'], [role='tab'], [contenteditable='true']";
+/** How long a click waits to see if it is the first of a double-click (which edits instead of opening). */
+const DOUBLE_CLICK_MS = 260;
+
+function pressedControl(event: ReactMouseEvent) {
+  return event.target instanceof Element && Boolean(event.target.closest(PREVIEW_CONTROLS));
+}
+
+const headerButton =
+  "flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-control bg-[var(--bg-primary)] p-3">
@@ -585,6 +603,10 @@ export function ArtifactEmbed({
   onRequestAccess,
   onCancelAccessRequest,
   onUseLiveVersion,
+  onPinVersion,
+  onEdit,
+  editor,
+  onDoneEditing,
   onRemove,
 }: {
   embed: SpectraArtifactEmbed;
@@ -595,10 +617,20 @@ export function ArtifactEmbed({
   onResize?: (size: { width: number; height: number }) => void;
   onRequestAccess?: () => void;
   onCancelAccessRequest?: (requestId: string) => void;
+  /** Back to the live work: offered for a pinned version too, which only reads. */
   onUseLiveVersion?: () => void;
+  /** Hold this embed at the work's latest saved version. */
+  onPinVersion?: () => void;
+  /** The work can be edited here: a double-click on the preview, or Edit here. */
+  onEdit?: () => void;
+  /** The work's editor, shown in place of the preview while it is edited here. */
+  editor?: ReactNode;
+  onDoneEditing?: () => void;
   onRemove?: () => void;
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
+  const openTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(openTimer.current), []);
   const [nearViewport, setNearViewport] = useState(
     () => typeof window !== "undefined" && !("IntersectionObserver" in window),
   );
@@ -773,6 +805,21 @@ export function ArtifactEmbed({
     );
   }
   if (!embed.source || !meta) return null;
+  const sourceId = embed.source.artifactId;
+  const pinned = embed.versionPolicy === "pinned";
+  // A click opens the work in the Side; a double-click edits it here, where
+  // the type allows (EDITORS.md, Embeds). Controls in the preview are its own.
+  const openFromPreview = (event: ReactMouseEvent) => {
+    if (!onOpenSource || pressedControl(event)) return;
+    window.clearTimeout(openTimer.current);
+    if (!onEdit) return onOpenSource(sourceId);
+    openTimer.current = window.setTimeout(() => onOpenSource(sourceId), DOUBLE_CLICK_MS);
+  };
+  const editFromPreview = (event: ReactMouseEvent) => {
+    if (!onEdit || pressedControl(event)) return;
+    window.clearTimeout(openTimer.current);
+    onEdit();
+  };
   return (
     <motion.section
       layout={!motionLevel.disabled}
@@ -783,6 +830,7 @@ export function ArtifactEmbed({
       }
       ref={rootRef}
       data-reference-id={embed.embedId}
+      data-embed-editing={editor ? "true" : undefined}
       className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-sm)]"
       style={
         embed.mode === "expanded"
@@ -883,7 +931,65 @@ export function ArtifactEmbed({
             ) : null}
           </div>
         </div>
-        {onModeChange ? (
+        {pinned ? (
+          // A pinned version only reads: say so, and offer the live work.
+          <span
+            className="inline-flex h-8 items-center gap-1.5 px-1 text-micro text-[var(--text-tertiary)]"
+            title="This shows a saved version. It stays as it is when the work changes."
+          >
+            <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+            Pinned, read-only
+          </span>
+        ) : null}
+        {pinned && embed.canConfigure && onUseLiveVersion ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onUseLiveVersion}
+            className={headerButton}
+            title="Show the work as it is now, and follow its changes"
+          >
+            <Radio className="h-3.5 w-3.5" />
+            Follow live
+          </button>
+        ) : null}
+        {!pinned && embed.canConfigure && onPinVersion && !editor ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onPinVersion}
+            className={headerButton}
+            aria-label="Pin the latest saved version"
+            title="Keep showing the latest saved version, even when the work changes"
+          >
+            <Pin className="h-3.5 w-3.5" />
+            Pin
+          </button>
+        ) : null}
+        {editor && onDoneEditing ? (
+          <button
+            type="button"
+            onClick={onDoneEditing}
+            className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+            title="Stop editing here (Esc)"
+          >
+            <Check className="h-3.5 w-3.5" />
+            Done
+          </button>
+        ) : onEdit ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onEdit}
+            className={headerButton}
+            aria-label={`Edit ${embed.source.title} here`}
+            title="Edit it here (or double-click it)"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit here
+          </button>
+        ) : null}
+        {onModeChange && !editor ? (
           <button
             type="button"
             disabled={busy}
@@ -934,8 +1040,16 @@ export function ArtifactEmbed({
           </button>
         ) : null}
       </header>
+      {editor ?? (
       <motion.div
         key={embed.mode}
+        // The editor grows out of this preview and folds back into it.
+        data-life-key={embedLifeKey(embed.embedId)}
+        data-life-launch=""
+        data-embed-preview=""
+        data-opens={onOpenSource ? "true" : undefined}
+        onClick={openFromPreview}
+        onDoubleClick={editFromPreview}
         initial={motionLevel.disabled ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={
@@ -967,7 +1081,8 @@ export function ArtifactEmbed({
           </div>
         )}
       </motion.div>
-      {embed.source.summary && embed.mode === "expanded" ? (
+      )}
+      {embed.source.summary && embed.mode === "expanded" && !editor ? (
         <motion.footer
           initial={motionLevel.disabled ? false : { opacity: 0, y: 3 }}
           animate={{ opacity: 1, y: 0 }}

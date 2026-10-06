@@ -5051,7 +5051,8 @@ function ArtifactStudioEditor({
       // closes the menu, so Escape on More would close the whole studio.
       if (
         document.querySelector(
-          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus]',
+          // A work edited in place inside another takes Escape for itself.
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
         )
       ) {
         return;
@@ -5122,7 +5123,13 @@ function ArtifactStudioEditor({
       if (!direction) return;
       const surface = studioSurfaceRef.current;
       const target = event.target;
-      const inside = target instanceof Node && Boolean(surface?.contains(target));
+      // A work edited in place inside this one keeps its own undo.
+      const nested =
+        target instanceof Element ? target.closest("[data-embed-editor]") : null;
+      const inside =
+        target instanceof Node &&
+        Boolean(surface?.contains(target)) &&
+        !(nested && surface?.contains(nested));
       const unfocused =
         target === document.body || target === document.documentElement;
       if (!surface || !(inside || (unfocused && lastInteractedStudioSurface === surface)))

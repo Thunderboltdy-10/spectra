@@ -907,11 +907,11 @@ function WorkspaceHeaderSkeleton() {
       className="border-b border-[var(--border-default)] px-5 pb-4 pt-4"
       aria-label="Loading workspace overview"
     >
-      <div className="flex items-start gap-4">
-        <div data-life-ghost className="size-14 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
+      <div data-life-ghost className="flex items-start gap-4">
+        <div data-life-ghost-bar className="size-14 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
         <div className="min-w-0 flex-1 pt-1">
-          <div data-life-ghost className="h-7 w-52 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
-          <div data-life-ghost className="mt-3 h-4 w-80 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+          <div data-life-ghost-bar className="h-7 w-52 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+          <div data-life-ghost-bar className="mt-3 h-4 w-80 max-w-full animate-pulse rounded-control bg-[var(--bg-secondary)]" />
         </div>
       </div>
     </div>

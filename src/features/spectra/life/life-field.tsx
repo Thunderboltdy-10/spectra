@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useSpectraMotion } from "../motion/motion-level";
 import type { LifeTier } from "./engine";
-import { figureOf } from "./figure-dom";
+import { figureOf, hasVisibleFrame } from "./figure-dom";
 import { life, type Formed } from "./life";
 import { markNavigation, sendInto } from "./use-life";
 
@@ -26,6 +26,43 @@ const MAX_GHOSTS = 16;
 
 const INK_LIGHT = [20, 19, 24] as const;
 const INK_DARK = [243, 241, 236] as const;
+
+/** The lines of real content a ghost's bars flow into. */
+const CONTENT_BARS = "h1, h2, h3, h4, [data-row-title], [data-row-meta], [data-card-title], [data-thread-title], p, li";
+
+/**
+ * What took a ghost's place: the largest element at its centre that sits over
+ * most of it without being much bigger. Nothing there (the page changed, the
+ * list came back empty) means the ghost simply fades.
+ */
+export function replacementOf(rect: DOMRect): HTMLElement | null {
+  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(rect.height / 2, 120));
+  let best: HTMLElement | null = null;
+  for (let node = hit instanceof HTMLElement ? hit : null; node && node !== document.body; node = node.parentElement) {
+    const r = node.getBoundingClientRect();
+    const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
+    const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
+    if (r.width * r.height > 2.5 * rect.width * rect.height) break;
+    if (w > 0 && h > 0 && w * h > 0.5 * rect.width * rect.height) best = node;
+  }
+  return best;
+}
+
+/** The content is hidden while the ghost's lines flow into its frame and lines, and is real when they have. */
+function handOver(formed: Formed, content: HTMLElement) {
+  const r = content.getBoundingClientRect();
+  if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return formed.release();
+  const previous = content.style.opacity;
+  content.style.opacity = "0";
+  let shown = false;
+  const show = () => {
+    if (shown) return;
+    shown = true;
+    content.style.opacity = previous;
+  };
+  void life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) })).formed.then(show);
+  window.setTimeout(show, 700);
+}
 
 function chooseTier(): LifeTier {
   const nav = navigator as Navigator & { deviceMemory?: number };
@@ -126,18 +163,23 @@ export function LifeField() {
     };
 
     // Loading placeholders become ghosts while they are in the page, and release into what replaces them.
-    const ghosts = new Map<Element, Formed>();
+    const ghosts = new Map<Element, { formed: Formed; rect: DOMRect }>();
     const adopt = (element: Element) => {
       if (ghosts.has(element) || ghosts.size >= MAX_GHOSTS) return;
       const r = element.getBoundingClientRect();
       if (r.width < 8 || r.height < 4 || r.bottom < 0 || r.top > window.innerHeight) return;
-      ghosts.set(element, life.ghost(figureOf(element, { bars: "[data-life-ghost-bar]", maxBars: 10 })));
+      // One ghost per placeholder: its frame if it shows one, and its bars where the content will be, so it settles as
+      // lines and releases into the real thing.
+      ghosts.set(element, { formed: life.ghost(figureOf(element, { bars: "[data-life-ghost-bar]", maxBars: 24, frame: hasVisibleFrame(element) })), rect: r });
     };
     const sweep = () => {
-      for (const [element, formed] of ghosts) {
+      for (const [element, { formed, rect }] of ghosts) {
         if (element.isConnected && element.matches(GHOST)) continue;
         ghosts.delete(element);
-        formed.release();
+        // The ghost hands over: its lines flow into the content that took its place.
+        const content = element.isConnected ? (element as HTMLElement) : replacementOf(rect);
+        if (content) handOver(formed, content);
+        else formed.release();
       }
     };
     let scanFrame = 0;
@@ -163,7 +205,7 @@ export function LifeField() {
     return () => {
       cancelAnimationFrame(scanFrame);
       ghostObserver.disconnect();
-      for (const formed of ghosts.values()) formed.release();
+      for (const { formed } of ghosts.values()) formed.release();
       ghosts.clear();
       delete document.documentElement.dataset.life;
       window.removeEventListener("dragover", dragOver);

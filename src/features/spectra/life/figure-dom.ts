@@ -44,7 +44,15 @@ export type ElementFigureOptions = {
   /** At most this many matched parts become bars (default 40): a long list forms its first rows. */
   maxBars?: number;
   ink?: Rgb;
+  /** Draw the element's own outline and surface (default true). A list of rows has no frame of its own: only its bars. */
+  frame?: boolean;
 };
+
+/** The element shows a frame of its own: a border or a surface. A bare container is only what it holds. */
+export function hasVisibleFrame(element: Element) {
+  const style = getComputedStyle(element);
+  return (Number.parseFloat(style.borderTopWidth) > 0 && cssToRgb(style.borderTopColor) !== null) || cssToRgb(style.backgroundColor) !== null;
+}
 
 /** An element as a figure: its rounded outline, its surface, and optionally rows for its content. */
 export function figureOf(element: Element, options: ElementFigureOptions = {}): Figure {
@@ -65,7 +73,8 @@ export function figureOf(element: Element, options: ElementFigureOptions = {}): 
       fillAlpha: surface?.alpha,
     },
   );
-  const strokes = [...figure.strokes];
+  const framed = options.frame !== false;
+  const strokes = framed ? [...figure.strokes] : [];
   if (options.rows) {
     strokes.push(...rowsFigure({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }, options.rows, { colour: ink }).strokes);
   }
@@ -73,7 +82,7 @@ export function figureOf(element: Element, options: ElementFigureOptions = {}): 
     const parts = Array.from(element.querySelectorAll(options.bars)).slice(0, options.maxBars ?? 40);
     for (const part of parts) strokes.push(...barsOf(part, ink));
   }
-  return { strokes, fill: figure.fill };
+  return { strokes, fill: framed ? figure.fill : undefined };
 }
 
 /** An element's content as bars: one per line of text, or one for the element itself. */

@@ -21,9 +21,9 @@ export function SkeletonCard() {
 
 export function SkeletonList({ count = 5 }: { count?: number }) {
   return (
-    <div className="space-y-3">
+    <div data-life-ghost className="space-y-3">
       {Array.from({ length: count }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full" />
+        <Skeleton key={i} bar className="h-12 w-full" />
       ))}
     </div>
   );

@@ -97,9 +97,9 @@ export function ProblemState({
 /** Rows on their way: ghosts at the rows' real places, with a glyph, a title and a meta line. */
 export function LoadingRows({ count = 4, label = "Loading", className }: { count?: number; label?: string; className?: string }) {
   return (
-    <div role="status" aria-label={label} className={cn("space-y-1", className)}>
+    <div role="status" aria-label={label} data-life-ghost className={cn("space-y-1", className)}>
       {Array.from({ length: count }, (_, index) => (
-        <div key={index} data-life-ghost className="flex min-h-10 items-center gap-2.5 rounded-control px-2.5 py-1.5">
+        <div key={index} className="flex min-h-10 items-center gap-2.5 rounded-control px-2.5 py-1.5">
           <Skeleton bar className="size-5 shrink-0" />
           <span className="min-w-0 flex-1 space-y-1.5">
             <Skeleton bar className="h-3.5" style={{ width: `${62 - ((index * 17) % 30)}%` }} />

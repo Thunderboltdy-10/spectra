@@ -85,7 +85,7 @@ animation.
 | **unform** | "This no longer exists." Its lines part into dots that sink. | Deleting anything |
 | **morph** | "This *is* that, in another shape." Its dots flow into the new shape, and lines it doesn't need sink. | Adjacent changes in place: the prism ↔ the composer, a tab ↔ a panel, a row ↔ its editor |
 | **travel** | "This goes there and becomes that." It breaks, pours into the field, crosses it as light, and forms (or is taken in) at the far end. A target close by is poured into directly. | Anything that changes place: a message into the prism, Spectra's question out of it, an answer back, an artifact Spectra makes |
-| **ghost** | "This is coming." A skeleton of the real content (frame, title and text lines at their real places) with a band of light sliding along it. | Loads of more than 300 ms. It releases into the real content. |
+| **ghost** | "This is coming." A skeleton of the real content (frame, title and text lines at their real places) with a band of light sliding along it. | Loads of more than 300 ms. One placeholder is one ghost: a list's rows are its bars, with no frame unless it shows one. When the content arrives, the ghost's lines flow into the content's frame and lines (a morph), and then the content is real. |
 | **breathe** | "The prism took something in" or "the prism changed state." It parts into dots, swells a little and reassembles. | The prism only: receiving, asking, starting work |
 | **radiate** | "The prism has news." A few dots in the status colour fly from its edges and sink as light. | The prism only: done (green), problem (red) |
 | **absorb** | "This took that in." The field around it draws in. | The end of a send or travel into something |

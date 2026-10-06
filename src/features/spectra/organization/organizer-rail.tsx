@@ -281,9 +281,9 @@ function RailBranch({
 
 function RailSkeleton() {
   return (
-    <div className="flex flex-col gap-1 py-1" aria-hidden>
+    <div data-life-ghost className="flex flex-col gap-1 py-1" aria-hidden>
       {[0, 1, 2, 3].map((row) => (
-        <div data-life-ghost
+        <div data-life-ghost-bar
           key={row}
           className="h-6 animate-pulse rounded-chip bg-[var(--bg-tertiary)]"
           style={{ width: `${88 - row * 9}%` }}

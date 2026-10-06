@@ -6,17 +6,8 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
-import { docxLens } from "@/features/spectra/lenses/docx-lens";
-import { xlsxLens } from "@/features/spectra/lenses/xlsx-lens";
-import { pptxLens } from "@/features/spectra/lenses/pptx-lens";
-import {
-  xlsxArtifactContent,
-  pptxArtifactContent,
-} from "@/features/spectra/lenses/office-content";
 import {
   convexMutation,
   convexPublicMutation,
@@ -28,7 +19,6 @@ import {
   storeSchoolSecret,
 } from "@/lib/server-secrets";
 import { badRequest, ok } from "@/lib/http";
-import { isNonPublicAddress } from "@/lib/network-egress";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { prepareAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import {
@@ -39,6 +29,20 @@ import {
   SCHOOL_SYNC_KINDS,
   type SchoolSyncKind,
 } from "../../../../../shared/school-sync";
+import {
+  assertPublicApiHost,
+  bridgeArgs,
+  canonicalJson,
+  capabilityUrl,
+  connectorContext,
+  digest,
+  identifier,
+  object,
+  string,
+  type ConnectorActor,
+  type ConnectorContext,
+} from "./connector";
+import { importManageBacResource } from "./resource-import";
 
 /**
  * A sync runs inside this request. Pinning the duration keeps the hosting
@@ -53,56 +57,6 @@ const SYNC_TIME_BUDGET_MS = 240_000;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = { [key: string]: Json };
-
-type ConnectorContext = {
-  integration: {
-    _id: string;
-    schoolId: string;
-    baseUrl: string;
-    authHeaderName: string;
-    authScheme: "raw" | "bearer";
-    requestBudgetPerMinute: number;
-    bootstrapVersion: number;
-    status: string;
-  };
-  capabilities: Array<{
-    _id: string;
-    category: string;
-    name: string;
-    recordType: string;
-    path: string;
-    purpose: string;
-    scope: "personal" | "class" | "school";
-    minimumRole: "student" | "teacher" | "school_admin";
-    pagination: "none" | "page" | "cursor" | "unknown";
-    changeStrategy: string;
-    contractVersion: string;
-    responseSchemaHash?: string;
-    personalIdParameter?: string;
-    normalization: unknown;
-  }>;
-  mapping: { status: string; providerUserId?: string };
-  selection: { revision: number; selectedClassIds: string[] };
-  actor: { accountId: string; email: string; schoolRole: string };
-};
-
-type ConnectorActor = Awaited<ReturnType<typeof requireActor>>;
-
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function string(value: unknown, maximum = 2_000) {
-  return typeof value === "string" ? value.trim().slice(0, maximum) : "";
-}
-
-function identifier(value: unknown, maximum = 500) {
-  if (typeof value === "number" && Number.isFinite(value))
-    return String(value).slice(0, maximum);
-  return string(value, maximum);
-}
 
 /**
  * MANAGEBAC_API_KEY lets a local stack connect without typing a key. A
@@ -137,20 +91,6 @@ function normalizeManageBacBaseUrl(raw: string) {
   if (host.endsWith(".managebac.com") || host.endsWith(".managebac.us"))
     return "https://api.managebac.com";
   return `${parsed.protocol}//${parsed.host}`;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value))
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-    .join(",")}}`;
-}
-
-function digest(value: unknown) {
-  return createHash("sha256").update(canonicalJson(value)).digest("base64url");
 }
 
 function officialPersonalCapabilities() {
@@ -540,105 +480,6 @@ function officialPersonalCapabilities() {
 
 function exactDigest(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("base64url");
-}
-
-async function bridgeArgs(input: {
-  operation: string;
-  subject: string;
-  integrationId: string;
-  syncRunId?: string;
-  payloadDigest: string;
-}) {
-  const key = process.env.SPECTRA_CONNECTOR_BRIDGE_KEY;
-  if (!key || key.length < 32)
-    throw new Error(
-      "INTEGRATION_BRIDGE_CONFIG_MISSING: Configure a strong connector bridge key.",
-    );
-  const timestamp = Date.now();
-  const nonce = randomBytes(24).toString("base64url");
-  const canonical = [
-    input.operation,
-    input.subject,
-    input.integrationId,
-    input.syncRunId ?? "-",
-    timestamp,
-    nonce,
-    input.payloadDigest,
-  ].join("|");
-  const signature = createHmac("sha256", key)
-    .update(canonical)
-    .digest("base64url");
-  return { timestamp, nonce, signature };
-}
-
-async function assertPublicApiHost(baseUrl: string) {
-  const url = new URL(baseUrl);
-  const localStack = process.env.SPECTRA_APP_URL?.startsWith(
-    "http://localhost:",
-  );
-  const testFixtureOrigin =
-    process.env.NODE_ENV === "test" || localStack
-      ? process.env.SPECTRA_MANAGEBAC_TEST_FIXTURE_ORIGIN?.trim()
-      : undefined;
-  if (testFixtureOrigin && url.origin === testFixtureOrigin) {
-    if (
-      url.protocol !== "http:" ||
-      !["127.0.0.1", "localhost"].includes(url.hostname)
-    )
-      throw new Error(
-        "INTEGRATION_EGRESS_BLOCKED: Test fixtures must use a loopback HTTP origin.",
-      );
-    return url;
-  }
-  if (url.protocol !== "https:" || url.username || url.password)
-    throw new Error("INTEGRATION_EGRESS_BLOCKED: API URL must be HTTPS.");
-  // WHATWG URLs keep IPv6 literals bracketed; judge the literal itself.
-  const literal = url.hostname.replace(/^\[(.*)\]$/, "$1");
-  if (isIP(literal)) {
-    if (isNonPublicAddress(literal))
-      throw new Error(
-        "INTEGRATION_EGRESS_BLOCKED: Private network hosts are blocked.",
-      );
-    return url;
-  }
-  const addresses = await lookup(url.hostname, { all: true, verbatim: true });
-  if (
-    addresses.length === 0 ||
-    addresses.some(({ address }) => isNonPublicAddress(address))
-  )
-    throw new Error(
-      "INTEGRATION_EGRESS_BLOCKED: API host resolves to a private network.",
-    );
-  return url;
-}
-
-async function connectorContext(
-  actor: ConnectorActor,
-  integrationId: string,
-  serviceSubject?: string,
-) {
-  const payloadDigest = digest({});
-  const bridge = await bridgeArgs({
-    operation: "context",
-    subject: actor.clerkId,
-    integrationId,
-    payloadDigest,
-  });
-  const args = {
-    integrationId,
-    ...(serviceSubject ? { serviceSubject } : {}),
-    payloadDigest,
-    ...bridge,
-  };
-  return serviceSubject
-    ? convexPublicMutation<Record<string, unknown>, ConnectorContext>(
-        "managebac:connectorContext",
-        args,
-      )
-    : convexMutation<Record<string, unknown>, ConnectorContext>(
-        "managebac:connectorContext",
-        args,
-      );
 }
 
 async function ensureOfficialPersonalCapabilityManifest(
@@ -1077,62 +918,6 @@ function normalizeProviderPage(
   };
 }
 
-function capabilityUrl(
-  context: ConnectorContext,
-  capability: ConnectorContext["capabilities"][number],
-  input: {
-    providerUserId?: string;
-    cursor?: string;
-    page?: number;
-    verifiedEmail?: string;
-    routeParameters?: Record<string, string>;
-  },
-) {
-  const base = new URL(context.integration.baseUrl);
-  let path = capability.path;
-  const personalParameter = capability.personalIdParameter;
-  if (personalParameter) {
-    if (!input.providerUserId)
-      throw new Error(
-        `INTEGRATION_IDENTITY_REQUIRED: ${capability.name} requires the server-side mapped user.`,
-      );
-    path = path.replaceAll(
-      `{${personalParameter}}`,
-      encodeURIComponent(input.providerUserId),
-    );
-  }
-  for (const [parameter, value] of Object.entries(
-    input.routeParameters ?? {},
-  ))
-    path = path.replaceAll(
-      `{${parameter}}`,
-      encodeURIComponent(value),
-    );
-  if (/\{[^}]+}/.test(path))
-    throw new Error(
-      `INTEGRATION_ROUTE_PARAMETERS_UNRESOLVED: ${capability.name} needs a verified route binding.`,
-    );
-  const url = new URL(
-    path.replace(/^\/+/, ""),
-    `${base.toString().replace(/\/+$/, "")}/`,
-  );
-  if (url.origin !== base.origin)
-    throw new Error(
-      "INTEGRATION_EGRESS_BLOCKED: Route left the tenant API host.",
-    );
-  const config = object(capability.normalization);
-  const emailQueryParameter = string(config.emailQueryParameter, 120);
-  if (input.verifiedEmail && emailQueryParameter)
-    url.searchParams.set(emailQueryParameter, input.verifiedEmail);
-  const cursorParameter = string(config.cursorParameter, 120);
-  if (input.cursor && cursorParameter)
-    url.searchParams.set(cursorParameter, input.cursor);
-  const pageParameter = string(config.pageParameter, 120);
-  if (input.page && pageParameter)
-    url.searchParams.set(pageParameter, String(input.page));
-  return url;
-}
-
 async function providerFetch(
   context: ConnectorContext,
   capability: ConnectorContext["capabilities"][number],
@@ -1200,228 +985,6 @@ async function providerFetch(
     return JSON.parse(raw) as unknown;
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-const MAX_RESOURCE_BYTES = 80_000_000;
-const OFFICE_FORMATS = new Set([
-  "docx",
-  "doc",
-  "xlsx",
-  "xlsm",
-  "xltx",
-  "xltm",
-  "xlam",
-  "pptx",
-  "pptm",
-  "potx",
-  "potm",
-  "ppsx",
-  "ppsm",
-  "ppam",
-]);
-
-function resourceFormat(title: string, mimeType: string) {
-  const extension = title.includes(".")
-    ? title.split(".").pop()?.toLowerCase() ?? ""
-    : "";
-  if (/^[a-z0-9][a-z0-9._-]{0,31}$/.test(extension)) return extension;
-  if (mimeType === "application/pdf") return "pdf";
-  if (mimeType.includes("wordprocessingml")) return "docx";
-  if (mimeType.includes("spreadsheetml")) return "xlsx";
-  if (mimeType.includes("presentationml")) return "pptx";
-  return "bin";
-}
-
-function assertResourceBytes(bytes: Buffer, mimeType: string) {
-  if (!bytes.length) throw new Error("INTEGRATION_RESOURCE_EMPTY");
-  const mediaType = mimeType.split(";", 1)[0].trim().toLowerCase();
-  const isPdf = mediaType === "application/pdf" || bytes.subarray(0, 5).toString() === "%PDF-";
-  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
-  const office = mediaType.includes("officedocument") || mediaType.includes("ms-excel") || mediaType.includes("ms-powerpoint");
-  if (isPdf && bytes.subarray(0, 5).toString() !== "%PDF-")
-    throw new Error("INTEGRATION_RESOURCE_CONTENT_INVALID: The provider did not return a valid PDF.");
-  if (office && !isZip)
-    throw new Error("INTEGRATION_RESOURCE_CONTENT_INVALID: The provider did not return a valid Office package.");
-  if (!isPdf && !isZip && !mediaType.startsWith("text/") && !mediaType.startsWith("image/"))
-    throw new Error("INTEGRATION_RESOURCE_CONTENT_UNSUPPORTED: The provider returned an unsupported file type.");
-}
-
-async function providerFetchResourceBytes(
-  context: ConnectorContext,
-  capability: ConnectorContext["capabilities"][number],
-  token: string,
-  routeParameters: Record<string, string>,
-) {
-  const url = capabilityUrl(context, capability, { routeParameters });
-  await assertPublicApiHost(url.origin);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
-  try {
-    const tokenValue =
-      context.integration.authScheme === "bearer" ? `Bearer ${token}` : token;
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/pdf, application/zip, application/octet-stream, text/plain, image/*",
-        [context.integration.authHeaderName]: tokenValue,
-      },
-      redirect: "error",
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    if (response.status === 401)
-      throw new Error("INTEGRATION_CREDENTIAL_REJECTED: ManageBac refused the school's API key.");
-    if (response.status === 403)
-      throw new Error("INTEGRATION_PERMISSION_DENIED: The school's ManageBac API key doesn't allow downloading this resource.");
-    if (response.status === 404)
-      throw new Error("INTEGRATION_RESOURCE_UNAVAILABLE: The provider no longer exposes this resource.");
-    if (!response.ok)
-      throw new Error(`INTEGRATION_RESOURCE_DOWNLOAD_FAILED: Provider returned ${response.status}.`);
-    const length = Number(response.headers.get("content-length") ?? 0);
-    if (length > MAX_RESOURCE_BYTES)
-      throw new Error("INTEGRATION_RESOURCE_TOO_LARGE: Resource exceeds the 80 MB import limit.");
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_RESOURCE_BYTES)
-      throw new Error("INTEGRATION_RESOURCE_TOO_LARGE: Resource exceeds the 80 MB import limit.");
-    const mimeType = (response.headers.get("content-type") || "application/octet-stream").slice(0, 160);
-    assertResourceBytes(bytes, mimeType);
-    return { bytes, mimeType };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function importOfficeProjection(bytes: Buffer, format: string) {
-  if (format === "docx" || format === "doc") {
-    const opened = await docxLens.open(bytes, "strict-native");
-    return { blueprintKey: "document", content: opened.projection };
-  }
-  if (["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(format)) {
-    const opened = await xlsxLens.open(bytes, "strict-native");
-    return { blueprintKey: "sheets", content: xlsxArtifactContent(opened.projection) };
-  }
-  if (["pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"].includes(format)) {
-    const opened = await pptxLens.open(bytes, "strict-native");
-    return { blueprintKey: "presentation", content: pptxArtifactContent(opened.projection) };
-  }
-  return null;
-}
-
-async function discardImportedArtifact(artifactId: string) {
-  await convexMutation("spectraArtifacts:permanentlyDelete", { artifactId }).catch(() => undefined);
-}
-
-async function uploadResourcePayload(
-  artifactId: string,
-  bytes: Buffer,
-  mimeType: string,
-  nativeFormat: string,
-) {
-  const uploadUrl = await convexMutation<{ workId: string }, string>("payloads:issueUpload", { workId: artifactId });
-  const uploaded = await fetch(uploadUrl, {
-    method: "POST",
-    headers: { "Content-Type": mimeType },
-    body: new Uint8Array(bytes) as unknown as BodyInit,
-  });
-  const stored = (await uploaded.json().catch(() => null)) as { storageId?: string } | null;
-  if (!uploaded.ok || !stored?.storageId) throw new Error("RESOURCE_PAYLOAD_UPLOAD_FAILED");
-  const contentHash = createHash("sha256").update(bytes).digest("hex");
-  const payload = await convexMutation<{ workId: string; hash: string; storageId: string; bytes: number; mediaType: string }, { payloadRef: string }>("payloads:put", {
-    workId: artifactId,
-    hash: contentHash,
-    storageId: stored.storageId,
-    bytes: bytes.byteLength,
-    mediaType: mimeType,
-  });
-  await convexMutation("replicas:attachPortablePayload", {
-    workId: artifactId,
-    payloadRef: payload.payloadRef,
-    contentHash,
-    nativeFormat,
-  });
-  return contentHash;
-}
-
-async function importManageBacResource(
-  actor: ConnectorActor,
-  context: ConnectorContext,
-  token: string,
-  sourceRecordId: string,
-  refresh: boolean,
-  requestKey?: string,
-) {
-  if (actor.schoolRole !== "school_admin" && context.mapping.status !== "verified")
-    throw new Error("INTEGRATION_IDENTITY_REQUIRED: Resolve your verified provider identity first.");
-  const begun = (await convexMutation("managebac:beginResourceImport", {
-    sourceRecordId,
-    ...(requestKey ? { requestKey } : {}),
-    refresh,
-  })) as Record<string, unknown>;
-  const status = string(begun.status, 60);
-  if (status === "imported" || status === "update_available" || status === "source_unavailable") return begun;
-  const importId = string(begun.importId, 200);
-  if (!importId) throw new Error("INTEGRATION_RESOURCE_IMPORT_RECEIPT_MISSING");
-  const existingArtifactId = string(begun.artifactId, 200);
-  let artifactId = existingArtifactId;
-  try {
-    const capability = context.capabilities.find((item) => object(item.normalization).onDemand === true);
-    if (!capability) throw new Error("INTEGRATION_RESOURCE_DOWNLOAD_UNAVAILABLE: The provider has no verified on-demand resource route.");
-    const normalized = object(begun.normalized);
-    const classId = identifier(begun.providerClassId ?? normalized.classId ?? normalized.class_id, 500);
-    const resourceId = identifier(begun.providerRecordId ?? normalized.id, 500);
-    if (!classId || !resourceId) throw new Error("INTEGRATION_RESOURCE_IDENTITY_MISSING");
-    const downloaded = await providerFetchResourceBytes(context, capability, token, {
-      class_id: classId,
-      resource_id: resourceId,
-    });
-    const title = string(begun.title ?? normalized.title ?? normalized.name, 300) || "School resource";
-    const nativeFormat = resourceFormat(title, downloaded.mimeType);
-    if (!artifactId) {
-      const office = OFFICE_FORMATS.has(nativeFormat)
-        ? await importOfficeProjection(downloaded.bytes, nativeFormat)
-        : null;
-      if (office) {
-        const created = await convexMutation<{ blueprintKey: string; title: string; summary: string; content: unknown; tags: string[]; source: "manual"; contextSummary: string }, { artifactId: string }>("spectraArtifacts:create", {
-          blueprintKey: office.blueprintKey,
-          title,
-          summary: `Imported from ManageBac · ${nativeFormat}`,
-          content: office.content,
-          tags: ["imported", "managebac"],
-          source: "manual",
-          contextSummary: "Imported from a permissioned ManageBac class resource.",
-        });
-        artifactId = created.artifactId;
-      } else {
-        const created = await convexMutation<{ title: string; nativeFormat: string; bytes: number; contentHash: string; mimeType: string; tags: string[] }, { artifactId: string }>("spectraArtifacts:createImportedResource", {
-          title,
-          nativeFormat,
-          bytes: downloaded.bytes.byteLength,
-          contentHash: createHash("sha256").update(downloaded.bytes).digest("hex"),
-          mimeType: downloaded.mimeType,
-          tags: ["imported", "managebac"],
-        });
-        artifactId = created.artifactId;
-      }
-      await convexMutation("managebac:attachResourceImportArtifact", { importId, artifactId });
-    }
-    const contentHash = await uploadResourcePayload(artifactId, downloaded.bytes, downloaded.mimeType, nativeFormat);
-    return await convexMutation("managebac:completeResourceImport", {
-      importId,
-      sourceHash: string(begun.sourceHash, 200),
-      contentHash,
-      bytes: downloaded.bytes.byteLength,
-      mimeType: downloaded.mimeType,
-      nativeFormat,
-    });
-  } catch (error) {
-    await convexMutation("managebac:failResourceImport", {
-      importId,
-      errorCode: error instanceof Error ? (error.message.match(/^([A-Z0-9_]+)/)?.[1] ?? "INTEGRATION_RESOURCE_IMPORT_FAILED") : "INTEGRATION_RESOURCE_IMPORT_FAILED",
-      errorSummary: error instanceof Error ? error.message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500) : "Resource import failed.",
-    }).catch(() => undefined);
-    if (artifactId) await discardImportedArtifact(artifactId);
-    throw error;
   }
 }
 

@@ -295,6 +295,12 @@ export async function loadSchoolSecretForConnector(input: {
   schoolId: string;
   purpose: "managebac-api-token";
   serviceSubject?: string;
+  /**
+   * The signed-in person, named when the caller has no Clerk request to read
+   * it from (a Spectra AI run acting with the owner's Convex token). Convex
+   * still checks it against the authenticated identity.
+   */
+  subject?: string;
 }) {
   const purpose = input.purpose;
   const bridge = await bridgeArgs(
@@ -302,12 +308,13 @@ export async function loadSchoolSecretForConnector(input: {
     input.schoolId,
     purpose,
     undefined,
-    input.serviceSubject,
+    input.serviceSubject ?? input.subject,
   );
+  const workerSubject = input.serviceSubject ?? input.subject;
   const args = {
     schoolId: input.schoolId,
     purpose,
-    ...(input.serviceSubject ? { workerSubject: input.serviceSubject } : {}),
+    ...(workerSubject ? { workerSubject } : {}),
     ...bridge,
   };
   const envelope = input.serviceSubject

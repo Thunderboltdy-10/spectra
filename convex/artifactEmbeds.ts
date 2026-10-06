@@ -436,6 +436,11 @@ async function projection(
     state:
       source.status === "archived" ? ("archived" as const) : ("ready" as const),
     effectiveInteraction,
+    // The reader may change the work itself, so it can be edited where it is
+    // embedded. A retained pin is read through the placement, never edited.
+    canEditSource: Boolean(
+      !retainedAccess?.allowed && decision?.capabilities.includes("modify"),
+    ),
     source: {
       artifactId: source._id,
       title: retainedAccess?.allowed

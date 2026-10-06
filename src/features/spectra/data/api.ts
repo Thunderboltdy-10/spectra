@@ -832,6 +832,8 @@ export type SpectraTimetableReminderNotification = {
 export type SpectraArtifactEmbed =
   import("../../../../shared/artifact-embed").ArtifactEmbedReference & {
   effectiveInteraction?: "read" | "interact" | "edit";
+  /** The reader may change the embedded work itself: it can be edited in place. */
+  canEditSource?: boolean;
   /** Opaque current-host placement witness; never source authority. */
   placementRefreshKey?: string;
   canConfigure?: boolean;

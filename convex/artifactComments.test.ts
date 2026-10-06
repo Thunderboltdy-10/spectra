@@ -168,22 +168,34 @@ describe("Spectra managing comments", () => {
       mentionedAccountIds: [],
     });
     const execute = makeFunctionReference<"mutation">("spectraApplicationWrites:execute");
-    const manage = async (args: Record<string, unknown>) => {
+    let attempt = 0;
+    /** Run the step as the harness does, after the user approves it when it asks. */
+    const manage = async (args: Record<string, unknown>, approved = false) => {
       const input = { artifactId: seeded.artifactId, commentId, ...args };
-      const operationId = await t.run((ctx) =>
-        ctx.db.insert("spectraOperations", {
+      const executionId = `exec-comment-${++attempt}`;
+      const operationId = await t.run(async (ctx) => {
+        await ctx.db.patch(seeded.runId, { status: "running", phase: "planning", approval: undefined, executionId });
+        return ctx.db.insert("spectraOperations", {
           runId: seeded.runId,
-          executionId: "exec-comment-1",
+          executionId,
           actorType: "ai",
           type: "app.command",
-          status: "executing",
-          requiresConfirmation: false,
+          status: "proposed",
+          requiresConfirmation: approved,
           input: { command: "manage_comment", args: input },
           affected: [],
           createdAt: Date.now(),
-        }),
-      );
-      return user.mutation(execute, { runId: seeded.runId, executionId: "exec-comment-1", operationId, expectedCommand: "manage_comment", expectedArgs: input });
+        });
+      });
+      if (approved) {
+        await user.mutation(api.spectraRuns.updateStatus, { runId: seeded.runId, executionId, status: "awaiting_confirmation", approvalReasons: ["Delete"] });
+        await user.mutation(api.spectraRuns.claimConfirmation, { runId: seeded.runId, executionId });
+      }
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seeded.runId, { status: "running", phase: "applying" });
+        await ctx.db.patch(operationId, { status: "executing" });
+      });
+      return user.mutation(execute, { runId: seeded.runId, executionId, operationId, expectedCommand: "manage_comment", expectedArgs: input });
     };
     const read = () => t.run((ctx) => ctx.db.get(commentId));
 
@@ -193,7 +205,10 @@ describe("Spectra managing comments", () => {
     expect((await read())?.status).toBe("open");
     await manage({ action: "edit", body: "Is this a primary source?" });
     expect((await read())?.body).toBe("Is this a primary source?");
-    await manage({ action: "delete" });
+    // Deleting is permanent, so it never runs unapproved.
+    await expect(manage({ action: "delete" })).rejects.toThrow("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
+    expect((await read())?.status).toBe("open");
+    await manage({ action: "delete" }, true);
     expect((await read())?.status).toBe("deleted");
   });
 });

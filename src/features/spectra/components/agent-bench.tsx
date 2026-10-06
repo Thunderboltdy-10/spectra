@@ -6,9 +6,11 @@
  * adjusts the instructions in place and runs again, and keeps any question as
  * a test that "Run checks" includes from then on.
  *
- * State lives in `useAgentBench`, so the editor's bar can run every prompt and
- * the checks and release views can count the saved tests. `AgentBench` is the
- * section itself.
+ * State lives in `useAgentBench`, so the editor's bar can run (and stop) every
+ * prompt and the checks and release views can count the saved tests.
+ * `AgentBench` is the section itself. The draft can be compared with any of
+ * its releases, and the model can suggest edits to an answer's instructions,
+ * which the creator applies to the draft one at a time.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -20,8 +22,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import {
+  applyBenchEdits,
   applyBenchInstructions,
   applySuggestion,
+  BENCH_LENGTH_LABELS,
+  BENCH_TONE_LABELS,
+  describeBenchEdit,
   benchChecksEmpty,
   benchEntries,
   benchPair,
@@ -40,6 +46,7 @@ import {
   type BenchCompareMode,
   type BenchEntry,
   type BenchInstructions,
+  type BenchModelSuggestion,
   type BenchRun,
   type BenchSuggestion,
   type BenchTarget,
@@ -51,7 +58,9 @@ import {
   removeAgentBenchCase,
   saveAgentBenchCase,
   streamAgentBench,
+  suggestBenchImprovements,
   type BenchRelease,
+  type BenchReleaseOption,
 } from "../data/agent-bench";
 import { useLifeArrival, useLifeDeparture, useLifeGlow, useWritingFront } from "../life/use-life";
 import { SpectraRichContent } from "./spectra-rich-content";
@@ -61,6 +70,26 @@ import { SpectraRichContent } from "./spectra-rich-content";
 /* ------------------------------------------------------------------ */
 
 type LiveAnswers = Partial<Record<BenchTarget, string>>;
+
+function withoutKey<T>(current: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in current)) return current;
+  const next = { ...current };
+  delete next[key];
+  return next;
+}
+
+/** A release as the picker names it: its number, and what became of it. */
+export function benchReleaseLabel(release: Pick<BenchReleaseOption, "releaseNumber" | "status" | "rollout">) {
+  const state =
+    release.status === "suspended"
+      ? ", suspended"
+      : release.status === "deprecated"
+        ? ", retired"
+        : release.rollout === "internal_test"
+          ? ", private"
+          : "";
+  return `Release ${release.releaseNumber}${state}`;
+}
 
 export type AgentBenchController = ReturnType<typeof useAgentBench>;
 
@@ -78,6 +107,9 @@ export function useAgentBench({
   const [cases, setCases] = useState<BenchCase[]>([]);
   const [runs, setRuns] = useState<BenchRun[]>([]);
   const [release, setRelease] = useState<BenchRelease | null>(null);
+  const [releases, setReleases] = useState<BenchReleaseOption[]>([]);
+  const [pickedRelease, setPickedRelease] = useState<number | undefined>(undefined);
+  const [stopped, setStopped] = useState<Record<string, true>>({});
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [added, setAdded] = useState<string[]>([]);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
@@ -88,12 +120,19 @@ export function useAgentBench({
   const contentRef = useRef(content);
   const releaseRef = useRef(release);
   const runsRef = useRef(runs);
-  const controllers = useRef(new Set<AbortController>());
+  /** Each open answer, by the prompt it answers, so one can be stopped. */
+  const controllers = useRef(new Map<AbortController, string>());
+  const stopAllRef = useRef(false);
+
+  /** The release the draft is compared with: the one picked, or the newest. */
+  const compareRelease = pickedRelease ?? release?.releaseNumber ?? releases[0]?.releaseNumber;
+  const compareReleaseRef = useRef(compareRelease);
 
   useEffect(() => {
     contentRef.current = content;
     releaseRef.current = release;
     runsRef.current = runs;
+    compareReleaseRef.current = compareRelease;
   });
 
   const load = useCallback(async () => {
@@ -103,6 +142,7 @@ export function useAgentBench({
       setCases(state.cases);
       setRuns(state.runs);
       setRelease(state.release);
+      setReleases(state.releases ?? []);
       setStatus("ready");
     } catch {
       setStatus("failed");
@@ -117,7 +157,7 @@ export function useAgentBench({
   useEffect(() => {
     const open = controllers.current;
     return () => {
-      for (const controller of open) controller.abort();
+      for (const controller of open.keys()) controller.abort();
     };
   }, []);
 
@@ -133,10 +173,10 @@ export function useAgentBench({
 
   /** Asks one target and keeps its answer; never throws. */
   const ask = useCallback(
-    async (prompt: string, target: BenchTarget, draft?: AgentFoundryContent) => {
+    async (prompt: string, target: BenchTarget, draft?: AgentFoundryContent, releaseNumber?: number) => {
       const key = benchPromptKey(prompt);
       const controller = new AbortController();
-      controllers.current.add(controller);
+      controllers.current.set(controller, key);
       setLive((current) => ({ ...current, [key]: { ...current[key], [target]: "" } }));
       try {
         const run = await streamAgentBench({
@@ -144,13 +184,22 @@ export function useAgentBench({
           prompt,
           target,
           content: target === "draft" ? (draft ?? contentRef.current) : undefined,
+          // The newest release is the route's default, so only an older one is named.
+          ...(target === "release" &&
+          releaseNumber !== undefined &&
+          releaseNumber !== releaseRef.current?.releaseNumber
+            ? { releaseNumber }
+            : {}),
           signal: controller.signal,
           onText: (text) =>
             setLive((current) => ({ ...current, [key]: { ...current[key], [target]: text } })),
         });
         setRuns((current) => [run, ...current]);
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          setStopped((current) => ({ ...current, [key]: true }));
+          return;
+        }
         setProblems((current) => ({
           ...current,
           [key]: benchErrorMessage(error, "This answer did not finish. Run it again."),
@@ -171,41 +220,55 @@ export function useAgentBench({
   );
 
   /**
-   * Runs the draft on one prompt, and the last release too when the draft is
-   * compared with it and that release has not answered this prompt yet.
+   * Runs the draft on one prompt, and the compared release too when the draft
+   * is compared with one and that release has not answered this prompt yet.
    */
   const runPrompt = useCallback(
     async (prompt: string, draft?: AgentFoundryContent) => {
       const text = prompt.trim();
       if (!text) return;
       const key = benchPromptKey(text);
-      setProblems((current) => {
-        const next = { ...current };
-        delete next[key];
-        return next;
-      });
+      setProblems((current) => withoutKey(current, key));
+      setStopped((current) => withoutKey(current, key));
       const targets: BenchTarget[] = ["draft"];
-      const latest = releaseRef.current;
-      if (compare === "release" && latest) {
+      const releaseNumber = compareReleaseRef.current;
+      if (compare === "release" && releaseNumber !== undefined) {
         const answered = runsRef.current.filter((run) => benchPromptKey(run.prompt) === key);
-        if (!benchPair(answered, "release", latest.releaseNumber).baseline) targets.push("release");
+        if (!benchPair(answered, "release", releaseNumber).baseline) targets.push("release");
       }
-      await Promise.all(targets.map((target) => ask(text, target, draft)));
+      await Promise.all(
+        targets.map((target) => ask(text, target, draft, target === "release" ? releaseNumber : undefined)),
+      );
     },
     [ask, compare],
   );
 
   const runAll = useCallback(
     async (draft?: AgentFoundryContent) => {
+      stopAllRef.current = false;
       setRunningAll(true);
       try {
-        for (const entry of entries) await runPrompt(entry.prompt, draft);
+        for (const entry of entries) {
+          if (stopAllRef.current) break;
+          await runPrompt(entry.prompt, draft);
+        }
       } finally {
         setRunningAll(false);
       }
     },
     [entries, runPrompt],
   );
+
+  /** Stops the answers running for one prompt; the question stays on the bench. */
+  const stopPrompt = useCallback((key: string) => {
+    for (const [controller, owner] of controllers.current) if (owner === key) controller.abort();
+  }, []);
+
+  /** Stops every running answer, and Run all before its next prompt. */
+  const stopAll = useCallback(() => {
+    stopAllRef.current = true;
+    for (const controller of controllers.current.keys()) controller.abort();
+  }, []);
 
   const addPrompt = useCallback((prompt: string) => {
     const text = prompt.trim().slice(0, BENCH_LIMITS.prompt);
@@ -289,9 +352,13 @@ export function useAgentBench({
     cases,
     runs,
     release,
+    releases,
+    compareRelease,
+    setCompareRelease: setPickedRelease,
     entries,
     live,
     problems,
+    stopped,
     compare,
     setCompare,
     runningAll,
@@ -299,11 +366,33 @@ export function useAgentBench({
     reload: load,
     runPrompt,
     runAll,
+    stopPrompt,
+    stopAll,
     addPrompt,
     dropPrompt,
     saveCase,
     removeCase,
   };
+}
+
+/**
+ * The editor bar's main action on the bench: Run all, or Stop while any
+ * answer is still being written (Stop also ends Run all before its next
+ * question).
+ */
+export function benchBarAction(
+  bench: Pick<AgentBenchController, "runningAll" | "live" | "entries" | "runAll" | "stopAll">,
+  canEdit: boolean,
+) {
+  const running = bench.runningAll || Object.keys(bench.live).length > 0;
+  return running
+    ? { label: "Stop", stops: true, disabled: !canEdit, onSelect: () => bench.stopAll() }
+    : {
+        label: "Run all",
+        stops: false,
+        disabled: !canEdit || bench.entries.length === 0,
+        onSelect: () => void bench.runAll(),
+      };
 }
 
 /* ------------------------------------------------------------------ */
@@ -440,6 +529,151 @@ function BenchCaseForm({
 }
 
 /* ------------------------------------------------------------------ */
+/* Suggestions the model writes                                        */
+/* ------------------------------------------------------------------ */
+
+function BenchIdea({
+  lifeKey,
+  suggestion,
+  applied,
+  onApply,
+}: {
+  lifeKey: string;
+  suggestion: BenchModelSuggestion;
+  applied: boolean;
+  onApply: () => void;
+}) {
+  const ref = useRef<HTMLLIElement>(null);
+  // A suggestion is Spectra's: it arrives from the prism.
+  useLifeArrival(ref, lifeKey, "ai");
+  return (
+    <li ref={ref}>
+      <div className="agent-bench-idea">
+        {suggestion.reason && <p>{suggestion.reason}</p>}
+        <ul>
+          {suggestion.edits.map((edit) => (
+            <li key={describeBenchEdit(edit)}>{describeBenchEdit(edit)}</li>
+          ))}
+        </ul>
+      </div>
+      {applied ? (
+        <span className="agent-bench-tag">Applied</span>
+      ) : (
+        <Button size="sm" variant="ghost" onClick={onApply}>
+          Apply to the draft
+        </Button>
+      )}
+    </li>
+  );
+}
+
+type IdeasState = {
+  /** The answer they are about; a newer answer needs new suggestions. */
+  runId: string;
+  status: "loading" | "ready" | "failed";
+  items: BenchModelSuggestion[];
+  applied: string[];
+  message?: string;
+};
+
+function BenchIdeas({
+  agentId,
+  entry,
+  answer,
+  content,
+  onApply,
+}: {
+  agentId: string;
+  entry: BenchEntry;
+  answer: BenchRun;
+  content: AgentFoundryContent;
+  onApply: (suggestion: BenchModelSuggestion) => void;
+}) {
+  const [state, setState] = useState<IdeasState | null>(null);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  const ideas = state?.runId === answer.id ? state : null;
+
+  async function ask() {
+    controller.current?.abort();
+    const next = new AbortController();
+    controller.current = next;
+    setState({ runId: answer.id, status: "loading", items: [], applied: [] });
+    try {
+      const items = await suggestBenchImprovements({
+        agentId,
+        prompt: entry.prompt,
+        output: answer.output,
+        ...(entry.saved ? { checks: entry.saved.checks } : {}),
+        content,
+        signal: next.signal,
+      });
+      if (next.signal.aborted) return;
+      setState({ runId: answer.id, status: "ready", items, applied: [] });
+    } catch (error) {
+      if (next.signal.aborted) return;
+      setState({
+        runId: answer.id,
+        status: "failed",
+        items: [],
+        applied: [],
+        message: benchErrorMessage(error, "Spectra could not suggest changes this time. Try again."),
+      });
+    }
+  }
+
+  function stop() {
+    controller.current?.abort();
+    setState(null);
+  }
+
+  function apply(suggestion: BenchModelSuggestion) {
+    onApply(suggestion);
+    setState((current) => (current ? { ...current, applied: [...current.applied, suggestion.key] } : current));
+  }
+
+  return (
+    <div className="agent-bench-ideas">
+      {ideas?.status === "loading" ? (
+        <p className="foundry-empty" aria-live="polite">
+          Spectra is reading the answer.{" "}
+          <button type="button" className="foundry-text-button" onClick={stop}>
+            <Icon name="stop" size={14} />
+            Stop
+          </button>
+        </p>
+      ) : (
+        <button type="button" className="foundry-text-button" onClick={() => void ask()}>
+          <Icon name="target" size={14} />
+          {ideas?.status === "ready" ? "Suggest again" : "Suggest improvements"}
+        </button>
+      )}
+      {ideas?.status === "failed" && (
+        <p className="agent-bench-problem" role="alert">
+          {ideas.message}
+        </p>
+      )}
+      {ideas?.status === "ready" && ideas.items.length === 0 && (
+        <p className="foundry-empty">Spectra has nothing to change for this answer.</p>
+      )}
+      {ideas?.status === "ready" && ideas.items.length > 0 && (
+        <ul className="agent-bench-suggestions" aria-label="Spectra's suggestions">
+          {ideas.items.map((suggestion) => (
+            <BenchIdea
+              key={suggestion.key}
+              lifeKey={`bench-idea:${agentId}:${entry.key}:${answer.id}:${suggestion.key}`}
+              suggestion={suggestion}
+              applied={ideas.applied.includes(suggestion.key)}
+              onApply={() => apply(suggestion)}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* One prompt on the bench                                             */
 /* ------------------------------------------------------------------ */
 
@@ -449,12 +683,14 @@ function BenchCard({
   content,
   canEdit,
   onApplySuggestion,
+  onApplyIdea,
 }: {
   bench: AgentBenchController;
   entry: BenchEntry;
   content: AgentFoundryContent;
   canEdit: boolean;
   onApplySuggestion: (suggestion: BenchSuggestion) => void;
+  onApplyIdea: (suggestion: BenchModelSuggestion) => void;
 }) {
   const ref = useRef<HTMLLIElement>(null);
   useLifeArrival(ref, `bench:${bench.agentId}:${entry.key}`, "human");
@@ -463,19 +699,19 @@ function BenchCard({
 
   const live = bench.live[entry.key] ?? {};
   const isRunning = bench.running(entry.key);
-  const release = bench.release;
+  const releaseNumber = bench.compareRelease;
   const { baseline, current } = benchPair(
     entry.runs,
     bench.compare,
-    bench.compare === "release" ? release?.releaseNumber : undefined,
+    bench.compare === "release" ? releaseNumber : undefined,
   );
   const draftText = live.draft ?? current?.output;
   const baselineText =
     bench.compare === "release" && live.release !== undefined ? live.release : baseline?.output;
   const baselineLabel =
     bench.compare === "release"
-      ? release
-        ? `Release ${release.releaseNumber}`
+      ? releaseNumber !== undefined
+        ? `Release ${releaseNumber}`
         : "Last release"
       : "Its answer before";
   const settled = live.draft === undefined && live.release === undefined;
@@ -504,15 +740,17 @@ function BenchCard({
           {entry.saved && (
             <span className="agent-bench-tag">{entry.saved.required ? "Test" : "Test, optional"}</span>
           )}
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!canEdit || isRunning}
-            onClick={() => void bench.runPrompt(entry.prompt)}
-          >
-            <Icon name={isRunning ? "working" : "play"} size={14} animate={isRunning} />
-            {isRunning ? "Running" : current ? "Run again" : "Run"}
-          </Button>
+          {isRunning ? (
+            <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => bench.stopPrompt(entry.key)}>
+              <Icon name="stop" size={14} />
+              Stop
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => void bench.runPrompt(entry.prompt)}>
+              <Icon name="play" size={14} />
+              {current ? "Run again" : "Run"}
+            </Button>
+          )}
           {!entry.saved && (
             <IconButton
               icon="close"
@@ -530,6 +768,11 @@ function BenchCard({
           {problem}
         </p>
       )}
+      {bench.stopped[entry.key] && !isRunning && !problem && (
+        <p className="foundry-empty" aria-live="polite">
+          Stopped before the answer finished. Run it again when you are ready.
+        </p>
+      )}
 
       {answered && (
         <div className="agent-bench-answers">
@@ -539,7 +782,7 @@ function BenchCard({
             streaming={live.release !== undefined}
             empty={
               bench.compare === "release"
-                ? release
+                ? releaseNumber !== undefined
                   ? "Run it to see how the release answers."
                   : "Nothing is released yet."
                 : "Run it again to compare."
@@ -620,6 +863,16 @@ function BenchCard({
         </ul>
       )}
 
+      {canEdit && settled && current && content.foundry.foundationEstablished && (
+        <BenchIdeas
+          agentId={bench.agentId}
+          entry={entry}
+          answer={current}
+          content={content}
+          onApply={onApplyIdea}
+        />
+      )}
+
       {canEdit &&
         (formOpen ? (
           <BenchCaseForm
@@ -648,20 +901,15 @@ function BenchCard({
 /* Adjusting the instructions                                          */
 /* ------------------------------------------------------------------ */
 
-const TONES: Array<{ value: BenchInstructions["tone"]; label: string }> = [
-  { value: "warm", label: "Warm" },
-  { value: "direct", label: "Direct" },
-  { value: "socratic", label: "Asks questions back" },
-  { value: "formal", label: "Formal" },
-  { value: "playful", label: "Playful" },
-  { value: "professional", label: "Professional" },
-];
+const TONES = (Object.keys(BENCH_TONE_LABELS) as Array<BenchInstructions["tone"]>).map((value) => ({
+  value,
+  label: BENCH_TONE_LABELS[value],
+}));
 
-const LENGTHS: Array<{ value: BenchInstructions["responseLength"]; label: string }> = [
-  { value: "concise", label: "Short" },
-  { value: "balanced", label: "Balanced" },
-  { value: "detailed", label: "Detailed" },
-];
+const LENGTHS = (Object.keys(BENCH_LENGTH_LABELS) as Array<BenchInstructions["responseLength"]>).map((value) => ({
+  value,
+  label: BENCH_LENGTH_LABELS[value],
+}));
 
 const lines = (values: string[]) => values.join("\n");
 const unlines = (text: string) => text.split(/\r?\n/);
@@ -840,6 +1088,11 @@ export function AgentBench({
     toast.success(`${suggestion.skillName} updated. Run it again to see the difference.`);
   }
 
+  function applyIdeaToDraft(suggestion: BenchModelSuggestion) {
+    onApply(applyBenchEdits(content, suggestion.edits, Date.now()));
+    toast.success("Applied to the draft. Run it again to see the difference.");
+  }
+
   function applyInstructions(next: AgentFoundryContent, rerun: boolean) {
     onApply(next);
     if (rerun) void bench.runAll(next);
@@ -910,12 +1163,28 @@ export function AgentBench({
             role="radio"
             aria-checked={bench.compare === "release"}
             className="agent-bench-choice"
-            disabled={!bench.release}
-            title={bench.release ? undefined : "Nothing is released yet"}
+            disabled={bench.compareRelease === undefined}
+            title={bench.compareRelease === undefined ? "Nothing is released yet" : undefined}
             onClick={() => bench.setCompare("release")}
           >
-            {bench.release ? `Release ${bench.release.releaseNumber}` : "Last release"}
+            {bench.releases.length > 1
+              ? "A release"
+              : bench.compareRelease !== undefined
+                ? `Release ${bench.compareRelease}`
+                : "Last release"}
           </button>
+          {bench.compare === "release" && bench.releases.length > 1 && bench.compareRelease !== undefined && (
+            <SelectField
+              ariaLabel="Which release"
+              size="sm"
+              value={String(bench.compareRelease)}
+              options={bench.releases.map((release) => ({
+                value: String(release.releaseNumber),
+                label: benchReleaseLabel(release),
+              }))}
+              onChange={(value) => bench.setCompareRelease(Number(value))}
+            />
+          )}
         </div>
       </section>
 
@@ -942,6 +1211,7 @@ export function AgentBench({
               content={content}
               canEdit={canEdit}
               onApplySuggestion={applySuggestionToDraft}
+              onApplyIdea={applyIdeaToDraft}
             />
           ))}
         </ol>

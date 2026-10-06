@@ -6,6 +6,7 @@ import {
   readBenchStream,
   saveAgentBenchCase,
   streamAgentBench,
+  suggestBenchImprovements,
 } from "../data/agent-bench";
 
 function streamOf(chunks: string[]) {
@@ -67,6 +68,16 @@ describe("reading the bench stream", () => {
     expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).not.toHaveProperty("content");
   });
 
+  it("names an older release only when asking a release", async () => {
+    const fetch = vi.fn(async () => new Response(streamOf(['{"type":"done","run":{}}\n'])));
+    vi.stubGlobal("fetch", fetch);
+    await streamAgentBench({ agentId: "a", prompt: "Hi", target: "release", releaseNumber: 1, onText: () => undefined });
+    await streamAgentBench({ agentId: "a", prompt: "Hi", target: "draft", releaseNumber: 1, onText: () => undefined });
+    const bodies = fetch.mock.calls.map((call) => JSON.parse((call as unknown as [string, RequestInit])[1].body as string));
+    expect(bodies[0]).toMatchObject({ target: "release", releaseNumber: 1 });
+    expect(bodies[1]).not.toHaveProperty("releaseNumber");
+  });
+
   it("throws the stream's own words, or nothing to show when it just stops", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(streamOf(['{"type":"error","message":"Try again soon."}\n']))));
     await expect(streamAgentBench({ agentId: "a", prompt: "Hi", target: "draft", onText: () => undefined })).rejects.toThrow(
@@ -123,6 +134,41 @@ describe("the bench's saved state", () => {
       required: true,
     }).catch((thrown: unknown) => thrown);
     expect(benchErrorMessage(error, "Not saved.")).toBe("An agent keeps up to 50 tests. Remove one first.");
+  });
+
+  it("asks for suggestions about one answer and reads them back", async () => {
+    const suggestions = [{ key: "tone:warm", reason: "Kinder.", edits: [{ kind: "tone", value: "warm" }] }];
+    const fetch = vi.fn(async () => Response.json({ suggestions }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      suggestBenchImprovements({
+        agentId: "a",
+        prompt: "Hi",
+        output: "Hello.",
+        checks: { mustInclude: ["x"], mustNotInclude: [] },
+        content: { y: 1 },
+      }),
+    ).resolves.toEqual(suggestions);
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/spectra/agents/bench/suggest");
+    expect(JSON.parse(init.body as string)).toEqual({
+      agentId: "a",
+      prompt: "Hi",
+      output: "Hello.",
+      checks: { mustInclude: ["x"], mustNotInclude: [] },
+      content: { y: 1 },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { ok: false, error: { code: "AGENT_BENCH_SUGGEST_UNAVAILABLE", message: "Compile the agent's skills first, then ask for suggestions." } },
+          { status: 400 },
+        ),
+      ),
+    );
+    const error = await suggestBenchImprovements({ agentId: "a", prompt: "Hi", output: "Hello." }).catch((thrown: unknown) => thrown);
+    expect(benchErrorMessage(error, "x")).toBe("Compile the agent's skills first, then ask for suggestions.");
   });
 
   it("keeps a code out of the words, and falls back for anything unworded", () => {

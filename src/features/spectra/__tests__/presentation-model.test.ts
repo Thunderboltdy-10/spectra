@@ -7,6 +7,9 @@ import {
   createPresentationObject,
   normalizePresentationContent,
   producePresentationContent,
+  retextPresentationParagraphs,
+  withPresentationObjectText,
+  type PresentationParagraph,
 } from "../presentation/model";
 import { workYjsAdapter } from "../work/models/yjs/registry";
 
@@ -78,3 +81,35 @@ describe("presentation default deck", () => {
     expect(next).not.toBe(original);
   });
 });
+
+describe("writing in a text box keeps the deck's formatting", () => {
+  const RED = ["#", "C00000"].join("");
+  const deck: PresentationParagraph[] = [
+    { runs: [{ text: "Bold ", bold: true }, { text: "red", color: RED }], alignment: "center" },
+    { runs: [{ text: "First point", fontSizePt: 24 }], bullet: "bullet", level: 1 },
+  ];
+
+  it("keeps the runs around a typed letter and leaves other lines alone", () => {
+    const next = retextPresentationParagraphs(deck, "Bold reds\nFirst point");
+    expect(next[0]).toEqual({ runs: [{ text: "Bold ", bold: true }, { text: "reds", color: RED }], alignment: "center" });
+    expect(next[1]).toBe(deck[1]);
+  });
+
+  it("gives a new line the bullet, level and style of the line it was split from", () => {
+    const next = retextPresentationParagraphs(deck, "Bold red\nFirst point\nSecond");
+    expect(next[2]).toEqual({ runs: [{ text: "Second", fontSizePt: 24 }], bullet: "bullet", level: 1 });
+    expect(next.slice(0, 2)).toEqual(deck);
+  });
+
+  it("drops only the paragraph that was deleted", () => {
+    expect(retextPresentationParagraphs(deck, "First point")).toEqual([deck[1]]);
+  });
+
+  it("is what a text box edit writes", () => {
+    const object = { ...createPresentationObject("text", 1), content: { text: "Bold red", paragraphs: [deck[0]!] } };
+    const next = withPresentationObjectText(object, "Bold red!") as typeof object;
+    expect(next.content.paragraphs[0]!.runs).toEqual([{ text: "Bold ", bold: true }, { text: "red!", color: RED }]);
+    expect(next.content.text).toBe("Bold red!");
+  });
+});
+

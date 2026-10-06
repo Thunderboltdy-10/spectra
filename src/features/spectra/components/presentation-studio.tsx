@@ -55,6 +55,7 @@ import {
   createPresentationObject,
   createPresentationSlide,
   normalizePresentationContent,
+  presentationObjectParagraphs,
   presentationObjectText,
   presentationSlideLabel,
   producePresentationContent,
@@ -65,6 +66,8 @@ import {
   type PresentationTableCell,
   type PresentationSlide,
 } from "../presentation/model";
+import { richContentFromSlideParagraphs } from "../rich-content";
+import { SpectraRichContent } from "./spectra-rich-content";
 import {
   applyPresentationLayout,
   PRESENTATION_LAYOUT_OPTIONS,
@@ -626,6 +629,31 @@ function PresentationObjectView({
     object.width,
     objectText,
   ]);
+  const textStyle: CSSProperties = {
+    color: String(styleValue(object, "color", "#173f35")),
+    fontFamily: presentationFontFamily(
+      object.style?.fontFamily,
+      themeFonts,
+      textFontSize,
+    ),
+    // Presentation geometry uses a 1000-unit logical canvas. One cqw
+    // represents ten of those units, so a 50-unit font maps to 5cqw.
+    // The previous /65 conversion collapsed nearly every text style
+    // to the 10px clamp and made Title, Subtitle, and Body visually
+    // indistinguishable.
+    fontSize: compact
+      ? `${textFontSize / 10}cqw`
+      : `clamp(10px, ${textFontSize / 10}cqw, ${textFontSize}px)`,
+    fontWeight: Number(styleValue(object, "fontWeight", 600)),
+    fontStyle: styleValue(object, "italic", false)
+      ? "italic"
+      : "normal",
+    textDecoration: styleValue(object, "underline", false)
+      ? "underline"
+      : "none",
+    textAlign: String(styleValue(object, "align", "left")) as
+      "left" | "center" | "right",
+  };
   if (object.hidden) return null;
   if (object.type === "group" && compact) return null;
   return (
@@ -657,7 +685,25 @@ function PresentationObjectView({
       }}
       onPointerDown={onPointerDown}
     >
-      {object.type === "text" ? (
+      {object.type === "text" && (compact || readOnly) ? (
+        // A slide that is shown, not written (a thumbnail, presenting, a
+        // reader without edit rights) draws its runs: bold, colour, links,
+        // bullets and levels from the deck, through the shared renderer.
+        <div
+          className="presentation-object-text"
+          data-text-preset={textPreset}
+          data-ai-region={aiRegionAttr(aiActive)}
+          {...(path ? targetAttrs(`${path}/text`) : {})}
+          style={textStyle}
+        >
+          <SpectraRichContent
+            ast={richContentFromSlideParagraphs(
+              presentationObjectParagraphs(object),
+            )}
+            className="spectra-prose-inherit presentation-object-copy"
+          />
+        </div>
+      ) : object.type === "text" ? (
         <LocalAutocompleteTextarea
           ref={textAreaRef}
           surface="slide_text"
@@ -670,31 +716,7 @@ function PresentationObjectView({
           onBlur={onTextBlur}
           onValueChange={onTextChange}
           onPointerDown={(event) => event.stopPropagation()}
-          style={{
-            color: String(styleValue(object, "color", "#173f35")),
-            fontFamily: presentationFontFamily(
-              object.style?.fontFamily,
-              themeFonts,
-              textFontSize,
-            ),
-            // Presentation geometry uses a 1000-unit logical canvas. One cqw
-            // represents ten of those units, so a 50-unit font maps to 5cqw.
-            // The previous /65 conversion collapsed nearly every text style
-            // to the 10px clamp and made Title, Subtitle, and Body visually
-            // indistinguishable.
-            fontSize: compact
-              ? `${textFontSize / 10}cqw`
-              : `clamp(10px, ${textFontSize / 10}cqw, ${textFontSize}px)`,
-            fontWeight: Number(styleValue(object, "fontWeight", 600)),
-            fontStyle: styleValue(object, "italic", false)
-              ? "italic"
-              : "normal",
-            textDecoration: styleValue(object, "underline", false)
-              ? "underline"
-              : "none",
-            textAlign: String(styleValue(object, "align", "left")) as
-              "left" | "center" | "right",
-          }}
+          style={textStyle}
           className="size-full"
           textareaClassName="presentation-object-text"
           aria-label="Slide text"

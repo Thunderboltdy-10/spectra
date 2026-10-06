@@ -5408,6 +5408,52 @@ button[data-spectra-context-trigger="true"]::after {
   outline: none;
 }
 
+/* The shared rich field fills its text box and keeps the box's own type. */
+.presentation-text-field {
+  cursor: text;
+}
+
+.presentation-text-field-content,
+.presentation-text-field .ProseMirror {
+  min-height: 100%;
+  outline: none;
+}
+
+.presentation-text-field .ProseMirror {
+  --prose-leading: 1.1;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Its commands float beside the box, over the canvas, never in it. */
+.presentation-text-bar {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+  transform: translateY(-100%);
+}
+
+.presentation-text-bar[data-below] {
+  flex-direction: column;
+  transform: none;
+}
+
+.presentation-text-bar [role="toolbar"],
+.presentation-text-bar form {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+}
+
 .presentation-shape,
 .presentation-media-missing {
   display: flex;

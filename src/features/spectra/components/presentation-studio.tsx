@@ -57,17 +57,21 @@ import {
   normalizePresentationContent,
   presentationObjectParagraphs,
   presentationObjectText,
+  presentationParagraphsText,
   presentationSlideLabel,
   producePresentationContent,
+  withPresentationObjectParagraphs,
   withPresentationObjectText,
   type PresentationContent,
   type PresentationObject,
   type PresentationObjectType,
+  type PresentationParagraph,
   type PresentationTableCell,
   type PresentationSlide,
 } from "../presentation/model";
 import { richContentFromSlideParagraphs } from "../rich-content";
 import { SpectraRichContent } from "./spectra-rich-content";
+import { SlideTextField } from "./slide-text-field";
 import {
   applyPresentationLayout,
   PRESENTATION_LAYOUT_OPTIONS,
@@ -295,19 +299,26 @@ const OBJECT_FORMAT_TOOLS: ReadonlyArray<{
     id: "bulleted-list",
     icon: List,
     label: () => "Bulleted list",
+    // Real bullets on every paragraph, as PowerPoint holds them. A "• " typed
+    // before each line used to stand in, which exported as text and could not
+    // be numbered, nested or ticked.
+    pressed: (object) =>
+      presentationObjectParagraphs(object).every(
+        (paragraph) => paragraph.bullet === "bullet" && paragraph.checked === undefined,
+      ),
     apply: (object) => {
-      const current = presentationObjectText(object);
-      const lineBreak = "\n";
+      const paragraphs = presentationObjectParagraphs(object);
+      const bulleted = paragraphs.every(
+        (paragraph) => paragraph.bullet === "bullet" && paragraph.checked === undefined,
+      );
       Object.assign(
         object,
-        withPresentationObjectText(
+        withPresentationObjectParagraphs(
           object,
-          current.startsWith("• ")
-            ? current.replace(/^• /gm, "")
-            : current
-                .split(lineBreak)
-                .map((line) => `• ${line}`)
-                .join(lineBreak),
+          paragraphs.map(({ checked: _checked, ...paragraph }) => ({
+            ...paragraph,
+            bullet: bulleted ? "none" : "bullet",
+          })),
         ),
       );
     },
@@ -562,6 +573,7 @@ function PresentationObjectView({
   readOnly,
   compact,
   aiActive = false,
+  nativeText = false,
   onSelect,
   onPointerDown,
   onResizePointerDown,
@@ -580,21 +592,28 @@ function PresentationObjectView({
   readOnly: boolean;
   compact: boolean;
   aiActive?: boolean;
+  /** Its deck is linked to a PowerPoint file: its text holds only what DrawingML can. */
+  nativeText?: boolean;
   onSelect: (additive: boolean) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerDown: (
     handle: ResizeHandle,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) => void;
-  onTextChange: (value: string) => void;
+  onTextChange: (paragraphs: PresentationParagraph[]) => void;
   onTextFocus: () => void;
   onTextBlur: () => void;
   /** Canonical pointer for this object, e.g. `/slides/2/objects/1`. */
   path?: string;
 }) {
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const [textOverflow, setTextOverflow] = useState(false);
-  const objectText = presentationObjectText(object);
+  const paragraphs = useMemo(
+    () => (object.type === "text" ? presentationObjectParagraphs(object) : []),
+    // The paragraphs are the object's content; nothing else shapes them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [object.content, object.type],
+  );
   const textFontSize = Number(styleValue(object, "fontSize", 42));
   const textPreset =
     textFontSize >= 44
@@ -610,7 +629,7 @@ function PresentationObjectView({
       return;
     }
     const frame = window.requestAnimationFrame(() => {
-      const element = textAreaRef.current;
+      const element = textRef.current;
       setTextOverflow(
         Boolean(
           element &&
@@ -627,7 +646,7 @@ function PresentationObjectView({
     object.style,
     object.type,
     object.width,
-    objectText,
+    paragraphs,
   ]);
   const textStyle: CSSProperties = {
     color: String(styleValue(object, "color", "#173f35")),
@@ -653,7 +672,10 @@ function PresentationObjectView({
       : "none",
     textAlign: String(styleValue(object, "align", "left")) as
       "left" | "center" | "right",
-  };
+    // One of the deck's points on this canvas, for runs with their own size:
+    // the same scale as the object's size above.
+    "--rich-pt": compact ? "0.1cqw" : "min(0.1cqw, 1px)",
+  } as CSSProperties;
   if (object.hidden) return null;
   if (object.type === "group" && compact) return null;
   return (
@@ -697,29 +719,26 @@ function PresentationObjectView({
           style={textStyle}
         >
           <SpectraRichContent
-            ast={richContentFromSlideParagraphs(
-              presentationObjectParagraphs(object),
-            )}
+            ast={richContentFromSlideParagraphs(paragraphs)}
             className="spectra-prose-inherit presentation-object-copy"
           />
         </div>
       ) : object.type === "text" ? (
-        <LocalAutocompleteTextarea
-          ref={textAreaRef}
-          surface="slide_text"
+        // Written in place with the field every editor shares (EDITORS.md,
+        // Shared rich content), storing the deck's own paragraphs and runs.
+        <SlideTextField
+          hostRef={textRef}
+          className="presentation-object-text"
           data-text-preset={textPreset}
           data-ai-region={aiRegionAttr(aiActive)}
           {...(path ? targetAttrs(`${path}/text`) : {})}
-          value={objectText}
-          readOnly={readOnly || object.locked || compact}
+          paragraphs={paragraphs}
+          editable={!object.locked}
+          native={nativeText}
+          style={textStyle}
           onFocus={onTextFocus}
           onBlur={onTextBlur}
-          onValueChange={onTextChange}
-          onPointerDown={(event) => event.stopPropagation()}
-          style={textStyle}
-          className="size-full"
-          textareaClassName="presentation-object-text"
-          aria-label="Slide text"
+          onChange={onTextChange}
         />
       ) : object.type === "shape" ? (
         <div
@@ -954,7 +973,7 @@ function SlideCanvas({
   ) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onTextChange: (objectId: string, value: string) => void;
+  onTextChange: (objectId: string, paragraphs: PresentationParagraph[]) => void;
   onTextFocus: (objectId: string) => void;
   onTextBlur: () => void;
 }) {
@@ -1119,7 +1138,8 @@ function SlideCanvas({
               onResizePointerDown={(handle, event) =>
                 onResizePointerDown(object, handle, event)
               }
-              onTextChange={(value) => onTextChange(object.id, value)}
+              nativeText={Boolean(deck.nativeBinding) || typeof source.nativeShapeId === "string"}
+              onTextChange={(paragraphs) => onTextChange(object.id, paragraphs)}
               onTextFocus={() => onTextFocus(object.id)}
               onTextBlur={onTextBlur}
               path={`/slides/${slideIndex}/objects/${objectIndex}`}
@@ -2642,6 +2662,37 @@ export function PresentationStudio({
       }
     });
   }
+  function updateTextParagraphs(objectId: string, paragraphs: PresentationParagraph[]) {
+    // As `updateText`, from the rich field: the paragraphs it wrote, with
+    // their words beside them for search, the slide title and the AI.
+    mutate((draft) => {
+      const slide = draft.slides[activeSlideIndex]!;
+      const object = slide.objects.find(
+        (candidate) => candidate.id === objectId,
+      );
+      if (!object) return;
+      const text = presentationParagraphsText(paragraphs);
+      const plain = paragraphs.every(
+        (paragraph) =>
+          Object.keys(paragraph).length === 1 &&
+          paragraph.runs.length <= 1 &&
+          paragraph.runs.every((run) => Object.keys(run).length === 1),
+      );
+      // A box that only ever held words keeps holding words until it is formatted.
+      Object.assign(
+        object,
+        plain &&
+          !Array.isArray((object.content as { paragraphs?: unknown } | null)?.paragraphs)
+          ? withPresentationObjectText(object, text)
+          : withPresentationObjectParagraphs(object, paragraphs),
+      );
+      const firstText = slide.objects.find((candidate) => candidate.type === "text");
+      if (firstText && firstText.id === objectId) {
+        const next = text.trim();
+        if (next) slide.title = next.slice(0, 300);
+      }
+    });
+  }
   function beginTyping() {
     if (typingSessionRef.current) return;
     const origin = cloneDeck(deckRef.current);
@@ -3987,7 +4038,7 @@ export function PresentationStudio({
                 onResizePointerDown={beginResize}
                 onPointerMove={moveDrag}
                 onPointerUp={finishDrag}
-                onTextChange={updateText}
+                onTextChange={updateTextParagraphs}
                 onTextFocus={beginText}
                 onTextBlur={finishTyping}
               />

@@ -255,10 +255,13 @@ function flatten(blocks: readonly RichBlock[], level: number | undefined, listIt
       ...(first && listItem.checked !== undefined ? { checked: listItem.checked } : {}),
     };
   };
-  for (const block of blocks) {
+  for (const [index, block] of blocks.entries()) {
     switch (block.type) {
       case "paragraph":
       case "heading":
+        // A list item cannot open with a nested list in the editor, so it
+        // carries an empty line there: a deeper bullet with no parent of its own.
+        if (leading && listItem && !block.content.length && blocks[index + 1]?.type === "list") break;
         output.push(...paragraphsOf(block.content, shapeFor(block.align)));
         break;
       case "list":

@@ -15,8 +15,9 @@ import { agentSystemPrompt, type LabAgent } from "../lab-prompt";
 import { admitAgentModelWork, recordAgentModelWork } from "../model-work";
 
 /*
- * The agent bench: one sample prompt, answered by the agent's draft or by its
- * last release, streamed back as it is written. It asks the model the way the
+ * The agent bench: one sample prompt, answered by the agent's draft or by one
+ * of its releases (the newest, or an older one the creator picked), streamed
+ * back as it is written. It asks the model the way the
  * checks do (the same lab system prompt) through the harness client, so the
  * model, provider and reasoning come only from the environment. The work is
  * admitted against the school's ceiling and metered like any agent model work.
@@ -78,17 +79,29 @@ export async function POST(request: Request) {
         "AGENT_BENCH_PROMPT_INVALID: Keep the question under 4,000 characters.",
       );
     const target: BenchTarget = body.target === "release" ? "release" : "draft";
+    // An older release the creator picked; without one, the newest.
+    const pickedRelease =
+      typeof body.releaseNumber === "number" &&
+      Number.isInteger(body.releaseNumber) &&
+      body.releaseNumber > 0
+        ? body.releaseNumber
+        : undefined;
 
     let agent: LabAgent;
     let releaseNumber: number | undefined;
     if (target === "release") {
-      const release = await convexQuery<{ agentId: string }, ReleaseAgent | null>(
-        "spectraArtifacts:agentBenchRelease",
-        { agentId },
-      );
+      const release = await convexQuery<
+        { agentId: string; releaseNumber?: number },
+        ReleaseAgent | null
+      >("spectraArtifacts:agentBenchRelease", {
+        agentId,
+        ...(pickedRelease ? { releaseNumber: pickedRelease } : {}),
+      });
       if (!release)
         throw new Error(
-          "AGENT_BENCH_NO_RELEASE: This agent has no release to compare with yet.",
+          pickedRelease
+            ? "AGENT_BENCH_NO_RELEASE: That release is not there any more. Pick another one."
+            : "AGENT_BENCH_NO_RELEASE: This agent has no release to compare with yet.",
         );
       agent = release;
       releaseNumber = release.releaseNumber;

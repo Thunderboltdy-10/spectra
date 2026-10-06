@@ -113,6 +113,32 @@ describe("the bench route", () => {
     expect(request.messages[0]!.content).toContain("Old.");
   });
 
+  it("answers as an older release the creator picked", async () => {
+    mocks.convexQuery.mockImplementation(async (name: string, args: { releaseNumber?: number }) =>
+      name === "spectraArtifacts:agentBenchRelease"
+        ? { releaseNumber: args.releaseNumber, title: "Essay coach", content: { instructions: { text: "Oldest." } } }
+        : draft,
+    );
+    const stream = await events(await post({ agentId: "agent_1", prompt: "Hi", target: "release", releaseNumber: 1 }));
+    expect(mocks.convexQuery).toHaveBeenCalledWith("spectraArtifacts:agentBenchRelease", { agentId: "agent_1", releaseNumber: 1 });
+    expect(stream[0]).toEqual({ type: "start", target: "release", releaseNumber: 1 });
+    expect(mocks.convexMutation).toHaveBeenCalledWith(
+      "agents:recordBenchRun",
+      expect.objectContaining({ target: "release", releaseNumber: 1 }),
+    );
+    const request = mocks.callSpectraModel.mock.calls[0]![0] as { messages: Array<{ content: string }> };
+    expect(request.messages[0]!.content).toContain("Oldest.");
+  });
+
+  it("ignores a release number that is not one, and says when a picked release is gone", async () => {
+    await events(await post({ agentId: "agent_1", prompt: "Hi", target: "release", releaseNumber: "2; drop" }));
+    expect(mocks.convexQuery).toHaveBeenCalledWith("spectraArtifacts:agentBenchRelease", { agentId: "agent_1" });
+    mocks.convexQuery.mockResolvedValue(null);
+    const response = await post({ agentId: "agent_1", prompt: "Hi", target: "release", releaseNumber: 7 });
+    expect((await response.json()).error.message).toBe("That release is not there any more. Pick another one.");
+    expect(mocks.callSpectraModel).toHaveBeenCalledTimes(1);
+  });
+
   it("says plainly when there is no release yet, before any model work", async () => {
     mocks.convexQuery.mockResolvedValue(null);
     const response = await post({ agentId: "agent_1", prompt: "Hi", target: "release" });

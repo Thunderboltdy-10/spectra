@@ -51,6 +51,7 @@ import { SelectField } from "@/components/ui/select";
 import { useAgentCatalog, useWorkspaceCatalog } from "../data/use-catalog-pages";
 import { CatalogProgress } from "../components/catalog-progress";
 import { createLatestStudioLoad } from "../components/latest-studio-load";
+import { beginCreation } from "../life/use-life";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 
 const ArtifactStudio = dynamic(
@@ -616,6 +617,8 @@ export function AgentLibraryShell({
   async function createAgent() {
     const payload = createDefaultArtifactPayload("agent");
     setBusyKey("create");
+    // Dots gather where it was asked for; the agent's studio grows out of them.
+    const creation = beginCreation();
     try {
       const result = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
@@ -626,9 +629,11 @@ export function AgentLibraryShell({
         tags: payload.tags,
       });
       await load();
+      creation.land();
       await openAgent(result.artifactId);
       toast.success("Agent draft created.");
     } catch (error) {
+      creation.cancel();
       toast.error(
         error instanceof Error ? error.message : "Could not create the agent.",
       );

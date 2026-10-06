@@ -95,7 +95,7 @@ describe("School admin People", () => {
   it("keeps Overview when the People tab is opened offline", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);
-    const people = await screen.findByRole("button", { name: "People" });
+    const people = await screen.findByRole("tab", { name: "People" });
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     fireEvent.click(people);
     expect(navigation.replace).not.toHaveBeenCalled();

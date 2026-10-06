@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import {
   getAdministration,
@@ -21,8 +21,7 @@ import { metricDefinition } from "@/features/spectra/administration/metric-regis
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
-import { SidePanel } from "@/components/ui/side-panel";
-import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
+import { PanelTabs, SidePanel, type PanelTab } from "@/components/ui/side-panel";
 import {
   AdminButton,
   AdminCard,
@@ -78,18 +77,18 @@ type Tab =
   | "profile"
   | "audit";
 
-const tabs: Array<{ key: Tab; label: string; icon: typeof School }> = [
-  { key: "overview", label: "Overview", icon: LayoutGrid },
-  { key: "people", label: "People", icon: Users },
-  { key: "groups", label: "Groups", icon: UsersRound },
-  { key: "communication", label: "Communication", icon: Mail },
-  { key: "usage", label: "Usage", icon: BarChart3 },
-  { key: "agents", label: "Agents & resources", icon: Bot },
-  { key: "integrations", label: "Integrations", icon: Network },
-  { key: "governance", label: "Governance", icon: ShieldCheck },
-  { key: "feedback", label: "Feedback", icon: MessageCircle },
-  { key: "profile", label: "School profile", icon: School },
-  { key: "audit", label: "Audit", icon: FileClock },
+const tabs: Array<PanelTab & { id: Tab }> = [
+  { id: "overview", label: "Overview", icon: "grid" },
+  { id: "people", label: "People", icon: "people" },
+  { id: "groups", label: "Groups", icon: "folderTree" },
+  { id: "communication", label: "Communication", icon: "mail" },
+  { id: "usage", label: "Usage", icon: "analytics" },
+  { id: "agents", label: "Agents & resources", icon: "agent" },
+  { id: "integrations", label: "Integrations", icon: "network" },
+  { id: "governance", label: "Governance", icon: "shield" },
+  { id: "feedback", label: "Feedback", icon: "conversations" },
+  { id: "profile", label: "School profile", icon: "school" },
+  { id: "audit", label: "Audit", icon: "log" },
 ];
 
 type Person = {
@@ -521,7 +520,7 @@ export function SchoolAdminShell() {
   const operatorSessionId = searchParams.get("operatorSessionId") ?? undefined;
   const requestedTab = searchParams.get("tab") as Tab | null;
   const [tab, setTabState] = useState<Tab>(
-    requestedTab && tabs.some((item) => item.key === requestedTab)
+    requestedTab && tabs.some((item) => item.id === requestedTab)
       ? requestedTab
       : "overview",
   );
@@ -697,11 +696,12 @@ export function SchoolAdminShell() {
           description={`${overview.school.name}. Run the school from here without opening anyone's work.`}
         />
 
-        <ProductSectionNav
+        <PanelTabs
           label="School admin sections"
-          items={tabs}
-          active={tab}
-          onChange={setTab}
+          tabs={tabs}
+          value={tab}
+          onChange={(id) => setTab(id as Tab)}
+          primaryCount={5}
           className="mb-4 mt-4"
         />
 

@@ -6,13 +6,16 @@ const h = vi.hoisted(() => ({
   glows: [] as boolean[],
   pulses: [] as unknown[],
   entrances: 0,
+  departureKeys: [] as unknown[],
 }));
 
 vi.mock("../../life/use-life", () => ({
   useLifeEntrance: () => {
     h.entrances += 1;
   },
-  useLifeDeparture: () => {},
+  useLifeDeparture: (_ref: unknown, _enabled: unknown, _figure: unknown, key: unknown) => {
+    h.departureKeys.push(key);
+  },
   useLifeGlow: (_ref: unknown, active: boolean) => {
     h.glows.push(active);
   },
@@ -22,18 +25,24 @@ vi.mock("../../life/life", () => ({
 }));
 
 import { STATUS_COLOURS } from "../../life/prism";
-import { PairingPanel } from "../pairing-panel";
+import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "../pairing-panel";
 
 afterEach(() => {
   cleanup();
   h.glows = [];
   h.pulses = [];
   h.entrances = 0;
+  h.departureKeys = [];
 });
 
 const noop = () => {};
 
 describe("pairing panel life", () => {
+  it("leaves as this computer, so connecting flows into its row", () => {
+    render(<PairingPanel state={{ phase: "checking" }} onCancel={noop} onRetry={noop} />);
+    expect(h.departureKeys.at(-1)).toBe(THIS_COMPUTER_LIFE_KEY);
+  });
+
   it("forms, and breathes light while it waits for Bridge", () => {
     render(<PairingPanel state={{ phase: "checking" }} onCancel={noop} onRetry={noop} />);
     expect(h.entrances).toBeGreaterThan(0);

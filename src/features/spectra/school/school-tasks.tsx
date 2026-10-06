@@ -64,6 +64,7 @@ export function TaskRow({ task, now, selected, onSelect }: { task: SchoolTask; n
   return (
     <Row
       data-school-task={task.recordId}
+      lifeKey={`school-task:${task.recordId}`}
       glyph="task"
       accent={overdue ? "var(--danger)" : task.past ? "var(--text-tertiary)" : "var(--warning)"}
       title={task.title}

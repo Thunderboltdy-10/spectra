@@ -25,7 +25,7 @@ import type { LocalDeviceRequest } from "./actions";
 import { DeviceDetails, TONE_GLYPH } from "./device-details";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
-import { PairingPanel } from "./pairing-panel";
+import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }];
@@ -230,6 +230,7 @@ export function DevicesPage() {
       meta={`${device.label} · ${device.detail}`}
       selected={selected?.id === device.id}
       fresh={device.isThisComputer && justPaired}
+      lifeKey={device.isThisComputer ? THIS_COMPUTER_LIFE_KEY : `device:${device.id}`}
       actionsVisible
       onClick={() => showDetails(device.id)}
       actions={

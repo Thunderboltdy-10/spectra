@@ -9,6 +9,8 @@ import { useLifeDeparture, useLifeEntrance, useLifeGlow } from "../life/use-life
 import type { PairingState } from "./pairing";
 
 const PANEL_BARS = "p, [data-devices-code]";
+/** This computer, connecting or connected: the pairing card and its row are one thing. */
+export const THIS_COMPUTER_LIFE_KEY = "device:this";
 
 /*
  * Connecting this computer, one step at a time: look for Bridge, offer the
@@ -39,7 +41,8 @@ function PairingCard({
   const ref = useRef<HTMLDivElement>(null);
   const waiting = state.phase === "checking" || state.phase === "requesting" || state.phase === "download";
   useLifeEntrance(ref, { bars: PANEL_BARS });
-  useLifeDeparture(ref, true, { bars: PANEL_BARS });
+  // Connected: the card flows into this computer's row, which arrives under the same key.
+  useLifeDeparture(ref, true, { bars: PANEL_BARS }, THIS_COMPUTER_LIFE_KEY);
   useLifeGlow(ref, waiting, "spectrum", 0.5);
   const phase = useRef(state.phase);
   useEffect(() => {

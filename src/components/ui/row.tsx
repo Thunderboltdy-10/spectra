@@ -2,14 +2,18 @@
 
 import * as React from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { useLifeDeparture, useLifeEntrance } from "@/features/spectra/life/use-life";
+import { useLifeArrival, useLifeDeparture, useLifeEntrance } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 
 /**
  * A list item (LANGUAGE.md): a leading glyph, a title, a meta line and
  * trailing actions. Life comes built in: a row made just now (`fresh`) forms
  * out of the field where it appears, and a row that is removed parts there.
+ * With a `lifeKey`, a row that moves (another group, another list) travels
+ * there instead, and anything that departs under the same key flows into it.
  */
+const ROW_FIGURE = { bars: "[data-row-title], [data-row-meta]" };
+
 export const Row = React.forwardRef<
   HTMLDivElement,
   Omit<React.HTMLAttributes<HTMLDivElement>, "title"> & {
@@ -24,12 +28,15 @@ export const Row = React.forwardRef<
     selected?: boolean;
     /** Made just now, by the user or by Spectra: it forms out of the field. */
     fresh?: boolean;
+    /** What the row shows, stable across lists: it travels when it moves (LIFE.md, Move). */
+    lifeKey?: string;
   }
->(function Row({ glyph, accent, title, meta, actions, actionsVisible, selected, fresh, className, ...props }, forwarded) {
+>(function Row({ glyph, accent, title, meta, actions, actionsVisible, selected, fresh, lifeKey, className, ...props }, forwarded) {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(forwarded, () => ref.current!);
-  useLifeEntrance(ref, { enabled: Boolean(fresh), bars: "[data-row-title], [data-row-meta]" });
-  useLifeDeparture(ref, true, { bars: "[data-row-title], [data-row-meta]" });
+  useLifeEntrance(ref, { enabled: Boolean(fresh) && !lifeKey, ...ROW_FIGURE });
+  useLifeArrival(ref, lifeKey, fresh ? "human" : undefined, ROW_FIGURE);
+  useLifeDeparture(ref, true, ROW_FIGURE, lifeKey);
   return (
     <div
       ref={ref}

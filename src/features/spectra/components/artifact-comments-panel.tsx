@@ -18,7 +18,7 @@ import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
 import { getAiLocation, subscribeFollowAi } from "../collaboration/follow-ai";
-import { unformElement, useLifeArrival, type ArrivalKind } from "../life/use-life";
+import { beginCreation, unformElement, useLifeArrival, type ArrivalKind } from "../life/use-life";
 
 export type ArtifactCommentRegion = {
   regionId: string;
@@ -226,6 +226,8 @@ export function ArtifactCommentsPanel({
     const value = body.trim();
     if (!value) return;
     setBusy("create");
+    // Dots gather at the press; the comment grows out of them.
+    const creation = beginCreation({ into: "item" });
     try {
       await postSpectra({
         action: "createArtifactComment",
@@ -243,9 +245,11 @@ export function ArtifactCommentsPanel({
       setReplyTo(null);
       setMentions([]);
       setMentionSearch("");
+      creation.land();
       await refresh(true);
       if (requestedComment?.submit) onRequestedCommentResult?.();
     } catch (error) {
+      creation.cancel();
       toast.error(error instanceof Error ? error.message : "Could not post this comment.");
       if (requestedComment?.submit) onRequestedCommentResult?.(error);
     } finally {

@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, LoadingRows } from "@/components/ui/page-state";
 import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { plainText } from "../../../../../shared/semantic-chunks";
-import { useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
+import { beginCreation, useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -1766,6 +1766,8 @@ function CalendarComposer({
             event.preventDefault();
             if (endBeforeStart) return;
             setBusy(true);
+            // Dots gather at the press; the event grows out of them where it lands.
+            const creation = beginCreation({ into: "item" });
             void calendarPost({
               action: "createPersonalItem",
               kind: "personal_event",
@@ -1774,10 +1776,14 @@ function CalendarComposer({
               endAt,
               timezone,
             })
-              .then(onCreated)
-              .catch((error) =>
-                toast.error(error instanceof Error ? error.message : "Could not add event."),
-              )
+              .then(() => {
+                creation.land();
+                onCreated();
+              })
+              .catch((error) => {
+                creation.cancel();
+                toast.error(error instanceof Error ? error.message : "Could not add event.");
+              })
               .finally(() => setBusy(false));
           }}
         >

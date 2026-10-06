@@ -106,7 +106,7 @@ animation.
 | Create by hand | The thing **forms** from where you made it. |
 | Add A to B | A **send** from A into B, which **absorbs** it and pulses. |
 | Move (another column, day or folder) | The thing **travels**: its old shape breaks into the field, crosses it and forms where it is now. A move in place, or many at once (a re-sort), simply lands. Keyed departures (`useLifeDeparture(..., key)`) and arrivals under the same key in one commit make the move. |
-| Create by hand (new work, duplicate) | While the request is on its way, dots **gather** where the user acted into the outline of a small work, breathing light (`beginCreation()`, a held ghost). When it exists, the surface that opens **morphs out of them** (`land()` hands the seed to `useLifeLanding`); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |
+| Create by hand (new work, duplicate, agent, event, comment) | While the request is on its way, dots **gather** where the user acted into the outline of a small work, breathing light (`beginCreation()`, a held ghost). When it exists, what it becomes **morphs out of them**: the surface that opens (`land()` hands the seed to `useLifeLanding`), or with `{ into: "item" }` the event or comment that arrives (its "human" arrival claims the seed); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |
 | Tick something off | The paper **pulses** green where it was done: a task's done control, a step, a checklist item in a work (`data-life-done`). Undoing it is quiet. |
 
 ### In editors

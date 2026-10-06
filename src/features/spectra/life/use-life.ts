@@ -254,35 +254,61 @@ export function recentCause(): Point | undefined {
 /* ------------------------------------------------------------ creation */
 
 export type Creation = {
-  /** It exists now: whatever opens next grows out of the gathered dots. */
+  /** It exists now: what it becomes (the surface that opens, or the item that arrives) grows out of the gathered dots. */
   land(): void;
   /** It was not made: the dots part where they gathered. */
   cancel(): void;
 };
 
+export type CreationOptions = {
+  /** Where the dots gather. Defaults to the last press. */
+  from?: Point;
+  /**
+   * What it becomes: a `surface` that opens (a work's studio, landing through
+   * `useLifeLanding`), or an `item` that arrives in a list (an event, a
+   * comment, arriving through `useLifeArrival` as "human").
+   */
+  into?: "surface" | "item";
+};
+
 const NO_CREATION: Creation = { land() {}, cancel() {} };
+
+/** A gathered item waiting for the row it becomes. */
+let seeded: { figure: Formed; at: number } | null = null;
+
+function takeSeed(): Formed | null {
+  if (!seeded || performance.now() - seeded.at > LAUNCH_WINDOW_MS) return null;
+  const { figure } = seeded;
+  seeded = null;
+  return figure;
+}
 
 /**
  * Making something by hand (LIFE.md, "Create by hand"): while the request is
- * on its way, dots gather where the user acted into the outline of a small
- * work, breathing light. When it exists, the surface that opens morphs out of
+ * on its way, dots gather where the user acted into the outline of what is
+ * being made, breathing light. When it exists, what it becomes morphs out of
  * them; if it fails, they part.
  */
-export function beginCreation(from?: Point): Creation {
+export function beginCreation({ from, into = "surface" }: CreationOptions = {}): Creation {
   if (!life.on) return NO_CREATION;
   const [x, y] = from ?? recentCause() ?? [window.innerWidth / 2, window.innerHeight / 2];
-  const rect = { x: x - 64, y: y - 44, width: 128, height: 88 };
-  const outline = outlineFigure(rect, { radius: 12 });
-  const seed = life.ghost({ strokes: [...outline.strokes, ...rowsFigure(rect, [0.62, 0.86, 0.48]).strokes] }, { from: [x, y] });
+  const [width, height] = into === "surface" ? [128, 88] : [112, 40];
+  const rect = { x: x - width / 2, y: y - height / 2, width, height };
+  const outline = outlineFigure(rect, { radius: into === "surface" ? 12 : 8 });
+  const rows = rowsFigure(rect, into === "surface" ? [0.62, 0.86, 0.48] : [0.7]);
+  const seed = life.ghost({ strokes: [...outline.strokes, ...rows.strokes] }, { from: [x, y] });
   let settled = false;
   return {
     land() {
       if (settled) return;
       settled = true;
-      launch = { figure: seed, at: performance.now() };
-      // Nothing opened from it in time: the dots go back to the field.
+      const at = performance.now();
+      if (into === "surface") launch = { figure: seed, at };
+      else seeded = { figure: seed, at };
+      // Nothing grew from it in time: the dots go back to the field.
       window.setTimeout(() => {
         if (launch?.figure === seed) launch = null;
+        if (seeded?.figure === seed) seeded = null;
         seed.release();
       }, LAUNCH_WINDOW_MS);
     },
@@ -445,7 +471,9 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
         life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.7, "spectrum");
       });
     } else {
-      void life.form(shape, { from: recentCause() }).formed.then(show);
+      // Made by hand: it grows out of the dots that gathered while it was on its way, or forms where the user acted.
+      const seed = takeSeed();
+      void (seed ? life.morph(seed, shape) : life.form(shape, { from: recentCause() })).formed.then(show);
     }
     const fallback = window.setTimeout(show, kind === "ai" ? 1700 : 800);
     return () => {

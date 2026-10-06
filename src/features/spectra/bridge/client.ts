@@ -400,6 +400,9 @@ export function persistBridgeStatusCache(status: BridgeStatus) {
   window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify(status));
 }
 
+/** Bridge answers its own refusals with a sentence; a route it does not know means it is older than this app. */
+export const BRIDGE_OUTDATED = "This computer's Spectra Bridge is too old for this. Update it from Devices, then try again.";
+
 async function authorizedBridgeRequest(
   path: string,
   init: RequestInit = {},
@@ -422,6 +425,7 @@ async function authorizedBridgeRequest(
     clearBridgeStatusCache();
     return null;
   }
+  if (response.status === 404) throw new Error(BRIDGE_OUTDATED);
   if (!response.ok) {
     throw new Error(
       (await response.text()) ||

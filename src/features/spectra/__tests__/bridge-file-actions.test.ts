@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BRIDGE_OUTDATED,
   BRIDGE_URL,
   clearBridgeSession,
   openBridgeFile,
@@ -38,6 +39,12 @@ describe("a work's file on this computer", () => {
     persistBridgeSession("session-token");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("This file is no longer in its folder on this computer.", { status: 400 })));
     await expect(openBridgeFile(FILE)).rejects.toThrow("This file is no longer in its folder on this computer.");
+  });
+
+  it("says to update Bridge when it is too old to know the action", async () => {
+    persistBridgeSession("session-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
+    await expect(revealBridgeFile(FILE)).rejects.toThrow(BRIDGE_OUTDATED);
   });
 
   it("says to connect this computer when Bridge is not paired", async () => {

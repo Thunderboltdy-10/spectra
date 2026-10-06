@@ -14,3 +14,4 @@ export * from "./improvement";
 export * from "./runtime-package";
 export * from "./compiler";
 export * from "./foundry-document";
+export * from "./bench";

@@ -80,6 +80,9 @@ const modes = {
   // keeps Present off presentation and Run off code).
   agent: [
     ["Overview", "view"],
+    // The bench runs the draft on sample questions; it needs `modify`, as
+    // `agents.benchCases` and the bench route do.
+    ["Bench", "edit"],
     ["Checks", "edit"],
     ["Releases", "view"],
   ],

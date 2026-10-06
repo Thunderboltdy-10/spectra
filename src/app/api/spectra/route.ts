@@ -558,6 +558,16 @@ export async function GET(request: NextRequest) {
       return ok(evaluation);
     }
 
+    if (action === "agentBench") {
+      const agentId = requireString(params.get("agentId"), "agentId");
+      const [cases, runs, release] = await Promise.all([
+        spectraQuery("agents:benchCases", { agentId }),
+        spectraQuery("agents:benchRuns", { agentId }),
+        spectraQuery("spectraArtifacts:agentBenchRelease", { agentId }),
+      ]);
+      return ok({ cases, runs, release });
+    }
+
     if (action === "agentResourceHealth") {
       const agentId = requireString(params.get("agentId"), "agentId");
       const resources = await spectraQuery(
@@ -1387,6 +1397,31 @@ export async function POST(request: NextRequest) {
         proposedPatch: body.proposedPatch,
         expectedImpact: requireString(body.expectedImpact, "expectedImpact"),
         evalRunId: optionalString(body.evalRunId),
+      });
+      return ok(result);
+    }
+
+    if (action === "saveAgentBenchCase") {
+      const strings = (value: unknown) =>
+        Array.isArray(value)
+          ? value.filter((entry): entry is string => typeof entry === "string")
+          : [];
+      const result = await spectraMutation("agents:saveBenchCase", {
+        agentId: requireString(body.agentId, "agentId"),
+        caseId: optionalString(body.caseId),
+        prompt: requireString(body.prompt, "prompt"),
+        mustInclude: strings(body.mustInclude),
+        mustNotInclude: strings(body.mustNotInclude),
+        rubric: optionalString(body.rubric),
+        required: typeof body.required === "boolean" ? body.required : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "removeAgentBenchCase") {
+      const result = await spectraMutation("agents:removeBenchCase", {
+        agentId: requireString(body.agentId, "agentId"),
+        caseId: requireString(body.caseId, "caseId"),
       });
       return ok(result);
     }

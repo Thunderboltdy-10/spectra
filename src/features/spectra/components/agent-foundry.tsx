@@ -21,7 +21,7 @@
  *     displacing it when the pane narrows.
  */
 
-import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X, CircleSlash, FlaskConical, Gauge, ScrollText } from "@/components/icons/glyph-icons";
+import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X, CircleSlash, FlaskConical, Gauge, Play, ScrollText } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBadge, statusToneFor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,12 +36,14 @@ import {
   addSection,
   answerSection,
   assessSufficiency,
+  benchCaseToEvaluationCase,
   buildEvaluationSuite,
   compileRuntimePackage,
   compilerProgress,
   compilerStatusLabel,
   detectSkillOverlap,
   dismissSection,
+  isBenchEvaluationCase,
   isEmptyValue,
   normalizeFoundryContent,
   planFacetWeights,
@@ -57,6 +59,8 @@ import {
   type FoundrySection,
   type FoundrySectionValue,
   type SpectraSkill,
+  withBenchCases,
+  type BenchCase,
 } from "../agents/foundry";
 import type { AgentTool } from "../agents/model";
 import {
@@ -83,6 +87,7 @@ import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./art
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { AgentBench, useAgentBench } from "./agent-bench";
 export { canPublishAgentArtifact } from "./agent-publish-gates";
 
 const FACET_LABEL: Record<FoundryFacet, string> = {
@@ -806,12 +811,15 @@ function ChecksView({
   currentHash,
   canEdit,
   loading,
+  benchCases = [],
 }: {
   suite: ReturnType<typeof buildEvaluationSuite>;
   runs: SpectraAgentEvalRun[];
   currentHash: string;
   canEdit: boolean;
   loading: boolean;
+  /** Tests saved from the bench; they run in the regression layer. */
+  benchCases?: BenchCase[];
 }) {
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [showPassed, setShowPassed] = useState(false);
@@ -829,6 +837,16 @@ function ChecksView({
 
   const cases = active?.results ?? [];
   const failed = cases.filter((entry) => !entry.passed);
+  const savedTests = suite.filter((entry) => isBenchEvaluationCase(entry.id)).length;
+  const caseLabel = (caseId: string, category: string) => {
+    if (isBenchEvaluationCase(caseId)) {
+      const saved = benchCases.find((entry) => `bench-${entry.id}` === caseId);
+      return saved
+        ? `Your test: ${saved.prompt.length > 80 ? `${saved.prompt.slice(0, 80)}…` : saved.prompt}`
+        : "A test you saved";
+    }
+    return LAYER_LABEL[category as EvaluationLayer] ?? category;
+  };
   const shown = showPassed ? cases : failed;
 
   return (
@@ -844,6 +862,9 @@ function ChecksView({
           The suite is built from this agent&rsquo;s own mission, skills and
           sources, so it changes as they do. Every check runs against the live
           model using the brief the runtime will use.
+          {savedTests > 0
+            ? ` It also runs the ${savedTests === 1 ? "test" : `${savedTests} tests`} you saved from the bench.`
+            : ""}
         </p>
         {suite.length === 0 ? (
           <p className="foundry-empty">
@@ -936,8 +957,7 @@ function ChecksView({
                 >
                   <div className="foundry-skill-head">
                     <span className="foundry-skill-name">
-                      {LAYER_LABEL[entry.category as EvaluationLayer] ??
-                        entry.category}
+                      {caseLabel(entry.caseId, entry.category)}
                     </span>
                     <span className="foundry-skill-state">
                       {entry.passed ? "passed" : "failed"} ·{" "}
@@ -1013,7 +1033,7 @@ export function AgentFoundry({
   const [agent, setAgent] = useState(normalized);
   useEffect(() => setAgent(normalized), [normalized]);
 
-  const [view, setView] = useState<string>("build");
+  const [view, setView] = useState<string>("overview");
   const [objective, setObjective] = useState("");
   const [interaction, setInteraction] = useState("");
   const [drafts, setDrafts] = useState<Record<string, FoundrySectionValue>>({});
@@ -1049,7 +1069,7 @@ export function AgentFoundry({
   // A mode the viewer cannot enter is never left selected.
   useEffect(() => {
     if (!contract.modes.some((entry) => entry.id === view))
-      setView(contract.modes[0]?.id ?? "build");
+      setView(contract.modes[0]?.id ?? "overview");
   }, [contract.modes, view]);
 
   useEffect(() => {
@@ -1427,14 +1447,28 @@ export function AgentFoundry({
     ],
   );
 
+  const bench = useAgentBench({ agentId: artifactId, enabled: canEdit, content: agent });
   const passingEval = evalRuns.some(
     (entry) =>
       entry.status === "passed" &&
       Boolean(currentHash) &&
       entry.contentHash === currentHash,
   );
+  /* Saving a test does not change the draft, so the server also asks that the
+     passing run started after the newest saved test. */
+  const newestTest = bench.cases.reduce(
+    (latest, entry) => Math.max(latest, entry.updatedAt),
+    0,
+  );
+  const passingWithTests = evalRuns.some(
+    (entry) =>
+      entry.status === "passed" &&
+      Boolean(currentHash) &&
+      entry.contentHash === currentHash &&
+      entry.startedAt >= newestTest,
+  );
 
-  const suite = useMemo(
+  const compiledSuite = useMemo(
     () =>
       buildEvaluationSuite({
         agentId: artifactId,
@@ -1443,6 +1477,13 @@ export function AgentFoundry({
         bindings: foundry.evidenceBindings,
       }),
     [artifactId, foundry.evidenceBindings, foundry.mission, foundry.skills],
+  );
+  const suite = useMemo(
+    () =>
+      compiledSuite.length > 0
+        ? withBenchCases(compiledSuite, bench.cases.map(benchCaseToEvaluationCase))
+        : compiledSuite,
+    [bench.cases, compiledSuite],
   );
 
   /* Capabilities a skill's procedure asks for that the agent has not been
@@ -1495,12 +1536,17 @@ export function AgentFoundry({
     const privateOnly = [...new Set(shared)];
     return {
       privateBlockers: privateOnly,
-      blockers: passingEval
-        ? privateOnly
-        : [
+      blockers: !passingEval
+        ? [
             ...privateOnly,
             "No check run has passed against this exact draft. Run the checks, or release it to yourself first.",
-          ],
+          ]
+        : !passingWithTests
+          ? [
+              ...privateOnly,
+              "A test was saved after the last passing run. Run the checks again so it counts.",
+            ]
+          : privateOnly,
     };
   }, [
     brief.length,
@@ -1508,6 +1554,7 @@ export function AgentFoundry({
     foundry.mission.objective,
     foundry.skills,
     passingEval,
+    passingWithTests,
     routingDescription.length,
     routingRequired,
   ]);
@@ -1643,7 +1690,7 @@ export function AgentFoundry({
   }
 
   const progressReadout =
-    established && view === "build" ? (
+    established && view === "overview" ? (
       <span
         className="spectra-workbar-progress"
         title={`${Math.round(sufficiency.coverage * 100)}% of the mission is established`}
@@ -1852,7 +1899,7 @@ export function AgentFoundry({
   const barActions: CommandBinding[] =
     projectBindingsFromIr(
       "agent",
-      view === "build"
+      view === "overview"
       ? [
           {
             id: "next",
@@ -1895,6 +1942,17 @@ export function AgentFoundry({
             onSelect: () => setLedgerOpen((open) => !open),
           },
         ]
+      : view === "bench"
+        ? [
+            {
+              id: "competence",
+              label: ledgerOpen ? "Hide competence" : "Competence",
+              icon: Gauge,
+              priority: "secondary" as const,
+              active: ledgerOpen,
+              onSelect: () => setLedgerOpen((open) => !open),
+            },
+          ]
       : view === "checks"
         ? [
             {
@@ -1950,7 +2008,7 @@ export function AgentFoundry({
     );
 
   const barPrimary =
-    view === "build"
+    view === "overview"
       ? {
           label: busy === "compile" ? "Drafting skills" : "Compile skills",
           disabled: !canEdit || busy === "compile",
@@ -1958,6 +2016,16 @@ export function AgentFoundry({
           requires: "edit" as const,
           onSelect: () => void compile(),
         }
+      : view === "bench"
+        ? {
+            label: bench.runningAll ? "Running" : "Run all",
+            icon: Play,
+            disabled:
+              !canEdit || bench.runningAll || bench.entries.length === 0,
+            busy: bench.runningAll,
+            requires: "edit" as const,
+            onSelect: () => void bench.runAll(),
+          }
       : view === "checks"
         ? {
             label: busy === "evaluate" ? "Running checks" : "Run checks",
@@ -1986,7 +2054,7 @@ export function AgentFoundry({
         modes={{ registry: true, value: view, onChange: setView }}
         context={newest ? `v${newest.releaseNumber} ${releaseLabel(newest)}` : "Not released"}
         selector={
-          view === "build" && questionItems.length ? (
+          view === "overview" && questionItems.length ? (
             <WorkbarItemSelector
               ariaLabel="Current question"
               itemNoun="question"
@@ -2024,7 +2092,7 @@ export function AgentFoundry({
         )}
         <FoundryProblem problem={problem} />
 
-        {view === "build" ? (
+        {view === "overview" ? (
           <>
         <header className="foundry-mission" {...targetAttrs("/foundry/mission")}>
           <p className="foundry-eyebrow">Mission</p>
@@ -2447,6 +2515,16 @@ export function AgentFoundry({
           </>
         ) : null}
 
+        {view === "bench" ? (
+          <AgentBench
+            bench={bench}
+            content={agent}
+            suite={compiledSuite}
+            canEdit={canEdit}
+            onApply={commit}
+          />
+        ) : null}
+
         {view === "checks" ? (
           <ChecksView
             suite={suite}
@@ -2454,6 +2532,7 @@ export function AgentFoundry({
             currentHash={currentHash}
             canEdit={canEdit}
             loading={runsLoading}
+            benchCases={bench.cases}
           />
         ) : null}
 

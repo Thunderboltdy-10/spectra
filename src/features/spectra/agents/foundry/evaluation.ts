@@ -9,6 +9,7 @@
  */
 
 import type { AgentMission } from "./mission";
+import { gradeBenchChecks } from "./bench";
 import type { EvidenceBinding } from "./evidence";
 import type { SkillEvaluationCase, SpectraSkill } from "./skills";
 
@@ -537,6 +538,36 @@ export function gradeDeterministically(
           reason: `Output is not parseable ${expectation.schema || "structured"} data.`,
         };
       }
+    }
+    case "checklist": {
+      // A failed simple check is decided here; only a case whose simple
+      // checks all hold and that carries a rubric goes on to a judge.
+      const grade = gradeBenchChecks(expectation, response);
+      if (!grade.allPassed) {
+        const failed = grade.results.filter((result) => !result.passed);
+        const missing = failed.filter((result) => result.kind === "include");
+        const present = failed.filter((result) => result.kind === "exclude");
+        return {
+          passed: false,
+          score: grade.total ? grade.passed / grade.total : 0,
+          reason: [
+            missing.length
+              ? `Missing: ${missing.map((result) => result.value).join(", ")}.`
+              : "",
+            present.length
+              ? `Included what it must not: ${present.map((result) => result.value).join(", ")}.`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
+      }
+      if (grade.needsJudgement) return null;
+      return {
+        passed: true,
+        score: 1,
+        reason: "Every check you saved holds.",
+      };
     }
     case "judged":
       return null;

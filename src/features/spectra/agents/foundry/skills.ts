@@ -75,7 +75,17 @@ export type SkillEvaluationCase = {
     | { kind: "excludes"; values: string[] }
     | { kind: "matches"; pattern: string }
     | { kind: "structured"; schema: string }
-    | { kind: "judged"; criteria: string; externalTruth: boolean };
+    | { kind: "judged"; criteria: string; externalTruth: boolean }
+    /**
+     * A bench case the creator kept: simple checks decided in code, plus an
+     * optional rubric a judge reads only once every simple check holds.
+     */
+    | {
+        kind: "checklist";
+        mustInclude: string[];
+        mustNotInclude: string[];
+        rubric?: string;
+      };
   required: boolean;
 };
 

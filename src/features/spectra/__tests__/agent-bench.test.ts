@@ -23,6 +23,8 @@ import {
   skillForPrompt,
   statementsOf,
   suggestAdjustments,
+  SUITE_CASE_LIMIT,
+  withBenchCases,
   type BenchCase,
   type BenchRun,
   type SpectraSkill,
@@ -111,6 +113,20 @@ describe("bench checks", () => {
       previousCases: [evaluation],
     });
     expect(suite.filter((entry) => entry.layer === "regression").map((entry) => entry.id)).toEqual(["bench-c1"]);
+  });
+
+  it("keeps every saved test when the suite would overflow, trimming the fullest layer", () => {
+    const compiled = [
+      ...Array.from({ length: 4 }, (_, index) => ({ id: `c${index}`, layer: "contract" })),
+      { id: "a0", layer: "adversarial" },
+      { id: "h0", layer: "held_out" },
+    ];
+    const kept = [{ id: "bench-1", layer: "regression" }, { id: "bench-2", layer: "regression" }];
+    expect(withBenchCases(compiled, kept, 6).map((entry) => entry.id)).toEqual([
+      "c0", "c1", "a0", "h0", "bench-1", "bench-2",
+    ]);
+    expect(withBenchCases(compiled, kept).map((entry) => entry.id)).toHaveLength(8);
+    expect(SUITE_CASE_LIMIT).toBe(50);
   });
 
   it("decides a checklist in code, and asks a judge only when the checks hold and a rubric exists", () => {

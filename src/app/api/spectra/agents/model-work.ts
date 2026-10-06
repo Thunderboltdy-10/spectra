@@ -10,7 +10,10 @@ import { convexMutation } from "@/lib/convex-server";
  */
 
 export type ModelTokens = { inputTokens: number; outputTokens: number };
-export type AgentModelWorkPurpose = "agent_foundry" | "agent_eval_generate";
+export type AgentModelWorkPurpose =
+  | "agent_foundry"
+  | "agent_eval_generate"
+  | "agent_bench";
 
 export function agentBridgeKey() {
   const key =

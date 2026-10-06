@@ -58,6 +58,15 @@ export type BenchRun = {
 
 export type BenchCompareMode = "previous" | "release";
 
+/** One line of the bench route's answer stream. */
+export type BenchStreamEvent =
+  | { type: "start"; target: BenchTarget; releaseNumber?: number }
+  | { type: "text"; delta: string }
+  /** The provider was retried: what streamed so far is discarded. */
+  | { type: "retry" }
+  | { type: "done"; run: BenchRun }
+  | { type: "error"; message: string };
+
 /* ------------------------------------------------------------------ */
 /* Prompts and checks                                                 */
 /* ------------------------------------------------------------------ */
@@ -189,6 +198,42 @@ export function benchCaseToEvaluationCase(entry: BenchCase): SkillEvaluationCase
     },
     required: entry.required,
   };
+}
+
+/** How many cases one evaluation run takes (convex/agents.ts beginEvalRun). */
+export const SUITE_CASE_LIMIT = 50;
+
+/**
+ * The compiled suite with the creator's saved tests in it. A suite runs at
+ * most fifty cases, so when it would overflow, the saved tests stay and the
+ * compiled cases give way, always from the layer that has the most, so no
+ * layer the suite needs is emptied first.
+ */
+export function withBenchCases<T extends { id: string; layer: string }>(
+  suite: readonly T[],
+  saved: readonly T[],
+  limit = SUITE_CASE_LIMIT,
+): T[] {
+  const kept = saved.slice(0, limit);
+  const savedIds = new Set(kept.map((entry) => entry.id));
+  const compiled = suite.filter((entry) => !savedIds.has(entry.id));
+  let overflow = compiled.length + kept.length - limit;
+  const dropped = new Set<T>();
+  while (overflow > 0) {
+    const counts = new Map<string, T[]>();
+    for (const entry of compiled) {
+      if (dropped.has(entry)) continue;
+      counts.set(entry.layer, [...(counts.get(entry.layer) ?? []), entry]);
+    }
+    let largest: T[] = [];
+    for (const entries of counts.values())
+      if (entries.length > largest.length) largest = entries;
+    const last = largest[largest.length - 1];
+    if (!last) break;
+    dropped.add(last);
+    overflow -= 1;
+  }
+  return [...compiled.filter((entry) => !dropped.has(entry)), ...kept];
 }
 
 /* ------------------------------------------------------------------ */

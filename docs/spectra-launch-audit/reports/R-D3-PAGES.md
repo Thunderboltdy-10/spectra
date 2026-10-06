@@ -103,7 +103,7 @@ changes: nothing under `convex/**`, `bridge/**` or `src/app/api/**` changed.
 - `npx tsc --noEmit -p convex/tsconfig.json`: pass.
 - `npx eslint . --max-warnings=0`: pass.
 - `npm run check:architecture`, `check:copy` and `check:design-tokens`: pass. The design-token gate gave no warnings.
-- `npx vitest run --maxWorkers=3`: 553 files and 4776 tests passed, 1 skipped. None of the known flaky suites failed.
+- `npx vitest run --maxWorkers=3`: 554 files and 4782 tests passed, 1 skipped. None of the known flaky suites failed.
 - New or updated tests:
   - `work-companion.component`
   - `superadmin-shell.component`

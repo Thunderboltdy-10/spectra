@@ -11,6 +11,7 @@ import {
 } from "./spectraShared";
 import { getAuthenticatedActor } from "./identityShared";
 import {
+  canonicalSnapshotJson,
   loadVersionAfter,
   retainSnapshotObject,
   type SnapshotStrategy,
@@ -736,6 +737,14 @@ export const createNamedCheckpoint = mutation({
       ? await ctx.db.get(refreshed.currentVersionId)
       : null;
     const before = parent ? await loadVersionAfter(ctx, parent) : after;
+    // The same checkpoint again with nothing changed since (a retried publish)
+    // is the one already there, not a second entry in the history.
+    if (
+      parent?.source === "checkpoint" &&
+      parent.name === name &&
+      canonicalSnapshotJson(before) === canonicalSnapshotJson(after)
+    )
+      return { versionId: parent._id, name, createdAt: parent.createdAt };
     const { strategy, inline } = commitSnapshotPlan(
       refreshed.blueprintKey,
       before,

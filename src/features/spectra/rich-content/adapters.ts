@@ -1,26 +1,45 @@
+import type { JSONContent } from "@tiptap/core";
+import type { PresentationParagraph } from "../presentation/model";
 import type { SpectraRichContentAst } from "./ast";
-import { parseSpectraRichContent } from "./parser";
+import { richContentFromHtml } from "./html";
+import { parseSpectraRichContent } from "./markdown";
+import { richContentFromProseMirror, richContentToProseMirror } from "./prosemirror";
+import { richContentToMarkdown } from "./serialize";
+import { richContentFromSlideParagraphs, richContentToSlideParagraphs } from "./slides";
 
-export const RICH_CONTENT_SURFACES = [
-  "chat", "stream", "tiptap", "comment", "run_summary", "quiz_explanation",
-  "flashcard", "presentation_text", "board_source_card", "agent_skill_evidence",
-  "public_share", "export",
-] as const;
-export type RichContentSurface = (typeof RICH_CONTENT_SURFACES)[number];
-export type RichContentAdapter = {
-  surface: RichContentSurface;
-  fromText(value: string): SpectraRichContentAst;
-  toText(value: SpectraRichContentAst): string;
+/*
+ * One adapter per stored format. Each artifact keeps the format its file
+ * needs; these are the only ways into and out of the shared model.
+ *
+ *   markdown     replies, comments, board notes, plan and task descriptions
+ *   html         quiz questions and answers, flashcard faces (TipTap HTML)
+ *   prosemirror  documents (Yjs) and every TipTap field while it is edited
+ *   slides       slide text boxes (DrawingML paragraphs and runs)
+ */
+export type RichContentAdapter<Stored> = {
+  read(value: Stored): SpectraRichContentAst;
+  write(ast: SpectraRichContentAst): Stored;
 };
 
-function adapter(surface: RichContentSurface): RichContentAdapter {
-  return { surface, fromText: parseSpectraRichContent, toText: (value) => value.source };
-}
+export const RICH_CONTENT_ADAPTERS = {
+  markdown: { read: parseSpectraRichContent, write: richContentToMarkdown } satisfies RichContentAdapter<string>,
+  html: { read: richContentFromHtml } satisfies Pick<RichContentAdapter<string>, "read">,
+  prosemirror: { read: richContentFromProseMirror, write: richContentToProseMirror } satisfies RichContentAdapter<JSONContent>,
+  slides: {
+    read: richContentFromSlideParagraphs,
+    write: richContentToSlideParagraphs,
+  } satisfies RichContentAdapter<readonly PresentationParagraph[]>,
+};
 
-export const RICH_CONTENT_ADAPTERS = Object.fromEntries(
-  RICH_CONTENT_SURFACES.map((surface) => [surface, adapter(surface)]),
-) as Record<RichContentSurface, RichContentAdapter>;
+export type RichContentFormat = keyof typeof RICH_CONTENT_ADAPTERS;
 
-export function getRichContentAdapter(surface: RichContentSurface) {
-  return RICH_CONTENT_ADAPTERS[surface];
+const STORED_HTML = /^<(?:p|h[1-6]|ul|ol|blockquote|pre|aside|div|table|hr|figure)\b/i;
+
+/**
+ * A text field's stored value, whichever of the two string formats it was
+ * written in: a TipTap field writes HTML, an import or the AI writes Markdown.
+ */
+export function richContentFromStored(value: string): SpectraRichContentAst {
+  const trimmed = value.trim();
+  return STORED_HTML.test(trimmed) ? richContentFromHtml(trimmed) : parseSpectraRichContent(value);
 }

@@ -3,7 +3,7 @@
 import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X, Undo2, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useState } from "react";
 import { toast } from "@/components/ui/toast";
-import { RichText } from "@/components/chat/rich-text";
+import { SpectraRichContent } from "./spectra-rich-content";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
@@ -164,7 +164,7 @@ export function ResultCardStack({
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
                 {opensDetails ? <button type="button" onClick={() => onOpen?.(card)} className="shrink-0 rounded-chip font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]" aria-label={`Open details for ${card.title}`}>{card.title}</button> : <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>}
-                {card.summary ? <RichText content={card.summary} className="line-clamp-1 min-w-0 flex-1 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal" /> : null}
+                {card.summary ? <SpectraRichContent content={card.summary} className="spectra-prose-line min-w-0 flex-1 text-[var(--text-secondary)]" /> : null}
               </div>
               {awaitingApproval ? (
                 <div

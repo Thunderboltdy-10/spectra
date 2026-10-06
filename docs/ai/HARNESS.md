@@ -181,6 +181,9 @@ waiting or working, attachments included, joins that run instead of starting a n
 
 - The existing memory system (Convex memory with embeddings) stays.
 - The model sees a short index of what it remembers about the user and reads or writes details with tools.
+- `remember` saves or revises a memory. `forget_memory` erases one by id (found with `search` in `memory`); it is
+  `irreversible` and asks under `permanent_delete`. Clearing every memory, disputing one and memory settings stay
+  the user's.
 
 ## Tools
 
@@ -195,7 +198,7 @@ Tools are grouped by what the model is doing. Names below are indicative, so pic
 | Operate Spectra | `find_commands`, `run_command` | These cover the shared command registry: settings, navigation, panels, calendar, reminders, Bridge, connections, sharing and ManageBac. |
 | Ask | `ask_user` | A question with optional choices. It pauses the run durably and appears in the island. |
 | Show | `show_widget` | An interactive HTML/SVG visual rendered inline in the thread, sandboxed and themed with Spectra tokens. The user can save it as an artifact. |
-| Know | `load_skill`, `remember`, `recall` | See Skills and Memory. |
+| Know | `load_skill`, `remember`, `forget_memory`, `recall` | See Skills and Memory. |
 | Track | `update_todos` | An optional visible checklist for long tasks. The model decides whether to use it. |
 
 ### Commands only `run_command` reaches
@@ -216,7 +219,14 @@ says that the names, titles and labels it returns are people's words: evidence, 
   invitation, sets or clears a per-work exception, and makes or turns off a public link.
 - **Publishing.** `publish_code` publishes or takes down a Code work's live build through the server function the
   editor's Publish button uses (`runtime-publish-server`). It builds the live document's source; a failed build comes
-  back as the compiler's report, for the model to fix with `edit_artifact`.
+  back as the compiler's report, for the model to fix with `edit_artifact`. A retried publish reuses its unchanged
+  "Published" checkpoint instead of adding a second one.
+- **Agent releases.** `read_agent_releases` lists an agent's releases (with the ids `release_agent` takes) and whether
+  its draft passed its checks. `release_agent` releases the draft privately (only the owner reaches it; runs without
+  asking), publishes it to everyone, promotes, rolls back or suspends a release (each asks under `sharing`).
+  Publishing to everyone needs passing checks, which only the studio runs.
+- **Quizzes.** `edit_artifact` opens a quiz for attempts (`publish`, refused while the quiz has problems) or closes it
+  (`unpublish`).
 
 **Public link addresses.** A public link's address carries a secret, and the journal keeps every write's result, so
 the secret must never be in either. The harness derives the token on the server from the operation (an HMAC under a
@@ -224,7 +234,9 @@ purpose key from `SPECTRA_SECRET_BRIDGE_KEY`), passes only its SHA-256 to `spect
 `derived.publicLinkTokenHash` (never part of the recorded operation), and the receipt keeps the link id. The UI event
 `public_link_created` carries the link and operation ids. The user's browser then fetches the address with their own
 session (`revealAiPublicLink`, which checks the run's owner and that the link is still on) and shows it once in a
-notice with **Copy link**. The model is told it never sees the address.
+notice with **Copy link**. The model is told it never sees the address. The link row keeps the run and operation
+that made it (`aiOrigin`), so when nobody saw the notice (a scheduled run), Share lists the link as made by Spectra to
+the run's owner, with its own **Copy link** that goes through `revealAiPublicLink` again.
 
 ### Authoring formats
 
@@ -287,6 +299,9 @@ How asking works:
 - **Settings.** In Settings → Spectra AI → Permissions, the user can switch each category between Ask and Allow. One
   switch, "Give Spectra full control", sets all of them to Allow.
 - **Self-granting.** The AI can never change its own permission settings. That command is always the user's.
+- **One table.** Which application commands ask, and under which category, is `shared/ai-application-approval.ts`.
+  The tools, the worker that stages the step and Convex (the approval scope and "Always allow") all read it, so an
+  approval the user gives always binds to the step it was asked for.
 - **In the thread.** An answered request leaves one compact line in the thread, for example "You allowed: delete *Old
   notes*".
 

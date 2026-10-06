@@ -19,7 +19,7 @@
  * frame, so nothing depends on a peer's pane size, scroll offset or zoom.
  */
 
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   actIsDrag,
   actIsResize,
@@ -50,6 +50,8 @@ import {
   type FrameTravel,
 } from "../../collaboration/presentation-lane";
 import { useSpectraMotion } from "../../motion";
+import { life } from "../../life/life";
+import { prismPoint } from "../../life/use-life";
 
 /** Presence for an actor whose last frame is older than this is dropped. */
 const STALE_AFTER_MS = 20_000;
@@ -544,6 +546,58 @@ function boxesEqual(
  * Per-actor chrome
  * ------------------------------------------------------------------ */
 
+/** Spectra actors whose light has already come into this work, so a cursor
+ *  that remounts (back from an edge, a re-render) does not arrive again. */
+const aiInWork = new Set<string>();
+/** The cursor never waits on the field for longer than this. */
+const ARRIVAL_FALLBACK_MS = 900;
+
+const centreOf = (element: Element): [number, number] => {
+  const r = element.getBoundingClientRect();
+  return [r.left + r.width / 2, r.top + r.height / 2];
+};
+
+/**
+ * Spectra in a work (LIFE.md, travel): its light leaves the prism, crosses
+ * the field and becomes its cursor where it lands; when it is done, the
+ * cursor's light crosses back into the prism, which takes it in.
+ */
+export function useAiCursorLight(clientId: string, isAi: boolean, departing: boolean) {
+  const cursor = useRef<HTMLElement | null>(null);
+  const attach = useCallback(
+    (node: HTMLElement | null) => {
+      cursor.current = node;
+      if (!node || !isAi || aiInWork.has(clientId)) return;
+      aiInWork.add(clientId);
+      if (!life.on) return;
+      node.style.opacity = "0";
+      const show = () => {
+        node.style.opacity = "";
+      };
+      const fallback = window.setTimeout(show, ARRIVAL_FALLBACK_MS);
+      requestAnimationFrame(() => {
+        if (!node.isConnected) return show();
+        void life.send(prismPoint(), centreOf(node), { colour: "spectrum", strength: 0.7 }).then(() => {
+          window.clearTimeout(fallback);
+          show();
+        });
+      });
+    },
+    [clientId, isAi],
+  );
+  useEffect(() => {
+    if (!isAi || !departing || !aiInWork.has(clientId)) return;
+    aiInWork.delete(clientId);
+    const node = cursor.current;
+    const prism = document.querySelector("[data-island-prism]")?.getBoundingClientRect();
+    if (!life.on || !node?.isConnected || !prism?.width) return;
+    void life.send(centreOf(node), { x: prism.x, y: prism.y, width: prism.width, height: prism.height }, { colour: "spectrum", strength: 0.6, absorb: true });
+  }, [clientId, isAi, departing]);
+  // Gone from the layer (the work closed): next time, its light comes in again.
+  useEffect(() => () => void aiInWork.delete(clientId), [clientId]);
+  return attach;
+}
+
 function ActorPresence({ visual }: { visual: ActorVisual }) {
   const {
     placement,
@@ -561,6 +615,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
     justCompleted,
   } = visual;
   const isAi = state.actor.kind === "ai";
+  const cursorLight = useAiCursorLight(state.actor.clientId, isAi, Boolean(departing));
 
   if (!placement) {
     // The control is not in the DOM at all — another slide, a collapsed section,
@@ -770,6 +825,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
           working actor's label stays visible and a settled actor's label
           decays away ~3.6 s after the last movement — no JS timer needed. */}
       <div
+        ref={cursorLight}
         className="spectra-presence-cursor"
         data-mode={mode}
         data-ai={isAi ? "true" : undefined}

@@ -59,7 +59,7 @@ async function seed() {
 
 describe("Spectra AI sharing and publishing commands", () => {
   it("makes a public link from a server-derived hash and keeps only the link id in the receipt", async () => {
-    const { t, ids, run } = await seed();
+    const { t, ids, user, run } = await seed();
     await expect(run({ action: "create_public_link" })).rejects.toThrow("AI_PUBLIC_LINK_TOKEN_REQUIRED");
     const { result, operationId } = await run({ action: "create_public_link", expiresInDays: 7 }, { publicLinkTokenHash: tokenHash });
     expect(result).toMatchObject({ level: "read", linkId: expect.any(String) });
@@ -68,6 +68,14 @@ describe("Spectra AI sharing and publishing commands", () => {
     expect(link!.expiresAt! - Date.now()).toBeGreaterThan(6 * 24 * 60 * 60 * 1000);
     const operation = await t.run((ctx) => ctx.db.get(operationId));
     expect(JSON.stringify(operation)).not.toContain(tokenHash);
+
+    // Share names the step that made it, so the owner can copy it again later
+    // (a scheduled run finishes with nobody there to see the notice).
+    const userHash = createHash("sha256").update("user-made-token").digest("hex");
+    await user.mutation(api.authority.createPublicLink, { resourceType: "artifact", resourceId: ids.artifactId, tokenHash: userHash });
+    const listed = await user.query(api.authority.listPublicLinks, { resourceType: "artifact", resourceId: ids.artifactId });
+    expect(listed.find((entry) => entry.linkId === link!._id)?.madeBySpectra).toEqual({ runId: ids.runId, operationId });
+    expect(listed.filter((entry) => "madeBySpectra" in entry)).toHaveLength(1);
 
     await run({ action: "revoke_public_link", linkId: link!._id });
     expect((await t.run((ctx) => ctx.db.get(link!._id)))?.revokedAt).toEqual(expect.any(Number));

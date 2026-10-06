@@ -939,6 +939,8 @@ export type SpectraPublicLinkEntry = {
   level: "read";
   expiresAt?: number;
   createdAt: number;
+  /** A link Spectra made in one of your runs: Share can copy it again. */
+  madeBySpectra?: { runId: string; operationId: string };
 };
 
 export type SpectraInheritedAccessEntry = {

@@ -240,6 +240,13 @@ export const execute = mutation({
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.
     const result = await ctx.runMutation(makeFunctionReference<"mutation">(spec.name), spec.args);
+    if (spec.name === "authority:createPublicLink") {
+      // Remembers which step made the link, so its owner can copy it later from
+      // Share (a scheduled run may finish while nobody watches).
+      const linkId = ctx.db.normalizeId("publicLinks", String(row(result).linkId ?? ""));
+      if (!linkId) throw new Error("AI_PUBLIC_LINK_NOT_RECORDED");
+      await ctx.db.patch(linkId, { aiOrigin: { runId: run._id, operationId: operation._id } });
+    }
     await ctx.db.patch(operation._id, { output: { ...row(operation.output), applicationWriteReceipt: { scope, result } } });
     return result;
   },

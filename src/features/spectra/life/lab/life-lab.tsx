@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { prismFigure, type Figure } from "../figure";
+import { outlineFigure, prismFigure, rowsFigure, type Figure } from "../figure";
 import { figureOf } from "../figure-dom";
 import { life, rectOf, type GlowHandle } from "../life";
 import { drawPrism, PrismBody, PRISM_PALETTES, type PrismMode } from "../prism";
+import { verdictAt } from "../use-life";
 import { spectraBus } from "../../events";
 
 /*
@@ -276,6 +277,48 @@ export function LifeLab() {
         const r = rectOf(card("b"));
         life.pulse(r.x + r.width / 2, r.y + r.height / 2, 0.8, "spectrum");
       },
+    },
+    make: {
+      label: "Make C by hand",
+      group: "Things",
+      run: async () => {
+        // beginCreation(): dots gather where the user asked into a small work's outline, breathing, until it exists.
+        show({ c: false });
+        const [x, y] = pointerRef.current;
+        const seedRect = { x: x - 64, y: y - 44, width: 128, height: 88 };
+        const outline = outlineFigure(seedRect, { radius: 12 });
+        const seed = life.ghost({ strokes: [...outline.strokes, ...rowsFigure(seedRect, [0.62, 0.86, 0.48]).strokes] }, { from: [x, y] });
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        // land(): what it becomes grows out of them.
+        await life.morph(seed, figureOf(card("c"), { bars: BARS })).formed;
+        show({ c: true });
+      },
+    },
+    launch: {
+      label: "Open C from B",
+      group: "Things",
+      run: async () => {
+        // A card, a rail item or a pinned work: what opens (a surface, a page's header) grows out of it.
+        if (!shownRef.current.c) return;
+        show({ c: false });
+        await life.morph(figureOf(card("b"), { bars: BARS }), figureOf(card("c"), { bars: BARS })).formed;
+        show({ c: true });
+      },
+    },
+    right: {
+      label: "Right on A",
+      group: "Verdicts",
+      run: () => verdictAt(card("a"), "right"),
+    },
+    wrong: {
+      label: "Wrong on A",
+      group: "Verdicts",
+      run: () => verdictAt(card("a"), "wrong"),
+    },
+    reviewed: {
+      label: "Open answer on A",
+      group: "Verdicts",
+      run: () => verdictAt(card("a"), "open"),
     },
     glow: {
       label: "Glow B",

@@ -19,6 +19,7 @@ import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operat
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
+import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../../../../../../shared/ai-application-approval";
 import { SEMANTIC_KINDS, type SemanticResult, type SemanticSearchResponse } from "../../../../../../shared/semantic-types";
 import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
@@ -35,19 +36,6 @@ const isArtifactTypeKey = (value: string): value is ArtifactTypeKey => (ARTIFACT
  * and applied through the same server paths as the user's own controls, so
  * receipts, undo groups, live presence and approval scopes all work as before.
  */
-
-const CONFIRMED_COMMANDS = new Set([
-  "change_spectra_settings",
-  "change_sync_policy",
-  "change_sharing",
-  "trigger_managebac_sync",
-  "select_managebac_classes",
-  "set_school_sync_mode",
-  "manage_class_workspaces",
-  "pair_device",
-  "remove_device",
-]);
-const LOCAL_EFFECT_COMMANDS = new Set(["organize_library", "delete_library_items", "change_sync_policy"]);
 
 export type ConvexBackendInput = {
   actorClerkId: string;
@@ -396,14 +384,14 @@ export class ConvexHarnessBackend implements HarnessBackend {
     // "This conversation" is the one the run belongs to.
     if (request.command === "manage_conversation" && !args.threadId && this.input.threadId) args.threadId = this.input.threadId;
     let localFiles = 0;
-    if (LOCAL_EFFECT_COMMANDS.has(request.command)) {
+    if (LOCAL_FILE_COMMANDS.has(request.command)) {
       const count = await localFileCountForApplicationCommand(this.actorClerkId, request.command, args);
       if (count === null) args.localFileCountUnknown = true;
       else args.localFileCount = count;
       localFiles = count ?? 1;
     }
     const operation = parseModelOperation({ type: "app.command", input: { command: request.command, args } });
-    const requiresConfirmation = CONFIRMED_COMMANDS.has(request.command) || localFiles > 0;
+    const requiresConfirmation = applicationCommandCategory(request.command, args) !== null || localFiles > 0;
     return { operation, requiresConfirmation, localFiles };
   }
 

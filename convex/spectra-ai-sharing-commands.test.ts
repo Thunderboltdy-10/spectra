@@ -101,4 +101,25 @@ describe("Spectra AI sharing and publishing commands", () => {
     await user.mutation(api.spectraHarness.ensureApproved, { runId: ids.runId, executionId, toolCallId: "call-link" });
     expect((await t.run((ctx) => ctx.db.get(ids.runId)))?.approval?.status).toBe("accepted");
   });
+
+  it.each([
+    ["manage_comment", { action: "delete", commentId: "c1" }, "permanent_delete"],
+    ["set_school_sync_mode", { kind: "grades", mode: "off" }, "managebac"],
+    ["manage_class_workspaces", { action: "create", recordIds: ["r1"] }, "managebac"],
+    ["control_device", { action: "remove_folder", grantId: "g1" }, "settings"],
+  ] as const)("lets \"Always allow\" stand in for asking before %s %j only under %s", async (command, args, category) => {
+    const { t, ids, user } = await seed();
+    const executionId = "share-attempt";
+    const operationId = await t.run((ctx) => ctx.db.insert("spectraOperations", {
+      runId: ids.runId, executionId, actorType: "ai", type: "app.command", status: "proposed", requiresConfirmation: true, affected: [], createdAt: Date.now(),
+      input: { command, args: { artifactId: ids.artifactId, ...args } },
+    }));
+    await user.mutation(api.spectraHarness.recordToolOperations, { runId: ids.runId, executionId, toolCallId: "call-ask", operationIds: [operationId] });
+    const allow = (categories: string[]) => user.mutation(api.accountPreferences.writeLayer, { scope: "account", scopeKey: "account", values: { ai: { permissionAllow: categories } } });
+    await allow(["sharing"]);
+    await expect(user.mutation(api.spectraHarness.ensureApproved, { runId: ids.runId, executionId, toolCallId: "call-ask" })).rejects.toThrow("AI_PERMISSION_REQUIRED");
+    await allow([category]);
+    await user.mutation(api.spectraHarness.ensureApproved, { runId: ids.runId, executionId, toolCallId: "call-ask" });
+    expect((await t.run((ctx) => ctx.db.get(ids.runId)))?.approval?.status).toBe("accepted");
+  });
 });

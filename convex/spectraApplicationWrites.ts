@@ -9,16 +9,13 @@ import { mapOperationArtifactReferences } from "../src/features/spectra/operatio
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
 import { aiRefreshRequest } from "../shared/school-sync";
+import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../shared/ai-application-approval";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-// Moving items to the Trash is undoable, so it asks only when desktop files
-// are affected (counted below), like organising the library.
-export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "set_school_sync_mode", "manage_class_workspaces", "remove_device"]);
-const localEffectCommands = new Set(["organize_library", "change_sync_policy", "delete_library_items"]);
 
 function semanticInput(input: Row) {
   const args = { ...row(input.args) };
@@ -208,11 +205,11 @@ export const execute = mutation({
     // The AI never changes its own permissions, whatever the approval says.
     if (input.command === "change_spectra_settings" && patchTouchesAiPermissions(row(input.args).patch))
       throw new Error("AI_PERMISSION_SELF_GRANT: Spectra cannot change its own permissions. Only you can, in Settings.");
-    let needsConfirmation = operation.requiresConfirmation || confirmedCommands.has(String(input.command));
+    let needsConfirmation = operation.requiresConfirmation || applicationCommandCategory(String(input.command), row(input.args)) !== null;
     const targetIds = strings(row(input.args).targetIds);
-    // Deletion's bounded approval scope below includes exact local identities;
-    // repeating the legacy count query would expand the subtree without a bound.
-    if (localEffectCommands.has(String(input.command)) && targetIds.length) {
+    // Moving items to the Trash is undoable, so like organising the library it
+    // asks only when desktop files are affected, counted here.
+    if (LOCAL_FILE_COMMANDS.has(String(input.command)) && targetIds.length) {
       const isPolicy = input.command === "change_sync_policy";
       const effect = await ctx.runQuery(makeFunctionReference<"query">(isPolicy ? "replicas:localEffectCount" : "replicas:localEffectCountForNodes"), isPolicy ? { workIds: targetIds } : { nodeIds: targetIds });
       const count = Number(row(effect).count);

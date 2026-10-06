@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { applicationCommandCategory } from "../../../../../../shared/ai-application-approval";
 import { authorNew } from "../authoring";
 import { emptyLoopState, runHarnessLoop, type ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
@@ -274,12 +275,27 @@ describe("harness tools", () => {
     ["share", { action: "clear_exception", resourceType: "agent", resourceId: "ag1", accountId: "a2" }, { command: "change_sharing", args: { action: "clear_exception", resourceType: "agent", resourceId: "ag1", accountId: "a2" } }],
     ["share", { action: "create_public_link", resourceType: "artifact", resourceId: "wx1", expiresInDays: 7 }, { command: "change_sharing", args: { action: "create_public_link", resourceType: "artifact", resourceId: "wx1", expiresInDays: 7 } }],
     ["share", { action: "revoke_public_link", resourceType: "artifact", resourceId: "wx1", linkId: "l1" }, { command: "change_sharing", args: { action: "revoke_public_link", resourceType: "artifact", resourceId: "wx1", linkId: "l1" } }],
-  ] as const)("%s sends the application command for %j", async (name, raw, sent) => {
+    ["publish_code", { artifactId: "wx1", action: "unpublish" }, { command: "publish_code", args: { artifactId: "wx1", action: "unpublish" } }],
+    ["manage_comment", { artifactId: "wx1", commentId: "c1", action: "delete" }, { command: "manage_comment", args: { artifactId: "wx1", commentId: "c1", action: "delete" } }],
+    ["managebac", { action: "sync", purpose: "grades" }, { command: "trigger_managebac_sync", args: { purpose: "grades" } }],
+    ["managebac", { action: "select_classes", classIds: ["r1"] }, { command: "select_managebac_classes", args: { recordIds: ["r1"] } }],
+    ["change_settings", { patch: { appearance: { theme: "dark" } } }, { command: "change_spectra_settings", args: { patch: { appearance: { theme: "dark" } } } }],
+    ["devices", { action: "pair" }, { command: "pair_device", args: {} }],
+    ["devices", { action: "remove_device", deviceId: "d1" }, { command: "remove_device", args: { deviceId: "d1" } }],
+    ["devices", { action: "remove_folder", grantId: "g1" }, { command: "control_device", args: { action: "remove_folder", grantId: "g1" } }],
+    ["devices", { action: "pause_folder", grantId: "g1", paused: false }, { command: "control_device", args: { action: "resume_folder", grantId: "g1" } }],
+    ["change_sync_policy", { targetIds: ["n1"], patch: { protectedOriginal: true } }, { command: "change_sync_policy", args: { targetIds: ["n1"], patch: { protectedOriginal: true } } }],
+  ] as const)("%s sends the application command for %j, asking under the server's category", async (name, raw, sent) => {
     const { tools, backend, session } = setup();
     const tool = [...tools, ...runOnlyTools(session)].find((entry) => entry.name === name)!;
     const args = tool.parse!({ ...raw });
     await tool.execute(args, { signal: new AbortController().signal, runId: "r", toolCallId: "t", approved: true });
     expect(backend.commands.at(-1)).toMatchObject(sent);
+    // The tool asks exactly when the server binds an approval, under the same category.
+    const category = applicationCommandCategory(sent.command, backend.commands.at(-1)!.args);
+    const effect = typeof tool.effect === "function" ? tool.effect(args) : tool.effect;
+    expect(tool.category?.(args) ?? null).toBe(category);
+    expect(effect === "irreversible" || effect === "settings").toBe(category !== null);
   });
 
   it("reads a work's comment threads with the ids manage_comment takes, replies under their comment", async () => {

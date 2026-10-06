@@ -143,7 +143,6 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "irreversible",
-      category: "external_send",
       targets: (args: PublishArgs) => [args.artifactId],
       label: (args: PublishArgs) => `${args.action === "publish" ? "Publishing" : "Unpublishing"} ${titled(session, args.artifactId, "your code")}`,
       doneLabel: (args: PublishArgs) => `${args.action === "publish" ? "Published" : "Unpublished"} ${titled(session, args.artifactId, "your code")}`,

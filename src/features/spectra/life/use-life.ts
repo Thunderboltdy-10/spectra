@@ -481,10 +481,17 @@ function writingEnd(root: Element): DOMRect | null {
   return rects.length ? rects[rects.length - 1] : null;
 }
 
+/** Replies whose light has already come out of the prism. */
+const writingFromPrism = new WeakSet<Element>();
+/** The writing front never waits on the crossing for longer than this. */
+export const WRITING_ARRIVAL_MS = 900;
+
 /**
- * Spectra writing in a thread (MOTION.md, "Streaming text"): a little light in
- * the field follows the writing front while words arrive, so the paper around
- * the text feels the writing, and lets go when the reply is complete.
+ * Spectra writing in a thread (MOTION.md, "Streaming text"; LIFE.md, travel):
+ * when a reply starts, light leaves the prism and crosses the field to where
+ * the words begin. From there a little light follows the writing front while
+ * words arrive, so the paper around the text feels the writing. When the reply
+ * is complete it lets go, and the paper pulses softly where the words settled.
  */
 export function useWritingFront(ref: RefObject<HTMLElement | null>, active: boolean) {
   useEffect(() => {
@@ -493,12 +500,29 @@ export function useWritingFront(ref: RefObject<HTMLElement | null>, active: bool
     let glow: GlowHandle | null = null;
     let last = 0;
     let frame = 0;
+    let settledAt: DOMRect | null = null;
+    let arrived = true;
+    let fallback = 0;
+    if (!writingFromPrism.has(root)) {
+      writingFromPrism.add(root);
+      const start = root.getBoundingClientRect();
+      if (start.width) {
+        arrived = false;
+        const land = () => {
+          arrived = true;
+          window.clearTimeout(fallback);
+        };
+        fallback = window.setTimeout(land, WRITING_ARRIVAL_MS);
+        void life.send(prismPoint(), [start.left + 12, start.top + 12], { colour: "spectrum", strength: 0.6 }).then(land);
+      }
+    }
     const follow = (now: number) => {
       frame = requestAnimationFrame(follow);
-      if (now - last < 90) return;
+      if (!arrived || now - last < 90) return;
       last = now;
       const end = writingEnd(root);
       if (!end || (!end.width && !end.height)) return;
+      settledAt = end;
       const rect = { x: end.right - 36, y: end.top - 8, width: 48, height: end.height + 16 };
       if (glow) glow.move(rect);
       else glow = life.glow(rect, "spectrum", 0.55);
@@ -506,7 +530,10 @@ export function useWritingFront(ref: RefObject<HTMLElement | null>, active: bool
     frame = requestAnimationFrame(follow);
     return () => {
       cancelAnimationFrame(frame);
+      window.clearTimeout(fallback);
       glow?.stop();
+      // Still on the page: the reply is complete, not gone.
+      if (settledAt && root.isConnected && life.on) life.pulse(settledAt.right, settledAt.top + settledAt.height / 2, 0.35, "spectrum");
     };
   }, [ref, active]);
 }

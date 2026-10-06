@@ -3,7 +3,7 @@
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Home, Library, Plus, School, Share2, Trash2, Users, X, Presentation, Bot, PencilLine, Sprout, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Plus, School, Trash2, X, Presentation, Bot, PencilLine, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,
@@ -58,7 +58,10 @@ import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../components/work-companion";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
-import { ChatBrowserButton, ChatBrowserPanel } from "../components/chat-browser-panel";
+import { ChatBrowserPanel } from "../components/chat-browser-panel";
+import { Icon } from "@/components/icons";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageHeader } from "@/components/ui/page-header";
 import { useProvideIslandEngine } from "../island/engine";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { applyPreferencePatch } from "../settings/schema";
@@ -463,6 +466,8 @@ function useOutsideClick<T extends HTMLElement>(
   return ref;
 }
 
+const WORKSPACE_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "chats" }, { hideLabel: "people" }, { toMenu: "chats" }];
+
 function WorkspaceHeader({
   workspace,
   items,
@@ -503,67 +508,63 @@ function WorkspaceHeader({
       ? 1
       : 0);
 
+  const commands: BarCommand[] = [
+    ...(onOpenChats
+      ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats } satisfies BarCommand]
+      : []),
+    {
+      id: "people",
+      icon: "people",
+      label: workspace?.sharedWithCount ? `People · ${workspace.sharedWithCount}` : "People",
+      onSelect: onShareWorkspace,
+    },
+    {
+      id: "more",
+      icon: "more",
+      label: "More workspace actions",
+      pinned: true,
+      render: () => (
+        <OverflowMenu
+          label="More workspace actions"
+          items={[
+            { key: "settings", label: "Workspace settings", icon: PencilLine },
+            { key: "export", label: "Export workspace", icon: Download },
+            { key: "delete", label: "Delete workspace", icon: Trash2 },
+          ]}
+          onSelect={(key) => {
+            if (key === "settings") onEditWorkspace();
+            else if (key === "export") onExportWorkspace();
+            else if (key === "delete") onDeleteWorkspace();
+          }}
+          size={32}
+        />
+      ),
+    },
+  ];
+
   return (
-    <header
-      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4"
+    <div
+      role="group"
+      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3"
       aria-label={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
     >
-      <div className="flex items-start justify-between gap-5">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-violet)_10%,var(--bg-elevated))] text-[var(--accent-violet)]">
-            <Sprout className="size-7" />
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
-                {workspace?.title ?? "Workspace"}
-              </h1>
-              {workspace?.isShared ? (
-                <Share2
-                  className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]"
-                  role="img" aria-label="Shared workspace"
-                />
-              ) : null}
-            </div>
-            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
-              {workspace?.description ?? "All your work, organized and ready."}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
-          {/* People and Settings are compact disclosing actions, not sections:
-              they open a dialog, so they do not belong in the work nav. */}
-          <Button variant="secondary" size="md" onClick={onShareWorkspace}>
-            <Users className="size-3.5 text-[var(--text-secondary)]" />
-            People
-            {workspace?.sharedWithCount ? (
-              <span className="tabular-nums text-[var(--text-secondary)]">
-                {workspace.sharedWithCount}
+      <PageHeader
+        title={
+          <span className="inline-flex min-w-0 max-w-full items-center gap-2">
+            <span className="truncate">{workspace?.title ?? "Workspace"}</span>
+            {workspace?.isShared ? (
+              <span role="img" aria-label="Shared workspace" className="inline-flex shrink-0 text-[var(--text-tertiary)]">
+                <Icon name="share" size={16} />
               </span>
             ) : null}
-          </Button>
-          <OverflowMenu
-            label="More workspace actions"
-            items={[
-              {
-                key: "settings",
-                label: "Workspace settings",
-                icon: PencilLine,
-              },
-              { key: "export", label: "Export workspace", icon: Download },
-              { key: "delete", label: "Delete workspace", icon: Trash2 },
-            ]}
-            onSelect={(key) => {
-              if (key === "settings") onEditWorkspace();
-              else if (key === "export") onExportWorkspace();
-              else if (key === "delete") onDeleteWorkspace();
-            }}
-            size={36}
-          />
-        </div>
-      </div>
-    </header>
+          </span>
+        }
+        commands={commands}
+        plan={WORKSPACE_BAR_PLAN}
+        barLabel="Workspace commands"
+        description={workspace?.description || undefined}
+      />
+    </div>
   );
 }
 
@@ -589,32 +590,27 @@ function RootHeader({
   workspaceCount: number;
   onOpenChats?: () => void;
 }) {
-  const Icon = surface === "library" ? Library : Home;
+  const commands: BarCommand[] = onOpenChats
+    ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats }]
+    : [];
   return (
-    <header className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4">
-      <div className="flex items-start justify-between gap-5">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
-            <Icon className="size-7" />
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
-              {surface === "library" ? "Library" : "Workspace"}
-            </h1>
-            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
-              {surface === "library"
-                ? "Everything you have made, filed where you put it."
-                : workspaceCount === 0
-                  ? "Your work lives here."
-                  : workspaceCount === 1
-                    ? "One workspace, and everything filed across it."
-                    : `${workspaceCount} workspaces, and everything filed across them.`}
-            </p>
-          </div>
-        </div>
-        {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
-      </div>
-    </header>
+    <div className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3">
+      <PageHeader
+        title={surface === "library" ? "Library" : "Workspace"}
+        commands={commands}
+        plan={WORKSPACE_BAR_PLAN}
+        barLabel={surface === "library" ? "Library commands" : "Workspace commands"}
+        description={
+          surface === "library"
+            ? "Everything you have made, filed where you put it."
+            : workspaceCount === 0
+              ? "Your work lives here."
+              : workspaceCount === 1
+                ? "One workspace, and everything filed across it."
+                : `${workspaceCount} workspaces, and everything filed across them.`
+        }
+      />
+    </div>
   );
 }
 
